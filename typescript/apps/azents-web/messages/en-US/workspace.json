@@ -604,6 +604,10 @@
           "managed": "Managed",
           "removing": "Removing"
         }
+      },
+      "services": {
+        "label": "Web services",
+        "description": "Public URLs for applications running on local Runtime ports"
       }
     },
     "automaticProjects": {

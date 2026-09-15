@@ -25,9 +25,9 @@ from typing_extensions import Self
 
 class RuntimeWebExpectedRevisionRequest(BaseModel):
     """
-    Revision-fenced request control mutation.
+    Revision-fenced service control mutation.
     """ # noqa: E501
-    expected_revision: Annotated[int, Field(strict=True, ge=1)]
+    expected_revision: Annotated[int, Field(strict=True, ge=0)]
     operation_key: Annotated[str, Field(min_length=1, strict=True, max_length=128)]
     additional_properties: Dict[str, Any] = {}
     __properties: ClassVar[List[str]] = ["expected_revision", "operation_key"]

@@ -35,11 +35,11 @@ class TestRuntimeWebSeparateInitiateRequest(unittest.TestCase):
         model = RuntimeWebSeparateInitiateRequest()
         if include_optional:
             return RuntimeWebSeparateInitiateRequest(
-                endpoint_id = '012345678910111213141516171819202122232425262728293031'
+                service_id = '012345678910111213141516171819202122232425262728293031'
             )
         else:
             return RuntimeWebSeparateInitiateRequest(
-                endpoint_id = '012345678910111213141516171819202122232425262728293031',
+                service_id = '012345678910111213141516171819202122232425262728293031',
         )
         """
 

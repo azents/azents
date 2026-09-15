@@ -104,8 +104,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/toolCallActionPresentation.ts
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
   - typescript/apps/azents-web/messages/*/chat.json
-last_verified_at: 2026-09-13
-spec_version: 180
+last_verified_at: 2026-09-15
+spec_version: 181
 ---
 
 # Agent Execution Loop
@@ -159,11 +159,13 @@ Main steps:
    provider-tool activity snapshots when observed.
 10. Before a normalized client-tool call is appended or admitted for execution, the immutable prepared Tool Catalog snapshots its DB-attached Toolkit source (`toolkit_config_id`, `toolkit_type`, `toolkit_name`, and `toolkit_slug`) onto the call. The same snapshot is retained by `active_tool_calls` and their live projections; built-in and auto-bound calls remain source-less.
 11. Foreground client tools execute in parallel and results are appended as event `client_tool_result`.
-    Runtime Web calls are server-side auto-bound client tools. They may prepare,
-    request, list, or close same-root Session services without waiting for a Runtime
-    application or human decision. Their durable tool result contains only recognized
-    content-free endpoint/request/cycle metadata, which the Web adapter may render as
-    a Runtime Web card.
+    Runtime Web calls are server-side auto-bound client tools available only for an
+    Agent with managed Runtime capability. They may request, list, or close
+    Agent-and-port services without waiting for the application process. Request
+    creates or returns an Off service and directs the user to turn it On; close can
+    only turn exposure Off. Their durable tool result contains recognized
+    content-free service metadata, which the Web adapter renders through the known
+    tool presentation path.
 12. The adapter computes normalized `needs_follow_up` as the requirement for another model step after
     current client tools complete. The runner always executes admitted client calls first. When the
     field is false, it then observes the terminal `RunComplete` boundary and transitions
@@ -1497,6 +1499,9 @@ icon.
 
 ## Changelog
 
+- **2026-09-15** (spec_version 181) — Replaced Runtime Web
+  prepare/request/approval-cycle tool behavior with managed-Runtime-gated
+  Agent-service request/list/close behavior.
 - **2026-09-13** (spec_version 180) — Added the required live Run `using_fallback` projection for
   transient Composer status while retaining automatic quota progression and internal health fencing.
 - **2026-09-13** (spec_version 179) — Added frozen foreground and compaction candidate chains,

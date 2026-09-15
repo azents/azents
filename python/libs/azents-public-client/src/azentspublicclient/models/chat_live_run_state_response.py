@@ -18,7 +18,7 @@ import re  # noqa: F401
 import json
 
 from datetime import datetime
-from pydantic import BaseModel, ConfigDict, Field, StrictStr
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.agent_run_phase import AgentRunPhase
 from azentspublicclient.models.agent_run_status import AgentRunStatus
@@ -36,11 +36,12 @@ class ChatLiveRunStateResponse(BaseModel):
     phase: AgentRunPhase = Field(description="Current run phase")
     status: AgentRunStatus = Field(description="Current run status")
     inference_profile: AppliedInferenceProfile = Field(description="Inference settings applied to the active turn")
+    using_fallback: StrictBool = Field(description="Whether the active foreground model route uses a fallback candidate")
     model_call_started_at: Optional[datetime]
     operation: Optional[ChatLiveRunOperationResponse] = None
     retry: Optional[ChatLiveRunRetryStateResponse] = None
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["run_id", "phase", "status", "inference_profile", "model_call_started_at", "operation", "retry"]
+    __properties: ClassVar[List[str]] = ["run_id", "phase", "status", "inference_profile", "using_fallback", "model_call_started_at", "operation", "retry"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -128,6 +129,7 @@ class ChatLiveRunStateResponse(BaseModel):
             "phase": obj.get("phase"),
             "status": obj.get("status"),
             "inference_profile": AppliedInferenceProfile.from_dict(obj["inference_profile"]) if obj.get("inference_profile") is not None else None,
+            "using_fallback": obj.get("using_fallback"),
             "model_call_started_at": obj.get("model_call_started_at"),
             "operation": ChatLiveRunOperationResponse.from_dict(obj["operation"]) if obj.get("operation") is not None else None,
             "retry": ChatLiveRunRetryStateResponse.from_dict(obj["retry"]) if obj.get("retry") is not None else None

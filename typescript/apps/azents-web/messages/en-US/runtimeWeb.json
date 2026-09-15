@@ -7,67 +7,67 @@
     "invalidResponse": "The authentication response was invalid.",
     "failed": "Runtime Web authentication failed."
   },
-  "confirmation": {
-    "title": "Review web service access",
-    "subtitle": "Only this exact Session service request can be approved here.",
-    "loading": "Loading the current service request…",
+  "activation": {
+    "title": "Turn on web service",
+    "subtitle": "Choose how long this public URL should stay available.",
+    "loading": "Loading the current web service…",
     "errorTitle": "Could not load this web service",
-    "duration": "Access expires after {minutes} minutes.",
     "untrustedNotice": "The Runtime application is not verified by Azents. Treat its content, downloads, and requests for sensitive information as untrusted.",
-    "alreadyActive": "This service is currently exposed. Opening it does not extend its expiration.",
-    "stale": "This request is no longer pending. The current state is shown without approval controls."
+    "alreadyOn": "This service is already On. Opening it does not extend its expiration."
   },
   "panel": {
     "tab": "Services",
     "title": "Web services",
-    "description": "Expose an application already running in this Session without stopping its process.",
+    "description": "Give an application on a local port a public URL. Turning a service Off does not stop the application.",
     "loading": "Loading web services…",
     "errorTitle": "Could not load web services",
     "emptyTitle": "No web services yet",
-    "emptyDescription": "Create a stable address for a numeric localhost port when the application is ready.",
-    "create": "Create service",
-    "createTitle": "Create web service",
+    "emptyDescription": "Add a service for a numeric localhost port when the application is ready.",
+    "create": "Add service",
+    "createTitle": "Add web service",
+    "editTitle": "Edit web service",
+    "deleteTitle": "Delete web service?",
+    "deleteDescription": "This permanently retires the public URL. Recreating the service will generate a different address.",
     "port": "Local port",
     "portPlaceholder": "3000",
-    "label": "Service label",
+    "label": "Service name",
     "labelPlaceholder": "Preview app",
-    "continue": "Review exposure",
-    "confirmTitle": "Expose this service?",
-    "confirmDescription": "The address will be accessible to authorized Session members for {minutes} minutes. Closing exposure does not stop the application.",
+    "duration": "Exposure duration",
+    "turnOnAfterCreate": "Turn on after creating",
+    "durationDeferred": "The current expiration will not change until you reset it or turn the service Off and On again.",
     "cancelDialog": "Cancel"
+  },
+  "duration": {
+    "oneHour": "1 hour",
+    "sixHours": "6 hours",
+    "twentyFourHours": "24 hours"
   },
   "service": {
     "portLabel": "Port {port}",
     "localPort": "localhost:{port}",
-    "expiresAt": "Expires {time}",
-    "endedAt": "Ended {time}"
+    "expiresAt": "Expires {time}"
   },
   "status": {
-    "active": "Active",
-    "pending": "Approval pending",
-    "activePending": "Active · new approval pending",
-    "inactive": "Inactive",
-    "expired": "Expired",
-    "closed": "Closed",
+    "on": "On",
+    "off": "Off",
     "unconfigured": "Installation not ready",
-    "runtimeUnavailable": "Runtime unavailable; application reachability has not been checked"
+    "runtimeUnavailable": "The Runtime is unavailable, so the application cannot be reached right now."
   },
   "actions": {
-    "approve": "Approve",
-    "approveDuration": "Approve for {minutes} minutes",
-    "reject": "Reject",
-    "cancel": "Cancel request",
-    "requestAgain": "Request again",
-    "close": "Close exposure",
+    "turnOn": "Turn On",
+    "turnOff": "Turn Off",
+    "resetExpiration": "Reset expiration",
+    "edit": "Edit",
+    "delete": "Delete",
+    "save": "Save",
     "copy": "Copy URL",
     "copied": "URL copied",
     "open": "Open service"
   },
   "chat": {
     "request": "Requested web service",
-    "preparing": "Preparing web service",
     "listing": "Inspected web services",
-    "closing": "Closed web service",
-    "stale": "This Chat item is stale; current service state is shown."
+    "closing": "Turned Off web service",
+    "stale": "This Chat item may be stale; the current service state is shown in Services."
   }
 }

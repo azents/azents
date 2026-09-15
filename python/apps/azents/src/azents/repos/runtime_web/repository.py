@@ -1,42 +1,40 @@
-"""Repository-owned Runtime Web authority operations."""
+"""Repository-owned Runtime Web service authority operations."""
 
+import base64
 import datetime
 import hashlib
+import json
+import secrets
+from collections.abc import Callable
 from typing import NamedTuple
 
 import sqlalchemy as sa
-from azcommon.uuid import uuid7
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.rdb.models.runtime_web import (
     RDBRuntimeWebAuthConfiguration,
-    RDBRuntimeWebCycle,
-    RDBRuntimeWebEndpoint,
     RDBRuntimeWebOperationReceipt,
     RDBRuntimeWebQuotaScope,
-    RDBRuntimeWebRequest,
-    RuntimeWebCycleEndReason,
+    RDBRuntimeWebService,
     RuntimeWebOperationKind,
-    RuntimeWebQuotaScopeKind,
-    RuntimeWebRequesterKind,
-    RuntimeWebRequestState,
 )
 from azents.repos.runtime_web.data import (
     RuntimeWebConfiguration,
-    RuntimeWebCycle,
-    RuntimeWebEndpoint,
     RuntimeWebMutationResult,
     RuntimeWebOperationIdentity,
-    RuntimeWebRequest,
-    derived_operation_key,
+    RuntimeWebServiceRecord,
 )
 
+_HOSTNAME_GENERATION_ATTEMPTS = 8
+_SUPPORTED_DURATIONS = frozenset({3_600, 21_600, 86_400})
 
-class RuntimeWebEndpointPage(NamedTuple):
-    """Field-named result for ``list_endpoints``."""
 
-    items: list[RuntimeWebEndpoint]
+class RuntimeWebServicePage(NamedTuple):
+    """Field-named result for ``list_services``."""
+
+    items: list[RuntimeWebServiceRecord]
     total: int
 
 
@@ -53,13 +51,20 @@ class RuntimeWebRepositoryQuotaExceeded(ValueError):
 
 
 class RuntimeWebRepository:
-    """Durable Runtime Web authority repository."""
+    """Durable Agent-scoped Runtime Web authority repository."""
+
+    def __init__(
+        self,
+        *,
+        random_bytes: Callable[[int], bytes] = secrets.token_bytes,
+    ) -> None:
+        self.random_bytes = random_bytes
 
     async def get_configuration(
         self,
         session: AsyncSession,
     ) -> RuntimeWebConfiguration | None:
-        """Load current durable configuration."""
+        """Load current durable authentication configuration."""
         rdb = await session.get(RDBRuntimeWebAuthConfiguration, 1)
         if rdb is None:
             return None
@@ -67,627 +72,619 @@ class RuntimeWebRepository:
             enabled=rdb.enabled,
             mode=rdb.mode,
             fingerprint=rdb.fingerprint,
-            active_duration_seconds=rdb.active_duration_seconds,
         )
 
-    async def prepare_endpoint(
+    async def create_service(
         self,
         session: AsyncSession,
         *,
         workspace_id: str,
         agent_id: str,
-        agent_session_id: str,
+        port: int,
+        label: str | None,
+        selected_duration_seconds: int,
+        turn_on: bool,
+        operation: RuntimeWebOperationIdentity,
+        service_limit: int,
+        active_agent_limit: int,
+    ) -> RuntimeWebMutationResult:
+        """Create one user-managed service and optionally turn it On."""
+        payload = {
+            "workspace_id": workspace_id,
+            "agent_id": agent_id,
+            "port": port,
+            "label": label,
+            "selected_duration_seconds": selected_duration_seconds,
+            "turn_on": turn_on,
+        }
+        replay = await self._service_replay(
+            session,
+            operation=operation,
+            kind=RuntimeWebOperationKind.CREATE,
+            payload=payload,
+        )
+        if replay is not None:
+            return RuntimeWebMutationResult(service=replay)
+        self._validate_duration(selected_duration_seconds)
+        await self._lock_agent_scope(session, agent_id=agent_id)
+        existing = await self._service_by_agent_port(
+            session,
+            agent_id=agent_id,
+            port=port,
+            for_update=True,
+        )
+        if existing is not None:
+            raise RuntimeWebRepositoryConflict("Service port already exists")
+        count = await session.scalar(
+            sa.select(sa.func.count(RDBRuntimeWebService.id)).where(
+                RDBRuntimeWebService.agent_id == agent_id
+            )
+        )
+        if int(count or 0) >= service_limit:
+            raise RuntimeWebRepositoryQuotaExceeded("agent_services")
+        now = await self._database_now(session)
+        if turn_on:
+            await self._require_active_capacity(
+                session,
+                agent_id=agent_id,
+                excluding_service_id=None,
+                active_agent_limit=active_agent_limit,
+                now=now,
+            )
+        rdb = await self._insert_with_random_hostname(
+            session,
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+            port=port,
+            label=label,
+            selected_duration_seconds=selected_duration_seconds,
+            exposure_deadline_at=(
+                now + datetime.timedelta(seconds=selected_duration_seconds)
+                if turn_on
+                else None
+            ),
+        )
+        result = RuntimeWebMutationResult(service=self._service(rdb))
+        await self._record_receipt(
+            session,
+            operation=operation,
+            kind=RuntimeWebOperationKind.CREATE,
+            payload=payload,
+            result=result,
+        )
+        return result
+
+    async def request_service(
+        self,
+        session: AsyncSession,
+        *,
+        workspace_id: str,
+        agent_id: str,
         port: int,
         label: str | None,
         operation: RuntimeWebOperationIdentity,
-        endpoint_limit: int,
+        service_limit: int,
     ) -> RuntimeWebMutationResult:
-        """Create or load one stable endpoint idempotently."""
-        replay = await self._mutation_replay(
+        """Create one missing Off service or return the existing service unchanged."""
+        payload = {
+            "workspace_id": workspace_id,
+            "agent_id": agent_id,
+            "port": port,
+            "label": label,
+        }
+        replay = await self._service_replay(
             session,
             operation=operation,
-            kind=RuntimeWebOperationKind.PREPARE,
+            kind=RuntimeWebOperationKind.REQUEST,
+            payload=payload,
         )
         if replay is not None:
-            return replay
-        await self._lock_scopes(
+            return RuntimeWebMutationResult(service=replay)
+        await self._lock_agent_scope(session, agent_id=agent_id)
+        rdb = await self._service_by_agent_port(
             session,
             agent_id=agent_id,
-            agent_session_id=agent_session_id,
-        )
-        rdb = await self._get_endpoint_by_session_port(
-            session,
-            agent_session_id=agent_session_id,
             port=port,
             for_update=True,
         )
         if rdb is None:
             count = await session.scalar(
-                sa.select(sa.func.count(RDBRuntimeWebEndpoint.id)).where(
-                    RDBRuntimeWebEndpoint.agent_session_id == agent_session_id
+                sa.select(sa.func.count(RDBRuntimeWebService.id)).where(
+                    RDBRuntimeWebService.agent_id == agent_id
                 )
             )
-            if (count or 0) >= endpoint_limit:
-                raise RuntimeWebRepositoryQuotaExceeded("session_endpoints")
-            rdb = RDBRuntimeWebEndpoint(
+            if int(count or 0) >= service_limit:
+                raise RuntimeWebRepositoryQuotaExceeded("agent_services")
+            rdb = await self._insert_with_random_hostname(
+                session,
                 workspace_id=workspace_id,
                 agent_id=agent_id,
-                agent_session_id=agent_session_id,
                 port=port,
-                hostname_key=uuid7().hex,
                 label=label,
+                selected_duration_seconds=3_600,
+                exposure_deadline_at=None,
             )
-            session.add(rdb)
-            await session.flush()
-        elif label is not None and rdb.label != label:
-            rdb.label = label
-            rdb.authority_revision += 1
-            await session.flush()
-            await session.refresh(rdb, attribute_names=["updated_at"])
-        result = RuntimeWebMutationResult(
-            endpoint=self._endpoint(rdb),
-            request=await self._request_by_id(session, rdb.current_pending_request_id),
-            cycle=await self._cycle_by_id(session, rdb.current_cycle_id),
-        )
+        result = RuntimeWebMutationResult(service=self._service(rdb))
         await self._record_receipt(
             session,
             operation=operation,
-            kind=RuntimeWebOperationKind.PREPARE,
+            kind=RuntimeWebOperationKind.REQUEST,
+            payload=payload,
             result=result,
         )
         return result
 
-    async def request_exposure(
+    async def update_service(
         self,
         session: AsyncSession,
         *,
-        endpoint_id: str,
-        actor_kind: RuntimeWebRequesterKind,
-        requester_user_id: str | None,
-        requester_agent_id: str | None,
-        requester_call_id: str | None,
+        service_id: str,
+        expected_revision: int,
+        label_present: bool,
         label: str | None,
+        selected_duration_seconds: int | None,
         operation: RuntimeWebOperationIdentity,
     ) -> RuntimeWebMutationResult:
-        """Create or reuse the one pending request without changing active cycle."""
-        replay = await self._mutation_replay(
+        """Update service metadata without changing its current deadline."""
+        payload = {
+            "service_id": service_id,
+            "expected_revision": expected_revision,
+            "label_present": label_present,
+            "label": label,
+            "selected_duration_seconds": selected_duration_seconds,
+        }
+        replay = await self._service_replay(
             session,
             operation=operation,
-            kind=RuntimeWebOperationKind.REQUEST,
+            kind=RuntimeWebOperationKind.UPDATE,
+            payload=payload,
         )
         if replay is not None:
-            return replay
-        endpoint = await self._endpoint_by_id(session, endpoint_id, for_update=True)
-        if endpoint is None:
-            raise RuntimeWebRepositoryConflict("Endpoint not found")
-        request = await self._request_by_id(
-            session,
-            endpoint.current_pending_request_id,
-        )
-        if request is None:
-            rdb_request = RDBRuntimeWebRequest(
-                endpoint_id=endpoint.id,
-                requester_kind=actor_kind,
-                operation_key=operation.operation_key,
-                requester_user_id=requester_user_id,
-                requester_agent_id=requester_agent_id,
-                requester_execution_id=operation.execution_id,
-                requester_call_id=requester_call_id,
-                label_snapshot=label,
-            )
-            session.add(rdb_request)
-            await session.flush()
-            endpoint.current_pending_request_id = rdb_request.id
-            endpoint.authority_revision += 1
-            await session.flush()
-            await session.refresh(endpoint, attribute_names=["updated_at"])
-            request = self._request(rdb_request)
-        result = RuntimeWebMutationResult(
-            endpoint=self._endpoint(endpoint),
-            request=request,
-            cycle=await self._cycle_by_id(session, endpoint.current_cycle_id),
-        )
+            return RuntimeWebMutationResult(service=replay)
+        if selected_duration_seconds is not None:
+            self._validate_duration(selected_duration_seconds)
+        rdb = await self._service_by_id(session, service_id, for_update=True)
+        self._require_revision(rdb, expected_revision)
+        assert rdb is not None
+        changed = False
+        if label_present and rdb.label != label:
+            rdb.label = label
+            changed = True
+        if (
+            selected_duration_seconds is not None
+            and rdb.selected_duration_seconds != selected_duration_seconds
+        ):
+            rdb.selected_duration_seconds = selected_duration_seconds
+            changed = True
+        if changed:
+            rdb.revision += 1
+            await self._flush_updated(session, rdb)
+        result = RuntimeWebMutationResult(service=self._service(rdb))
         await self._record_receipt(
             session,
             operation=operation,
-            kind=RuntimeWebOperationKind.REQUEST,
+            kind=RuntimeWebOperationKind.UPDATE,
+            payload=payload,
             result=result,
         )
         return result
 
-    async def direct_create(
+    async def turn_on(
+        self,
+        session: AsyncSession,
+        *,
+        service_id: str,
+        expected_revision: int,
+        selected_duration_seconds: int | None,
+        operation: RuntimeWebOperationIdentity,
+        active_agent_limit: int,
+    ) -> RuntimeWebMutationResult:
+        """Turn an Off service On using its selected duration."""
+        payload = {
+            "service_id": service_id,
+            "expected_revision": expected_revision,
+            "selected_duration_seconds": selected_duration_seconds,
+        }
+        replay = await self._service_replay(
+            session,
+            operation=operation,
+            kind=RuntimeWebOperationKind.TURN_ON,
+            payload=payload,
+        )
+        if replay is not None:
+            return RuntimeWebMutationResult(service=replay)
+        if selected_duration_seconds is not None:
+            self._validate_duration(selected_duration_seconds)
+        snapshot = await self._service_by_id(session, service_id, for_update=False)
+        if snapshot is None:
+            raise RuntimeWebRepositoryConflict("Service not found")
+        await self._lock_agent_scope(session, agent_id=snapshot.agent_id)
+        rdb = await self._service_by_id(session, service_id, for_update=True)
+        self._require_revision(rdb, expected_revision)
+        assert rdb is not None
+        now = await self._database_now(session)
+        if rdb.exposure_deadline_at is not None and rdb.exposure_deadline_at > now:
+            raise RuntimeWebRepositoryConflict("Service is already On")
+        await self._require_active_capacity(
+            session,
+            agent_id=rdb.agent_id,
+            excluding_service_id=rdb.id,
+            active_agent_limit=active_agent_limit,
+            now=now,
+        )
+        if selected_duration_seconds is not None:
+            rdb.selected_duration_seconds = selected_duration_seconds
+        rdb.exposure_deadline_at = now + datetime.timedelta(
+            seconds=rdb.selected_duration_seconds
+        )
+        rdb.revision += 1
+        await self._flush_updated(session, rdb)
+        result = RuntimeWebMutationResult(service=self._service(rdb))
+        await self._record_receipt(
+            session,
+            operation=operation,
+            kind=RuntimeWebOperationKind.TURN_ON,
+            payload=payload,
+            result=result,
+        )
+        return result
+
+    async def turn_off(
+        self,
+        session: AsyncSession,
+        *,
+        service_id: str,
+        expected_revision: int,
+        operation: RuntimeWebOperationIdentity,
+    ) -> RuntimeWebMutationResult:
+        """Turn one exact service Off with optimistic revision fencing."""
+        return await self._turn_off(
+            session,
+            service_id=service_id,
+            expected_revision=expected_revision,
+            operation=operation,
+            kind=RuntimeWebOperationKind.TURN_OFF,
+        )
+
+    async def close_service(
+        self,
+        session: AsyncSession,
+        *,
+        service_id: str,
+        operation: RuntimeWebOperationIdentity,
+    ) -> RuntimeWebMutationResult:
+        """Idempotently turn one exact service Off for an Agent caller."""
+        return await self._turn_off(
+            session,
+            service_id=service_id,
+            expected_revision=None,
+            operation=operation,
+            kind=RuntimeWebOperationKind.CLOSE,
+        )
+
+    async def reset_expiration(
+        self,
+        session: AsyncSession,
+        *,
+        service_id: str,
+        expected_revision: int,
+        operation: RuntimeWebOperationIdentity,
+    ) -> RuntimeWebMutationResult:
+        """Restart an On service window using the selected duration."""
+        payload = {
+            "service_id": service_id,
+            "expected_revision": expected_revision,
+        }
+        replay = await self._service_replay(
+            session,
+            operation=operation,
+            kind=RuntimeWebOperationKind.RESET,
+            payload=payload,
+        )
+        if replay is not None:
+            return RuntimeWebMutationResult(service=replay)
+        rdb = await self._service_by_id(session, service_id, for_update=True)
+        self._require_revision(rdb, expected_revision)
+        assert rdb is not None
+        now = await self._database_now(session)
+        if rdb.exposure_deadline_at is None or rdb.exposure_deadline_at <= now:
+            raise RuntimeWebRepositoryConflict("Service is Off")
+        rdb.exposure_deadline_at = now + datetime.timedelta(
+            seconds=rdb.selected_duration_seconds
+        )
+        rdb.revision += 1
+        await self._flush_updated(session, rdb)
+        result = RuntimeWebMutationResult(service=self._service(rdb))
+        await self._record_receipt(
+            session,
+            operation=operation,
+            kind=RuntimeWebOperationKind.RESET,
+            payload=payload,
+            result=result,
+        )
+        return result
+
+    async def delete_service(
+        self,
+        session: AsyncSession,
+        *,
+        agent_id: str,
+        service_id: str,
+        expected_revision: int,
+        operation: RuntimeWebOperationIdentity,
+    ) -> bool:
+        """Delete an exact service; a missing service is an authorized success."""
+        payload = {
+            "agent_id": agent_id,
+            "service_id": service_id,
+            "expected_revision": expected_revision,
+        }
+        replay = await self._receipt(
+            session,
+            operation=operation,
+            kind=RuntimeWebOperationKind.DELETE,
+            payload=payload,
+        )
+        if replay is not None:
+            return bool(replay.result.get("deleted", False))
+        rdb = await self._service_by_id(session, service_id, for_update=True)
+        if rdb is not None and (
+            rdb.agent_id != agent_id or rdb.revision != expected_revision
+        ):
+            raise RuntimeWebRepositoryConflict("Service changed")
+        if rdb is not None:
+            await session.delete(rdb)
+            await session.flush()
+        await self._record_raw_receipt(
+            session,
+            operation=operation,
+            kind=RuntimeWebOperationKind.DELETE,
+            payload=payload,
+            service_id=None,
+            result={"service_id": service_id, "deleted": True},
+        )
+        return True
+
+    async def get_service(
+        self,
+        session: AsyncSession,
+        *,
+        agent_id: str,
+        port: int,
+    ) -> RuntimeWebServiceRecord | None:
+        """Load one service by Agent and port."""
+        rdb = await self._service_by_agent_port(
+            session,
+            agent_id=agent_id,
+            port=port,
+            for_update=False,
+        )
+        return None if rdb is None else self._service(rdb)
+
+    async def get_service_by_id(
+        self,
+        session: AsyncSession,
+        service_id: str,
+    ) -> RuntimeWebServiceRecord | None:
+        """Load one service by opaque row identity."""
+        rdb = await self._service_by_id(session, service_id, for_update=False)
+        return None if rdb is None else self._service(rdb)
+
+    async def get_service_by_hostname(
+        self,
+        session: AsyncSession,
+        *,
+        hostname_key: str,
+    ) -> RuntimeWebServiceRecord | None:
+        """Load one service by exact public hostname key."""
+        rdb = await session.scalar(
+            sa.select(RDBRuntimeWebService).where(
+                RDBRuntimeWebService.hostname_key == hostname_key
+            )
+        )
+        return None if rdb is None else self._service(rdb)
+
+    async def list_services(
+        self,
+        session: AsyncSession,
+        *,
+        agent_id: str,
+        offset: int,
+        limit: int,
+    ) -> RuntimeWebServicePage:
+        """List stable services for one Agent."""
+        where = RDBRuntimeWebService.agent_id == agent_id
+        rows = await session.scalars(
+            sa.select(RDBRuntimeWebService)
+            .where(where)
+            .order_by(RDBRuntimeWebService.created_at, RDBRuntimeWebService.id)
+            .offset(offset)
+            .limit(limit)
+        )
+        total = await session.scalar(
+            sa.select(sa.func.count(RDBRuntimeWebService.id)).where(where)
+        )
+        return RuntimeWebServicePage(
+            items=[self._service(row) for row in rows],
+            total=int(total or 0),
+        )
+
+    async def delete_by_agent_id(
+        self,
+        session: AsyncSession,
+        *,
+        agent_id: str,
+    ) -> int:
+        """Delete every service owned by one Agent."""
+        result = await session.execute(
+            sa.delete(RDBRuntimeWebService)
+            .where(RDBRuntimeWebService.agent_id == agent_id)
+            .returning(RDBRuntimeWebService.id)
+        )
+        return len(result.scalars().all())
+
+    async def count_by_agent_id(
+        self,
+        session: AsyncSession,
+        *,
+        agent_id: str,
+    ) -> int:
+        """Count services remaining for one Agent."""
+        return int(
+            await session.scalar(
+                sa.select(sa.func.count(RDBRuntimeWebService.id)).where(
+                    RDBRuntimeWebService.agent_id == agent_id
+                )
+            )
+            or 0
+        )
+
+    async def _turn_off(
+        self,
+        session: AsyncSession,
+        *,
+        service_id: str,
+        expected_revision: int | None,
+        operation: RuntimeWebOperationIdentity,
+        kind: RuntimeWebOperationKind,
+    ) -> RuntimeWebMutationResult:
+        payload = {
+            "service_id": service_id,
+            "expected_revision": expected_revision,
+        }
+        replay = await self._service_replay(
+            session,
+            operation=operation,
+            kind=kind,
+            payload=payload,
+        )
+        if replay is not None:
+            return RuntimeWebMutationResult(service=replay)
+        rdb = await self._service_by_id(session, service_id, for_update=True)
+        if rdb is None or (
+            expected_revision is not None and rdb.revision != expected_revision
+        ):
+            raise RuntimeWebRepositoryConflict("Service changed")
+        now = await self._database_now(session)
+        if rdb.exposure_deadline_at is not None:
+            if rdb.exposure_deadline_at > now:
+                rdb.revision += 1
+            rdb.exposure_deadline_at = None
+            await self._flush_updated(session, rdb)
+        result = RuntimeWebMutationResult(service=self._service(rdb))
+        await self._record_receipt(
+            session,
+            operation=operation,
+            kind=kind,
+            payload=payload,
+            result=result,
+        )
+        return result
+
+    async def _insert_with_random_hostname(
         self,
         session: AsyncSession,
         *,
         workspace_id: str,
         agent_id: str,
-        agent_session_id: str,
         port: int,
         label: str | None,
-        requester_user_id: str,
-        requester_call_id: str | None,
-        duration_seconds: int,
-        operation: RuntimeWebOperationIdentity,
-        endpoint_limit: int,
-        active_session_limit: int,
-        active_agent_limit: int,
-    ) -> RuntimeWebMutationResult:
-        """Create an explicitly confirmed request and cycle atomically."""
-        replay = await self._mutation_replay(
-            session,
-            operation=operation,
-            kind=RuntimeWebOperationKind.DIRECT_CREATE,
-        )
-        if replay is not None:
-            return replay
-        async with session.begin_nested():
-            prepared = await self.prepare_endpoint(
-                session,
-                workspace_id=workspace_id,
-                agent_id=agent_id,
-                agent_session_id=agent_session_id,
-                port=port,
-                label=label,
-                operation=self._suboperation(operation, "prepare"),
-                endpoint_limit=endpoint_limit,
-            )
-            requested = await self.request_exposure(
-                session,
-                endpoint_id=prepared.endpoint.id,
-                actor_kind=RuntimeWebRequesterKind.USER,
-                requester_user_id=requester_user_id,
-                requester_agent_id=None,
-                requester_call_id=requester_call_id,
-                label=label,
-                operation=self._suboperation(operation, "request"),
-            )
-            if requested.request is None:
-                raise RuntimeWebRepositoryConflict("Pending request missing")
-            result = await self.approve_request(
-                session,
-                request_id=requested.request.id,
-                expected_revision=requested.request.revision,
-                approver_user_id=requester_user_id,
-                duration_seconds=duration_seconds,
-                operation=self._suboperation(operation, "approve"),
-                active_session_limit=active_session_limit,
-                active_agent_limit=active_agent_limit,
-            )
-            await self._record_receipt(
-                session,
-                operation=operation,
-                kind=RuntimeWebOperationKind.DIRECT_CREATE,
-                result=result,
-            )
-        return result
+        selected_duration_seconds: int,
+        exposure_deadline_at: datetime.datetime | None,
+    ) -> RDBRuntimeWebService:
+        for _ in range(_HOSTNAME_GENERATION_ATTEMPTS):
+            candidate = self._hostname_key()
+            try:
+                async with session.begin_nested():
+                    rdb = RDBRuntimeWebService(
+                        workspace_id=workspace_id,
+                        agent_id=agent_id,
+                        port=port,
+                        hostname_key=candidate,
+                        label=label,
+                        selected_duration_seconds=selected_duration_seconds,
+                        exposure_deadline_at=exposure_deadline_at,
+                    )
+                    session.add(rdb)
+                    await session.flush()
+                return rdb
+            except IntegrityError as error:
+                if "uq_runtime_web_services_hostname_key" not in str(error):
+                    raise
+        raise RuntimeWebRepositoryConflict("Hostname generation exhausted")
 
-    async def approve_request(
-        self,
-        session: AsyncSession,
-        *,
-        request_id: str,
-        expected_revision: int,
-        approver_user_id: str,
-        duration_seconds: int,
-        operation: RuntimeWebOperationIdentity,
-        active_session_limit: int,
-        active_agent_limit: int,
-    ) -> RuntimeWebMutationResult:
-        """Approve the exact pending request and atomically replace its cycle."""
-        replay = await self._mutation_replay(
-            session,
-            operation=operation,
-            kind=RuntimeWebOperationKind.APPROVE,
-        )
-        if replay is not None:
-            return replay
-        request = await self._request_rdb_by_id(session, request_id)
-        if request is None:
-            raise RuntimeWebRepositoryConflict("Request not found")
-        endpoint_snapshot = await session.get(
-            RDBRuntimeWebEndpoint, request.endpoint_id
-        )
-        if endpoint_snapshot is None:
-            raise RuntimeWebRepositoryConflict("Endpoint not found")
-        await self._lock_scopes(
-            session,
-            agent_id=endpoint_snapshot.agent_id,
-            agent_session_id=endpoint_snapshot.agent_session_id,
-        )
-        endpoint = await self._endpoint_by_id(
-            session,
-            endpoint_snapshot.id,
-            for_update=True,
-        )
-        request = await self._request_rdb_by_id(
-            session,
-            request_id,
-            for_update=True,
-        )
-        if (
-            endpoint is None
-            or request is None
-            or endpoint.current_pending_request_id != request.id
-            or request.state is not RuntimeWebRequestState.PENDING
-            or request.revision != expected_revision
-        ):
-            raise RuntimeWebRepositoryConflict("Pending request changed")
-        configuration = await self.get_configuration(session)
-        if (
-            configuration is None
-            or not configuration.enabled
-            or configuration.active_duration_seconds != duration_seconds
-        ):
-            raise RuntimeWebRepositoryConflict("Duration configuration changed")
-        now = await self._database_now(session)
-        await self._expire_current_cycles(session, now=now)
-        session_count = await self._active_count(
-            session,
-            now=now,
-            agent_session_id=endpoint.agent_session_id,
-            agent_id=None,
-            excluding_endpoint_id=endpoint.id,
-        )
-        agent_count = await self._active_count(
-            session,
-            now=now,
-            agent_session_id=None,
-            agent_id=endpoint.agent_id,
-            excluding_endpoint_id=endpoint.id,
-        )
-        if session_count >= active_session_limit:
-            raise RuntimeWebRepositoryQuotaExceeded("session_active")
-        if agent_count >= active_agent_limit:
-            raise RuntimeWebRepositoryQuotaExceeded("agent_active")
-        prior = await self._cycle_rdb_by_id(
-            session,
-            endpoint.current_cycle_id,
-            for_update=True,
-        )
-        if prior is not None and prior.ended_at is None:
-            prior.ended_at = now
-            prior.end_reason = RuntimeWebCycleEndReason.REPLACED
-        request.state = RuntimeWebRequestState.APPROVED
-        request.revision += 1
-        request.decided_by_user_id = approver_user_id
-        request.decided_at = now
-        cycle = RDBRuntimeWebCycle(
-            endpoint_id=endpoint.id,
-            request_id=request.id,
-            approver_user_id=approver_user_id,
-            duration_seconds=duration_seconds,
-            approved_at=now,
-            expires_at=now + datetime.timedelta(seconds=duration_seconds),
-            close_barrier=endpoint.close_barrier,
-        )
-        session.add(cycle)
-        await session.flush()
-        endpoint.current_pending_request_id = None
-        endpoint.current_cycle_id = cycle.id
-        endpoint.authority_revision += 1
-        await session.flush()
-        await session.refresh(endpoint, attribute_names=["updated_at"])
-        await session.refresh(request, attribute_names=["updated_at"])
-        result = RuntimeWebMutationResult(
-            endpoint=self._endpoint(endpoint),
-            request=self._request(request),
-            cycle=self._cycle(cycle),
-        )
-        await self._record_receipt(
-            session,
-            operation=operation,
-            kind=RuntimeWebOperationKind.APPROVE,
-            result=result,
-        )
-        return result
+    def _hostname_key(self) -> str:
+        encoded = base64.b32encode(self.random_bytes(8)).decode().lower().rstrip("=")
+        return encoded[:12]
 
-    async def decide_request(
-        self,
-        session: AsyncSession,
-        *,
-        request_id: str,
-        expected_revision: int,
-        decided_by_user_id: str | None,
-        state: RuntimeWebRequestState,
-        operation: RuntimeWebOperationIdentity,
-        kind: RuntimeWebOperationKind,
-    ) -> RuntimeWebMutationResult:
-        """Reject or cancel the exact pending request."""
-        replay = await self._mutation_replay(
-            session,
-            operation=operation,
-            kind=kind,
-        )
-        if replay is not None:
-            return replay
-        request = await self._request_rdb_by_id(session, request_id)
-        if request is None:
-            raise RuntimeWebRepositoryConflict("Request not found")
-        endpoint = await self._endpoint_by_id(
-            session,
-            request.endpoint_id,
-            for_update=True,
-        )
-        request = await self._request_rdb_by_id(
-            session,
-            request_id,
-            for_update=True,
-        )
-        if (
-            endpoint is None
-            or request is None
-            or endpoint.current_pending_request_id != request.id
-            or request.state is not RuntimeWebRequestState.PENDING
-            or request.revision != expected_revision
-        ):
-            raise RuntimeWebRepositoryConflict("Pending request changed")
-        now = await self._database_now(session)
-        request.state = state
-        request.revision += 1
-        request.decided_by_user_id = decided_by_user_id
-        request.decided_at = now
-        endpoint.current_pending_request_id = None
-        endpoint.authority_revision += 1
-        await session.flush()
-        await session.refresh(endpoint, attribute_names=["updated_at"])
-        await session.refresh(request, attribute_names=["updated_at"])
-        result = RuntimeWebMutationResult(
-            endpoint=self._endpoint(endpoint),
-            request=self._request(request),
-            cycle=await self._cycle_by_id(session, endpoint.current_cycle_id),
-        )
-        await self._record_receipt(
-            session,
-            operation=operation,
-            kind=kind,
-            result=result,
-        )
-        return result
-
-    async def close_cycle(
-        self,
-        session: AsyncSession,
-        *,
-        cycle_id: str,
-        expected_endpoint_revision: int,
-        operation: RuntimeWebOperationIdentity,
-    ) -> RuntimeWebMutationResult:
-        """Close only the exact current cycle."""
-        replay = await self._mutation_replay(
-            session,
-            operation=operation,
-            kind=RuntimeWebOperationKind.CLOSE,
-        )
-        if replay is not None:
-            return replay
-        cycle_snapshot = await self._cycle_rdb_by_id(session, cycle_id)
-        if cycle_snapshot is None:
-            raise RuntimeWebRepositoryConflict("Cycle not found")
-        endpoint = await self._endpoint_by_id(
-            session,
-            cycle_snapshot.endpoint_id,
-            for_update=True,
-        )
-        cycle = await self._cycle_rdb_by_id(session, cycle_id, for_update=True)
-        if (
-            endpoint is None
-            or cycle is None
-            or endpoint.current_cycle_id != cycle.id
-            or endpoint.authority_revision != expected_endpoint_revision
-            or cycle.ended_at is not None
-        ):
-            raise RuntimeWebRepositoryConflict("Current cycle changed")
-        now = await self._database_now(session)
-        endpoint.close_barrier += 1
-        endpoint.authority_revision += 1
-        cycle.ended_at = now
-        cycle.end_reason = RuntimeWebCycleEndReason.CLOSED
-        await session.flush()
-        await session.refresh(endpoint, attribute_names=["updated_at"])
-        result = RuntimeWebMutationResult(
-            endpoint=self._endpoint(endpoint),
-            request=await self._request_by_id(
-                session,
-                endpoint.current_pending_request_id,
-            ),
-            cycle=self._cycle(cycle),
-        )
-        await self._record_receipt(
-            session,
-            operation=operation,
-            kind=RuntimeWebOperationKind.CLOSE,
-            result=result,
-        )
-        return result
-
-    async def get_endpoint(
-        self,
-        session: AsyncSession,
-        *,
-        agent_session_id: str,
-        port: int,
-    ) -> RuntimeWebEndpoint | None:
-        """Load one endpoint by concrete Session and port."""
-        rdb = await self._get_endpoint_by_session_port(
-            session,
-            agent_session_id=agent_session_id,
-            port=port,
-            for_update=False,
-        )
-        return None if rdb is None else self._endpoint(rdb)
-
-    async def get_endpoint_by_id(
-        self,
-        session: AsyncSession,
-        endpoint_id: str,
-    ) -> RuntimeWebEndpoint | None:
-        """Load one endpoint by its opaque public identifier."""
-        rdb = await self._endpoint_by_id(
-            session,
-            endpoint_id,
-            for_update=False,
-        )
-        return None if rdb is None else self._endpoint(rdb)
-
-    async def list_endpoints(
-        self,
-        session: AsyncSession,
-        *,
-        agent_session_id: str,
-        offset: int,
-        limit: int,
-    ) -> RuntimeWebEndpointPage:
-        """List stable endpoints for one concrete Session."""
-        where = RDBRuntimeWebEndpoint.agent_session_id == agent_session_id
-        rows = await session.scalars(
-            sa.select(RDBRuntimeWebEndpoint)
-            .where(where)
-            .order_by(RDBRuntimeWebEndpoint.created_at, RDBRuntimeWebEndpoint.id)
-            .offset(offset)
-            .limit(limit)
-        )
-        total = await session.scalar(
-            sa.select(sa.func.count(RDBRuntimeWebEndpoint.id)).where(where)
-        )
-        return RuntimeWebEndpointPage(
-            items=[self._endpoint(row) for row in rows],
-            total=total or 0,
-        )
-
-    async def current_request(
-        self,
-        session: AsyncSession,
-        endpoint: RuntimeWebEndpoint,
-    ) -> RuntimeWebRequest | None:
-        """Load endpoint's current pending request."""
-        return await self._request_by_id(session, endpoint.current_pending_request_id)
-
-    async def current_cycle(
-        self,
-        session: AsyncSession,
-        endpoint: RuntimeWebEndpoint,
-    ) -> RuntimeWebCycle | None:
-        """Load endpoint's current cycle."""
-        return await self._cycle_by_id(session, endpoint.current_cycle_id)
-
-    async def endpoint_for_request(
-        self,
-        session: AsyncSession,
-        request_id: str,
-    ) -> RuntimeWebEndpoint | None:
-        """Load endpoint containing one request."""
-        request = await self._request_rdb_by_id(session, request_id)
-        if request is None:
-            return None
-        endpoint = await session.get(RDBRuntimeWebEndpoint, request.endpoint_id)
-        return None if endpoint is None else self._endpoint(endpoint)
-
-    async def endpoint_for_cycle(
-        self,
-        session: AsyncSession,
-        cycle_id: str,
-    ) -> RuntimeWebEndpoint | None:
-        """Load endpoint containing one cycle."""
-        cycle = await self._cycle_rdb_by_id(session, cycle_id)
-        if cycle is None:
-            return None
-        endpoint = await session.get(RDBRuntimeWebEndpoint, cycle.endpoint_id)
-        return None if endpoint is None else self._endpoint(endpoint)
-
-    async def _lock_scopes(
+    async def _lock_agent_scope(
         self,
         session: AsyncSession,
         *,
         agent_id: str,
-        agent_session_id: str,
-    ) -> None:
-        for scope_kind, subject_id in (
-            (RuntimeWebQuotaScopeKind.AGENT, agent_id),
-            (RuntimeWebQuotaScopeKind.SESSION, agent_session_id),
-        ):
-            await session.execute(
-                pg_insert(RDBRuntimeWebQuotaScope)
-                .values(scope_kind=scope_kind, subject_id=subject_id)
-                .on_conflict_do_nothing()
-            )
-            await session.execute(
-                sa.select(RDBRuntimeWebQuotaScope)
-                .where(
-                    RDBRuntimeWebQuotaScope.scope_kind == scope_kind,
-                    RDBRuntimeWebQuotaScope.subject_id == subject_id,
-                )
-                .with_for_update()
-            )
-
-    async def _active_count(
-        self,
-        session: AsyncSession,
-        *,
-        now: datetime.datetime,
-        agent_session_id: str | None,
-        agent_id: str | None,
-        excluding_endpoint_id: str,
-    ) -> int:
-        statement = (
-            sa.select(sa.func.count(sa.distinct(RDBRuntimeWebCycle.endpoint_id)))
-            .join(
-                RDBRuntimeWebEndpoint,
-                RDBRuntimeWebEndpoint.id == RDBRuntimeWebCycle.endpoint_id,
-            )
-            .where(
-                RDBRuntimeWebCycle.ended_at.is_(None),
-                RDBRuntimeWebCycle.expires_at > now,
-                RDBRuntimeWebCycle.endpoint_id != excluding_endpoint_id,
-            )
-        )
-        if agent_session_id is not None:
-            statement = statement.where(
-                RDBRuntimeWebEndpoint.agent_session_id == agent_session_id
-            )
-        if agent_id is not None:
-            statement = statement.where(RDBRuntimeWebEndpoint.agent_id == agent_id)
-        return int(await session.scalar(statement) or 0)
-
-    async def _expire_current_cycles(
-        self,
-        session: AsyncSession,
-        *,
-        now: datetime.datetime,
     ) -> None:
         await session.execute(
-            sa.update(RDBRuntimeWebCycle)
-            .where(
-                RDBRuntimeWebCycle.ended_at.is_(None),
-                RDBRuntimeWebCycle.expires_at <= now,
-            )
-            .values(ended_at=now, end_reason=RuntimeWebCycleEndReason.EXPIRED)
+            pg_insert(RDBRuntimeWebQuotaScope)
+            .values(agent_id=agent_id)
+            .on_conflict_do_nothing()
+        )
+        await session.execute(
+            sa.select(RDBRuntimeWebQuotaScope)
+            .where(RDBRuntimeWebQuotaScope.agent_id == agent_id)
+            .with_for_update()
         )
 
-    async def _mutation_replay(
+    async def _require_active_capacity(
+        self,
+        session: AsyncSession,
+        *,
+        agent_id: str,
+        excluding_service_id: str | None,
+        active_agent_limit: int,
+        now: datetime.datetime,
+    ) -> None:
+        statement = sa.select(sa.func.count(RDBRuntimeWebService.id)).where(
+            RDBRuntimeWebService.agent_id == agent_id,
+            RDBRuntimeWebService.exposure_deadline_at > now,
+        )
+        if excluding_service_id is not None:
+            statement = statement.where(RDBRuntimeWebService.id != excluding_service_id)
+        if int(await session.scalar(statement) or 0) >= active_agent_limit:
+            raise RuntimeWebRepositoryQuotaExceeded("agent_active")
+
+    async def _service_replay(
         self,
         session: AsyncSession,
         *,
         operation: RuntimeWebOperationIdentity,
         kind: RuntimeWebOperationKind,
-    ) -> RuntimeWebMutationResult | None:
-        lock_material = "\0".join(
-            (
-                operation.actor_kind.value,
-                operation.actor_id,
-                operation.execution_id,
-                operation.operation_key,
-                kind.value,
-            )
+        payload: object,
+    ) -> RuntimeWebServiceRecord | None:
+        receipt = await self._receipt(
+            session,
+            operation=operation,
+            kind=kind,
+            payload=payload,
         )
-        lock_key = int.from_bytes(
-            hashlib.sha256(lock_material.encode()).digest()[:8],
-            byteorder="big",
-            signed=True,
-        )
-        await session.execute(
-            sa.text("SELECT pg_advisory_xact_lock(:lock_key)"),
-            {"lock_key": lock_key},
-        )
+        if receipt is None:
+            return None
+        service_id = receipt.service_id
+        if service_id is None:
+            raise RuntimeWebRepositoryConflict("Operation target is no longer present")
+        service = await self._service_by_id(session, service_id, for_update=False)
+        if service is None:
+            raise RuntimeWebRepositoryConflict("Operation target is no longer present")
+        return self._service(service)
+
+    async def _receipt(
+        self,
+        session: AsyncSession,
+        *,
+        operation: RuntimeWebOperationIdentity,
+        kind: RuntimeWebOperationKind,
+        payload: object,
+    ) -> RDBRuntimeWebOperationReceipt | None:
+        await self._lock_operation(session, operation=operation, kind=kind)
         receipt = await session.scalar(
             sa.select(RDBRuntimeWebOperationReceipt).where(
                 RDBRuntimeWebOperationReceipt.actor_kind == operation.actor_kind,
@@ -697,20 +694,11 @@ class RuntimeWebRepository:
                 RDBRuntimeWebOperationReceipt.operation_kind == kind,
             )
         )
-        if receipt is None:
-            return None
-        endpoint = await self._endpoint_by_id(
-            session,
-            receipt.endpoint_id,
-            for_update=False,
-        )
-        if endpoint is None:
-            raise RuntimeError("Runtime Web receipt endpoint is missing")
-        return RuntimeWebMutationResult(
-            endpoint=self._endpoint(endpoint),
-            request=await self._request_by_id(session, receipt.request_id),
-            cycle=await self._cycle_by_id(session, receipt.cycle_id),
-        )
+        if receipt is not None and receipt.input_fingerprint != self._fingerprint(
+            payload
+        ):
+            raise RuntimeWebRepositoryConflict("Idempotency input changed")
+        return receipt
 
     async def _record_receipt(
         self,
@@ -718,7 +706,27 @@ class RuntimeWebRepository:
         *,
         operation: RuntimeWebOperationIdentity,
         kind: RuntimeWebOperationKind,
+        payload: object,
         result: RuntimeWebMutationResult,
+    ) -> None:
+        await self._record_raw_receipt(
+            session,
+            operation=operation,
+            kind=kind,
+            payload=payload,
+            service_id=result.service.id,
+            result={"service_id": result.service.id},
+        )
+
+    async def _record_raw_receipt(
+        self,
+        session: AsyncSession,
+        *,
+        operation: RuntimeWebOperationIdentity,
+        kind: RuntimeWebOperationKind,
+        payload: object,
+        service_id: str | None,
+        result: dict[str, object],
     ) -> None:
         session.add(
             RDBRuntimeWebOperationReceipt(
@@ -727,93 +735,68 @@ class RuntimeWebRepository:
                 execution_id=operation.execution_id,
                 operation_key=operation.operation_key,
                 operation_kind=kind,
-                result={"endpoint_id": result.endpoint.id},
-                endpoint_id=result.endpoint.id,
-                request_id=None if result.request is None else result.request.id,
-                cycle_id=None if result.cycle is None else result.cycle.id,
+                input_fingerprint=self._fingerprint(payload),
+                result=result,
+                service_id=service_id,
             )
         )
         await session.flush()
 
-    async def _get_endpoint_by_session_port(
+    async def _lock_operation(
         self,
         session: AsyncSession,
         *,
-        agent_session_id: str,
+        operation: RuntimeWebOperationIdentity,
+        kind: RuntimeWebOperationKind,
+    ) -> None:
+        material = "\0".join(
+            (
+                operation.actor_kind.value,
+                operation.actor_id,
+                operation.execution_id,
+                operation.operation_key,
+                kind.value,
+            )
+        )
+        lock_key = int.from_bytes(
+            hashlib.sha256(material.encode()).digest()[:8],
+            byteorder="big",
+            signed=True,
+        )
+        await session.execute(
+            sa.text("SELECT pg_advisory_xact_lock(:lock_key)"),
+            {"lock_key": lock_key},
+        )
+
+    async def _service_by_agent_port(
+        self,
+        session: AsyncSession,
+        *,
+        agent_id: str,
         port: int,
         for_update: bool,
-    ) -> RDBRuntimeWebEndpoint | None:
-        statement = sa.select(RDBRuntimeWebEndpoint).where(
-            RDBRuntimeWebEndpoint.agent_session_id == agent_session_id,
-            RDBRuntimeWebEndpoint.port == port,
+    ) -> RDBRuntimeWebService | None:
+        statement = sa.select(RDBRuntimeWebService).where(
+            RDBRuntimeWebService.agent_id == agent_id,
+            RDBRuntimeWebService.port == port,
         )
         if for_update:
             statement = statement.with_for_update()
         return await session.scalar(statement)
 
-    async def _endpoint_by_id(
+    async def _service_by_id(
         self,
         session: AsyncSession,
-        endpoint_id: str | None,
+        service_id: str,
         *,
         for_update: bool,
-    ) -> RDBRuntimeWebEndpoint | None:
-        if endpoint_id is None:
-            return None
-        statement = sa.select(RDBRuntimeWebEndpoint).where(
-            RDBRuntimeWebEndpoint.id == endpoint_id
+    ) -> RDBRuntimeWebService | None:
+        statement = sa.select(RDBRuntimeWebService).where(
+            RDBRuntimeWebService.id == service_id
         )
         if for_update:
             statement = statement.with_for_update()
         return await session.scalar(statement)
-
-    async def _request_rdb_by_id(
-        self,
-        session: AsyncSession,
-        request_id: str | None,
-        *,
-        for_update: bool = False,
-    ) -> RDBRuntimeWebRequest | None:
-        if request_id is None:
-            return None
-        statement = sa.select(RDBRuntimeWebRequest).where(
-            RDBRuntimeWebRequest.id == request_id
-        )
-        if for_update:
-            statement = statement.with_for_update()
-        return await session.scalar(statement)
-
-    async def _cycle_rdb_by_id(
-        self,
-        session: AsyncSession,
-        cycle_id: str | None,
-        *,
-        for_update: bool = False,
-    ) -> RDBRuntimeWebCycle | None:
-        if cycle_id is None:
-            return None
-        statement = sa.select(RDBRuntimeWebCycle).where(
-            RDBRuntimeWebCycle.id == cycle_id
-        )
-        if for_update:
-            statement = statement.with_for_update()
-        return await session.scalar(statement)
-
-    async def _request_by_id(
-        self,
-        session: AsyncSession,
-        request_id: str | None,
-    ) -> RuntimeWebRequest | None:
-        rdb = await self._request_rdb_by_id(session, request_id)
-        return None if rdb is None else self._request(rdb)
-
-    async def _cycle_by_id(
-        self,
-        session: AsyncSession,
-        cycle_id: str | None,
-    ) -> RuntimeWebCycle | None:
-        rdb = await self._cycle_rdb_by_id(session, cycle_id)
-        return None if rdb is None else self._cycle(rdb)
 
     async def _database_now(self, session: AsyncSession) -> datetime.datetime:
         now = await session.scalar(sa.select(sa.func.now()))
@@ -821,25 +804,42 @@ class RuntimeWebRepository:
             raise RuntimeError("Database did not return current timestamp")
         return now
 
-    def _endpoint(self, rdb: RDBRuntimeWebEndpoint) -> RuntimeWebEndpoint:
-        return RuntimeWebEndpoint.model_validate(rdb, from_attributes=True)
-
-    def _request(self, rdb: RDBRuntimeWebRequest) -> RuntimeWebRequest:
-        return RuntimeWebRequest.model_validate(rdb, from_attributes=True)
-
-    def _cycle(self, rdb: RDBRuntimeWebCycle) -> RuntimeWebCycle:
-        return RuntimeWebCycle.model_validate(rdb, from_attributes=True)
+    async def _flush_updated(
+        self,
+        session: AsyncSession,
+        rdb: RDBRuntimeWebService,
+    ) -> None:
+        await session.flush()
+        await session.refresh(rdb, attribute_names=["updated_at"])
 
     @staticmethod
-    def _suboperation(
-        operation: RuntimeWebOperationIdentity,
-        suffix: str,
-    ) -> RuntimeWebOperationIdentity:
-        return operation.model_copy(
-            update={
-                "operation_key": derived_operation_key(
-                    operation.operation_key,
-                    suffix,
-                )
-            }
-        )
+    def _require_revision(
+        rdb: RDBRuntimeWebService | None,
+        expected_revision: int,
+    ) -> None:
+        if rdb is None or rdb.revision != expected_revision:
+            raise RuntimeWebRepositoryConflict("Service revision changed")
+
+    @staticmethod
+    def _validate_duration(duration_seconds: int) -> None:
+        if duration_seconds not in _SUPPORTED_DURATIONS:
+            raise RuntimeWebRepositoryConflict("Unsupported service duration")
+
+    @staticmethod
+    def _fingerprint(payload: object) -> str:
+        encoded = json.dumps(
+            payload,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+        ).encode()
+        return hashlib.sha256(encoded).hexdigest()
+
+    @staticmethod
+    def _service(rdb: RDBRuntimeWebService) -> RuntimeWebServiceRecord:
+        return RuntimeWebServiceRecord.model_validate(rdb, from_attributes=True)
+
+
+def get_runtime_web_repository() -> RuntimeWebRepository:
+    """Create the Runtime Web repository dependency."""
+    return RuntimeWebRepository()

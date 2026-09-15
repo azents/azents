@@ -10,6 +10,7 @@ Name | Type | Description | Notes
 **phase** | [**AgentRunPhase**](AgentRunPhase.md) | Current run phase | 
 **status** | [**AgentRunStatus**](AgentRunStatus.md) | Current run status | 
 **inference_profile** | [**AppliedInferenceProfile**](AppliedInferenceProfile.md) | Inference settings applied to the active turn | 
+**using_fallback** | **bool** | Whether the active foreground model route uses a fallback candidate | 
 **model_call_started_at** | **datetime** |  | 
 **operation** | [**ChatLiveRunOperationResponse**](ChatLiveRunOperationResponse.md) |  | [optional] 
 **retry** | [**ChatLiveRunRetryStateResponse**](ChatLiveRunRetryStateResponse.md) |  | [optional] 

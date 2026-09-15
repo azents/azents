@@ -84,7 +84,7 @@ class CloseReason(enum.StrEnum):
     """Bounded content-free terminal reason."""
 
     CALLER = "caller"
-    APPROVAL_EXPIRED = "approval_expired"
+    SERVICE_EXPIRED = "service_expired"
     AUTHORITY_REVOKED = "authority_revoked"
     GENERATION_REPLACED = "generation_replaced"
     DEADLINE = "deadline"
@@ -327,54 +327,51 @@ class Header:
 
 @dataclasses.dataclass(frozen=True)
 class StreamAuthority:
-    """Immutable approval, Runtime, port, and deadline authority."""
+    """Immutable service, Runtime, port, and deadline authority."""
 
     correlation_id: str
-    endpoint_id: str
-    cycle_id: str
-    endpoint_authority_revision: int
-    close_barrier: int
+    service_id: str
+    service_revision: int
     identity_id: str
     authentication_session_id: str
     user_id: str
-    agent_session_id: str
+    agent_id: str
     runtime_id: str
     desired_generation: int
     runner_generation: int
     port: int
     open_deadline_at: datetime
-    approval_deadline_at: datetime
+    exposure_deadline_at: datetime
     transport_deadline_at: datetime
 
     def __post_init__(self) -> None:
         """Reject incomplete or inconsistent logical-stream authority."""
         for name, value in (
             ("correlation_id", self.correlation_id),
-            ("endpoint_id", self.endpoint_id),
-            ("cycle_id", self.cycle_id),
+            ("service_id", self.service_id),
             ("identity_id", self.identity_id),
             ("authentication_session_id", self.authentication_session_id),
             ("user_id", self.user_id),
-            ("agent_session_id", self.agent_session_id),
+            ("agent_id", self.agent_id),
             ("runtime_id", self.runtime_id),
         ):
             _validate_text(value, name, _MAX_IDENTIFIER_BYTES)
-        if self.endpoint_authority_revision < 0 or self.close_barrier < 0:
-            raise ValueError("Runtime Web authority revisions must not be negative")
+        if self.service_revision < 0:
+            raise ValueError("Runtime Web service revision must not be negative")
         if self.desired_generation <= 0 or self.runner_generation <= 0:
             raise ValueError("Runtime Web authority generations must be positive")
         if not 1 <= self.port <= 65_535:
             raise ValueError("Runtime Web port must be between 1 and 65535")
         for name, value in (
             ("open_deadline_at", self.open_deadline_at),
-            ("approval_deadline_at", self.approval_deadline_at),
+            ("exposure_deadline_at", self.exposure_deadline_at),
             ("transport_deadline_at", self.transport_deadline_at),
         ):
             _validate_deadline(value, name)
         if self.open_deadline_at > self.transport_deadline_at:
             raise ValueError("Open deadline must not exceed transport deadline")
-        if self.transport_deadline_at > self.approval_deadline_at:
-            raise ValueError("Transport deadline must not exceed approval deadline")
+        if self.transport_deadline_at > self.exposure_deadline_at:
+            raise ValueError("Transport deadline must not exceed exposure deadline")
 
 
 @dataclasses.dataclass(frozen=True)

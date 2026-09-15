@@ -1,5 +1,5 @@
 import {
-  runtimeWebV1GetServiceByEndpointId,
+  runtimeWebV1GetRuntimeWebServiceById,
   runtimeWebV1InitiateRuntimeWebSeparateIdentity,
   runtimeWebV1IssueRuntimeWebSharedIdentity,
 } from "@azents/public-client";
@@ -17,16 +17,16 @@ import {
 } from "@/trpc/context";
 
 interface StartRequest {
-  endpointId: string;
+  serviceId: string;
 }
 
 function isStartRequest(value: unknown): value is StartRequest {
   return (
     typeof value === "object" &&
     value !== null &&
-    "endpointId" in value &&
-    typeof value.endpointId === "string" &&
-    /^[a-zA-Z0-9_-]{32}$/.test(value.endpointId)
+    "serviceId" in value &&
+    typeof value.serviceId === "string" &&
+    /^[a-zA-Z0-9_-]{32}$/.test(value.serviceId)
   );
 }
 
@@ -54,12 +54,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     body = await request.json();
   } catch (error) {
     if (error instanceof SyntaxError) {
-      return NextResponse.json({ error: "Invalid endpoint" }, { status: 400 });
+      return NextResponse.json({ error: "Invalid service" }, { status: 400 });
     }
     throw error;
   }
   if (!isStartRequest(body)) {
-    return NextResponse.json({ error: "Invalid endpoint" }, { status: 400 });
+    return NextResponse.json({ error: "Invalid service" }, { status: 400 });
   }
   const resHeaders = new Headers({ "Cache-Control": "no-store" });
   let accessToken: string | null;
@@ -75,12 +75,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return unauthorized(resHeaders);
   }
   const client = createApiClientWithAccessToken(accessToken);
-  const { data: service } = await runtimeWebV1GetServiceByEndpointId({
+  const { data: service } = await runtimeWebV1GetRuntimeWebServiceById({
     client,
-    path: { endpoint_id: body.endpointId },
+    path: { service_id: body.serviceId },
     throwOnError: true,
   });
-  if (service.endpoint.url === null) {
+  if (service.url === null) {
     return NextResponse.json(
       { error: "Runtime Web Gateway is not configured" },
       { status: 409, headers: resHeaders },
@@ -93,7 +93,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       throwOnError: true,
     });
     const response = NextResponse.json(
-      { mode: "shared_cookie", destination: service.endpoint.url },
+      { mode: "shared_cookie", destination: service.url },
       { headers: resHeaders },
     );
     response.cookies.set(configuration.identityCookieName, identity.secret, {
@@ -110,7 +110,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const { data: initiation } =
     await runtimeWebV1InitiateRuntimeWebSeparateIdentity({
       client,
-      body: { endpoint_id: body.endpointId },
+      body: { service_id: body.serviceId },
       throwOnError: true,
     });
   const response = NextResponse.json(

@@ -7,67 +7,67 @@
     "invalidResponse": "La réponse d’authentification est invalide.",
     "failed": "L’authentification Runtime Web a échoué."
   },
-  "confirmation": {
-    "title": "Vérifier l’accès au service web",
-    "subtitle": "Seule cette demande précise du service de la Session peut être approuvée ici.",
-    "loading": "Chargement de la demande actuelle…",
+  "activation": {
+    "title": "Activer le service web",
+    "subtitle": "Choisissez la durée de disponibilité de cette URL publique.",
+    "loading": "Chargement du service web actuel…",
     "errorTitle": "Impossible de charger ce service web",
-    "duration": "L’accès expire après {minutes} minutes.",
     "untrustedNotice": "L’application Runtime n’est pas vérifiée par Azents. Ne faites pas confiance à son contenu, ses téléchargements ni ses demandes d’informations sensibles.",
-    "alreadyActive": "Ce service est actuellement exposé. Son ouverture ne prolonge pas son expiration.",
-    "stale": "Cette demande n’est plus en attente. L’état actuel est affiché sans contrôle d’approbation."
+    "alreadyOn": "Ce service est déjà activé. Son ouverture ne prolonge pas son expiration."
   },
   "panel": {
     "tab": "Services",
     "title": "Services web",
-    "description": "Exposez une application déjà exécutée dans cette Session sans arrêter son processus.",
+    "description": "Donnez une URL publique à une application sur un port local. Désactiver le service n’arrête pas l’application.",
     "loading": "Chargement des services web…",
     "errorTitle": "Impossible de charger les services web",
     "emptyTitle": "Aucun service web",
-    "emptyDescription": "Créez une adresse stable pour un port localhost numérique lorsque l’application est prête.",
-    "create": "Créer un service",
-    "createTitle": "Créer un service web",
+    "emptyDescription": "Ajoutez un service pour un port localhost numérique lorsque l’application est prête.",
+    "create": "Ajouter un service",
+    "createTitle": "Ajouter un service web",
+    "editTitle": "Modifier le service web",
+    "deleteTitle": "Supprimer le service web ?",
+    "deleteDescription": "L’URL publique sera définitivement retirée. Recréer le service générera une autre adresse.",
     "port": "Port local",
     "portPlaceholder": "3000",
     "label": "Nom du service",
     "labelPlaceholder": "Application de prévisualisation",
-    "continue": "Vérifier l’exposition",
-    "confirmTitle": "Exposer ce service ?",
-    "confirmDescription": "Les membres autorisés de la Session pourront accéder à cette adresse pendant {minutes} minutes. Fermer l’exposition n’arrête pas l’application.",
+    "duration": "Durée d’exposition",
+    "turnOnAfterCreate": "Activer après la création",
+    "durationDeferred": "L’expiration actuelle ne change pas. La nouvelle durée s’appliquera après une réinitialisation ou une désactivation suivie d’une réactivation.",
     "cancelDialog": "Annuler"
+  },
+  "duration": {
+    "oneHour": "1 heure",
+    "sixHours": "6 heures",
+    "twentyFourHours": "24 heures"
   },
   "service": {
     "portLabel": "Port {port}",
     "localPort": "localhost:{port}",
-    "expiresAt": "Expire à {time}",
-    "endedAt": "Terminé à {time}"
+    "expiresAt": "Expire à {time}"
   },
   "status": {
-    "active": "Actif",
-    "pending": "Approbation en attente",
-    "activePending": "Actif · nouvelle approbation en attente",
-    "inactive": "Inactif",
-    "expired": "Expiré",
-    "closed": "Fermé",
+    "on": "Activé",
+    "off": "Désactivé",
     "unconfigured": "Installation non prête",
-    "runtimeUnavailable": "Runtime indisponible ; l’accessibilité de l’application n’a pas été vérifiée"
+    "runtimeUnavailable": "Le Runtime est indisponible ; l’application n’est pas accessible pour le moment."
   },
   "actions": {
-    "approve": "Approuver",
-    "approveDuration": "Approuver pour {minutes} minutes",
-    "reject": "Refuser",
-    "cancel": "Annuler la demande",
-    "requestAgain": "Demander à nouveau",
-    "close": "Fermer l’exposition",
+    "turnOn": "Activer",
+    "turnOff": "Désactiver",
+    "resetExpiration": "Réinitialiser l’expiration",
+    "edit": "Modifier",
+    "delete": "Supprimer",
+    "save": "Enregistrer",
     "copy": "Copier l’URL",
     "copied": "URL copiée",
     "open": "Ouvrir le service"
   },
   "chat": {
     "request": "Service web demandé",
-    "preparing": "Préparation du service web",
     "listing": "Services web consultés",
-    "closing": "Service web fermé",
-    "stale": "Cet élément de Chat est obsolète ; l’état actuel du service est affiché."
+    "closing": "Service web désactivé",
+    "stale": "Cet élément de Chat peut être obsolète ; consultez l’état actuel dans Services."
   }
 }

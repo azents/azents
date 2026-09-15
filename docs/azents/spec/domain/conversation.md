@@ -139,7 +139,7 @@ api_routes:
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ticket
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ws
 last_verified_at: 2026-09-15
-spec_version: 171
+spec_version: 172
 ---
 
 # Conversation & Events
@@ -176,9 +176,7 @@ erDiagram
     AgentSession ||--o{ ExchangeFile : "shows uploads and artifacts"
     AgentSession ||--o{ SessionGitWorktree : "owned worktrees"
     AgentSession ||--o{ ActionExecution : "operation TurnAction executions"
-    AgentSession ||--o{ RuntimeWebEndpoint : "owns stable service endpoints"
-    RuntimeWebEndpoint ||--o{ RuntimeWebRequest : "receives exposure requests"
-    RuntimeWebRequest ||--o| RuntimeWebCycle : "may create approved cycle"
+    Agent ||--o{ RuntimeWebService : "owns local-port services"
     AgentRuntime ||--o{ ExchangeFile : "owns sandbox artifacts"
 ```
 
@@ -193,13 +191,13 @@ Session execution control state is stored on `AgentSession`; detailed run phase/
 in `agent_runs`. Runtime lifecycle state must not be used as the authority for a session run,
 pending command, stop intent, or run heartbeat.
 
-Runtime Web endpoints, requests, and finite approval cycles are durable
-Session-scoped conversation resources, but application traffic is not conversation
+Runtime Web services are Agent-owned resources rather than Session or conversation
 state. Chat events may retain only recognized content-free Runtime Web metadata such
-as endpoint, request, cycle, port, and label identifiers. They never retain browser
-identity, tickets, cookies, application paths, query strings, headers, request or
-response bodies, or live transport state. Current approval and availability always
-come from the Runtime Web projection rather than from an older Chat event.
+as service ID, port, label, URL, On/Off state, selected duration, expiration, and
+revision. They never retain browser identity, tickets, cookies, application paths,
+query strings, headers, request or response bodies, or live transport state. Current
+service state always comes from the Agent-scoped Runtime Web projection rather than
+from an older Chat event.
 
 `SessionAgent` is the session-scoped participant tree used by subagents. It does not replace
 `AgentSession`; every participant links one-to-one to an `AgentSession`, and the linked session owns
@@ -1399,6 +1397,9 @@ presentations.
 
 ## 13. Changelog
 
+- **2026-09-15** — v172. Removed Session-owned Runtime Web endpoint, request, and
+  cycle resources from the Conversation model and retained only content-free
+  Agent-service metadata in tool-call history.
 - **2026-09-13** — v171. Added the required live Run fallback-route projection for transient Web
   status while retaining the public availability and reservation contracts as backend behavior.
 - **2026-09-13** — v170. Added frozen foreground/compaction candidate operation state,

@@ -5,11 +5,7 @@ import datetime
 from pydantic import BaseModel, Field
 
 from azents.rdb.models.runtime_web import RuntimeWebAuthMode
-from azents.repos.runtime_web.data import (
-    RuntimeWebCycle,
-    RuntimeWebEndpoint,
-    RuntimeWebRequest,
-)
+from azents.repos.runtime_web.data import RuntimeWebServiceRecord
 
 
 class RuntimeWebDesiredConfiguration(BaseModel):
@@ -18,7 +14,6 @@ class RuntimeWebDesiredConfiguration(BaseModel):
     enabled: bool
     mode: RuntimeWebAuthMode
     fingerprint: str = Field(min_length=64, max_length=64)
-    active_duration_seconds: int = Field(ge=300, le=28_800)
 
 
 class RuntimeWebGatewayIdentity(BaseModel):
@@ -40,9 +35,9 @@ class RuntimeWebIssuedSecret(BaseModel):
 
 
 class RuntimeWebRedeemedIdentity(RuntimeWebIssuedSecret):
-    """Identity plus the ticket-bound endpoint destination."""
+    """Identity plus the ticket-bound service destination."""
 
-    endpoint_id: str
+    service_id: str
 
 
 class RuntimeWebAuthBinding(BaseModel):
@@ -52,7 +47,7 @@ class RuntimeWebAuthBinding(BaseModel):
     initiation_id: str
     user_id: str
     auth_session_id: str
-    endpoint_id: str
+    service_id: str
     expires_at: datetime.datetime
     broker_bound: bool
     settled: bool
@@ -76,19 +71,16 @@ class RuntimeWebIssuedTicket(BaseModel):
     """Thirty-second one-use broker redemption ticket."""
 
     ticket_secret: str
-    endpoint_id: str
+    service_id: str
     expires_at: datetime.datetime
 
 
 class RuntimeWebGatewayAuthority(BaseModel):
-    """Current endpoint, approval, Runtime, and caller authority."""
+    """Current service, Runtime, and caller authority."""
 
     identity: RuntimeWebGatewayIdentity
-    endpoint: RuntimeWebEndpoint
-    request: RuntimeWebRequest | None
-    cycle: RuntimeWebCycle | None
-    runtime_id: str | None
-    desired_generation: int | None
-    runner_generation: int | None
-    active: bool
-    runtime_ready: bool
+    service: RuntimeWebServiceRecord
+    runtime_id: str
+    desired_generation: int
+    runner_generation: int
+    exposure_deadline_at: datetime.datetime

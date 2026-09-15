@@ -6,8 +6,15 @@ import secrets
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.enums import (
+    AgentLifecycleStatus,
+    AgentRuntimeCapability,
+    AgentType,
+    WorkspaceUserRole,
+)
 from azents.rdb.session import SessionManager
-from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.agent import AgentRepository
+from azents.repos.agent_admin import AgentAdminRepository
 from azents.repos.runtime_web.gateway_data import (
     RuntimeWebBrokerBinding,
     RuntimeWebDesiredConfiguration,
@@ -22,10 +29,6 @@ from azents.repos.runtime_web.gateway_repository import (
 )
 from azents.repos.runtime_web.repository import RuntimeWebRepositoryConflict
 from azents.repos.workspace_user import WorkspaceUserRepository
-from azents.services.session_resource_authority import (
-    AuthorizedPublicSessionResource,
-    authorize_public_session_resource,
-)
 
 _BINDING_LIFETIME = datetime.timedelta(minutes=2)
 _TICKET_LIFETIME = datetime.timedelta(seconds=30)
@@ -39,14 +42,16 @@ class RuntimeWebGatewayAuthService:
         *,
         session_manager: SessionManager[AsyncSession],
         repository: RuntimeWebGatewayRepository,
-        agent_session_repository: AgentSessionRepository,
+        agent_repository: AgentRepository,
+        agent_admin_repository: AgentAdminRepository,
         workspace_user_repository: WorkspaceUserRepository,
         identity_lifetime: datetime.timedelta,
         desired_configuration: RuntimeWebDesiredConfiguration | None,
     ) -> None:
         self.session_manager = session_manager
         self.repository = repository
-        self.agent_session_repository = agent_session_repository
+        self.agent_repository = agent_repository
+        self.agent_admin_repository = agent_admin_repository
         self.workspace_user_repository = workspace_user_repository
         self.identity_lifetime = identity_lifetime
         self.desired_configuration = desired_configuration
@@ -121,7 +126,7 @@ class RuntimeWebGatewayAuthService:
         *,
         user_id: str,
         auth_session_id: str,
-        endpoint_id: str,
+        service_id: str,
         now: datetime.datetime,
     ) -> RuntimeWebIssuedBinding:
         """Create one short-lived Main-origin browser binding."""
@@ -129,44 +134,43 @@ class RuntimeWebGatewayAuthService:
         initiation_id = secrets.token_hex(16)
         main_secret = _secret()
         async with self.session_manager() as session:
-            endpoint = await self.repository.get_endpoint_by_id(
+            service = await self.repository.get_service_by_id(
                 session,
-                endpoint_id=endpoint_id,
+                service_id=service_id,
             )
-            if endpoint is None:
-                raise RuntimeWebRepositoryConflict(
-                    "Runtime Web endpoint is unavailable"
-                )
-            agent_session = await self.agent_session_repository.get_by_id(
+            if service is None:
+                raise RuntimeWebRepositoryConflict("Runtime Web service is unavailable")
+            member = await self.workspace_user_repository.get_by_workspace_and_user(
                 session,
-                endpoint.agent_session_id,
+                service.workspace_id,
+                user_id,
             )
-            if agent_session is None:
-                raise RuntimeWebRepositoryConflict(
-                    "Runtime Web endpoint is unavailable"
+            agent = await self.agent_repository.get_by_id(session, service.agent_id)
+            if (
+                member is None
+                or agent is None
+                or agent.workspace_id != service.workspace_id
+                or agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE
+                or agent.runtime_capability is not AgentRuntimeCapability.MANAGED
+            ):
+                raise RuntimeWebRepositoryConflict("Runtime Web service is unavailable")
+            if (
+                agent.type is AgentType.PRIVATE
+                and member.role is not WorkspaceUserRole.OWNER
+                and not await self.agent_admin_repository.is_admin(
+                    session,
+                    agent.id,
+                    member.id,
                 )
-            access = await authorize_public_session_resource(
-                session,
-                agent_session=agent_session,
-                user_id=user_id,
-                require_active=True,
-                denied_as_not_found=True,
-                expected_workspace_id=endpoint.workspace_id,
-                expected_agent_id=endpoint.agent_id,
-                agent_session_repository=self.agent_session_repository,
-                workspace_user_repository=self.workspace_user_repository,
-            )
-            if not isinstance(access, AuthorizedPublicSessionResource):
-                raise RuntimeWebRepositoryConflict(
-                    "Runtime Web endpoint is unavailable"
-                )
+            ):
+                raise RuntimeWebRepositoryConflict("Runtime Web service is unavailable")
             return await self.repository.create_binding(
                 session,
                 initiation_id=initiation_id,
                 main_binding_hash=_hash(main_secret),
                 user_id=user_id,
                 auth_session_id=auth_session_id,
-                endpoint_id=endpoint_id,
+                service_id=service_id,
                 expires_at=now + _BINDING_LIFETIME,
                 now=now,
                 main_binding_secret=main_secret,

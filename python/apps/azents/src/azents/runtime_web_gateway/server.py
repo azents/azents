@@ -37,9 +37,10 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engin
 
 from azents.core.config import PostgreSQLConfig
 from azents.rdb.session import SessionManager
+from azents.repos.agent import AgentRepository
+from azents.repos.agent_admin import AgentAdminRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
-from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.runtime_web.data import RuntimeWebEndpoint
+from azents.repos.runtime_web.data import RuntimeWebServiceRecord
 from azents.repos.runtime_web.gateway_data import (
     RuntimeWebBrokerBinding,
     RuntimeWebDesiredConfiguration,
@@ -195,25 +196,25 @@ class RuntimeWebGatewaySessionProvider(Protocol):
 
 
 class RuntimeWebGatewayAuthorityProvider(Protocol):
-    """Current endpoint and transport authority used by HTTP handlers."""
+    """Current service and transport authority used by HTTP handlers."""
 
-    async def resolve_endpoint(
+    async def resolve_service(
         self,
         *,
         hostname_key: str,
-    ) -> RuntimeWebEndpoint | None: ...
+    ) -> RuntimeWebServiceRecord | None: ...
 
-    async def resolve_endpoint_by_id(
+    async def resolve_service_by_id(
         self,
         *,
-        endpoint_id: str,
-    ) -> RuntimeWebEndpoint | None: ...
+        service_id: str,
+    ) -> RuntimeWebServiceRecord | None: ...
 
-    async def source_endpoint_matches_root(
+    async def source_service_matches_agent(
         self,
         *,
         source_hostname_key: str,
-        target_endpoint: RuntimeWebEndpoint,
+        target_service: RuntimeWebServiceRecord,
     ) -> bool: ...
 
     async def authorize(
@@ -345,12 +346,12 @@ async def runtime_web_gateway_lifespan(
         enabled=True,
         mode=config.auth_mode,
         fingerprint=settings.security_fingerprint(),
-        active_duration_seconds=settings.runtime_web_gateway_active_duration_seconds,
     )
     auth = RuntimeWebGatewayAuthService(
         session_manager=session_manager,
         repository=gateway_repository,
-        agent_session_repository=AgentSessionRepository(),
+        agent_repository=AgentRepository(),
+        agent_admin_repository=AgentAdminRepository(),
         workspace_user_repository=WorkspaceUserRepository(),
         identity_lifetime=datetime.timedelta(seconds=config.identity_lifetime_seconds),
         desired_configuration=desired_configuration,
@@ -360,7 +361,8 @@ async def runtime_web_gateway_lifespan(
         session_manager=session_manager,
         gateway_repository=gateway_repository,
         runtime_web_repository=RuntimeWebRepository(),
-        agent_session_repository=AgentSessionRepository(),
+        agent_repository=AgentRepository(),
+        agent_admin_repository=AgentAdminRepository(),
         workspace_user_repository=WorkspaceUserRepository(),
         runtime_repository=AgentRuntimeRepository(),
     )
@@ -753,17 +755,20 @@ async def _broker_redeem(
             status=409,
             code="ticket_unavailable",
         )
-    endpoint = await state.authority.resolve_endpoint_by_id(
-        endpoint_id=identity.endpoint_id,
+    service = await state.authority.resolve_service_by_id(
+        service_id=identity.service_id,
     )
-    if endpoint is None:
+    if service is None:
         return _bounded_error(
             request,
             state.config,
             status=404,
             code="not_found",
         )
-    destination = f"{_public_scheme(state.config)}://{endpoint.hostname_key}.{state.config.service_suffix}/"
+    destination = (
+        f"{_public_scheme(state.config)}://"
+        f"{service.hostname_key}.{state.config.service_suffix}/"
+    )
     response = web.Response(
         text=_completion_document(destination),
         content_type="text/html",
@@ -796,8 +801,8 @@ async def _endpoint(
     endpoint_key: str,
 ) -> web.StreamResponse:
     reject_service_worker_request(request.headers)
-    endpoint = await state.authority.resolve_endpoint(hostname_key=endpoint_key)
-    if endpoint is None:
+    service = await state.authority.resolve_service(hostname_key=endpoint_key)
+    if service is None:
         return _bounded_error(
             request,
             state.config,
@@ -808,9 +813,9 @@ async def _endpoint(
     requested_method = request.headers.get("Access-Control-Request-Method")
     if request.method == "OPTIONS" and origin and requested_method:
         source_key = _source_endpoint_key(origin, state.config)
-        if source_key is None or not await state.authority.source_endpoint_matches_root(
+        if source_key is None or not await state.authority.source_service_matches_agent(
             source_hostname_key=source_key,
-            target_endpoint=endpoint,
+            target_service=service,
         ):
             raise RuntimeWebPolicyError(RuntimeWebPolicyCode.FORBIDDEN)
         decision = evaluate_preflight(
@@ -835,7 +840,7 @@ async def _endpoint(
     navigation = _safe_navigation(request)
     if identity_secret is None:
         if navigation:
-            return _auth_navigation(state.config, endpoint.id)
+            return _auth_navigation(state.config, service.id)
         return _bounded_error(
             request,
             state.config,
@@ -853,18 +858,18 @@ async def _endpoint(
             request,
             state.config,
             error.code,
-            endpoint_id=endpoint.id,
+            service_id=service.id,
         )
     target_origin = (
         f"{_public_scheme(state.config)}://"
-        f"{endpoint.hostname_key}.{state.config.service_suffix}"
+        f"{service.hostname_key}.{state.config.service_suffix}"
     )
     source_origins: frozenset[str] = frozenset()
     if origin is not None and canonical_origin(origin) != target_origin:
         source_key = _source_endpoint_key(origin, state.config)
-        if source_key is None or not await state.authority.source_endpoint_matches_root(
+        if source_key is None or not await state.authority.source_service_matches_agent(
             source_hostname_key=source_key,
-            target_endpoint=endpoint,
+            target_service=service,
         ):
             raise RuntimeWebPolicyError(RuntimeWebPolicyCode.FORBIDDEN)
         source_origins = frozenset({canonical_origin(origin)})
@@ -879,7 +884,7 @@ async def _endpoint(
     now = datetime.datetime.now(datetime.UTC)
     headers = normalize_request_headers(
         request.raw_headers,
-        port=endpoint.port,
+        port=service.port,
         target_origin=target_origin,
         maximum_bytes=state.config.request_header_bytes,
     )
@@ -1036,7 +1041,7 @@ async def _proxy_http(
                             config=state.config,
                             cors=cors,
                             target_origin=target_origin,
-                            port=authority.endpoint.port,
+                            port=authority.service.port,
                         ),
                     )
                     await response.prepare(request)
@@ -1165,43 +1170,28 @@ def _stream_authority(
     now: datetime.datetime,
 ) -> StreamAuthority:
     """Create one exact non-replayable replacement stream authority."""
-    cycle = authority.cycle
-    runtime_id = authority.runtime_id
-    desired_generation = authority.desired_generation
-    runner_generation = authority.runner_generation
-    if (
-        cycle is None
-        or runtime_id is None
-        or desired_generation is None
-        or runner_generation is None
-    ):
-        raise RuntimeWebGatewayAuthorityError(
-            RuntimeWebGatewayAuthorityCode.RUNTIME_UNAVAILABLE
-        )
     transport_deadline = (
-        min(cycle.expires_at, now + datetime.timedelta(minutes=30))
+        min(authority.exposure_deadline_at, now + datetime.timedelta(minutes=30))
         if protocol is StreamProtocol.HTTP
-        else cycle.expires_at
+        else authority.exposure_deadline_at
     )
     return StreamAuthority(
         correlation_id=secrets.token_hex(32),
-        endpoint_id=authority.endpoint.id,
-        cycle_id=cycle.id,
-        endpoint_authority_revision=authority.endpoint.authority_revision,
-        close_barrier=authority.endpoint.close_barrier,
+        service_id=authority.service.id,
+        service_revision=authority.service.revision,
         identity_id=authority.identity.id,
         authentication_session_id=authority.identity.auth_session_id,
         user_id=authority.identity.user_id,
-        agent_session_id=authority.endpoint.agent_session_id,
-        runtime_id=runtime_id,
-        desired_generation=desired_generation,
-        runner_generation=runner_generation,
-        port=authority.endpoint.port,
+        agent_id=authority.service.agent_id,
+        runtime_id=authority.runtime_id,
+        desired_generation=authority.desired_generation,
+        runner_generation=authority.runner_generation,
+        port=authority.service.port,
         open_deadline_at=min(
-            cycle.expires_at,
+            authority.exposure_deadline_at,
             now + datetime.timedelta(seconds=10),
         ),
-        approval_deadline_at=cycle.expires_at,
+        exposure_deadline_at=authority.exposure_deadline_at,
         transport_deadline_at=transport_deadline,
     )
 
@@ -1273,7 +1263,7 @@ async def _proxy_websocket(
                                 config=state.config,
                                 cors=cors,
                                 target_origin=target_origin,
-                                port=authority.endpoint.port,
+                                port=authority.service.port,
                             ),
                         )
                     try:
@@ -1602,19 +1592,17 @@ def _authority_error(
     config: RuntimeWebGatewayConfig,
     code: RuntimeWebGatewayAuthorityCode,
     *,
-    endpoint_id: str,
+    service_id: str,
 ) -> web.StreamResponse:
     if code is RuntimeWebGatewayAuthorityCode.UNAUTHENTICATED:
         if _safe_navigation(request):
-            return _auth_navigation(config, endpoint_id)
+            return _auth_navigation(config, service_id)
         return _bounded_error(request, config, status=401, code=code.value)
     if code is RuntimeWebGatewayAuthorityCode.NOT_FOUND:
         return _bounded_error(request, config, status=404, code=code.value)
-    if code is RuntimeWebGatewayAuthorityCode.PENDING_APPROVAL:
-        if _safe_navigation(request):
-            return _confirmation_navigation(config, endpoint_id)
-        return _bounded_error(request, config, status=409, code=code.value)
     if code is RuntimeWebGatewayAuthorityCode.GONE:
+        if _safe_navigation(request):
+            return _activation_navigation(config, service_id)
         return _bounded_error(request, config, status=410, code=code.value)
     return _bounded_error(request, config, status=503, code=code.value)
 
@@ -1644,7 +1632,7 @@ def _stream_error(
         CloseReason.OWNER_LOST: 503,
         CloseReason.RESOURCE_EXHAUSTED: 429,
         CloseReason.DEADLINE: 410,
-        CloseReason.APPROVAL_EXPIRED: 410,
+        CloseReason.SERVICE_EXPIRED: 410,
     }.get(code, 409)
     return _bounded_error(request, config, status=status, code=code.value)
 
@@ -1676,11 +1664,11 @@ def _bounded_error(
 
 def _auth_navigation(
     config: RuntimeWebGatewayConfig,
-    endpoint_id: str,
+    service_id: str,
 ) -> web.Response:
     destination = (
         f"{config.main_web_origin}/runtime-web/auth?"
-        f"endpoint_id={urllib.parse.quote(endpoint_id, safe='')}"
+        f"service_id={urllib.parse.quote(service_id, safe='')}"
     )
     return web.HTTPSeeOther(
         destination,
@@ -1688,13 +1676,13 @@ def _auth_navigation(
     )
 
 
-def _confirmation_navigation(
+def _activation_navigation(
     config: RuntimeWebGatewayConfig,
-    endpoint_id: str,
+    service_id: str,
 ) -> web.Response:
     destination = (
-        f"{config.main_web_origin}/runtime-web/confirm?"
-        f"endpoint_id={urllib.parse.quote(endpoint_id, safe='')}"
+        f"{config.main_web_origin}/runtime-web/activate?"
+        f"service_id={urllib.parse.quote(service_id, safe='')}"
     )
     return web.HTTPSeeOther(
         destination,

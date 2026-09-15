@@ -19,21 +19,20 @@ from typing_extensions import Annotated
 from pydantic import Field, StrictStr
 from typing import Optional
 from typing_extensions import Annotated
-from azentspublicclient.models.runtime_web_approval_request import RuntimeWebApprovalRequest
-from azentspublicclient.models.runtime_web_close_request import RuntimeWebCloseRequest
-from azentspublicclient.models.runtime_web_direct_create_request import RuntimeWebDirectCreateRequest
+from azentspublicclient.models.runtime_web_create_request import RuntimeWebCreateRequest
+from azentspublicclient.models.runtime_web_delete_response import RuntimeWebDeleteResponse
 from azentspublicclient.models.runtime_web_expected_revision_request import RuntimeWebExpectedRevisionRequest
-from azentspublicclient.models.runtime_web_exposure_request import RuntimeWebExposureRequest
 from azentspublicclient.models.runtime_web_identity_revoke_request import RuntimeWebIdentityRevokeRequest
 from azentspublicclient.models.runtime_web_identity_revoke_response import RuntimeWebIdentityRevokeResponse
 from azentspublicclient.models.runtime_web_identity_secret_response import RuntimeWebIdentitySecretResponse
-from azentspublicclient.models.runtime_web_prepare_request import RuntimeWebPrepareRequest
 from azentspublicclient.models.runtime_web_separate_bound_request import RuntimeWebSeparateBoundRequest
 from azentspublicclient.models.runtime_web_separate_initiate_request import RuntimeWebSeparateInitiateRequest
 from azentspublicclient.models.runtime_web_separate_initiate_response import RuntimeWebSeparateInitiateResponse
 from azentspublicclient.models.runtime_web_separate_ticket_response import RuntimeWebSeparateTicketResponse
 from azentspublicclient.models.runtime_web_service_list_response import RuntimeWebServiceListResponse
 from azentspublicclient.models.runtime_web_service_response import RuntimeWebServiceResponse
+from azentspublicclient.models.runtime_web_turn_on_request import RuntimeWebTurnOnRequest
+from azentspublicclient.models.runtime_web_update_request import RuntimeWebUpdateRequest
 
 from azentspublicclient.api_client import ApiClient, RequestSerialized
 from azentspublicclient.api_response import ApiResponse
@@ -54,13 +53,11 @@ class RuntimeWebV1Api:
 
 
     @validate_call
-    def runtime_web_v1_approve_runtime_web_request(
+    def runtime_web_v1_create_runtime_web_service(
         self,
-        handle: StrictStr,
         agent_id: StrictStr,
-        session_id: StrictStr,
-        request_id: StrictStr,
-        runtime_web_approval_request: RuntimeWebApprovalRequest,
+        handle: StrictStr,
+        runtime_web_create_request: RuntimeWebCreateRequest,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -74,20 +71,16 @@ class RuntimeWebV1Api:
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
     ) -> RuntimeWebServiceResponse:
-        """Approve Runtime Web Request
+        """Create Runtime Web Service
 
-        Approve one exact pending request and displayed duration.
+        Create one Agent-port service directly.
 
-        :param handle: (required)
-        :type handle: str
         :param agent_id: (required)
         :type agent_id: str
-        :param session_id: (required)
-        :type session_id: str
-        :param request_id: (required)
-        :type request_id: str
-        :param runtime_web_approval_request: (required)
-        :type runtime_web_approval_request: RuntimeWebApprovalRequest
+        :param handle: (required)
+        :type handle: str
+        :param runtime_web_create_request: (required)
+        :type runtime_web_create_request: RuntimeWebCreateRequest
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -110,12 +103,10 @@ class RuntimeWebV1Api:
         :return: Returns the result object.
         """ # noqa: E501
 
-        _param = self._runtime_web_v1_approve_runtime_web_request_serialize(
-            handle=handle,
+        _param = self._runtime_web_v1_create_runtime_web_service_serialize(
             agent_id=agent_id,
-            session_id=session_id,
-            request_id=request_id,
-            runtime_web_approval_request=runtime_web_approval_request,
+            handle=handle,
+            runtime_web_create_request=runtime_web_create_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -142,13 +133,11 @@ class RuntimeWebV1Api:
 
 
     @validate_call
-    def runtime_web_v1_approve_runtime_web_request_with_http_info(
+    def runtime_web_v1_create_runtime_web_service_with_http_info(
         self,
-        handle: StrictStr,
         agent_id: StrictStr,
-        session_id: StrictStr,
-        request_id: StrictStr,
-        runtime_web_approval_request: RuntimeWebApprovalRequest,
+        handle: StrictStr,
+        runtime_web_create_request: RuntimeWebCreateRequest,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -162,20 +151,16 @@ class RuntimeWebV1Api:
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
     ) -> ApiResponse[RuntimeWebServiceResponse]:
-        """Approve Runtime Web Request
+        """Create Runtime Web Service
 
-        Approve one exact pending request and displayed duration.
+        Create one Agent-port service directly.
 
-        :param handle: (required)
-        :type handle: str
         :param agent_id: (required)
         :type agent_id: str
-        :param session_id: (required)
-        :type session_id: str
-        :param request_id: (required)
-        :type request_id: str
-        :param runtime_web_approval_request: (required)
-        :type runtime_web_approval_request: RuntimeWebApprovalRequest
+        :param handle: (required)
+        :type handle: str
+        :param runtime_web_create_request: (required)
+        :type runtime_web_create_request: RuntimeWebCreateRequest
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -198,12 +183,10 @@ class RuntimeWebV1Api:
         :return: Returns the result object.
         """ # noqa: E501
 
-        _param = self._runtime_web_v1_approve_runtime_web_request_serialize(
-            handle=handle,
+        _param = self._runtime_web_v1_create_runtime_web_service_serialize(
             agent_id=agent_id,
-            session_id=session_id,
-            request_id=request_id,
-            runtime_web_approval_request=runtime_web_approval_request,
+            handle=handle,
+            runtime_web_create_request=runtime_web_create_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -230,13 +213,11 @@ class RuntimeWebV1Api:
 
 
     @validate_call
-    def runtime_web_v1_approve_runtime_web_request_without_preload_content(
+    def runtime_web_v1_create_runtime_web_service_without_preload_content(
         self,
-        handle: StrictStr,
         agent_id: StrictStr,
-        session_id: StrictStr,
-        request_id: StrictStr,
-        runtime_web_approval_request: RuntimeWebApprovalRequest,
+        handle: StrictStr,
+        runtime_web_create_request: RuntimeWebCreateRequest,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -250,20 +231,16 @@ class RuntimeWebV1Api:
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
     ) -> RESTResponseType:
-        """Approve Runtime Web Request
+        """Create Runtime Web Service
 
-        Approve one exact pending request and displayed duration.
+        Create one Agent-port service directly.
 
-        :param handle: (required)
-        :type handle: str
         :param agent_id: (required)
         :type agent_id: str
-        :param session_id: (required)
-        :type session_id: str
-        :param request_id: (required)
-        :type request_id: str
-        :param runtime_web_approval_request: (required)
-        :type runtime_web_approval_request: RuntimeWebApprovalRequest
+        :param handle: (required)
+        :type handle: str
+        :param runtime_web_create_request: (required)
+        :type runtime_web_create_request: RuntimeWebCreateRequest
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -286,12 +263,10 @@ class RuntimeWebV1Api:
         :return: Returns the result object.
         """ # noqa: E501
 
-        _param = self._runtime_web_v1_approve_runtime_web_request_serialize(
-            handle=handle,
+        _param = self._runtime_web_v1_create_runtime_web_service_serialize(
             agent_id=agent_id,
-            session_id=session_id,
-            request_id=request_id,
-            runtime_web_approval_request=runtime_web_approval_request,
+            handle=handle,
+            runtime_web_create_request=runtime_web_create_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -313,13 +288,11 @@ class RuntimeWebV1Api:
         return response_data.response
 
 
-    def _runtime_web_v1_approve_runtime_web_request_serialize(
+    def _runtime_web_v1_create_runtime_web_service_serialize(
         self,
-        handle,
         agent_id,
-        session_id,
-        request_id,
-        runtime_web_approval_request,
+        handle,
+        runtime_web_create_request,
         _request_auth,
         _content_type,
         _headers,
@@ -341,20 +314,16 @@ class RuntimeWebV1Api:
         _body_params: Optional[bytes] = None
 
         # process the path parameters
-        if handle is not None:
-            _path_params['handle'] = handle
         if agent_id is not None:
             _path_params['agent_id'] = agent_id
-        if session_id is not None:
-            _path_params['session_id'] = session_id
-        if request_id is not None:
-            _path_params['request_id'] = request_id
+        if handle is not None:
+            _path_params['handle'] = handle
         # process the query parameters
         # process the header parameters
         # process the form parameters
         # process the body parameter
-        if runtime_web_approval_request is not None:
-            _body_params = runtime_web_approval_request
+        if runtime_web_create_request is not None:
+            _body_params = runtime_web_create_request
 
 
         # set the HTTP header `Accept`
@@ -386,7 +355,7 @@ class RuntimeWebV1Api:
 
         return self.api_client.param_serialize(
             method='POST',
-            resource_path='/runtime-web/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/requests/{request_id}/approve',
+            resource_path='/runtime-web/v1/workspaces/{handle}/agents/{agent_id}/services',
             path_params=_path_params,
             query_params=_query_params,
             header_params=_header_params,
@@ -403,11 +372,12 @@ class RuntimeWebV1Api:
 
 
     @validate_call
-    def runtime_web_v1_approve_runtime_web_request_by_endpoint_id(
+    def runtime_web_v1_delete_runtime_web_service(
         self,
-        endpoint_id: Annotated[str, Field(min_length=32, strict=True, max_length=32)],
-        request_id: StrictStr,
-        runtime_web_approval_request: RuntimeWebApprovalRequest,
+        agent_id: StrictStr,
+        service_id: Annotated[str, Field(min_length=32, strict=True, max_length=32)],
+        handle: StrictStr,
+        runtime_web_expected_revision_request: RuntimeWebExpectedRevisionRequest,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -420,17 +390,19 @@ class RuntimeWebV1Api:
         _content_type: Optional[StrictStr] = None,
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> RuntimeWebServiceResponse:
-        """Approve Runtime Web Request By Endpoint Id
+    ) -> RuntimeWebDeleteResponse:
+        """Delete Runtime Web Service
 
-        Approve one exact pending request reached through a trusted endpoint ID.
+        Delete one service and retire its public address.
 
-        :param endpoint_id: (required)
-        :type endpoint_id: str
-        :param request_id: (required)
-        :type request_id: str
-        :param runtime_web_approval_request: (required)
-        :type runtime_web_approval_request: RuntimeWebApprovalRequest
+        :param agent_id: (required)
+        :type agent_id: str
+        :param service_id: (required)
+        :type service_id: str
+        :param handle: (required)
+        :type handle: str
+        :param runtime_web_expected_revision_request: (required)
+        :type runtime_web_expected_revision_request: RuntimeWebExpectedRevisionRequest
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -453,10 +425,11 @@ class RuntimeWebV1Api:
         :return: Returns the result object.
         """ # noqa: E501
 
-        _param = self._runtime_web_v1_approve_runtime_web_request_by_endpoint_id_serialize(
-            endpoint_id=endpoint_id,
-            request_id=request_id,
-            runtime_web_approval_request=runtime_web_approval_request,
+        _param = self._runtime_web_v1_delete_runtime_web_service_serialize(
+            agent_id=agent_id,
+            service_id=service_id,
+            handle=handle,
+            runtime_web_expected_revision_request=runtime_web_expected_revision_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -464,7 +437,7 @@ class RuntimeWebV1Api:
         )
 
         _response_types_map: Dict[str, Optional[str]] = {
-            '200': "RuntimeWebServiceResponse",
+            '200': "RuntimeWebDeleteResponse",
             '403': "RuntimeWebActionErrorResponse",
             '404': "RuntimeWebActionErrorResponse",
             '409': "RuntimeWebActionErrorResponse",
@@ -483,251 +456,11 @@ class RuntimeWebV1Api:
 
 
     @validate_call
-    def runtime_web_v1_approve_runtime_web_request_by_endpoint_id_with_http_info(
+    def runtime_web_v1_delete_runtime_web_service_with_http_info(
         self,
-        endpoint_id: Annotated[str, Field(min_length=32, strict=True, max_length=32)],
-        request_id: StrictStr,
-        runtime_web_approval_request: RuntimeWebApprovalRequest,
-        _request_timeout: Union[
-            None,
-            Annotated[StrictFloat, Field(gt=0)],
-            Tuple[
-                Annotated[StrictFloat, Field(gt=0)],
-                Annotated[StrictFloat, Field(gt=0)]
-            ]
-        ] = None,
-        _request_auth: Optional[Dict[StrictStr, Any]] = None,
-        _content_type: Optional[StrictStr] = None,
-        _headers: Optional[Dict[StrictStr, Any]] = None,
-        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> ApiResponse[RuntimeWebServiceResponse]:
-        """Approve Runtime Web Request By Endpoint Id
-
-        Approve one exact pending request reached through a trusted endpoint ID.
-
-        :param endpoint_id: (required)
-        :type endpoint_id: str
-        :param request_id: (required)
-        :type request_id: str
-        :param runtime_web_approval_request: (required)
-        :type runtime_web_approval_request: RuntimeWebApprovalRequest
-        :param _request_timeout: timeout setting for this request. If one
-                                 number provided, it will be total request
-                                 timeout. It can also be a pair (tuple) of
-                                 (connection, read) timeouts.
-        :type _request_timeout: int, tuple(int, int), optional
-        :param _request_auth: set to override the auth_settings for an a single
-                              request; this effectively ignores the
-                              authentication in the spec for a single request.
-        :type _request_auth: dict, optional
-        :param _content_type: force content-type for the request.
-        :type _content_type: str, Optional
-        :param _headers: set to override the headers for a single
-                         request; this effectively ignores the headers
-                         in the spec for a single request.
-        :type _headers: dict, optional
-        :param _host_index: set to override the host_index for a single
-                            request; this effectively ignores the host_index
-                            in the spec for a single request.
-        :type _host_index: int, optional
-        :return: Returns the result object.
-        """ # noqa: E501
-
-        _param = self._runtime_web_v1_approve_runtime_web_request_by_endpoint_id_serialize(
-            endpoint_id=endpoint_id,
-            request_id=request_id,
-            runtime_web_approval_request=runtime_web_approval_request,
-            _request_auth=_request_auth,
-            _content_type=_content_type,
-            _headers=_headers,
-            _host_index=_host_index
-        )
-
-        _response_types_map: Dict[str, Optional[str]] = {
-            '200': "RuntimeWebServiceResponse",
-            '403': "RuntimeWebActionErrorResponse",
-            '404': "RuntimeWebActionErrorResponse",
-            '409': "RuntimeWebActionErrorResponse",
-            '429': "RuntimeWebActionErrorResponse",
-            '422': "HTTPValidationError",
-        }
-        response_data = self.api_client.call_api(
-            *_param,
-            _request_timeout=_request_timeout
-        )
-        response_data.read()
-        return self.api_client.response_deserialize(
-            response_data=response_data,
-            response_types_map=_response_types_map,
-        )
-
-
-    @validate_call
-    def runtime_web_v1_approve_runtime_web_request_by_endpoint_id_without_preload_content(
-        self,
-        endpoint_id: Annotated[str, Field(min_length=32, strict=True, max_length=32)],
-        request_id: StrictStr,
-        runtime_web_approval_request: RuntimeWebApprovalRequest,
-        _request_timeout: Union[
-            None,
-            Annotated[StrictFloat, Field(gt=0)],
-            Tuple[
-                Annotated[StrictFloat, Field(gt=0)],
-                Annotated[StrictFloat, Field(gt=0)]
-            ]
-        ] = None,
-        _request_auth: Optional[Dict[StrictStr, Any]] = None,
-        _content_type: Optional[StrictStr] = None,
-        _headers: Optional[Dict[StrictStr, Any]] = None,
-        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> RESTResponseType:
-        """Approve Runtime Web Request By Endpoint Id
-
-        Approve one exact pending request reached through a trusted endpoint ID.
-
-        :param endpoint_id: (required)
-        :type endpoint_id: str
-        :param request_id: (required)
-        :type request_id: str
-        :param runtime_web_approval_request: (required)
-        :type runtime_web_approval_request: RuntimeWebApprovalRequest
-        :param _request_timeout: timeout setting for this request. If one
-                                 number provided, it will be total request
-                                 timeout. It can also be a pair (tuple) of
-                                 (connection, read) timeouts.
-        :type _request_timeout: int, tuple(int, int), optional
-        :param _request_auth: set to override the auth_settings for an a single
-                              request; this effectively ignores the
-                              authentication in the spec for a single request.
-        :type _request_auth: dict, optional
-        :param _content_type: force content-type for the request.
-        :type _content_type: str, Optional
-        :param _headers: set to override the headers for a single
-                         request; this effectively ignores the headers
-                         in the spec for a single request.
-        :type _headers: dict, optional
-        :param _host_index: set to override the host_index for a single
-                            request; this effectively ignores the host_index
-                            in the spec for a single request.
-        :type _host_index: int, optional
-        :return: Returns the result object.
-        """ # noqa: E501
-
-        _param = self._runtime_web_v1_approve_runtime_web_request_by_endpoint_id_serialize(
-            endpoint_id=endpoint_id,
-            request_id=request_id,
-            runtime_web_approval_request=runtime_web_approval_request,
-            _request_auth=_request_auth,
-            _content_type=_content_type,
-            _headers=_headers,
-            _host_index=_host_index
-        )
-
-        _response_types_map: Dict[str, Optional[str]] = {
-            '200': "RuntimeWebServiceResponse",
-            '403': "RuntimeWebActionErrorResponse",
-            '404': "RuntimeWebActionErrorResponse",
-            '409': "RuntimeWebActionErrorResponse",
-            '429': "RuntimeWebActionErrorResponse",
-            '422': "HTTPValidationError",
-        }
-        response_data = self.api_client.call_api(
-            *_param,
-            _request_timeout=_request_timeout
-        )
-        return response_data.response
-
-
-    def _runtime_web_v1_approve_runtime_web_request_by_endpoint_id_serialize(
-        self,
-        endpoint_id,
-        request_id,
-        runtime_web_approval_request,
-        _request_auth,
-        _content_type,
-        _headers,
-        _host_index,
-    ) -> RequestSerialized:
-
-        _host = None
-
-        _collection_formats: Dict[str, str] = {
-        }
-
-        _path_params: Dict[str, str] = {}
-        _query_params: List[Tuple[str, str]] = []
-        _header_params: Dict[str, Optional[str]] = _headers or {}
-        _form_params: List[Tuple[str, str]] = []
-        _files: Dict[
-            str, Union[str, bytes, List[str], List[bytes], List[Tuple[str, bytes]]]
-        ] = {}
-        _body_params: Optional[bytes] = None
-
-        # process the path parameters
-        if endpoint_id is not None:
-            _path_params['endpoint_id'] = endpoint_id
-        if request_id is not None:
-            _path_params['request_id'] = request_id
-        # process the query parameters
-        # process the header parameters
-        # process the form parameters
-        # process the body parameter
-        if runtime_web_approval_request is not None:
-            _body_params = runtime_web_approval_request
-
-
-        # set the HTTP header `Accept`
-        if 'Accept' not in _header_params:
-            _header_params['Accept'] = self.api_client.select_header_accept(
-                [
-                    'application/json'
-                ]
-            )
-
-        # set the HTTP header `Content-Type`
-        if _content_type:
-            _header_params['Content-Type'] = _content_type
-        else:
-            _default_content_type = (
-                self.api_client.select_header_content_type(
-                    [
-                        'application/json'
-                    ]
-                )
-            )
-            if _default_content_type is not None:
-                _header_params['Content-Type'] = _default_content_type
-
-        # authentication setting
-        _auth_settings: List[str] = [
-            'HTTPBearer'
-        ]
-
-        return self.api_client.param_serialize(
-            method='POST',
-            resource_path='/runtime-web/v1/services/{endpoint_id}/requests/{request_id}/approve',
-            path_params=_path_params,
-            query_params=_query_params,
-            header_params=_header_params,
-            body=_body_params,
-            post_params=_form_params,
-            files=_files,
-            auth_settings=_auth_settings,
-            collection_formats=_collection_formats,
-            _host=_host,
-            _request_auth=_request_auth
-        )
-
-
-
-
-    @validate_call
-    def runtime_web_v1_cancel_runtime_web_request(
-        self,
-        handle: StrictStr,
         agent_id: StrictStr,
-        session_id: StrictStr,
-        request_id: StrictStr,
+        service_id: Annotated[str, Field(min_length=32, strict=True, max_length=32)],
+        handle: StrictStr,
         runtime_web_expected_revision_request: RuntimeWebExpectedRevisionRequest,
         _request_timeout: Union[
             None,
@@ -741,19 +474,17 @@ class RuntimeWebV1Api:
         _content_type: Optional[StrictStr] = None,
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> RuntimeWebServiceResponse:
-        """Cancel Runtime Web Request
+    ) -> ApiResponse[RuntimeWebDeleteResponse]:
+        """Delete Runtime Web Service
 
-        Cancel one exact pending request without closing an active exposure.
+        Delete one service and retire its public address.
 
-        :param handle: (required)
-        :type handle: str
         :param agent_id: (required)
         :type agent_id: str
-        :param session_id: (required)
-        :type session_id: str
-        :param request_id: (required)
-        :type request_id: str
+        :param service_id: (required)
+        :type service_id: str
+        :param handle: (required)
+        :type handle: str
         :param runtime_web_expected_revision_request: (required)
         :type runtime_web_expected_revision_request: RuntimeWebExpectedRevisionRequest
         :param _request_timeout: timeout setting for this request. If one
@@ -778,11 +509,10 @@ class RuntimeWebV1Api:
         :return: Returns the result object.
         """ # noqa: E501
 
-        _param = self._runtime_web_v1_cancel_runtime_web_request_serialize(
-            handle=handle,
+        _param = self._runtime_web_v1_delete_runtime_web_service_serialize(
             agent_id=agent_id,
-            session_id=session_id,
-            request_id=request_id,
+            service_id=service_id,
+            handle=handle,
             runtime_web_expected_revision_request=runtime_web_expected_revision_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -791,95 +521,7 @@ class RuntimeWebV1Api:
         )
 
         _response_types_map: Dict[str, Optional[str]] = {
-            '200': "RuntimeWebServiceResponse",
-            '403': "RuntimeWebActionErrorResponse",
-            '404': "RuntimeWebActionErrorResponse",
-            '409': "RuntimeWebActionErrorResponse",
-            '429': "RuntimeWebActionErrorResponse",
-            '422': "HTTPValidationError",
-        }
-        response_data = self.api_client.call_api(
-            *_param,
-            _request_timeout=_request_timeout
-        )
-        response_data.read()
-        return self.api_client.response_deserialize(
-            response_data=response_data,
-            response_types_map=_response_types_map,
-        ).data
-
-
-    @validate_call
-    def runtime_web_v1_cancel_runtime_web_request_with_http_info(
-        self,
-        handle: StrictStr,
-        agent_id: StrictStr,
-        session_id: StrictStr,
-        request_id: StrictStr,
-        runtime_web_expected_revision_request: RuntimeWebExpectedRevisionRequest,
-        _request_timeout: Union[
-            None,
-            Annotated[StrictFloat, Field(gt=0)],
-            Tuple[
-                Annotated[StrictFloat, Field(gt=0)],
-                Annotated[StrictFloat, Field(gt=0)]
-            ]
-        ] = None,
-        _request_auth: Optional[Dict[StrictStr, Any]] = None,
-        _content_type: Optional[StrictStr] = None,
-        _headers: Optional[Dict[StrictStr, Any]] = None,
-        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> ApiResponse[RuntimeWebServiceResponse]:
-        """Cancel Runtime Web Request
-
-        Cancel one exact pending request without closing an active exposure.
-
-        :param handle: (required)
-        :type handle: str
-        :param agent_id: (required)
-        :type agent_id: str
-        :param session_id: (required)
-        :type session_id: str
-        :param request_id: (required)
-        :type request_id: str
-        :param runtime_web_expected_revision_request: (required)
-        :type runtime_web_expected_revision_request: RuntimeWebExpectedRevisionRequest
-        :param _request_timeout: timeout setting for this request. If one
-                                 number provided, it will be total request
-                                 timeout. It can also be a pair (tuple) of
-                                 (connection, read) timeouts.
-        :type _request_timeout: int, tuple(int, int), optional
-        :param _request_auth: set to override the auth_settings for an a single
-                              request; this effectively ignores the
-                              authentication in the spec for a single request.
-        :type _request_auth: dict, optional
-        :param _content_type: force content-type for the request.
-        :type _content_type: str, Optional
-        :param _headers: set to override the headers for a single
-                         request; this effectively ignores the headers
-                         in the spec for a single request.
-        :type _headers: dict, optional
-        :param _host_index: set to override the host_index for a single
-                            request; this effectively ignores the host_index
-                            in the spec for a single request.
-        :type _host_index: int, optional
-        :return: Returns the result object.
-        """ # noqa: E501
-
-        _param = self._runtime_web_v1_cancel_runtime_web_request_serialize(
-            handle=handle,
-            agent_id=agent_id,
-            session_id=session_id,
-            request_id=request_id,
-            runtime_web_expected_revision_request=runtime_web_expected_revision_request,
-            _request_auth=_request_auth,
-            _content_type=_content_type,
-            _headers=_headers,
-            _host_index=_host_index
-        )
-
-        _response_types_map: Dict[str, Optional[str]] = {
-            '200': "RuntimeWebServiceResponse",
+            '200': "RuntimeWebDeleteResponse",
             '403': "RuntimeWebActionErrorResponse",
             '404': "RuntimeWebActionErrorResponse",
             '409': "RuntimeWebActionErrorResponse",
@@ -898,12 +540,11 @@ class RuntimeWebV1Api:
 
 
     @validate_call
-    def runtime_web_v1_cancel_runtime_web_request_without_preload_content(
+    def runtime_web_v1_delete_runtime_web_service_without_preload_content(
         self,
-        handle: StrictStr,
         agent_id: StrictStr,
-        session_id: StrictStr,
-        request_id: StrictStr,
+        service_id: Annotated[str, Field(min_length=32, strict=True, max_length=32)],
+        handle: StrictStr,
         runtime_web_expected_revision_request: RuntimeWebExpectedRevisionRequest,
         _request_timeout: Union[
             None,
@@ -918,18 +559,16 @@ class RuntimeWebV1Api:
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
     ) -> RESTResponseType:
-        """Cancel Runtime Web Request
+        """Delete Runtime Web Service
 
-        Cancel one exact pending request without closing an active exposure.
+        Delete one service and retire its public address.
 
-        :param handle: (required)
-        :type handle: str
         :param agent_id: (required)
         :type agent_id: str
-        :param session_id: (required)
-        :type session_id: str
-        :param request_id: (required)
-        :type request_id: str
+        :param service_id: (required)
+        :type service_id: str
+        :param handle: (required)
+        :type handle: str
         :param runtime_web_expected_revision_request: (required)
         :type runtime_web_expected_revision_request: RuntimeWebExpectedRevisionRequest
         :param _request_timeout: timeout setting for this request. If one
@@ -954,11 +593,10 @@ class RuntimeWebV1Api:
         :return: Returns the result object.
         """ # noqa: E501
 
-        _param = self._runtime_web_v1_cancel_runtime_web_request_serialize(
-            handle=handle,
+        _param = self._runtime_web_v1_delete_runtime_web_service_serialize(
             agent_id=agent_id,
-            session_id=session_id,
-            request_id=request_id,
+            service_id=service_id,
+            handle=handle,
             runtime_web_expected_revision_request=runtime_web_expected_revision_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -967,7 +605,7 @@ class RuntimeWebV1Api:
         )
 
         _response_types_map: Dict[str, Optional[str]] = {
-            '200': "RuntimeWebServiceResponse",
+            '200': "RuntimeWebDeleteResponse",
             '403': "RuntimeWebActionErrorResponse",
             '404': "RuntimeWebActionErrorResponse",
             '409': "RuntimeWebActionErrorResponse",
@@ -981,12 +619,11 @@ class RuntimeWebV1Api:
         return response_data.response
 
 
-    def _runtime_web_v1_cancel_runtime_web_request_serialize(
+    def _runtime_web_v1_delete_runtime_web_service_serialize(
         self,
-        handle,
         agent_id,
-        session_id,
-        request_id,
+        service_id,
+        handle,
         runtime_web_expected_revision_request,
         _request_auth,
         _content_type,
@@ -1009,14 +646,12 @@ class RuntimeWebV1Api:
         _body_params: Optional[bytes] = None
 
         # process the path parameters
-        if handle is not None:
-            _path_params['handle'] = handle
         if agent_id is not None:
             _path_params['agent_id'] = agent_id
-        if session_id is not None:
-            _path_params['session_id'] = session_id
-        if request_id is not None:
-            _path_params['request_id'] = request_id
+        if service_id is not None:
+            _path_params['service_id'] = service_id
+        if handle is not None:
+            _path_params['handle'] = handle
         # process the query parameters
         # process the header parameters
         # process the form parameters
@@ -1053,8 +688,8 @@ class RuntimeWebV1Api:
         ]
 
         return self.api_client.param_serialize(
-            method='POST',
-            resource_path='/runtime-web/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/requests/{request_id}/cancel',
+            method='DELETE',
+            resource_path='/runtime-web/v1/workspaces/{handle}/agents/{agent_id}/services/{service_id}',
             path_params=_path_params,
             query_params=_query_params,
             header_params=_header_params,
@@ -1071,11 +706,9 @@ class RuntimeWebV1Api:
 
 
     @validate_call
-    def runtime_web_v1_cancel_runtime_web_request_by_endpoint_id(
+    def runtime_web_v1_get_runtime_web_service_by_id(
         self,
-        endpoint_id: Annotated[str, Field(min_length=32, strict=True, max_length=32)],
-        request_id: StrictStr,
-        runtime_web_expected_revision_request: RuntimeWebExpectedRevisionRequest,
+        service_id: Annotated[str, Field(min_length=32, strict=True, max_length=32)],
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -1089,16 +722,12 @@ class RuntimeWebV1Api:
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
     ) -> RuntimeWebServiceResponse:
-        """Cancel Runtime Web Request By Endpoint Id
+        """Get Runtime Web Service By Id
 
-        Cancel one exact pending request reached through a trusted endpoint ID.
+        Get one service for the trusted Main Web activation surface.
 
-        :param endpoint_id: (required)
-        :type endpoint_id: str
-        :param request_id: (required)
-        :type request_id: str
-        :param runtime_web_expected_revision_request: (required)
-        :type runtime_web_expected_revision_request: RuntimeWebExpectedRevisionRequest
+        :param service_id: (required)
+        :type service_id: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -1121,10 +750,8 @@ class RuntimeWebV1Api:
         :return: Returns the result object.
         """ # noqa: E501
 
-        _param = self._runtime_web_v1_cancel_runtime_web_request_by_endpoint_id_serialize(
-            endpoint_id=endpoint_id,
-            request_id=request_id,
-            runtime_web_expected_revision_request=runtime_web_expected_revision_request,
+        _param = self._runtime_web_v1_get_runtime_web_service_by_id_serialize(
+            service_id=service_id,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -1151,11 +778,9 @@ class RuntimeWebV1Api:
 
 
     @validate_call
-    def runtime_web_v1_cancel_runtime_web_request_by_endpoint_id_with_http_info(
+    def runtime_web_v1_get_runtime_web_service_by_id_with_http_info(
         self,
-        endpoint_id: Annotated[str, Field(min_length=32, strict=True, max_length=32)],
-        request_id: StrictStr,
-        runtime_web_expected_revision_request: RuntimeWebExpectedRevisionRequest,
+        service_id: Annotated[str, Field(min_length=32, strict=True, max_length=32)],
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -1169,16 +794,12 @@ class RuntimeWebV1Api:
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
     ) -> ApiResponse[RuntimeWebServiceResponse]:
-        """Cancel Runtime Web Request By Endpoint Id
+        """Get Runtime Web Service By Id
 
-        Cancel one exact pending request reached through a trusted endpoint ID.
+        Get one service for the trusted Main Web activation surface.
 
-        :param endpoint_id: (required)
-        :type endpoint_id: str
-        :param request_id: (required)
-        :type request_id: str
-        :param runtime_web_expected_revision_request: (required)
-        :type runtime_web_expected_revision_request: RuntimeWebExpectedRevisionRequest
+        :param service_id: (required)
+        :type service_id: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -1201,10 +822,8 @@ class RuntimeWebV1Api:
         :return: Returns the result object.
         """ # noqa: E501
 
-        _param = self._runtime_web_v1_cancel_runtime_web_request_by_endpoint_id_serialize(
-            endpoint_id=endpoint_id,
-            request_id=request_id,
-            runtime_web_expected_revision_request=runtime_web_expected_revision_request,
+        _param = self._runtime_web_v1_get_runtime_web_service_by_id_serialize(
+            service_id=service_id,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -1231,11 +850,9 @@ class RuntimeWebV1Api:
 
 
     @validate_call
-    def runtime_web_v1_cancel_runtime_web_request_by_endpoint_id_without_preload_content(
+    def runtime_web_v1_get_runtime_web_service_by_id_without_preload_content(
         self,
-        endpoint_id: Annotated[str, Field(min_length=32, strict=True, max_length=32)],
-        request_id: StrictStr,
-        runtime_web_expected_revision_request: RuntimeWebExpectedRevisionRequest,
+        service_id: Annotated[str, Field(min_length=32, strict=True, max_length=32)],
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -1249,16 +866,12 @@ class RuntimeWebV1Api:
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
     ) -> RESTResponseType:
-        """Cancel Runtime Web Request By Endpoint Id
+        """Get Runtime Web Service By Id
 
-        Cancel one exact pending request reached through a trusted endpoint ID.
+        Get one service for the trusted Main Web activation surface.
 
-        :param endpoint_id: (required)
-        :type endpoint_id: str
-        :param request_id: (required)
-        :type request_id: str
-        :param runtime_web_expected_revision_request: (required)
-        :type runtime_web_expected_revision_request: RuntimeWebExpectedRevisionRequest
+        :param service_id: (required)
+        :type service_id: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -1281,10 +894,8 @@ class RuntimeWebV1Api:
         :return: Returns the result object.
         """ # noqa: E501
 
-        _param = self._runtime_web_v1_cancel_runtime_web_request_by_endpoint_id_serialize(
-            endpoint_id=endpoint_id,
-            request_id=request_id,
-            runtime_web_expected_revision_request=runtime_web_expected_revision_request,
+        _param = self._runtime_web_v1_get_runtime_web_service_by_id_serialize(
+            service_id=service_id,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -1306,11 +917,9 @@ class RuntimeWebV1Api:
         return response_data.response
 
 
-    def _runtime_web_v1_cancel_runtime_web_request_by_endpoint_id_serialize(
+    def _runtime_web_v1_get_runtime_web_service_by_id_serialize(
         self,
-        endpoint_id,
-        request_id,
-        runtime_web_expected_revision_request,
+        service_id,
         _request_auth,
         _content_type,
         _headers,
@@ -1332,16 +941,12 @@ class RuntimeWebV1Api:
         _body_params: Optional[bytes] = None
 
         # process the path parameters
-        if endpoint_id is not None:
-            _path_params['endpoint_id'] = endpoint_id
-        if request_id is not None:
-            _path_params['request_id'] = request_id
+        if service_id is not None:
+            _path_params['service_id'] = service_id
         # process the query parameters
         # process the header parameters
         # process the form parameters
         # process the body parameter
-        if runtime_web_expected_revision_request is not None:
-            _body_params = runtime_web_expected_revision_request
 
 
         # set the HTTP header `Accept`
@@ -1352,19 +957,6 @@ class RuntimeWebV1Api:
                 ]
             )
 
-        # set the HTTP header `Content-Type`
-        if _content_type:
-            _header_params['Content-Type'] = _content_type
-        else:
-            _default_content_type = (
-                self.api_client.select_header_content_type(
-                    [
-                        'application/json'
-                    ]
-                )
-            )
-            if _default_content_type is not None:
-                _header_params['Content-Type'] = _default_content_type
 
         # authentication setting
         _auth_settings: List[str] = [
@@ -1372,1025 +964,8 @@ class RuntimeWebV1Api:
         ]
 
         return self.api_client.param_serialize(
-            method='POST',
-            resource_path='/runtime-web/v1/services/{endpoint_id}/requests/{request_id}/cancel',
-            path_params=_path_params,
-            query_params=_query_params,
-            header_params=_header_params,
-            body=_body_params,
-            post_params=_form_params,
-            files=_files,
-            auth_settings=_auth_settings,
-            collection_formats=_collection_formats,
-            _host=_host,
-            _request_auth=_request_auth
-        )
-
-
-
-
-    @validate_call
-    def runtime_web_v1_close_runtime_web_cycle(
-        self,
-        handle: StrictStr,
-        agent_id: StrictStr,
-        session_id: StrictStr,
-        cycle_id: StrictStr,
-        runtime_web_close_request: RuntimeWebCloseRequest,
-        _request_timeout: Union[
-            None,
-            Annotated[StrictFloat, Field(gt=0)],
-            Tuple[
-                Annotated[StrictFloat, Field(gt=0)],
-                Annotated[StrictFloat, Field(gt=0)]
-            ]
-        ] = None,
-        _request_auth: Optional[Dict[StrictStr, Any]] = None,
-        _content_type: Optional[StrictStr] = None,
-        _headers: Optional[Dict[StrictStr, Any]] = None,
-        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> RuntimeWebServiceResponse:
-        """Close Runtime Web Cycle
-
-        Close one exact active exposure without managing the application process.
-
-        :param handle: (required)
-        :type handle: str
-        :param agent_id: (required)
-        :type agent_id: str
-        :param session_id: (required)
-        :type session_id: str
-        :param cycle_id: (required)
-        :type cycle_id: str
-        :param runtime_web_close_request: (required)
-        :type runtime_web_close_request: RuntimeWebCloseRequest
-        :param _request_timeout: timeout setting for this request. If one
-                                 number provided, it will be total request
-                                 timeout. It can also be a pair (tuple) of
-                                 (connection, read) timeouts.
-        :type _request_timeout: int, tuple(int, int), optional
-        :param _request_auth: set to override the auth_settings for an a single
-                              request; this effectively ignores the
-                              authentication in the spec for a single request.
-        :type _request_auth: dict, optional
-        :param _content_type: force content-type for the request.
-        :type _content_type: str, Optional
-        :param _headers: set to override the headers for a single
-                         request; this effectively ignores the headers
-                         in the spec for a single request.
-        :type _headers: dict, optional
-        :param _host_index: set to override the host_index for a single
-                            request; this effectively ignores the host_index
-                            in the spec for a single request.
-        :type _host_index: int, optional
-        :return: Returns the result object.
-        """ # noqa: E501
-
-        _param = self._runtime_web_v1_close_runtime_web_cycle_serialize(
-            handle=handle,
-            agent_id=agent_id,
-            session_id=session_id,
-            cycle_id=cycle_id,
-            runtime_web_close_request=runtime_web_close_request,
-            _request_auth=_request_auth,
-            _content_type=_content_type,
-            _headers=_headers,
-            _host_index=_host_index
-        )
-
-        _response_types_map: Dict[str, Optional[str]] = {
-            '200': "RuntimeWebServiceResponse",
-            '403': "RuntimeWebActionErrorResponse",
-            '404': "RuntimeWebActionErrorResponse",
-            '409': "RuntimeWebActionErrorResponse",
-            '429': "RuntimeWebActionErrorResponse",
-            '422': "HTTPValidationError",
-        }
-        response_data = self.api_client.call_api(
-            *_param,
-            _request_timeout=_request_timeout
-        )
-        response_data.read()
-        return self.api_client.response_deserialize(
-            response_data=response_data,
-            response_types_map=_response_types_map,
-        ).data
-
-
-    @validate_call
-    def runtime_web_v1_close_runtime_web_cycle_with_http_info(
-        self,
-        handle: StrictStr,
-        agent_id: StrictStr,
-        session_id: StrictStr,
-        cycle_id: StrictStr,
-        runtime_web_close_request: RuntimeWebCloseRequest,
-        _request_timeout: Union[
-            None,
-            Annotated[StrictFloat, Field(gt=0)],
-            Tuple[
-                Annotated[StrictFloat, Field(gt=0)],
-                Annotated[StrictFloat, Field(gt=0)]
-            ]
-        ] = None,
-        _request_auth: Optional[Dict[StrictStr, Any]] = None,
-        _content_type: Optional[StrictStr] = None,
-        _headers: Optional[Dict[StrictStr, Any]] = None,
-        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> ApiResponse[RuntimeWebServiceResponse]:
-        """Close Runtime Web Cycle
-
-        Close one exact active exposure without managing the application process.
-
-        :param handle: (required)
-        :type handle: str
-        :param agent_id: (required)
-        :type agent_id: str
-        :param session_id: (required)
-        :type session_id: str
-        :param cycle_id: (required)
-        :type cycle_id: str
-        :param runtime_web_close_request: (required)
-        :type runtime_web_close_request: RuntimeWebCloseRequest
-        :param _request_timeout: timeout setting for this request. If one
-                                 number provided, it will be total request
-                                 timeout. It can also be a pair (tuple) of
-                                 (connection, read) timeouts.
-        :type _request_timeout: int, tuple(int, int), optional
-        :param _request_auth: set to override the auth_settings for an a single
-                              request; this effectively ignores the
-                              authentication in the spec for a single request.
-        :type _request_auth: dict, optional
-        :param _content_type: force content-type for the request.
-        :type _content_type: str, Optional
-        :param _headers: set to override the headers for a single
-                         request; this effectively ignores the headers
-                         in the spec for a single request.
-        :type _headers: dict, optional
-        :param _host_index: set to override the host_index for a single
-                            request; this effectively ignores the host_index
-                            in the spec for a single request.
-        :type _host_index: int, optional
-        :return: Returns the result object.
-        """ # noqa: E501
-
-        _param = self._runtime_web_v1_close_runtime_web_cycle_serialize(
-            handle=handle,
-            agent_id=agent_id,
-            session_id=session_id,
-            cycle_id=cycle_id,
-            runtime_web_close_request=runtime_web_close_request,
-            _request_auth=_request_auth,
-            _content_type=_content_type,
-            _headers=_headers,
-            _host_index=_host_index
-        )
-
-        _response_types_map: Dict[str, Optional[str]] = {
-            '200': "RuntimeWebServiceResponse",
-            '403': "RuntimeWebActionErrorResponse",
-            '404': "RuntimeWebActionErrorResponse",
-            '409': "RuntimeWebActionErrorResponse",
-            '429': "RuntimeWebActionErrorResponse",
-            '422': "HTTPValidationError",
-        }
-        response_data = self.api_client.call_api(
-            *_param,
-            _request_timeout=_request_timeout
-        )
-        response_data.read()
-        return self.api_client.response_deserialize(
-            response_data=response_data,
-            response_types_map=_response_types_map,
-        )
-
-
-    @validate_call
-    def runtime_web_v1_close_runtime_web_cycle_without_preload_content(
-        self,
-        handle: StrictStr,
-        agent_id: StrictStr,
-        session_id: StrictStr,
-        cycle_id: StrictStr,
-        runtime_web_close_request: RuntimeWebCloseRequest,
-        _request_timeout: Union[
-            None,
-            Annotated[StrictFloat, Field(gt=0)],
-            Tuple[
-                Annotated[StrictFloat, Field(gt=0)],
-                Annotated[StrictFloat, Field(gt=0)]
-            ]
-        ] = None,
-        _request_auth: Optional[Dict[StrictStr, Any]] = None,
-        _content_type: Optional[StrictStr] = None,
-        _headers: Optional[Dict[StrictStr, Any]] = None,
-        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> RESTResponseType:
-        """Close Runtime Web Cycle
-
-        Close one exact active exposure without managing the application process.
-
-        :param handle: (required)
-        :type handle: str
-        :param agent_id: (required)
-        :type agent_id: str
-        :param session_id: (required)
-        :type session_id: str
-        :param cycle_id: (required)
-        :type cycle_id: str
-        :param runtime_web_close_request: (required)
-        :type runtime_web_close_request: RuntimeWebCloseRequest
-        :param _request_timeout: timeout setting for this request. If one
-                                 number provided, it will be total request
-                                 timeout. It can also be a pair (tuple) of
-                                 (connection, read) timeouts.
-        :type _request_timeout: int, tuple(int, int), optional
-        :param _request_auth: set to override the auth_settings for an a single
-                              request; this effectively ignores the
-                              authentication in the spec for a single request.
-        :type _request_auth: dict, optional
-        :param _content_type: force content-type for the request.
-        :type _content_type: str, Optional
-        :param _headers: set to override the headers for a single
-                         request; this effectively ignores the headers
-                         in the spec for a single request.
-        :type _headers: dict, optional
-        :param _host_index: set to override the host_index for a single
-                            request; this effectively ignores the host_index
-                            in the spec for a single request.
-        :type _host_index: int, optional
-        :return: Returns the result object.
-        """ # noqa: E501
-
-        _param = self._runtime_web_v1_close_runtime_web_cycle_serialize(
-            handle=handle,
-            agent_id=agent_id,
-            session_id=session_id,
-            cycle_id=cycle_id,
-            runtime_web_close_request=runtime_web_close_request,
-            _request_auth=_request_auth,
-            _content_type=_content_type,
-            _headers=_headers,
-            _host_index=_host_index
-        )
-
-        _response_types_map: Dict[str, Optional[str]] = {
-            '200': "RuntimeWebServiceResponse",
-            '403': "RuntimeWebActionErrorResponse",
-            '404': "RuntimeWebActionErrorResponse",
-            '409': "RuntimeWebActionErrorResponse",
-            '429': "RuntimeWebActionErrorResponse",
-            '422': "HTTPValidationError",
-        }
-        response_data = self.api_client.call_api(
-            *_param,
-            _request_timeout=_request_timeout
-        )
-        return response_data.response
-
-
-    def _runtime_web_v1_close_runtime_web_cycle_serialize(
-        self,
-        handle,
-        agent_id,
-        session_id,
-        cycle_id,
-        runtime_web_close_request,
-        _request_auth,
-        _content_type,
-        _headers,
-        _host_index,
-    ) -> RequestSerialized:
-
-        _host = None
-
-        _collection_formats: Dict[str, str] = {
-        }
-
-        _path_params: Dict[str, str] = {}
-        _query_params: List[Tuple[str, str]] = []
-        _header_params: Dict[str, Optional[str]] = _headers or {}
-        _form_params: List[Tuple[str, str]] = []
-        _files: Dict[
-            str, Union[str, bytes, List[str], List[bytes], List[Tuple[str, bytes]]]
-        ] = {}
-        _body_params: Optional[bytes] = None
-
-        # process the path parameters
-        if handle is not None:
-            _path_params['handle'] = handle
-        if agent_id is not None:
-            _path_params['agent_id'] = agent_id
-        if session_id is not None:
-            _path_params['session_id'] = session_id
-        if cycle_id is not None:
-            _path_params['cycle_id'] = cycle_id
-        # process the query parameters
-        # process the header parameters
-        # process the form parameters
-        # process the body parameter
-        if runtime_web_close_request is not None:
-            _body_params = runtime_web_close_request
-
-
-        # set the HTTP header `Accept`
-        if 'Accept' not in _header_params:
-            _header_params['Accept'] = self.api_client.select_header_accept(
-                [
-                    'application/json'
-                ]
-            )
-
-        # set the HTTP header `Content-Type`
-        if _content_type:
-            _header_params['Content-Type'] = _content_type
-        else:
-            _default_content_type = (
-                self.api_client.select_header_content_type(
-                    [
-                        'application/json'
-                    ]
-                )
-            )
-            if _default_content_type is not None:
-                _header_params['Content-Type'] = _default_content_type
-
-        # authentication setting
-        _auth_settings: List[str] = [
-            'HTTPBearer'
-        ]
-
-        return self.api_client.param_serialize(
-            method='POST',
-            resource_path='/runtime-web/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/cycles/{cycle_id}/close',
-            path_params=_path_params,
-            query_params=_query_params,
-            header_params=_header_params,
-            body=_body_params,
-            post_params=_form_params,
-            files=_files,
-            auth_settings=_auth_settings,
-            collection_formats=_collection_formats,
-            _host=_host,
-            _request_auth=_request_auth
-        )
-
-
-
-
-    @validate_call
-    def runtime_web_v1_close_runtime_web_cycle_by_endpoint_id(
-        self,
-        endpoint_id: Annotated[str, Field(min_length=32, strict=True, max_length=32)],
-        cycle_id: StrictStr,
-        runtime_web_close_request: RuntimeWebCloseRequest,
-        _request_timeout: Union[
-            None,
-            Annotated[StrictFloat, Field(gt=0)],
-            Tuple[
-                Annotated[StrictFloat, Field(gt=0)],
-                Annotated[StrictFloat, Field(gt=0)]
-            ]
-        ] = None,
-        _request_auth: Optional[Dict[StrictStr, Any]] = None,
-        _content_type: Optional[StrictStr] = None,
-        _headers: Optional[Dict[StrictStr, Any]] = None,
-        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> RuntimeWebServiceResponse:
-        """Close Runtime Web Cycle By Endpoint Id
-
-        Close one exact cycle reached through a trusted endpoint ID.
-
-        :param endpoint_id: (required)
-        :type endpoint_id: str
-        :param cycle_id: (required)
-        :type cycle_id: str
-        :param runtime_web_close_request: (required)
-        :type runtime_web_close_request: RuntimeWebCloseRequest
-        :param _request_timeout: timeout setting for this request. If one
-                                 number provided, it will be total request
-                                 timeout. It can also be a pair (tuple) of
-                                 (connection, read) timeouts.
-        :type _request_timeout: int, tuple(int, int), optional
-        :param _request_auth: set to override the auth_settings for an a single
-                              request; this effectively ignores the
-                              authentication in the spec for a single request.
-        :type _request_auth: dict, optional
-        :param _content_type: force content-type for the request.
-        :type _content_type: str, Optional
-        :param _headers: set to override the headers for a single
-                         request; this effectively ignores the headers
-                         in the spec for a single request.
-        :type _headers: dict, optional
-        :param _host_index: set to override the host_index for a single
-                            request; this effectively ignores the host_index
-                            in the spec for a single request.
-        :type _host_index: int, optional
-        :return: Returns the result object.
-        """ # noqa: E501
-
-        _param = self._runtime_web_v1_close_runtime_web_cycle_by_endpoint_id_serialize(
-            endpoint_id=endpoint_id,
-            cycle_id=cycle_id,
-            runtime_web_close_request=runtime_web_close_request,
-            _request_auth=_request_auth,
-            _content_type=_content_type,
-            _headers=_headers,
-            _host_index=_host_index
-        )
-
-        _response_types_map: Dict[str, Optional[str]] = {
-            '200': "RuntimeWebServiceResponse",
-            '403': "RuntimeWebActionErrorResponse",
-            '404': "RuntimeWebActionErrorResponse",
-            '409': "RuntimeWebActionErrorResponse",
-            '429': "RuntimeWebActionErrorResponse",
-            '422': "HTTPValidationError",
-        }
-        response_data = self.api_client.call_api(
-            *_param,
-            _request_timeout=_request_timeout
-        )
-        response_data.read()
-        return self.api_client.response_deserialize(
-            response_data=response_data,
-            response_types_map=_response_types_map,
-        ).data
-
-
-    @validate_call
-    def runtime_web_v1_close_runtime_web_cycle_by_endpoint_id_with_http_info(
-        self,
-        endpoint_id: Annotated[str, Field(min_length=32, strict=True, max_length=32)],
-        cycle_id: StrictStr,
-        runtime_web_close_request: RuntimeWebCloseRequest,
-        _request_timeout: Union[
-            None,
-            Annotated[StrictFloat, Field(gt=0)],
-            Tuple[
-                Annotated[StrictFloat, Field(gt=0)],
-                Annotated[StrictFloat, Field(gt=0)]
-            ]
-        ] = None,
-        _request_auth: Optional[Dict[StrictStr, Any]] = None,
-        _content_type: Optional[StrictStr] = None,
-        _headers: Optional[Dict[StrictStr, Any]] = None,
-        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> ApiResponse[RuntimeWebServiceResponse]:
-        """Close Runtime Web Cycle By Endpoint Id
-
-        Close one exact cycle reached through a trusted endpoint ID.
-
-        :param endpoint_id: (required)
-        :type endpoint_id: str
-        :param cycle_id: (required)
-        :type cycle_id: str
-        :param runtime_web_close_request: (required)
-        :type runtime_web_close_request: RuntimeWebCloseRequest
-        :param _request_timeout: timeout setting for this request. If one
-                                 number provided, it will be total request
-                                 timeout. It can also be a pair (tuple) of
-                                 (connection, read) timeouts.
-        :type _request_timeout: int, tuple(int, int), optional
-        :param _request_auth: set to override the auth_settings for an a single
-                              request; this effectively ignores the
-                              authentication in the spec for a single request.
-        :type _request_auth: dict, optional
-        :param _content_type: force content-type for the request.
-        :type _content_type: str, Optional
-        :param _headers: set to override the headers for a single
-                         request; this effectively ignores the headers
-                         in the spec for a single request.
-        :type _headers: dict, optional
-        :param _host_index: set to override the host_index for a single
-                            request; this effectively ignores the host_index
-                            in the spec for a single request.
-        :type _host_index: int, optional
-        :return: Returns the result object.
-        """ # noqa: E501
-
-        _param = self._runtime_web_v1_close_runtime_web_cycle_by_endpoint_id_serialize(
-            endpoint_id=endpoint_id,
-            cycle_id=cycle_id,
-            runtime_web_close_request=runtime_web_close_request,
-            _request_auth=_request_auth,
-            _content_type=_content_type,
-            _headers=_headers,
-            _host_index=_host_index
-        )
-
-        _response_types_map: Dict[str, Optional[str]] = {
-            '200': "RuntimeWebServiceResponse",
-            '403': "RuntimeWebActionErrorResponse",
-            '404': "RuntimeWebActionErrorResponse",
-            '409': "RuntimeWebActionErrorResponse",
-            '429': "RuntimeWebActionErrorResponse",
-            '422': "HTTPValidationError",
-        }
-        response_data = self.api_client.call_api(
-            *_param,
-            _request_timeout=_request_timeout
-        )
-        response_data.read()
-        return self.api_client.response_deserialize(
-            response_data=response_data,
-            response_types_map=_response_types_map,
-        )
-
-
-    @validate_call
-    def runtime_web_v1_close_runtime_web_cycle_by_endpoint_id_without_preload_content(
-        self,
-        endpoint_id: Annotated[str, Field(min_length=32, strict=True, max_length=32)],
-        cycle_id: StrictStr,
-        runtime_web_close_request: RuntimeWebCloseRequest,
-        _request_timeout: Union[
-            None,
-            Annotated[StrictFloat, Field(gt=0)],
-            Tuple[
-                Annotated[StrictFloat, Field(gt=0)],
-                Annotated[StrictFloat, Field(gt=0)]
-            ]
-        ] = None,
-        _request_auth: Optional[Dict[StrictStr, Any]] = None,
-        _content_type: Optional[StrictStr] = None,
-        _headers: Optional[Dict[StrictStr, Any]] = None,
-        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> RESTResponseType:
-        """Close Runtime Web Cycle By Endpoint Id
-
-        Close one exact cycle reached through a trusted endpoint ID.
-
-        :param endpoint_id: (required)
-        :type endpoint_id: str
-        :param cycle_id: (required)
-        :type cycle_id: str
-        :param runtime_web_close_request: (required)
-        :type runtime_web_close_request: RuntimeWebCloseRequest
-        :param _request_timeout: timeout setting for this request. If one
-                                 number provided, it will be total request
-                                 timeout. It can also be a pair (tuple) of
-                                 (connection, read) timeouts.
-        :type _request_timeout: int, tuple(int, int), optional
-        :param _request_auth: set to override the auth_settings for an a single
-                              request; this effectively ignores the
-                              authentication in the spec for a single request.
-        :type _request_auth: dict, optional
-        :param _content_type: force content-type for the request.
-        :type _content_type: str, Optional
-        :param _headers: set to override the headers for a single
-                         request; this effectively ignores the headers
-                         in the spec for a single request.
-        :type _headers: dict, optional
-        :param _host_index: set to override the host_index for a single
-                            request; this effectively ignores the host_index
-                            in the spec for a single request.
-        :type _host_index: int, optional
-        :return: Returns the result object.
-        """ # noqa: E501
-
-        _param = self._runtime_web_v1_close_runtime_web_cycle_by_endpoint_id_serialize(
-            endpoint_id=endpoint_id,
-            cycle_id=cycle_id,
-            runtime_web_close_request=runtime_web_close_request,
-            _request_auth=_request_auth,
-            _content_type=_content_type,
-            _headers=_headers,
-            _host_index=_host_index
-        )
-
-        _response_types_map: Dict[str, Optional[str]] = {
-            '200': "RuntimeWebServiceResponse",
-            '403': "RuntimeWebActionErrorResponse",
-            '404': "RuntimeWebActionErrorResponse",
-            '409': "RuntimeWebActionErrorResponse",
-            '429': "RuntimeWebActionErrorResponse",
-            '422': "HTTPValidationError",
-        }
-        response_data = self.api_client.call_api(
-            *_param,
-            _request_timeout=_request_timeout
-        )
-        return response_data.response
-
-
-    def _runtime_web_v1_close_runtime_web_cycle_by_endpoint_id_serialize(
-        self,
-        endpoint_id,
-        cycle_id,
-        runtime_web_close_request,
-        _request_auth,
-        _content_type,
-        _headers,
-        _host_index,
-    ) -> RequestSerialized:
-
-        _host = None
-
-        _collection_formats: Dict[str, str] = {
-        }
-
-        _path_params: Dict[str, str] = {}
-        _query_params: List[Tuple[str, str]] = []
-        _header_params: Dict[str, Optional[str]] = _headers or {}
-        _form_params: List[Tuple[str, str]] = []
-        _files: Dict[
-            str, Union[str, bytes, List[str], List[bytes], List[Tuple[str, bytes]]]
-        ] = {}
-        _body_params: Optional[bytes] = None
-
-        # process the path parameters
-        if endpoint_id is not None:
-            _path_params['endpoint_id'] = endpoint_id
-        if cycle_id is not None:
-            _path_params['cycle_id'] = cycle_id
-        # process the query parameters
-        # process the header parameters
-        # process the form parameters
-        # process the body parameter
-        if runtime_web_close_request is not None:
-            _body_params = runtime_web_close_request
-
-
-        # set the HTTP header `Accept`
-        if 'Accept' not in _header_params:
-            _header_params['Accept'] = self.api_client.select_header_accept(
-                [
-                    'application/json'
-                ]
-            )
-
-        # set the HTTP header `Content-Type`
-        if _content_type:
-            _header_params['Content-Type'] = _content_type
-        else:
-            _default_content_type = (
-                self.api_client.select_header_content_type(
-                    [
-                        'application/json'
-                    ]
-                )
-            )
-            if _default_content_type is not None:
-                _header_params['Content-Type'] = _default_content_type
-
-        # authentication setting
-        _auth_settings: List[str] = [
-            'HTTPBearer'
-        ]
-
-        return self.api_client.param_serialize(
-            method='POST',
-            resource_path='/runtime-web/v1/services/{endpoint_id}/cycles/{cycle_id}/close',
-            path_params=_path_params,
-            query_params=_query_params,
-            header_params=_header_params,
-            body=_body_params,
-            post_params=_form_params,
-            files=_files,
-            auth_settings=_auth_settings,
-            collection_formats=_collection_formats,
-            _host=_host,
-            _request_auth=_request_auth
-        )
-
-
-
-
-    @validate_call
-    def runtime_web_v1_direct_create_runtime_web_exposure(
-        self,
-        handle: StrictStr,
-        agent_id: StrictStr,
-        session_id: StrictStr,
-        port: Annotated[int, Field(le=65535, strict=True, ge=1)],
-        runtime_web_direct_create_request: RuntimeWebDirectCreateRequest,
-        _request_timeout: Union[
-            None,
-            Annotated[StrictFloat, Field(gt=0)],
-            Tuple[
-                Annotated[StrictFloat, Field(gt=0)],
-                Annotated[StrictFloat, Field(gt=0)]
-            ]
-        ] = None,
-        _request_auth: Optional[Dict[StrictStr, Any]] = None,
-        _content_type: Optional[StrictStr] = None,
-        _headers: Optional[Dict[StrictStr, Any]] = None,
-        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> RuntimeWebServiceResponse:
-        """Direct Create Runtime Web Exposure
-
-        Directly create one user-confirmed finite exposure cycle.
-
-        :param handle: (required)
-        :type handle: str
-        :param agent_id: (required)
-        :type agent_id: str
-        :param session_id: (required)
-        :type session_id: str
-        :param port: (required)
-        :type port: int
-        :param runtime_web_direct_create_request: (required)
-        :type runtime_web_direct_create_request: RuntimeWebDirectCreateRequest
-        :param _request_timeout: timeout setting for this request. If one
-                                 number provided, it will be total request
-                                 timeout. It can also be a pair (tuple) of
-                                 (connection, read) timeouts.
-        :type _request_timeout: int, tuple(int, int), optional
-        :param _request_auth: set to override the auth_settings for an a single
-                              request; this effectively ignores the
-                              authentication in the spec for a single request.
-        :type _request_auth: dict, optional
-        :param _content_type: force content-type for the request.
-        :type _content_type: str, Optional
-        :param _headers: set to override the headers for a single
-                         request; this effectively ignores the headers
-                         in the spec for a single request.
-        :type _headers: dict, optional
-        :param _host_index: set to override the host_index for a single
-                            request; this effectively ignores the host_index
-                            in the spec for a single request.
-        :type _host_index: int, optional
-        :return: Returns the result object.
-        """ # noqa: E501
-
-        _param = self._runtime_web_v1_direct_create_runtime_web_exposure_serialize(
-            handle=handle,
-            agent_id=agent_id,
-            session_id=session_id,
-            port=port,
-            runtime_web_direct_create_request=runtime_web_direct_create_request,
-            _request_auth=_request_auth,
-            _content_type=_content_type,
-            _headers=_headers,
-            _host_index=_host_index
-        )
-
-        _response_types_map: Dict[str, Optional[str]] = {
-            '200': "RuntimeWebServiceResponse",
-            '403': "RuntimeWebActionErrorResponse",
-            '404': "RuntimeWebActionErrorResponse",
-            '409': "RuntimeWebActionErrorResponse",
-            '429': "RuntimeWebActionErrorResponse",
-            '422': "HTTPValidationError",
-        }
-        response_data = self.api_client.call_api(
-            *_param,
-            _request_timeout=_request_timeout
-        )
-        response_data.read()
-        return self.api_client.response_deserialize(
-            response_data=response_data,
-            response_types_map=_response_types_map,
-        ).data
-
-
-    @validate_call
-    def runtime_web_v1_direct_create_runtime_web_exposure_with_http_info(
-        self,
-        handle: StrictStr,
-        agent_id: StrictStr,
-        session_id: StrictStr,
-        port: Annotated[int, Field(le=65535, strict=True, ge=1)],
-        runtime_web_direct_create_request: RuntimeWebDirectCreateRequest,
-        _request_timeout: Union[
-            None,
-            Annotated[StrictFloat, Field(gt=0)],
-            Tuple[
-                Annotated[StrictFloat, Field(gt=0)],
-                Annotated[StrictFloat, Field(gt=0)]
-            ]
-        ] = None,
-        _request_auth: Optional[Dict[StrictStr, Any]] = None,
-        _content_type: Optional[StrictStr] = None,
-        _headers: Optional[Dict[StrictStr, Any]] = None,
-        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> ApiResponse[RuntimeWebServiceResponse]:
-        """Direct Create Runtime Web Exposure
-
-        Directly create one user-confirmed finite exposure cycle.
-
-        :param handle: (required)
-        :type handle: str
-        :param agent_id: (required)
-        :type agent_id: str
-        :param session_id: (required)
-        :type session_id: str
-        :param port: (required)
-        :type port: int
-        :param runtime_web_direct_create_request: (required)
-        :type runtime_web_direct_create_request: RuntimeWebDirectCreateRequest
-        :param _request_timeout: timeout setting for this request. If one
-                                 number provided, it will be total request
-                                 timeout. It can also be a pair (tuple) of
-                                 (connection, read) timeouts.
-        :type _request_timeout: int, tuple(int, int), optional
-        :param _request_auth: set to override the auth_settings for an a single
-                              request; this effectively ignores the
-                              authentication in the spec for a single request.
-        :type _request_auth: dict, optional
-        :param _content_type: force content-type for the request.
-        :type _content_type: str, Optional
-        :param _headers: set to override the headers for a single
-                         request; this effectively ignores the headers
-                         in the spec for a single request.
-        :type _headers: dict, optional
-        :param _host_index: set to override the host_index for a single
-                            request; this effectively ignores the host_index
-                            in the spec for a single request.
-        :type _host_index: int, optional
-        :return: Returns the result object.
-        """ # noqa: E501
-
-        _param = self._runtime_web_v1_direct_create_runtime_web_exposure_serialize(
-            handle=handle,
-            agent_id=agent_id,
-            session_id=session_id,
-            port=port,
-            runtime_web_direct_create_request=runtime_web_direct_create_request,
-            _request_auth=_request_auth,
-            _content_type=_content_type,
-            _headers=_headers,
-            _host_index=_host_index
-        )
-
-        _response_types_map: Dict[str, Optional[str]] = {
-            '200': "RuntimeWebServiceResponse",
-            '403': "RuntimeWebActionErrorResponse",
-            '404': "RuntimeWebActionErrorResponse",
-            '409': "RuntimeWebActionErrorResponse",
-            '429': "RuntimeWebActionErrorResponse",
-            '422': "HTTPValidationError",
-        }
-        response_data = self.api_client.call_api(
-            *_param,
-            _request_timeout=_request_timeout
-        )
-        response_data.read()
-        return self.api_client.response_deserialize(
-            response_data=response_data,
-            response_types_map=_response_types_map,
-        )
-
-
-    @validate_call
-    def runtime_web_v1_direct_create_runtime_web_exposure_without_preload_content(
-        self,
-        handle: StrictStr,
-        agent_id: StrictStr,
-        session_id: StrictStr,
-        port: Annotated[int, Field(le=65535, strict=True, ge=1)],
-        runtime_web_direct_create_request: RuntimeWebDirectCreateRequest,
-        _request_timeout: Union[
-            None,
-            Annotated[StrictFloat, Field(gt=0)],
-            Tuple[
-                Annotated[StrictFloat, Field(gt=0)],
-                Annotated[StrictFloat, Field(gt=0)]
-            ]
-        ] = None,
-        _request_auth: Optional[Dict[StrictStr, Any]] = None,
-        _content_type: Optional[StrictStr] = None,
-        _headers: Optional[Dict[StrictStr, Any]] = None,
-        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> RESTResponseType:
-        """Direct Create Runtime Web Exposure
-
-        Directly create one user-confirmed finite exposure cycle.
-
-        :param handle: (required)
-        :type handle: str
-        :param agent_id: (required)
-        :type agent_id: str
-        :param session_id: (required)
-        :type session_id: str
-        :param port: (required)
-        :type port: int
-        :param runtime_web_direct_create_request: (required)
-        :type runtime_web_direct_create_request: RuntimeWebDirectCreateRequest
-        :param _request_timeout: timeout setting for this request. If one
-                                 number provided, it will be total request
-                                 timeout. It can also be a pair (tuple) of
-                                 (connection, read) timeouts.
-        :type _request_timeout: int, tuple(int, int), optional
-        :param _request_auth: set to override the auth_settings for an a single
-                              request; this effectively ignores the
-                              authentication in the spec for a single request.
-        :type _request_auth: dict, optional
-        :param _content_type: force content-type for the request.
-        :type _content_type: str, Optional
-        :param _headers: set to override the headers for a single
-                         request; this effectively ignores the headers
-                         in the spec for a single request.
-        :type _headers: dict, optional
-        :param _host_index: set to override the host_index for a single
-                            request; this effectively ignores the host_index
-                            in the spec for a single request.
-        :type _host_index: int, optional
-        :return: Returns the result object.
-        """ # noqa: E501
-
-        _param = self._runtime_web_v1_direct_create_runtime_web_exposure_serialize(
-            handle=handle,
-            agent_id=agent_id,
-            session_id=session_id,
-            port=port,
-            runtime_web_direct_create_request=runtime_web_direct_create_request,
-            _request_auth=_request_auth,
-            _content_type=_content_type,
-            _headers=_headers,
-            _host_index=_host_index
-        )
-
-        _response_types_map: Dict[str, Optional[str]] = {
-            '200': "RuntimeWebServiceResponse",
-            '403': "RuntimeWebActionErrorResponse",
-            '404': "RuntimeWebActionErrorResponse",
-            '409': "RuntimeWebActionErrorResponse",
-            '429': "RuntimeWebActionErrorResponse",
-            '422': "HTTPValidationError",
-        }
-        response_data = self.api_client.call_api(
-            *_param,
-            _request_timeout=_request_timeout
-        )
-        return response_data.response
-
-
-    def _runtime_web_v1_direct_create_runtime_web_exposure_serialize(
-        self,
-        handle,
-        agent_id,
-        session_id,
-        port,
-        runtime_web_direct_create_request,
-        _request_auth,
-        _content_type,
-        _headers,
-        _host_index,
-    ) -> RequestSerialized:
-
-        _host = None
-
-        _collection_formats: Dict[str, str] = {
-        }
-
-        _path_params: Dict[str, str] = {}
-        _query_params: List[Tuple[str, str]] = []
-        _header_params: Dict[str, Optional[str]] = _headers or {}
-        _form_params: List[Tuple[str, str]] = []
-        _files: Dict[
-            str, Union[str, bytes, List[str], List[bytes], List[Tuple[str, bytes]]]
-        ] = {}
-        _body_params: Optional[bytes] = None
-
-        # process the path parameters
-        if handle is not None:
-            _path_params['handle'] = handle
-        if agent_id is not None:
-            _path_params['agent_id'] = agent_id
-        if session_id is not None:
-            _path_params['session_id'] = session_id
-        if port is not None:
-            _path_params['port'] = port
-        # process the query parameters
-        # process the header parameters
-        # process the form parameters
-        # process the body parameter
-        if runtime_web_direct_create_request is not None:
-            _body_params = runtime_web_direct_create_request
-
-
-        # set the HTTP header `Accept`
-        if 'Accept' not in _header_params:
-            _header_params['Accept'] = self.api_client.select_header_accept(
-                [
-                    'application/json'
-                ]
-            )
-
-        # set the HTTP header `Content-Type`
-        if _content_type:
-            _header_params['Content-Type'] = _content_type
-        else:
-            _default_content_type = (
-                self.api_client.select_header_content_type(
-                    [
-                        'application/json'
-                    ]
-                )
-            )
-            if _default_content_type is not None:
-                _header_params['Content-Type'] = _default_content_type
-
-        # authentication setting
-        _auth_settings: List[str] = [
-            'HTTPBearer'
-        ]
-
-        return self.api_client.param_serialize(
-            method='POST',
-            resource_path='/runtime-web/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/services/{port}/direct-create',
+            method='GET',
+            resource_path='/runtime-web/v1/services/{service_id}',
             path_params=_path_params,
             query_params=_query_params,
             header_params=_header_params,
@@ -2409,10 +984,9 @@ class RuntimeWebV1Api:
     @validate_call
     def runtime_web_v1_get_runtime_web_service_projection(
         self,
-        handle: StrictStr,
         agent_id: StrictStr,
-        session_id: StrictStr,
-        port: Annotated[int, Field(le=65535, strict=True, ge=1)],
+        service_id: Annotated[str, Field(min_length=32, strict=True, max_length=32)],
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -2428,16 +1002,14 @@ class RuntimeWebV1Api:
     ) -> RuntimeWebServiceResponse:
         """Get Runtime Web Service Projection
 
-        Return one current Runtime Web service projection.
+        Get one exact Agent-owned service.
 
-        :param handle: (required)
-        :type handle: str
         :param agent_id: (required)
         :type agent_id: str
-        :param session_id: (required)
-        :type session_id: str
-        :param port: (required)
-        :type port: int
+        :param service_id: (required)
+        :type service_id: str
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -2461,10 +1033,9 @@ class RuntimeWebV1Api:
         """ # noqa: E501
 
         _param = self._runtime_web_v1_get_runtime_web_service_projection_serialize(
-            handle=handle,
             agent_id=agent_id,
-            session_id=session_id,
-            port=port,
+            service_id=service_id,
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -2493,10 +1064,9 @@ class RuntimeWebV1Api:
     @validate_call
     def runtime_web_v1_get_runtime_web_service_projection_with_http_info(
         self,
-        handle: StrictStr,
         agent_id: StrictStr,
-        session_id: StrictStr,
-        port: Annotated[int, Field(le=65535, strict=True, ge=1)],
+        service_id: Annotated[str, Field(min_length=32, strict=True, max_length=32)],
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -2512,16 +1082,14 @@ class RuntimeWebV1Api:
     ) -> ApiResponse[RuntimeWebServiceResponse]:
         """Get Runtime Web Service Projection
 
-        Return one current Runtime Web service projection.
+        Get one exact Agent-owned service.
 
-        :param handle: (required)
-        :type handle: str
         :param agent_id: (required)
         :type agent_id: str
-        :param session_id: (required)
-        :type session_id: str
-        :param port: (required)
-        :type port: int
+        :param service_id: (required)
+        :type service_id: str
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -2545,10 +1113,9 @@ class RuntimeWebV1Api:
         """ # noqa: E501
 
         _param = self._runtime_web_v1_get_runtime_web_service_projection_serialize(
-            handle=handle,
             agent_id=agent_id,
-            session_id=session_id,
-            port=port,
+            service_id=service_id,
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -2577,10 +1144,9 @@ class RuntimeWebV1Api:
     @validate_call
     def runtime_web_v1_get_runtime_web_service_projection_without_preload_content(
         self,
-        handle: StrictStr,
         agent_id: StrictStr,
-        session_id: StrictStr,
-        port: Annotated[int, Field(le=65535, strict=True, ge=1)],
+        service_id: Annotated[str, Field(min_length=32, strict=True, max_length=32)],
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -2596,16 +1162,14 @@ class RuntimeWebV1Api:
     ) -> RESTResponseType:
         """Get Runtime Web Service Projection
 
-        Return one current Runtime Web service projection.
+        Get one exact Agent-owned service.
 
-        :param handle: (required)
-        :type handle: str
         :param agent_id: (required)
         :type agent_id: str
-        :param session_id: (required)
-        :type session_id: str
-        :param port: (required)
-        :type port: int
+        :param service_id: (required)
+        :type service_id: str
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -2629,10 +1193,9 @@ class RuntimeWebV1Api:
         """ # noqa: E501
 
         _param = self._runtime_web_v1_get_runtime_web_service_projection_serialize(
-            handle=handle,
             agent_id=agent_id,
-            session_id=session_id,
-            port=port,
+            service_id=service_id,
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -2656,10 +1219,9 @@ class RuntimeWebV1Api:
 
     def _runtime_web_v1_get_runtime_web_service_projection_serialize(
         self,
-        handle,
         agent_id,
-        session_id,
-        port,
+        service_id,
+        handle,
         _request_auth,
         _content_type,
         _headers,
@@ -2681,14 +1243,12 @@ class RuntimeWebV1Api:
         _body_params: Optional[bytes] = None
 
         # process the path parameters
-        if handle is not None:
-            _path_params['handle'] = handle
         if agent_id is not None:
             _path_params['agent_id'] = agent_id
-        if session_id is not None:
-            _path_params['session_id'] = session_id
-        if port is not None:
-            _path_params['port'] = port
+        if service_id is not None:
+            _path_params['service_id'] = service_id
+        if handle is not None:
+            _path_params['handle'] = handle
         # process the query parameters
         # process the header parameters
         # process the form parameters
@@ -2711,283 +1271,7 @@ class RuntimeWebV1Api:
 
         return self.api_client.param_serialize(
             method='GET',
-            resource_path='/runtime-web/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/services/{port}',
-            path_params=_path_params,
-            query_params=_query_params,
-            header_params=_header_params,
-            body=_body_params,
-            post_params=_form_params,
-            files=_files,
-            auth_settings=_auth_settings,
-            collection_formats=_collection_formats,
-            _host=_host,
-            _request_auth=_request_auth
-        )
-
-
-
-
-    @validate_call
-    def runtime_web_v1_get_service_by_endpoint_id(
-        self,
-        endpoint_id: Annotated[str, Field(min_length=32, strict=True, max_length=32)],
-        _request_timeout: Union[
-            None,
-            Annotated[StrictFloat, Field(gt=0)],
-            Tuple[
-                Annotated[StrictFloat, Field(gt=0)],
-                Annotated[StrictFloat, Field(gt=0)]
-            ]
-        ] = None,
-        _request_auth: Optional[Dict[StrictStr, Any]] = None,
-        _content_type: Optional[StrictStr] = None,
-        _headers: Optional[Dict[StrictStr, Any]] = None,
-        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> RuntimeWebServiceResponse:
-        """Get Service By Endpoint Id
-
-        Return one authorized service projection by opaque endpoint ID.
-
-        :param endpoint_id: (required)
-        :type endpoint_id: str
-        :param _request_timeout: timeout setting for this request. If one
-                                 number provided, it will be total request
-                                 timeout. It can also be a pair (tuple) of
-                                 (connection, read) timeouts.
-        :type _request_timeout: int, tuple(int, int), optional
-        :param _request_auth: set to override the auth_settings for an a single
-                              request; this effectively ignores the
-                              authentication in the spec for a single request.
-        :type _request_auth: dict, optional
-        :param _content_type: force content-type for the request.
-        :type _content_type: str, Optional
-        :param _headers: set to override the headers for a single
-                         request; this effectively ignores the headers
-                         in the spec for a single request.
-        :type _headers: dict, optional
-        :param _host_index: set to override the host_index for a single
-                            request; this effectively ignores the host_index
-                            in the spec for a single request.
-        :type _host_index: int, optional
-        :return: Returns the result object.
-        """ # noqa: E501
-
-        _param = self._runtime_web_v1_get_service_by_endpoint_id_serialize(
-            endpoint_id=endpoint_id,
-            _request_auth=_request_auth,
-            _content_type=_content_type,
-            _headers=_headers,
-            _host_index=_host_index
-        )
-
-        _response_types_map: Dict[str, Optional[str]] = {
-            '200': "RuntimeWebServiceResponse",
-            '403': "RuntimeWebActionErrorResponse",
-            '404': "RuntimeWebActionErrorResponse",
-            '409': "RuntimeWebActionErrorResponse",
-            '429': "RuntimeWebActionErrorResponse",
-            '422': "HTTPValidationError",
-        }
-        response_data = self.api_client.call_api(
-            *_param,
-            _request_timeout=_request_timeout
-        )
-        response_data.read()
-        return self.api_client.response_deserialize(
-            response_data=response_data,
-            response_types_map=_response_types_map,
-        ).data
-
-
-    @validate_call
-    def runtime_web_v1_get_service_by_endpoint_id_with_http_info(
-        self,
-        endpoint_id: Annotated[str, Field(min_length=32, strict=True, max_length=32)],
-        _request_timeout: Union[
-            None,
-            Annotated[StrictFloat, Field(gt=0)],
-            Tuple[
-                Annotated[StrictFloat, Field(gt=0)],
-                Annotated[StrictFloat, Field(gt=0)]
-            ]
-        ] = None,
-        _request_auth: Optional[Dict[StrictStr, Any]] = None,
-        _content_type: Optional[StrictStr] = None,
-        _headers: Optional[Dict[StrictStr, Any]] = None,
-        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> ApiResponse[RuntimeWebServiceResponse]:
-        """Get Service By Endpoint Id
-
-        Return one authorized service projection by opaque endpoint ID.
-
-        :param endpoint_id: (required)
-        :type endpoint_id: str
-        :param _request_timeout: timeout setting for this request. If one
-                                 number provided, it will be total request
-                                 timeout. It can also be a pair (tuple) of
-                                 (connection, read) timeouts.
-        :type _request_timeout: int, tuple(int, int), optional
-        :param _request_auth: set to override the auth_settings for an a single
-                              request; this effectively ignores the
-                              authentication in the spec for a single request.
-        :type _request_auth: dict, optional
-        :param _content_type: force content-type for the request.
-        :type _content_type: str, Optional
-        :param _headers: set to override the headers for a single
-                         request; this effectively ignores the headers
-                         in the spec for a single request.
-        :type _headers: dict, optional
-        :param _host_index: set to override the host_index for a single
-                            request; this effectively ignores the host_index
-                            in the spec for a single request.
-        :type _host_index: int, optional
-        :return: Returns the result object.
-        """ # noqa: E501
-
-        _param = self._runtime_web_v1_get_service_by_endpoint_id_serialize(
-            endpoint_id=endpoint_id,
-            _request_auth=_request_auth,
-            _content_type=_content_type,
-            _headers=_headers,
-            _host_index=_host_index
-        )
-
-        _response_types_map: Dict[str, Optional[str]] = {
-            '200': "RuntimeWebServiceResponse",
-            '403': "RuntimeWebActionErrorResponse",
-            '404': "RuntimeWebActionErrorResponse",
-            '409': "RuntimeWebActionErrorResponse",
-            '429': "RuntimeWebActionErrorResponse",
-            '422': "HTTPValidationError",
-        }
-        response_data = self.api_client.call_api(
-            *_param,
-            _request_timeout=_request_timeout
-        )
-        response_data.read()
-        return self.api_client.response_deserialize(
-            response_data=response_data,
-            response_types_map=_response_types_map,
-        )
-
-
-    @validate_call
-    def runtime_web_v1_get_service_by_endpoint_id_without_preload_content(
-        self,
-        endpoint_id: Annotated[str, Field(min_length=32, strict=True, max_length=32)],
-        _request_timeout: Union[
-            None,
-            Annotated[StrictFloat, Field(gt=0)],
-            Tuple[
-                Annotated[StrictFloat, Field(gt=0)],
-                Annotated[StrictFloat, Field(gt=0)]
-            ]
-        ] = None,
-        _request_auth: Optional[Dict[StrictStr, Any]] = None,
-        _content_type: Optional[StrictStr] = None,
-        _headers: Optional[Dict[StrictStr, Any]] = None,
-        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> RESTResponseType:
-        """Get Service By Endpoint Id
-
-        Return one authorized service projection by opaque endpoint ID.
-
-        :param endpoint_id: (required)
-        :type endpoint_id: str
-        :param _request_timeout: timeout setting for this request. If one
-                                 number provided, it will be total request
-                                 timeout. It can also be a pair (tuple) of
-                                 (connection, read) timeouts.
-        :type _request_timeout: int, tuple(int, int), optional
-        :param _request_auth: set to override the auth_settings for an a single
-                              request; this effectively ignores the
-                              authentication in the spec for a single request.
-        :type _request_auth: dict, optional
-        :param _content_type: force content-type for the request.
-        :type _content_type: str, Optional
-        :param _headers: set to override the headers for a single
-                         request; this effectively ignores the headers
-                         in the spec for a single request.
-        :type _headers: dict, optional
-        :param _host_index: set to override the host_index for a single
-                            request; this effectively ignores the host_index
-                            in the spec for a single request.
-        :type _host_index: int, optional
-        :return: Returns the result object.
-        """ # noqa: E501
-
-        _param = self._runtime_web_v1_get_service_by_endpoint_id_serialize(
-            endpoint_id=endpoint_id,
-            _request_auth=_request_auth,
-            _content_type=_content_type,
-            _headers=_headers,
-            _host_index=_host_index
-        )
-
-        _response_types_map: Dict[str, Optional[str]] = {
-            '200': "RuntimeWebServiceResponse",
-            '403': "RuntimeWebActionErrorResponse",
-            '404': "RuntimeWebActionErrorResponse",
-            '409': "RuntimeWebActionErrorResponse",
-            '429': "RuntimeWebActionErrorResponse",
-            '422': "HTTPValidationError",
-        }
-        response_data = self.api_client.call_api(
-            *_param,
-            _request_timeout=_request_timeout
-        )
-        return response_data.response
-
-
-    def _runtime_web_v1_get_service_by_endpoint_id_serialize(
-        self,
-        endpoint_id,
-        _request_auth,
-        _content_type,
-        _headers,
-        _host_index,
-    ) -> RequestSerialized:
-
-        _host = None
-
-        _collection_formats: Dict[str, str] = {
-        }
-
-        _path_params: Dict[str, str] = {}
-        _query_params: List[Tuple[str, str]] = []
-        _header_params: Dict[str, Optional[str]] = _headers or {}
-        _form_params: List[Tuple[str, str]] = []
-        _files: Dict[
-            str, Union[str, bytes, List[str], List[bytes], List[Tuple[str, bytes]]]
-        ] = {}
-        _body_params: Optional[bytes] = None
-
-        # process the path parameters
-        if endpoint_id is not None:
-            _path_params['endpoint_id'] = endpoint_id
-        # process the query parameters
-        # process the header parameters
-        # process the form parameters
-        # process the body parameter
-
-
-        # set the HTTP header `Accept`
-        if 'Accept' not in _header_params:
-            _header_params['Accept'] = self.api_client.select_header_accept(
-                [
-                    'application/json'
-                ]
-            )
-
-
-        # authentication setting
-        _auth_settings: List[str] = [
-            'HTTPBearer'
-        ]
-
-        return self.api_client.param_serialize(
-            method='GET',
-            resource_path='/runtime-web/v1/services/{endpoint_id}',
+            resource_path='/runtime-web/v1/workspaces/{handle}/agents/{agent_id}/services/{service_id}',
             path_params=_path_params,
             query_params=_query_params,
             header_params=_header_params,
@@ -3815,9 +2099,8 @@ class RuntimeWebV1Api:
     @validate_call
     def runtime_web_v1_list_runtime_web_services(
         self,
-        handle: StrictStr,
         agent_id: StrictStr,
-        session_id: StrictStr,
+        handle: StrictStr,
         offset: Optional[Annotated[int, Field(strict=True, ge=0)]] = None,
         limit: Optional[Annotated[int, Field(le=100, strict=True, ge=1)]] = None,
         _request_timeout: Union[
@@ -3835,14 +2118,12 @@ class RuntimeWebV1Api:
     ) -> RuntimeWebServiceListResponse:
         """List Runtime Web Services
 
-        List bounded current Runtime Web service projections.
+        List services shared by every Session of one Agent.
 
-        :param handle: (required)
-        :type handle: str
         :param agent_id: (required)
         :type agent_id: str
-        :param session_id: (required)
-        :type session_id: str
+        :param handle: (required)
+        :type handle: str
         :param offset:
         :type offset: int
         :param limit:
@@ -3870,9 +2151,8 @@ class RuntimeWebV1Api:
         """ # noqa: E501
 
         _param = self._runtime_web_v1_list_runtime_web_services_serialize(
-            handle=handle,
             agent_id=agent_id,
-            session_id=session_id,
+            handle=handle,
             offset=offset,
             limit=limit,
             _request_auth=_request_auth,
@@ -3903,9 +2183,8 @@ class RuntimeWebV1Api:
     @validate_call
     def runtime_web_v1_list_runtime_web_services_with_http_info(
         self,
-        handle: StrictStr,
         agent_id: StrictStr,
-        session_id: StrictStr,
+        handle: StrictStr,
         offset: Optional[Annotated[int, Field(strict=True, ge=0)]] = None,
         limit: Optional[Annotated[int, Field(le=100, strict=True, ge=1)]] = None,
         _request_timeout: Union[
@@ -3923,14 +2202,12 @@ class RuntimeWebV1Api:
     ) -> ApiResponse[RuntimeWebServiceListResponse]:
         """List Runtime Web Services
 
-        List bounded current Runtime Web service projections.
+        List services shared by every Session of one Agent.
 
-        :param handle: (required)
-        :type handle: str
         :param agent_id: (required)
         :type agent_id: str
-        :param session_id: (required)
-        :type session_id: str
+        :param handle: (required)
+        :type handle: str
         :param offset:
         :type offset: int
         :param limit:
@@ -3958,9 +2235,8 @@ class RuntimeWebV1Api:
         """ # noqa: E501
 
         _param = self._runtime_web_v1_list_runtime_web_services_serialize(
-            handle=handle,
             agent_id=agent_id,
-            session_id=session_id,
+            handle=handle,
             offset=offset,
             limit=limit,
             _request_auth=_request_auth,
@@ -3991,9 +2267,8 @@ class RuntimeWebV1Api:
     @validate_call
     def runtime_web_v1_list_runtime_web_services_without_preload_content(
         self,
-        handle: StrictStr,
         agent_id: StrictStr,
-        session_id: StrictStr,
+        handle: StrictStr,
         offset: Optional[Annotated[int, Field(strict=True, ge=0)]] = None,
         limit: Optional[Annotated[int, Field(le=100, strict=True, ge=1)]] = None,
         _request_timeout: Union[
@@ -4011,14 +2286,12 @@ class RuntimeWebV1Api:
     ) -> RESTResponseType:
         """List Runtime Web Services
 
-        List bounded current Runtime Web service projections.
+        List services shared by every Session of one Agent.
 
-        :param handle: (required)
-        :type handle: str
         :param agent_id: (required)
         :type agent_id: str
-        :param session_id: (required)
-        :type session_id: str
+        :param handle: (required)
+        :type handle: str
         :param offset:
         :type offset: int
         :param limit:
@@ -4046,9 +2319,8 @@ class RuntimeWebV1Api:
         """ # noqa: E501
 
         _param = self._runtime_web_v1_list_runtime_web_services_serialize(
-            handle=handle,
             agent_id=agent_id,
-            session_id=session_id,
+            handle=handle,
             offset=offset,
             limit=limit,
             _request_auth=_request_auth,
@@ -4074,9 +2346,8 @@ class RuntimeWebV1Api:
 
     def _runtime_web_v1_list_runtime_web_services_serialize(
         self,
-        handle,
         agent_id,
-        session_id,
+        handle,
         offset,
         limit,
         _request_auth,
@@ -4100,12 +2371,10 @@ class RuntimeWebV1Api:
         _body_params: Optional[bytes] = None
 
         # process the path parameters
-        if handle is not None:
-            _path_params['handle'] = handle
         if agent_id is not None:
             _path_params['agent_id'] = agent_id
-        if session_id is not None:
-            _path_params['session_id'] = session_id
+        if handle is not None:
+            _path_params['handle'] = handle
         # process the query parameters
         if offset is not None:
             
@@ -4136,7 +2405,7 @@ class RuntimeWebV1Api:
 
         return self.api_client.param_serialize(
             method='GET',
-            resource_path='/runtime-web/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/services',
+            resource_path='/runtime-web/v1/workspaces/{handle}/agents/{agent_id}/services',
             path_params=_path_params,
             query_params=_query_params,
             header_params=_header_params,
@@ -4433,361 +2702,11 @@ class RuntimeWebV1Api:
 
 
     @validate_call
-    def runtime_web_v1_prepare_runtime_web_endpoint(
+    def runtime_web_v1_reset_runtime_web_service_expiration(
         self,
-        handle: StrictStr,
         agent_id: StrictStr,
-        session_id: StrictStr,
-        port: Annotated[int, Field(le=65535, strict=True, ge=1)],
-        runtime_web_prepare_request: RuntimeWebPrepareRequest,
-        _request_timeout: Union[
-            None,
-            Annotated[StrictFloat, Field(gt=0)],
-            Tuple[
-                Annotated[StrictFloat, Field(gt=0)],
-                Annotated[StrictFloat, Field(gt=0)]
-            ]
-        ] = None,
-        _request_auth: Optional[Dict[StrictStr, Any]] = None,
-        _content_type: Optional[StrictStr] = None,
-        _headers: Optional[Dict[StrictStr, Any]] = None,
-        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> RuntimeWebServiceResponse:
-        """Prepare Runtime Web Endpoint
-
-        Prepare one stable Session-and-port endpoint without creating exposure.
-
-        :param handle: (required)
-        :type handle: str
-        :param agent_id: (required)
-        :type agent_id: str
-        :param session_id: (required)
-        :type session_id: str
-        :param port: (required)
-        :type port: int
-        :param runtime_web_prepare_request: (required)
-        :type runtime_web_prepare_request: RuntimeWebPrepareRequest
-        :param _request_timeout: timeout setting for this request. If one
-                                 number provided, it will be total request
-                                 timeout. It can also be a pair (tuple) of
-                                 (connection, read) timeouts.
-        :type _request_timeout: int, tuple(int, int), optional
-        :param _request_auth: set to override the auth_settings for an a single
-                              request; this effectively ignores the
-                              authentication in the spec for a single request.
-        :type _request_auth: dict, optional
-        :param _content_type: force content-type for the request.
-        :type _content_type: str, Optional
-        :param _headers: set to override the headers for a single
-                         request; this effectively ignores the headers
-                         in the spec for a single request.
-        :type _headers: dict, optional
-        :param _host_index: set to override the host_index for a single
-                            request; this effectively ignores the host_index
-                            in the spec for a single request.
-        :type _host_index: int, optional
-        :return: Returns the result object.
-        """ # noqa: E501
-
-        _param = self._runtime_web_v1_prepare_runtime_web_endpoint_serialize(
-            handle=handle,
-            agent_id=agent_id,
-            session_id=session_id,
-            port=port,
-            runtime_web_prepare_request=runtime_web_prepare_request,
-            _request_auth=_request_auth,
-            _content_type=_content_type,
-            _headers=_headers,
-            _host_index=_host_index
-        )
-
-        _response_types_map: Dict[str, Optional[str]] = {
-            '200': "RuntimeWebServiceResponse",
-            '403': "RuntimeWebActionErrorResponse",
-            '404': "RuntimeWebActionErrorResponse",
-            '409': "RuntimeWebActionErrorResponse",
-            '429': "RuntimeWebActionErrorResponse",
-            '422': "HTTPValidationError",
-        }
-        response_data = self.api_client.call_api(
-            *_param,
-            _request_timeout=_request_timeout
-        )
-        response_data.read()
-        return self.api_client.response_deserialize(
-            response_data=response_data,
-            response_types_map=_response_types_map,
-        ).data
-
-
-    @validate_call
-    def runtime_web_v1_prepare_runtime_web_endpoint_with_http_info(
-        self,
+        service_id: Annotated[str, Field(min_length=32, strict=True, max_length=32)],
         handle: StrictStr,
-        agent_id: StrictStr,
-        session_id: StrictStr,
-        port: Annotated[int, Field(le=65535, strict=True, ge=1)],
-        runtime_web_prepare_request: RuntimeWebPrepareRequest,
-        _request_timeout: Union[
-            None,
-            Annotated[StrictFloat, Field(gt=0)],
-            Tuple[
-                Annotated[StrictFloat, Field(gt=0)],
-                Annotated[StrictFloat, Field(gt=0)]
-            ]
-        ] = None,
-        _request_auth: Optional[Dict[StrictStr, Any]] = None,
-        _content_type: Optional[StrictStr] = None,
-        _headers: Optional[Dict[StrictStr, Any]] = None,
-        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> ApiResponse[RuntimeWebServiceResponse]:
-        """Prepare Runtime Web Endpoint
-
-        Prepare one stable Session-and-port endpoint without creating exposure.
-
-        :param handle: (required)
-        :type handle: str
-        :param agent_id: (required)
-        :type agent_id: str
-        :param session_id: (required)
-        :type session_id: str
-        :param port: (required)
-        :type port: int
-        :param runtime_web_prepare_request: (required)
-        :type runtime_web_prepare_request: RuntimeWebPrepareRequest
-        :param _request_timeout: timeout setting for this request. If one
-                                 number provided, it will be total request
-                                 timeout. It can also be a pair (tuple) of
-                                 (connection, read) timeouts.
-        :type _request_timeout: int, tuple(int, int), optional
-        :param _request_auth: set to override the auth_settings for an a single
-                              request; this effectively ignores the
-                              authentication in the spec for a single request.
-        :type _request_auth: dict, optional
-        :param _content_type: force content-type for the request.
-        :type _content_type: str, Optional
-        :param _headers: set to override the headers for a single
-                         request; this effectively ignores the headers
-                         in the spec for a single request.
-        :type _headers: dict, optional
-        :param _host_index: set to override the host_index for a single
-                            request; this effectively ignores the host_index
-                            in the spec for a single request.
-        :type _host_index: int, optional
-        :return: Returns the result object.
-        """ # noqa: E501
-
-        _param = self._runtime_web_v1_prepare_runtime_web_endpoint_serialize(
-            handle=handle,
-            agent_id=agent_id,
-            session_id=session_id,
-            port=port,
-            runtime_web_prepare_request=runtime_web_prepare_request,
-            _request_auth=_request_auth,
-            _content_type=_content_type,
-            _headers=_headers,
-            _host_index=_host_index
-        )
-
-        _response_types_map: Dict[str, Optional[str]] = {
-            '200': "RuntimeWebServiceResponse",
-            '403': "RuntimeWebActionErrorResponse",
-            '404': "RuntimeWebActionErrorResponse",
-            '409': "RuntimeWebActionErrorResponse",
-            '429': "RuntimeWebActionErrorResponse",
-            '422': "HTTPValidationError",
-        }
-        response_data = self.api_client.call_api(
-            *_param,
-            _request_timeout=_request_timeout
-        )
-        response_data.read()
-        return self.api_client.response_deserialize(
-            response_data=response_data,
-            response_types_map=_response_types_map,
-        )
-
-
-    @validate_call
-    def runtime_web_v1_prepare_runtime_web_endpoint_without_preload_content(
-        self,
-        handle: StrictStr,
-        agent_id: StrictStr,
-        session_id: StrictStr,
-        port: Annotated[int, Field(le=65535, strict=True, ge=1)],
-        runtime_web_prepare_request: RuntimeWebPrepareRequest,
-        _request_timeout: Union[
-            None,
-            Annotated[StrictFloat, Field(gt=0)],
-            Tuple[
-                Annotated[StrictFloat, Field(gt=0)],
-                Annotated[StrictFloat, Field(gt=0)]
-            ]
-        ] = None,
-        _request_auth: Optional[Dict[StrictStr, Any]] = None,
-        _content_type: Optional[StrictStr] = None,
-        _headers: Optional[Dict[StrictStr, Any]] = None,
-        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> RESTResponseType:
-        """Prepare Runtime Web Endpoint
-
-        Prepare one stable Session-and-port endpoint without creating exposure.
-
-        :param handle: (required)
-        :type handle: str
-        :param agent_id: (required)
-        :type agent_id: str
-        :param session_id: (required)
-        :type session_id: str
-        :param port: (required)
-        :type port: int
-        :param runtime_web_prepare_request: (required)
-        :type runtime_web_prepare_request: RuntimeWebPrepareRequest
-        :param _request_timeout: timeout setting for this request. If one
-                                 number provided, it will be total request
-                                 timeout. It can also be a pair (tuple) of
-                                 (connection, read) timeouts.
-        :type _request_timeout: int, tuple(int, int), optional
-        :param _request_auth: set to override the auth_settings for an a single
-                              request; this effectively ignores the
-                              authentication in the spec for a single request.
-        :type _request_auth: dict, optional
-        :param _content_type: force content-type for the request.
-        :type _content_type: str, Optional
-        :param _headers: set to override the headers for a single
-                         request; this effectively ignores the headers
-                         in the spec for a single request.
-        :type _headers: dict, optional
-        :param _host_index: set to override the host_index for a single
-                            request; this effectively ignores the host_index
-                            in the spec for a single request.
-        :type _host_index: int, optional
-        :return: Returns the result object.
-        """ # noqa: E501
-
-        _param = self._runtime_web_v1_prepare_runtime_web_endpoint_serialize(
-            handle=handle,
-            agent_id=agent_id,
-            session_id=session_id,
-            port=port,
-            runtime_web_prepare_request=runtime_web_prepare_request,
-            _request_auth=_request_auth,
-            _content_type=_content_type,
-            _headers=_headers,
-            _host_index=_host_index
-        )
-
-        _response_types_map: Dict[str, Optional[str]] = {
-            '200': "RuntimeWebServiceResponse",
-            '403': "RuntimeWebActionErrorResponse",
-            '404': "RuntimeWebActionErrorResponse",
-            '409': "RuntimeWebActionErrorResponse",
-            '429': "RuntimeWebActionErrorResponse",
-            '422': "HTTPValidationError",
-        }
-        response_data = self.api_client.call_api(
-            *_param,
-            _request_timeout=_request_timeout
-        )
-        return response_data.response
-
-
-    def _runtime_web_v1_prepare_runtime_web_endpoint_serialize(
-        self,
-        handle,
-        agent_id,
-        session_id,
-        port,
-        runtime_web_prepare_request,
-        _request_auth,
-        _content_type,
-        _headers,
-        _host_index,
-    ) -> RequestSerialized:
-
-        _host = None
-
-        _collection_formats: Dict[str, str] = {
-        }
-
-        _path_params: Dict[str, str] = {}
-        _query_params: List[Tuple[str, str]] = []
-        _header_params: Dict[str, Optional[str]] = _headers or {}
-        _form_params: List[Tuple[str, str]] = []
-        _files: Dict[
-            str, Union[str, bytes, List[str], List[bytes], List[Tuple[str, bytes]]]
-        ] = {}
-        _body_params: Optional[bytes] = None
-
-        # process the path parameters
-        if handle is not None:
-            _path_params['handle'] = handle
-        if agent_id is not None:
-            _path_params['agent_id'] = agent_id
-        if session_id is not None:
-            _path_params['session_id'] = session_id
-        if port is not None:
-            _path_params['port'] = port
-        # process the query parameters
-        # process the header parameters
-        # process the form parameters
-        # process the body parameter
-        if runtime_web_prepare_request is not None:
-            _body_params = runtime_web_prepare_request
-
-
-        # set the HTTP header `Accept`
-        if 'Accept' not in _header_params:
-            _header_params['Accept'] = self.api_client.select_header_accept(
-                [
-                    'application/json'
-                ]
-            )
-
-        # set the HTTP header `Content-Type`
-        if _content_type:
-            _header_params['Content-Type'] = _content_type
-        else:
-            _default_content_type = (
-                self.api_client.select_header_content_type(
-                    [
-                        'application/json'
-                    ]
-                )
-            )
-            if _default_content_type is not None:
-                _header_params['Content-Type'] = _default_content_type
-
-        # authentication setting
-        _auth_settings: List[str] = [
-            'HTTPBearer'
-        ]
-
-        return self.api_client.param_serialize(
-            method='PUT',
-            resource_path='/runtime-web/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/services/{port}/endpoint',
-            path_params=_path_params,
-            query_params=_query_params,
-            header_params=_header_params,
-            body=_body_params,
-            post_params=_form_params,
-            files=_files,
-            auth_settings=_auth_settings,
-            collection_formats=_collection_formats,
-            _host=_host,
-            _request_auth=_request_auth
-        )
-
-
-
-
-    @validate_call
-    def runtime_web_v1_reject_runtime_web_request(
-        self,
-        handle: StrictStr,
-        agent_id: StrictStr,
-        session_id: StrictStr,
-        request_id: StrictStr,
         runtime_web_expected_revision_request: RuntimeWebExpectedRevisionRequest,
         _request_timeout: Union[
             None,
@@ -4802,18 +2721,16 @@ class RuntimeWebV1Api:
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
     ) -> RuntimeWebServiceResponse:
-        """Reject Runtime Web Request
+        """Reset Runtime Web Service Expiration
 
-        Reject one exact pending request.
+        Restart one On service exposure window.
 
-        :param handle: (required)
-        :type handle: str
         :param agent_id: (required)
         :type agent_id: str
-        :param session_id: (required)
-        :type session_id: str
-        :param request_id: (required)
-        :type request_id: str
+        :param service_id: (required)
+        :type service_id: str
+        :param handle: (required)
+        :type handle: str
         :param runtime_web_expected_revision_request: (required)
         :type runtime_web_expected_revision_request: RuntimeWebExpectedRevisionRequest
         :param _request_timeout: timeout setting for this request. If one
@@ -4838,11 +2755,10 @@ class RuntimeWebV1Api:
         :return: Returns the result object.
         """ # noqa: E501
 
-        _param = self._runtime_web_v1_reject_runtime_web_request_serialize(
-            handle=handle,
+        _param = self._runtime_web_v1_reset_runtime_web_service_expiration_serialize(
             agent_id=agent_id,
-            session_id=session_id,
-            request_id=request_id,
+            service_id=service_id,
+            handle=handle,
             runtime_web_expected_revision_request=runtime_web_expected_revision_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -4870,12 +2786,11 @@ class RuntimeWebV1Api:
 
 
     @validate_call
-    def runtime_web_v1_reject_runtime_web_request_with_http_info(
+    def runtime_web_v1_reset_runtime_web_service_expiration_with_http_info(
         self,
-        handle: StrictStr,
         agent_id: StrictStr,
-        session_id: StrictStr,
-        request_id: StrictStr,
+        service_id: Annotated[str, Field(min_length=32, strict=True, max_length=32)],
+        handle: StrictStr,
         runtime_web_expected_revision_request: RuntimeWebExpectedRevisionRequest,
         _request_timeout: Union[
             None,
@@ -4890,18 +2805,16 @@ class RuntimeWebV1Api:
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
     ) -> ApiResponse[RuntimeWebServiceResponse]:
-        """Reject Runtime Web Request
+        """Reset Runtime Web Service Expiration
 
-        Reject one exact pending request.
+        Restart one On service exposure window.
 
-        :param handle: (required)
-        :type handle: str
         :param agent_id: (required)
         :type agent_id: str
-        :param session_id: (required)
-        :type session_id: str
-        :param request_id: (required)
-        :type request_id: str
+        :param service_id: (required)
+        :type service_id: str
+        :param handle: (required)
+        :type handle: str
         :param runtime_web_expected_revision_request: (required)
         :type runtime_web_expected_revision_request: RuntimeWebExpectedRevisionRequest
         :param _request_timeout: timeout setting for this request. If one
@@ -4926,11 +2839,10 @@ class RuntimeWebV1Api:
         :return: Returns the result object.
         """ # noqa: E501
 
-        _param = self._runtime_web_v1_reject_runtime_web_request_serialize(
-            handle=handle,
+        _param = self._runtime_web_v1_reset_runtime_web_service_expiration_serialize(
             agent_id=agent_id,
-            session_id=session_id,
-            request_id=request_id,
+            service_id=service_id,
+            handle=handle,
             runtime_web_expected_revision_request=runtime_web_expected_revision_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -4958,12 +2870,11 @@ class RuntimeWebV1Api:
 
 
     @validate_call
-    def runtime_web_v1_reject_runtime_web_request_without_preload_content(
+    def runtime_web_v1_reset_runtime_web_service_expiration_without_preload_content(
         self,
-        handle: StrictStr,
         agent_id: StrictStr,
-        session_id: StrictStr,
-        request_id: StrictStr,
+        service_id: Annotated[str, Field(min_length=32, strict=True, max_length=32)],
+        handle: StrictStr,
         runtime_web_expected_revision_request: RuntimeWebExpectedRevisionRequest,
         _request_timeout: Union[
             None,
@@ -4978,18 +2889,16 @@ class RuntimeWebV1Api:
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
     ) -> RESTResponseType:
-        """Reject Runtime Web Request
+        """Reset Runtime Web Service Expiration
 
-        Reject one exact pending request.
+        Restart one On service exposure window.
 
-        :param handle: (required)
-        :type handle: str
         :param agent_id: (required)
         :type agent_id: str
-        :param session_id: (required)
-        :type session_id: str
-        :param request_id: (required)
-        :type request_id: str
+        :param service_id: (required)
+        :type service_id: str
+        :param handle: (required)
+        :type handle: str
         :param runtime_web_expected_revision_request: (required)
         :type runtime_web_expected_revision_request: RuntimeWebExpectedRevisionRequest
         :param _request_timeout: timeout setting for this request. If one
@@ -5014,11 +2923,10 @@ class RuntimeWebV1Api:
         :return: Returns the result object.
         """ # noqa: E501
 
-        _param = self._runtime_web_v1_reject_runtime_web_request_serialize(
-            handle=handle,
+        _param = self._runtime_web_v1_reset_runtime_web_service_expiration_serialize(
             agent_id=agent_id,
-            session_id=session_id,
-            request_id=request_id,
+            service_id=service_id,
+            handle=handle,
             runtime_web_expected_revision_request=runtime_web_expected_revision_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -5041,12 +2949,11 @@ class RuntimeWebV1Api:
         return response_data.response
 
 
-    def _runtime_web_v1_reject_runtime_web_request_serialize(
+    def _runtime_web_v1_reset_runtime_web_service_expiration_serialize(
         self,
-        handle,
         agent_id,
-        session_id,
-        request_id,
+        service_id,
+        handle,
         runtime_web_expected_revision_request,
         _request_auth,
         _content_type,
@@ -5069,14 +2976,12 @@ class RuntimeWebV1Api:
         _body_params: Optional[bytes] = None
 
         # process the path parameters
-        if handle is not None:
-            _path_params['handle'] = handle
         if agent_id is not None:
             _path_params['agent_id'] = agent_id
-        if session_id is not None:
-            _path_params['session_id'] = session_id
-        if request_id is not None:
-            _path_params['request_id'] = request_id
+        if service_id is not None:
+            _path_params['service_id'] = service_id
+        if handle is not None:
+            _path_params['handle'] = handle
         # process the query parameters
         # process the header parameters
         # process the form parameters
@@ -5114,675 +3019,7 @@ class RuntimeWebV1Api:
 
         return self.api_client.param_serialize(
             method='POST',
-            resource_path='/runtime-web/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/requests/{request_id}/reject',
-            path_params=_path_params,
-            query_params=_query_params,
-            header_params=_header_params,
-            body=_body_params,
-            post_params=_form_params,
-            files=_files,
-            auth_settings=_auth_settings,
-            collection_formats=_collection_formats,
-            _host=_host,
-            _request_auth=_request_auth
-        )
-
-
-
-
-    @validate_call
-    def runtime_web_v1_reject_runtime_web_request_by_endpoint_id(
-        self,
-        endpoint_id: Annotated[str, Field(min_length=32, strict=True, max_length=32)],
-        request_id: StrictStr,
-        runtime_web_expected_revision_request: RuntimeWebExpectedRevisionRequest,
-        _request_timeout: Union[
-            None,
-            Annotated[StrictFloat, Field(gt=0)],
-            Tuple[
-                Annotated[StrictFloat, Field(gt=0)],
-                Annotated[StrictFloat, Field(gt=0)]
-            ]
-        ] = None,
-        _request_auth: Optional[Dict[StrictStr, Any]] = None,
-        _content_type: Optional[StrictStr] = None,
-        _headers: Optional[Dict[StrictStr, Any]] = None,
-        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> RuntimeWebServiceResponse:
-        """Reject Runtime Web Request By Endpoint Id
-
-        Reject one exact pending request reached through a trusted endpoint ID.
-
-        :param endpoint_id: (required)
-        :type endpoint_id: str
-        :param request_id: (required)
-        :type request_id: str
-        :param runtime_web_expected_revision_request: (required)
-        :type runtime_web_expected_revision_request: RuntimeWebExpectedRevisionRequest
-        :param _request_timeout: timeout setting for this request. If one
-                                 number provided, it will be total request
-                                 timeout. It can also be a pair (tuple) of
-                                 (connection, read) timeouts.
-        :type _request_timeout: int, tuple(int, int), optional
-        :param _request_auth: set to override the auth_settings for an a single
-                              request; this effectively ignores the
-                              authentication in the spec for a single request.
-        :type _request_auth: dict, optional
-        :param _content_type: force content-type for the request.
-        :type _content_type: str, Optional
-        :param _headers: set to override the headers for a single
-                         request; this effectively ignores the headers
-                         in the spec for a single request.
-        :type _headers: dict, optional
-        :param _host_index: set to override the host_index for a single
-                            request; this effectively ignores the host_index
-                            in the spec for a single request.
-        :type _host_index: int, optional
-        :return: Returns the result object.
-        """ # noqa: E501
-
-        _param = self._runtime_web_v1_reject_runtime_web_request_by_endpoint_id_serialize(
-            endpoint_id=endpoint_id,
-            request_id=request_id,
-            runtime_web_expected_revision_request=runtime_web_expected_revision_request,
-            _request_auth=_request_auth,
-            _content_type=_content_type,
-            _headers=_headers,
-            _host_index=_host_index
-        )
-
-        _response_types_map: Dict[str, Optional[str]] = {
-            '200': "RuntimeWebServiceResponse",
-            '403': "RuntimeWebActionErrorResponse",
-            '404': "RuntimeWebActionErrorResponse",
-            '409': "RuntimeWebActionErrorResponse",
-            '429': "RuntimeWebActionErrorResponse",
-            '422': "HTTPValidationError",
-        }
-        response_data = self.api_client.call_api(
-            *_param,
-            _request_timeout=_request_timeout
-        )
-        response_data.read()
-        return self.api_client.response_deserialize(
-            response_data=response_data,
-            response_types_map=_response_types_map,
-        ).data
-
-
-    @validate_call
-    def runtime_web_v1_reject_runtime_web_request_by_endpoint_id_with_http_info(
-        self,
-        endpoint_id: Annotated[str, Field(min_length=32, strict=True, max_length=32)],
-        request_id: StrictStr,
-        runtime_web_expected_revision_request: RuntimeWebExpectedRevisionRequest,
-        _request_timeout: Union[
-            None,
-            Annotated[StrictFloat, Field(gt=0)],
-            Tuple[
-                Annotated[StrictFloat, Field(gt=0)],
-                Annotated[StrictFloat, Field(gt=0)]
-            ]
-        ] = None,
-        _request_auth: Optional[Dict[StrictStr, Any]] = None,
-        _content_type: Optional[StrictStr] = None,
-        _headers: Optional[Dict[StrictStr, Any]] = None,
-        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> ApiResponse[RuntimeWebServiceResponse]:
-        """Reject Runtime Web Request By Endpoint Id
-
-        Reject one exact pending request reached through a trusted endpoint ID.
-
-        :param endpoint_id: (required)
-        :type endpoint_id: str
-        :param request_id: (required)
-        :type request_id: str
-        :param runtime_web_expected_revision_request: (required)
-        :type runtime_web_expected_revision_request: RuntimeWebExpectedRevisionRequest
-        :param _request_timeout: timeout setting for this request. If one
-                                 number provided, it will be total request
-                                 timeout. It can also be a pair (tuple) of
-                                 (connection, read) timeouts.
-        :type _request_timeout: int, tuple(int, int), optional
-        :param _request_auth: set to override the auth_settings for an a single
-                              request; this effectively ignores the
-                              authentication in the spec for a single request.
-        :type _request_auth: dict, optional
-        :param _content_type: force content-type for the request.
-        :type _content_type: str, Optional
-        :param _headers: set to override the headers for a single
-                         request; this effectively ignores the headers
-                         in the spec for a single request.
-        :type _headers: dict, optional
-        :param _host_index: set to override the host_index for a single
-                            request; this effectively ignores the host_index
-                            in the spec for a single request.
-        :type _host_index: int, optional
-        :return: Returns the result object.
-        """ # noqa: E501
-
-        _param = self._runtime_web_v1_reject_runtime_web_request_by_endpoint_id_serialize(
-            endpoint_id=endpoint_id,
-            request_id=request_id,
-            runtime_web_expected_revision_request=runtime_web_expected_revision_request,
-            _request_auth=_request_auth,
-            _content_type=_content_type,
-            _headers=_headers,
-            _host_index=_host_index
-        )
-
-        _response_types_map: Dict[str, Optional[str]] = {
-            '200': "RuntimeWebServiceResponse",
-            '403': "RuntimeWebActionErrorResponse",
-            '404': "RuntimeWebActionErrorResponse",
-            '409': "RuntimeWebActionErrorResponse",
-            '429': "RuntimeWebActionErrorResponse",
-            '422': "HTTPValidationError",
-        }
-        response_data = self.api_client.call_api(
-            *_param,
-            _request_timeout=_request_timeout
-        )
-        response_data.read()
-        return self.api_client.response_deserialize(
-            response_data=response_data,
-            response_types_map=_response_types_map,
-        )
-
-
-    @validate_call
-    def runtime_web_v1_reject_runtime_web_request_by_endpoint_id_without_preload_content(
-        self,
-        endpoint_id: Annotated[str, Field(min_length=32, strict=True, max_length=32)],
-        request_id: StrictStr,
-        runtime_web_expected_revision_request: RuntimeWebExpectedRevisionRequest,
-        _request_timeout: Union[
-            None,
-            Annotated[StrictFloat, Field(gt=0)],
-            Tuple[
-                Annotated[StrictFloat, Field(gt=0)],
-                Annotated[StrictFloat, Field(gt=0)]
-            ]
-        ] = None,
-        _request_auth: Optional[Dict[StrictStr, Any]] = None,
-        _content_type: Optional[StrictStr] = None,
-        _headers: Optional[Dict[StrictStr, Any]] = None,
-        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> RESTResponseType:
-        """Reject Runtime Web Request By Endpoint Id
-
-        Reject one exact pending request reached through a trusted endpoint ID.
-
-        :param endpoint_id: (required)
-        :type endpoint_id: str
-        :param request_id: (required)
-        :type request_id: str
-        :param runtime_web_expected_revision_request: (required)
-        :type runtime_web_expected_revision_request: RuntimeWebExpectedRevisionRequest
-        :param _request_timeout: timeout setting for this request. If one
-                                 number provided, it will be total request
-                                 timeout. It can also be a pair (tuple) of
-                                 (connection, read) timeouts.
-        :type _request_timeout: int, tuple(int, int), optional
-        :param _request_auth: set to override the auth_settings for an a single
-                              request; this effectively ignores the
-                              authentication in the spec for a single request.
-        :type _request_auth: dict, optional
-        :param _content_type: force content-type for the request.
-        :type _content_type: str, Optional
-        :param _headers: set to override the headers for a single
-                         request; this effectively ignores the headers
-                         in the spec for a single request.
-        :type _headers: dict, optional
-        :param _host_index: set to override the host_index for a single
-                            request; this effectively ignores the host_index
-                            in the spec for a single request.
-        :type _host_index: int, optional
-        :return: Returns the result object.
-        """ # noqa: E501
-
-        _param = self._runtime_web_v1_reject_runtime_web_request_by_endpoint_id_serialize(
-            endpoint_id=endpoint_id,
-            request_id=request_id,
-            runtime_web_expected_revision_request=runtime_web_expected_revision_request,
-            _request_auth=_request_auth,
-            _content_type=_content_type,
-            _headers=_headers,
-            _host_index=_host_index
-        )
-
-        _response_types_map: Dict[str, Optional[str]] = {
-            '200': "RuntimeWebServiceResponse",
-            '403': "RuntimeWebActionErrorResponse",
-            '404': "RuntimeWebActionErrorResponse",
-            '409': "RuntimeWebActionErrorResponse",
-            '429': "RuntimeWebActionErrorResponse",
-            '422': "HTTPValidationError",
-        }
-        response_data = self.api_client.call_api(
-            *_param,
-            _request_timeout=_request_timeout
-        )
-        return response_data.response
-
-
-    def _runtime_web_v1_reject_runtime_web_request_by_endpoint_id_serialize(
-        self,
-        endpoint_id,
-        request_id,
-        runtime_web_expected_revision_request,
-        _request_auth,
-        _content_type,
-        _headers,
-        _host_index,
-    ) -> RequestSerialized:
-
-        _host = None
-
-        _collection_formats: Dict[str, str] = {
-        }
-
-        _path_params: Dict[str, str] = {}
-        _query_params: List[Tuple[str, str]] = []
-        _header_params: Dict[str, Optional[str]] = _headers or {}
-        _form_params: List[Tuple[str, str]] = []
-        _files: Dict[
-            str, Union[str, bytes, List[str], List[bytes], List[Tuple[str, bytes]]]
-        ] = {}
-        _body_params: Optional[bytes] = None
-
-        # process the path parameters
-        if endpoint_id is not None:
-            _path_params['endpoint_id'] = endpoint_id
-        if request_id is not None:
-            _path_params['request_id'] = request_id
-        # process the query parameters
-        # process the header parameters
-        # process the form parameters
-        # process the body parameter
-        if runtime_web_expected_revision_request is not None:
-            _body_params = runtime_web_expected_revision_request
-
-
-        # set the HTTP header `Accept`
-        if 'Accept' not in _header_params:
-            _header_params['Accept'] = self.api_client.select_header_accept(
-                [
-                    'application/json'
-                ]
-            )
-
-        # set the HTTP header `Content-Type`
-        if _content_type:
-            _header_params['Content-Type'] = _content_type
-        else:
-            _default_content_type = (
-                self.api_client.select_header_content_type(
-                    [
-                        'application/json'
-                    ]
-                )
-            )
-            if _default_content_type is not None:
-                _header_params['Content-Type'] = _default_content_type
-
-        # authentication setting
-        _auth_settings: List[str] = [
-            'HTTPBearer'
-        ]
-
-        return self.api_client.param_serialize(
-            method='POST',
-            resource_path='/runtime-web/v1/services/{endpoint_id}/requests/{request_id}/reject',
-            path_params=_path_params,
-            query_params=_query_params,
-            header_params=_header_params,
-            body=_body_params,
-            post_params=_form_params,
-            files=_files,
-            auth_settings=_auth_settings,
-            collection_formats=_collection_formats,
-            _host=_host,
-            _request_auth=_request_auth
-        )
-
-
-
-
-    @validate_call
-    def runtime_web_v1_request_runtime_web_exposure(
-        self,
-        handle: StrictStr,
-        agent_id: StrictStr,
-        session_id: StrictStr,
-        port: Annotated[int, Field(le=65535, strict=True, ge=1)],
-        runtime_web_exposure_request: RuntimeWebExposureRequest,
-        _request_timeout: Union[
-            None,
-            Annotated[StrictFloat, Field(gt=0)],
-            Tuple[
-                Annotated[StrictFloat, Field(gt=0)],
-                Annotated[StrictFloat, Field(gt=0)]
-            ]
-        ] = None,
-        _request_auth: Optional[Dict[StrictStr, Any]] = None,
-        _content_type: Optional[StrictStr] = None,
-        _headers: Optional[Dict[StrictStr, Any]] = None,
-        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> RuntimeWebServiceResponse:
-        """Request Runtime Web Exposure
-
-        Create or return the pending request without waiting for approval.
-
-        :param handle: (required)
-        :type handle: str
-        :param agent_id: (required)
-        :type agent_id: str
-        :param session_id: (required)
-        :type session_id: str
-        :param port: (required)
-        :type port: int
-        :param runtime_web_exposure_request: (required)
-        :type runtime_web_exposure_request: RuntimeWebExposureRequest
-        :param _request_timeout: timeout setting for this request. If one
-                                 number provided, it will be total request
-                                 timeout. It can also be a pair (tuple) of
-                                 (connection, read) timeouts.
-        :type _request_timeout: int, tuple(int, int), optional
-        :param _request_auth: set to override the auth_settings for an a single
-                              request; this effectively ignores the
-                              authentication in the spec for a single request.
-        :type _request_auth: dict, optional
-        :param _content_type: force content-type for the request.
-        :type _content_type: str, Optional
-        :param _headers: set to override the headers for a single
-                         request; this effectively ignores the headers
-                         in the spec for a single request.
-        :type _headers: dict, optional
-        :param _host_index: set to override the host_index for a single
-                            request; this effectively ignores the host_index
-                            in the spec for a single request.
-        :type _host_index: int, optional
-        :return: Returns the result object.
-        """ # noqa: E501
-
-        _param = self._runtime_web_v1_request_runtime_web_exposure_serialize(
-            handle=handle,
-            agent_id=agent_id,
-            session_id=session_id,
-            port=port,
-            runtime_web_exposure_request=runtime_web_exposure_request,
-            _request_auth=_request_auth,
-            _content_type=_content_type,
-            _headers=_headers,
-            _host_index=_host_index
-        )
-
-        _response_types_map: Dict[str, Optional[str]] = {
-            '200': "RuntimeWebServiceResponse",
-            '403': "RuntimeWebActionErrorResponse",
-            '404': "RuntimeWebActionErrorResponse",
-            '409': "RuntimeWebActionErrorResponse",
-            '429': "RuntimeWebActionErrorResponse",
-            '422': "HTTPValidationError",
-        }
-        response_data = self.api_client.call_api(
-            *_param,
-            _request_timeout=_request_timeout
-        )
-        response_data.read()
-        return self.api_client.response_deserialize(
-            response_data=response_data,
-            response_types_map=_response_types_map,
-        ).data
-
-
-    @validate_call
-    def runtime_web_v1_request_runtime_web_exposure_with_http_info(
-        self,
-        handle: StrictStr,
-        agent_id: StrictStr,
-        session_id: StrictStr,
-        port: Annotated[int, Field(le=65535, strict=True, ge=1)],
-        runtime_web_exposure_request: RuntimeWebExposureRequest,
-        _request_timeout: Union[
-            None,
-            Annotated[StrictFloat, Field(gt=0)],
-            Tuple[
-                Annotated[StrictFloat, Field(gt=0)],
-                Annotated[StrictFloat, Field(gt=0)]
-            ]
-        ] = None,
-        _request_auth: Optional[Dict[StrictStr, Any]] = None,
-        _content_type: Optional[StrictStr] = None,
-        _headers: Optional[Dict[StrictStr, Any]] = None,
-        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> ApiResponse[RuntimeWebServiceResponse]:
-        """Request Runtime Web Exposure
-
-        Create or return the pending request without waiting for approval.
-
-        :param handle: (required)
-        :type handle: str
-        :param agent_id: (required)
-        :type agent_id: str
-        :param session_id: (required)
-        :type session_id: str
-        :param port: (required)
-        :type port: int
-        :param runtime_web_exposure_request: (required)
-        :type runtime_web_exposure_request: RuntimeWebExposureRequest
-        :param _request_timeout: timeout setting for this request. If one
-                                 number provided, it will be total request
-                                 timeout. It can also be a pair (tuple) of
-                                 (connection, read) timeouts.
-        :type _request_timeout: int, tuple(int, int), optional
-        :param _request_auth: set to override the auth_settings for an a single
-                              request; this effectively ignores the
-                              authentication in the spec for a single request.
-        :type _request_auth: dict, optional
-        :param _content_type: force content-type for the request.
-        :type _content_type: str, Optional
-        :param _headers: set to override the headers for a single
-                         request; this effectively ignores the headers
-                         in the spec for a single request.
-        :type _headers: dict, optional
-        :param _host_index: set to override the host_index for a single
-                            request; this effectively ignores the host_index
-                            in the spec for a single request.
-        :type _host_index: int, optional
-        :return: Returns the result object.
-        """ # noqa: E501
-
-        _param = self._runtime_web_v1_request_runtime_web_exposure_serialize(
-            handle=handle,
-            agent_id=agent_id,
-            session_id=session_id,
-            port=port,
-            runtime_web_exposure_request=runtime_web_exposure_request,
-            _request_auth=_request_auth,
-            _content_type=_content_type,
-            _headers=_headers,
-            _host_index=_host_index
-        )
-
-        _response_types_map: Dict[str, Optional[str]] = {
-            '200': "RuntimeWebServiceResponse",
-            '403': "RuntimeWebActionErrorResponse",
-            '404': "RuntimeWebActionErrorResponse",
-            '409': "RuntimeWebActionErrorResponse",
-            '429': "RuntimeWebActionErrorResponse",
-            '422': "HTTPValidationError",
-        }
-        response_data = self.api_client.call_api(
-            *_param,
-            _request_timeout=_request_timeout
-        )
-        response_data.read()
-        return self.api_client.response_deserialize(
-            response_data=response_data,
-            response_types_map=_response_types_map,
-        )
-
-
-    @validate_call
-    def runtime_web_v1_request_runtime_web_exposure_without_preload_content(
-        self,
-        handle: StrictStr,
-        agent_id: StrictStr,
-        session_id: StrictStr,
-        port: Annotated[int, Field(le=65535, strict=True, ge=1)],
-        runtime_web_exposure_request: RuntimeWebExposureRequest,
-        _request_timeout: Union[
-            None,
-            Annotated[StrictFloat, Field(gt=0)],
-            Tuple[
-                Annotated[StrictFloat, Field(gt=0)],
-                Annotated[StrictFloat, Field(gt=0)]
-            ]
-        ] = None,
-        _request_auth: Optional[Dict[StrictStr, Any]] = None,
-        _content_type: Optional[StrictStr] = None,
-        _headers: Optional[Dict[StrictStr, Any]] = None,
-        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> RESTResponseType:
-        """Request Runtime Web Exposure
-
-        Create or return the pending request without waiting for approval.
-
-        :param handle: (required)
-        :type handle: str
-        :param agent_id: (required)
-        :type agent_id: str
-        :param session_id: (required)
-        :type session_id: str
-        :param port: (required)
-        :type port: int
-        :param runtime_web_exposure_request: (required)
-        :type runtime_web_exposure_request: RuntimeWebExposureRequest
-        :param _request_timeout: timeout setting for this request. If one
-                                 number provided, it will be total request
-                                 timeout. It can also be a pair (tuple) of
-                                 (connection, read) timeouts.
-        :type _request_timeout: int, tuple(int, int), optional
-        :param _request_auth: set to override the auth_settings for an a single
-                              request; this effectively ignores the
-                              authentication in the spec for a single request.
-        :type _request_auth: dict, optional
-        :param _content_type: force content-type for the request.
-        :type _content_type: str, Optional
-        :param _headers: set to override the headers for a single
-                         request; this effectively ignores the headers
-                         in the spec for a single request.
-        :type _headers: dict, optional
-        :param _host_index: set to override the host_index for a single
-                            request; this effectively ignores the host_index
-                            in the spec for a single request.
-        :type _host_index: int, optional
-        :return: Returns the result object.
-        """ # noqa: E501
-
-        _param = self._runtime_web_v1_request_runtime_web_exposure_serialize(
-            handle=handle,
-            agent_id=agent_id,
-            session_id=session_id,
-            port=port,
-            runtime_web_exposure_request=runtime_web_exposure_request,
-            _request_auth=_request_auth,
-            _content_type=_content_type,
-            _headers=_headers,
-            _host_index=_host_index
-        )
-
-        _response_types_map: Dict[str, Optional[str]] = {
-            '200': "RuntimeWebServiceResponse",
-            '403': "RuntimeWebActionErrorResponse",
-            '404': "RuntimeWebActionErrorResponse",
-            '409': "RuntimeWebActionErrorResponse",
-            '429': "RuntimeWebActionErrorResponse",
-            '422': "HTTPValidationError",
-        }
-        response_data = self.api_client.call_api(
-            *_param,
-            _request_timeout=_request_timeout
-        )
-        return response_data.response
-
-
-    def _runtime_web_v1_request_runtime_web_exposure_serialize(
-        self,
-        handle,
-        agent_id,
-        session_id,
-        port,
-        runtime_web_exposure_request,
-        _request_auth,
-        _content_type,
-        _headers,
-        _host_index,
-    ) -> RequestSerialized:
-
-        _host = None
-
-        _collection_formats: Dict[str, str] = {
-        }
-
-        _path_params: Dict[str, str] = {}
-        _query_params: List[Tuple[str, str]] = []
-        _header_params: Dict[str, Optional[str]] = _headers or {}
-        _form_params: List[Tuple[str, str]] = []
-        _files: Dict[
-            str, Union[str, bytes, List[str], List[bytes], List[Tuple[str, bytes]]]
-        ] = {}
-        _body_params: Optional[bytes] = None
-
-        # process the path parameters
-        if handle is not None:
-            _path_params['handle'] = handle
-        if agent_id is not None:
-            _path_params['agent_id'] = agent_id
-        if session_id is not None:
-            _path_params['session_id'] = session_id
-        if port is not None:
-            _path_params['port'] = port
-        # process the query parameters
-        # process the header parameters
-        # process the form parameters
-        # process the body parameter
-        if runtime_web_exposure_request is not None:
-            _body_params = runtime_web_exposure_request
-
-
-        # set the HTTP header `Accept`
-        if 'Accept' not in _header_params:
-            _header_params['Accept'] = self.api_client.select_header_accept(
-                [
-                    'application/json'
-                ]
-            )
-
-        # set the HTTP header `Content-Type`
-        if _content_type:
-            _header_params['Content-Type'] = _content_type
-        else:
-            _default_content_type = (
-                self.api_client.select_header_content_type(
-                    [
-                        'application/json'
-                    ]
-                )
-            )
-            if _default_content_type is not None:
-                _header_params['Content-Type'] = _default_content_type
-
-        # authentication setting
-        _auth_settings: List[str] = [
-            'HTTPBearer'
-        ]
-
-        return self.api_client.param_serialize(
-            method='POST',
-            resource_path='/runtime-web/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/services/{port}/requests',
+            resource_path='/runtime-web/v1/workspaces/{handle}/agents/{agent_id}/services/{service_id}/reset',
             path_params=_path_params,
             query_params=_query_params,
             header_params=_header_params,
@@ -6060,6 +3297,1312 @@ class RuntimeWebV1Api:
         return self.api_client.param_serialize(
             method='POST',
             resource_path='/runtime-web/v1/auth/revoke-identity',
+            path_params=_path_params,
+            query_params=_query_params,
+            header_params=_header_params,
+            body=_body_params,
+            post_params=_form_params,
+            files=_files,
+            auth_settings=_auth_settings,
+            collection_formats=_collection_formats,
+            _host=_host,
+            _request_auth=_request_auth
+        )
+
+
+
+
+    @validate_call
+    def runtime_web_v1_turn_off_runtime_web_service(
+        self,
+        agent_id: StrictStr,
+        service_id: Annotated[str, Field(min_length=32, strict=True, max_length=32)],
+        handle: StrictStr,
+        runtime_web_expected_revision_request: RuntimeWebExpectedRevisionRequest,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> RuntimeWebServiceResponse:
+        """Turn Off Runtime Web Service
+
+        Turn one service Off without deleting it.
+
+        :param agent_id: (required)
+        :type agent_id: str
+        :param service_id: (required)
+        :type service_id: str
+        :param handle: (required)
+        :type handle: str
+        :param runtime_web_expected_revision_request: (required)
+        :type runtime_web_expected_revision_request: RuntimeWebExpectedRevisionRequest
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._runtime_web_v1_turn_off_runtime_web_service_serialize(
+            agent_id=agent_id,
+            service_id=service_id,
+            handle=handle,
+            runtime_web_expected_revision_request=runtime_web_expected_revision_request,
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '200': "RuntimeWebServiceResponse",
+            '403': "RuntimeWebActionErrorResponse",
+            '404': "RuntimeWebActionErrorResponse",
+            '409': "RuntimeWebActionErrorResponse",
+            '429': "RuntimeWebActionErrorResponse",
+            '422': "HTTPValidationError",
+        }
+        response_data = self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        response_data.read()
+        return self.api_client.response_deserialize(
+            response_data=response_data,
+            response_types_map=_response_types_map,
+        ).data
+
+
+    @validate_call
+    def runtime_web_v1_turn_off_runtime_web_service_with_http_info(
+        self,
+        agent_id: StrictStr,
+        service_id: Annotated[str, Field(min_length=32, strict=True, max_length=32)],
+        handle: StrictStr,
+        runtime_web_expected_revision_request: RuntimeWebExpectedRevisionRequest,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> ApiResponse[RuntimeWebServiceResponse]:
+        """Turn Off Runtime Web Service
+
+        Turn one service Off without deleting it.
+
+        :param agent_id: (required)
+        :type agent_id: str
+        :param service_id: (required)
+        :type service_id: str
+        :param handle: (required)
+        :type handle: str
+        :param runtime_web_expected_revision_request: (required)
+        :type runtime_web_expected_revision_request: RuntimeWebExpectedRevisionRequest
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._runtime_web_v1_turn_off_runtime_web_service_serialize(
+            agent_id=agent_id,
+            service_id=service_id,
+            handle=handle,
+            runtime_web_expected_revision_request=runtime_web_expected_revision_request,
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '200': "RuntimeWebServiceResponse",
+            '403': "RuntimeWebActionErrorResponse",
+            '404': "RuntimeWebActionErrorResponse",
+            '409': "RuntimeWebActionErrorResponse",
+            '429': "RuntimeWebActionErrorResponse",
+            '422': "HTTPValidationError",
+        }
+        response_data = self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        response_data.read()
+        return self.api_client.response_deserialize(
+            response_data=response_data,
+            response_types_map=_response_types_map,
+        )
+
+
+    @validate_call
+    def runtime_web_v1_turn_off_runtime_web_service_without_preload_content(
+        self,
+        agent_id: StrictStr,
+        service_id: Annotated[str, Field(min_length=32, strict=True, max_length=32)],
+        handle: StrictStr,
+        runtime_web_expected_revision_request: RuntimeWebExpectedRevisionRequest,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> RESTResponseType:
+        """Turn Off Runtime Web Service
+
+        Turn one service Off without deleting it.
+
+        :param agent_id: (required)
+        :type agent_id: str
+        :param service_id: (required)
+        :type service_id: str
+        :param handle: (required)
+        :type handle: str
+        :param runtime_web_expected_revision_request: (required)
+        :type runtime_web_expected_revision_request: RuntimeWebExpectedRevisionRequest
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._runtime_web_v1_turn_off_runtime_web_service_serialize(
+            agent_id=agent_id,
+            service_id=service_id,
+            handle=handle,
+            runtime_web_expected_revision_request=runtime_web_expected_revision_request,
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '200': "RuntimeWebServiceResponse",
+            '403': "RuntimeWebActionErrorResponse",
+            '404': "RuntimeWebActionErrorResponse",
+            '409': "RuntimeWebActionErrorResponse",
+            '429': "RuntimeWebActionErrorResponse",
+            '422': "HTTPValidationError",
+        }
+        response_data = self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        return response_data.response
+
+
+    def _runtime_web_v1_turn_off_runtime_web_service_serialize(
+        self,
+        agent_id,
+        service_id,
+        handle,
+        runtime_web_expected_revision_request,
+        _request_auth,
+        _content_type,
+        _headers,
+        _host_index,
+    ) -> RequestSerialized:
+
+        _host = None
+
+        _collection_formats: Dict[str, str] = {
+        }
+
+        _path_params: Dict[str, str] = {}
+        _query_params: List[Tuple[str, str]] = []
+        _header_params: Dict[str, Optional[str]] = _headers or {}
+        _form_params: List[Tuple[str, str]] = []
+        _files: Dict[
+            str, Union[str, bytes, List[str], List[bytes], List[Tuple[str, bytes]]]
+        ] = {}
+        _body_params: Optional[bytes] = None
+
+        # process the path parameters
+        if agent_id is not None:
+            _path_params['agent_id'] = agent_id
+        if service_id is not None:
+            _path_params['service_id'] = service_id
+        if handle is not None:
+            _path_params['handle'] = handle
+        # process the query parameters
+        # process the header parameters
+        # process the form parameters
+        # process the body parameter
+        if runtime_web_expected_revision_request is not None:
+            _body_params = runtime_web_expected_revision_request
+
+
+        # set the HTTP header `Accept`
+        if 'Accept' not in _header_params:
+            _header_params['Accept'] = self.api_client.select_header_accept(
+                [
+                    'application/json'
+                ]
+            )
+
+        # set the HTTP header `Content-Type`
+        if _content_type:
+            _header_params['Content-Type'] = _content_type
+        else:
+            _default_content_type = (
+                self.api_client.select_header_content_type(
+                    [
+                        'application/json'
+                    ]
+                )
+            )
+            if _default_content_type is not None:
+                _header_params['Content-Type'] = _default_content_type
+
+        # authentication setting
+        _auth_settings: List[str] = [
+            'HTTPBearer'
+        ]
+
+        return self.api_client.param_serialize(
+            method='POST',
+            resource_path='/runtime-web/v1/workspaces/{handle}/agents/{agent_id}/services/{service_id}/off',
+            path_params=_path_params,
+            query_params=_query_params,
+            header_params=_header_params,
+            body=_body_params,
+            post_params=_form_params,
+            files=_files,
+            auth_settings=_auth_settings,
+            collection_formats=_collection_formats,
+            _host=_host,
+            _request_auth=_request_auth
+        )
+
+
+
+
+    @validate_call
+    def runtime_web_v1_turn_on_runtime_web_service(
+        self,
+        agent_id: StrictStr,
+        service_id: Annotated[str, Field(min_length=32, strict=True, max_length=32)],
+        handle: StrictStr,
+        runtime_web_turn_on_request: RuntimeWebTurnOnRequest,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> RuntimeWebServiceResponse:
+        """Turn On Runtime Web Service
+
+        Turn one Off service On.
+
+        :param agent_id: (required)
+        :type agent_id: str
+        :param service_id: (required)
+        :type service_id: str
+        :param handle: (required)
+        :type handle: str
+        :param runtime_web_turn_on_request: (required)
+        :type runtime_web_turn_on_request: RuntimeWebTurnOnRequest
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._runtime_web_v1_turn_on_runtime_web_service_serialize(
+            agent_id=agent_id,
+            service_id=service_id,
+            handle=handle,
+            runtime_web_turn_on_request=runtime_web_turn_on_request,
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '200': "RuntimeWebServiceResponse",
+            '403': "RuntimeWebActionErrorResponse",
+            '404': "RuntimeWebActionErrorResponse",
+            '409': "RuntimeWebActionErrorResponse",
+            '429': "RuntimeWebActionErrorResponse",
+            '422': "HTTPValidationError",
+        }
+        response_data = self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        response_data.read()
+        return self.api_client.response_deserialize(
+            response_data=response_data,
+            response_types_map=_response_types_map,
+        ).data
+
+
+    @validate_call
+    def runtime_web_v1_turn_on_runtime_web_service_with_http_info(
+        self,
+        agent_id: StrictStr,
+        service_id: Annotated[str, Field(min_length=32, strict=True, max_length=32)],
+        handle: StrictStr,
+        runtime_web_turn_on_request: RuntimeWebTurnOnRequest,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> ApiResponse[RuntimeWebServiceResponse]:
+        """Turn On Runtime Web Service
+
+        Turn one Off service On.
+
+        :param agent_id: (required)
+        :type agent_id: str
+        :param service_id: (required)
+        :type service_id: str
+        :param handle: (required)
+        :type handle: str
+        :param runtime_web_turn_on_request: (required)
+        :type runtime_web_turn_on_request: RuntimeWebTurnOnRequest
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._runtime_web_v1_turn_on_runtime_web_service_serialize(
+            agent_id=agent_id,
+            service_id=service_id,
+            handle=handle,
+            runtime_web_turn_on_request=runtime_web_turn_on_request,
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '200': "RuntimeWebServiceResponse",
+            '403': "RuntimeWebActionErrorResponse",
+            '404': "RuntimeWebActionErrorResponse",
+            '409': "RuntimeWebActionErrorResponse",
+            '429': "RuntimeWebActionErrorResponse",
+            '422': "HTTPValidationError",
+        }
+        response_data = self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        response_data.read()
+        return self.api_client.response_deserialize(
+            response_data=response_data,
+            response_types_map=_response_types_map,
+        )
+
+
+    @validate_call
+    def runtime_web_v1_turn_on_runtime_web_service_without_preload_content(
+        self,
+        agent_id: StrictStr,
+        service_id: Annotated[str, Field(min_length=32, strict=True, max_length=32)],
+        handle: StrictStr,
+        runtime_web_turn_on_request: RuntimeWebTurnOnRequest,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> RESTResponseType:
+        """Turn On Runtime Web Service
+
+        Turn one Off service On.
+
+        :param agent_id: (required)
+        :type agent_id: str
+        :param service_id: (required)
+        :type service_id: str
+        :param handle: (required)
+        :type handle: str
+        :param runtime_web_turn_on_request: (required)
+        :type runtime_web_turn_on_request: RuntimeWebTurnOnRequest
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._runtime_web_v1_turn_on_runtime_web_service_serialize(
+            agent_id=agent_id,
+            service_id=service_id,
+            handle=handle,
+            runtime_web_turn_on_request=runtime_web_turn_on_request,
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '200': "RuntimeWebServiceResponse",
+            '403': "RuntimeWebActionErrorResponse",
+            '404': "RuntimeWebActionErrorResponse",
+            '409': "RuntimeWebActionErrorResponse",
+            '429': "RuntimeWebActionErrorResponse",
+            '422': "HTTPValidationError",
+        }
+        response_data = self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        return response_data.response
+
+
+    def _runtime_web_v1_turn_on_runtime_web_service_serialize(
+        self,
+        agent_id,
+        service_id,
+        handle,
+        runtime_web_turn_on_request,
+        _request_auth,
+        _content_type,
+        _headers,
+        _host_index,
+    ) -> RequestSerialized:
+
+        _host = None
+
+        _collection_formats: Dict[str, str] = {
+        }
+
+        _path_params: Dict[str, str] = {}
+        _query_params: List[Tuple[str, str]] = []
+        _header_params: Dict[str, Optional[str]] = _headers or {}
+        _form_params: List[Tuple[str, str]] = []
+        _files: Dict[
+            str, Union[str, bytes, List[str], List[bytes], List[Tuple[str, bytes]]]
+        ] = {}
+        _body_params: Optional[bytes] = None
+
+        # process the path parameters
+        if agent_id is not None:
+            _path_params['agent_id'] = agent_id
+        if service_id is not None:
+            _path_params['service_id'] = service_id
+        if handle is not None:
+            _path_params['handle'] = handle
+        # process the query parameters
+        # process the header parameters
+        # process the form parameters
+        # process the body parameter
+        if runtime_web_turn_on_request is not None:
+            _body_params = runtime_web_turn_on_request
+
+
+        # set the HTTP header `Accept`
+        if 'Accept' not in _header_params:
+            _header_params['Accept'] = self.api_client.select_header_accept(
+                [
+                    'application/json'
+                ]
+            )
+
+        # set the HTTP header `Content-Type`
+        if _content_type:
+            _header_params['Content-Type'] = _content_type
+        else:
+            _default_content_type = (
+                self.api_client.select_header_content_type(
+                    [
+                        'application/json'
+                    ]
+                )
+            )
+            if _default_content_type is not None:
+                _header_params['Content-Type'] = _default_content_type
+
+        # authentication setting
+        _auth_settings: List[str] = [
+            'HTTPBearer'
+        ]
+
+        return self.api_client.param_serialize(
+            method='POST',
+            resource_path='/runtime-web/v1/workspaces/{handle}/agents/{agent_id}/services/{service_id}/on',
+            path_params=_path_params,
+            query_params=_query_params,
+            header_params=_header_params,
+            body=_body_params,
+            post_params=_form_params,
+            files=_files,
+            auth_settings=_auth_settings,
+            collection_formats=_collection_formats,
+            _host=_host,
+            _request_auth=_request_auth
+        )
+
+
+
+
+    @validate_call
+    def runtime_web_v1_turn_on_runtime_web_service_by_id(
+        self,
+        service_id: Annotated[str, Field(min_length=32, strict=True, max_length=32)],
+        runtime_web_turn_on_request: RuntimeWebTurnOnRequest,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> RuntimeWebServiceResponse:
+        """Turn On Runtime Web Service By Id
+
+        Turn On one service from the trusted Main Web activation surface.
+
+        :param service_id: (required)
+        :type service_id: str
+        :param runtime_web_turn_on_request: (required)
+        :type runtime_web_turn_on_request: RuntimeWebTurnOnRequest
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._runtime_web_v1_turn_on_runtime_web_service_by_id_serialize(
+            service_id=service_id,
+            runtime_web_turn_on_request=runtime_web_turn_on_request,
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '200': "RuntimeWebServiceResponse",
+            '403': "RuntimeWebActionErrorResponse",
+            '404': "RuntimeWebActionErrorResponse",
+            '409': "RuntimeWebActionErrorResponse",
+            '429': "RuntimeWebActionErrorResponse",
+            '422': "HTTPValidationError",
+        }
+        response_data = self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        response_data.read()
+        return self.api_client.response_deserialize(
+            response_data=response_data,
+            response_types_map=_response_types_map,
+        ).data
+
+
+    @validate_call
+    def runtime_web_v1_turn_on_runtime_web_service_by_id_with_http_info(
+        self,
+        service_id: Annotated[str, Field(min_length=32, strict=True, max_length=32)],
+        runtime_web_turn_on_request: RuntimeWebTurnOnRequest,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> ApiResponse[RuntimeWebServiceResponse]:
+        """Turn On Runtime Web Service By Id
+
+        Turn On one service from the trusted Main Web activation surface.
+
+        :param service_id: (required)
+        :type service_id: str
+        :param runtime_web_turn_on_request: (required)
+        :type runtime_web_turn_on_request: RuntimeWebTurnOnRequest
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._runtime_web_v1_turn_on_runtime_web_service_by_id_serialize(
+            service_id=service_id,
+            runtime_web_turn_on_request=runtime_web_turn_on_request,
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '200': "RuntimeWebServiceResponse",
+            '403': "RuntimeWebActionErrorResponse",
+            '404': "RuntimeWebActionErrorResponse",
+            '409': "RuntimeWebActionErrorResponse",
+            '429': "RuntimeWebActionErrorResponse",
+            '422': "HTTPValidationError",
+        }
+        response_data = self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        response_data.read()
+        return self.api_client.response_deserialize(
+            response_data=response_data,
+            response_types_map=_response_types_map,
+        )
+
+
+    @validate_call
+    def runtime_web_v1_turn_on_runtime_web_service_by_id_without_preload_content(
+        self,
+        service_id: Annotated[str, Field(min_length=32, strict=True, max_length=32)],
+        runtime_web_turn_on_request: RuntimeWebTurnOnRequest,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> RESTResponseType:
+        """Turn On Runtime Web Service By Id
+
+        Turn On one service from the trusted Main Web activation surface.
+
+        :param service_id: (required)
+        :type service_id: str
+        :param runtime_web_turn_on_request: (required)
+        :type runtime_web_turn_on_request: RuntimeWebTurnOnRequest
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._runtime_web_v1_turn_on_runtime_web_service_by_id_serialize(
+            service_id=service_id,
+            runtime_web_turn_on_request=runtime_web_turn_on_request,
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '200': "RuntimeWebServiceResponse",
+            '403': "RuntimeWebActionErrorResponse",
+            '404': "RuntimeWebActionErrorResponse",
+            '409': "RuntimeWebActionErrorResponse",
+            '429': "RuntimeWebActionErrorResponse",
+            '422': "HTTPValidationError",
+        }
+        response_data = self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        return response_data.response
+
+
+    def _runtime_web_v1_turn_on_runtime_web_service_by_id_serialize(
+        self,
+        service_id,
+        runtime_web_turn_on_request,
+        _request_auth,
+        _content_type,
+        _headers,
+        _host_index,
+    ) -> RequestSerialized:
+
+        _host = None
+
+        _collection_formats: Dict[str, str] = {
+        }
+
+        _path_params: Dict[str, str] = {}
+        _query_params: List[Tuple[str, str]] = []
+        _header_params: Dict[str, Optional[str]] = _headers or {}
+        _form_params: List[Tuple[str, str]] = []
+        _files: Dict[
+            str, Union[str, bytes, List[str], List[bytes], List[Tuple[str, bytes]]]
+        ] = {}
+        _body_params: Optional[bytes] = None
+
+        # process the path parameters
+        if service_id is not None:
+            _path_params['service_id'] = service_id
+        # process the query parameters
+        # process the header parameters
+        # process the form parameters
+        # process the body parameter
+        if runtime_web_turn_on_request is not None:
+            _body_params = runtime_web_turn_on_request
+
+
+        # set the HTTP header `Accept`
+        if 'Accept' not in _header_params:
+            _header_params['Accept'] = self.api_client.select_header_accept(
+                [
+                    'application/json'
+                ]
+            )
+
+        # set the HTTP header `Content-Type`
+        if _content_type:
+            _header_params['Content-Type'] = _content_type
+        else:
+            _default_content_type = (
+                self.api_client.select_header_content_type(
+                    [
+                        'application/json'
+                    ]
+                )
+            )
+            if _default_content_type is not None:
+                _header_params['Content-Type'] = _default_content_type
+
+        # authentication setting
+        _auth_settings: List[str] = [
+            'HTTPBearer'
+        ]
+
+        return self.api_client.param_serialize(
+            method='POST',
+            resource_path='/runtime-web/v1/services/{service_id}/on',
+            path_params=_path_params,
+            query_params=_query_params,
+            header_params=_header_params,
+            body=_body_params,
+            post_params=_form_params,
+            files=_files,
+            auth_settings=_auth_settings,
+            collection_formats=_collection_formats,
+            _host=_host,
+            _request_auth=_request_auth
+        )
+
+
+
+
+    @validate_call
+    def runtime_web_v1_update_runtime_web_service(
+        self,
+        agent_id: StrictStr,
+        service_id: Annotated[str, Field(min_length=32, strict=True, max_length=32)],
+        handle: StrictStr,
+        runtime_web_update_request: RuntimeWebUpdateRequest,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> RuntimeWebServiceResponse:
+        """Update Runtime Web Service
+
+        Update label or selected duration without changing expiration.
+
+        :param agent_id: (required)
+        :type agent_id: str
+        :param service_id: (required)
+        :type service_id: str
+        :param handle: (required)
+        :type handle: str
+        :param runtime_web_update_request: (required)
+        :type runtime_web_update_request: RuntimeWebUpdateRequest
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._runtime_web_v1_update_runtime_web_service_serialize(
+            agent_id=agent_id,
+            service_id=service_id,
+            handle=handle,
+            runtime_web_update_request=runtime_web_update_request,
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '200': "RuntimeWebServiceResponse",
+            '403': "RuntimeWebActionErrorResponse",
+            '404': "RuntimeWebActionErrorResponse",
+            '409': "RuntimeWebActionErrorResponse",
+            '429': "RuntimeWebActionErrorResponse",
+            '422': "HTTPValidationError",
+        }
+        response_data = self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        response_data.read()
+        return self.api_client.response_deserialize(
+            response_data=response_data,
+            response_types_map=_response_types_map,
+        ).data
+
+
+    @validate_call
+    def runtime_web_v1_update_runtime_web_service_with_http_info(
+        self,
+        agent_id: StrictStr,
+        service_id: Annotated[str, Field(min_length=32, strict=True, max_length=32)],
+        handle: StrictStr,
+        runtime_web_update_request: RuntimeWebUpdateRequest,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> ApiResponse[RuntimeWebServiceResponse]:
+        """Update Runtime Web Service
+
+        Update label or selected duration without changing expiration.
+
+        :param agent_id: (required)
+        :type agent_id: str
+        :param service_id: (required)
+        :type service_id: str
+        :param handle: (required)
+        :type handle: str
+        :param runtime_web_update_request: (required)
+        :type runtime_web_update_request: RuntimeWebUpdateRequest
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._runtime_web_v1_update_runtime_web_service_serialize(
+            agent_id=agent_id,
+            service_id=service_id,
+            handle=handle,
+            runtime_web_update_request=runtime_web_update_request,
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '200': "RuntimeWebServiceResponse",
+            '403': "RuntimeWebActionErrorResponse",
+            '404': "RuntimeWebActionErrorResponse",
+            '409': "RuntimeWebActionErrorResponse",
+            '429': "RuntimeWebActionErrorResponse",
+            '422': "HTTPValidationError",
+        }
+        response_data = self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        response_data.read()
+        return self.api_client.response_deserialize(
+            response_data=response_data,
+            response_types_map=_response_types_map,
+        )
+
+
+    @validate_call
+    def runtime_web_v1_update_runtime_web_service_without_preload_content(
+        self,
+        agent_id: StrictStr,
+        service_id: Annotated[str, Field(min_length=32, strict=True, max_length=32)],
+        handle: StrictStr,
+        runtime_web_update_request: RuntimeWebUpdateRequest,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> RESTResponseType:
+        """Update Runtime Web Service
+
+        Update label or selected duration without changing expiration.
+
+        :param agent_id: (required)
+        :type agent_id: str
+        :param service_id: (required)
+        :type service_id: str
+        :param handle: (required)
+        :type handle: str
+        :param runtime_web_update_request: (required)
+        :type runtime_web_update_request: RuntimeWebUpdateRequest
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._runtime_web_v1_update_runtime_web_service_serialize(
+            agent_id=agent_id,
+            service_id=service_id,
+            handle=handle,
+            runtime_web_update_request=runtime_web_update_request,
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '200': "RuntimeWebServiceResponse",
+            '403': "RuntimeWebActionErrorResponse",
+            '404': "RuntimeWebActionErrorResponse",
+            '409': "RuntimeWebActionErrorResponse",
+            '429': "RuntimeWebActionErrorResponse",
+            '422': "HTTPValidationError",
+        }
+        response_data = self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        return response_data.response
+
+
+    def _runtime_web_v1_update_runtime_web_service_serialize(
+        self,
+        agent_id,
+        service_id,
+        handle,
+        runtime_web_update_request,
+        _request_auth,
+        _content_type,
+        _headers,
+        _host_index,
+    ) -> RequestSerialized:
+
+        _host = None
+
+        _collection_formats: Dict[str, str] = {
+        }
+
+        _path_params: Dict[str, str] = {}
+        _query_params: List[Tuple[str, str]] = []
+        _header_params: Dict[str, Optional[str]] = _headers or {}
+        _form_params: List[Tuple[str, str]] = []
+        _files: Dict[
+            str, Union[str, bytes, List[str], List[bytes], List[Tuple[str, bytes]]]
+        ] = {}
+        _body_params: Optional[bytes] = None
+
+        # process the path parameters
+        if agent_id is not None:
+            _path_params['agent_id'] = agent_id
+        if service_id is not None:
+            _path_params['service_id'] = service_id
+        if handle is not None:
+            _path_params['handle'] = handle
+        # process the query parameters
+        # process the header parameters
+        # process the form parameters
+        # process the body parameter
+        if runtime_web_update_request is not None:
+            _body_params = runtime_web_update_request
+
+
+        # set the HTTP header `Accept`
+        if 'Accept' not in _header_params:
+            _header_params['Accept'] = self.api_client.select_header_accept(
+                [
+                    'application/json'
+                ]
+            )
+
+        # set the HTTP header `Content-Type`
+        if _content_type:
+            _header_params['Content-Type'] = _content_type
+        else:
+            _default_content_type = (
+                self.api_client.select_header_content_type(
+                    [
+                        'application/json'
+                    ]
+                )
+            )
+            if _default_content_type is not None:
+                _header_params['Content-Type'] = _default_content_type
+
+        # authentication setting
+        _auth_settings: List[str] = [
+            'HTTPBearer'
+        ]
+
+        return self.api_client.param_serialize(
+            method='PATCH',
+            resource_path='/runtime-web/v1/workspaces/{handle}/agents/{agent_id}/services/{service_id}',
             path_params=_path_params,
             query_params=_query_params,
             header_params=_header_params,

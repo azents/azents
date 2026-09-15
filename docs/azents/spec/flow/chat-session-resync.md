@@ -23,8 +23,8 @@ code_paths:
   - typescript/apps/azents-web/src/shared/agent-session/**
   - typescript/apps/azents-web/src/shared/subagent-tree/**
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
-last_verified_at: 2026-09-13
-spec_version: 51
+last_verified_at: 2026-09-15
+spec_version: 52
 ---
 
 # Chat Session Resync
@@ -106,21 +106,20 @@ canonical live actions rather than broadcast directly. `history_event_appended` 
 idempotent by event ID. A duplicate delivery preserves the existing timeline item and its position.
 Run lifecycle or provenance changes do not republish an existing history event.
 
-Recognized Runtime Web tool-call history renders a dedicated request card only when
-its metadata contains the expected endpoint/request/cycle identifiers. The card and
-Services workspace panel load the current Runtime Web projection independently from
-the immutable Chat event. A historical card whose request is no longer the current
-pending request is explicitly stale and read-only; it cannot approve, reject, cancel,
-or close newer authority. Unknown or malformed metadata remains on the generic tool
-presentation path. Runtime Web secrets, URLs carrying secrets, application bodies,
-and transport diagnostics are not reconstructed from Chat history.
+Recognized Runtime Web tool-call history uses the known-tool summary only when its
+metadata contains the expected service projection. Immutable Chat events do not own
+or refresh current On/Off state, and no approval card or embedded mutation control is
+rendered from history. Current service management is loaded independently by the
+Services workspace panel or Agent settings. Unknown or malformed metadata remains on
+the generic tool presentation path. Runtime Web secrets, URLs carrying secrets,
+application bodies, and transport diagnostics are not reconstructed from Chat
+history.
 
 Services is a first-class Session supporting-panel destination. The canonical
 `page=services` query restores it after navigation or reload, the same destination is
-available in desktop and mobile panel navigation, and current service polling runs
-only while the panel is open on Services. Its Workspace panel remains mounted for the
-external Session navigation path, so Runtime absence does not remove the management
-entry point.
+available in desktop and mobile panel navigation when the Agent has managed Runtime
+capability, and current Agent-scoped service polling runs only while the panel is
+open on Services. Every Session of one Agent observes the same service list.
 
 ## 5. REST History Contract
 
@@ -528,6 +527,9 @@ Session Channels management state is queried separately from timeline resync.
 
 ## 12. Changelog
 
+- **2026-09-15** — v52. Replaced Runtime Web approval cards and Session-keyed
+  projections with known-tool summaries plus managed-Runtime-gated Agent service
+  management.
 - **2026-09-13** — v51. Replaced persistent Web Composer availability and Primary recovery
   presentation with the active live Run `using_fallback` badge while retaining live REST/WS resync.
 - **2026-09-13** — v50. Restored Services as a URL-addressable desktop/mobile

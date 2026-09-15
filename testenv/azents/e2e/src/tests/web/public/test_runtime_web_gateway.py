@@ -43,14 +43,10 @@ from azentspublicclient.models.llm_provider import LLMProvider
 from azentspublicclient.models.llm_provider_integration_create_request import (
     LLMProviderIntegrationCreateRequest,
 )
-from azentspublicclient.models.runtime_web_approval_request import (
-    RuntimeWebApprovalRequest,
+from azentspublicclient.models.runtime_web_create_request import RuntimeWebCreateRequest
+from azentspublicclient.models.runtime_web_expected_revision_request import (
+    RuntimeWebExpectedRevisionRequest,
 )
-from azentspublicclient.models.runtime_web_close_request import RuntimeWebCloseRequest
-from azentspublicclient.models.runtime_web_exposure_request import (
-    RuntimeWebExposureRequest,
-)
-from azentspublicclient.models.runtime_web_request_state import RuntimeWebRequestState
 from azentspublicclient.models.runtime_web_service_response import (
     RuntimeWebServiceResponse,
 )
@@ -1353,69 +1349,84 @@ def _login(driver: WebDriver, *, email: str) -> None:
     wait.until(ec.url_contains("/workspaces"))
 
 
-def _approve_in_browser(driver: WebDriver, *, endpoint_url: str) -> None:
-    """Complete browser authentication and exact pending-request approval."""
+def _activate_in_browser(driver: WebDriver, *, service_url: str) -> None:
+    """Turn On one Off service through its authenticated public URL."""
     wait = WebDriverWait(driver, 60)
-    driver.get(endpoint_url)
+    driver.get(service_url)
     try:
         wait.until(
             ec.visibility_of_element_located(
-                (By.XPATH, "//*[normalize-space()='Review web service access']")
+                (By.XPATH, "//*[normalize-space()='Turn on web service']")
             )
         )
     except TimeoutException as error:
         current_url = driver.current_url.split("?", maxsplit=1)[0]
         body_text = driver.find_element(By.TAG_NAME, "body").text[:2_000]
         raise AssertionError(
-            "Runtime Web confirmation did not become visible: "
+            "Runtime Web activation did not become visible: "
             f"url={current_url!r}, title={driver.title!r}, body={body_text!r}"
         ) from error
     wait.until(
-        ec.element_to_be_clickable(
-            (By.XPATH, "//button[starts-with(normalize-space(), 'Approve for ')]")
-        )
+        ec.element_to_be_clickable((By.XPATH, "//button[normalize-space()='Turn On']"))
     ).click()
-    wait.until(
-        ec.visibility_of_element_located(
-            (By.XPATH, "//*[contains(normalize-space(), 'currently exposed')]")
-        )
-    )
+    wait.until(ec.url_to_be(service_url))
 
 
 def _wait_for_active_service(
     *,
     api: RuntimeWebV1Api,
     workspace: _RuntimeWebWorkspace,
+    service_id: str,
 ) -> RuntimeWebServiceResponse:
-    """Poll the authoritative Public API until the approval transaction is visible."""
+    """Poll the authoritative Public API until the service is On."""
     deadline = time.monotonic() + 30
     while True:
         service = api.runtime_web_v1_get_runtime_web_service_projection(
             handle=workspace.handle,
             agent_id=workspace.agent_id,
-            session_id=workspace.session_id,
-            port=_RUNTIME_WEB_PORT,
+            service_id=service_id,
             _headers=_headers(workspace.token),
         )
-        if (
-            service.active
-            and service.current_cycle is not None
-            and service.current_request is None
-        ):
+        if service.on:
             return service
         if time.monotonic() >= deadline:
-            request_state = (
-                service.current_request.state
-                if service.current_request is not None
-                else None
-            )
             raise AssertionError(
-                "Runtime Web approval did not reach authoritative active state: "
-                f"active={service.active!r}, "
-                f"request_state={request_state!r}, "
-                f"cycle_present={service.current_cycle is not None!r}"
+                "Runtime Web activation did not reach authoritative On state: "
+                f"on={service.on!r}, revision={service.revision!r}"
             )
         time.sleep(0.1)
+
+
+def _delete_existing_runtime_web_services(
+    *,
+    api: RuntimeWebV1Api,
+    workspace: _RuntimeWebWorkspace,
+) -> None:
+    """Reset Agent-owned service state while reusing the Runtime application."""
+    existing = api.runtime_web_v1_list_runtime_web_services(
+        handle=workspace.handle,
+        agent_id=workspace.agent_id,
+        _headers=_headers(workspace.token),
+    )
+    for service in existing.items:
+        deleted = api.runtime_web_v1_delete_runtime_web_service(
+            handle=workspace.handle,
+            agent_id=workspace.agent_id,
+            service_id=service.id,
+            runtime_web_expected_revision_request=RuntimeWebExpectedRevisionRequest(
+                expected_revision=service.revision,
+                operation_key=f"scenario-cleanup-{unique()}",
+            ),
+            _headers=_headers(workspace.token),
+        )
+        assert deleted.deleted
+
+    current = api.runtime_web_v1_list_runtime_web_services(
+        handle=workspace.handle,
+        agent_id=workspace.agent_id,
+        _headers=_headers(workspace.token),
+    )
+    assert current.total_count == 0
 
 
 def _assert_operations_ready(stack: _RuntimeWebStack) -> str:
@@ -1521,7 +1532,7 @@ def _assert_content_free_metrics(
     for forbidden_label in (
         "user=",
         "session_id=",
-        "endpoint_id=",
+        "service_id=",
         'path="/',
         "query=",
         "cookie=",
@@ -2111,25 +2122,26 @@ def test_runtime_web_gateway_real_runtime_browser_and_cross_replica_relay(
             configuration=azentspublicclient.Configuration(host=stack.public_api_url)
         )
         api = RuntimeWebV1Api(runtime_web_api_client)
-        requested = api.runtime_web_v1_request_runtime_web_exposure(
+        _delete_existing_runtime_web_services(api=api, workspace=workspace)
+        service = api.runtime_web_v1_create_runtime_web_service(
             handle=workspace.handle,
             agent_id=workspace.agent_id,
-            session_id=workspace.session_id,
-            port=_RUNTIME_WEB_PORT,
-            runtime_web_exposure_request=RuntimeWebExposureRequest(
+            runtime_web_create_request=RuntimeWebCreateRequest(
+                port=_RUNTIME_WEB_PORT,
                 label=f"Gateway {auth_mode}",
+                selected_duration_seconds=3_600,
+                turn_on=False,
                 operation_key=f"request-{unique()}",
             ),
             _headers=_headers(workspace.token),
         )
-        assert requested.current_request is not None
-        assert requested.current_request.state is RuntimeWebRequestState.PENDING
-        assert requested.endpoint.url is not None
-        endpoint_url = requested.endpoint.url
-        assert endpoint_url.startswith("https://")
-        assert "?" not in endpoint_url
-        assert "ticket" not in endpoint_url.lower()
-        stable_endpoint_id = requested.endpoint.id
+        assert not service.on
+        assert service.url is not None
+        service_url = service.url
+        assert service_url.startswith("https://")
+        assert "?" not in service_url
+        assert "ticket" not in service_url.lower()
+        stable_service_id = service.id
 
         driver = _browser(
             selenium_url=stack.selenium_url,
@@ -2137,16 +2149,18 @@ def test_runtime_web_gateway_real_runtime_browser_and_cross_replica_relay(
         )
         try:
             _login(driver, email=workspace.email)
-            _approve_in_browser(driver, endpoint_url=endpoint_url)
-            active = _wait_for_active_service(api=api, workspace=workspace)
-            assert active.active
-            assert active.current_cycle is not None
-            assert active.current_request is None
-            assert active.endpoint.id == stable_endpoint_id
-            assert active.endpoint.url == endpoint_url
+            _activate_in_browser(driver, service_url=service_url)
+            active = _wait_for_active_service(
+                api=api,
+                workspace=workspace,
+                service_id=stable_service_id,
+            )
+            assert active.on
+            assert active.id == stable_service_id
+            assert active.url == service_url
             metrics_before = _assert_operations_ready(stack)
             relay_opens_before = _route_open_count(metrics_before, "relay")
-            _open_application_in_browser(driver, endpoint_url=endpoint_url)
+            _open_application_in_browser(driver, endpoint_url=service_url)
 
             evidence = _browser_transport_evidence(driver)
             assert "error" not in evidence, evidence
@@ -2164,7 +2178,7 @@ def test_runtime_web_gateway_real_runtime_browser_and_cross_replica_relay(
                 "data: open\n\ndata: heartbeat\n\ndata: complete\n\n"
             )
             assert evidence["redirectStatus"] == 200
-            assert evidence["redirectedUrl"] == endpoint_url
+            assert evidence["redirectedUrl"] == service_url
             redirected_body = evidence["redirectedBody"]
             assert isinstance(redirected_body, str)
             assert "Runtime Web E2E ready" in redirected_body
@@ -2176,7 +2190,7 @@ def test_runtime_web_gateway_real_runtime_browser_and_cross_replica_relay(
                 "binary": [0, 1, 2, 255],
             }
             _wait_for_runtime_web_stream_release(stack)
-            assert driver.current_url == endpoint_url
+            assert driver.current_url == service_url
             assert "ticket" not in driver.current_url.lower()
             identity_cookie = driver.get_cookie("__Http-Azents-Runtime-Web")
             assert identity_cookie is not None
@@ -2184,13 +2198,13 @@ def test_runtime_web_gateway_real_runtime_browser_and_cross_replica_relay(
             assert isinstance(identity_secret, str)
             _browser_neutral_transport_evidence(
                 stack=stack,
-                endpoint_url=endpoint_url,
+                endpoint_url=service_url,
                 identity_secret=identity_secret,
             )
             if auth_mode == "shared_cookie":
                 _assert_redis_capacity_fallback(
                     stack=stack,
-                    endpoint_url=endpoint_url,
+                    endpoint_url=service_url,
                     identity_secret=identity_secret,
                     valkey=valkey_container,
                 )
@@ -2202,7 +2216,7 @@ def test_runtime_web_gateway_real_runtime_browser_and_cross_replica_relay(
                     workspace.handle,
                     workspace.agent_id,
                     workspace.session_id,
-                    endpoint_url,
+                    service_url,
                     identity_secret,
                     "sk-runtime-web-gateway",
                     "runtime-web-body",
@@ -2215,68 +2229,50 @@ def test_runtime_web_gateway_real_runtime_browser_and_cross_replica_relay(
             )
             assert _route_open_count(metrics_after, "relay") > relay_opens_before
 
-            replacement = api.runtime_web_v1_request_runtime_web_exposure(
-                handle=workspace.handle,
-                agent_id=workspace.agent_id,
-                session_id=workspace.session_id,
-                port=_RUNTIME_WEB_PORT,
-                runtime_web_exposure_request=RuntimeWebExposureRequest(
-                    label=f"Replacement {auth_mode}",
-                    operation_key=f"replacement-{unique()}",
-                ),
-                _headers=_headers(workspace.token),
-            )
-            assert replacement.active
-            assert replacement.current_request is not None
-            assert replacement.current_request.state is RuntimeWebRequestState.PENDING
-            assert replacement.endpoint.url == endpoint_url
-            with pytest.raises(ApiException) as stale_approval:
-                api.runtime_web_v1_approve_runtime_web_request(
+            with pytest.raises(ApiException) as stale_reset:
+                api.runtime_web_v1_reset_runtime_web_service_expiration(
                     handle=workspace.handle,
                     agent_id=workspace.agent_id,
-                    session_id=workspace.session_id,
-                    request_id=replacement.current_request.id,
-                    runtime_web_approval_request=RuntimeWebApprovalRequest(
-                        expected_revision=replacement.current_request.revision + 1,
-                        duration_seconds=replacement.duration_seconds,
-                        operation_key=f"stale-approve-{unique()}",
+                    service_id=stable_service_id,
+                    runtime_web_expected_revision_request=(
+                        RuntimeWebExpectedRevisionRequest(
+                            expected_revision=active.revision + 1,
+                            operation_key=f"stale-reset-{unique()}",
+                        )
                     ),
                     _headers=_headers(workspace.token),
                 )
-            assert stale_approval.value.status == 409
+            assert stale_reset.value.status == 409
 
-            replaced = api.runtime_web_v1_approve_runtime_web_request(
+            reset = api.runtime_web_v1_reset_runtime_web_service_expiration(
                 handle=workspace.handle,
                 agent_id=workspace.agent_id,
-                session_id=workspace.session_id,
-                request_id=replacement.current_request.id,
-                runtime_web_approval_request=RuntimeWebApprovalRequest(
-                    expected_revision=replacement.current_request.revision,
-                    duration_seconds=replacement.duration_seconds,
-                    operation_key=f"approve-replacement-{unique()}",
+                service_id=stable_service_id,
+                runtime_web_expected_revision_request=RuntimeWebExpectedRevisionRequest(
+                    expected_revision=active.revision,
+                    operation_key=f"reset-{unique()}",
                 ),
                 _headers=_headers(workspace.token),
             )
-            assert replaced.active
-            assert replaced.current_cycle is not None
-            assert active.current_cycle.id != replaced.current_cycle.id
-            assert replaced.endpoint.id == stable_endpoint_id
-            assert replaced.endpoint.url == endpoint_url
+            assert reset.on
+            assert reset.id == stable_service_id
+            assert reset.url == service_url
+            assert reset.revision == active.revision + 1
+            assert reset.expires_at is not None
 
-            closed = api.runtime_web_v1_close_runtime_web_cycle(
+            turned_off = api.runtime_web_v1_turn_off_runtime_web_service(
                 handle=workspace.handle,
                 agent_id=workspace.agent_id,
-                session_id=workspace.session_id,
-                cycle_id=replaced.current_cycle.id,
-                runtime_web_close_request=RuntimeWebCloseRequest(
-                    expected_endpoint_revision=replaced.endpoint.authority_revision,
-                    operation_key=f"close-{unique()}",
+                service_id=stable_service_id,
+                runtime_web_expected_revision_request=RuntimeWebExpectedRevisionRequest(
+                    expected_revision=reset.revision,
+                    operation_key=f"turn-off-{unique()}",
                 ),
                 _headers=_headers(workspace.token),
             )
-            assert not closed.active
-            assert closed.endpoint.id == stable_endpoint_id
-            assert closed.endpoint.url == endpoint_url
+            assert not turned_off.on
+            assert turned_off.id == stable_service_id
+            assert turned_off.url == service_url
             status_after_close = driver.execute_async_script(
                 "const done = arguments[arguments.length - 1];"
                 "fetch('/', {cache: 'no-store'})"
@@ -2291,7 +2287,7 @@ def test_runtime_web_gateway_real_runtime_browser_and_cross_replica_relay(
         unauthenticated = requests.get(
             f"{stack.edge_host_url}/",
             headers={
-                "Host": endpoint_url.removeprefix("https://").rstrip("/"),
+                "Host": service_url.removeprefix("https://").rstrip("/"),
                 "User-Agent": "Mozilla/5.0 Firefox/143.0",
                 "Sec-Fetch-Mode": "cors",
                 "Sec-Fetch-Dest": "empty",
@@ -2305,11 +2301,10 @@ def test_runtime_web_gateway_real_runtime_browser_and_cross_replica_relay(
         listed = api.runtime_web_v1_list_runtime_web_services(
             handle=workspace.handle,
             agent_id=workspace.agent_id,
-            session_id=workspace.session_id,
             _headers=_headers(workspace.token),
         )
         assert listed.total_count == 1
-        assert listed.items[0].endpoint.id == stable_endpoint_id
+        assert listed.items[0].id == stable_service_id
         serialized = json.dumps(listed.items[0].to_dict(), default=str)
         assert "sk-runtime-web-gateway" not in serialized
         assert "ticket_secret" not in serialized
@@ -2334,19 +2329,21 @@ def test_runtime_web_gateway_hard_limit_rejects_before_body_admission(
             configuration=azentspublicclient.Configuration(host=stack.public_api_url)
         )
         api = RuntimeWebV1Api(runtime_web_api_client)
-        requested = api.runtime_web_v1_request_runtime_web_exposure(
+        _delete_existing_runtime_web_services(api=api, workspace=workspace)
+        service = api.runtime_web_v1_create_runtime_web_service(
             handle=workspace.handle,
             agent_id=workspace.agent_id,
-            session_id=workspace.session_id,
-            port=_RUNTIME_WEB_PORT,
-            runtime_web_exposure_request=RuntimeWebExposureRequest(
+            runtime_web_create_request=RuntimeWebCreateRequest(
+                port=_RUNTIME_WEB_PORT,
                 label="Hard limit",
+                selected_duration_seconds=3_600,
+                turn_on=False,
                 operation_key=f"hard-limit-{unique()}",
             ),
             _headers=_headers(workspace.token),
         )
-        assert requested.endpoint.url is not None
-        endpoint_url = requested.endpoint.url
+        assert service.url is not None
+        endpoint_url = service.url
 
         driver = _browser(
             selenium_url=stack.selenium_url,
@@ -2354,8 +2351,12 @@ def test_runtime_web_gateway_hard_limit_rejects_before_body_admission(
         )
         try:
             _login(driver, email=workspace.email)
-            _approve_in_browser(driver, endpoint_url=endpoint_url)
-            _wait_for_active_service(api=api, workspace=workspace)
+            _activate_in_browser(driver, service_url=endpoint_url)
+            _wait_for_active_service(
+                api=api,
+                workspace=workspace,
+                service_id=service.id,
+            )
             metrics_before = _assert_operations_ready(stack)
             local_opens_before = _route_open_count(metrics_before, "local")
             _open_application_in_browser(driver, endpoint_url=endpoint_url)
@@ -2588,39 +2589,27 @@ def test_runtime_web_gateway_maintenance_preflight(
             configuration=azentspublicclient.Configuration(host=stack.public_api_url)
         )
         api = RuntimeWebV1Api(runtime_web_api_client)
-        requested = api.runtime_web_v1_request_runtime_web_exposure(
+        _delete_existing_runtime_web_services(api=api, workspace=workspace)
+        active = api.runtime_web_v1_create_runtime_web_service(
             handle=workspace.handle,
             agent_id=workspace.agent_id,
-            session_id=workspace.session_id,
-            port=_RUNTIME_WEB_PORT,
-            runtime_web_exposure_request=RuntimeWebExposureRequest(
+            runtime_web_create_request=RuntimeWebCreateRequest(
+                port=_RUNTIME_WEB_PORT,
                 label="Maintenance preflight",
+                selected_duration_seconds=3_600,
+                turn_on=True,
                 operation_key=f"maintenance-{unique()}",
             ),
             _headers=_headers(workspace.token),
         )
-        assert requested.current_request is not None
-        assert requested.endpoint.url is not None
-        approved = api.runtime_web_v1_approve_runtime_web_request(
-            handle=workspace.handle,
-            agent_id=workspace.agent_id,
-            session_id=workspace.session_id,
-            request_id=requested.current_request.id,
-            runtime_web_approval_request=RuntimeWebApprovalRequest(
-                expected_revision=requested.current_request.revision,
-                duration_seconds=requested.duration_seconds,
-                operation_key=f"maintenance-approve-{unique()}",
-            ),
-            _headers=_headers(workspace.token),
-        )
-        assert approved.active
-        assert approved.current_cycle is not None
+        assert active.on
+        assert active.url is not None
         _assert_maintenance_preflight(stack)
         state_before_refusal = _runtime_application_state_via_terminal(runtime_terminal)
         assert state_before_refusal.active_sse == 0
         assert state_before_refusal.active_websockets == 0
 
-        endpoint_host = requested.endpoint.url.removeprefix("https://").rstrip("/")
+        endpoint_host = active.url.removeprefix("https://").rstrip("/")
         refused = requests.get(
             f"{stack.edge_host_url}/",
             headers={"Host": endpoint_host},
@@ -2644,10 +2633,9 @@ def test_runtime_web_gateway_maintenance_preflight(
         preserved = api.runtime_web_v1_get_runtime_web_service_projection(
             handle=workspace.handle,
             agent_id=workspace.agent_id,
-            session_id=workspace.session_id,
-            port=_RUNTIME_WEB_PORT,
+            service_id=active.id,
             _headers=_headers(workspace.token),
         )
-        assert preserved.active
-        assert preserved.current_cycle is not None
-        assert preserved.current_cycle.id == approved.current_cycle.id
+        assert preserved.on
+        assert preserved.id == active.id
+        assert preserved.revision == active.revision

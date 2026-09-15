@@ -34,7 +34,6 @@ import {
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import { Component, useState } from "react";
-import { RuntimeWebServiceRequestCardContainer } from "../containers/RuntimeWebServiceRequestCardContainer";
 import { knownToolPresentation } from "../knownToolPresentation";
 import { toolCallActionMessageKey } from "../toolCallActionPresentation";
 import { ActivityRow } from "./ActivityRow";
@@ -956,21 +955,6 @@ function SpecializedToolCallCard({
   presentation: KnownToolPresentation;
   hiddenAttachmentUris: readonly string[];
 }): ReactElement {
-  if (
-    presentation.action === "runtimeWeb" &&
-    presentation.detail?.type === "runtimeWeb" &&
-    presentation.detail.requestId !== null
-  ) {
-    return (
-      <RuntimeWebServiceRequestCardContainer
-        endpointId={presentation.detail.endpointId}
-        requestId={presentation.detail.requestId}
-        fallbackLabel={presentation.subject}
-        fallbackPort={presentation.detail.port}
-        fallbackUrl={presentation.detail.url}
-      />
-    );
-  }
   return (
     <StandardSpecializedToolCallCard
       toolCall={toolCall}

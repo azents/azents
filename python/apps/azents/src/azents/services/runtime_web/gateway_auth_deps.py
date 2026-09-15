@@ -11,7 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.rdb.deps import get_session_manager
 from azents.rdb.models.runtime_web import RuntimeWebAuthMode
 from azents.rdb.session import SessionManager
-from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.agent import AgentRepository
+from azents.repos.agent_admin import AgentAdminRepository
 from azents.repos.runtime_web.gateway_data import RuntimeWebDesiredConfiguration
 from azents.repos.runtime_web.gateway_repository import (
     RuntimeWebGatewayRepository,
@@ -45,11 +46,6 @@ class RuntimeWebGatewayAuthSettings(BaseSettings):
     runtime_web_gateway_service_suffix: str | None = None
     runtime_web_gateway_cookie_domain: str | None = None
     runtime_web_gateway_identity_cookie_name: str = "__Http-Azents-Runtime-Web"
-    runtime_web_gateway_active_duration_seconds: int = Field(
-        default=3_600,
-        ge=300,
-        le=28_800,
-    )
 
 
 def get_runtime_web_gateway_auth_service(
@@ -61,9 +57,13 @@ def get_runtime_web_gateway_auth_service(
         RuntimeWebGatewayRepository,
         Depends(RuntimeWebGatewayRepository),
     ],
-    agent_session_repository: Annotated[
-        AgentSessionRepository,
-        Depends(AgentSessionRepository),
+    agent_repository: Annotated[
+        AgentRepository,
+        Depends(AgentRepository),
+    ],
+    agent_admin_repository: Annotated[
+        AgentAdminRepository,
+        Depends(AgentAdminRepository),
     ],
     workspace_user_repository: Annotated[
         WorkspaceUserRepository,
@@ -84,12 +84,12 @@ def get_runtime_web_gateway_auth_service(
             cookie_domain=settings.runtime_web_gateway_cookie_domain,
             identity_cookie_name=settings.runtime_web_gateway_identity_cookie_name,
         ),
-        active_duration_seconds=(settings.runtime_web_gateway_active_duration_seconds),
     )
     return RuntimeWebGatewayAuthService(
         session_manager=session_manager,
         repository=repository,
-        agent_session_repository=agent_session_repository,
+        agent_repository=agent_repository,
+        agent_admin_repository=agent_admin_repository,
         workspace_user_repository=workspace_user_repository,
         identity_lifetime=datetime.timedelta(
             seconds=settings.runtime_web_gateway_identity_lifetime_seconds

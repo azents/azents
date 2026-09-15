@@ -1,6 +1,6 @@
 # RuntimeWebExpectedRevisionRequest
 
-Revision-fenced request control mutation.
+Revision-fenced service control mutation.
 
 ## Properties
 

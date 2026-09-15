@@ -69,8 +69,6 @@ code_paths:
   - typescript/apps/azents-web/src/shared/runtime-terminal/**
   - typescript/apps/azents-web/src/trpc/routers/terminal.ts
   - typescript/apps/azents-web/src/features/runtime-web/**
-  - typescript/apps/azents-web/src/features/chat/components/RuntimeWeb*
-  - typescript/apps/azents-web/src/features/chat/workspace/components/RuntimeServicesPanel*
   - typescript/apps/azents-web/src/app/(app)/runtime-web/**
   - typescript/apps/azents-web/src/trpc/routers/runtime-web.ts
   - testenv/azents/e2e/src/support/runtime_profiles.py
@@ -80,7 +78,7 @@ code_paths:
   - testenv/azents/e2e/src/tests/web/public/test_runtime_web_gateway.py
   - infra/charts/azents/**
 last_verified_at: 2026-09-15
-spec_version: 85
+spec_version: 86
 ---
 
 # Agent Runtime Control
@@ -177,30 +175,30 @@ read or migrate the retired volatile namespace.
 
 ## Runtime Web Exposure
 
-Runtime Web gives one Session and numeric loopback port a stable opaque HTTPS
-endpoint. Preparing an endpoint, requesting exposure, approving a request, and
-closing an approved cycle are separate revision-fenced operations. Approval is a
-finite authority record in PostgreSQL and remains independent from application
-process or Runtime lifecycle. Closing exposure does not stop the application, and a
-Runtime restart or Runner replacement makes transport temporarily unavailable
-without changing the stable endpoint URL or implicitly extending approval.
+Runtime Web gives one Agent and numeric loopback port one stable opaque HTTPS
+service URL. PostgreSQL stores the service's selected 1-, 6-, or 24-hour duration,
+nullable exposure deadline, and monotonic revision. Effective On state exists only
+while the deadline is in the future; expiration projects the service as Off without
+a sweeper. Turning Off does not stop the application, and a Runtime restart or Runner
+replacement makes transport temporarily unavailable without changing the service
+URL or extending exposure.
 
-The Public API authorizes every projection and mutation through the concrete Agent
-Session. Team Session access follows current Workspace membership; User Session
-access remains owner-only. Agent tools resolve subagents to their same-root Session
-authority and return non-secret endpoint/request/cycle projections. Request creation
-is nonblocking. Human approval binds the exact pending request revision and displayed
-duration. Repeated or stale decisions fail with conflict
-instead of mutating the newer projection.
+The Public API authorizes every projection and human mutation through current
+Workspace membership plus the exact Agent and service identity. Human create,
+metadata update, On, Off, reset-expiration, and delete operations use opaque
+`service_id` plus revision fencing. Agent tools expose exactly request, list, and
+close: request creates or returns an Off service without changing an existing
+deadline, list returns bounded non-secret projections, and close idempotently turns
+an On service Off. Agents cannot turn On, reset, extend, update, or delete services.
 
-The Main Web exposes the same current projection through the Session supporting
-panel's `services` destination on desktop and mobile. `page=services` restores that
-destination, and service polling runs while it is visible even when the Runtime is
-absent. Direct create, approve, reject, cancel, request again, URL copy/open, and
-close actions retain revision fencing. Active approval and a simultaneous pending
-request remain independent. Runtime unavailability is shown as Runtime evidence and
-does not claim that the application port was checked or that closing exposure stops
-the application.
+The Main Web exposes the same Agent-scoped projection through every Session's
+`services` supporting-panel destination and Agent settings. Both surfaces are
+available only while the Agent has managed Runtime capability. Direct create,
+metadata update, On, Off, expiration reset, delete, URL copy, and URL open retain
+revision fencing. An authenticated user opening an Off service URL reaches the
+trusted activation surface and may turn it On with a selected finite duration.
+Runtime unavailability is shown as Runtime evidence and does not claim that the
+application port was checked or that turning Off stops the application.
 
 Application bytes never enter ordinary Runtime operations, PostgreSQL, Redis, Chat
 items, or audit history. The replacement data plane uses three persistent
@@ -250,17 +248,17 @@ memory ceilings.
 
 The independent Gateway synchronizes the current Runtime Web configuration,
 explicitly invalidates browser identities, bindings, and tickets when security
-configuration changes, resolves the endpoint by opaque hostname, authenticates one
-opaque browser identity, validates current approval and Runtime/Runner generations,
-opens a logical stream only after Control acceptance, and then streams the exchange.
-It fails closed when configuration, persistent session readiness, or database
-authority is unavailable. Identity extraction scans every raw Cookie header and
-exact cookie pair: zero matches is unauthenticated, one match is validated, and
-multiple matches are rejected before authority lookup without retaining request
-history or depending on Redis.
+configuration changes, resolves the service by opaque hostname, authenticates one
+opaque browser identity, validates effective On state plus current Runtime and Runner
+generations, opens a logical stream only after Control acceptance, and then streams
+the exchange. It fails closed when configuration, persistent session readiness, or
+database authority is unavailable. Identity extraction scans every raw Cookie
+header and exact cookie pair: zero matches is unauthenticated, one match is
+validated, and multiple matches are rejected before authority lookup without
+retaining request history or depending on Redis.
 Programmatic requests receive bounded `401`, `409`, `410`, `429`, `502`, or `503`
 responses as applicable; safe browser navigation is redirected only to the exact
-configured Main Web authentication or confirmation route.
+configured Main Web authentication or Off-service activation route.
 
 Gateway authentication is browser-vendor and version neutral and does not use
 User-Agent Client Hints, an allowlist, or a browser-proof cookie. HTTP and WebSocket
@@ -270,7 +268,7 @@ non-origin-form targets, oversized headers or bodies, and unauthorized WebSocket
 upgrades before application content is returned. Upstream access-control headers are
 replaced by Gateway policy, hop-by-hop headers are removed, cookies are bounded and
 rewritten for the service host, and security responses are content-free.
-Gateway-generated authentication, approval, transfer, and error documents deny
+Gateway-generated authentication, activation, transfer, and error documents deny
 framing. Proxied application responses receive no Gateway-invented framing policy;
 application-provided `X-Frame-Options` and Content Security Policy remain
 authoritative for application content.
@@ -316,11 +314,11 @@ application port. Metrics never retain application bodies, paths, queries, heade
 cookies, authorization values, tickets, identity secrets, raw application errors,
 or unbounded Runtime/user/Session labels.
 
-The request-scoped Runtime Web protobuf service, Runner intent and client, tunnel
-registry, transport coordinator/dispatcher, transport and admission tables, old
-endpoint/user/Agent capacity settings, 64 KiB frame setting, ten-minute SSE
-deadline, generated APIs, and compatibility tests do not exist in the current
-system.
+The legacy request-scoped Runtime Web protobuf service, Runner intent and client,
+tunnel registry, transport coordinator/dispatcher, transport and admission tables,
+Session endpoint/request/cycle authority, old endpoint/user/Agent capacity settings,
+64 KiB frame setting, ten-minute SSE deadline, generated APIs, and compatibility
+tests do not exist in the current system.
 
 ## Runtime File Transfer
 
@@ -1084,6 +1082,9 @@ Live/provider evidence belongs in the testenv prerequisite system and must redac
 
 ## Changelog
 
+- **2026-09-15 (spec_version=86)** — Replaced Session endpoint/request/approval
+  cycles with Agent-and-port services, direct revision-fenced On/Off management,
+  bounded Agent request/list/close tools, and Off-URL activation.
 - **2026-09-15 (spec_version=85)** — Attached the distinct Runner Web RPC to the
   ordinary authenticated Runner Control gRPC channel and removed replica,
   connect-address, and TLS-name routing authority from session offers and

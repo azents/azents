@@ -26,52 +26,24 @@ class TestRuntimeWebV1Api(unittest.TestCase):
     def tearDown(self) -> None:
         pass
 
-    def test_runtime_web_v1_approve_runtime_web_request(self) -> None:
-        """Test case for runtime_web_v1_approve_runtime_web_request
+    def test_runtime_web_v1_create_runtime_web_service(self) -> None:
+        """Test case for runtime_web_v1_create_runtime_web_service
 
-        Approve Runtime Web Request
+        Create Runtime Web Service
         """
         pass
 
-    def test_runtime_web_v1_approve_runtime_web_request_by_endpoint_id(self) -> None:
-        """Test case for runtime_web_v1_approve_runtime_web_request_by_endpoint_id
+    def test_runtime_web_v1_delete_runtime_web_service(self) -> None:
+        """Test case for runtime_web_v1_delete_runtime_web_service
 
-        Approve Runtime Web Request By Endpoint Id
+        Delete Runtime Web Service
         """
         pass
 
-    def test_runtime_web_v1_cancel_runtime_web_request(self) -> None:
-        """Test case for runtime_web_v1_cancel_runtime_web_request
+    def test_runtime_web_v1_get_runtime_web_service_by_id(self) -> None:
+        """Test case for runtime_web_v1_get_runtime_web_service_by_id
 
-        Cancel Runtime Web Request
-        """
-        pass
-
-    def test_runtime_web_v1_cancel_runtime_web_request_by_endpoint_id(self) -> None:
-        """Test case for runtime_web_v1_cancel_runtime_web_request_by_endpoint_id
-
-        Cancel Runtime Web Request By Endpoint Id
-        """
-        pass
-
-    def test_runtime_web_v1_close_runtime_web_cycle(self) -> None:
-        """Test case for runtime_web_v1_close_runtime_web_cycle
-
-        Close Runtime Web Cycle
-        """
-        pass
-
-    def test_runtime_web_v1_close_runtime_web_cycle_by_endpoint_id(self) -> None:
-        """Test case for runtime_web_v1_close_runtime_web_cycle_by_endpoint_id
-
-        Close Runtime Web Cycle By Endpoint Id
-        """
-        pass
-
-    def test_runtime_web_v1_direct_create_runtime_web_exposure(self) -> None:
-        """Test case for runtime_web_v1_direct_create_runtime_web_exposure
-
-        Direct Create Runtime Web Exposure
+        Get Runtime Web Service By Id
         """
         pass
 
@@ -79,13 +51,6 @@ class TestRuntimeWebV1Api(unittest.TestCase):
         """Test case for runtime_web_v1_get_runtime_web_service_projection
 
         Get Runtime Web Service Projection
-        """
-        pass
-
-    def test_runtime_web_v1_get_service_by_endpoint_id(self) -> None:
-        """Test case for runtime_web_v1_get_service_by_endpoint_id
-
-        Get Service By Endpoint Id
         """
         pass
 
@@ -124,31 +89,10 @@ class TestRuntimeWebV1Api(unittest.TestCase):
         """
         pass
 
-    def test_runtime_web_v1_prepare_runtime_web_endpoint(self) -> None:
-        """Test case for runtime_web_v1_prepare_runtime_web_endpoint
+    def test_runtime_web_v1_reset_runtime_web_service_expiration(self) -> None:
+        """Test case for runtime_web_v1_reset_runtime_web_service_expiration
 
-        Prepare Runtime Web Endpoint
-        """
-        pass
-
-    def test_runtime_web_v1_reject_runtime_web_request(self) -> None:
-        """Test case for runtime_web_v1_reject_runtime_web_request
-
-        Reject Runtime Web Request
-        """
-        pass
-
-    def test_runtime_web_v1_reject_runtime_web_request_by_endpoint_id(self) -> None:
-        """Test case for runtime_web_v1_reject_runtime_web_request_by_endpoint_id
-
-        Reject Runtime Web Request By Endpoint Id
-        """
-        pass
-
-    def test_runtime_web_v1_request_runtime_web_exposure(self) -> None:
-        """Test case for runtime_web_v1_request_runtime_web_exposure
-
-        Request Runtime Web Exposure
+        Reset Runtime Web Service Expiration
         """
         pass
 
@@ -156,6 +100,34 @@ class TestRuntimeWebV1Api(unittest.TestCase):
         """Test case for runtime_web_v1_revoke_runtime_web_identity
 
         Revoke Runtime Web Identity
+        """
+        pass
+
+    def test_runtime_web_v1_turn_off_runtime_web_service(self) -> None:
+        """Test case for runtime_web_v1_turn_off_runtime_web_service
+
+        Turn Off Runtime Web Service
+        """
+        pass
+
+    def test_runtime_web_v1_turn_on_runtime_web_service(self) -> None:
+        """Test case for runtime_web_v1_turn_on_runtime_web_service
+
+        Turn On Runtime Web Service
+        """
+        pass
+
+    def test_runtime_web_v1_turn_on_runtime_web_service_by_id(self) -> None:
+        """Test case for runtime_web_v1_turn_on_runtime_web_service_by_id
+
+        Turn On Runtime Web Service By Id
+        """
+        pass
+
+    def test_runtime_web_v1_update_runtime_web_service(self) -> None:
+        """Test case for runtime_web_v1_update_runtime_web_service
+
+        Update Runtime Web Service
         """
         pass
 

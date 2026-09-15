@@ -6,19 +6,17 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from azents.rdb.models.runtime_web import RuntimeWebRequesterKind
+from azents.rdb.models.runtime_web import RuntimeWebActorKind
 from azents.repos.runtime_web.data import (
-    RuntimeWebCycle,
-    RuntimeWebEndpoint,
     RuntimeWebOperationIdentity,
-    RuntimeWebRequest,
+    RuntimeWebServiceRecord,
 )
 
 
 class RuntimeWebActor(BaseModel):
     """Actor requesting a Runtime Web operation."""
 
-    kind: RuntimeWebRequesterKind
+    kind: RuntimeWebActorKind
     actor_id: str
     execution_id: str
     call_id: str | None
@@ -31,16 +29,48 @@ class RuntimeWebOperation(BaseModel):
 
 
 class RuntimeWebServiceProjection(BaseModel):
-    """Current orthogonal service state."""
+    """Current user-relevant service state."""
 
-    endpoint: RuntimeWebEndpoint
+    id: str
+    port: int
+    label: str | None
     url: str | None
     configuration_state: Literal["configured", "unconfigured"]
-    current_request: RuntimeWebRequest | None
-    current_cycle: RuntimeWebCycle | None
-    active: bool
-    duration_seconds: int
+    on: bool
+    selected_duration_seconds: int
+    expires_at: datetime.datetime | None
+    revision: int
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
     observed_at: datetime.datetime
+
+    @classmethod
+    def from_record(
+        cls,
+        record: RuntimeWebServiceRecord,
+        *,
+        url: str | None,
+        observed_at: datetime.datetime,
+    ) -> "RuntimeWebServiceProjection":
+        """Project effective state from one service row and database time."""
+        on = (
+            record.exposure_deadline_at is not None
+            and record.exposure_deadline_at > observed_at
+        )
+        return cls(
+            id=record.id,
+            port=record.port,
+            label=record.label,
+            url=url,
+            configuration_state="configured" if url is not None else "unconfigured",
+            on=on,
+            selected_duration_seconds=record.selected_duration_seconds,
+            expires_at=record.exposure_deadline_at if on else None,
+            revision=record.revision,
+            created_at=record.created_at,
+            updated_at=record.updated_at,
+            observed_at=observed_at,
+        )
 
 
 class RuntimeWebServicePage(BaseModel):
@@ -57,17 +87,17 @@ class RuntimeWebNotFound:
 
 @dataclasses.dataclass(frozen=True)
 class RuntimeWebAccessDenied:
-    """The authenticated user lacks disclosed Session access."""
+    """The actor lacks current Agent access."""
 
 
 @dataclasses.dataclass(frozen=True)
 class RuntimeWebConflict:
-    """The expected revision or current resource changed."""
+    """The expected revision, operation input, or current state changed."""
 
 
 @dataclasses.dataclass(frozen=True)
 class RuntimeWebQuotaExceeded:
-    """A logical endpoint or active-service quota is exhausted."""
+    """A logical service or active-service quota is exhausted."""
 
     scope: str
 
@@ -77,12 +107,18 @@ class RuntimeWebConfigurationUnavailable:
     """Runtime Web has no usable current durable configuration."""
 
 
+@dataclasses.dataclass(frozen=True)
+class RuntimeWebCapabilityUnavailable:
+    """The Agent does not currently have a managed Runtime capability."""
+
+
 type RuntimeWebError = (
     RuntimeWebNotFound
     | RuntimeWebAccessDenied
     | RuntimeWebConflict
     | RuntimeWebQuotaExceeded
     | RuntimeWebConfigurationUnavailable
+    | RuntimeWebCapabilityUnavailable
 )
 
 

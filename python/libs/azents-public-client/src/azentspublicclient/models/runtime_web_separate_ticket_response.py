@@ -26,13 +26,13 @@ from typing_extensions import Self
 
 class RuntimeWebSeparateTicketResponse(BaseModel):
     """
-    One-use POST-body ticket for the exact endpoint.
+    One-use POST-body ticket for the exact service.
     """ # noqa: E501
     ticket_secret: Annotated[str, Field(min_length=32, strict=True, max_length=128)]
-    endpoint_id: Annotated[str, Field(min_length=32, strict=True, max_length=32)]
+    service_id: Annotated[str, Field(min_length=32, strict=True, max_length=32)]
     expires_at: datetime
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["ticket_secret", "endpoint_id", "expires_at"]
+    __properties: ClassVar[List[str]] = ["ticket_secret", "service_id", "expires_at"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -93,7 +93,7 @@ class RuntimeWebSeparateTicketResponse(BaseModel):
 
         _obj = cls.model_validate({
             "ticket_secret": obj.get("ticket_secret"),
-            "endpoint_id": obj.get("endpoint_id"),
+            "service_id": obj.get("service_id"),
             "expires_at": obj.get("expires_at")
         })
         # store additional fields in additional_properties

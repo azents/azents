@@ -29,7 +29,7 @@ code_paths:
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
 last_verified_at: 2026-09-15
-spec_version: 63
+spec_version: 64
 ---
 
 # E2E Primary Test Strategy
@@ -417,19 +417,20 @@ Always-on required CI does not depend on external credentials.
 - Runtime Web Gateway E2E starts the real Docker Runtime and launches a bounded
   loopback fixture application through the product Terminal API. It runs both
   shared-cookie and separate-domain browser identity flows through a local TLS
-  wildcard edge, approves the exact pending request through Main Web, and verifies
-  stable secret-free URLs, current projection, replacement and close revision
-  fencing, browser upload digest and streamed download byte count, eight-asset
-  fan-out, HTTP POST and error propagation, SSE, redirect handling, and WebSocket
-  text, binary, ping/pong, and close behavior. A second Runtime Control replica accepts
-  the Gateway session after the Runner has registered with the first replica, forcing
-  the PostgreSQL Owner route and maximum-one-hop trusted relay path. The
-  recurring file collects four tests: shared-cookie and separate-domain full
+  wildcard edge, creates one Off Agent service through the generated Public client,
+  turns it On through the authenticated service URL, and verifies stable secret-free
+  URLs, current Agent-scoped projection, stale-revision rejection, expiration reset,
+  direct Off control, browser upload digest and streamed download byte count,
+  eight-asset fan-out, HTTP POST and error propagation, SSE, redirect handling, and
+  WebSocket text, binary, ping/pong, and close behavior. A second Runtime Control
+  replica accepts the Gateway session after the Runner has registered with the first
+  replica, forcing the PostgreSQL Owner route and maximum-one-hop trusted relay path.
+  The recurring file collects four tests: shared-cookie and separate-domain full
   journeys, pre-body hard-limit rejection, and maintenance preflight. The capacity
   backend is selectable between memory and Redis; Redis loss/recovery behavior stays
-  within the same lightweight journey and does not make Redis a readiness
-  dependency. Recurring defaults are 1 MiB transfer bodies, eight assets, and a
-  120-second browser-script deadline. The same collected journey accepts bounded
+  within the same lightweight journey and does not make Redis a readiness dependency.
+  Recurring defaults are 1 MiB transfer bodies, eight assets, and a 120-second
+  browser-script deadline. The same collected journey accepts bounded
   `AZENTS_E2E_RUNTIME_WEB_TRANSFER_BYTES`,
   `AZENTS_E2E_RUNTIME_WEB_ASSET_COUNT`, and
   `AZENTS_E2E_RUNTIME_WEB_SCRIPT_TIMEOUT_SECONDS` overrides for an explicitly
@@ -514,6 +515,9 @@ Local/PR environment without live substrate does not fake live PASS. Instead, se
 
 ## Changelog
 
+- **2026-09-15** (spec_version 64) — Replaced Runtime Web approval-cycle E2E with
+  Off-service URL activation, Agent-scoped service projection, reset revision
+  fencing, and direct Off control.
 - **2026-09-15** (spec_version 63) — Extended immutable snapshot reuse and
   prerequisite pre-pulls to every Web E2E image, reused the session Chromium across
   isolated Runtime Web scenarios, launched Chromium through a Web-suite-only session

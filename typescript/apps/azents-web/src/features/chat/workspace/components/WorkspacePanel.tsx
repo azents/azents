@@ -31,6 +31,7 @@ import {
   IconWorld,
 } from "@tabler/icons-react";
 import Link from "next/link";
+import { RuntimeWebServices } from "@/features/runtime-web/components/RuntimeWebServices";
 import { RuntimeLifecycleStatus } from "@/shared/components/runtime/RuntimeLifecycleStatus";
 import { RuntimeSystemMetricsOverview } from "@/shared/runtime-metrics/components/RuntimeSystemMetricsOverview";
 import { FileBrowserContainer } from "../containers/FileBrowserContainer";
@@ -38,13 +39,11 @@ import { FileInfo } from "./FileInfo";
 import { FileViewer } from "./FileViewer";
 import { RuntimeActivationView } from "./RuntimeActivationView";
 import { RuntimeConfigurationStatus } from "./RuntimeConfigurationStatus";
-import { RuntimeServicesPanel } from "./RuntimeServicesPanel";
 import { WorkspaceDirectoryPickerModal } from "./WorkspaceDirectoryPickerModal";
 import type { WorkspacePanelTranslator } from "../containers/useWorkspacePanelTranslations";
 import type {
   ProjectRegistrationDialogState,
   ProjectRegistrationMode,
-  RuntimeServicesState,
   WorkspaceBrowserMode,
   WorkspaceEntry,
   WorkspacePanelState,
@@ -55,8 +54,8 @@ import type {
   ProjectDirectoryPickerEntry,
   ProjectDirectoryPickerState,
 } from "./WorkspaceDirectoryPickerModal";
+import type { RuntimeWebServicesContainerOutput } from "@/features/runtime-web/containers/useRuntimeWebServicesContainer";
 import type { RuntimeSystemMetricsOverviewState } from "@/shared/runtime-metrics/types";
-import type { RuntimeWebServiceResponse } from "@azents/public-client";
 
 const closedProjectRegistrationDialog: ProjectRegistrationDialogState = {
   type: "CLOSED",
@@ -66,18 +65,7 @@ export interface WorkspacePanelProps {
   state: WorkspacePanelState;
   projectState: WorkspaceProjectPanelState;
   metricsState: RuntimeSystemMetricsOverviewState;
-  servicesState?: RuntimeServicesState;
-  servicesMutating?: boolean;
-  preparedRuntimeService?: RuntimeWebServiceResponse | null;
-  servicesMutationError?: string | null;
-  onPrepareRuntimeService?: (port: number, label: string | null) => void;
-  onConfirmCreateRuntimeService?: () => void;
-  onResetPreparedRuntimeService?: () => void;
-  onApproveRuntimeService?: (service: RuntimeWebServiceResponse) => void;
-  onRejectRuntimeService?: (service: RuntimeWebServiceResponse) => void;
-  onCancelRuntimeService?: (service: RuntimeWebServiceResponse) => void;
-  onRequestRuntimeServiceAgain?: (service: RuntimeWebServiceResponse) => void;
-  onCloseRuntimeService?: (service: RuntimeWebServiceResponse) => void;
+  runtimeWebServices?: RuntimeWebServicesContainerOutput;
   defaultTab?: WorkspacePanelTab;
   activeTab?: WorkspacePanelTab;
   navigation?: "internal" | "external";
@@ -148,22 +136,7 @@ export function WorkspacePanel({
   state,
   projectState,
   metricsState,
-  servicesState = {
-    type: "READY",
-    services: [],
-    runtimeAvailable: false,
-  },
-  servicesMutating = false,
-  preparedRuntimeService = null,
-  servicesMutationError = null,
-  onPrepareRuntimeService = (): void => {},
-  onConfirmCreateRuntimeService = (): void => {},
-  onResetPreparedRuntimeService = (): void => {},
-  onApproveRuntimeService = (): void => {},
-  onRejectRuntimeService = (): void => {},
-  onCancelRuntimeService = (): void => {},
-  onRequestRuntimeServiceAgain = (): void => {},
-  onCloseRuntimeService = (): void => {},
+  runtimeWebServices,
   defaultTab = "workspace",
   activeTab = defaultTab,
   navigation = "internal",
@@ -844,20 +817,9 @@ export function WorkspacePanel({
           p="md"
           style={{ flex: 1, minHeight: 0, overflow: "auto" }}
         >
-          <RuntimeServicesPanel
-            state={servicesState}
-            mutating={servicesMutating}
-            preparedService={preparedRuntimeService}
-            mutationError={servicesMutationError}
-            onPrepareService={onPrepareRuntimeService}
-            onConfirmCreate={onConfirmCreateRuntimeService}
-            onResetPreparedService={onResetPreparedRuntimeService}
-            onApprove={onApproveRuntimeService}
-            onReject={onRejectRuntimeService}
-            onCancel={onCancelRuntimeService}
-            onRequestAgain={onRequestRuntimeServiceAgain}
-            onClose={onCloseRuntimeService}
-          />
+          {runtimeWebServices ? (
+            <RuntimeWebServices {...runtimeWebServices} />
+          ) : null}
         </Tabs.Panel>
         {metricsTabAvailable ? (
           <Tabs.Panel

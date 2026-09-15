@@ -1,4 +1,4 @@
-"""Current Session, approval, and Runtime admission authority for the Gateway."""
+"""Current Agent service and Runtime admission authority for the Gateway."""
 
 import datetime
 import enum
@@ -9,27 +9,24 @@ from azents_runtime_control.runtime_web_session import StreamProtocol
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
+    AgentLifecycleStatus,
+    AgentRuntimeCapability,
+    AgentType,
     RuntimeDesiredState,
     RuntimeProviderObservedState,
     RuntimeRunnerState,
+    WorkspaceUserRole,
 )
 from azents.rdb.session import SessionManager
+from azents.repos.agent import AgentRepository
+from azents.repos.agent_admin import AgentAdminRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime.data import AgentRuntime
-from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.runtime_web.data import RuntimeWebEndpoint
-from azents.repos.runtime_web.gateway_data import (
-    RuntimeWebGatewayAuthority,
-)
-from azents.repos.runtime_web.gateway_repository import (
-    RuntimeWebGatewayRepository,
-)
+from azents.repos.runtime_web.data import RuntimeWebServiceRecord
+from azents.repos.runtime_web.gateway_data import RuntimeWebGatewayAuthority
+from azents.repos.runtime_web.gateway_repository import RuntimeWebGatewayRepository
 from azents.repos.runtime_web.repository import RuntimeWebRepository
 from azents.repos.workspace_user import WorkspaceUserRepository
-from azents.services.session_resource_authority import (
-    AuthorizedPublicSessionResource,
-    authorize_public_session_resource,
-)
 
 
 class RuntimeWebGatewayAuthorityCode(enum.StrEnum):
@@ -37,7 +34,6 @@ class RuntimeWebGatewayAuthorityCode(enum.StrEnum):
 
     UNAUTHENTICATED = "unauthenticated"
     NOT_FOUND = "not_found"
-    PENDING_APPROVAL = "pending_approval"
     GONE = "gone"
     RUNTIME_UNAVAILABLE = "runtime_unavailable"
 
@@ -51,7 +47,7 @@ class RuntimeWebGatewayAuthorityError(ValueError):
 
 
 class RuntimeWebGatewayAuthorityService:
-    """Resolve one request against current identity and Session authority."""
+    """Resolve one request against current identity and Agent service authority."""
 
     def __init__(
         self,
@@ -59,14 +55,16 @@ class RuntimeWebGatewayAuthorityService:
         session_manager: SessionManager[AsyncSession],
         gateway_repository: RuntimeWebGatewayRepository,
         runtime_web_repository: RuntimeWebRepository,
-        agent_session_repository: AgentSessionRepository,
+        agent_repository: AgentRepository,
+        agent_admin_repository: AgentAdminRepository,
         workspace_user_repository: WorkspaceUserRepository,
         runtime_repository: AgentRuntimeRepository,
     ) -> None:
         self.session_manager = session_manager
         self.gateway_repository = gateway_repository
         self.runtime_web_repository = runtime_web_repository
-        self.agent_session_repository = agent_session_repository
+        self.agent_repository = agent_repository
+        self.agent_admin_repository = agent_admin_repository
         self.workspace_user_repository = workspace_user_repository
         self.runtime_repository = runtime_repository
 
@@ -77,7 +75,8 @@ class RuntimeWebGatewayAuthorityService:
         identity_secret: str,
         protocol: StreamProtocol,
     ) -> RuntimeWebGatewayAuthority:
-        """Authorize identity, Session membership, approval, and current Runtime."""
+        """Authorize identity, Agent access, exposure, and current Runtime."""
+        del protocol
         async with self.session_manager() as session:
             now = await self._database_now(session)
             identity = await self.gateway_repository.authenticate_identity(
@@ -89,57 +88,28 @@ class RuntimeWebGatewayAuthorityService:
                 raise RuntimeWebGatewayAuthorityError(
                     RuntimeWebGatewayAuthorityCode.UNAUTHENTICATED
                 )
-            endpoint_rdb = await self.gateway_repository.get_endpoint_by_hostname(
+            service = await self.runtime_web_repository.get_service_by_hostname(
                 session,
                 hostname_key=hostname_key,
             )
-            if endpoint_rdb is None:
-                raise RuntimeWebGatewayAuthorityError(
-                    RuntimeWebGatewayAuthorityCode.NOT_FOUND
-                )
-            endpoint = await self.runtime_web_repository.get_endpoint(
+            if service is None or not await self._authorize_service(
                 session,
-                agent_session_id=endpoint_rdb.agent_session_id,
-                port=endpoint_rdb.port,
-            )
-            if endpoint is None:
-                raise RuntimeWebGatewayAuthorityError(
-                    RuntimeWebGatewayAuthorityCode.NOT_FOUND
-                )
-            access = await self._authorize_endpoint(
-                session,
-                endpoint=endpoint,
+                service=service,
                 user_id=identity.user_id,
-            )
-            if access is None:
+            ):
                 raise RuntimeWebGatewayAuthorityError(
                     RuntimeWebGatewayAuthorityCode.NOT_FOUND
                 )
-            request = await self.runtime_web_repository.current_request(
-                session,
-                endpoint,
-            )
-            cycle = await self.runtime_web_repository.current_cycle(
-                session,
-                endpoint,
-            )
-            active = (
-                cycle is not None
-                and cycle.ended_at is None
-                and cycle.expires_at > now
-                and cycle.close_barrier == endpoint.close_barrier
-                and endpoint.current_cycle_id == cycle.id
-            )
-            if not active:
-                code = (
-                    RuntimeWebGatewayAuthorityCode.PENDING_APPROVAL
-                    if request is not None and request.state.value == "pending"
-                    else RuntimeWebGatewayAuthorityCode.GONE
+            if (
+                service.exposure_deadline_at is None
+                or service.exposure_deadline_at <= now
+            ):
+                raise RuntimeWebGatewayAuthorityError(
+                    RuntimeWebGatewayAuthorityCode.GONE
                 )
-                raise RuntimeWebGatewayAuthorityError(code)
             runtime = await self.runtime_repository.get_by_agent_id(
                 session,
-                endpoint.agent_id,
+                service.agent_id,
             )
             if not _runtime_ready(runtime):
                 raise RuntimeWebGatewayAuthorityError(
@@ -148,155 +118,137 @@ class RuntimeWebGatewayAuthorityService:
             assert runtime is not None
             return RuntimeWebGatewayAuthority(
                 identity=identity,
-                endpoint=endpoint,
-                request=request,
-                cycle=cycle,
+                service=service,
                 runtime_id=runtime.id,
                 desired_generation=runtime.desired_generation,
                 runner_generation=runtime.runner_generation,
-                active=True,
-                runtime_ready=True,
+                exposure_deadline_at=service.exposure_deadline_at,
             )
 
-    async def resolve_endpoint(
+    async def resolve_service(
         self,
         *,
         hostname_key: str,
-    ) -> RuntimeWebEndpoint | None:
+    ) -> RuntimeWebServiceRecord | None:
         """Resolve a public host label without disclosing private authority."""
         async with self.session_manager() as session:
-            endpoint_rdb = await self.gateway_repository.get_endpoint_by_hostname(
+            return await self.runtime_web_repository.get_service_by_hostname(
                 session,
                 hostname_key=hostname_key,
             )
-            if endpoint_rdb is None:
-                return None
-            return await self.runtime_web_repository.get_endpoint(
-                session,
-                agent_session_id=endpoint_rdb.agent_session_id,
-                port=endpoint_rdb.port,
-            )
 
-    async def resolve_endpoint_by_id(
+    async def resolve_service_by_id(
         self,
         *,
-        endpoint_id: str,
-    ) -> RuntimeWebEndpoint | None:
-        """Resolve the endpoint destination of a consumed auth ticket."""
+        service_id: str,
+    ) -> RuntimeWebServiceRecord | None:
+        """Resolve the service destination of a consumed auth ticket."""
         async with self.session_manager() as session:
-            endpoint_rdb = await self.gateway_repository.get_endpoint_by_id(
+            return await self.runtime_web_repository.get_service_by_id(
                 session,
-                endpoint_id=endpoint_id,
-            )
-            if endpoint_rdb is None:
-                return None
-            return await self.runtime_web_repository.get_endpoint(
-                session,
-                agent_session_id=endpoint_rdb.agent_session_id,
-                port=endpoint_rdb.port,
+                service_id,
             )
 
-    async def source_endpoint_matches_root(
+    async def source_service_matches_agent(
         self,
         *,
         source_hostname_key: str,
-        target_endpoint: RuntimeWebEndpoint,
+        target_service: RuntimeWebServiceRecord,
     ) -> bool:
-        """Return whether two exact endpoint labels share one root Session."""
+        """Return whether two current On services belong to the same Agent."""
         async with self.session_manager() as session:
-            source = await self.gateway_repository.get_endpoint_by_hostname(
+            now = await self._database_now(session)
+            source = await self.runtime_web_repository.get_service_by_hostname(
                 session,
                 hostname_key=source_hostname_key,
             )
-            if source is None:
-                return False
-            source_session = await self.agent_session_repository.get_by_id(
+            target = await self.runtime_web_repository.get_service_by_id(
                 session,
-                source.agent_session_id,
+                target_service.id,
             )
-            target_session = await self.agent_session_repository.get_by_id(
-                session,
-                target_endpoint.agent_session_id,
+            return (
+                source is not None
+                and target is not None
+                and source.agent_id == target.agent_id
+                and source.exposure_deadline_at is not None
+                and source.exposure_deadline_at > now
+                and target.exposure_deadline_at is not None
+                and target.exposure_deadline_at > now
             )
-            if source_session is None or target_session is None:
-                return False
-            source_root = await self._root_session_id(session, source_session.id)
-            target_root = await self._root_session_id(session, target_session.id)
-            return source_root is not None and source_root == target_root
 
     async def identity_and_access_current(
         self,
         *,
         authority: RuntimeWebGatewayAuthority,
     ) -> bool:
-        """Revalidate identity, auth Session, user, and Session membership."""
+        """Revalidate identity, user access, service state, and Runtime generation."""
         async with self.session_manager() as session:
             now = await self._database_now(session)
-            current = await self.gateway_repository.identity_authority_current(
+            identity_current = await self.gateway_repository.identity_authority_current(
                 session,
                 identity_id=authority.identity.id,
                 user_id=authority.identity.user_id,
                 auth_session_id=authority.identity.auth_session_id,
                 now=now,
             )
-            if not current:
-                return False
-            return (
-                await self._authorize_endpoint(
+            service = await self.runtime_web_repository.get_service_by_id(
+                session,
+                authority.service.id,
+            )
+            if (
+                not identity_current
+                or service is None
+                or service.exposure_deadline_at is None
+                or service.exposure_deadline_at <= now
+                or not await self._authorize_service(
                     session,
-                    endpoint=authority.endpoint,
+                    service=service,
                     user_id=authority.identity.user_id,
                 )
-                is not None
+            ):
+                return False
+            runtime = await self.runtime_repository.get_by_agent_id(
+                session,
+                service.agent_id,
+            )
+            return (
+                _runtime_ready(runtime)
+                and runtime is not None
+                and runtime.id == authority.runtime_id
+                and runtime.desired_generation == authority.desired_generation
+                and runtime.runner_generation == authority.runner_generation
             )
 
-    async def _authorize_endpoint(
+    async def _authorize_service(
         self,
         session: AsyncSession,
         *,
-        endpoint: RuntimeWebEndpoint,
+        service: RuntimeWebServiceRecord,
         user_id: str,
-    ) -> AuthorizedPublicSessionResource | None:
-        agent_session = await self.agent_session_repository.get_by_id(
+    ) -> bool:
+        member = await self.workspace_user_repository.get_by_workspace_and_user(
             session,
-            endpoint.agent_session_id,
+            service.workspace_id,
+            user_id,
         )
-        if agent_session is None:
-            return None
-        access = await authorize_public_session_resource(
+        agent = await self.agent_repository.get_by_id(session, service.agent_id)
+        if (
+            member is None
+            or agent is None
+            or agent.workspace_id != service.workspace_id
+            or agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE
+            or agent.runtime_capability is not AgentRuntimeCapability.MANAGED
+        ):
+            return False
+        if (
+            agent.type is not AgentType.PRIVATE
+            or member.role is WorkspaceUserRole.OWNER
+        ):
+            return True
+        return await self.agent_admin_repository.is_admin(
             session,
-            agent_session=agent_session,
-            user_id=user_id,
-            require_active=True,
-            denied_as_not_found=True,
-            expected_workspace_id=endpoint.workspace_id,
-            expected_agent_id=endpoint.agent_id,
-            agent_session_repository=self.agent_session_repository,
-            workspace_user_repository=self.workspace_user_repository,
-        )
-        if not isinstance(access, AuthorizedPublicSessionResource):
-            return None
-        return access
-
-    async def _root_session_id(
-        self,
-        session: AsyncSession,
-        agent_session_id: str,
-    ) -> str | None:
-        agent_session = await self.agent_session_repository.get_by_id(
-            session,
-            agent_session_id,
-        )
-        if agent_session is None:
-            return None
-        root_agent = (
-            await self.agent_session_repository.get_root_session_agent_by_session_id(
-                session,
-                agent_session_id,
-            )
-        )
-        return (
-            root_agent.agent_session_id if root_agent is not None else agent_session.id
+            agent.id,
+            member.id,
         )
 
     @staticmethod

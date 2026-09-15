@@ -103,8 +103,8 @@ api_routes:
   - /system/v1
   - /system-setting/v1
   - /debug/v1
-last_verified_at: 2026-09-13
-spec_version: 19
+last_verified_at: 2026-09-15
+spec_version: 20
 ---
 
 # User & Authentication
@@ -382,6 +382,12 @@ not use browser vendor, version, User-Agent Client Hints, a browser capability p
 or a browser-profile field. Logout revokes the opaque Runtime Web identity and clears
 its cookie without revealing the secret.
 
+An authenticated Off-service URL resolves the opaque service ID through the trusted
+Main Web activation route. Authorization is rechecked against the service's current
+Workspace and Agent ownership before the user may choose 1, 6, or 24 hours and turn
+the service On with its displayed revision. Activation does not create an approval
+request, replace browser identity authority, or put a credential in the URL.
+
 Shared-cookie mode mints the identity through the authenticated Public API and writes
 it from a trusted Main Web response to the configured parent cookie domain.
 Separate-domain mode creates an opaque initiation ID plus a Main-origin-only binding,
@@ -554,6 +560,9 @@ Admin-issued signup/password-reset token management and other instance-wide oper
 
 ## 9. Changelog
 
+- **2026-09-15** (v20) — Added the authenticated Off-service activation route
+  with service-ID authorization and revision-fenced On control, without an approval
+  resource or URL credential.
 - **2026-09-13** (v19) — Removed Runtime Web browser-profile and capability-probe
   authorization, made identity issuance browser-neutral, and documented exact raw
   identity-cookie cardinality before opaque-secret validation.

@@ -3,7 +3,9 @@
 import hashlib
 import json
 
+import pytest
 import sqlalchemy as sa
+import sqlalchemy.exc as sa_exc
 from pytest_alembic import tests
 from pytest_alembic.runner import MigrationContext
 from sqlalchemy.engine import Engine
@@ -11,7 +13,7 @@ from sqlalchemy.engine import Engine
 from azents.rdb.models.base import RDBModel
 
 _EXPECTED_PUBLIC_SCHEMA_FINGERPRINT = (
-    "7dd4f96571315e5f6f61e4bb4c020fb3f5d3e4a76a23a664310d7b85b5260197"
+    "68b1355da00444b079b55fc6a775a323720ecd193ecdb80b1c65f12c1a13d759"
 )
 
 
@@ -187,9 +189,68 @@ def test_model_definitions_match_ddl(alembic_runner: MigrationContext) -> None:
     tests.test_model_definitions_match_ddl(alembic_runner)
 
 
-def test_up_down_consistency(alembic_runner: MigrationContext) -> None:
-    """Require the baseline to downgrade and upgrade consistently."""
-    tests.test_up_down_consistency(alembic_runner)
+def test_runtime_web_service_cutover_requires_drained_legacy_sessions(
+    alembic_runner: MigrationContext,
+    alembic_engine: Engine,
+) -> None:
+    """Reject the destructive service cutover while a legacy route is active."""
+    alembic_runner.migrate_up_to("097a97177350")
+    with alembic_engine.begin() as connection:
+        connection.execute(sa.text("SET LOCAL session_replication_role = replica"))
+        connection.execute(
+            sa.text(
+                """
+                INSERT INTO runtime_web_session_routes (
+                    runtime_id,
+                    desired_generation,
+                    runner_generation,
+                    owner_replica_id,
+                    owner_boot_id,
+                    owner_address,
+                    session_lease_id,
+                    lease_generation,
+                    join_nonce_hash,
+                    protocol_fingerprint,
+                    lease_expires_at
+                )
+                VALUES (
+                    'legacy-runtime',
+                    1,
+                    1,
+                    'legacy-control',
+                    'legacy-boot',
+                    'legacy-control:8032',
+                    'legacy-session-lease',
+                    1,
+                    repeat('a', 64),
+                    repeat('b', 64),
+                    now() + interval '1 hour'
+                )
+                """
+            )
+        )
+
+    with pytest.raises(
+        sa_exc.DBAPIError,
+        match="Runtime Web maintenance preflight found active legacy sessions",
+    ):
+        alembic_runner.migrate_up_to("head")
+
+    with alembic_engine.begin() as connection:
+        connection.execute(sa.text("DELETE FROM runtime_web_session_routes"))
+    alembic_runner.migrate_up_to("head")
+
+
+def test_runtime_web_service_cutover_is_forward_only(
+    alembic_runner: MigrationContext,
+) -> None:
+    """Reject restoration of deleted Session-scoped Runtime Web authority."""
+    alembic_runner.migrate_up_to("head")
+    with pytest.raises(
+        RuntimeError,
+        match="Runtime Web service-management cutover is irreversible and forward-only",
+    ):
+        alembic_runner.migrate_down_to("097a97177350")
 
 
 def test_all_check_constraints_are_named(
@@ -253,8 +314,7 @@ def test_baseline_schema_and_seed_state(
         runtime_web_configuration = connection.execute(
             sa.text(
                 """
-                SELECT id, enabled, mode, fingerprint,
-                       active_duration_seconds
+                SELECT id, enabled, mode, fingerprint
                 FROM runtime_web_auth_configuration
                 """
             )
@@ -264,5 +324,17 @@ def test_baseline_schema_and_seed_state(
             False,
             "separate_domain",
             "9d83c5f39577f63a9e9ce3eeef51751ed5798537fcea984a30dcdb21105d339d",
-            7_200,
         )
+
+        runtime_web_authority_tables = connection.execute(
+            sa.text(
+                """
+                SELECT
+                    to_regclass('public.runtime_web_services') IS NOT NULL,
+                    to_regclass('public.runtime_web_endpoints') IS NULL,
+                    to_regclass('public.runtime_web_requests') IS NULL,
+                    to_regclass('public.runtime_web_cycles') IS NULL
+                """
+            )
+        ).one()
+        assert runtime_web_authority_tables == (True, True, True, True)

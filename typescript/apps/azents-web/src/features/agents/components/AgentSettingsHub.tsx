@@ -25,6 +25,7 @@ import {
   IconSitemap,
   IconTerminal2,
   IconTrash,
+  IconWorld,
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
@@ -178,6 +179,17 @@ export function AgentSettingsHub({
           description: t("runtime.description"),
           value: t(`runtime.values.${agent.runtime_capability}`),
         },
+        ...(agent.runtime_capability === "managed"
+          ? [
+              {
+                href: `${basePath}/services`,
+                icon: <IconWorld size={rem(18)} />,
+                label: t("services.label"),
+                description: t("services.description"),
+                value: null,
+              },
+            ]
+          : []),
         {
           href: `${basePath}/capabilities`,
           icon: <IconSettings size={rem(18)} />,

@@ -604,6 +604,10 @@
           "managed": "관리형",
           "removing": "제거 중"
         }
+      },
+      "services": {
+        "label": "웹 서비스",
+        "description": "로컬 Runtime 포트에서 실행 중인 애플리케이션의 공개 URL"
       }
     },
     "automaticProjects": {

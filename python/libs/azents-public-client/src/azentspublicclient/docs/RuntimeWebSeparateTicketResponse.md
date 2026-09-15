@@ -1,13 +1,13 @@
 # RuntimeWebSeparateTicketResponse
 
-One-use POST-body ticket for the exact endpoint.
+One-use POST-body ticket for the exact service.
 
 ## Properties
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **ticket_secret** | **str** |  | 
-**endpoint_id** | **str** |  | 
+**service_id** | **str** |  | 
 **expires_at** | **datetime** |  | 
 
 ## Example

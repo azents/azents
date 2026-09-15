@@ -28,6 +28,7 @@ from azents.rdb.models.agent_project_preset import RDBAgentProjectPreset
 from azents.rdb.models.agent_run import RDBAgentRun
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.git_worktree_cleanup_claim import RDBGitWorktreePathClaim
+from azents.rdb.models.runtime_web import RDBRuntimeWebService
 from azents.rdb.models.session_agent_context import (
     RDBSessionAgentContext,
     RDBSessionAgentContextGitWorktree,
@@ -361,6 +362,11 @@ class AgentRuntimeRemovalScopeRepository:
                 RDBAgentProjectPreset.agent_id == agent_id,
                 "Agent Project presets",
             ),
+            (
+                RDBRuntimeWebService,
+                RDBRuntimeWebService.agent_id == agent_id,
+                "Runtime Web service",
+            ),
         )
         for _, predicate, label in remaining:
             if await session.scalar(sa.select(sa.exists().where(predicate))):
@@ -468,6 +474,11 @@ class AgentRuntimeRemovalScopeRepository:
             RDBAgentProjectPreset,
         ):
             await session.execute(sa.delete(model).where(model.agent_id == agent_id))
+        await session.execute(
+            sa.delete(RDBRuntimeWebService).where(
+                RDBRuntimeWebService.agent_id == agent_id
+            )
+        )
         await session.execute(
             sa.delete(RDBToolkitState).where(
                 RDBToolkitState.agent_id == agent_id,

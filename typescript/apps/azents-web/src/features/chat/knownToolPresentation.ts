@@ -155,9 +155,8 @@ export interface SkillDetail {
 
 export interface RuntimeWebDetail {
   type: "runtimeWeb";
-  endpointId: string;
+  serviceId: string;
   port: number;
-  requestId: string | null;
   url: string;
 }
 
@@ -244,45 +243,32 @@ const runtimeWebPortInputSchema = z.object({
   port: z.number().int().min(1).max(65_535),
   label: z.string().max(120).nullable(),
 });
-const runtimeWebRequestMutationInputSchema = z.object({
-  request_id: z.string().min(1).max(32),
-  expected_revision: z.number().int().min(1),
-});
 const runtimeWebCloseInputSchema = z.object({
-  cycle_id: z.string().min(1).max(32),
-  expected_endpoint_revision: z.number().int().min(0),
+  service_id: z.string().length(32),
 });
 const runtimeWebProjectionSchema = z.object({
-  endpoint_id: z.string().length(32),
+  service_id: z.string().length(32),
   port: z.number().int().min(1).max(65_535),
   label: z.string().nullable(),
   url: z.string().url(),
-  request: z
-    .object({
-      id: z.string().min(1).max(32),
-      state: z.enum(["pending", "approved", "rejected", "cancelled"]),
-      revision: z.number().int().min(1),
-    })
-    .nullable(),
-  cycle: z
-    .object({
-      id: z.string().min(1).max(32),
-    })
-    .nullable(),
-  active: z.boolean(),
+  configuration_state: z.enum(["configured", "unconfigured"]),
+  on: z.boolean(),
+  selected_duration_seconds: z.union([
+    z.literal(3600),
+    z.literal(21_600),
+    z.literal(86_400),
+  ]),
+  expires_at: z.string().datetime().nullable(),
+  revision: z.number().int().min(0),
+  observed_at: z.string().datetime(),
 });
 const runtimeWebMetadataSchema = z.object({
-  kind: z.enum([
-    "runtime_web_service_endpoint",
-    "runtime_web_service_request",
-    "runtime_web_service_cycle",
-  ]),
-  endpoint_id: z.string().length(32),
+  kind: z.literal("runtime_web_service"),
+  service_id: z.string().length(32),
   port: z.number().int().min(1).max(65_535),
   url: z.string().url(),
-  request_id: z.string().min(1).max(32).nullable(),
-  request_revision: z.number().int().min(1).nullable(),
-  cycle_id: z.string().min(1).max(32).nullable(),
+  revision: z.number().int().min(0),
+  expires_at: z.string().datetime().nullable(),
 });
 const writeStdinInputSchema = z.object({ process_id: z.string().min(1) });
 const presentFileInputSchema = z.object({
@@ -566,10 +552,8 @@ const scheduledToolNames = new Set([
   "submit_scheduled_task_result",
 ]);
 const runtimeWebToolNames = new Set([
-  "prepare_web_service",
   "request_web_service",
   "list_web_services",
-  "cancel_web_service_request",
   "close_web_service",
 ]);
 
@@ -728,10 +712,6 @@ function parsedResult<T extends z.ZodTypeAny>(
 function runtimeWebPresentation(
   toolCall: ActiveToolCall,
   subject: string,
-  expectedKind:
-    | "runtime_web_service_endpoint"
-    | "runtime_web_service_request"
-    | "runtime_web_service_cycle",
 ): KnownToolPresentationResult {
   if (!completed(toolCall)) {
     return presentation("runtimeWeb", subject, null, null);
@@ -741,36 +721,23 @@ function runtimeWebPresentation(
   if (!metadata.success || result === null) {
     return generic("invalid-output");
   }
-  const resultRequestId = result.request === null ? null : result.request.id;
-  const resultRequestRevision =
-    result.request === null ? null : result.request.revision;
-  const resultCycleId = result.cycle === null ? null : result.cycle.id;
   if (
-    metadata.data.kind !== expectedKind ||
-    metadata.data.endpoint_id !== result.endpoint_id ||
+    metadata.data.service_id !== result.service_id ||
     metadata.data.port !== result.port ||
     metadata.data.url !== result.url ||
-    metadata.data.request_id !== resultRequestId ||
-    metadata.data.request_revision !== resultRequestRevision ||
-    metadata.data.cycle_id !== resultCycleId
+    metadata.data.revision !== result.revision ||
+    metadata.data.expires_at !== result.expires_at
   ) {
     return generic("invalid-output");
   }
   return presentation(
     "runtimeWeb",
     result.label ?? subject,
-    result.active
-      ? result.request !== null && result.request.state === "pending"
-        ? "active-pending"
-        : "active"
-      : result.request === null
-        ? "inactive"
-        : result.request.state,
+    result.on ? "on" : "off",
     {
       type: "runtimeWeb",
-      endpointId: result.endpoint_id,
+      serviceId: result.service_id,
       port: result.port,
-      requestId: metadata.data.request_id,
       url: result.url,
     },
   );
@@ -950,18 +917,6 @@ export function knownToolPresentation(
   }
   try {
     switch (toolCall.name) {
-      case "prepare_web_service": {
-        const input = runtimeWebPortInputSchema.safeParse(
-          argumentsResult.value,
-        );
-        return input.success
-          ? runtimeWebPresentation(
-              toolCall,
-              input.data.label ?? `localhost:${input.data.port}`,
-              "runtime_web_service_endpoint",
-            )
-          : generic("invalid-arguments");
-      }
       case "request_web_service": {
         const input = runtimeWebPortInputSchema.safeParse(
           argumentsResult.value,
@@ -970,19 +925,6 @@ export function knownToolPresentation(
           ? runtimeWebPresentation(
               toolCall,
               input.data.label ?? `localhost:${input.data.port}`,
-              "runtime_web_service_request",
-            )
-          : generic("invalid-arguments");
-      }
-      case "cancel_web_service_request": {
-        const input = runtimeWebRequestMutationInputSchema.safeParse(
-          argumentsResult.value,
-        );
-        return input.success
-          ? runtimeWebPresentation(
-              toolCall,
-              input.data.request_id,
-              "runtime_web_service_request",
             )
           : generic("invalid-arguments");
       }
@@ -991,11 +933,7 @@ export function knownToolPresentation(
           argumentsResult.value,
         );
         return input.success
-          ? runtimeWebPresentation(
-              toolCall,
-              input.data.cycle_id,
-              "runtime_web_service_cycle",
-            )
+          ? runtimeWebPresentation(toolCall, input.data.service_id)
           : generic("invalid-arguments");
       }
       case "list_web_services": {

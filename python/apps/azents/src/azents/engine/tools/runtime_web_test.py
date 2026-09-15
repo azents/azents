@@ -1,4 +1,4 @@
-"""Runtime-independent Runtime Web Toolkit tests."""
+"""Agent-scoped Runtime Web Toolkit tests."""
 
 import datetime
 import json
@@ -11,64 +11,33 @@ from azents.core.tools import TurnContext
 from azents.engine.run.types import FunctionTool, FunctionToolError, FunctionToolResult
 from azents.engine.tooling.execution_context import client_tool_execution_context
 from azents.engine.tools.runtime_web import RuntimeWebToolkit
-from azents.rdb.models.runtime_web import (
-    RuntimeWebRequesterKind,
-    RuntimeWebRequestState,
-)
-from azents.repos.runtime_web.data import RuntimeWebEndpoint, RuntimeWebRequest
 from azents.services.runtime_web.data import (
-    RuntimeWebConfigurationUnavailable,
+    RuntimeWebCapabilityUnavailable,
     RuntimeWebServicePage,
     RuntimeWebServiceProjection,
 )
 from azents.services.runtime_web.service import RuntimeWebService
 
-_NOW = datetime.datetime(2026, 9, 12, 0, 0, tzinfo=datetime.UTC)
+_NOW = datetime.datetime(2026, 9, 15, 0, 0, tzinfo=datetime.UTC)
+_SERVICE_ID = "s" * 32
 
 
 def _projection(
-    *, url: str | None = "https://service.example.test"
+    *,
+    url: str | None = "https://service.example.test",
 ) -> RuntimeWebServiceProjection:
-    endpoint = RuntimeWebEndpoint(
-        id="endpoint-1",
-        workspace_id="workspace-1",
-        agent_id="agent-1",
-        agent_session_id="session-1",
-        port=3000,
-        hostname_key="host-key",
-        label="Preview",
-        authority_revision=2,
-        close_barrier=0,
-        current_pending_request_id="request-1",
-        current_cycle_id=None,
-        created_at=_NOW,
-        updated_at=_NOW,
-    )
-    request = RuntimeWebRequest(
-        id="request-1",
-        endpoint_id=endpoint.id,
-        requester_kind=RuntimeWebRequesterKind.AGENT,
-        operation_key="operation",
-        state=RuntimeWebRequestState.PENDING,
-        revision=1,
-        requester_user_id=None,
-        requester_agent_id="agent-1",
-        requester_execution_id="run-1",
-        requester_call_id="call-1",
-        label_snapshot="Preview",
-        decided_by_user_id=None,
-        decided_at=None,
-        created_at=_NOW,
-        updated_at=_NOW,
-    )
     return RuntimeWebServiceProjection(
-        endpoint=endpoint,
+        id=_SERVICE_ID,
+        port=3000,
+        label="Preview",
         url=url,
         configuration_state="configured" if url is not None else "unconfigured",
-        current_request=request,
-        current_cycle=None,
-        active=False,
-        duration_seconds=7200,
+        on=False,
+        selected_duration_seconds=3_600,
+        expires_at=None,
+        revision=2,
+        created_at=_NOW,
+        updated_at=_NOW,
         observed_at=_NOW,
     )
 
@@ -95,23 +64,19 @@ async def _tools(service: RuntimeWebService) -> dict[str, FunctionTool]:
     return {tool.spec.name: tool for tool in state.tools}
 
 
-async def test_runtime_web_toolkit_exposes_runtime_independent_controls() -> None:
-    """The Toolkit exposes control tools without a Runtime capability check."""
+async def test_runtime_web_toolkit_exposes_exact_agent_service_controls() -> None:
     tools = await _tools(AsyncMock(spec=RuntimeWebService))
 
     assert set(tools) == {
-        "prepare_web_service",
         "request_web_service",
         "list_web_services",
-        "cancel_web_service_request",
         "close_web_service",
     }
 
 
-async def test_request_tool_returns_pending_result_without_extra_prepare() -> None:
-    """The request tool returns its durable request immediately and only once."""
+async def test_request_tool_returns_off_service_and_agent_guidance_metadata() -> None:
     service = AsyncMock(spec=RuntimeWebService)
-    service.request_exposure.return_value = Success(_projection())
+    service.request_service.return_value = Success(_projection())
     tools = await _tools(service)
 
     with client_tool_execution_context(call_id="call-1", name="request_web_service"):
@@ -121,68 +86,55 @@ async def test_request_tool_returns_pending_result_without_extra_prepare() -> No
 
     assert isinstance(result, FunctionToolResult)
     assert result.metadata == {
-        "kind": "runtime_web_service_request",
-        "endpoint_id": "endpoint-1",
+        "kind": "runtime_web_service",
+        "service_id": _SERVICE_ID,
         "port": 3000,
         "url": "https://service.example.test",
-        "endpoint_revision": 2,
-        "request_id": "request-1",
-        "request_revision": 1,
-        "cycle_id": None,
+        "revision": 2,
+        "expires_at": None,
     }
     assert isinstance(result.output, str)
-    assert json.loads(result.output)["request"]["state"] == "pending"
-    service.prepare_endpoint.assert_not_awaited()
-    _, kwargs = service.request_exposure.await_args
-    assert kwargs["user_id"] is None
+    payload = json.loads(result.output)
+    assert payload["on"] is False
+    assert payload["selected_duration_seconds"] == 3_600
+    _, kwargs = service.request_service.await_args
+    assert kwargs["port"] == 3000
     assert kwargs["actor"].execution_id == "run-1"
     assert kwargs["actor"].call_id == "call-1"
 
 
-async def test_request_tool_reports_unconfigured_gateway() -> None:
-    """Configuration failure is bounded and never claims a usable URL."""
-    service = AsyncMock(spec=RuntimeWebService)
-    service.request_exposure.return_value = Failure(
-        RuntimeWebConfigurationUnavailable()
-    )
-    tools = await _tools(service)
-
-    with (
-        client_tool_execution_context(call_id="call-1", name="request_web_service"),
-        pytest.raises(FunctionToolError, match="not configured"),
-    ):
-        await tools["request_web_service"].handler('{"port":3000,"label":null}')
-
-
-async def test_list_cancel_and_close_use_exact_session_resources() -> None:
-    """List and mutations retain exact request/cycle revisions and Session identity."""
+async def test_list_and_close_share_agent_identity_and_exact_service_id() -> None:
     service = AsyncMock(spec=RuntimeWebService)
     projection = _projection()
     service.list_services.return_value = Success(
         RuntimeWebServicePage(items=[projection], total_count=1)
     )
-    service.cancel_request.return_value = Success(projection)
-    service.close_cycle.return_value = Success(projection)
+    service.close_service.return_value = Success(projection)
     tools = await _tools(service)
 
     listed = await tools["list_web_services"].handler("{}")
     assert isinstance(listed, str)
-    assert json.loads(listed)["total_count"] == 1
+    assert json.loads(listed)["items"][0]["service_id"] == _SERVICE_ID
+    _, list_kwargs = service.list_services.await_args
+    assert list_kwargs["user_id"] is None
+    assert list_kwargs["actor"].actor_id == "agent-1"
 
-    with client_tool_execution_context(call_id="cancel-call", name="cancel"):
-        await tools["cancel_web_service_request"].handler(
-            '{"request_id":"request-1","expected_revision":3}'
-        )
-    _, cancel = service.cancel_request.await_args
-    assert cancel["session_id"] == "session-1"
-    assert cancel["request_id"] == "request-1"
-    assert cancel["expected_revision"] == 3
-
-    with client_tool_execution_context(call_id="close-call", name="close"):
+    with client_tool_execution_context(call_id="close-call", name="close_web_service"):
         await tools["close_web_service"].handler(
-            '{"cycle_id":"cycle-1","expected_endpoint_revision":7}'
+            json.dumps({"service_id": _SERVICE_ID})
         )
-    _, close = service.close_cycle.await_args
-    assert close["session_id"] == "session-1"
-    assert close["cycle_id"] == "cycle-1"
-    assert close["expected_endpoint_revision"] == 7
+    _, close_kwargs = service.close_service.await_args
+    assert close_kwargs["service_id"] == _SERVICE_ID
+    assert close_kwargs["actor"].execution_id == "run-1"
+
+
+async def test_mutating_tool_fails_closed_without_managed_runtime() -> None:
+    service = AsyncMock(spec=RuntimeWebService)
+    service.request_service.return_value = Failure(RuntimeWebCapabilityUnavailable())
+    tools = await _tools(service)
+
+    with (
+        client_tool_execution_context(call_id="call-1", name="request_web_service"),
+        pytest.raises(FunctionToolError, match="managed Runtime"),
+    ):
+        await tools["request_web_service"].handler('{"port":3000,"label":null}')

@@ -4,6 +4,7 @@ import datetime
 from typing import NamedTuple
 from uuid import uuid4
 
+import pytest
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -42,6 +43,7 @@ from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.git_worktree_cleanup_claim import RDBGitWorktreePathClaim
 from azents.rdb.models.memory import RDBAgentMemory
+from azents.rdb.models.runtime_web import RDBRuntimeWebService
 from azents.rdb.models.session_agent_context import (
     RDBSessionAgentContext,
     RDBSessionAgentContextGitWorktree,
@@ -419,6 +421,15 @@ async def test_bounded_cleanup_invalidates_bindings_and_preserves_retained_state
                 agent_id=agent.id,
                 path="/workspace/preset",
             ),
+            RDBRuntimeWebService(
+                workspace_id=workspace.id,
+                agent_id=agent.id,
+                port=3000,
+                hostname_key="remove123456",
+                label="Removed with Runtime",
+                exposure_deadline_at=datetime.datetime.now(datetime.UTC)
+                + datetime.timedelta(hours=1),
+            ),
             RDBAgentMemory(
                 agent_id=agent.id,
                 scope="agent",
@@ -551,3 +562,44 @@ async def test_bounded_cleanup_invalidates_bindings_and_preserves_retained_state
     )
     assert retained_toolkit_state is not None
     assert retained_toolkit_state.toolkit_namespace == "remote_toolkit"
+    assert not await rdb_session.scalar(
+        sa.select(
+            sa.exists().where(
+                RDBRuntimeWebService.agent_id == agent.id,
+            )
+        )
+    )
+
+
+async def test_cleanup_completion_rejects_remaining_runtime_web_service(
+    rdb_session: AsyncSession,
+) -> None:
+    """Finalization remains fenced until every Agent service is deleted."""
+    workspace, agent, runtime = await _seed_agent(rdb_session)
+    rdb_session.add(
+        RDBAgentAutomaticProjectSetting(
+            agent_id=agent.id,
+            revision=1,
+            updated_by_workspace_user_id=None,
+        )
+    )
+    rdb_session.add(
+        RDBRuntimeWebService(
+            workspace_id=workspace.id,
+            agent_id=agent.id,
+            port=3000,
+            hostname_key="remain123456",
+            label=None,
+        )
+    )
+    await rdb_session.flush()
+
+    with pytest.raises(
+        RuntimeError,
+        match="Runtime Web service remains after Runtime removal",
+    ):
+        await AgentRuntimeRemovalScopeRepository().require_cleanup_complete(
+            rdb_session,
+            agent_id=agent.id,
+            agent_runtime_id=runtime.id,
+        )

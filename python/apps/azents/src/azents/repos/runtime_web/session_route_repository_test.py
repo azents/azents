@@ -14,7 +14,7 @@ from azents.repos.runtime_web.session_route_repository import (
 
 
 async def _runtime(session: AsyncSession) -> RDBAgentRuntime:
-    workspace_id, agent_id, _, _ = await _authority_fixture(session)
+    workspace_id, agent_id, _ = await _authority_fixture(session)
     runtime = RDBAgentRuntime(workspace_id=workspace_id, agent_id=agent_id)
     session.add(runtime)
     await session.flush()
