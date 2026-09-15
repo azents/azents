@@ -806,6 +806,86 @@ class RDBRuntimeWebAuthTicket(RDBModel):
     __table_args__ = (CK_DEADLINE, UQ_SECRET_HASH, IX_EXPIRY)
 
 
+class RDBRuntimeWebSessionRoute(RDBModel):
+    """Current Owner route for one Runtime Web Runner session."""
+
+    __tablename__ = "runtime_web_session_routes"
+
+    CK_GENERATIONS = sa.CheckConstraint(
+        "desired_generation >= 1 AND runner_generation >= 1 AND lease_generation >= 1",
+        name="ck_runtime_web_session_routes_generations",
+    )
+    CK_DEADLINES = sa.CheckConstraint(
+        "lease_expires_at > created_at "
+        "AND (draining_at IS NULL OR draining_at <= lease_expires_at)",
+        name="ck_runtime_web_session_routes_deadlines",
+    )
+    UQ_SESSION_LEASE = sa.UniqueConstraint(
+        "session_lease_id",
+        name="uq_runtime_web_session_routes_session_lease",
+    )
+    UQ_JOIN_NONCE_HASH = sa.UniqueConstraint(
+        "join_nonce_hash",
+        name="uq_runtime_web_session_routes_join_nonce_hash",
+    )
+    IX_OWNER_LEASE = sa.Index(
+        "ix_runtime_web_session_routes_owner_lease",
+        "owner_boot_id",
+        "lease_expires_at",
+    )
+    IX_GENERATION = sa.Index(
+        "ix_runtime_web_session_routes_generation",
+        "desired_generation",
+        "runner_generation",
+        "lease_expires_at",
+    )
+
+    runtime_id: Mapped[str] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey("agent_runtimes.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    desired_generation: Mapped[int] = mapped_column(sa.BigInteger, nullable=False)
+    runner_generation: Mapped[int] = mapped_column(sa.BigInteger, nullable=False)
+    owner_replica_id: Mapped[str] = mapped_column(sa.String(255), nullable=False)
+    owner_boot_id: Mapped[str] = mapped_column(sa.String(128), nullable=False)
+    owner_address: Mapped[str] = mapped_column(sa.String(255), nullable=False)
+    session_lease_id: Mapped[str] = mapped_column(sa.String(32), nullable=False)
+    lease_generation: Mapped[int] = mapped_column(sa.BigInteger, nullable=False)
+    join_nonce_hash: Mapped[str] = mapped_column(sa.String(64), nullable=False)
+    protocol_fingerprint: Mapped[str] = mapped_column(sa.String(64), nullable=False)
+    lease_expires_at: Mapped[datetime.datetime] = mapped_column(
+        TimeZoneDateTime,
+        nullable=False,
+    )
+    draining_at: Mapped[datetime.datetime | None] = mapped_column(
+        TimeZoneDateTime,
+        nullable=True,
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TimeZoneDateTime,
+        init=False,
+        nullable=False,
+        server_default=sa.func.now(),
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        TimeZoneDateTime,
+        init=False,
+        nullable=False,
+        server_default=sa.func.now(),
+        onupdate=sa.func.now(),
+    )
+
+    __table_args__ = (
+        CK_GENERATIONS,
+        CK_DEADLINES,
+        UQ_SESSION_LEASE,
+        UQ_JOIN_NONCE_HASH,
+        IX_OWNER_LEASE,
+        IX_GENERATION,
+    )
+
+
 class RDBRuntimeWebTunnelRoute(RDBModel):
     """Short-lived owner route for one exact Runtime Web tunnel."""
 

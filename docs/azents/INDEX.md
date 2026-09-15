@@ -364,6 +364,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Isolated Runtime Operation Reply Streams Requirements](requirements/runtime-260912-isolated-operation-reply-streams.md) | runtime-260912 | 2026-09-12 | - |
 | [Bound Runtime Control Connections Requirements](requirements/runtimeauth-260723-bound-runtime-control-connections.md) | runtimeauth-260723 | 2026-07-23 | - |
 | [Runtime Web Browser and Services Correction Requirements](requirements/runtimeweb-260913-browser-services-correction.md) | runtimeweb-260913 | 2026-09-13 | - |
+| [Heavy-Workload Runtime Web Services Requirements](requirements/runtimeweb-260914-heavy-workload-services.md) | runtimeweb-260914 | 2026-09-14 | - |
 | [Agent Sandbox Historical Requirements Reconstruction](requirements/sandbox-260225-sandbox.md) | sandbox-260225 | 2026-02-25 | 2026-03-23 |
 | [sandbox-daemon Sidecar Separation + kube API Exec Integration Historical Requirements Reconstruction](requirements/sandbox-260403-sandbox-daemon-sidecar.md) | sandbox-260403 | 2026-04-03 | 2026-04-03 |
 | [Sandbox Runtime Profile Abstraction Discussion Historical Requirements Reconstruction](requirements/sandbox-260419-sandbox-profile.md) | sandbox-260419 | 2026-04-19 | - |
@@ -797,6 +798,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Isolated Runtime Operation Reply Streams](adr/runtime-260912-isolated-operation-reply-streams.md)
 - [Bound Runtime Control Connections](adr/runtimeauth-260723-bound-runtime-control-connections.md)
 - [Runtime Web Browser and Services Correction Decisions](adr/runtimeweb-260913-browser-services-correction.md)
+- [Heavy-Workload Runtime Web Services Decisions](adr/runtimeweb-260914-heavy-workload-services.md)
 - [Agent Sandbox Historical Decision Reconstruction](adr/sandbox-260225-sandbox.md)
 - [sandbox-daemon Sidecar Separation + kube API Exec Integration Historical Decision Reconstruction](adr/sandbox-260403-sandbox-daemon-sidecar.md)
 - [Sandbox Runtime Profile Abstraction Discussion](adr/sandbox-260419-sandbox-profile.md)

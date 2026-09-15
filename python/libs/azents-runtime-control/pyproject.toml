@@ -18,6 +18,7 @@ dev = [
     "types-protobuf>=7.34.1.20260518",
     "types-grpcio>=1.83.0.20260730",
     "ty>=0.0.74",
+    "redis>=8.1.0",
 ]
 
 [tool.uv]
