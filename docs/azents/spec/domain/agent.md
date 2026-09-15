@@ -73,9 +73,11 @@ code_paths:
   - typescript/apps/azents-web/src/features/agents/automaticProjects.ts
   - typescript/apps/azents-web/src/features/agents/agentToolkitManagementState.ts
   - typescript/apps/azents-web/src/features/agents/components/AgentAutomaticProjects.tsx
+  - typescript/apps/azents-web/src/features/agents/components/AgentForm.tsx
   - typescript/apps/azents-web/src/features/agents/components/AgentToolkitSection.tsx
   - typescript/apps/azents-web/src/features/agents/containers/useAgentAutomaticProjectsContainer.ts
   - typescript/apps/azents-web/src/features/agents/containers/useAgentToolkitManagementContainer.ts
+  - typescript/apps/azents-web/src/features/agents/terminalSettingsVisibility.ts
   - typescript/apps/azents-web/src/features/external-channel-management/**
   - typescript/apps/azents-web/src/features/runtime-profiles/**
   - typescript/apps/azents-web/src/shared/agent-session/AgentAvatar.tsx
@@ -111,8 +113,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/default-response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack
-last_verified_at: 2026-09-13
-spec_version: 79
+last_verified_at: 2026-09-15
+spec_version: 80
 ---
 
 # Agent Domain Spec
@@ -178,6 +180,10 @@ the bounded denial scope. Effective access requires every policy level plus curr
 managed Runtime, ready Runner `terminal.v1` capability, Session access, and working-folder
 authority. Runtime Toolkit projection instead depends only on managed Runtime capability
 and its optimistic version; there is no Agent Shell setting or compatibility fallback.
+The Agent form exposes the Terminal policy and its effective status only when create
+currently selects a Runtime Profile or edit reports `runtime_capability=managed`.
+Runtime-free create and edit forms keep the raw default or stored policy for submission
+but do not expose Terminal controls or denial diagnostics.
 
 ### 1.2 Runtime Profile selection
 
