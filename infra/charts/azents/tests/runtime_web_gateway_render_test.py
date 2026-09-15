@@ -15,7 +15,7 @@ def _helm_template(*values: str) -> str:
     helm = shutil.which("helm")
     if helm is None:
         pytest.skip("helm binary is not available")
-    command = [helm, "template", "azents", str(CHART_DIR)]
+    command = ["helm", "template", "azents", str(CHART_DIR)]
     base_values = (
         "server.image.repository=repo/server",
         "server.image.tag=sha",
@@ -94,6 +94,19 @@ def test_enabled_gateway_renders_isolated_process_and_trusted_control_path() -> 
     assert "kind: PodDisruptionBudget" in rendered
     assert "runtime-control-headless" in rendered
     assert "name: trusted-web" in rendered
+    runtime_control = _rendered_resource(
+        rendered,
+        kind="Deployment",
+        name="runtime-control",
+    )
+    assert (
+        "name: AZ_RUNTIME_CONTROL_RUNNER_WEB_CONNECT_ADDRESS\n"
+        '              value: "runtime-control.$(AZ_RUNTIME_CONTROL_POD_NAMESPACE).svc.cluster.local:8030"'
+    ) in runtime_control
+    assert (
+        "runtime-control-headless.$(AZ_RUNTIME_CONTROL_POD_NAMESPACE).svc:8030"
+        not in runtime_control
+    )
     assert "AZ_RUNTIME_CONTROL_TRUSTED_ADVERTISE_ADDRESS" in rendered
     assert "AZ_RUNTIME_CONTROL_TRUSTED_GATEWAY_PEER_IDENTITIES" in rendered
     assert "AZ_RUNTIME_CONTROL_TRUSTED_CONTROL_PEER_IDENTITIES" in rendered
