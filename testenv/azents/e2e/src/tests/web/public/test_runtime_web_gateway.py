@@ -2479,8 +2479,8 @@ def test_runtime_web_gateway_hard_limit_rejects_before_body_admission(
 
         with ThreadPoolExecutor(max_workers=2) as executor:
             websocket = executor.submit(hold_websocket)
-            sse = executor.submit(hold_sse)
             assert websocket_started.wait(timeout=10)
+            sse = executor.submit(hold_sse)
             assert sse_started.wait(timeout=10)
             active_long_lived = _runtime_application_state_via_terminal(
                 runtime_terminal
