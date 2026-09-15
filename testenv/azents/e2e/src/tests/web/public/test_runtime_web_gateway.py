@@ -56,7 +56,11 @@ from azentspublicclient.models.runtime_web_service_response import (
 )
 from azentspublicclient.models.secrets import Secrets
 from selenium import webdriver
-from selenium.common.exceptions import TimeoutException, WebDriverException
+from selenium.common.exceptions import (
+    StaleElementReferenceException,
+    TimeoutException,
+    WebDriverException,
+)
 from selenium.webdriver.chrome.options import Options as ChromeOptions
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
@@ -1529,6 +1533,42 @@ def _services_button(driver: WebDriver, label: str) -> WebElement:
     )
 
 
+def _click_services_button(driver: WebDriver, label: str) -> None:
+    """Click only after the rendered button owns its center hit-test point."""
+    locator = (By.XPATH, f"//button[normalize-space()={label!r}]")
+
+    def _click_target(current_driver: WebDriver) -> WebElement | bool:
+        for button in current_driver.find_elements(*locator):
+            try:
+                if not button.is_displayed() or not button.is_enabled():
+                    continue
+                current_driver.execute_script(
+                    "arguments[0].scrollIntoView({block:'center',inline:'nearest'})",
+                    button,
+                )
+                receives_click = current_driver.execute_script(
+                    """
+const button = arguments[0];
+const rect = button.getBoundingClientRect();
+const target = document.elementFromPoint(
+  rect.left + rect.width / 2,
+  rect.top + rect.height / 2,
+);
+return target !== null && (target === button || button.contains(target));
+""",
+                    button,
+                )
+            except StaleElementReferenceException:
+                continue
+            if receives_click is True:
+                return button
+        return False
+
+    button = WebDriverWait(driver, 30).until(_click_target)
+    assert isinstance(button, WebElement)
+    button.click()
+
+
 def _exercise_services_management_ui(
     driver: WebDriver,
     *,
@@ -1546,7 +1586,7 @@ def _exercise_services_management_ui(
     )
     assert "page=services" in driver.current_url
 
-    _services_button(driver, "Create service").click()
+    _click_services_button(driver, "Create service")
     port = wait.until(
         ec.element_to_be_clickable((By.CSS_SELECTOR, "input[placeholder='3000']"))
     )
@@ -1559,7 +1599,7 @@ def _exercise_services_management_ui(
     )
     label.send_keys(Keys.CONTROL, "a")
     label.send_keys("Services UI")
-    _services_button(driver, "Review exposure").click()
+    _click_services_button(driver, "Review exposure")
     wait.until(
         ec.visibility_of_element_located(
             (By.XPATH, "//*[normalize-space()='Expose this service?']")
@@ -1579,17 +1619,17 @@ def _exercise_services_management_ui(
         )
     )
 
-    _services_button(driver, "Request again").click()
+    _click_services_button(driver, "Request again")
     wait.until(
         ec.visibility_of_element_located(
             (By.XPATH, "//*[contains(normalize-space(), 'new approval pending')]")
         )
     )
-    _services_button(driver, "Cancel request").click()
+    _click_services_button(driver, "Cancel request")
     _services_button(driver, "Request again")
 
-    _services_button(driver, "Request again").click()
-    _services_button(driver, "Approve").click()
+    _click_services_button(driver, "Request again")
+    _click_services_button(driver, "Approve")
     approval_button = wait.until(
         ec.element_to_be_clickable(
             (
@@ -1647,11 +1687,11 @@ window.fetch = (...args) => {
     )
     _services_button(driver, "Request again")
 
-    _services_button(driver, "Request again").click()
-    _services_button(driver, "Reject").click()
+    _click_services_button(driver, "Request again")
+    _click_services_button(driver, "Reject")
     _services_button(driver, "Request again")
 
-    _services_button(driver, "Close exposure").click()
+    _click_services_button(driver, "Close exposure")
     wait.until(
         ec.visibility_of_element_located((By.XPATH, "//*[normalize-space()='Closed']"))
     )
