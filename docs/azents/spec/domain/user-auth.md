@@ -66,6 +66,8 @@ code_paths:
   - typescript/apps/azents-admin-web/src/trpc/**
   - typescript/apps/azents-web/src/app/(app)/login/**
   - typescript/apps/azents-web/src/features/auth/**
+  - typescript/apps/azents-web/src/features/account/**
+  - typescript/apps/azents-web/src/features/home/components/LocaleSwitcher.tsx
   - typescript/apps/azents-web/src/features/signup/**
   - typescript/apps/azents-web/src/features/password-reset/**
   - typescript/apps/azents-web/src/features/security/**
@@ -76,8 +78,17 @@ code_paths:
   - typescript/apps/azents-web/src/shared/lib/auth-cookie-policy*
   - typescript/apps/azents-web/src/shared/lib/cookies.ts
   - typescript/apps/azents-web/src/shared/lib/getInitialAuthState.ts
+  - typescript/apps/azents-web/src/shared/lib/account-locale*
+  - typescript/apps/azents-web/src/shared/lib/locale.ts
   - typescript/apps/azents-web/src/shared/lib/request-origin*
   - typescript/apps/azents-web/src/shared/lib/runtime-web-auth*
+  - typescript/apps/azents-web/src/shared/providers/account-locale-sync.tsx
+  - typescript/apps/azents-web/src/shared/providers/locale.tsx
+  - typescript/apps/azents-web/src/i18n/request.ts
+  - typescript/apps/azents-web/src/app/(app)/layout.tsx
+  - typescript/apps/azents-web/src/app/(landing)/layout.tsx
+  - typescript/apps/azents-web/src/app/providers.tsx
+  - typescript/apps/azents-web/src/shared/components/AppLayout.tsx
   - python/apps/azents/src/azents/services/runtime_web/gateway_auth*
   - python/apps/azents/src/azents/services/runtime_web/gateway_auth_deps.py
   - python/apps/azents/src/azents/api/public/runtime_web/v1/**
@@ -104,7 +115,7 @@ api_routes:
   - /system-setting/v1
   - /debug/v1
 last_verified_at: 2026-09-15
-spec_version: 20
+spec_version: 21
 ---
 
 # User & Authentication
@@ -128,6 +139,8 @@ Core characteristics:
 - **Password is one login method** — password login is stored as bcrypt hash. Security setting changes require elevated access token.
 - **Admin-issued password reset** — password recovery is not self-service email flow; it uses admin-issued user_id-bound, hash-only, single-use reset token.
 - **Refresh token rotation + grace** — refresh token has rotation period and grace period to mitigate simultaneous request race.
+- **Account-owned locale** — authenticated Main Web rendering prefers the persisted
+  account locale and synchronizes a stale rendered locale after authentication.
 
 ## 2. Domain Model
 
@@ -414,6 +427,37 @@ Main Web, Admin Web, Public API, and Admin API use explicit public or internal U
 
 Helm keeps Admin Web public routing separate from internal API services. An operator-provided bootstrap token is referenced through an existing Kubernetes Secret and injected only into the Admin API/server boundary; chart defaults contain no secret literal. Obsolete GitHub Admin login and Admin API OAuth2 client-credential settings are not part of the chart contract.
 
+### 3.13 Account locale resolution
+
+`User.locale` stores one supported BCP 47 account locale: `en-US`, `ko-KR`,
+`ja-JP`, or `fr-FR`. Authenticated `GET /user/v1/me` returns it, and
+`PATCH /user/v1/me` replaces it with a validated supported value.
+
+Main Web server rendering resolves one locale without locale-prefixed routes in this
+order:
+
+1. For an authenticated request with a strictly unexpired access token, read the
+   current account through the Public User API with no response caching. The normal
+   proactive token-refresh threshold does not prevent this bounded locale read.
+2. If the account read is unavailable or invalid, use a supported `locale` cookie.
+3. Otherwise, select the highest-priority supported `Accept-Language` value, including
+   language-prefix matches such as `ko` to `ko-KR`.
+4. Fall back to `en-US`.
+
+The resolved locale selects server messages and the document language. Authenticated
+application and landing layouts also read the current account on the client. If a
+valid account locale differs from the rendered locale, they write the supported
+locale to the one-year, path-rooted, `SameSite=Lax` locale cookie and reload the
+document so server-rendered messages converge. The client synchronization query is
+disabled for unauthenticated state, and the landing surface does not redirect to
+login when that optional query receives an authorization failure.
+
+Saving a locale from Account settings updates the account first. A successful
+response uses the same cookie-and-reload boundary; the browser does not treat a
+local-only language selection as authoritative over the persisted account.
+When no authenticated account locale is available, the landing language switcher
+uses the cookie-and-reload boundary directly.
+
 ## 4. Session / Refresh Token Lifecycle
 
 ```mermaid
@@ -560,6 +604,9 @@ Admin-issued signup/password-reset token management and other instance-wide oper
 
 ## 9. Changelog
 
+- **2026-09-15** (v21) — Added account-locale persistence, SSR resolution
+  precedence, authenticated client convergence, and Account settings update
+  behavior.
 - **2026-09-15** (v20) — Added the authenticated Off-service activation route
   with service-ID authorization and revision-fenced On control, without an approval
   resource or URL credential.
