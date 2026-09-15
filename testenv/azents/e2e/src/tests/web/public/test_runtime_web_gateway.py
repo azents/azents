@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import logging
@@ -66,6 +67,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from testcontainers.core.container import DockerContainer
 from testcontainers.core.network import Network
 from testcontainers.postgres import PostgresContainer
+from websockets.asyncio.client import connect as async_connect
 from websockets.exceptions import ConnectionClosed
 from websockets.sync.client import connect
 from websockets.typing import Origin
@@ -239,6 +241,7 @@ class _RuntimeWebStackFactory:
     s3_bucket_name: str
     s3_access_key: str
     s3_secret_key: str
+    selenium_url: str
 
     def start(
         self,
@@ -269,6 +272,7 @@ class _RuntimeWebStackFactory:
             s3_bucket_name=self.s3_bucket_name,
             s3_access_key=self.s3_access_key,
             s3_secret_key=self.s3_secret_key,
+            selenium_url=self.selenium_url,
         )
 
 
@@ -612,21 +616,6 @@ def _runtime_web_edge_container(
     )
 
 
-def _runtime_web_selenium_container(
-    *,
-    network: Network,
-) -> DockerContainer:
-    """Create Chromium after the function-scoped TLS edge is available."""
-    return (
-        DockerContainer(image="selenium/standalone-chromium:4.45.0-20260606")
-        .with_name(f"azents-runtime-web-selenium-{unique()}")
-        .with_network(network)
-        .with_env("SE_NODE_SESSION_TIMEOUT", "120")
-        .with_exposed_ports(4444)
-        .with_kwargs(shm_size="2g")
-    )
-
-
 def _write_tls_edge_files(root: Path) -> _TlsEdgeFiles:
     """Write a local certificate and exact reverse-proxy configuration."""
     certificate_path = root / "tls.crt"
@@ -738,6 +727,7 @@ def _runtime_web_stack(
     s3_bucket_name: str,
     s3_access_key: str,
     s3_secret_key: str,
+    selenium_url: str,
 ) -> Generator[_RuntimeWebStack, None, None]:
     """Start two-Control relay, Gateway, Main Web, and TLS edge."""
     with tempfile.TemporaryDirectory(prefix="runtime-web-e2e-") as temporary_root:
@@ -788,8 +778,7 @@ def _runtime_web_stack(
             private_key_path=private_key_path,
             config_path=config_path,
         )
-        selenium = _runtime_web_selenium_container(network=network)
-        containers = [relay, gateway, public_api, main_web, edge, selenium]
+        containers = [relay, gateway, public_api, main_web, edge]
         with ExitStack() as stack:
             stack.enter_context(relay)
             _wait_for_log(
@@ -819,7 +808,6 @@ def _runtime_web_stack(
                 name="Runtime Web Main Web",
             )
             stack.enter_context(edge)
-            stack.enter_context(selenium)
             try:
                 edge_host = edge.get_container_host_ip()
                 edge_port = edge.get_exposed_port(443)
@@ -849,29 +837,6 @@ def _runtime_web_stack(
                 ]
                 if not isinstance(edge_ip, str) or not edge_ip:
                     raise AssertionError("Runtime Web TLS edge has no network address")
-                selenium_host = selenium.get_container_host_ip()
-                selenium_port = selenium.get_exposed_port(4444)
-                selenium_url = f"http://{selenium_host}:{selenium_port}"
-                deadline = time.monotonic() + 60
-                while time.monotonic() < deadline:
-                    try:
-                        status = requests.get(
-                            f"{selenium_url}/status",
-                            timeout=2,
-                        ).json()
-                        if status.get("value", {}).get("ready") is True:
-                            break
-                    except (
-                        requests.RequestException,
-                        ValueError,
-                    ):
-                        pass
-                    time.sleep(0.5)
-                else:
-                    selenium_logs = _container_logs(selenium)
-                    raise AssertionError(
-                        f"Runtime Web Selenium did not become ready:\n{selenium_logs}"
-                    )
                 yield _RuntimeWebStack(
                     main_origin=_MAIN_ORIGIN,
                     public_api_url=(
@@ -934,6 +899,7 @@ def runtime_web_stack_factory(
     azents_web_image: str,
     azents_runtime_runner_image: str,
     azents_runtime_control_container: DockerContainer,
+    selenium_container: DockerContainer,
     runtime_web_capacity_backend: str,
     credential_encryption_key: str,
     auth_jwt_secret_key: str,
@@ -943,6 +909,10 @@ def runtime_web_stack_factory(
     rustfs_secret_key: str,
 ) -> _RuntimeWebStackFactory:
     """Capture secret fixture values behind a redacted stack factory."""
+    selenium_url = (
+        f"http://{selenium_container.get_container_host_ip()}:"
+        f"{selenium_container.get_exposed_port(4444)}"
+    )
     return _RuntimeWebStackFactory(
         network=container_network,
         postgres=postgres_container,
@@ -957,6 +927,7 @@ def runtime_web_stack_factory(
         s3_bucket_name=s3_bucket_name,
         s3_access_key=rustfs_access_key,
         s3_secret_key=rustfs_secret_key,
+        selenium_url=selenium_url,
     )
 
 
@@ -2006,30 +1977,53 @@ def _browser_neutral_transport_evidence(
     assert failure.status_code == 500
     assert failure.text == "application-error-canary"
 
+    asyncio.run(
+        _browser_neutral_websocket_evidence(
+            stack=stack,
+            endpoint_url=endpoint_url,
+            cookie=cookie,
+            user_agent=firefox_user_agent,
+        )
+    )
+
+
+async def _browser_neutral_websocket_evidence(
+    *,
+    stack: _RuntimeWebStack,
+    endpoint_url: str,
+    cookie: str,
+    user_agent: str,
+) -> None:
+    """Exercise browser-neutral WebSocket frames without a receiver thread."""
+    endpoint_host = endpoint_url.removeprefix("https://").rstrip("/")
     edge_address = stack.edge_host_url.removeprefix("https://")
     edge_host, edge_port_text = edge_address.rsplit(":", maxsplit=1)
     raw_socket = socket.create_connection((edge_host, int(edge_port_text)), timeout=10)
+    raw_socket.setblocking(False)
     tls_context = ssl.create_default_context()
     tls_context.check_hostname = False
     tls_context.verify_mode = ssl.CERT_NONE
 
-    with connect(
+    async with async_connect(
         f"wss://{endpoint_host}/ws",
         sock=raw_socket,
         ssl=tls_context,
         server_hostname=endpoint_host,
         origin=Origin(endpoint_url.rstrip("/")),
         additional_headers={"Cookie": cookie},
-        user_agent_header=firefox_user_agent,
+        user_agent_header=user_agent,
         proxy=None,
         open_timeout=10,
     ) as websocket:
-        websocket.send("browser-neutral-socket")
-        assert websocket.recv(timeout=10) == "echo:browser-neutral-socket"
-        websocket.send(bytes([0, 1, 2, 255]))
-        assert websocket.recv(timeout=10) == bytes([0, 1, 2, 255])
-        pong = websocket.ping(b"runtime-web-ping")
-        assert pong.wait(timeout=10)
+        await websocket.send("browser-neutral-socket")
+        async with asyncio.timeout(10):
+            assert await websocket.recv() == "echo:browser-neutral-socket"
+        await websocket.send(bytes([0, 1, 2, 255]))
+        async with asyncio.timeout(10):
+            assert await websocket.recv() == bytes([0, 1, 2, 255])
+        pong = await websocket.ping(b"runtime-web-ping")
+        async with asyncio.timeout(10):
+            await pong
 
 
 def _assert_redis_capacity_fallback(
@@ -2232,6 +2226,7 @@ def test_runtime_web_gateway_real_runtime_browser_and_cross_replica_relay(
                 "text": "echo:runtime-web-socket",
                 "binary": [0, 1, 2, 255],
             }
+            _wait_for_runtime_web_stream_release(stack)
             assert driver.current_url == endpoint_url
             assert "ticket" not in driver.current_url.lower()
             identity_cookie = driver.get_cookie("__Http-Azents-Runtime-Web")
