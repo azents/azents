@@ -30,6 +30,7 @@ import { IconArrowLeft } from "@tabler/icons-react";
 import Link from "next/link";
 import { useId } from "react";
 import { hasInvalidImageGenerationSelections } from "../model-selection";
+import { shouldShowAgentTerminalSettings } from "../terminalSettingsVisibility";
 import { AgentAdminSection } from "./AgentAdminSection";
 import { AgentToolkitSection } from "./AgentToolkitSection";
 import { SelectableModelOptionsEditor } from "./SelectableModelOptionsEditor";
@@ -111,6 +112,7 @@ export interface AgentFormProps {
   mode?: "fullpage" | "embedded";
   section?: AgentFormSection;
   cancelHref?: string;
+  includeToolkitSection?: boolean;
 }
 
 interface AgentFormViewProps extends AgentFormProps {
@@ -152,6 +154,7 @@ export function AgentForm({
   mode = "fullpage",
   section = "all",
   cancelHref,
+  includeToolkitSection = true,
 }: AgentFormViewProps): React.ReactElement {
   const agentFormId = useId();
   const isEdit = formState.type === "EDIT";
@@ -212,6 +215,19 @@ export function AgentForm({
   const showSubagents = section === "all" || section === "subagents";
   const showAdmins = section === "all" || section === "admins";
   const showFormActions = section !== "admins";
+  const showTerminalSettings =
+    showCapabilities &&
+    shouldShowAgentTerminalSettings(
+      formState.type === "EDIT"
+        ? {
+            type: "EDIT",
+            runtimeCapability: formState.agent.runtime_capability,
+          }
+        : {
+            type: "CREATE",
+            runtimeProfileId: form.values.runtime_profile_id,
+          },
+    );
 
   const content = (
     <Stack gap="lg">
@@ -464,7 +480,7 @@ export function AgentForm({
               </Radio.Group>
             )}
 
-            {showCapabilities && (
+            {showTerminalSettings && (
               <Switch
                 label={t("terminalEnabledLabel")}
                 description={t("terminalEnabledDescription")}
@@ -478,7 +494,7 @@ export function AgentForm({
               />
             )}
 
-            {showCapabilities && formState.type === "EDIT" ? (
+            {showTerminalSettings && formState.type === "EDIT" ? (
               <Group gap="xs">
                 <Badge
                   color={
@@ -537,13 +553,15 @@ export function AgentForm({
           </Stack>
         </form>
 
-        {showCapabilities && formState.type === "EDIT" && (
-          <AgentToolkitSection
-            handle={handle}
-            agentId={formState.agent.id}
-            managementAvailable={formState.agent.toolkit_management_available}
-          />
-        )}
+        {includeToolkitSection &&
+          showCapabilities &&
+          formState.type === "EDIT" && (
+            <AgentToolkitSection
+              handle={handle}
+              agentId={formState.agent.id}
+              managementAvailable={formState.agent.toolkit_management_available}
+            />
+          )}
 
         {showAdmins && isEdit && (
           <AgentAdminSection

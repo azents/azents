@@ -1,11 +1,22 @@
 import { rem } from "@mantine/core";
+import { useForm } from "@mantine/form";
+import { expect, userEvent, within } from "storybook/test";
+import { reasoningEffortLevels } from "@/shared/lib/reasoning-effort";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
-import { AgentFormContainer } from "../containers/AgentFormContainer";
+import { useAgentFormTranslations } from "../containers/useAgentFormTranslations";
+import {
+  findSelectableModelOptionByLabel,
+  selectableModelOptionFormValuesFromStoredOptions,
+} from "../model-selection";
+import { AgentForm } from "./AgentForm";
 import type {
+  ImageGenerationCatalogState,
   ModelSelectionOption,
   ProviderIntegrationOption,
 } from "../model-selection";
 import type { AgentFormValues } from "../schemas";
+import type { AgentFormState } from "../types";
+import type { AgentFormProps } from "./AgentForm";
 import type {
   AgentModelSelection,
   AgentResponse,
@@ -135,15 +146,15 @@ const baseAgent: AgentResponse = {
   system_prompt: "Help the workspace team with engineering tasks.",
   enabled: true,
   type: "public",
-  runtime_profile_id: null,
+  runtime_profile_id: "workspace-runtime-profile-standard",
   runtime_profile_selection_version: 1,
-  runtime_profile_available: false,
-  runtime_profile_availability_reason_code: "runtime_profile_unconfigured",
-  runtime_capability: "none",
+  runtime_profile_available: true,
+  runtime_profile_availability_reason_code: null,
+  runtime_capability: "managed",
   runtime_capability_version: 1,
-  runtime_profile_configuration_status: "not_applicable",
+  runtime_profile_configuration_status: "configured",
   runtime_add_available: false,
-  runtime_remove_available: false,
+  runtime_remove_available: true,
   toolkit_management_available: true,
   terminal_enabled: true,
   infrastructure_terminal_enabled: true,
@@ -204,8 +215,89 @@ function noopSubmit(values: AgentFormValues): void {
   void values;
 }
 
+const emptyImageGenerationCatalogStates = new Map<
+  string,
+  ImageGenerationCatalogState
+>();
+
+function storyFormValues(formState: AgentFormState): AgentFormValues {
+  if (formState.type === "EDIT") {
+    const agent = formState.agent;
+    return {
+      name: agent.name,
+      description: agent.description ?? "",
+      selectable_model_options:
+        selectableModelOptionFormValuesFromStoredOptions(
+          agent.selectable_model_options,
+        ),
+      main_model_label: agent.main_model_label,
+      lightweight_model_label: agent.lightweight_model_label,
+      system_prompt: agent.system_prompt ?? "",
+      runtime_profile_id: agent.runtime_profile_id,
+      type: agent.type,
+      enabled: agent.enabled,
+      reasoning_effort: agent.model_parameters?.reasoning_effort ?? null,
+      terminal_enabled: agent.terminal_enabled,
+      memory_enabled: agent.memory_enabled,
+      tool_search_enabled: agent.tool_search_enabled,
+      max_turns: agent.max_turns,
+      auto_archive_ttl_days: agent.auto_archive_ttl_days,
+      subagent_max_subagents: agent.subagent_settings.max_subagents ?? 3,
+      subagent_max_depth: agent.subagent_settings.max_depth ?? 1,
+    };
+  }
+  return {
+    name: "",
+    description: "",
+    selectable_model_options: [],
+    main_model_label: null,
+    lightweight_model_label: null,
+    system_prompt: "",
+    runtime_profile_id: null,
+    type: "public",
+    enabled: true,
+    reasoning_effort: null,
+    terminal_enabled: true,
+    memory_enabled: true,
+    tool_search_enabled: true,
+    max_turns: null,
+    auto_archive_ttl_days: 30,
+    subagent_max_subagents: 3,
+    subagent_max_depth: 1,
+  };
+}
+
+function AgentFormStory(props: AgentFormProps): React.ReactElement {
+  const t = useAgentFormTranslations();
+  const form = useForm<AgentFormValues>({
+    mode: "controlled",
+    initialValues: storyFormValues(props.formState),
+  });
+  const selectedMainModelOption = findSelectableModelOptionByLabel(
+    form.values.selectable_model_options,
+    form.values.main_model_label,
+  );
+  const selectedModelEffortLevels = reasoningEffortLevels(
+    selectedMainModelOption?.candidates[0]?.normalized_capabilities ?? null,
+  );
+  return (
+    <AgentForm
+      {...props}
+      includeToolkitSection={false}
+      t={t}
+      form={form}
+      hasSubmitAttempted={false}
+      onSubmitAttempted={() => {}}
+      selectedModelEffortLevels={selectedModelEffortLevels}
+      imageGenerationCatalogStates={emptyImageGenerationCatalogStates}
+      canSyncImageCatalog={false}
+      onSyncImageCatalog={async () => {}}
+    />
+  );
+}
+
 const meta = {
-  component: AgentFormContainer,
+  component: AgentFormStory,
   decorators: [
     (Story) => (
       <StorybookCanvas maxWidth={rem(760)}>
@@ -233,7 +325,7 @@ const meta = {
     onRemoveAdmin: () => {},
     mode: "embedded",
   },
-} satisfies Meta<typeof AgentFormContainer>;
+} satisfies Meta<typeof AgentFormStory>;
 
 export default meta;
 
@@ -245,6 +337,57 @@ export const CreateUsesWorkspaceDefault = {
   args: {
     formState: { type: "CREATE" },
     runtimeProfiles: [runtimeProfile],
+  },
+} satisfies Story;
+
+export const RuntimeFreeCreateHidesTerminalSettings = {
+  args: {
+    formState: { type: "CREATE" },
+    runtimeProfiles: [runtimeProfile],
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      canvas.queryByText("Enable interactive Terminal"),
+    ).not.toBeInTheDocument();
+    await expect(canvas.getByText("Enable Memory")).toBeVisible();
+    await expect(canvas.getByText("Enable Tool Search")).toBeVisible();
+
+    await userEvent.click(canvas.getByLabelText("Runtime profile"));
+    const documentBody = within(canvasElement.ownerDocument.body);
+    await userEvent.click(await documentBody.findByText("Standard runtime"));
+    await expect(canvas.getByText("Enable interactive Terminal")).toBeVisible();
+  },
+} satisfies Story;
+
+export const RuntimeFreeEditHidesTerminalSettings = {
+  args: {
+    formState: {
+      type: "EDIT",
+      agent: {
+        ...baseAgent,
+        runtime_profile_id: null,
+        runtime_profile_available: false,
+        runtime_profile_availability_reason_code:
+          "runtime_profile_unconfigured",
+        runtime_capability: "none",
+        runtime_profile_configuration_status: "not_applicable",
+        runtime_remove_available: false,
+        effective_terminal_enabled: false,
+        terminal_denied_scope: "runtime",
+      },
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      canvas.queryByText("Enable interactive Terminal"),
+    ).not.toBeInTheDocument();
+    await expect(
+      canvas.queryByText("Current effective Terminal: unavailable"),
+    ).not.toBeInTheDocument();
+    await expect(canvas.getByText("Enable Memory")).toBeVisible();
+    await expect(canvas.getByText("Enable Tool Search")).toBeVisible();
   },
 } satisfies Story;
 
