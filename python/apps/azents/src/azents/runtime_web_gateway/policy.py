@@ -259,7 +259,7 @@ def normalize_response_headers(
     target_origin: str,
     port: int,
 ) -> tuple[tuple[str, str], ...]:
-    """Replace upstream browser security, CORS, cache, and reserved cookie fields."""
+    """Normalize application response fields and add Gateway-owned policy."""
     output: list[tuple[str, str]] = []
     for name, value in headers:
         lowered = name.lower()
@@ -282,7 +282,6 @@ def normalize_response_headers(
         [
             ("Cache-Control", "no-store"),
             ("Referrer-Policy", "no-referrer"),
-            ("X-Frame-Options", "DENY"),
             ("Cross-Origin-Opener-Policy", "same-origin"),
             ("Permissions-Policy", config.permissions_policy),
         ]
