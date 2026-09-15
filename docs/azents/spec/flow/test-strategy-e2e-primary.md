@@ -516,7 +516,8 @@ Local/PR environment without live substrate does not fake live PASS. Instead, se
 
 - **2026-09-15** (spec_version 63) — Extended immutable snapshot reuse and
   prerequisite pre-pulls to every Web E2E image, reused the session Chromium across
-  isolated Runtime Web scenarios, refreshed authoritative Runtime metrics instead of
+  isolated Runtime Web scenarios, overlapped Chromium startup with Main Web and Admin
+  Web container preparation, refreshed authoritative Runtime metrics instead of
   waiting for a stale UI polling cycle, started independent Runtime Web topology
   containers concurrently, and defined the full gated E2E critical path across every
   enabled suite lane.
