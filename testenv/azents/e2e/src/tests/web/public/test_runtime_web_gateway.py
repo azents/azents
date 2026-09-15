@@ -73,6 +73,7 @@ from websockets.sync.connection import Connection
 from websockets.typing import Origin
 
 from support.runtime_profiles import create_workspace_runtime_profile
+from support.system_bootstrap import SystemBootstrapEvidence
 from support.utils import (
     authenticate_user,
     model_selection_from_first_candidate,
@@ -196,6 +197,14 @@ class _RuntimeApplicationCommands:
                 ),
                 message="Runtime Web fixture Terminal did not detach after command",
             )
+
+
+@dataclass(frozen=True)
+class _RuntimeWebApplication:
+    """Module-scoped Runtime application reused across isolated Gateway stacks."""
+
+    workspace: _RuntimeWebWorkspace
+    commands: _RuntimeApplicationCommands
 
 
 @dataclass(frozen=True)
@@ -1276,6 +1285,41 @@ while True:
     yield commands
 
 
+@pytest.fixture(scope="module")
+def runtime_web_application(
+    azents_public_server_url: str,
+    azents_admin_server_url: str,
+    system_bootstrap_evidence: SystemBootstrapEvidence,
+    azents_runtime_provider_docker_container: DockerContainer,
+    azents_runtime_control_container: DockerContainer,
+) -> Generator[_RuntimeWebApplication, None, None]:
+    """Start one real Runtime application for isolated Gateway scenarios."""
+    del azents_runtime_provider_docker_container, azents_runtime_control_container
+    public_api_client = azentspublicclient.ApiClient(
+        configuration=azentspublicclient.Configuration(host=azents_public_server_url)
+    )
+    admin_api_client = azentsadminclient.ApiClient(
+        configuration=azentsadminclient.Configuration(
+            host=azents_admin_server_url,
+            access_token=system_bootstrap_evidence.access_token,
+        )
+    )
+    workspace = _create_workspace(
+        public_api_client=public_api_client,
+        admin_api_client=admin_api_client,
+        server_url=azents_public_server_url,
+    )
+    with _runtime_application(
+        public_api_client=public_api_client,
+        workspace=workspace,
+        server_url=azents_public_server_url,
+    ) as commands:
+        yield _RuntimeWebApplication(
+            workspace=workspace,
+            commands=commands,
+        )
+
+
 def _browser(
     *,
     selenium_url: str,
@@ -1771,28 +1815,48 @@ def _metric_value(metrics: str, prefix: str) -> float:
 
 
 def _wait_for_runtime_web_stream_release(stack: _RuntimeWebStack) -> None:
-    """Wait for authoritative Gateway and Control stream gauges to reach zero."""
+    """Wait for authoritative stream and capacity gauges to reach zero."""
     deadline = time.monotonic() + 10
     while True:
         gateway_active = _metric_value(
             _gateway_metrics(stack),
             "runtime_web_gateway_active_exchanges ",
         )
+        owner_metrics = _control_metrics(stack.owner_control_operations_url)
+        accepting_metrics = _control_metrics(stack.accepting_control_operations_url)
         owner_active = _metric_value(
-            _control_metrics(stack.owner_control_operations_url),
+            owner_metrics,
             "runtime_web_control_active_streams ",
         )
         accepting_active = _metric_value(
-            _control_metrics(stack.accepting_control_operations_url),
+            accepting_metrics,
             "runtime_web_control_active_streams ",
         )
-        if gateway_active == owner_active == accepting_active == 0:
+        owner_capacity_active = _metric_value(
+            owner_metrics,
+            "runtime_web_control_capacity_active_streams ",
+        )
+        accepting_capacity_active = _metric_value(
+            accepting_metrics,
+            "runtime_web_control_capacity_active_streams ",
+        )
+        if (
+            gateway_active
+            == owner_active
+            == accepting_active
+            == owner_capacity_active
+            == accepting_capacity_active
+            == 0
+        ):
             return
         if time.monotonic() >= deadline:
             raise AssertionError(
-                "Runtime Web streams were not released before drain verification: "
+                "Runtime Web streams or capacity were not released before "
+                "drain verification: "
                 f"gateway={gateway_active}, owner={owner_active}, "
-                f"accepting={accepting_active}"
+                f"accepting={accepting_active}, "
+                f"owner_capacity={owner_capacity_active}, "
+                f"accepting_capacity={accepting_capacity_active}"
             )
         time.sleep(0.1)
 
@@ -2030,35 +2094,19 @@ def _assert_redis_capacity_fallback(
 @pytest.mark.parametrize("auth_mode", ["shared_cookie", "separate_domain"])
 def test_runtime_web_gateway_real_runtime_browser_and_cross_replica_relay(
     auth_mode: str,
-    public_api_client: azentspublicclient.ApiClient,
-    admin_api_client: azentsadminclient.ApiClient,
-    azents_public_server_url: str,
-    azents_runtime_provider_docker_container: DockerContainer,
-    azents_runtime_control_container: DockerContainer,
     valkey_container: DockerContainer,
+    runtime_web_application: _RuntimeWebApplication,
     runtime_web_stack_factory: _RuntimeWebStackFactory,
 ) -> None:
     """Prove both auth modes, relay, revision fencing, and streamed transport."""
-    del azents_runtime_provider_docker_container, azents_runtime_control_container
-    workspace = _create_workspace(
-        public_api_client=public_api_client,
-        admin_api_client=admin_api_client,
-        server_url=azents_public_server_url,
-    )
-    with (
-        _runtime_application(
-            public_api_client=public_api_client,
-            workspace=workspace,
-            server_url=azents_public_server_url,
-        ),
-        runtime_web_stack_factory.start(
-            auth_mode,
-            maximum_active_exchanges=512,
-            maximum_application_buffer_bytes=16 * 1024 * 1024,
-            maintenance=False,
-            relay_path=True,
-        ) as stack,
-    ):
+    workspace = runtime_web_application.workspace
+    with runtime_web_stack_factory.start(
+        auth_mode,
+        maximum_active_exchanges=512,
+        maximum_application_buffer_bytes=16 * 1024 * 1024,
+        maintenance=False,
+        relay_path=True,
+    ) as stack:
         runtime_web_api_client = azentspublicclient.ApiClient(
             configuration=azentspublicclient.Configuration(host=stack.public_api_url)
         )
@@ -2269,34 +2317,19 @@ def test_runtime_web_gateway_real_runtime_browser_and_cross_replica_relay(
 
 
 def test_runtime_web_gateway_hard_limit_rejects_before_body_admission(
-    public_api_client: azentspublicclient.ApiClient,
-    admin_api_client: azentsadminclient.ApiClient,
-    azents_public_server_url: str,
-    azents_runtime_provider_docker_container: DockerContainer,
-    azents_runtime_control_container: DockerContainer,
+    runtime_web_application: _RuntimeWebApplication,
     runtime_web_stack_factory: _RuntimeWebStackFactory,
 ) -> None:
     """Reject a second exchange and release the exact disconnected reservation."""
-    del azents_runtime_provider_docker_container, azents_runtime_control_container
-    workspace = _create_workspace(
-        public_api_client=public_api_client,
-        admin_api_client=admin_api_client,
-        server_url=azents_public_server_url,
-    )
-    with (
-        _runtime_application(
-            public_api_client=public_api_client,
-            workspace=workspace,
-            server_url=azents_public_server_url,
-        ) as runtime_terminal,
-        runtime_web_stack_factory.start(
-            "shared_cookie",
-            maximum_active_exchanges=2,
-            maximum_application_buffer_bytes=4 * 1024 * 1024,
-            maintenance=False,
-            relay_path=False,
-        ) as stack,
-    ):
+    workspace = runtime_web_application.workspace
+    runtime_terminal = runtime_web_application.commands
+    with runtime_web_stack_factory.start(
+        "shared_cookie",
+        maximum_active_exchanges=2,
+        maximum_application_buffer_bytes=4 * 1024 * 1024,
+        maintenance=False,
+        relay_path=False,
+    ) as stack:
         runtime_web_api_client = azentspublicclient.ApiClient(
             configuration=azentspublicclient.Configuration(host=stack.public_api_url)
         )
@@ -2361,7 +2394,8 @@ def test_runtime_web_gateway_hard_limit_rejects_before_body_admission(
                     raise TimeoutError("Hard-limit exchange was not released")
 
         initial_state = _runtime_application_state(stack=stack, headers=headers)
-        assert initial_state.upload_invocations == 0
+        assert initial_state.active_sse == 0
+        assert initial_state.active_websockets == 0
         with ThreadPoolExecutor(max_workers=2) as executor:
             held = [
                 executor.submit(hold_exchange, started_event)
@@ -2384,7 +2418,7 @@ def test_runtime_web_gateway_hard_limit_rejects_before_body_admission(
             stack=stack,
             headers=headers,
         )
-        assert state_after_rejection.upload_invocations == 0
+        assert state_after_rejection == initial_state
 
         deadline = time.monotonic() + 10
         while True:
@@ -2422,6 +2456,9 @@ def test_runtime_web_gateway_hard_limit_rejects_before_body_admission(
         assert _route_open_count(metrics_after_recovery, "local") > local_opens_before
         _wait_for_runtime_web_stream_release(stack)
 
+        stream_state_before = _runtime_application_state_via_terminal(runtime_terminal)
+        assert stream_state_before.active_websockets == 0
+        assert stream_state_before.active_sse == 0
         websocket_drained = threading.Event()
         sse_started = threading.Event()
         sse_drained = threading.Event()
@@ -2484,9 +2521,19 @@ def test_runtime_web_gateway_hard_limit_rejects_before_body_admission(
                         runtime_terminal
                     )
                     assert active_long_lived.active_websockets == 1
-                    assert active_long_lived.websocket_connections == 1
+                    assert (
+                        active_long_lived.websocket_connections
+                        == stream_state_before.websocket_connections + 1
+                    )
                     assert active_long_lived.active_sse == 1
-                    assert active_long_lived.sse_connections == 1
+                    assert (
+                        active_long_lived.sse_connections
+                        == stream_state_before.sse_connections + 1
+                    )
+                    assert (
+                        active_long_lived.upload_invocations
+                        == stream_state_before.upload_invocations
+                    )
                     _drain_gateway(stack)
                     assert websocket_drained.wait(timeout=10)
                     assert sse_drained.wait(timeout=10)
@@ -2503,8 +2550,14 @@ def test_runtime_web_gateway_hard_limit_rejects_before_body_admission(
                     "Runtime Web drain did not release application streams"
                 )
             time.sleep(0.1)
-        assert drained_state.websocket_connections == 1
-        assert drained_state.sse_connections == 1
+        assert (
+            drained_state.websocket_connections
+            == stream_state_before.websocket_connections + 1
+        )
+        assert drained_state.sse_connections == stream_state_before.sse_connections + 1
+        assert (
+            drained_state.upload_invocations == stream_state_before.upload_invocations
+        )
 
         refused = requests.post(
             f"{stack.edge_host_url}/echo",
@@ -2518,34 +2571,19 @@ def test_runtime_web_gateway_hard_limit_rejects_before_body_admission(
 
 
 def test_runtime_web_gateway_maintenance_preflight(
-    public_api_client: azentspublicclient.ApiClient,
-    admin_api_client: azentsadminclient.ApiClient,
-    azents_public_server_url: str,
-    azents_runtime_provider_docker_container: DockerContainer,
-    azents_runtime_control_container: DockerContainer,
+    runtime_web_application: _RuntimeWebApplication,
     runtime_web_stack_factory: _RuntimeWebStackFactory,
 ) -> None:
     """Preserve durable authority while maintenance refuses all public work."""
-    del azents_runtime_provider_docker_container, azents_runtime_control_container
-    workspace = _create_workspace(
-        public_api_client=public_api_client,
-        admin_api_client=admin_api_client,
-        server_url=azents_public_server_url,
-    )
-    with (
-        _runtime_application(
-            public_api_client=public_api_client,
-            workspace=workspace,
-            server_url=azents_public_server_url,
-        ) as runtime_terminal,
-        runtime_web_stack_factory.start(
-            "shared_cookie",
-            maximum_active_exchanges=512,
-            maximum_application_buffer_bytes=16 * 1024 * 1024,
-            maintenance=True,
-            relay_path=True,
-        ) as stack,
-    ):
+    workspace = runtime_web_application.workspace
+    runtime_terminal = runtime_web_application.commands
+    with runtime_web_stack_factory.start(
+        "shared_cookie",
+        maximum_active_exchanges=512,
+        maximum_application_buffer_bytes=16 * 1024 * 1024,
+        maintenance=True,
+        relay_path=True,
+    ) as stack:
         runtime_web_api_client = azentspublicclient.ApiClient(
             configuration=azentspublicclient.Configuration(host=stack.public_api_url)
         )
@@ -2578,6 +2616,9 @@ def test_runtime_web_gateway_maintenance_preflight(
         assert approved.active
         assert approved.current_cycle is not None
         _assert_maintenance_preflight(stack)
+        state_before_refusal = _runtime_application_state_via_terminal(runtime_terminal)
+        assert state_before_refusal.active_sse == 0
+        assert state_before_refusal.active_websockets == 0
 
         endpoint_host = requested.endpoint.url.removeprefix("https://").rstrip("/")
         refused = requests.get(
@@ -2593,11 +2634,12 @@ def test_runtime_web_gateway_maintenance_preflight(
         assert "maintenance" in refused_body
 
         state = _runtime_application_state_via_terminal(runtime_terminal)
-        assert state.upload_invocations == 0
-        assert state.active_sse == 0
-        assert state.active_websockets == 0
+        assert state == state_before_refusal
         _drain_gateway(stack)
-        assert _runtime_application_state_via_terminal(runtime_terminal) == state
+        assert (
+            _runtime_application_state_via_terminal(runtime_terminal)
+            == state_before_refusal
+        )
 
         preserved = api.runtime_web_v1_get_runtime_web_service_projection(
             handle=workspace.handle,
