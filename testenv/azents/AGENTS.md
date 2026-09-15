@@ -42,6 +42,12 @@ uv run pytest ./src/tests/required/public/test_health.py
 
 E2E is the primary location for product behavior verification. `testenv` is the fixture/prerequisite support layer that makes E2E execution possible.
 
+Complex UI state matrices, confirmation and error dialogs, copy, conditional controls,
+and responsive component interactions belong to frontend component or Storybook
+interaction tests. Browser E2E retains only behavior that requires a real browser or
+crosses independently deployed product boundaries; do not duplicate exhaustive UI
+presentation coverage in browser E2E.
+
 Required CI runs one Docker-free support-test job and folder-owned E2E suites from
 `testenv/azents/e2e`. `src/tests/required/` owns credential-free product E2E using
 the Docker Runtime Provider. `src/tests/web/` owns browser, TLS gateway, and
@@ -63,9 +69,11 @@ The `agent-basic` fixture internally uses `setup/*.md` and `testenv/setup_handle
 Keep only setup entries that are actually referenced by fixtures, E2E tests, or prerequisites.
 
 <!-- SETUP-LIST:START -->
+
 - `agent-dummy-key` — Create agent with dummy-key LLM integration and default Runtime selection
 - `llm-provider-dummy` — Register dummy-key OpenAI LLM integration and ModelConfig for LLM-bypass pipeline tests
 - `test-user-workspace` — Create new azents user and workspace, record in state.json
+
 <!-- SETUP-LIST:END -->
 
 ## Scripts

@@ -116,6 +116,17 @@ export const Active = {
       runtimeAvailable: true,
     },
   },
+  play: async ({ args, canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(
+      canvas.getByRole("button", { name: "Request again" }),
+    );
+    await expect(args.onRequestAgain).toHaveBeenCalled();
+    await userEvent.click(
+      canvas.getByRole("button", { name: "Close exposure" }),
+    );
+    await expect(args.onClose).toHaveBeenCalled();
+  },
 } satisfies Story;
 
 export const ActiveWithPendingRequest = {
@@ -131,6 +142,19 @@ export const ActiveWithPendingRequest = {
       ],
       runtimeAvailable: true,
     },
+  },
+  play: async ({ args, canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(canvas.getByRole("button", { name: "Reject" }));
+    await expect(args.onReject).toHaveBeenCalled();
+    await userEvent.click(
+      canvas.getByRole("button", { name: "Cancel request" }),
+    );
+    await expect(args.onCancel).toHaveBeenCalled();
+    await userEvent.click(
+      canvas.getByRole("button", { name: "Close exposure" }),
+    );
+    await expect(args.onClose).toHaveBeenCalled();
   },
 } satisfies Story;
 
@@ -149,6 +173,13 @@ export const Expired = {
       ],
       runtimeAvailable: true,
     },
+  },
+  play: async ({ args, canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(
+      canvas.getByRole("button", { name: "Request again" }),
+    );
+    await expect(args.onRequestAgain).toHaveBeenCalled();
   },
 } satisfies Story;
 
@@ -197,7 +228,7 @@ export const CreateConfirmation = {
   args: {
     preparedService: service(),
   },
-  play: async ({ canvasElement }) => {
+  play: async ({ args, canvasElement }) => {
     const canvas = within(canvasElement);
     await userEvent.click(
       canvas.getByRole("button", { name: "Create service" }),
@@ -206,6 +237,10 @@ export const CreateConfirmation = {
     await expect(
       page.getByRole("heading", { name: "Expose this service?" }),
     ).toBeVisible();
+    await userEvent.click(
+      page.getByRole("button", { name: "Approve for 60 minutes" }),
+    );
+    await expect(args.onConfirmCreate).toHaveBeenCalled();
   },
 } satisfies Story;
 

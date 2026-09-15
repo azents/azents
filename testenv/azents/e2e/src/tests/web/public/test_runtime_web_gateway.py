@@ -56,16 +56,11 @@ from azentspublicclient.models.runtime_web_service_response import (
 )
 from azentspublicclient.models.secrets import Secrets
 from selenium import webdriver
-from selenium.common.exceptions import (
-    StaleElementReferenceException,
-    TimeoutException,
-    WebDriverException,
-)
+from selenium.common.exceptions import TimeoutException, WebDriverException
 from selenium.webdriver.chrome.options import Options as ChromeOptions
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.remote.webdriver import WebDriver
-from selenium.webdriver.remote.webelement import WebElement
 from selenium.webdriver.support import expected_conditions as ec
 from selenium.webdriver.support.ui import WebDriverWait
 from testcontainers.core.container import DockerContainer
@@ -1527,176 +1522,6 @@ def _open_application_in_browser(
         ) from error
 
 
-def _services_button(driver: WebDriver, label: str) -> WebElement:
-    return WebDriverWait(driver, 30).until(
-        ec.element_to_be_clickable((By.XPATH, f"//button[normalize-space()={label!r}]"))
-    )
-
-
-def _click_services_button(driver: WebDriver, label: str) -> None:
-    """Click only after the rendered button owns its center hit-test point."""
-    locator = (By.XPATH, f"//button[normalize-space()={label!r}]")
-
-    def _click_target(current_driver: WebDriver) -> WebElement | bool:
-        for button in current_driver.find_elements(*locator):
-            try:
-                if not button.is_displayed() or not button.is_enabled():
-                    continue
-                current_driver.execute_script(
-                    "arguments[0].scrollIntoView({block:'center',inline:'nearest'})",
-                    button,
-                )
-                receives_click = current_driver.execute_script(
-                    """
-const button = arguments[0];
-const rect = button.getBoundingClientRect();
-const target = document.elementFromPoint(
-  rect.left + rect.width / 2,
-  rect.top + rect.height / 2,
-);
-return target !== null && (target === button || button.contains(target));
-""",
-                    button,
-                )
-            except StaleElementReferenceException:
-                continue
-            if receives_click is True:
-                return button
-        return False
-
-    button = WebDriverWait(driver, 30).until(_click_target)
-    assert isinstance(button, WebElement)
-    button.click()
-
-
-def _exercise_services_management_ui(
-    driver: WebDriver,
-    *,
-    workspace: _RuntimeWebWorkspace,
-    endpoint_url: str,
-) -> None:
-    """Exercise direct creation and current-request decisions in Services."""
-    driver.get(
-        f"{_MAIN_ORIGIN}/w/{workspace.handle}/agents/{workspace.agent_id}"
-        f"/sessions/{workspace.session_id}?page=services"
-    )
-    wait = WebDriverWait(driver, 30)
-    wait.until(
-        ec.visibility_of_element_located((By.XPATH, "//*[text()='Web services']"))
-    )
-    assert "page=services" in driver.current_url
-
-    _click_services_button(driver, "Create service")
-    port = wait.until(
-        ec.element_to_be_clickable((By.CSS_SELECTOR, "input[placeholder='3000']"))
-    )
-    port.send_keys(Keys.CONTROL, "a")
-    port.send_keys(str(_RUNTIME_WEB_PORT))
-    label = wait.until(
-        ec.element_to_be_clickable(
-            (By.CSS_SELECTOR, "input[placeholder='Preview app']")
-        )
-    )
-    label.send_keys(Keys.CONTROL, "a")
-    label.send_keys("Services UI")
-    _click_services_button(driver, "Review exposure")
-    wait.until(
-        ec.visibility_of_element_located(
-            (By.XPATH, "//*[normalize-space()='Expose this service?']")
-        )
-    )
-    wait.until(
-        ec.element_to_be_clickable(
-            (By.XPATH, "//button[starts-with(normalize-space(), 'Approve for ')]")
-        )
-    ).click()
-    wait.until(
-        ec.visibility_of_element_located((By.XPATH, "//*[normalize-space()='Active']"))
-    )
-    wait.until(
-        ec.visibility_of_element_located(
-            (By.XPATH, f"//*[normalize-space()={endpoint_url!r}]")
-        )
-    )
-
-    _click_services_button(driver, "Request again")
-    wait.until(
-        ec.visibility_of_element_located(
-            (By.XPATH, "//*[contains(normalize-space(), 'new approval pending')]")
-        )
-    )
-    _click_services_button(driver, "Cancel request")
-    _services_button(driver, "Request again")
-
-    _click_services_button(driver, "Request again")
-    _click_services_button(driver, "Approve")
-    approval_button = wait.until(
-        ec.element_to_be_clickable(
-            (
-                By.XPATH,
-                "//*[@role='dialog']//button"
-                "[starts-with(normalize-space(), 'Approve for ')]",
-            )
-        )
-    )
-    driver.execute_script(
-        """
-const originalFetch = window.fetch.bind(window);
-window.fetch = (...args) => {
-  const input = args[0];
-  const url = typeof input === 'string' ? input : input.url;
-  if (url.includes('/api/trpc/runtimeWeb.approve')) {
-    window.fetch = originalFetch;
-    const init = args[1];
-    const payload = JSON.parse(init.body);
-    payload.json.expectedRevision += 1000;
-    return originalFetch(input, {
-      ...init,
-      body: JSON.stringify(payload),
-    });
-  }
-  return originalFetch(...args);
-};
-"""
-    )
-    approval_button.click()
-    wait.until(ec.visibility_of_element_located((By.XPATH, "//*[@role='dialog']")))
-    wait.until(
-        ec.visibility_of_element_located(
-            (By.XPATH, "//*[@role='dialog']//*[@role='alert']")
-        )
-    )
-    dialog = driver.find_element(By.XPATH, "//*[@role='dialog']")
-    assert "Review web service access" in dialog.text
-    wait.until(
-        ec.element_to_be_clickable(
-            (
-                By.XPATH,
-                "//*[@role='dialog']//button"
-                "[starts-with(normalize-space(), 'Approve for ')]",
-            )
-        )
-    ).click()
-    wait.until(
-        ec.invisibility_of_element_located(
-            (
-                By.XPATH,
-                "//*[@role='dialog']//*[normalize-space()='Review web service access']",
-            )
-        )
-    )
-    _services_button(driver, "Request again")
-
-    _click_services_button(driver, "Request again")
-    _click_services_button(driver, "Reject")
-    _services_button(driver, "Request again")
-
-    _click_services_button(driver, "Close exposure")
-    wait.until(
-        ec.visibility_of_element_located((By.XPATH, "//*[normalize-space()='Closed']"))
-    )
-
-
 def _browser_transport_evidence(
     driver: WebDriver,
 ) -> dict[str, object]:
@@ -2375,11 +2200,6 @@ def test_runtime_web_gateway_real_runtime_browser_and_cross_replica_relay(
                 ".catch(error => done(String(error)));"
             )
             assert status_after_close == 410
-            _exercise_services_management_ui(
-                driver,
-                workspace=workspace,
-                endpoint_url=endpoint_url,
-            )
         finally:
             with suppress(WebDriverException):
                 driver.quit()

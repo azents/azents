@@ -46,6 +46,7 @@ layout.tsx           → MantineProvider (default theme, no color scheme forced)
 ```
 
 Color mode utilities:
+
 - `shared/lib/color-mode.ts` — `parseColorModePreference` (server/client shared)
 - `shared/providers/color-mode.tsx` — `ColorModeProvider`
 - Cookies: `color-mode-preference` (`light|dark|system`), `color-mode-resolved` (`light|dark`)
@@ -59,6 +60,14 @@ Color mode utilities:
 5. Add UI components under `components/`.
 6. Add a `[Name]Page.tsx` entry point.
 7. Import directly from `app/[name]/page.tsx`; do not use `index.ts` files. See `.claude/conventions/typescript/no-index-files.md`.
+
+## Component Test Ownership
+
+Complex UI state matrices, confirmation and error dialogs, copy, conditional controls,
+and responsive component interactions are frontend component-test responsibilities.
+Represent meaningful states with colocated Storybook stories and use `play` assertions
+for interactions. Browser E2E should retain only behavior that requires a real browser
+or crosses independently deployed product boundaries.
 
 ## Localization Messages
 

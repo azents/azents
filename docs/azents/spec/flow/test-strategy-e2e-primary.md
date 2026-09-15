@@ -28,8 +28,8 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
-last_verified_at: 2026-09-14
-spec_version: 61
+last_verified_at: 2026-09-15
+spec_version: 62
 ---
 
 # E2E Primary Test Strategy
@@ -42,12 +42,12 @@ This spec defines boundaries connecting azents feature design, E2E location, fix
 
 ## Layer Boundaries
 
-| Layer | Responsibility | Prohibited |
-| --- | --- | --- |
-| `testenv/azents/e2e/` | pytest-based product behavior E2E. Primary verification location for API/WS/browser/user journey regression. | Do not wrap E2E with testenv fixture command. Do not create product state through direct DB writes. |
-| `testenv/azents/fixtures/` | Prepare reusable product state readiness and verify with doctor. | Do not own E2E/feature QA plan instead. |
-| `testenv/azents/contracts/` | Declare credential/prerequisite contract and safe metadata schema. | Do not output raw secrets or store them in snapshots. |
-| `testenv/azents/support/` | Promote only helpers confirmed to be repeatedly used in E2E/fixture/prerequisite. | Do not preemptively commonize. |
+| Layer                       | Responsibility                                                                                               | Prohibited                                                                                          |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------- |
+| `testenv/azents/e2e/`       | pytest-based product behavior E2E. Primary verification location for API/WS/browser/user journey regression. | Do not wrap E2E with testenv fixture command. Do not create product state through direct DB writes. |
+| `testenv/azents/fixtures/`  | Prepare reusable product state readiness and verify with doctor.                                             | Do not own E2E/feature QA plan instead.                                                             |
+| `testenv/azents/contracts/` | Declare credential/prerequisite contract and safe metadata schema.                                           | Do not output raw secrets or store them in snapshots.                                               |
+| `testenv/azents/support/`   | Promote only helpers confirmed to be repeatedly used in E2E/fixture/prerequisite.                            | Do not preemptively commonize.                                                                      |
 
 Manual-only runbook, blocked placeholder, removed-feature residue check, legacy TC markdown, `run-tc`, verifier, and markdown bash fallback are not part of event azents verification path. Primary evidence for product behavior QA is E2E result, and it is not separated into long-term catalog files.
 
@@ -126,12 +126,12 @@ Agent Runtime live prerequisite is declared with Runtime provider/control contra
 
 Consumer policy:
 
-| Consumer | Missing/stale snapshot |
-| --- | --- |
-| required E2E | fail |
-| optional/live E2E | skip summary |
+| Consumer                        | Missing/stale snapshot        |
+| ------------------------------- | ----------------------------- |
+| required E2E                    | fail                          |
+| optional/live E2E               | skip summary                  |
 | fixture/prerequisite diagnostic | structured prerequisite error |
-| prepare command | environment prep failure |
+| prepare command                 | environment prep failure      |
 
 E2E and fixture/prerequisite diagnostic read only snapshot during test and do not run doctor again.
 
@@ -140,6 +140,11 @@ E2E tests reproduce product behavior through user-facing UI, public/internal tes
 E2E-first does not require every exact internal race permutation to become a browser or full-stack
 cross-product. Required product-path E2E owns user-visible journeys and representative cross-boundary
 integration through public API, Worker/provider execution, durable state, and browser presentation.
+Complex UI state matrices, confirmation and error dialogs, copy, conditional controls,
+and responsive component interactions are owned by frontend component and Storybook
+interaction tests. Browser E2E retains only behavior that requires a real browser or
+crosses independently deployed product boundaries; it does not repeat an exhaustive
+component-presentation matrix.
 Required repository, service, and Worker integration tests own exact interleavings whose authority is
 PostgreSQL CAS, generation fencing, ownership recovery, transaction rollback, or stale-completion
 ordering. Those tests must exercise production repositories and execution owners with explicit
