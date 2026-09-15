@@ -344,6 +344,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Register Project Picker Worktree UI Historical Requirements Reconstruction](requirements/register-260706-register-picker-worktree-ui.md) | register-260706 | 2026-07-06 | - |
 | [Remove Project Registration Requests Historical Requirements Reconstruction](requirements/registration-260707-registration-requests.md) | registration-260707 | 2026-07-07 | 2026-07-07 |
 | [Session-Owned Project Registry Historical Requirements Reconstruction](requirements/registry-260625-registry.md) | registry-260625 | 2026-06-25 | - |
+| [One-Click Public Release Requirements](requirements/release-260915-one-click-publication.md) | release-260915 | 2026-09-15 | 2026-09-15 |
 | [Require Explicit Responses Stream Completion Historical Requirements Reconstruction](requirements/responses-260715-responses-stream-completion.md) | responses-260715 | 2026-07-15 | - |
 | [Define the OpenAI Responses WebSocket Lifecycle Historical Requirements Reconstruction](requirements/responses-260716-openai-responses-websocket-lifecycle.md) | responses-260716 | 2026-07-16 | - |
 | [Chat Writes Use REST Commit Boundary Historical Requirements Reconstruction](requirements/rest-260605-rest-chat-write-boundary.md) | rest-260605 | 2026-06-05 | - |
@@ -782,6 +783,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Register Project Picker Worktree UI](adr/register-260706-register-picker-worktree-ui.md)
 - [Remove Project Registration Requests Historical Decision Reconstruction](adr/registration-260707-registration-requests.md)
 - [Session-Owned Project Registry](adr/registry-260625-registry.md)
+- [One-Click Public Release](adr/release-260915-one-click-publication.md)
 - [Require Explicit Responses Stream Completion](adr/responses-260715-responses-stream-completion.md)
 - [Define the OpenAI Responses WebSocket Lifecycle](adr/responses-260716-openai-responses-websocket-lifecycle.md)
 - [Chat Writes Use REST Commit Boundary](adr/rest-260605-rest-chat-write-boundary.md)
