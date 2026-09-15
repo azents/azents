@@ -334,6 +334,7 @@ const args: ChatSessionViewContainerOutput = {
   supportingContent: null,
   panel: {
     activeView: "files",
+    activationRevision: 0,
     opened: true,
     onSelect: noop,
     onOpen: noop,
@@ -354,6 +355,9 @@ function InteractiveSession(
   const [activeView, setActiveView] = useState<SessionPanelView>(
     props.panel.activeView,
   );
+  const [activationRevision, setActivationRevision] = useState(
+    props.panel.activationRevision,
+  );
   const [opened, setOpened] = useState(props.panel.opened);
   const containerRef = useRef<HTMLDivElement>(null);
   const [chatRatio, setChatRatio] = useState(props.panel.chatRatio);
@@ -363,11 +367,18 @@ function InteractiveSession(
       panel={{
         ...props.panel,
         activeView,
+        activationRevision,
         opened,
         containerRef,
         chatRatio,
-        onSelect: setActiveView,
-        onOpen: () => setOpened(true),
+        onSelect: (view) => {
+          setActiveView(view);
+          setActivationRevision((revision) => revision + 1);
+        },
+        onOpen: () => {
+          setOpened(true);
+          setActivationRevision((revision) => revision + 1);
+        },
         onClose: () => setOpened(false),
         onResizeBy: (delta) =>
           setChatRatio((value) =>

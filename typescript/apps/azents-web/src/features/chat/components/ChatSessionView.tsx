@@ -164,19 +164,7 @@ export function ChatSessionView({
         mih={0}
         style={{ display: workspaceSelected ? "block" : "none" }}
       >
-        <WorkspacePanelContainer
-          {...workspacePanel}
-          navigation="external"
-          activeTab={
-            panel.activeView === "runtime"
-              ? "settings"
-              : panel.activeView === "metrics"
-                ? "metrics"
-                : panel.activeView === "services"
-                  ? "services"
-                  : "workspace"
-          }
-        />
+        <WorkspacePanelContainer {...workspacePanel} navigation="external" />
       </Box>
       <Box
         h="100%"

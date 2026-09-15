@@ -20,12 +20,17 @@ import { isTerminalProjectionConnectable } from "@/shared/runtime-terminal/proto
 import { resolveComposerSubscriptionSelection } from "@/shared/subscription-usage/composerSubscriptionUsage";
 import { trpc } from "@/trpc/client";
 import { ChatSessionView } from "../components/ChatSessionView";
+import {
+  sessionPanelInvalidationPlan,
+  type SessionPanelInvalidationTarget,
+} from "../session-panel/sessionPanelRefresh";
 import { useSessionPanelState } from "../session-panel/useSessionPanelState";
 import {
   resolveSubagentNavigation,
   type SubagentNavigationLinks,
 } from "../subagentNavigation";
 import { useWorkspacePanelContainer } from "../workspace/containers/useWorkspacePanelContainer";
+import { workspacePanelTabForSessionPanelView } from "../workspace/workspacePanelTabs";
 import { useAgentSessionTitleUpdater } from "./useAgentSessionTitleUpdater";
 import { useChatSessionContainer } from "./useChatSessionContainer";
 import { useSubscriptionUsageContainer } from "./useSubscriptionUsageContainer";
@@ -82,6 +87,7 @@ export function useChatSessionViewContainer(
     `(min-width: ${theme.breakpoints.lg})`,
   );
   const panel = useSessionPanelState(!isWorkspacePanelDocked);
+  const utils = trpc.useUtils();
   useFocusReturn({ opened: !isWorkspacePanelDocked && panel.opened });
   const [headerSession, setHeaderSession] =
     useState<AgentSessionResponse>(session);
@@ -154,6 +160,8 @@ export function useChatSessionViewContainer(
     handle,
     agentId: agent.id,
     sessionId,
+    activeTab: workspacePanelTabForSessionPanelView(panel.activeView),
+    activationRevision: panel.activationRevision,
     autoRefreshVisible:
       panel.opened &&
       (panel.activeView === "files" ||
@@ -178,6 +186,72 @@ export function useChatSessionViewContainer(
     }
     return resolveSubagentNavigation(subagentTreePanel.state.tree);
   }, [subagentTreePanel.state]);
+
+  const invalidateSessionPanelTarget = useCallback(
+    async (target: SessionPanelInvalidationTarget): Promise<void> => {
+      switch (target) {
+        case "channels":
+          await Promise.all([
+            utils.chat.getAgentSession.invalidate({
+              agentId: agent.id,
+              sessionId,
+            }),
+            utils.externalChannel.listSessionChannels.invalidate({
+              handle,
+              agentId: agent.id,
+              sessionId,
+            }),
+          ]);
+          return;
+        case "context":
+          await utils.chat.getAgentSessionContext.invalidate({
+            agentId: agent.id,
+            sessionId,
+            limit: 300,
+          });
+          return;
+        case "subagents":
+          await utils.chat.getSubagentTree.invalidate({
+            agentId: agent.id,
+            sessionId,
+          });
+          return;
+        case "terminal":
+          await utils.terminal.projection.invalidate({
+            handle,
+            agentId: agent.id,
+            sessionId,
+          });
+          return;
+      }
+    },
+    [
+      agent.id,
+      handle,
+      sessionId,
+      utils.chat.getAgentSession,
+      utils.chat.getAgentSessionContext,
+      utils.chat.getSubagentTree,
+      utils.externalChannel.listSessionChannels,
+      utils.terminal.projection,
+    ],
+  );
+
+  useEffect(() => {
+    if (!panel.opened) {
+      return;
+    }
+    void Promise.all(
+      sessionPanelInvalidationPlan(panel.activeView).map(
+        invalidateSessionPanelTarget,
+      ),
+    );
+  }, [
+    invalidateSessionPanelTarget,
+    panel.activationRevision,
+    panel.activeView,
+    panel.opened,
+  ]);
 
   useEffect(() => {
     if (
@@ -216,6 +290,7 @@ export function useChatSessionViewContainer(
       supportingContent = (
         <ScheduledTasksPage
           {...supportingProps}
+          activationRevision={panel.activationRevision}
           initialTaskId={panel.initialTaskId}
           openInitialTaskForEdit={panel.openInitialTaskForEdit}
         />
