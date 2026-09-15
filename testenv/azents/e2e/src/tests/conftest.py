@@ -15,7 +15,7 @@ import threading
 import time
 import warnings
 from collections.abc import Callable, Generator
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import AbstractContextManager, contextmanager, suppress
 from pathlib import Path
 from typing import NamedTuple, TypeVar
@@ -60,6 +60,7 @@ from support.strict_network_control_plane import (
 from support.system_bootstrap import SystemBootstrapEvidence
 from support.timing_observability import (
     TimingObservabilityPlugin,
+    record_fixture_phase,
     timing_path,
 )
 
@@ -163,6 +164,23 @@ class _CorePrerequisites:
     openai_proxy: DockerContainer
     github_validation_proxy: DockerContainer
     slack_provider_fake: DockerContainer
+
+
+@dataclasses.dataclass(frozen=True)
+class _SeleniumContainerStartResult:
+    """Retain one background Chromium start outcome for main-thread evidence."""
+
+    container: DockerContainer | None
+    duration_seconds: float
+    error: BaseException | None
+
+
+@dataclasses.dataclass
+class _SeleniumContainerStart:
+    """Track the background Chromium start and whether its result was joined."""
+
+    future: Future[_SeleniumContainerStartResult]
+    joined: bool
 
 
 _SERVER_IMAGE_BUILD = _E2EImageBuild(
@@ -2787,26 +2805,10 @@ server {
             _log_server_output(container, "azents-web-gateway")
 
 
-@pytest.fixture(scope="session")
-def selenium_container(
-    container_network: Network,
-    azents_main_web_container: DockerContainer,
-    azents_admin_web_container: DockerContainer,
-) -> Generator[DockerContainer, None, None]:
-    """Run a remote Chromium browser on the E2E container network."""
-    del azents_main_web_container, azents_admin_web_container
-    container = (
-        DockerContainer(
-            image=_SELENIUM_IMAGE,
-            docker_client_kw={"timeout": _DOCKER_CLIENT_TIMEOUT_SECONDS},
-        )
-        .with_name(f"azents-selenium-{random_secret(4)}")
-        .with_network(container_network)
-        .with_env("SE_NODE_SESSION_TIMEOUT", "120")
-        .with_exposed_ports(4444)
-        .with_kwargs(shm_size="2g")
-    )
-    with container:
+def _start_selenium_container(container: DockerContainer) -> DockerContainer:
+    """Start Chromium and preserve cleanup across partial failures."""
+    try:
+        container.start()
         host = container.get_container_host_ip()
         port = container.get_exposed_port(4444)
         status_url = f"http://{host}:{port}/status"
@@ -2819,16 +2821,104 @@ def selenium_container(
                 if isinstance(value, dict):
                     status = _JSON_OBJECT_ADAPTER.validate_python(value)
                     if status.get("ready") is True:
-                        break
+                        return container
             except requests.exceptions.RequestException:
                 pass
             except ValueError:
                 pass
             time.sleep(1)
-        else:
-            pytest.fail("Selenium did not become ready")
-        yield container
-        _log_server_output(container, "selenium")
+        pytest.fail("Selenium did not become ready")
+    except BaseException:
+        with suppress(Exception):
+            container.stop()
+        raise
+
+
+def _capture_selenium_container_start(
+    container: DockerContainer,
+) -> _SeleniumContainerStartResult:
+    """Capture the complete background Chromium start outcome."""
+    started_at = time.monotonic()
+    try:
+        started_container = _start_selenium_container(container)
+    except BaseException as error:
+        return _SeleniumContainerStartResult(
+            container=None,
+            duration_seconds=time.monotonic() - started_at,
+            error=error,
+        )
+    return _SeleniumContainerStartResult(
+        container=started_container,
+        duration_seconds=time.monotonic() - started_at,
+        error=None,
+    )
+
+
+@pytest.fixture(scope="session")
+def selenium_container_start(
+    container_network: Network,
+) -> Generator[_SeleniumContainerStart, None, None]:
+    """Start Chromium while independent Web services are still preparing."""
+    _initialize_testcontainers_reaper()
+    container = (
+        DockerContainer(
+            image=_SELENIUM_IMAGE,
+            docker_client_kw={"timeout": _DOCKER_CLIENT_TIMEOUT_SECONDS},
+        )
+        .with_name(f"azents-selenium-{random_secret(4)}")
+        .with_network(container_network)
+        .with_env("SE_NODE_SESSION_TIMEOUT", "120")
+        .with_exposed_ports(4444)
+        .with_kwargs(shm_size="2g")
+    )
+    executor = ThreadPoolExecutor(max_workers=1)
+    start = _SeleniumContainerStart(
+        future=executor.submit(_capture_selenium_container_start, container),
+        joined=False,
+    )
+    try:
+        yield start
+    finally:
+        executor.shutdown(wait=True)
+        if not start.future.cancelled():
+            result = start.future.result()
+            try:
+                record_fixture_phase(
+                    fixture="selenium_container_background",
+                    scope="session",
+                    node_id="",
+                    phase="setup",
+                    duration_seconds=result.duration_seconds,
+                    outcome="failed" if result.error is not None else "passed",
+                )
+                if result.error is not None and not start.joined:
+                    warnings.warn(
+                        "Concurrent Selenium startup also failed with "
+                        f"{type(result.error).__name__}.",
+                        stacklevel=2,
+                    )
+                if result.container is not None:
+                    _log_server_output(result.container, "selenium")
+            finally:
+                if result.container is not None:
+                    result.container.stop()
+
+
+@pytest.fixture(scope="session")
+def selenium_container(
+    selenium_container_start: _SeleniumContainerStart,
+    azents_main_web_container: DockerContainer,
+    azents_admin_web_container: DockerContainer,
+) -> DockerContainer:
+    """Join the shared Chromium start after dependent Web services are ready."""
+    del azents_main_web_container, azents_admin_web_container
+    selenium_container_start.joined = True
+    result = selenium_container_start.future.result()
+    if result.error is not None:
+        raise result.error
+    if result.container is None:
+        raise RuntimeError("Selenium startup completed without a container or error.")
+    return result.container
 
 
 @pytest.fixture(scope="function")

@@ -1,4 +1,4 @@
-"""Tests for required E2E immutable snapshot image preparation."""
+"""Tests for E2E immutable snapshot image preparation."""
 
 from __future__ import annotations
 
@@ -11,8 +11,8 @@ from pathlib import Path
 from support.e2e_snapshot_images import (
     SnapshotPreparation,
     _write_observability,
+    prepare_e2e_snapshot_images,
     prepare_prerequisite_images,
-    prepare_required_snapshot_images,
 )
 
 _BASE_SHA = "a" * 40
@@ -48,9 +48,12 @@ class FakeCommandRunner:
 
 def _unchanged_environment() -> dict[str, str]:
     return {
+        "AZENTS_E2E_IMAGE_BUILD_PROFILE": "required",
         "AZENTS_E2E_SERVER_IMAGE_CHANGED": "false",
         "AZENTS_E2E_RUNTIME_RUNNER_IMAGE_CHANGED": "false",
         "AZENTS_E2E_RUNTIME_PROVIDER_DOCKER_IMAGE_CHANGED": "false",
+        "AZENTS_E2E_WEB_IMAGE_CHANGED": "false",
+        "AZENTS_E2E_ADMIN_WEB_IMAGE_CHANGED": "false",
     }
 
 
@@ -76,7 +79,7 @@ def test_prerequisite_pulls_are_best_effort_and_complete() -> None:
 def test_prepares_all_unchanged_images() -> None:
     runner = FakeCommandRunner(frozenset())
 
-    result = prepare_required_snapshot_images(
+    result = prepare_e2e_snapshot_images(
         base_sha=_BASE_SHA,
         candidate_shas=(_BASE_SHA,),
         current_sha=None,
@@ -101,12 +104,68 @@ def test_prepares_all_unchanged_images() -> None:
     assert sum(command[0][1] == "tag" for command in runner.commands) == 3
 
 
+def test_web_profile_prepares_unchanged_web_images() -> None:
+    runner = FakeCommandRunner(frozenset())
+    environment = _unchanged_environment()
+    environment["AZENTS_E2E_IMAGE_BUILD_PROFILE"] = "web"
+
+    result = prepare_e2e_snapshot_images(
+        base_sha=_BASE_SHA,
+        candidate_shas=(_BASE_SHA,),
+        current_sha=None,
+        github_token="token",
+        github_actor="github-actions",
+        environment=environment,
+        command_runner=runner,
+    )
+
+    assert result.all_images_prepared
+    assert result.environment["AZENTS_E2E_WEB_IMAGE"] == (
+        "azents-web:e2e-base-snapshot"
+    )
+    assert result.environment["AZENTS_E2E_ADMIN_WEB_IMAGE"] == (
+        "azents-admin-web:e2e-base-snapshot"
+    )
+    assert len(result.pulls) == 5
+
+
+def test_web_profile_builds_changed_web_image_locally() -> None:
+    runner = FakeCommandRunner(frozenset())
+    environment = _unchanged_environment()
+    environment.update(
+        {
+            "AZENTS_E2E_IMAGE_BUILD_PROFILE": "web",
+            "AZENTS_E2E_WEB_IMAGE_CHANGED": "true",
+        }
+    )
+
+    result = prepare_e2e_snapshot_images(
+        base_sha=_BASE_SHA,
+        candidate_shas=(_BASE_SHA,),
+        current_sha=None,
+        github_token="token",
+        github_actor="github-actions",
+        environment=environment,
+        command_runner=runner,
+    )
+
+    assert not result.all_images_prepared
+    assert not result.fallback_required
+    assert "AZENTS_E2E_WEB_IMAGE" not in result.environment
+    assert {pull.image for pull in result.pulls} == {
+        "azents-server",
+        "azents-runtime-runner",
+        "azents-runtime-provider-docker",
+        "azents-admin-web",
+    }
+
+
 def test_builds_changed_image_and_prepares_unchanged_images() -> None:
     runner = FakeCommandRunner(frozenset())
     environment = _unchanged_environment()
     environment["AZENTS_E2E_SERVER_IMAGE_CHANGED"] = "true"
 
-    result = prepare_required_snapshot_images(
+    result = prepare_e2e_snapshot_images(
         base_sha=_BASE_SHA,
         candidate_shas=(_BASE_SHA,),
         current_sha=None,
@@ -137,7 +196,7 @@ def test_prepares_changed_server_as_source_overlay_base() -> None:
         }
     )
 
-    result = prepare_required_snapshot_images(
+    result = prepare_e2e_snapshot_images(
         base_sha=_BASE_SHA,
         candidate_shas=(_BASE_SHA,),
         current_sha=None,
@@ -175,7 +234,7 @@ def test_source_overlay_pull_failure_requires_full_build_fallback() -> None:
         }
     )
 
-    result = prepare_required_snapshot_images(
+    result = prepare_e2e_snapshot_images(
         base_sha=_BASE_SHA,
         candidate_shas=(_BASE_SHA,),
         current_sha=None,
@@ -205,7 +264,7 @@ def test_source_overlay_uses_dependency_compatible_ancestor() -> None:
         }
     )
 
-    result = prepare_required_snapshot_images(
+    result = prepare_e2e_snapshot_images(
         base_sha=_BASE_SHA,
         candidate_shas=(_BASE_SHA, _ANCESTOR_SHA),
         current_sha=None,
@@ -250,7 +309,7 @@ def test_current_snapshot_takes_precedence_over_source_overlay() -> None:
         }
     )
 
-    result = prepare_required_snapshot_images(
+    result = prepare_e2e_snapshot_images(
         base_sha=_BASE_SHA,
         candidate_shas=(_BASE_SHA,),
         current_sha=_ANCESTOR_SHA,
@@ -270,7 +329,7 @@ def test_current_snapshot_takes_precedence_over_source_overlay() -> None:
 def test_pull_failure_falls_back_to_build() -> None:
     runner = FakeCommandRunner(frozenset({"azents-runtime-runner-snapshot"}))
 
-    result = prepare_required_snapshot_images(
+    result = prepare_e2e_snapshot_images(
         base_sha=_BASE_SHA,
         candidate_shas=(_BASE_SHA,),
         current_sha=None,
@@ -299,7 +358,7 @@ def test_missing_base_snapshot_uses_compatible_ancestor() -> None:
         frozenset({f"azents-runtime-runner-snapshot:sha-{_BASE_SHA}"})
     )
 
-    result = prepare_required_snapshot_images(
+    result = prepare_e2e_snapshot_images(
         base_sha=_BASE_SHA,
         candidate_shas=(_BASE_SHA, _ANCESTOR_SHA),
         current_sha=None,
@@ -334,7 +393,7 @@ def test_fallback_preserves_directly_prepared_images() -> None:
         }
     )
 
-    result = prepare_required_snapshot_images(
+    result = prepare_e2e_snapshot_images(
         base_sha=_BASE_SHA,
         candidate_shas=(_ANCESTOR_SHA,),
         current_sha=None,
@@ -370,7 +429,7 @@ def test_incompatible_ancestor_falls_back_to_build() -> None:
         )
     )
 
-    result = prepare_required_snapshot_images(
+    result = prepare_e2e_snapshot_images(
         base_sha=_BASE_SHA,
         candidate_shas=(_BASE_SHA, _ANCESTOR_SHA),
         current_sha=None,
@@ -395,7 +454,7 @@ def test_incompatible_ancestor_falls_back_to_build() -> None:
 def test_login_failure_falls_back_without_pull_attempts() -> None:
     runner = FakeCommandRunner(frozenset({"docker login"}))
 
-    result = prepare_required_snapshot_images(
+    result = prepare_e2e_snapshot_images(
         base_sha=_BASE_SHA,
         candidate_shas=(_BASE_SHA,),
         current_sha=None,
@@ -417,7 +476,7 @@ def test_prepares_changed_image_from_exact_current_snapshot() -> None:
     environment = _unchanged_environment()
     environment["AZENTS_E2E_SERVER_IMAGE_CHANGED"] = "true"
 
-    result = prepare_required_snapshot_images(
+    result = prepare_e2e_snapshot_images(
         base_sha=_BASE_SHA,
         candidate_shas=(_BASE_SHA,),
         current_sha=_ANCESTOR_SHA,
@@ -449,7 +508,7 @@ def test_missing_current_snapshot_builds_changed_image_locally() -> None:
     environment = _unchanged_environment()
     environment["AZENTS_E2E_SERVER_IMAGE_CHANGED"] = "true"
 
-    result = prepare_required_snapshot_images(
+    result = prepare_e2e_snapshot_images(
         base_sha=_BASE_SHA,
         candidate_shas=(_BASE_SHA,),
         current_sha=_ANCESTOR_SHA,

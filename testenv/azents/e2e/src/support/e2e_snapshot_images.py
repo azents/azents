@@ -1,4 +1,4 @@
-"""Prepare required E2E images from immutable snapshot tags."""
+"""Prepare E2E images from immutable snapshot tags."""
 
 from __future__ import annotations
 
@@ -17,6 +17,7 @@ _REGISTRY = "ghcr.io"
 _OWNER = "azents"
 _SERVER_SOURCE_OVERLAY_ELIGIBLE_ENV = "AZENTS_E2E_SERVER_SOURCE_OVERLAY_ELIGIBLE"
 _SERVER_SOURCE_OVERLAY_BASE_ENV = "AZENTS_E2E_SERVER_SOURCE_OVERLAY_BASE"
+_IMAGE_BUILD_PROFILE_ENV = "AZENTS_E2E_IMAGE_BUILD_PROFILE"
 _PREREQUISITE_IMAGES = (
     "postgres:18",
     "rustfs/rustfs:1.0.0-alpha.90",
@@ -28,7 +29,7 @@ _PREREQUISITE_IMAGES = (
 
 @dataclass(frozen=True)
 class SnapshotImage:
-    """Describe one required E2E snapshot image."""
+    """Describe one E2E snapshot image."""
 
     image: str
     package: str
@@ -91,7 +92,7 @@ CommandRunner = Callable[
     subprocess.CompletedProcess[str],
 ]
 
-_REQUIRED_IMAGES = (
+_CORE_IMAGES = (
     SnapshotImage(
         image="azents-server",
         package="azents-server-snapshot",
@@ -143,6 +144,40 @@ _REQUIRED_IMAGES = (
         source_overlay_pathspecs=None,
     ),
 )
+_WEB_IMAGES = (
+    SnapshotImage(
+        image="azents-web",
+        package="azents-web-snapshot",
+        local_tag="azents-web:e2e-base-snapshot",
+        environment_variable="AZENTS_E2E_WEB_IMAGE",
+        changed_environment_variable="AZENTS_E2E_WEB_IMAGE_CHANGED",
+        pathspecs=(
+            ".dockerignore",
+            "azents-web.Dockerfile",
+            "python/apps/azents/specs",
+            "typescript",
+        ),
+        source_overlay_pathspecs=None,
+    ),
+    SnapshotImage(
+        image="azents-admin-web",
+        package="azents-admin-web-snapshot",
+        local_tag="azents-admin-web:e2e-base-snapshot",
+        environment_variable="AZENTS_E2E_ADMIN_WEB_IMAGE",
+        changed_environment_variable="AZENTS_E2E_ADMIN_WEB_IMAGE_CHANGED",
+        pathspecs=(
+            ".dockerignore",
+            "azents-admin-web.Dockerfile",
+            "python/apps/azents/specs",
+            "typescript",
+        ),
+        source_overlay_pathspecs=None,
+    ),
+)
+_IMAGE_BUILD_PROFILES = {
+    "required": _CORE_IMAGES,
+    "web": (*_CORE_IMAGES, *_WEB_IMAGES),
+}
 
 
 def _run_command(
@@ -265,7 +300,7 @@ def _pull_snapshot(
     )
 
 
-def prepare_required_snapshot_images(
+def prepare_e2e_snapshot_images(
     *,
     base_sha: str,
     candidate_shas: Sequence[str],
@@ -275,7 +310,15 @@ def prepare_required_snapshot_images(
     environment: dict[str, str],
     command_runner: CommandRunner,
 ) -> SnapshotPreparation:
-    """Pull required images from exact or compatible immutable snapshots."""
+    """Pull one E2E profile from exact or compatible immutable snapshots."""
+    profile = environment.get(_IMAGE_BUILD_PROFILE_ENV)
+    if profile is None or profile not in _IMAGE_BUILD_PROFILES:
+        supported = ", ".join(sorted(_IMAGE_BUILD_PROFILES))
+        raise RuntimeError(
+            f"Unsupported {_IMAGE_BUILD_PROFILE_ENV} {profile!r}; "
+            f"expected one of: {supported}."
+        )
+    images = _IMAGE_BUILD_PROFILES[profile]
     pull_requests = [
         SnapshotPullRequest(
             image=image,
@@ -294,7 +337,7 @@ def prepare_required_snapshot_images(
                 else base_sha
             ),
         )
-        for image in _REQUIRED_IMAGES
+        for image in images
         if not environment.get(image.environment_variable)
         and (
             environment.get(image.changed_environment_variable) == "false"
@@ -304,7 +347,7 @@ def prepare_required_snapshot_images(
             )
         )
     ]
-    server_image = _REQUIRED_IMAGES[0]
+    server_image = images[0]
     if (
         current_sha is None
         and environment.get(_SERVER_SOURCE_OVERLAY_ELIGIBLE_ENV) == "true"
@@ -327,7 +370,7 @@ def prepare_required_snapshot_images(
         )
     prepared_environment = {
         image.environment_variable: value
-        for image in _REQUIRED_IMAGES
+        for image in images
         if (value := environment.get(image.environment_variable))
     }
     if overlay_base := environment.get(_SERVER_SOURCE_OVERLAY_BASE_ENV):
@@ -338,8 +381,7 @@ def prepare_required_snapshot_images(
             pulls=(),
             login_completed=False,
             all_images_prepared=all(
-                image.environment_variable in prepared_environment
-                for image in _REQUIRED_IMAGES
+                image.environment_variable in prepared_environment for image in images
             ),
             fallback_required=any(
                 request.compatibility_base_sha is not None
@@ -365,8 +407,7 @@ def prepare_required_snapshot_images(
             pulls=(),
             login_completed=False,
             all_images_prepared=all(
-                image.environment_variable in prepared_environment
-                for image in _REQUIRED_IMAGES
+                image.environment_variable in prepared_environment for image in images
             ),
             fallback_required=any(
                 request.compatibility_base_sha is not None
@@ -398,8 +439,7 @@ def prepare_required_snapshot_images(
         pulls=pulls,
         login_completed=True,
         all_images_prepared=all(
-            image.environment_variable in prepared_environment
-            for image in _REQUIRED_IMAGES
+            image.environment_variable in prepared_environment for image in images
         ),
         fallback_required=any(
             request.compatibility_base_sha is not None
@@ -517,7 +557,7 @@ def main() -> None:
     )
     with ThreadPoolExecutor(max_workers=2) as executor:
         preparation_future = executor.submit(
-            prepare_required_snapshot_images,
+            prepare_e2e_snapshot_images,
             base_sha=base_sha,
             candidate_shas=candidate_shas,
             current_sha=os.environ.get("AZENTS_E2E_CURRENT_SHA") or None,

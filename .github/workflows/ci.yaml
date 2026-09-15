@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       force_current_snapshots:
-        description: Exercise exact-current-SHA required image selection
+        description: Exercise exact-current-SHA E2E image selection
         required: false
         type: boolean
         default: false
@@ -37,6 +37,8 @@ jobs:
       e2e_server_source_overlay: ${{ steps.filter.outputs['e2e-server-image'] == 'true' && steps.filter.outputs['e2e-server-image-dependencies'] != 'true' }}
       e2e_runtime_runner_image: ${{ steps.filter.outputs['e2e-runtime-runner-image'] == 'true' }}
       e2e_runtime_provider_docker_image: ${{ steps.filter.outputs['e2e-runtime-provider-docker-image'] == 'true' }}
+      e2e_web_image: ${{ steps.filter.outputs['e2e-web-image'] == 'true' }}
+      e2e_admin_web_image: ${{ steps.filter.outputs['e2e-admin-web-image'] == 'true' }}
       typescript: ${{ github.event_name != 'pull_request' || steps.filter.outputs.typescript == 'true' }}
       helm: ${{ github.event_name != 'pull_request' || steps.filter.outputs.helm == 'true' }}
       docker: ${{ github.event_name != 'pull_request' || steps.filter.outputs.docker == 'true' }}
@@ -125,6 +127,16 @@ jobs:
               - '.dockerignore'
               - 'python/apps/azents-runtime-provider-docker/**'
               - 'python/libs/azents-runtime-control/**'
+            e2e-web-image:
+              - '.dockerignore'
+              - 'azents-web.Dockerfile'
+              - 'python/apps/azents/specs/**'
+              - 'typescript/**'
+            e2e-admin-web-image:
+              - '.dockerignore'
+              - 'azents-admin-web.Dockerfile'
+              - 'python/apps/azents/specs/**'
+              - 'typescript/**'
             typescript:
               - '.github/workflows/**'
               - 'azents-admin-web.Dockerfile'
@@ -405,9 +417,8 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 2
-      - name: Resolve required E2E snapshot base
+      - name: Resolve E2E snapshot base
         id: snapshot_base
-        if: matrix.suite == 'required'
         env:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PR_HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
@@ -451,6 +462,9 @@ jobs:
           AZENTS_E2E_SERVER_SOURCE_OVERLAY_ELIGIBLE: ${{ !inputs.force_current_snapshots && needs.changes.outputs.e2e_server_source_overlay }}
           AZENTS_E2E_RUNTIME_RUNNER_IMAGE_CHANGED: ${{ inputs.force_current_snapshots || needs.changes.outputs.e2e_runtime_runner_image }}
           AZENTS_E2E_RUNTIME_PROVIDER_DOCKER_IMAGE_CHANGED: ${{ inputs.force_current_snapshots || needs.changes.outputs.e2e_runtime_provider_docker_image }}
+          AZENTS_E2E_WEB_IMAGE_CHANGED: ${{ inputs.force_current_snapshots || needs.changes.outputs.e2e_web_image }}
+          AZENTS_E2E_ADMIN_WEB_IMAGE_CHANGED: ${{ inputs.force_current_snapshots || needs.changes.outputs.e2e_admin_web_image }}
+          AZENTS_E2E_IMAGE_BUILD_PROFILE: ${{ matrix.suite }}
           GHCR_TOKEN: ${{ github.token }}
         run: |
           report_dir="${RUNNER_TEMP}/e2e-observability/${{ matrix.lane }}"
@@ -544,6 +558,9 @@ jobs:
           AZENTS_E2E_SERVER_SOURCE_OVERLAY_ELIGIBLE: ${{ needs.changes.outputs.e2e_server_source_overlay }}
           AZENTS_E2E_RUNTIME_RUNNER_IMAGE_CHANGED: ${{ needs.changes.outputs.e2e_runtime_runner_image }}
           AZENTS_E2E_RUNTIME_PROVIDER_DOCKER_IMAGE_CHANGED: ${{ needs.changes.outputs.e2e_runtime_provider_docker_image }}
+          AZENTS_E2E_WEB_IMAGE_CHANGED: ${{ needs.changes.outputs.e2e_web_image }}
+          AZENTS_E2E_ADMIN_WEB_IMAGE_CHANGED: ${{ needs.changes.outputs.e2e_admin_web_image }}
+          AZENTS_E2E_IMAGE_BUILD_PROFILE: ${{ matrix.suite }}
           GHCR_TOKEN: ${{ github.token }}
         run: |
           report_dir="${RUNNER_TEMP}/e2e-observability/${{ matrix.lane }}"

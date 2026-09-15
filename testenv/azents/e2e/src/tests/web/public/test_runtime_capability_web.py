@@ -122,6 +122,29 @@ def _click_button(driver: WebDriver, text: str) -> None:
     ).click()
 
 
+def _has_visible_css_element(
+    driver: WebDriver,
+    selector: str,
+) -> bool:
+    """Return whether the current DOM has one visible matching element."""
+    return (
+        driver.execute_script(
+            """
+            return Array.from(document.querySelectorAll(arguments[0])).some(
+              element => {
+                const style = getComputedStyle(element);
+                return style.visibility !== 'hidden'
+                  && style.display !== 'none'
+                  && element.getClientRects().length > 0;
+              },
+            );
+            """,
+            selector,
+        )
+        is True
+    )
+
+
 def _open_metrics_tab(driver: WebDriver) -> None:
     """Open the Runtime system metrics tab."""
     _wait(driver).until(
@@ -148,11 +171,8 @@ def _assert_mobile_session_panel(driver: WebDriver) -> None:
     driver.set_window_size(390, 844)
     toggle = (By.CSS_SELECTOR, "button[aria-label='Toggle session panel']")
     close = (By.CSS_SELECTOR, "button[aria-label='Close session panel']")
-    visible_close = [
-        item for item in driver.find_elements(*close) if item.is_displayed()
-    ]
-    if visible_close:
-        visible_close[0].click()
+    if _has_visible_css_element(driver, close[1]):
+        _wait(driver).until(ec.element_to_be_clickable(close)).click()
     composer = _wait(driver).until(
         ec.element_to_be_clickable((By.CSS_SELECTOR, "textarea"))
     )
@@ -213,14 +233,8 @@ def _assert_mobile_session_panel(driver: WebDriver) -> None:
     )
     composer.clear()
     driver.set_window_size(1440, 1000)
-    visible_metrics = [
-        item
-        for item in driver.find_elements(
-            By.CSS_SELECTOR, "[role='tab'][aria-label='Metrics']"
-        )
-        if item.is_displayed()
-    ]
-    if not visible_metrics:
+    metrics = (By.CSS_SELECTOR, "[role='tab'][aria-label='Metrics']")
+    if not _has_visible_css_element(driver, metrics[1]):
         _wait(driver).until(
             lambda current: next(
                 (
@@ -529,6 +543,7 @@ def test_runtime_free_add_and_remove_progress(
         handle=workspace.handle,
         agent_id=agent.id,
     )
+    browser_driver.refresh()
     _assert_visible_text(browser_driver, "System metrics")
     _assert_visible_text(browser_driver, "CPU")
     _assert_visible_text(browser_driver, "Memory")

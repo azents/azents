@@ -54,3 +54,22 @@ def test_workflow_dispatch_detects_changes_from_first_parent() -> None:
     assert "if [ \"$GITHUB_EVENT_NAME\" = 'workflow_dispatch' ]; then" in base_step
     assert 'base="$(git rev-parse "$GITHUB_SHA^")"' in base_step
     assert "base: ${{ steps.change_base.outputs.base }}" in filter_step
+
+
+def test_web_lane_prefetches_all_snapshots_and_skips_unused_buildx() -> None:
+    """Web E2E reuses every unchanged image and builds only on fallback."""
+    workflow = _WORKFLOW_PATH.read_text(encoding="utf-8")
+    base_step = _step_block(workflow, "Resolve E2E snapshot base")
+    prefetch_step = _step_block(
+        workflow,
+        "Start direct E2E snapshot image preparation",
+    )
+    buildx_step = _step_block(workflow, "Setup Docker Buildx")
+    runtime_step = _step_block(workflow, "Expose GitHub Actions runtime")
+
+    assert "if: matrix.suite == 'required'" not in base_step
+    assert "AZENTS_E2E_WEB_IMAGE_CHANGED:" in prefetch_step
+    assert "AZENTS_E2E_ADMIN_WEB_IMAGE_CHANGED:" in prefetch_step
+    assert "AZENTS_E2E_IMAGE_BUILD_PROFILE: ${{ matrix.suite }}" in prefetch_step
+    assert "matrix.suite == 'web'" not in buildx_step
+    assert "matrix.suite == 'web'" not in runtime_step

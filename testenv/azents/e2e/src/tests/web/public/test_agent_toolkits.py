@@ -64,7 +64,7 @@ def _headers(token: str) -> dict[str, str]:
 
 def _wait(driver: WebDriver) -> WebDriverWait[WebDriver]:
     """Return the bounded browser wait used by this surface."""
-    return WebDriverWait(driver, 20)
+    return WebDriverWait(driver, 20, poll_frequency=0.1)
 
 
 def _login_main_web(

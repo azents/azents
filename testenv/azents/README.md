@@ -42,7 +42,7 @@ Maintained suite ownership:
 
 - `src/support_tests/` — Docker-free support tests that do not open listeners or start product services.
 - `src/tests/required/` — credential-free product E2E using the Docker Runtime Provider.
-- `src/tests/web/` — browser, TLS gateway, and worktree-built Web image E2E.
+- `src/tests/web/` — browser, TLS gateway, and content-matched Web image E2E.
 
 Each suite directory owns one execution profile through `suite.toml`. CI may split a suite into timing-balanced lanes, but every lane retains the same suite profile.
 
