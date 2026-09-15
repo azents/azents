@@ -28,8 +28,8 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
-last_verified_at: 2026-09-13
-spec_version: 60
+last_verified_at: 2026-09-15
+spec_version: 62
 ---
 
 # E2E Primary Test Strategy
@@ -42,12 +42,12 @@ This spec defines boundaries connecting azents feature design, E2E location, fix
 
 ## Layer Boundaries
 
-| Layer | Responsibility | Prohibited |
-| --- | --- | --- |
-| `testenv/azents/e2e/` | pytest-based product behavior E2E. Primary verification location for API/WS/browser/user journey regression. | Do not wrap E2E with testenv fixture command. Do not create product state through direct DB writes. |
-| `testenv/azents/fixtures/` | Prepare reusable product state readiness and verify with doctor. | Do not own E2E/feature QA plan instead. |
-| `testenv/azents/contracts/` | Declare credential/prerequisite contract and safe metadata schema. | Do not output raw secrets or store them in snapshots. |
-| `testenv/azents/support/` | Promote only helpers confirmed to be repeatedly used in E2E/fixture/prerequisite. | Do not preemptively commonize. |
+| Layer                       | Responsibility                                                                                               | Prohibited                                                                                          |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------- |
+| `testenv/azents/e2e/`       | pytest-based product behavior E2E. Primary verification location for API/WS/browser/user journey regression. | Do not wrap E2E with testenv fixture command. Do not create product state through direct DB writes. |
+| `testenv/azents/fixtures/`  | Prepare reusable product state readiness and verify with doctor.                                             | Do not own E2E/feature QA plan instead.                                                             |
+| `testenv/azents/contracts/` | Declare credential/prerequisite contract and safe metadata schema.                                           | Do not output raw secrets or store them in snapshots.                                               |
+| `testenv/azents/support/`   | Promote only helpers confirmed to be repeatedly used in E2E/fixture/prerequisite.                            | Do not preemptively commonize.                                                                      |
 
 Manual-only runbook, blocked placeholder, removed-feature residue check, legacy TC markdown, `run-tc`, verifier, and markdown bash fallback are not part of event azents verification path. Primary evidence for product behavior QA is E2E result, and it is not separated into long-term catalog files.
 
@@ -126,12 +126,12 @@ Agent Runtime live prerequisite is declared with Runtime provider/control contra
 
 Consumer policy:
 
-| Consumer | Missing/stale snapshot |
-| --- | --- |
-| required E2E | fail |
-| optional/live E2E | skip summary |
+| Consumer                        | Missing/stale snapshot        |
+| ------------------------------- | ----------------------------- |
+| required E2E                    | fail                          |
+| optional/live E2E               | skip summary                  |
 | fixture/prerequisite diagnostic | structured prerequisite error |
-| prepare command | environment prep failure |
+| prepare command                 | environment prep failure      |
 
 E2E and fixture/prerequisite diagnostic read only snapshot during test and do not run doctor again.
 
@@ -140,6 +140,11 @@ E2E tests reproduce product behavior through user-facing UI, public/internal tes
 E2E-first does not require every exact internal race permutation to become a browser or full-stack
 cross-product. Required product-path E2E owns user-visible journeys and representative cross-boundary
 integration through public API, Worker/provider execution, durable state, and browser presentation.
+Complex UI state matrices, confirmation and error dialogs, copy, conditional controls,
+and responsive component interactions are owned by frontend component and Storybook
+interaction tests. Browser E2E retains only behavior that requires a real browser or
+crosses independently deployed product boundaries; it does not repeat an exhaustive
+component-presentation matrix.
 Required repository, service, and Worker integration tests own exact interleavings whose authority is
 PostgreSQL CAS, generation fencing, ownership recovery, transaction rollback, or stale-completion
 ordering. Those tests must exercise production repositories and execution owners with explicit
@@ -408,13 +413,34 @@ Always-on required CI does not depend on external credentials.
   shared-cookie and separate-domain browser identity flows through a local TLS
   wildcard edge, approves the exact pending request through Main Web, and verifies
   stable secret-free URLs, current projection, replacement and close revision
-  fencing, HTTP POST, SSE, WebSocket, redirect non-following, and a streamed response
-  larger than 64 MiB. A second Runtime Control replica accepts the Gateway stream
-  after the Runner has registered with the first replica, forcing the PostgreSQL
-  owner-route and one-hop trusted relay path. Unsupported browser and unauthenticated
-  programmatic probes fail before application content. The fixture uses only
-  generated clients, UI, Runtime Terminal, and public/admin APIs; it never writes
-  product state directly to PostgreSQL.
+  fencing, browser upload digest and streamed download byte count, eight-asset
+  fan-out, HTTP POST and error propagation, SSE, redirect handling, and WebSocket
+  text, binary, ping/pong, and close behavior. A second Runtime Control replica accepts
+  the Gateway session after the Runner has registered with the first replica, forcing
+  the PostgreSQL Owner route and maximum-one-hop trusted relay path. The
+  recurring file collects four tests: shared-cookie and separate-domain full
+  journeys, pre-body hard-limit rejection, and maintenance preflight. The capacity
+  backend is selectable between memory and Redis; Redis loss/recovery behavior stays
+  within the same lightweight journey and does not make Redis a readiness
+  dependency. Recurring defaults are 1 MiB transfer bodies, eight assets, and a
+  120-second browser-script deadline. The same collected journey accepts bounded
+  `AZENTS_E2E_RUNTIME_WEB_TRANSFER_BYTES`,
+  `AZENTS_E2E_RUNTIME_WEB_ASSET_COUNT`, and
+  `AZENTS_E2E_RUNTIME_WEB_SCRIPT_TIMEOUT_SECONDS` overrides for an explicitly
+  requested one-time run; CI does not set a heavy profile. Unauthenticated and
+  malformed programmatic probes fail before application content. The fixture uses
+  only generated clients, UI, Runtime Terminal, and public/admin APIs; it never
+  writes product state directly to PostgreSQL.
+- Runtime Web heavy-load verification is disposable evidence, not a recurring
+  regression-test catalog. A feature, release, or incident that requires fresh load
+  evidence raises the bounded environment values on the same lightweight journey,
+  records a dated supporting report with commit/image identity, environment,
+  workload, command, result, defects, and limits, and restores the low defaults
+  afterward. It does not add a separate test node or heavy CI configuration. The
+  current
+  [2026-09-14 report](../../design/runtime-web-heavy-transport-load-test-report-2026-09-14.md)
+  records one bounded 64 MiB/32 MiB local correctness and resource-pressure run; it
+  is not a 1 GiB production throughput or latency benchmark.
 - The stable `ci-python-e2e` required gate aggregates support tests, the planner,
   all enabled suite lanes, and the timing aggregator for the scopes selected by path
   filtering.
@@ -482,6 +508,11 @@ Local/PR environment without live substrate does not fake live PASS. Instead, se
 
 ## Changelog
 
+- **2026-09-14** (spec_version 61) — Made recurring Runtime Web verification a
+  four-test lightweight 1 MiB/eight-asset matrix with relay, hard-limit,
+  maintenance, protocol, and optional Redis recovery coverage; added bounded
+  environment overrides on the same journey; and made heavy-load runs disposable
+  dated report evidence without a separate pytest node or heavy CI profile.
 - **2026-09-13** (spec_version 60) — Defined E2E-first layered verification for model quota
   fallback: product-visible and representative cross-boundary E2E plus production
   repository/Worker integration tests for exact concurrency, fencing, recovery, and rollback

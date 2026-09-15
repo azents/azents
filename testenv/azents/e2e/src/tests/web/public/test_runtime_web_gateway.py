@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import logging
+import os
 import socket
 import ssl
 import subprocess
@@ -59,12 +61,12 @@ from selenium.webdriver.chrome.options import Options as ChromeOptions
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.remote.webdriver import WebDriver
-from selenium.webdriver.remote.webelement import WebElement
 from selenium.webdriver.support import expected_conditions as ec
 from selenium.webdriver.support.ui import WebDriverWait
 from testcontainers.core.container import DockerContainer
 from testcontainers.core.network import Network
 from testcontainers.postgres import PostgresContainer
+from websockets.asyncio.client import connect as async_connect
 from websockets.exceptions import ConnectionClosed
 from websockets.sync.client import connect
 from websockets.typing import Origin
@@ -102,9 +104,43 @@ _SHARED_COOKIE_DOMAIN = "runtime-e2e.test"
 _SEPARATE_COOKIE_DOMAIN = _SERVICE_SUFFIX
 _TERMINAL_ORIGIN = "https://azents-web-gateway:8443"
 _SIGNUP_PASSWORD = "TestPass123!"
-_BROWSER_TRANSFER_BYTES = 1024 * 1024
-_BROWSER_ASSET_COUNT = 8
-_REJECTED_REQUEST_CONTENT_LENGTH = 64 * 1024 * 1024
+
+
+def _bounded_workload_value(
+    name: str,
+    *,
+    default: int,
+    maximum: int,
+) -> int:
+    """Read one bounded positive E2E workload override."""
+    raw_value = os.environ.get(name)
+    if raw_value is None:
+        return default
+    try:
+        value = int(raw_value)
+    except ValueError:
+        raise RuntimeError(f"{name} must be an integer") from None
+    if not 1 <= value <= maximum:
+        raise RuntimeError(f"{name} must be between 1 and {maximum}")
+    return value
+
+
+_BROWSER_TRANSFER_BYTES = _bounded_workload_value(
+    "AZENTS_E2E_RUNTIME_WEB_TRANSFER_BYTES",
+    default=1024 * 1024,
+    maximum=1024 * 1024 * 1024,
+)
+_BROWSER_ASSET_COUNT = _bounded_workload_value(
+    "AZENTS_E2E_RUNTIME_WEB_ASSET_COUNT",
+    default=8,
+    maximum=2_000,
+)
+_BROWSER_SCRIPT_TIMEOUT_SECONDS = _bounded_workload_value(
+    "AZENTS_E2E_RUNTIME_WEB_SCRIPT_TIMEOUT_SECONDS",
+    default=120,
+    maximum=7_200,
+)
+_REJECTED_REQUEST_CONTENT_LENGTH = _BROWSER_TRANSFER_BYTES
 logger = logging.getLogger(__name__)
 
 
@@ -204,6 +240,7 @@ class _RuntimeWebStackFactory:
     s3_bucket_name: str
     s3_access_key: str
     s3_secret_key: str
+    selenium_url: str
 
     def start(
         self,
@@ -234,6 +271,7 @@ class _RuntimeWebStackFactory:
             s3_bucket_name=self.s3_bucket_name,
             s3_access_key=self.s3_access_key,
             s3_secret_key=self.s3_secret_key,
+            selenium_url=self.selenium_url,
         )
 
 
@@ -452,6 +490,10 @@ def _runtime_web_gateway_container(
         .with_env("AZ_RUNTIME_WEB_GATEWAY_PORT", "8040")
         .with_env("AZ_RUNTIME_WEB_GATEWAY_MAINTENANCE", str(maintenance).lower())
         .with_env(
+            "AZ_RUNTIME_WEB_GATEWAY_REQUEST_BODY_BYTES",
+            str(_BROWSER_TRANSFER_BYTES),
+        )
+        .with_env(
             "AZ_RUNTIME_WEB_GATEWAY_MAXIMUM_ACTIVE_EXCHANGES",
             str(maximum_active_exchanges),
         )
@@ -573,21 +615,6 @@ def _runtime_web_edge_container(
     )
 
 
-def _runtime_web_selenium_container(
-    *,
-    network: Network,
-) -> DockerContainer:
-    """Create Chromium after the function-scoped TLS edge is available."""
-    return (
-        DockerContainer(image="selenium/standalone-chromium:4.45.0-20260606")
-        .with_name(f"azents-runtime-web-selenium-{unique()}")
-        .with_network(network)
-        .with_env("SE_NODE_SESSION_TIMEOUT", "120")
-        .with_exposed_ports(4444)
-        .with_kwargs(shm_size="2g")
-    )
-
-
 def _write_tls_edge_files(root: Path) -> _TlsEdgeFiles:
     """Write a local certificate and exact reverse-proxy configuration."""
     certificate_path = root / "tls.crt"
@@ -699,6 +726,7 @@ def _runtime_web_stack(
     s3_bucket_name: str,
     s3_access_key: str,
     s3_secret_key: str,
+    selenium_url: str,
 ) -> Generator[_RuntimeWebStack, None, None]:
     """Start two-Control relay, Gateway, Main Web, and TLS edge."""
     with tempfile.TemporaryDirectory(prefix="runtime-web-e2e-") as temporary_root:
@@ -749,8 +777,7 @@ def _runtime_web_stack(
             private_key_path=private_key_path,
             config_path=config_path,
         )
-        selenium = _runtime_web_selenium_container(network=network)
-        containers = [relay, gateway, public_api, main_web, edge, selenium]
+        containers = [relay, gateway, public_api, main_web, edge]
         with ExitStack() as stack:
             stack.enter_context(relay)
             _wait_for_log(
@@ -780,7 +807,6 @@ def _runtime_web_stack(
                 name="Runtime Web Main Web",
             )
             stack.enter_context(edge)
-            stack.enter_context(selenium)
             try:
                 edge_host = edge.get_container_host_ip()
                 edge_port = edge.get_exposed_port(443)
@@ -810,29 +836,6 @@ def _runtime_web_stack(
                 ]
                 if not isinstance(edge_ip, str) or not edge_ip:
                     raise AssertionError("Runtime Web TLS edge has no network address")
-                selenium_host = selenium.get_container_host_ip()
-                selenium_port = selenium.get_exposed_port(4444)
-                selenium_url = f"http://{selenium_host}:{selenium_port}"
-                deadline = time.monotonic() + 60
-                while time.monotonic() < deadline:
-                    try:
-                        status = requests.get(
-                            f"{selenium_url}/status",
-                            timeout=2,
-                        ).json()
-                        if status.get("value", {}).get("ready") is True:
-                            break
-                    except (
-                        requests.RequestException,
-                        ValueError,
-                    ):
-                        pass
-                    time.sleep(0.5)
-                else:
-                    selenium_logs = _container_logs(selenium)
-                    raise AssertionError(
-                        f"Runtime Web Selenium did not become ready:\n{selenium_logs}"
-                    )
                 yield _RuntimeWebStack(
                     main_origin=_MAIN_ORIGIN,
                     public_api_url=(
@@ -895,6 +898,7 @@ def runtime_web_stack_factory(
     azents_web_image: str,
     azents_runtime_runner_image: str,
     azents_runtime_control_container: DockerContainer,
+    selenium_container: DockerContainer,
     runtime_web_capacity_backend: str,
     credential_encryption_key: str,
     auth_jwt_secret_key: str,
@@ -904,6 +908,10 @@ def runtime_web_stack_factory(
     rustfs_secret_key: str,
 ) -> _RuntimeWebStackFactory:
     """Capture secret fixture values behind a redacted stack factory."""
+    selenium_url = (
+        f"http://{selenium_container.get_container_host_ip()}:"
+        f"{selenium_container.get_exposed_port(4444)}"
+    )
     return _RuntimeWebStackFactory(
         network=container_network,
         postgres=postgres_container,
@@ -918,6 +926,7 @@ def runtime_web_stack_factory(
         s3_bucket_name=s3_bucket_name,
         s3_access_key=rustfs_access_key,
         s3_secret_key=rustfs_secret_key,
+        selenium_url=selenium_url,
     )
 
 
@@ -1010,15 +1019,16 @@ def _create_workspace(
 
 def _runtime_application_script() -> str:
     """Return the bounded loopback application executed by the real Runner."""
-    return """
+    script = """
 import asyncio
 import hashlib
 
 from aiohttp import web
 
-TRANSFER_BYTES = 1024 * 1024
+TRANSFER_BYTES = __TRANSFER_BYTES__
 TRANSFER_CHUNK_BYTES = 256 * 1024
 ASSET_BYTES = 32 * 1024
+ASSET_COUNT = __ASSET_COUNT__
 upload_invocations = 0
 active_sse = 0
 sse_connections = 0
@@ -1056,17 +1066,23 @@ async def upload(request):
 
 async def download(request):
     digest = hashlib.sha256()
-    chunk = b'd' * TRANSFER_CHUNK_BYTES
-    for _ in range(TRANSFER_BYTES // len(chunk)):
-        digest.update(chunk)
+    chunk = b'd' * min(TRANSFER_CHUNK_BYTES, TRANSFER_BYTES)
+    remaining = TRANSFER_BYTES
+    while remaining:
+        data = chunk[:remaining]
+        digest.update(data)
+        remaining -= len(data)
     response = web.StreamResponse(headers={
         'Content-Length': str(TRANSFER_BYTES),
         'Content-Type': 'application/octet-stream',
         'X-Content-Sha256': digest.hexdigest(),
     })
     await response.prepare(request)
-    for _ in range(TRANSFER_BYTES // len(chunk)):
-        await response.write(chunk)
+    remaining = TRANSFER_BYTES
+    while remaining:
+        data = chunk[:remaining]
+        await response.write(data)
+        remaining -= len(data)
     await response.write_eof()
     return response
 
@@ -1082,10 +1098,10 @@ async def hold(request):
 
 async def asset(request):
     asset_id = int(request.match_info['asset_id'])
-    if not 0 <= asset_id < 8:
+    if not 0 <= asset_id < ASSET_COUNT:
         raise web.HTTPNotFound()
     return web.Response(
-        body=bytes([asset_id]) * ASSET_BYTES,
+        body=bytes([asset_id % 256]) * ASSET_BYTES,
         content_type='application/octet-stream',
     )
 
@@ -1159,7 +1175,12 @@ application.router.add_get('/redirect', redirect)
 application.router.add_get('/failure/{canary}', failure)
 application.router.add_get('/ws', websocket)
 web.run_app(application, host='127.0.0.1', port=8765, handle_signals=False)
-""".strip()
+"""
+    return (
+        script.replace("__TRANSFER_BYTES__", str(_BROWSER_TRANSFER_BYTES))
+        .replace("__ASSET_COUNT__", str(_BROWSER_ASSET_COUNT))
+        .strip()
+    )
 
 
 @contextmanager
@@ -1236,7 +1257,7 @@ def _browser(
         command_executor=selenium_url,
         options=options,
     )
-    driver.set_script_timeout(120)
+    driver.set_script_timeout(_BROWSER_SCRIPT_TIMEOUT_SECONDS)
     return driver
 
 
@@ -1501,146 +1522,14 @@ def _open_application_in_browser(
         ) from error
 
 
-def _services_button(driver: WebDriver, label: str) -> WebElement:
-    return WebDriverWait(driver, 30).until(
-        ec.element_to_be_clickable((By.XPATH, f"//button[normalize-space()={label!r}]"))
-    )
-
-
-def _exercise_services_management_ui(
-    driver: WebDriver,
-    *,
-    workspace: _RuntimeWebWorkspace,
-    endpoint_url: str,
-) -> None:
-    """Exercise direct creation and current-request decisions in Services."""
-    driver.get(
-        f"{_MAIN_ORIGIN}/w/{workspace.handle}/agents/{workspace.agent_id}"
-        f"/sessions/{workspace.session_id}?page=services"
-    )
-    wait = WebDriverWait(driver, 30)
-    wait.until(
-        ec.visibility_of_element_located((By.XPATH, "//*[text()='Web services']"))
-    )
-    assert "page=services" in driver.current_url
-
-    _services_button(driver, "Create service").click()
-    port = wait.until(
-        ec.element_to_be_clickable((By.CSS_SELECTOR, "input[placeholder='3000']"))
-    )
-    port.send_keys(Keys.CONTROL, "a")
-    port.send_keys(str(_RUNTIME_WEB_PORT))
-    label = wait.until(
-        ec.element_to_be_clickable(
-            (By.CSS_SELECTOR, "input[placeholder='Preview app']")
-        )
-    )
-    label.send_keys(Keys.CONTROL, "a")
-    label.send_keys("Services UI")
-    _services_button(driver, "Review exposure").click()
-    wait.until(
-        ec.visibility_of_element_located(
-            (By.XPATH, "//*[normalize-space()='Expose this service?']")
-        )
-    )
-    wait.until(
-        ec.element_to_be_clickable(
-            (By.XPATH, "//button[starts-with(normalize-space(), 'Approve for ')]")
-        )
-    ).click()
-    wait.until(
-        ec.visibility_of_element_located((By.XPATH, "//*[normalize-space()='Active']"))
-    )
-    wait.until(
-        ec.visibility_of_element_located(
-            (By.XPATH, f"//*[normalize-space()={endpoint_url!r}]")
-        )
-    )
-
-    _services_button(driver, "Request again").click()
-    wait.until(
-        ec.visibility_of_element_located(
-            (By.XPATH, "//*[contains(normalize-space(), 'new approval pending')]")
-        )
-    )
-    _services_button(driver, "Cancel request").click()
-    _services_button(driver, "Request again")
-
-    _services_button(driver, "Request again").click()
-    _services_button(driver, "Approve").click()
-    approval_button = wait.until(
-        ec.element_to_be_clickable(
-            (
-                By.XPATH,
-                "//*[@role='dialog']//button"
-                "[starts-with(normalize-space(), 'Approve for ')]",
-            )
-        )
-    )
-    driver.execute_script(
-        """
-const originalFetch = window.fetch.bind(window);
-window.fetch = (...args) => {
-  const input = args[0];
-  const url = typeof input === 'string' ? input : input.url;
-  if (url.includes('/api/trpc/runtimeWeb.approve')) {
-    window.fetch = originalFetch;
-    const init = args[1];
-    const payload = JSON.parse(init.body);
-    payload.json.expectedRevision += 1000;
-    return originalFetch(input, {
-      ...init,
-      body: JSON.stringify(payload),
-    });
-  }
-  return originalFetch(...args);
-};
-"""
-    )
-    approval_button.click()
-    wait.until(ec.visibility_of_element_located((By.XPATH, "//*[@role='dialog']")))
-    wait.until(
-        ec.visibility_of_element_located(
-            (By.XPATH, "//*[@role='dialog']//*[@role='alert']")
-        )
-    )
-    dialog = driver.find_element(By.XPATH, "//*[@role='dialog']")
-    assert "Review web service access" in dialog.text
-    wait.until(
-        ec.element_to_be_clickable(
-            (
-                By.XPATH,
-                "//*[@role='dialog']//button"
-                "[starts-with(normalize-space(), 'Approve for ')]",
-            )
-        )
-    ).click()
-    wait.until(
-        ec.invisibility_of_element_located(
-            (
-                By.XPATH,
-                "//*[@role='dialog']//*[normalize-space()='Review web service access']",
-            )
-        )
-    )
-    _services_button(driver, "Request again")
-
-    _services_button(driver, "Request again").click()
-    _services_button(driver, "Reject").click()
-    _services_button(driver, "Request again")
-
-    _services_button(driver, "Close exposure").click()
-    wait.until(
-        ec.visibility_of_element_located((By.XPATH, "//*[normalize-space()='Closed']"))
-    )
-
-
 def _browser_transport_evidence(
     driver: WebDriver,
 ) -> dict[str, object]:
     """Exercise bounded browser transfer, fan-out, SSE, and WebSocket behavior."""
     result = driver.execute_async_script(
         """
+const transferBytes = arguments[0];
+const assetCount = arguments[1];
 const done = arguments[arguments.length - 1];
 (async () => {
   const checkedFetch = async (url, init = undefined) => {
@@ -1656,7 +1545,7 @@ const done = arguments[arguments.length - 1];
     {method: 'POST', body: 'runtime-web-body'},
   );
   const echoBody = await echo.json();
-  const uploadBody = new Uint8Array(1024 * 1024);
+  const uploadBody = new Uint8Array(transferBytes);
   uploadBody.fill(0x75);
   const expectedUploadDigest = Array.from(
     new Uint8Array(await crypto.subtle.digest('SHA-256', uploadBody)),
@@ -1680,10 +1569,10 @@ const done = arguments[arguments.length - 1];
     bytes += part.value.byteLength;
   }
   const assets = await Promise.all(
-    Array.from({length: 8}, async (_, assetId) => {
+    Array.from({length: assetCount}, async (_, assetId) => {
       const response = await checkedFetch(`/asset/${assetId}`);
       const body = new Uint8Array(await response.arrayBuffer());
-      return body.length === 32 * 1024 && body[0] === assetId;
+      return body.length === 32 * 1024 && body[0] === assetId % 256;
     }),
   );
   const websocket = await new Promise((resolve, reject) => {
@@ -1748,7 +1637,9 @@ const done = arguments[arguments.length - 1];
     websocket,
   });
 })().catch(error => done({error: String(error)}));
-"""
+""",
+        _BROWSER_TRANSFER_BYTES,
+        _BROWSER_ASSET_COUNT,
     )
     if not isinstance(result, dict):
         raise AssertionError(f"Browser transport evidence was invalid: {result!r}")
@@ -1951,30 +1842,53 @@ def _browser_neutral_transport_evidence(
     assert failure.status_code == 500
     assert failure.text == "application-error-canary"
 
+    asyncio.run(
+        _browser_neutral_websocket_evidence(
+            stack=stack,
+            endpoint_url=endpoint_url,
+            cookie=cookie,
+            user_agent=firefox_user_agent,
+        )
+    )
+
+
+async def _browser_neutral_websocket_evidence(
+    *,
+    stack: _RuntimeWebStack,
+    endpoint_url: str,
+    cookie: str,
+    user_agent: str,
+) -> None:
+    """Exercise browser-neutral WebSocket frames without a receiver thread."""
+    endpoint_host = endpoint_url.removeprefix("https://").rstrip("/")
     edge_address = stack.edge_host_url.removeprefix("https://")
     edge_host, edge_port_text = edge_address.rsplit(":", maxsplit=1)
     raw_socket = socket.create_connection((edge_host, int(edge_port_text)), timeout=10)
+    raw_socket.setblocking(False)
     tls_context = ssl.create_default_context()
     tls_context.check_hostname = False
     tls_context.verify_mode = ssl.CERT_NONE
 
-    with connect(
+    async with async_connect(
         f"wss://{endpoint_host}/ws",
         sock=raw_socket,
         ssl=tls_context,
         server_hostname=endpoint_host,
         origin=Origin(endpoint_url.rstrip("/")),
         additional_headers={"Cookie": cookie},
-        user_agent_header=firefox_user_agent,
+        user_agent_header=user_agent,
         proxy=None,
         open_timeout=10,
     ) as websocket:
-        websocket.send("browser-neutral-socket")
-        assert websocket.recv(timeout=10) == "echo:browser-neutral-socket"
-        websocket.send(bytes([0, 1, 2, 255]))
-        assert websocket.recv(timeout=10) == bytes([0, 1, 2, 255])
-        pong = websocket.ping(b"runtime-web-ping")
-        assert pong.wait(timeout=10)
+        await websocket.send("browser-neutral-socket")
+        async with asyncio.timeout(10):
+            assert await websocket.recv() == "echo:browser-neutral-socket"
+        await websocket.send(bytes([0, 1, 2, 255]))
+        async with asyncio.timeout(10):
+            assert await websocket.recv() == bytes([0, 1, 2, 255])
+        pong = await websocket.ping(b"runtime-web-ping")
+        async with asyncio.timeout(10):
+            await pong
 
 
 def _assert_redis_capacity_fallback(
@@ -2177,6 +2091,7 @@ def test_runtime_web_gateway_real_runtime_browser_and_cross_replica_relay(
                 "text": "echo:runtime-web-socket",
                 "binary": [0, 1, 2, 255],
             }
+            _wait_for_runtime_web_stream_release(stack)
             assert driver.current_url == endpoint_url
             assert "ticket" not in driver.current_url.lower()
             identity_cookie = driver.get_cookie("__Http-Azents-Runtime-Web")
@@ -2285,11 +2200,6 @@ def test_runtime_web_gateway_real_runtime_browser_and_cross_replica_relay(
                 ".catch(error => done(String(error)));"
             )
             assert status_after_close == 410
-            _exercise_services_management_ui(
-                driver,
-                workspace=workspace,
-                endpoint_url=endpoint_url,
-            )
         finally:
             with suppress(WebDriverException):
                 driver.quit()

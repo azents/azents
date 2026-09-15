@@ -79,8 +79,8 @@ code_paths:
   - testenv/azents/e2e/src/tests/web/public/test_runtime_capability_web.py
   - testenv/azents/e2e/src/tests/web/public/test_runtime_web_gateway.py
   - infra/charts/azents/**
-last_verified_at: 2026-09-13
-spec_version: 82
+last_verified_at: 2026-09-14
+spec_version: 83
 ---
 
 # Agent Runtime Control
@@ -203,30 +203,57 @@ does not claim that the application port was checked or that closing exposure st
 the application.
 
 Application bytes never enter ordinary Runtime operations, PostgreSQL, Redis, Chat
-items, or audit history. Each admitted HTTP, SSE, or WebSocket exchange uses a
-dedicated bounded bidirectional stream between Gateway, Runtime Control, and the
-Runner. The Runner connects only to the requested numeric `127.0.0.1` port, uses an
-origin-form target, disables redirect following, and advertises
-`runtime-web-http.v1`. Headers, frames, queues, request size, connections, deadlines,
-and shared admission leases are bounded. Owner loss, route-lease loss, generation
-replacement, relay failure, or ambiguity terminates transport without replaying an
-unsafe request.
+items, or audit history. The replacement data plane uses three persistent
+bidirectional sessions: Gateway to an accepting Control, accepting Control to the
+exact Owner Control when one relay is required, and Runner to its offered Owner
+Control. Gateway and relay peers use the dedicated trusted listener with
+role-specific mTLS in deployed environments. The Runner uses its generation-bound
+credential on the existing Runner-authenticated listener and connects to the exact
+Owner address and TLS name received through its ordinary control stream. Local E2E
+may explicitly use isolated insecure listeners.
 
-Runtime Control owns a process-local tunnel registry and a PostgreSQL route lease
-that advertises its configured trusted address and random boot identity. A Gateway
-may connect to any Control replica. The accepting replica joins a local owner or
-relays exactly once over the isolated trusted Control service to the current owner;
-the Runner continues to use its established Control connection. Gateway-to-Control
-and Control-to-Control authentication uses the dedicated mTLS listener in deployed
-environments. Local E2E may explicitly use the isolated insecure trusted port.
+Every peer requires exact equality with the unversioned
+`RUNTIME_WEB_PROTOCOL_FINGERPRINT`; there is no supported-version list,
+compatibility alias, or fallback protocol. Session identity includes peer boot
+identity and, where applicable, the complete Owner epoch: Runtime ID, desired
+generation, Runner generation, Owner boot ID, session lease ID, and lease
+generation.
+
+Each persistent session multiplexes monotonic logical stream IDs. `OPEN` carries one
+immutable authority snapshot plus the normalized HTTP or WebSocket request head.
+Typed session and stream frames carry raw application bytes without text or base64
+conversion. DATA frames are 256 KiB under the mandatory profile, envelopes are
+bounded to 1 MiB, directional stream credit is 1 MiB, and directional hop-session
+credit is 8 MiB. Absolute monotonic consumed-byte totals grant credit; decreasing,
+overflowing, cross-epoch, or post-terminal updates fail closed. Control, latency,
+and data queues are independently bounded. Control traffic has a reserved lane,
+while active data streams use fair scheduling.
+
+One exact Owner Control boot owns the live Runner Web session for a Runtime and both
+generations. PostgreSQL stores only the current `runtime_web_session_routes` lease
+needed to find and fence that Owner. A Gateway may connect to any Control replica;
+the accepting replica routes locally or uses at most one persistent
+Control-to-Control relay. A relay cannot relay again. The Owner performs one exact
+PostgreSQL authority validation for every new logical stream before Runtime capacity
+admission and Runner forwarding.
+
+Runtime capacity is Owner-scoped ephemeral operational state, not durable product
+authority. It bounds active HTTP, SSE, and WebSocket streams, pending opens, buffered
+bytes, bandwidth, and burst grants. In-memory and Redis backends implement the same
+typed contract. Redis is optional: loss reconstructs equivalent state from the live
+Owner registry and credit accounting under local hard limits; recovery publishes a
+new backend epoch rather than trusting stale keys. Gateway and Runner also enforce
+independent hard stream, queue, application-buffer, scheduler-waiter, and resident
+memory ceilings.
 
 The independent Gateway synchronizes the current Runtime Web configuration,
 explicitly invalidates browser identities, bindings, and tickets when security
 configuration changes, resolves the endpoint by opaque hostname, authenticates one
 opaque browser identity, validates current approval and Runtime/Runner generations,
-acquires admission, and streams the exchange. It fails closed when configuration or
-database authority is unavailable. Identity extraction scans every raw Cookie header
-and exact cookie pair: zero matches is unauthenticated, one match is validated, and
+opens a logical stream only after Control acceptance, and then streams the exchange.
+It fails closed when configuration, persistent session readiness, or database
+authority is unavailable. Identity extraction scans every raw Cookie header and
+exact cookie pair: zero matches is unauthenticated, one match is validated, and
 multiple matches are rejected before authority lookup without retaining request
 history or depending on Redis.
 Programmatic requests receive bounded `401`, `409`, `410`, `429`, `502`, or `503`
@@ -240,10 +267,54 @@ Service Worker requests, cross-root origins, invalid Fetch Metadata, ambiguous h
 non-origin-form targets, oversized headers or bodies, and unauthorized WebSocket
 upgrades before application content is returned. Upstream access-control headers are
 replaced by Gateway policy, hop-by-hop headers are removed, cookies are bounded and
-rewritten for the service host, and security responses are content-free. Logs and
-metrics retain identifiers, status classes, durations, and byte counts but never
-application bodies, query strings, cookies, authorization values, tickets, or
-identity secrets.
+rewritten for the service host, and security responses are content-free.
+
+The Runner owns one pooled loopback HTTP client per accepted generation. It connects
+only to the requested numeric `127.0.0.1` port with an origin-form target, disables
+automatic decompression, implicit user-agent and encoding headers, and redirect
+following, and never exposes an application listener. HTTP response heads precede
+body DATA. SSE uses ordinary response DATA with long-lived drain classification and
+has no event replay or cursor. WebSocket translation preserves text, binary,
+continuation, ping, pong, and close frames with compression and autoping disabled
+and a 1 MiB assembled-message ceiling. A repeated
+`Sec-WebSocket-Protocol` request field, duplicate exact token, malformed token, or
+unoffered upstream selection is rejected before the public `101` and cancels the
+logical stream.
+
+Peers heartbeat every five seconds, and two missed intervals or an RPC failure
+closes the session within ten seconds. Planned drain withdraws readiness, fences
+Owner leases, sends `GOAWAY`, rejects post-drain Gateway or relay registration and
+new `OPEN`, allows bounded finite and long-lived grace, then resets remaining work.
+The binding insertion is linearized with the drain state so an open racing route or
+capacity admission cannot enter after the drain boundary. Owner loss, route-lease
+loss, generation replacement, authority revocation, relay failure, overload, or
+protocol ambiguity terminates affected work without replay or active-stream resume.
+
+Gateway readiness requires valid configuration, database authority, exact protocol
+compatibility, at least one active Control session, acceptable local pressure, and a
+responsive event loop. Redis availability is reported but is not a readiness
+dependency. Runtime Control sub-readiness requires an active Runner Web session and
+no global drain. Helm supplies explicit resource requests, readiness/liveness
+probes, preStop drain, termination grace, a disruption budget, CPU/memory HPA
+behavior, and an optional pressure metric.
+
+OpenMetrics and structured logs retain bounded session/stream counts and limits,
+queue and buffer totals, managed-task usage, credit stalls, frames, bytes, setup,
+duration and time-to-first-byte summaries, route class, close reason, capacity
+backend/degraded state, and process pressure. Runner exports a complete typed
+aggregate through the existing generation-fenced system-metrics path; Control
+combines only the latest active-generation snapshots, uses the worst normalized
+Runner event-loop lag pressure, and labels only closed protocol, direction, outcome,
+and reason dimensions. Runner does not open a metrics listener or reserve an
+application port. Metrics never retain application bodies, paths, queries, headers,
+cookies, authorization values, tickets, identity secrets, raw application errors,
+or unbounded Runtime/user/Session labels.
+
+The request-scoped Runtime Web protobuf service, Runner intent and client, tunnel
+registry, transport coordinator/dispatcher, transport and admission tables, old
+endpoint/user/Agent capacity settings, 64 KiB frame setting, ten-minute SSE
+deadline, generated APIs, and compatibility tests do not exist in the current
+system.
 
 ## Runtime File Transfer
 
@@ -1007,6 +1078,12 @@ Live/provider evidence belongs in the testenv prerequisite system and must redac
 
 ## Changelog
 
+- **2026-09-14 (spec_version=83)** — Replaced request-scoped Runtime Web transport
+  with exact-fingerprint persistent Gateway, maximum-one-hop Control relay, and
+  Owner Runner sessions; added multiplexed logical streams, hierarchical absolute
+  credit, fair scheduling, Runtime-scoped Redis-optional capacity, hard process
+  limits, drain/readiness/observability contracts, and authoritative legacy-surface
+  removal.
 - **2026-09-13 (spec_version=82)** — Removed Chromium, client-hint,
   browser-profile, capability-probe, and browser-proof authorization; documented
   exact raw identity-cookie cardinality and restored the desktop/mobile Services

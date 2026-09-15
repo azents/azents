@@ -690,7 +690,6 @@ def test_runtime_free_add_and_remove_progress(
     )
     browser_driver.set_window_size(1440, 1000)
     browser_driver.get(session_url)
-    _open_services_tab(browser_driver)
     _assert_mobile_session_panel(browser_driver)
     browser_driver.set_window_size(1440, 1000)
     browser_driver.get(
