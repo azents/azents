@@ -18,11 +18,16 @@ from azents_runtime_control.runtime_web_session import (
     RequestHead,
     SessionIdentity,
     SessionPeerRole,
+    SessionState,
     StreamAuthority,
     StreamDirection,
     StreamProtocol,
 )
 
+from azents.runtime_web_gateway.operations import (
+    RuntimeWebGatewayHardLimits,
+    RuntimeWebGatewayResourceTracker,
+)
 from azents.runtime_web_gateway.web_session_pool import (
     GatewayStreamHandler,
     RuntimeWebGatewaySessionPool,
@@ -31,6 +36,18 @@ from azents.runtime_web_gateway.web_session_pool import (
 
 class _Transport:
     def __init__(self) -> None:
+        self.resources = RuntimeWebGatewayResourceTracker(
+            RuntimeWebGatewayHardLimits(
+                maximum_active_exchanges=8,
+                maximum_application_buffer_bytes=8 * 1024 * 1024,
+                maximum_control_buffer_bytes=1024 * 1024,
+                maximum_pending_tasks=32,
+                maximum_scheduler_waiters=8,
+                maximum_event_loop_lag_milliseconds=250,
+                maximum_resident_memory_bytes=1024 * 1024 * 1024,
+            )
+        )
+        self.credit_condition = asyncio.Condition()
         self.request_session_credit = AbsoluteCreditWindow(
             initial_bytes=SESSION_WINDOW_BYTES,
             maximum_bytes=SESSION_WINDOW_BYTES,
@@ -155,6 +172,73 @@ async def test_pool_returns_only_active_bindings_when_session_fails() -> None:
         request_head=_head(),
     )
     assert await pool.close_session(registration) == (active,)
+
+
+@pytest.mark.asyncio
+async def test_pool_go_away_fences_new_opens_and_preserves_allowed_streams() -> None:
+    pool = RuntimeWebGatewaySessionPool(maximum_sessions=1)
+    registration = await pool.register(
+        identity=_identity("a"),
+        profile=APPROVED_SESSION_PROFILE,
+        transport=_TRANSPORT,
+    )
+    first = await pool.open(
+        stream_id=1,
+        authority=_authority(),
+        request_head=_head(),
+    )
+    second = await pool.open(
+        stream_id=2,
+        authority=_authority(),
+        request_head=_head(),
+    )
+
+    terminated = await pool.start_draining(
+        registration,
+        last_accepted_stream_id=1,
+    )
+
+    assert terminated == (2,)
+    assert first.state.snapshot().terminal_reason is None
+    assert second.state.snapshot().terminal_reason is CloseReason.SERVICE_DRAIN
+    assert pool.sessions["a"].state.state is SessionState.DRAINING
+    with pytest.raises(RuntimeError, match="no active"):
+        await pool.open(
+            stream_id=3,
+            authority=_authority(),
+            request_head=_head(),
+        )
+
+
+@pytest.mark.asyncio
+async def test_pool_go_away_maximum_boundary_preserves_all_existing_streams() -> None:
+    pool = RuntimeWebGatewaySessionPool(maximum_sessions=1)
+    registration = await pool.register(
+        identity=_identity("a"),
+        profile=APPROVED_SESSION_PROFILE,
+        transport=_TRANSPORT,
+    )
+    first = await pool.open(
+        stream_id=1,
+        authority=_authority(),
+        request_head=_head(),
+    )
+    second = await pool.open(
+        stream_id=2,
+        authority=_authority(),
+        request_head=_head(),
+    )
+
+    terminated = await pool.start_draining(
+        registration,
+        last_accepted_stream_id=2**64 - 1,
+    )
+
+    assert terminated == ()
+    assert first.state.snapshot().terminal_reason is None
+    assert second.state.snapshot().terminal_reason is None
+    assert pool.sessions["a"].state.last_accepted_stream_id == 2
+    assert pool.sessions["a"].state.state is SessionState.DRAINING
 
 
 @pytest.mark.asyncio

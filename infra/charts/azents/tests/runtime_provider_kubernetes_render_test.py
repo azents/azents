@@ -132,6 +132,23 @@ def test_runtime_provider_kubernetes_enabled_render_contract() -> None:
         ("AZ_RUNTIME_RUNNER_MAX_PENDING_OPERATIONS_PER_OWNER", "100"),
         ("AZ_RUNTIME_RUNNER_MAX_PENDING_OPERATIONS", "1000"),
         ("AZ_RUNTIME_RUNNER_MAX_CONCURRENT_CONTROL_OPERATIONS", "4"),
+        ("AZ_RUNTIME_RUNNER_WEB_MAXIMUM_SESSIONS", "1"),
+        ("AZ_RUNTIME_RUNNER_WEB_MAXIMUM_ACTIVE_STREAMS", "128"),
+        (
+            "AZ_RUNTIME_RUNNER_WEB_MAXIMUM_APPLICATION_BUFFER_BYTES",
+            "268435456",
+        ),
+        ("AZ_RUNTIME_RUNNER_WEB_MAXIMUM_CONTROL_BUFFER_BYTES", "16777216"),
+        ("AZ_RUNTIME_RUNNER_WEB_MAXIMUM_QUEUED_ENVELOPES", "1024"),
+        ("AZ_RUNTIME_RUNNER_WEB_MAXIMUM_PENDING_TASKS", "512"),
+        (
+            "AZ_RUNTIME_RUNNER_WEB_MAXIMUM_EVENT_LOOP_LAG_MILLISECONDS",
+            "250",
+        ),
+        (
+            "AZ_RUNTIME_RUNNER_WEB_MAXIMUM_RESIDENT_MEMORY_BYTES",
+            "1610612736",
+        ),
     ):
         assert f'- name: {name}\n              value: "{value}"' in rendered
     assert "AZ_RUNTIME_RUNNER_CPU_REQUEST" not in rendered

@@ -12,12 +12,67 @@ from azents_runtime_control.runtime_web_session import (
     OwnerSessionEpoch,
 )
 
+from azents.runtime import web_session_relay as web_session_relay_module
 from azents.runtime.web_session_broker import BrokerTarget
 from azents.runtime.web_session_relay import (
     GrpcPersistentControlRelay,
+    PersistentRelayConnection,
     RelaySessionKey,
+    RelaySourceStreamKey,
+    RelayStreamBinding,
     RuntimeWebRelayPool,
 )
+
+
+class _Resources:
+    def __init__(self, *, maximum_tasks: int) -> None:
+        self.maximum_tasks = maximum_tasks
+        self.sessions = 0
+        self.tasks = 0
+        self.envelopes = 0
+
+    def try_open_session(self) -> bool:
+        if self.sessions >= 1:
+            return False
+        self.sessions += 1
+        return True
+
+    def close_session(self) -> None:
+        if self.sessions <= 0:
+            raise ValueError("session reservation is absent")
+        self.sessions -= 1
+
+    def try_begin_task(self) -> bool:
+        if self.tasks >= self.maximum_tasks:
+            return False
+        self.tasks += 1
+        return True
+
+    def end_task(self) -> None:
+        if self.tasks <= 0:
+            raise ValueError("task reservation is absent")
+        self.tasks -= 1
+
+    def try_reserve_envelope(
+        self,
+        *,
+        application_bytes: int,
+        control_bytes: int,
+    ) -> bool:
+        del application_bytes, control_bytes
+        self.envelopes += 1
+        return True
+
+    def release_envelope(
+        self,
+        *,
+        application_bytes: int,
+        control_bytes: int,
+    ) -> None:
+        del application_bytes, control_bytes
+        if self.envelopes <= 0:
+            raise ValueError("envelope reservation is absent")
+        self.envelopes -= 1
 
 
 def _owner(owner_boot_id: str = "owner") -> OwnerSessionEpoch:
@@ -61,6 +116,37 @@ class _Connector:
     async def __call__(self, key: RelaySessionKey) -> _Connection:
         self.keys.append(key)
         return self.connections[len(self.keys) - 1]
+
+
+class _RouteGateRelayPool(RuntimeWebRelayPool):
+    def __init__(self, connector: _Connector) -> None:
+        super().__init__(
+            connector=connector,
+            maximum_sessions=1,
+            peer_boot_id="accepting-control",
+        )
+        self.gate_credit_translation = False
+        self.route_returned = asyncio.Event()
+        self.release_route = asyncio.Event()
+
+    async def _route(
+        self,
+        key: RelaySessionKey,
+        source: RelaySourceStreamKey,
+        *,
+        create: bool,
+        payload: str | None,
+    ) -> tuple[PersistentRelayConnection, RelayStreamBinding] | None:
+        routed = await super()._route(
+            key,
+            source,
+            create=create,
+            payload=payload,
+        )
+        if self.gate_credit_translation and payload == "window_update":
+            self.route_returned.set()
+            await self.release_route.wait()
+        return routed
 
 
 def _source_envelope(
@@ -122,6 +208,8 @@ async def test_relay_maps_same_source_stream_id_without_collision() -> None:
     )
 
     assert len(connector.keys) == 1
+    assert first is not None
+    assert second is not None
     assert first.relay_stream_id != second.relay_stream_id
     assert [message.stream_id for message in connection.sent] == [1, 2]
     for message in connection.sent:
@@ -159,6 +247,145 @@ async def test_relay_maps_same_source_stream_id_without_collision() -> None:
                 source_peer_boot_id="gateway-boot-b",
             ),
         )
+    late_credit = _source_envelope(
+        1,
+        source_session_id="gateway-session-b",
+        source_peer_boot_id="gateway-boot-b",
+    )
+    late_credit.ClearField("open")
+    late_credit.window_update.direction = (
+        runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_RESPONSE
+    )
+    assert await pool.forward(target=target, envelope=late_credit) is None
+    await pool.close()
+
+
+@pytest.mark.asyncio
+async def test_relay_translates_hop_local_session_credit_across_sources() -> None:
+    connection = _Connection()
+    pool = _pool(_Connector([connection]))
+    target = BrokerTarget(owner=_owner(), local=False, relay_count=1)
+    first = await pool.forward(
+        target=target,
+        envelope=_source_envelope(1),
+    )
+    second = await pool.forward(
+        target=target,
+        envelope=_source_envelope(
+            1,
+            source_session_id="gateway-session-b",
+            source_peer_boot_id="gateway-boot-b",
+        ),
+    )
+    assert first is not None
+    assert second is not None
+
+    first_response_credit = _source_envelope(1)
+    first_response_credit.ClearField("open")
+    first_response_credit.window_update.direction = (
+        runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_RESPONSE
+    )
+    first_response_credit.window_update.stream_consumed_total = 5
+    first_response_credit.window_update.session_consumed_total = 5
+    await pool.forward(target=target, envelope=first_response_credit)
+    second_response_credit = _source_envelope(
+        1,
+        source_session_id="gateway-session-b",
+        source_peer_boot_id="gateway-boot-b",
+    )
+    second_response_credit.ClearField("open")
+    second_response_credit.window_update.direction = (
+        runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_RESPONSE
+    )
+    second_response_credit.window_update.stream_consumed_total = 3
+    second_response_credit.window_update.session_consumed_total = 3
+    await pool.forward(target=target, envelope=second_response_credit)
+
+    assert connection.sent[-2].window_update.session_consumed_total == 5
+    assert connection.sent[-1].window_update.session_consumed_total == 8
+
+    first_request_credit = _owner_envelope(
+        _owner(),
+        stream_id=first.relay_stream_id,
+    )
+    first_request_credit.window_update.direction = (
+        runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_REQUEST
+    )
+    first_request_credit.window_update.stream_consumed_total = 5
+    first_request_credit.window_update.session_consumed_total = 5
+    translated_first = await pool.route_response(
+        key=RelaySessionKey(_owner(), RUNTIME_WEB_PROTOCOL_FINGERPRINT),
+        envelope=first_request_credit,
+    )
+    second_request_credit = _owner_envelope(
+        _owner(),
+        stream_id=second.relay_stream_id,
+    )
+    second_request_credit.window_update.direction = (
+        runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_REQUEST
+    )
+    second_request_credit.window_update.stream_consumed_total = 3
+    second_request_credit.window_update.session_consumed_total = 8
+    translated_second = await pool.route_response(
+        key=RelaySessionKey(_owner(), RUNTIME_WEB_PROTOCOL_FINGERPRINT),
+        envelope=second_request_credit,
+    )
+
+    assert translated_first is not None
+    assert translated_first.window_update.session_consumed_total == 5
+    assert translated_second is not None
+    assert translated_second.window_update.session_consumed_total == 3
+    await pool.close()
+
+
+@pytest.mark.asyncio
+async def test_relay_retirement_before_credit_translation_leaves_no_stale_state() -> (
+    None
+):
+    retired = _Connection()
+    replacement = _Connection()
+    pool = _RouteGateRelayPool(_Connector([retired, replacement]))
+    target = BrokerTarget(owner=_owner(), local=False, relay_count=1)
+    await pool.forward(target=target, envelope=_source_envelope(1))
+    key = RelaySessionKey(_owner(), RUNTIME_WEB_PROTOCOL_FINGERPRINT)
+    credit = _source_envelope(1)
+    credit.ClearField("open")
+    credit.window_update.direction = (
+        runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_RESPONSE
+    )
+    credit.window_update.stream_consumed_total = 5
+    credit.window_update.session_consumed_total = 5
+    pool.gate_credit_translation = True
+
+    forwarding = asyncio.create_task(pool.forward(target=target, envelope=credit))
+    await pool.route_returned.wait()
+    assert await pool.retire(key, retired)
+    pool.release_route.set()
+
+    with pytest.raises(RuntimeError, match="route changed"):
+        await forwarding
+    assert pool.sessions == {}
+    assert pool.source_bindings == {}
+    assert pool.relay_bindings == {}
+    assert pool.source_response_session_consumed == {}
+    assert pool.source_response_stream_consumed == {}
+    assert pool.relay_response_session_consumed == {}
+    assert pool.owner_request_session_consumed == {}
+    assert pool.relay_request_stream_consumed == {}
+    assert pool.source_request_session_consumed == {}
+
+    await pool.forward(target=target, envelope=_source_envelope(2))
+    replacement_credit = _source_envelope(2)
+    replacement_credit.ClearField("open")
+    replacement_credit.window_update.direction = (
+        runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_RESPONSE
+    )
+    replacement_credit.window_update.stream_consumed_total = 4
+    replacement_credit.window_update.session_consumed_total = 9
+    pool.gate_credit_translation = False
+    await pool.forward(target=target, envelope=replacement_credit)
+
+    assert replacement.sent[-1].window_update.session_consumed_total == 4
     await pool.close()
 
 
@@ -176,6 +403,40 @@ async def test_relay_failure_retires_without_replay() -> None:
     assert replacement.sent == []
     await pool.forward(target=target, envelope=_source_envelope(2))
     assert [message.stream_id for message in replacement.sent] == [1]
+    await pool.close()
+
+
+@pytest.mark.asyncio
+async def test_relay_monitor_reports_every_retired_source_binding() -> None:
+    connection = _Connection()
+    pool = _pool(_Connector([connection]))
+    target = BrokerTarget(owner=_owner(), local=False, relay_count=1)
+    retired = asyncio.Event()
+    observations: list[tuple[RelaySessionKey, tuple[RelayStreamBinding, ...]]] = []
+
+    async def handle_retirement(
+        key: RelaySessionKey,
+        bindings: tuple[RelayStreamBinding, ...],
+    ) -> None:
+        observations.append((key, bindings))
+        retired.set()
+
+    pool.bind_retirement_handler(handle_retirement)
+    binding = await pool.forward(target=target, envelope=_source_envelope(7))
+    assert binding is not None
+
+    connection.closed.set()
+    await asyncio.wait_for(retired.wait(), timeout=1)
+
+    assert observations == [
+        (
+            RelaySessionKey(_owner(), RUNTIME_WEB_PROTOCOL_FINGERPRINT),
+            (binding,),
+        )
+    ]
+    assert pool.sessions == {}
+    assert pool.source_bindings == {}
+    assert pool.relay_bindings == {}
     await pool.close()
 
 
@@ -211,6 +472,7 @@ async def test_relay_rejects_fingerprint_and_owner_response_mismatch() -> None:
     with pytest.raises(ValueError, match="fingerprint"):
         await pool.forward(target=target, envelope=incompatible)
     binding = await pool.forward(target=target, envelope=_source_envelope(2))
+    assert binding is not None
     stale = _owner_envelope(_owner(), stream_id=binding.relay_stream_id)
     stale.peer_boot_id = "stale-owner"
     with pytest.raises(ValueError, match="identity"):
@@ -219,6 +481,39 @@ async def test_relay_rejects_fingerprint_and_owner_response_mismatch() -> None:
             envelope=stale,
         )
     await pool.close()
+
+
+@pytest.mark.asyncio
+async def test_relay_pool_monitor_releases_task_budget_on_close() -> None:
+    connection = _Connection()
+    pool = _pool(_Connector([connection]))
+    resources = _Resources(maximum_tasks=1)
+    pool.bind_resources(resources)
+    target = BrokerTarget(owner=_owner(), local=False, relay_count=1)
+
+    await pool.forward(target=target, envelope=_source_envelope(1))
+
+    assert resources.tasks == 1
+    await pool.close()
+    assert resources.tasks == 0
+    assert connection.closed.is_set()
+
+
+@pytest.mark.asyncio
+async def test_relay_pool_monitor_budget_exhaustion_closes_new_connection() -> None:
+    connection = _Connection()
+    pool = _pool(_Connector([connection]))
+    resources = _Resources(maximum_tasks=0)
+    pool.bind_resources(resources)
+    target = BrokerTarget(owner=_owner(), local=False, relay_count=1)
+
+    with pytest.raises(RuntimeError, match="hard task limit"):
+        await pool.forward(target=target, envelope=_source_envelope(1))
+
+    assert resources.tasks == 0
+    assert pool.sessions == {}
+    assert pool.monitors == {}
+    assert connection.closed.is_set()
 
 
 class _RelayDuplexStream:
@@ -288,6 +583,7 @@ async def test_concrete_grpc_relay_persists_and_pins_owner_peer() -> None:
         hello=hello,
         handler=handler,
         timeout_seconds=1,
+        resources=None,
     )
     assert (await stream.sent.get()).WhichOneof("payload") == "hello"
     outbound = _owner_envelope(owner, stream_id=7)
@@ -308,3 +604,161 @@ async def test_concrete_grpc_relay_persists_and_pins_owner_peer() -> None:
     await stream.responses.put(response)
     await asyncio.wait_for(delivered.wait(), timeout=1)
     await relay.close()
+
+
+@pytest.mark.asyncio
+async def test_concrete_relay_releases_receiver_and_heartbeat_tasks_on_close() -> None:
+    owner = _owner()
+    key = RelaySessionKey(owner, RUNTIME_WEB_PROTOCOL_FINGERPRINT)
+    stream = _RelayDuplexStream(key)
+    resources = _Resources(maximum_tasks=2)
+    hello = _owner_envelope(owner, stream_id=0)
+    hello.peer_boot_id = "accepting-control"
+    hello.hello.CopyFrom(
+        runtime_web_session_pb2.RuntimeWebSessionHello(
+            role=runtime_web_session_pb2.RUNTIME_WEB_SESSION_PEER_ROLE_CONTROL,
+            runtime_id=owner.runtime_id,
+            desired_generation=owner.desired_generation,
+            runner_generation=owner.runner_generation,
+        )
+    )
+
+    relay = await GrpcPersistentControlRelay.connect(
+        key=key,
+        stream=stream,
+        hello=hello,
+        handler=lambda envelope: asyncio.sleep(0),
+        timeout_seconds=1,
+        resources=resources,
+    )
+
+    assert resources.sessions == 1
+    assert resources.tasks == 2
+    await relay.close()
+    assert resources.sessions == 0
+    assert resources.tasks == 0
+
+
+@pytest.mark.asyncio
+async def test_concrete_relay_heartbeat_budget_exhaustion_releases_receiver() -> None:
+    owner = _owner()
+    key = RelaySessionKey(owner, RUNTIME_WEB_PROTOCOL_FINGERPRINT)
+    stream = _RelayDuplexStream(key)
+    resources = _Resources(maximum_tasks=1)
+    hello = _owner_envelope(owner, stream_id=0)
+    hello.peer_boot_id = "accepting-control"
+    hello.hello.CopyFrom(
+        runtime_web_session_pb2.RuntimeWebSessionHello(
+            role=runtime_web_session_pb2.RUNTIME_WEB_SESSION_PEER_ROLE_CONTROL,
+            runtime_id=owner.runtime_id,
+            desired_generation=owner.desired_generation,
+            runner_generation=owner.runner_generation,
+        )
+    )
+
+    with pytest.raises(RuntimeError, match="hard task limit"):
+        await GrpcPersistentControlRelay.connect(
+            key=key,
+            stream=stream,
+            hello=hello,
+            handler=lambda envelope: asyncio.sleep(0),
+            timeout_seconds=1,
+            resources=resources,
+        )
+
+    assert resources.sessions == 0
+    assert resources.tasks == 0
+
+
+@pytest.mark.asyncio
+async def test_concrete_relay_receiver_failure_releases_its_task_budget() -> None:
+    owner = _owner()
+    key = RelaySessionKey(owner, RUNTIME_WEB_PROTOCOL_FINGERPRINT)
+    stream = _RelayDuplexStream(key)
+    resources = _Resources(maximum_tasks=2)
+    hello = _owner_envelope(owner, stream_id=0)
+    hello.peer_boot_id = "accepting-control"
+    hello.hello.CopyFrom(
+        runtime_web_session_pb2.RuntimeWebSessionHello(
+            role=runtime_web_session_pb2.RUNTIME_WEB_SESSION_PEER_ROLE_CONTROL,
+            runtime_id=owner.runtime_id,
+            desired_generation=owner.desired_generation,
+            runner_generation=owner.runner_generation,
+        )
+    )
+    relay = await GrpcPersistentControlRelay.connect(
+        key=key,
+        stream=stream,
+        hello=hello,
+        handler=lambda envelope: asyncio.sleep(0),
+        timeout_seconds=1,
+        resources=resources,
+    )
+    assert (await stream.sent.get()).WhichOneof("payload") == "hello"
+    outbound = _owner_envelope(owner, stream_id=1)
+    outbound.peer_boot_id = "accepting-control"
+    outbound.cancel.CopyFrom(runtime_web_session_pb2.RuntimeWebSessionCancel())
+    await relay.send(outbound)
+    assert (await stream.sent.get()).stream_id == 1
+    invalid = _owner_envelope(owner, stream_id=1)
+    invalid.peer_boot_id = "stale-owner"
+    await stream.responses.put(invalid)
+
+    await asyncio.wait_for(relay.wait_closed(), timeout=1)
+
+    assert resources.tasks == 1
+    await relay.close()
+    assert resources.sessions == 0
+    assert resources.tasks == 0
+    assert resources.envelopes == 0
+
+
+def test_relay_managed_task_releases_when_create_task_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    resources = _Resources(maximum_tasks=1)
+
+    def fail_create_task(
+        coroutine: object,
+        *,
+        name: str | None = None,
+    ) -> asyncio.Task[object]:
+        del coroutine, name
+        raise RuntimeError("create failed")
+
+    monkeypatch.setattr(
+        web_session_relay_module.asyncio,
+        "create_task",
+        fail_create_task,
+    )
+
+    async def task() -> None:
+        raise AssertionError("task must not start")
+
+    with pytest.raises(RuntimeError, match="create failed"):
+        web_session_relay_module._create_relay_task(resources, task)
+    assert resources.tasks == 0
+
+
+@pytest.mark.asyncio
+async def test_relay_rewrites_owner_local_acceptance_to_relay() -> None:
+    connection = _Connection()
+    pool = _pool(_Connector([connection]))
+    target = BrokerTarget(owner=_owner(), local=False, relay_count=1)
+    binding = await pool.forward(target=target, envelope=_source_envelope(1))
+    assert binding is not None
+    response = _owner_envelope(_owner(), stream_id=binding.relay_stream_id)
+    response.open_accepted.route_path = (
+        runtime_web_session_pb2.RUNTIME_WEB_SESSION_ROUTE_PATH_LOCAL
+    )
+
+    translated = await pool.route_response(
+        key=RelaySessionKey(_owner(), RUNTIME_WEB_PROTOCOL_FINGERPRINT),
+        envelope=response,
+    )
+
+    assert translated is not None
+    assert translated.open_accepted.route_path == (
+        runtime_web_session_pb2.RUNTIME_WEB_SESSION_ROUTE_PATH_RELAY
+    )
+    await pool.close()

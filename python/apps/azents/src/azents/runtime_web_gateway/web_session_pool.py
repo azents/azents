@@ -11,6 +11,7 @@ from typing import Protocol
 from azents_runtime_control.proto import runtime_web_session_pb2
 from azents_runtime_control.runtime_web_flow import AbsoluteCreditWindow
 from azents_runtime_control.runtime_web_session import (
+    CloseReason,
     LogicalStreamState,
     PeerSessionState,
     RequestHead,
@@ -20,6 +21,8 @@ from azents_runtime_control.runtime_web_session import (
     SessionState,
     StreamAuthority,
 )
+
+from azents.runtime_web_gateway.operations import RuntimeWebGatewayResourceTracker
 
 
 class GatewayStreamHandler(Protocol):
@@ -33,12 +36,16 @@ class GatewayStreamHandler(Protocol):
 
     async def fail_transport(self) -> None: ...
 
+    async def fail_go_away(self, reason: CloseReason) -> None: ...
+
 
 class GatewaySessionTransport(Protocol):
     """One exact persistent transport associated with a pool registration."""
 
     request_session_credit: AbsoluteCreditWindow
     response_session_credit: AbsoluteCreditWindow
+    credit_condition: asyncio.Condition
+    resources: RuntimeWebGatewayResourceTracker
 
     async def bind(
         self,
@@ -181,6 +188,31 @@ class RuntimeWebGatewaySessionPool:
                 return False
             session.state.release_stream(binding.stream_id)
             return True
+
+    async def active_session_count(self) -> int:
+        """Return the number of exact active Control sessions."""
+        async with self.lock:
+            return sum(
+                session.state.state is SessionState.ACTIVE
+                for session in self.sessions.values()
+            )
+
+    async def start_draining(
+        self,
+        registration: GatewaySessionRegistration,
+        *,
+        last_accepted_stream_id: int,
+    ) -> tuple[int, ...]:
+        """Fence new opens and return work above the peer GOAWAY boundary."""
+        async with self.lock:
+            session = self.sessions.get(registration.session_id)
+            if session is None or session.registration != registration:
+                raise RuntimeError("Runtime Web Gateway session registration is stale")
+            effective_boundary = min(
+                last_accepted_stream_id,
+                session.state.last_stream_id,
+            )
+            return session.state.start_draining(effective_boundary)
 
     async def close_session(
         self, registration: GatewaySessionRegistration

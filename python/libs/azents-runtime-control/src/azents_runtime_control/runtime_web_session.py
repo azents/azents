@@ -1,4 +1,4 @@
-"""Inactive typed foundation for the replacement Runtime Web session protocol."""
+"""Typed foundation for the Runtime Web persistent session protocol."""
 
 from __future__ import annotations
 
@@ -7,9 +7,17 @@ import enum
 import hashlib
 import json
 from collections import deque
+from collections.abc import Awaitable, Callable
 from datetime import datetime
+from typing import TypeAlias
 
-from azents_runtime_control.proto import runtime_web_session_pb2
+from google.protobuf import descriptor_pb2
+from google.protobuf.descriptor import Descriptor, FieldDescriptor
+
+from azents_runtime_control.proto import (
+    runtime_runner_control_pb2,
+    runtime_web_session_pb2,
+)
 
 RUNTIME_WEB_CAPABILITY = "runtime-web-http"
 MANDATORY_DATA_FRAME_BYTES = 256 * 1024
@@ -154,6 +162,8 @@ def _fingerprint_material() -> dict[str, object]:
 def protocol_fingerprint(
     *,
     descriptor: bytes | None = None,
+    runner_offer_descriptor: bytes | None = None,
+    runner_offer_field_descriptor: bytes | None = None,
     material: dict[str, object] | None = None,
 ) -> str:
     """Return the exact replacement-protocol equality fingerprint."""
@@ -164,6 +174,23 @@ def protocol_fingerprint(
         else descriptor
     )
     digest.update(
+        _message_descriptor_bytes(
+            runtime_runner_control_pb2.RunnerSessionOffer.DESCRIPTOR
+        )
+        if runner_offer_descriptor is None
+        else runner_offer_descriptor
+    )
+    digest.update(
+        _field_descriptor_bytes(
+            runtime_runner_control_pb2.RunnerControlMessage.DESCRIPTOR.fields_by_name[
+                "web_session_offer"
+            ],
+            runtime_runner_control_pb2.DESCRIPTOR.serialized_pb,
+        )
+        if runner_offer_field_descriptor is None
+        else runner_offer_field_descriptor
+    )
+    digest.update(
         json.dumps(
             _fingerprint_material() if material is None else material,
             sort_keys=True,
@@ -171,6 +198,37 @@ def protocol_fingerprint(
         ).encode()
     )
     return digest.hexdigest()
+
+
+def _message_descriptor_bytes(descriptor: Descriptor) -> bytes:
+    file_descriptor = descriptor_pb2.FileDescriptorProto.FromString(
+        descriptor.file.serialized_pb
+    )
+    message = next(
+        message
+        for message in file_descriptor.message_type
+        if message.name == descriptor.name
+    )
+    return message.SerializeToString(deterministic=True)
+
+
+def _field_descriptor_bytes(
+    descriptor: FieldDescriptor,
+    file_descriptor_bytes: bytes,
+) -> bytes:
+    file_descriptor = descriptor_pb2.FileDescriptorProto.FromString(
+        file_descriptor_bytes
+    )
+    containing_type = descriptor.containing_type
+    if containing_type is None:
+        raise ValueError("Runtime Web session offer field must have a containing type")
+    message = next(
+        message
+        for message in file_descriptor.message_type
+        if message.name == containing_type.name
+    )
+    field = next(field for field in message.field if field.name == descriptor.name)
+    return field.SerializeToString(deterministic=True)
 
 
 RUNTIME_WEB_PROTOCOL_FINGERPRINT = protocol_fingerprint()
@@ -206,6 +264,7 @@ class RunnerSessionOffer:
     """One-time Owner-specific address and authority for a Runner session."""
 
     owner: OwnerSessionEpoch
+    owner_replica_id: str
     connect_address: str
     tls_server_name: str
     session_nonce: str
@@ -214,6 +273,7 @@ class RunnerSessionOffer:
 
     def __post_init__(self) -> None:
         """Reject an incomplete, stale-capable, or incompatible offer."""
+        _validate_text(self.owner_replica_id, "owner_replica_id", 255)
         validate_runner_web_connect_address(self.connect_address)
         _validate_text(
             self.tls_server_name,
@@ -226,16 +286,24 @@ class RunnerSessionOffer:
             raise ValueError("Runtime Web session protocol fingerprint is incompatible")
 
 
+RunnerSessionOfferHandler: TypeAlias = Callable[
+    [RunnerSessionOffer],
+    Awaitable[None],
+]
+
+
 def validate_runner_web_connect_address(value: str) -> None:
-    """Require one direct Runner-authenticated Control endpoint on port 8030."""
+    """Require one direct Runner-authenticated Control host and numeric port."""
     _validate_text(value, "connect_address", 255)
     if any(character.isspace() for character in value):
         raise ValueError("Runner Web connect address must not contain whitespace")
     if "://" in value or any(character in value for character in "/?#"):
-        raise ValueError("Runner Web connect address must use host:8030 form")
+        raise ValueError("Runner Web connect address must use host:port form")
     host, separator, port = value.rpartition(":")
-    if separator != ":" or port != "8030" or not host:
-        raise ValueError("Runner Web connect address must use port 8030")
+    if separator != ":" or not host or not port.isdigit():
+        raise ValueError("Runner Web connect address must use host:port form")
+    if not 1 <= int(port) <= 65_535:
+        raise ValueError("Runner Web connect address port is invalid")
     if ":" in host and not (host.startswith("[") and host.endswith("]")):
         raise ValueError("Runner Web IPv6 connect address must be bracketed")
 

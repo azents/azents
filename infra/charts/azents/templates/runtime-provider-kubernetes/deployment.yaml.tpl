@@ -133,6 +133,22 @@ spec:
               value: {{ .Values.runtimeProviderKubernetes.runnerLimits.maxPendingOperations | quote }}
             - name: AZ_RUNTIME_RUNNER_MAX_CONCURRENT_CONTROL_OPERATIONS
               value: {{ .Values.runtimeProviderKubernetes.runnerLimits.maxConcurrentControlOperations | quote }}
+            - name: AZ_RUNTIME_RUNNER_WEB_MAXIMUM_SESSIONS
+              value: {{ printf "%d" (int64 .Values.runtimeProviderKubernetes.runnerLimits.runtimeWebMaximumSessions) | quote }}
+            - name: AZ_RUNTIME_RUNNER_WEB_MAXIMUM_ACTIVE_STREAMS
+              value: {{ printf "%d" (int64 .Values.runtimeProviderKubernetes.runnerLimits.runtimeWebMaximumActiveStreams) | quote }}
+            - name: AZ_RUNTIME_RUNNER_WEB_MAXIMUM_APPLICATION_BUFFER_BYTES
+              value: {{ printf "%d" (int64 .Values.runtimeProviderKubernetes.runnerLimits.runtimeWebMaximumApplicationBufferBytes) | quote }}
+            - name: AZ_RUNTIME_RUNNER_WEB_MAXIMUM_CONTROL_BUFFER_BYTES
+              value: {{ printf "%d" (int64 .Values.runtimeProviderKubernetes.runnerLimits.runtimeWebMaximumControlBufferBytes) | quote }}
+            - name: AZ_RUNTIME_RUNNER_WEB_MAXIMUM_QUEUED_ENVELOPES
+              value: {{ printf "%d" (int64 .Values.runtimeProviderKubernetes.runnerLimits.runtimeWebMaximumQueuedEnvelopes) | quote }}
+            - name: AZ_RUNTIME_RUNNER_WEB_MAXIMUM_PENDING_TASKS
+              value: {{ printf "%d" (int64 .Values.runtimeProviderKubernetes.runnerLimits.runtimeWebMaximumPendingTasks) | quote }}
+            - name: AZ_RUNTIME_RUNNER_WEB_MAXIMUM_EVENT_LOOP_LAG_MILLISECONDS
+              value: {{ printf "%d" (int64 .Values.runtimeProviderKubernetes.runnerLimits.runtimeWebMaximumEventLoopLagMilliseconds) | quote }}
+            - name: AZ_RUNTIME_RUNNER_WEB_MAXIMUM_RESIDENT_MEMORY_BYTES
+              value: {{ printf "%d" (int64 .Values.runtimeProviderKubernetes.runnerLimits.runtimeWebMaximumResidentMemoryBytes) | quote }}
             - name: AZ_RUNTIME_PROVIDER_POD_IMAGE_PULL_SECRETS
               value: {{ $runtimePodImagePullSecrets | toJson | quote }}
             - name: AZ_RUNTIME_PROVIDER_POD_ANNOTATIONS

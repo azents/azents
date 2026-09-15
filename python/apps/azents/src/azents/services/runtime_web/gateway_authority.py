@@ -3,10 +3,9 @@
 import datetime
 import enum
 import hashlib
-import secrets
 
 import sqlalchemy as sa
-from azents_runtime_control.runner_web import RunnerWebIdentity, RunnerWebProtocol
+from azents_runtime_control.runtime_web_session import StreamProtocol
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
@@ -20,7 +19,6 @@ from azents.repos.agent_runtime.data import AgentRuntime
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.runtime_web.data import RuntimeWebEndpoint
 from azents.repos.runtime_web.gateway_data import (
-    RuntimeWebAdmissionLimits,
     RuntimeWebGatewayAuthority,
 )
 from azents.repos.runtime_web.gateway_repository import (
@@ -32,9 +30,6 @@ from azents.services.session_resource_authority import (
     AuthorizedPublicSessionResource,
     authorize_public_session_resource,
 )
-
-_REGISTRATION_WINDOW = datetime.timedelta(seconds=10)
-_HTTP_ABSOLUTE_WINDOW = datetime.timedelta(minutes=10)
 
 
 class RuntimeWebGatewayAuthorityCode(enum.StrEnum):
@@ -80,7 +75,7 @@ class RuntimeWebGatewayAuthorityService:
         *,
         hostname_key: str,
         identity_secret: str,
-        protocol: RunnerWebProtocol,
+        protocol: StreamProtocol,
     ) -> RuntimeWebGatewayAuthority:
         """Authorize identity, Session membership, approval, and current Runtime."""
         async with self.session_manager() as session:
@@ -228,82 +223,6 @@ class RuntimeWebGatewayAuthorityService:
             source_root = await self._root_session_id(session, source_session.id)
             target_root = await self._root_session_id(session, target_session.id)
             return source_root is not None and source_root == target_root
-
-    def tunnel_identity(
-        self,
-        *,
-        authority: RuntimeWebGatewayAuthority,
-        protocol: RunnerWebProtocol,
-        now: datetime.datetime,
-    ) -> RunnerWebIdentity:
-        """Create one exact non-replayable transport identity."""
-        cycle = authority.cycle
-        runtime_id = authority.runtime_id
-        desired_generation = authority.desired_generation
-        runner_generation = authority.runner_generation
-        if (
-            cycle is None
-            or runtime_id is None
-            or desired_generation is None
-            or runner_generation is None
-        ):
-            raise RuntimeWebGatewayAuthorityError(
-                RuntimeWebGatewayAuthorityCode.RUNTIME_UNAVAILABLE
-            )
-        transport_deadline = (
-            min(cycle.expires_at, now + _HTTP_ABSOLUTE_WINDOW)
-            if protocol is RunnerWebProtocol.HTTP
-            else cycle.expires_at
-        )
-        return RunnerWebIdentity(
-            tunnel_id=secrets.token_hex(32),
-            endpoint_id=authority.endpoint.id,
-            cycle_id=cycle.id,
-            endpoint_authority_revision=authority.endpoint.authority_revision,
-            close_barrier=authority.endpoint.close_barrier,
-            runtime_id=runtime_id,
-            desired_generation=desired_generation,
-            runner_generation=runner_generation,
-            port=authority.endpoint.port,
-            join_nonce=secrets.token_urlsafe(32),
-            registration_deadline_at=min(
-                cycle.expires_at,
-                now + _REGISTRATION_WINDOW,
-            ),
-            approval_deadline_at=cycle.expires_at,
-            transport_deadline_at=transport_deadline,
-        )
-
-    async def acquire_admission(
-        self,
-        *,
-        authority: RuntimeWebGatewayAuthority,
-        identity: RunnerWebIdentity,
-        protocol: RunnerWebProtocol,
-        limits: RuntimeWebAdmissionLimits,
-        now: datetime.datetime,
-    ) -> None:
-        """Acquire shared endpoint, user, and Agent connection capacity."""
-        async with self.session_manager() as session:
-            await self.gateway_repository.acquire_admission(
-                session,
-                tunnel_id=identity.tunnel_id,
-                endpoint_id=authority.endpoint.id,
-                user_id=authority.identity.user_id,
-                agent_id=authority.endpoint.agent_id,
-                websocket=protocol is RunnerWebProtocol.WEBSOCKET,
-                lease_expires_at=identity.transport_deadline_at,
-                now=now,
-                limits=limits,
-            )
-
-    async def release_admission(self, *, tunnel_id: str) -> None:
-        """Release shared capacity when the public transport ends."""
-        async with self.session_manager() as session:
-            await self.gateway_repository.release_admission(
-                session,
-                tunnel_id=tunnel_id,
-            )
 
     async def identity_and_access_current(
         self,

@@ -193,6 +193,7 @@ class RuntimeControlProtocolService:
                 cpu=report.cpu,
                 memory=report.memory,
                 disk=report.disk,
+                runtime_web=report.runtime_web,
             ),
         )
         return (

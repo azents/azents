@@ -141,6 +141,7 @@ source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
     { name = "azents-runtime-control" },
+    { name = "h11" },
     { name = "httpcore", extra = ["asyncio"] },
     { name = "wsproto" },
 ]
@@ -157,6 +158,7 @@ dev = [
 requires-dist = [
     { name = "aiohttp", specifier = "==3.14.3" },
     { name = "azents-runtime-control", editable = "../../libs/azents-runtime-control" },
+    { name = "h11", specifier = "==0.16.0" },
     { name = "httpcore", extras = ["asyncio"], specifier = "==1.0.9" },
     { name = "wsproto", specifier = "==1.3.2" },
 ]

@@ -37,6 +37,7 @@ from azents_runtime_control.runner_transfer import (
 from azents_runtime_control.runtime_configuration import RuntimeConfigurationEvidence
 from azents_runtime_control.system_metrics import (
     CollectedRunnerSystemMetrics,
+    RunnerRuntimeWebMetrics,
     RunnerSystemMetricAvailability,
     RunnerSystemMetricObservation,
     RunnerSystemMetricsReport,
@@ -275,7 +276,21 @@ class FakeSystemMetricsCollector:
                 used=1024,
                 total=2048,
             ),
+            runtime_web=_runtime_web_metrics(),
         )
+
+
+def _runtime_web_metrics() -> RunnerRuntimeWebMetrics:
+    return RunnerRuntimeWebMetrics.zero(
+        maximum_sessions=1,
+        maximum_active_streams=1,
+        application_buffer_limit_bytes=1,
+        control_buffer_limit_bytes=1,
+        queued_envelope_limit=1,
+        pending_task_limit=1,
+        event_loop_lag_limit_milliseconds=1,
+        resident_memory_limit_bytes=1,
+    )
 
 
 @pytest.mark.asyncio

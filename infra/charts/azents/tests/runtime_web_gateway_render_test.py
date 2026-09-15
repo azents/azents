@@ -121,14 +121,15 @@ def test_enabled_gateway_renders_isolated_process_and_trusted_control_path() -> 
         name="runtime-web-gateway",
     )
     assert "terminationGracePeriodSeconds: 150" in deployment
-    assert "containerPort: 8041" not in deployment
-    assert "path: /__azents/drain" not in deployment
-    assert "path: /__azents/live" not in deployment
-    assert "port: metrics" not in deployment
-    assert "AZ_RUNTIME_WEB_GATEWAY_CONTROL_SESSION_POOL_SIZE" not in deployment
-    assert "AZ_RUNTIME_WEB_GATEWAY_MAXIMUM_ACTIVE_EXCHANGES" not in deployment
+    assert "containerPort: 8041" in deployment
+    assert "path: /__azents/drain" in deployment
+    assert "path: /__azents/live" in deployment
+    assert "port: operations" in deployment
+    assert "AZ_RUNTIME_WEB_GATEWAY_CONTROL_SESSION_POOL_SIZE" in deployment
+    assert "AZ_RUNTIME_WEB_GATEWAY_MAXIMUM_ACTIVE_EXCHANGES" in deployment
+    assert "AZ_RUNTIME_WEB_GATEWAY_MAXIMUM_CONTROL_BUFFER_BYTES" in deployment
+    assert "AZ_RUNTIME_WEB_GATEWAY_MAXIMUM_PENDING_TASKS" in deployment
     assert "path: /__azents/ready" in deployment
-    assert "port: http" in deployment
     assert "requests:" in deployment
     assert "cpu: 250m" in deployment
     assert "memory: 512Mi" in deployment

@@ -15,13 +15,12 @@ from azents_runtime_control.grpc_runner_client import (
     runner_event_from_message,
     runner_runtime_configuration_evidence_from_message,
     runner_runtime_configuration_evidence_to_message,
+    runner_session_offer_to_message,
     runner_state_report_from_message,
     runner_system_metrics_from_message,
     runner_terminal_open_intent_to_message,
     runner_terminal_terminate_intent_to_message,
     runner_transfer_result_from_message,
-    runner_web_cancel_intent_to_message,
-    runner_web_open_intent_to_message,
 )
 from azents_runtime_control.proto import (
     runtime_runner_control_pb2,
@@ -38,16 +37,10 @@ from azents_runtime_control.runner_terminal import (
     RunnerTerminalTerminationReason,
 )
 from azents_runtime_control.runner_transfer import RunnerTransferDirection
-from azents_runtime_control.runner_web import (
-    RUNNER_WEB_CAPABILITY,
-    RunnerWebCancelIntent,
-    RunnerWebCancelReason,
-    RunnerWebIdentity,
-    RunnerWebOpenIntent,
-)
 from azents_runtime_control.runtime_configuration import (
     RuntimeConfigurationEvidence,
 )
+from azents_runtime_control.runtime_web_session import RunnerSessionOffer
 from azents_runtime_control.system_metrics import (
     RUNNER_SYSTEM_METRICS_MAX_MESSAGE_BYTES,
 )
@@ -92,10 +85,9 @@ from azents.services.runtime_connection_registration.service import (
 _DEFAULT_OPERATION_BLOCK_MS = 500
 _BODY_CHUNK_READ_LIMIT = 100
 _MAX_TRANSFER_DISPATCH_TOMBSTONES = 4096
+_WEB_SESSION_OFFER_RETRY_SECONDS = 1.0
 _TERMINAL_OPEN_OPERATION_TYPE = "terminal.open.v1"
 _TERMINAL_TERMINATE_OPERATION_TYPE = "terminal.terminate.v1"
-_WEB_OPEN_OPERATION_TYPE = "runtime.web.open.v1"
-_WEB_CANCEL_OPERATION_TYPE = "runtime.web.cancel.v1"
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -138,6 +130,17 @@ class RuntimeRunnerStateSink(Protocol):
         ...
 
 
+class RuntimeWebSessionOfferProvider(Protocol):
+    """Acquire one exact Owner-session offer for a registered Runner."""
+
+    async def offer_for_runner(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+    ) -> RunnerSessionOffer | None: ...
+
+
 class RuntimeRunnerControlGrpcServicer(
     runtime_runner_control_pb2_grpc.RuntimeRunnerControlServicer
 ):
@@ -154,6 +157,7 @@ class RuntimeRunnerControlGrpcServicer(
         runner_authenticator: RuntimeRunnerCredentialAuthenticator,
         connection_registrar: RuntimeRunnerConnectionRegistrar,
         transfer_result_sink: RuntimeRunnerTransferResultSink,
+        web_session_offer_provider: RuntimeWebSessionOfferProvider,
         operation_block_ms: int = _DEFAULT_OPERATION_BLOCK_MS,
     ) -> None:
         """Initialize the Runner Control gRPC servicer."""
@@ -166,6 +170,7 @@ class RuntimeRunnerControlGrpcServicer(
         self._connection_registrar = connection_registrar
         self._auth = RuntimeRunnerCredentialGrpcAuth(runner_authenticator)
         self._transfer_result_sink = transfer_result_sink
+        self._web_session_offer_provider = web_session_offer_provider
         self._operation_block_ms = operation_block_ms
 
     async def ConnectRunner(
@@ -255,6 +260,13 @@ class RuntimeRunnerControlGrpcServicer(
                 active_transfer_dispatches=active_transfer_dispatches,
             )
         )
+        offer_task = asyncio.create_task(
+            self._relay_web_session_offers(
+                outbound,
+                runtime_id=accepted.runtime_id,
+                generation=accepted.generation,
+            )
+        )
         try:
             yield runtime_runner_control_pb2.RunnerControlMessage(
                 request_id=first_message.request_id,
@@ -270,6 +282,7 @@ class RuntimeRunnerControlGrpcServicer(
                 outbound,
                 inbound_task,
                 operation_task,
+                offer_task,
                 control_protocol=self._control_protocol,
                 authorize=lambda: self._runner_authenticator.authorize_runner(
                     authentication
@@ -286,7 +299,7 @@ class RuntimeRunnerControlGrpcServicer(
                     "runner_generation": accepted.generation,
                 },
             )
-            for task in (inbound_task, operation_task):
+            for task in (inbound_task, operation_task, offer_task):
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
@@ -306,6 +319,27 @@ class RuntimeRunnerControlGrpcServicer(
                         "runner_generation": accepted.generation,
                     },
                 )
+
+    async def _relay_web_session_offers(
+        self,
+        outbound: asyncio.Queue[_RunnerOutbound],
+        *,
+        runtime_id: str,
+        generation: int,
+    ) -> None:
+        """Reissue exact Web session offers while Runner control remains current."""
+        while True:
+            offer = await self._web_session_offer_provider.offer_for_runner(
+                runtime_id=runtime_id,
+                runner_generation=generation,
+            )
+            if offer is not None:
+                await outbound.put(
+                    runtime_runner_control_pb2.RunnerControlMessage(
+                        web_session_offer=runner_session_offer_to_message(offer)
+                    )
+                )
+            await asyncio.sleep(_WEB_SESSION_OFFER_RETRY_SECONDS)
 
     async def _record_runner_stream_closed(
         self,
@@ -751,67 +785,6 @@ class RuntimeRunnerControlGrpcServicer(
                     )
                 )
                 continue
-            if envelope.operation_type == _WEB_OPEN_OPERATION_TYPE:
-                if _deadline_expired(envelope, datetime.now(UTC)):
-                    await self._expire_runner_operation(
-                        envelope,
-                        runtime_id=runtime_id,
-                    )
-                    await self._control_protocol.ack_claimed_request(envelope)
-                    continue
-                if not await self._runner_web_capable(
-                    runtime_id=runtime_id,
-                    generation=generation,
-                ):
-                    _LOGGER.warning(
-                        "Runtime Runner Web intent rejected",
-                        extra={
-                            "runtime_id": runtime_id,
-                            "runner_generation": generation,
-                            "request_id": envelope.request_id,
-                            "reason": "web_capability_missing",
-                        },
-                    )
-                    await self._control_protocol.ack_claimed_request(envelope)
-                    continue
-                await outbound.put(
-                    _RunnerOutboundItem(
-                        message=runtime_runner_control_pb2.RunnerControlMessage(
-                            request_id=envelope.request_id,
-                            web_open_intent=runner_web_open_intent_to_message(
-                                _runner_web_open_intent(envelope)
-                            ),
-                        ),
-                        ack_envelope=envelope,
-                    )
-                )
-                continue
-            if envelope.operation_type == _WEB_CANCEL_OPERATION_TYPE:
-                if _deadline_expired(envelope, datetime.now(UTC)):
-                    await self._expire_runner_operation(
-                        envelope,
-                        runtime_id=runtime_id,
-                    )
-                    await self._control_protocol.ack_claimed_request(envelope)
-                    continue
-                if not await self._runner_web_capable(
-                    runtime_id=runtime_id,
-                    generation=generation,
-                ):
-                    await self._control_protocol.ack_claimed_request(envelope)
-                    continue
-                await outbound.put(
-                    _RunnerOutboundItem(
-                        message=runtime_runner_control_pb2.RunnerControlMessage(
-                            request_id=envelope.request_id,
-                            web_cancel_intent=runner_web_cancel_intent_to_message(
-                                _runner_web_cancel_intent(envelope)
-                            ),
-                        ),
-                        ack_envelope=envelope,
-                    )
-                )
-                continue
             if _deadline_expired(envelope, datetime.now(UTC)):
                 await self._expire_runner_operation(
                     envelope,
@@ -855,21 +828,6 @@ class RuntimeRunnerControlGrpcServicer(
             isinstance(capabilities, list)
             and RUNNER_TERMINAL_CAPABILITY in capabilities
         )
-
-    async def _runner_web_capable(
-        self,
-        *,
-        runtime_id: str,
-        generation: int,
-    ) -> bool:
-        connection = await self._coordination_store.get_connection(
-            kind=RuntimeConnectionKind.RUNNER,
-            subject_id=runtime_id,
-        )
-        if connection is None or connection.generation != generation:
-            return False
-        capabilities = connection.metadata.get("capabilities")
-        return isinstance(capabilities, list) and RUNNER_WEB_CAPABILITY in capabilities
 
     async def _expire_runner_operation(
         self,
@@ -1056,6 +1014,7 @@ def add_runtime_runner_control_servicer(
     runner_authenticator: RuntimeRunnerCredentialAuthenticator,
     connection_registrar: RuntimeRunnerConnectionRegistrar,
     transfer_result_sink: RuntimeRunnerTransferResultSink,
+    web_session_offer_provider: RuntimeWebSessionOfferProvider,
     operation_block_ms: int = _DEFAULT_OPERATION_BLOCK_MS,
 ) -> None:
     """Add the Agent Runtime Runner Control servicer to a gRPC server."""
@@ -1069,6 +1028,7 @@ def add_runtime_runner_control_servicer(
             runner_authenticator=runner_authenticator,
             connection_registrar=connection_registrar,
             transfer_result_sink=transfer_result_sink,
+            web_session_offer_provider=web_session_offer_provider,
             operation_block_ms=operation_block_ms,
         ),
         server,
@@ -1103,6 +1063,7 @@ async def _outbound_messages(
     outbound: asyncio.Queue[_RunnerOutbound],
     inbound_task: asyncio.Task[None],
     operation_task: asyncio.Task[None],
+    offer_task: asyncio.Task[None],
     *,
     control_protocol: RuntimeControlProtocolService,
     authorize: Callable[[], Awaitable[bool]],
@@ -1111,7 +1072,7 @@ async def _outbound_messages(
     try:
         while True:
             done, _pending = await asyncio.wait(
-                {inbound_task, operation_task, get_task},
+                {inbound_task, operation_task, offer_task, get_task},
                 return_when=asyncio.FIRST_COMPLETED,
             )
             if get_task in done:
@@ -1127,7 +1088,7 @@ async def _outbound_messages(
                     yield item
                 get_task = asyncio.create_task(outbound.get())
                 continue
-            for task in (inbound_task, operation_task):
+            for task in (inbound_task, operation_task, offer_task):
                 if task in done:
                     await task
                     return
@@ -1250,119 +1211,6 @@ def _runner_transfer_cancel(
         dispatch_id=_str_payload(payload, "dispatch_id"),
         reason=reasons[reason],
     )
-
-
-_WEB_IDENTITY_FIELDS = {
-    "tunnel_id",
-    "endpoint_id",
-    "cycle_id",
-    "endpoint_authority_revision",
-    "close_barrier",
-    "runtime_id",
-    "desired_generation",
-    "runner_generation",
-    "port",
-    "join_nonce",
-    "registration_deadline_at",
-    "approval_deadline_at",
-    "transport_deadline_at",
-}
-
-
-def _runner_web_open_intent(
-    envelope: RuntimeRequestEnvelope,
-) -> RunnerWebOpenIntent:
-    if envelope.body_stream_id is not None or envelope.deadline_at is None:
-        raise ValueError("Runtime Web open intent requires metadata-only routing")
-    payload = _web_payload(envelope, required=_WEB_IDENTITY_FIELDS)
-    return RunnerWebOpenIntent(identity=_runner_web_identity(envelope, payload))
-
-
-def _runner_web_cancel_intent(
-    envelope: RuntimeRequestEnvelope,
-) -> RunnerWebCancelIntent:
-    if envelope.body_stream_id is not None:
-        raise ValueError("Runtime Web cancellation requires metadata-only routing")
-    payload = _web_payload(envelope, required=_WEB_IDENTITY_FIELDS | {"reason"})
-    return RunnerWebCancelIntent(
-        identity=_runner_web_identity(envelope, payload),
-        reason=RunnerWebCancelReason(_web_required_str(payload, "reason")),
-    )
-
-
-def _runner_web_identity(
-    envelope: RuntimeRequestEnvelope,
-    payload: dict[str, JsonValue],
-) -> RunnerWebIdentity:
-    runner_generation = _web_required_int(payload, "runner_generation")
-    if runner_generation != envelope.generation:
-        raise ValueError("Runtime Web intent generation does not match")
-    return RunnerWebIdentity(
-        tunnel_id=_web_required_str(payload, "tunnel_id"),
-        endpoint_id=_web_required_str(payload, "endpoint_id"),
-        cycle_id=_web_required_str(payload, "cycle_id"),
-        endpoint_authority_revision=_web_required_int(
-            payload,
-            "endpoint_authority_revision",
-        ),
-        close_barrier=_web_required_int(payload, "close_barrier"),
-        runtime_id=_web_required_str(payload, "runtime_id"),
-        desired_generation=_web_required_int(payload, "desired_generation"),
-        runner_generation=runner_generation,
-        port=_web_required_int(payload, "port"),
-        join_nonce=_web_required_str(payload, "join_nonce"),
-        registration_deadline_at=_web_required_datetime(
-            payload,
-            "registration_deadline_at",
-        ),
-        approval_deadline_at=_web_required_datetime(
-            payload,
-            "approval_deadline_at",
-        ),
-        transport_deadline_at=_web_required_datetime(
-            payload,
-            "transport_deadline_at",
-        ),
-    )
-
-
-def _web_payload(
-    envelope: RuntimeRequestEnvelope,
-    *,
-    required: set[str],
-) -> dict[str, JsonValue]:
-    payload = envelope.payload.get("payload")
-    if not isinstance(payload, dict) or set(payload) != required:
-        raise ValueError("Runtime Web intent payload fields are invalid")
-    return payload
-
-
-def _web_required_str(payload: dict[str, JsonValue], key: str) -> str:
-    value = payload[key]
-    if not isinstance(value, str):
-        raise ValueError(f"Runtime Web intent {key} must be a string")
-    return value
-
-
-def _web_required_int(payload: dict[str, JsonValue], key: str) -> int:
-    value = payload[key]
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise ValueError(f"Runtime Web intent {key} must be an integer")
-    return value
-
-
-def _web_required_datetime(
-    payload: dict[str, JsonValue],
-    key: str,
-) -> datetime:
-    value = _web_required_str(payload, key)
-    try:
-        parsed = datetime.fromisoformat(value)
-    except ValueError:
-        raise ValueError(f"Runtime Web intent {key} must be ISO 8601") from None
-    if parsed.tzinfo is None or parsed.utcoffset() is None:
-        raise ValueError(f"Runtime Web intent {key} must be timezone-aware")
-    return parsed
 
 
 def _copy_operation_payload(

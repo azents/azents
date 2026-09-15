@@ -1,7 +1,8 @@
-"""Inactive authenticated Runner client for one persistent Runtime Web session."""
+"""Authenticated Runner client for one persistent Runtime Web session."""
 
 import asyncio
 import enum
+import logging
 from collections import deque
 from collections.abc import AsyncIterable, AsyncIterator, Awaitable, Sequence
 from typing import TYPE_CHECKING, Protocol
@@ -24,6 +25,11 @@ else:
     )
 
 _MAX_PENDING_ENVELOPES = 8
+_LOGGER = logging.getLogger(__name__)
+
+
+class RunnerWebResourceExhausted(RuntimeError):
+    """One process-local Runner Web hard-limit rejection."""
 
 
 class _ClientState(enum.StrEnum):
@@ -48,6 +54,20 @@ class RunnerWebSessionStream(Protocol):
     ) -> AsyncIterable[runtime_web_session_pb2.RuntimeWebSessionEnvelope]: ...
 
 
+class RunnerWebEnvelopeResources(Protocol):
+    """Process-local resource accounting for the Runner outbound queue."""
+
+    def try_reserve_envelope(
+        self,
+        envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+    ) -> bool: ...
+
+    def release_envelope(
+        self,
+        envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+    ) -> None: ...
+
+
 class GrpcRunnerWebSessionClient:
     """Own one bounded persistent Runner-to-Owner gRPC session."""
 
@@ -57,11 +77,13 @@ class GrpcRunnerWebSessionClient:
         *,
         runner_auth_token: str,
         channel: grpc.aio.Channel | None,
+        outbound_resources: RunnerWebEnvelopeResources | None,
     ) -> None:
         if not runner_auth_token:
             raise ValueError("Runner authentication token must not be empty")
         self.stream = stream
         self.channel = channel
+        self.outbound_resources = outbound_resources
         self.metadata = (("authorization", f"Bearer {runner_auth_token}"),)
         self.outbound: deque[runtime_web_session_pb2.RuntimeWebSessionEnvelope] = (
             deque()
@@ -84,6 +106,7 @@ class GrpcRunnerWebSessionClient:
         runner_auth_token: str,
         tls: GrpcClientTlsConfig | None,
         allow_insecure: bool,
+        outbound_resources: RunnerWebEnvelopeResources | None,
     ) -> "GrpcRunnerWebSessionClient":
         validate_runner_web_connect_address(endpoint)
         options: tuple[tuple[str, int | str], ...] = (
@@ -105,12 +128,14 @@ class GrpcRunnerWebSessionClient:
             _RuntimeRunnerWebSessionStub(channel).Connect,
             runner_auth_token=runner_auth_token,
             channel=channel,
+            outbound_resources=outbound_resources,
         )
 
     async def start(
         self,
         hello: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
         handler: "EnvelopeHandler",
+        failure_handler: "FailureHandler",
         *,
         timeout_seconds: float,
     ) -> runtime_web_session_pb2.RuntimeWebSessionEnvelope:
@@ -134,7 +159,7 @@ class GrpcRunnerWebSessionClient:
                 stream_error = error
             else:
                 self.receiver_task = asyncio.create_task(
-                    self._receive(responses, handler)
+                    self._receive(responses, handler, failure_handler)
                 )
         if stream_error is not None:
             await self._shutdown(propagate_receiver_error=False)
@@ -178,6 +203,13 @@ class GrpcRunnerWebSessionClient:
                 or self.receiver_task.done()
             ):
                 raise RuntimeError("Runner Web session is not active")
+            if (
+                self.outbound_resources is not None
+                and not self.outbound_resources.try_reserve_envelope(envelope)
+            ):
+                raise RunnerWebResourceExhausted(
+                    "Runner Web outbound hard limit is exhausted"
+                )
             self.outbound.append(envelope)
             self.condition.notify_all()
 
@@ -198,6 +230,8 @@ class GrpcRunnerWebSessionClient:
                 if self.state is not _ClientState.ACTIVE:
                     return
                 message = self.outbound.popleft()
+                if self.outbound_resources is not None:
+                    self.outbound_resources.release_envelope(message)
                 self.condition.notify_all()
             yield message
 
@@ -205,15 +239,19 @@ class GrpcRunnerWebSessionClient:
         self,
         responses: AsyncIterable[runtime_web_session_pb2.RuntimeWebSessionEnvelope],
         handler: "EnvelopeHandler",
+        failure_handler: "FailureHandler",
     ) -> None:
         first = True
         try:
             async for response in responses:
                 if first:
                     first = False
-                    if response.WhichOneof("payload") != "session_accepted":
+                    if (
+                        response.WhichOneof("payload") != "session_accepted"
+                        or response.stream_id != 0
+                    ):
                         raise RuntimeError(
-                            "Runner Web session accepted frame must be first"
+                            "Runner Web session acceptance must be session-scoped"
                         )
                     if self.accepted is not None and not self.accepted.done():
                         self.accepted.set_result(response)
@@ -224,17 +262,23 @@ class GrpcRunnerWebSessionClient:
                 self.accepted.set_exception(
                     RuntimeError("Runner Web session closed before acceptance")
                 )
+            _LOGGER.warning("Runtime Web Runner session closed by Control")
         except asyncio.CancelledError:
             raise
         except Exception as error:
+            _LOGGER.exception("Runtime Web Runner session receive failed")
             if self.accepted is not None and not self.accepted.done():
                 self.accepted.set_exception(error)
             raise
         finally:
+            failed = False
             async with self.condition:
                 if self.state is _ClientState.ACTIVE:
                     self.state = _ClientState.FAILED
+                    failed = True
                 self.condition.notify_all()
+            if failed:
+                await failure_handler()
 
     async def _shutdown(self, *, propagate_receiver_error: bool) -> None:
         async with self.shutdown_lock:
@@ -242,7 +286,7 @@ class GrpcRunnerWebSessionClient:
                 if self.state is _ClientState.CLOSED:
                     return
                 self.state = _ClientState.CLOSING
-                self.outbound.clear()
+                self._release_outbound()
                 receiver_task = self.receiver_task
                 self.receiver_task = None
                 self.condition.notify_all()
@@ -263,13 +307,20 @@ class GrpcRunnerWebSessionClient:
                     await channel.close()
             finally:
                 async with self.condition:
-                    self.outbound.clear()
+                    self._release_outbound()
                     if self.accepted is not None and not self.accepted.done():
                         self.accepted.cancel()
                     self.state = _ClientState.CLOSED
                     self.condition.notify_all()
             if propagate_receiver_error and receiver_error is not None:
                 raise receiver_error
+
+    def _release_outbound(self) -> None:
+        """Release all exact queued process reservations before clearing."""
+        if self.outbound_resources is not None:
+            for envelope in self.outbound:
+                self.outbound_resources.release_envelope(envelope)
+        self.outbound.clear()
 
 
 class EnvelopeHandler(Protocol):
@@ -280,3 +331,9 @@ class EnvelopeHandler(Protocol):
         envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
         /,
     ) -> Awaitable[None]: ...
+
+
+class FailureHandler(Protocol):
+    """Handle independent persistent-session receiver failure."""
+
+    def __call__(self) -> Awaitable[None]: ...

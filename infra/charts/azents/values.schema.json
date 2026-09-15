@@ -812,7 +812,15 @@
             "maxConcurrentOperations",
             "maxPendingOperationsPerOwner",
             "maxPendingOperations",
-            "maxConcurrentControlOperations"
+            "maxConcurrentControlOperations",
+            "runtimeWebMaximumSessions",
+            "runtimeWebMaximumActiveStreams",
+            "runtimeWebMaximumApplicationBufferBytes",
+            "runtimeWebMaximumControlBufferBytes",
+            "runtimeWebMaximumQueuedEnvelopes",
+            "runtimeWebMaximumPendingTasks",
+            "runtimeWebMaximumEventLoopLagMilliseconds",
+            "runtimeWebMaximumResidentMemoryBytes"
           ],
           "properties": {
             "maxConcurrentOperationsPerSession": {
@@ -836,6 +844,38 @@
               "minimum": 1
             },
             "maxConcurrentControlOperations": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "runtimeWebMaximumSessions": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "runtimeWebMaximumActiveStreams": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "runtimeWebMaximumApplicationBufferBytes": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "runtimeWebMaximumControlBufferBytes": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "runtimeWebMaximumQueuedEnvelopes": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "runtimeWebMaximumPendingTasks": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "runtimeWebMaximumEventLoopLagMilliseconds": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "runtimeWebMaximumResidentMemoryBytes": {
               "type": "integer",
               "minimum": 1
             }
@@ -1045,6 +1085,12 @@
         "runtimeControl": {
           "type": "object",
           "additionalProperties": false,
+          "required": [
+            "metricsPort",
+            "terminationGracePeriodSeconds",
+            "webCapacity",
+            "webHardLimits"
+          ],
           "properties": {
             "enabled": {
               "type": "boolean"
@@ -1054,6 +1100,15 @@
             },
             "replicas": {
               "type": "integer"
+            },
+            "metricsPort": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            },
+            "terminationGracePeriodSeconds": {
+              "type": "integer",
+              "const": 150
             },
             "reconcileIntervalSeconds": {
               "type": "number"
@@ -1180,6 +1235,127 @@
             "pdb": {
               "type": "object"
             },
+            "webCapacity": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "backend",
+                "maximumActiveStreams",
+                "maximumSseStreams",
+                "maximumWebsocketStreams",
+                "maximumPendingOpens",
+                "maximumBufferBytes",
+                "inboundBytesPerSecond",
+                "outboundBytesPerSecond",
+                "burstBytes",
+                "redisNamespace",
+                "redisTtlSeconds",
+                "maximumRelaySessions"
+              ],
+              "properties": {
+                "backend": {
+                  "type": "string",
+                  "enum": [
+                    "memory",
+                    "redis"
+                  ]
+                },
+                "maximumActiveStreams": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "maximumSseStreams": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "maximumWebsocketStreams": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "maximumPendingOpens": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "maximumBufferBytes": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "inboundBytesPerSecond": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "outboundBytesPerSecond": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "burstBytes": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "redisNamespace": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "redisTtlSeconds": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 300
+                },
+                "maximumRelaySessions": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 256
+                }
+              }
+            },
+            "webHardLimits": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "maximumSessions",
+                "maximumActiveStreams",
+                "maximumApplicationBufferBytes",
+                "maximumControlBufferBytes",
+                "maximumQueuedEnvelopes",
+                "maximumPendingTasks",
+                "maximumEventLoopLagMilliseconds",
+                "maximumResidentMemoryBytes"
+              ],
+              "properties": {
+                "maximumSessions": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "maximumActiveStreams": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "maximumApplicationBufferBytes": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "maximumControlBufferBytes": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "maximumQueuedEnvelopes": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "maximumPendingTasks": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "maximumEventLoopLagMilliseconds": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "maximumResidentMemoryBytes": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
             "webTransport": {
               "type": "object",
               "additionalProperties": false,
@@ -1187,7 +1363,7 @@
                 "enabled",
                 "trustedPort",
                 "routeLeaseSeconds",
-                "maxActiveConnections",
+                "runnerTlsServerName",
                 "gatewayPeerIdentities",
                 "controlPeerIdentities"
               ],
@@ -1205,10 +1381,9 @@
                   "minimum": 1,
                   "maximum": 60
                 },
-                "maxActiveConnections": {
-                  "type": "integer",
-                  "minimum": 1,
-                  "maximum": 512
+                "runnerTlsServerName": {
+                  "type": "string",
+                  "minLength": 1
                 },
                 "gatewayPeerIdentities": {
                   "type": "string"
@@ -1240,7 +1415,6 @@
             "identityLifetimeSeconds",
             "activeDurationSeconds",
             "request",
-            "connectionLimits",
             "permissionsPolicy",
             "controlTls",
             "ingress",
@@ -1281,6 +1455,8 @@
               "required": [
                 "activeExchanges",
                 "applicationBufferBytes",
+                "controlBufferBytes",
+                "pendingTasks",
                 "schedulerWaiters",
                 "eventLoopLagMilliseconds",
                 "residentMemoryBytes"
@@ -1295,6 +1471,16 @@
                   "type": "integer",
                   "minimum": 1048576,
                   "maximum": 17179869184
+                },
+                "controlBufferBytes": {
+                  "type": "integer",
+                  "minimum": 1048576,
+                  "maximum": 1073741824
+                },
+                "pendingTasks": {
+                  "type": "integer",
+                  "minimum": 4,
+                  "maximum": 65536
                 },
                 "schedulerWaiters": {
                   "type": "integer",
@@ -1351,8 +1537,7 @@
               "additionalProperties": false,
               "required": [
                 "headerBytes",
-                "bodyBytes",
-                "frameBytes"
+                "bodyBytes"
               ],
               "properties": {
                 "headerBytes": {
@@ -1364,73 +1549,6 @@
                   "type": "integer",
                   "minimum": 65536,
                   "maximum": 1073741824
-                },
-                "frameBytes": {
-                  "type": "integer",
-                  "minimum": 4096,
-                  "maximum": 65536
-                }
-              }
-            },
-            "connectionLimits": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "http",
-                "websocket"
-              ],
-              "properties": {
-                "http": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "required": [
-                    "endpoint",
-                    "user",
-                    "agent"
-                  ],
-                  "properties": {
-                    "endpoint": {
-                      "type": "integer",
-                      "minimum": 1,
-                      "maximum": 128
-                    },
-                    "user": {
-                      "type": "integer",
-                      "minimum": 1,
-                      "maximum": 256
-                    },
-                    "agent": {
-                      "type": "integer",
-                      "minimum": 1,
-                      "maximum": 512
-                    }
-                  }
-                },
-                "websocket": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "required": [
-                    "endpoint",
-                    "user",
-                    "agent"
-                  ],
-                  "properties": {
-                    "endpoint": {
-                      "type": "integer",
-                      "minimum": 1,
-                      "maximum": 16
-                    },
-                    "user": {
-                      "type": "integer",
-                      "minimum": 1,
-                      "maximum": 32
-                    },
-                    "agent": {
-                      "type": "integer",
-                      "minimum": 1,
-                      "maximum": 64
-                    }
-                  }
                 }
               }
             },

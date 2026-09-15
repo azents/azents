@@ -6,6 +6,7 @@ import pytest
 from azents_runtime_control.runtime_web_session import (
     RUNTIME_WEB_PROTOCOL_FINGERPRINT,
     CloseReason,
+    StreamProtocol,
 )
 
 from azents.runtime_web_gateway.operations import (
@@ -29,6 +30,8 @@ def _limits(*, active_exchanges: int = 2) -> RuntimeWebGatewayHardLimits:
     return RuntimeWebGatewayHardLimits(
         maximum_active_exchanges=active_exchanges,
         maximum_application_buffer_bytes=10,
+        maximum_control_buffer_bytes=10,
+        maximum_pending_tasks=16,
         maximum_scheduler_waiters=1,
         maximum_event_loop_lag_milliseconds=100,
         maximum_resident_memory_bytes=1000,
@@ -59,6 +62,10 @@ def _operational_state(
         backend=RuntimeWebCapacityBackend.MEMORY,
         capacity_degraded=True,
         resources=resources,
+        local_open_count=0,
+        relay_open_count=0,
+        event_loop_lag_milliseconds=0,
+        resident_memory_bytes=0,
     )
 
 
@@ -138,6 +145,8 @@ def test_hard_limits_require_positive_process_ceilings() -> None:
         RuntimeWebGatewayHardLimits(
             maximum_active_exchanges=0,
             maximum_application_buffer_bytes=1,
+            maximum_control_buffer_bytes=1,
+            maximum_pending_tasks=4,
             maximum_scheduler_waiters=1,
             maximum_event_loop_lag_milliseconds=1,
             maximum_resident_memory_bytes=1,
@@ -153,6 +162,10 @@ def test_resource_tracker_rejects_and_updates_live_pressure_before_oom() -> None
     assert not tracker.try_open_exchange()
     assert tracker.try_reserve_application_buffer(10)
     assert not tracker.try_reserve_application_buffer(1)
+    assert tracker.try_reserve_control_buffer(7)
+    assert not tracker.try_reserve_control_buffer(4)
+    assert tracker.snapshot().control_buffer_bytes == 7
+    tracker.release_control_buffer(7)
     assert tracker.try_add_scheduler_waiter()
     assert not tracker.try_add_scheduler_waiter()
 
@@ -413,16 +426,167 @@ def test_operational_state_drains_before_refusing_new_work() -> None:
     assert state.health.live
 
 
+def test_operational_state_recovers_immediately_after_resource_release() -> None:
+    state = _operational_state()
+    resources = state.resources
+    assert resources.try_open_exchange()
+    assert resources.try_open_exchange()
+    state.refresh_resource_pressure()
+    assert not state.health.local_pressure_acceptable
+
+    resources.close_exchange()
+    resources.close_exchange()
+    assert not state.health.local_pressure_acceptable
+    state.refresh_resource_pressure()
+
+    assert state.health.local_pressure_acceptable
+    assert state.pressure.active_exchange_ratio == 0
+
+
+@pytest.mark.asyncio
+async def test_sse_registration_reclassifies_before_drain() -> None:
+    resources = RuntimeWebGatewayResourceTracker(_limits())
+
+    async def ignore(reason: CloseReason) -> None:
+        assert reason is CloseReason.SERVICE_DRAIN
+
+    coordinator = RuntimeWebDrainCoordinator(
+        policy=RuntimeWebDrainPolicy(
+            finite_http_grace_seconds=0.02,
+            long_lived_grace_seconds=0.01,
+            termination_grace_seconds=1,
+            scale_down_stabilization_seconds=1,
+        ),
+        resources=resources,
+        begin_session_drain=ignore,
+    )
+    registration = await coordinator.register(
+        kind=RuntimeWebDrainStreamKind.FINITE_HTTP,
+        request_graceful_close=ignore,
+        force_close=ignore,
+    )
+    assert registration is not None
+
+    assert await coordinator.reclassify(
+        registration,
+        kind=RuntimeWebDrainStreamKind.LONG_LIVED,
+    )
+    assert coordinator.active[registration.registration_id].registration.kind is (
+        RuntimeWebDrainStreamKind.LONG_LIVED
+    )
+
+
+@pytest.mark.asyncio
+async def test_sse_reclassification_after_drain_start_uses_long_lived_grace() -> None:
+    resources = RuntimeWebGatewayResourceTracker(_limits(active_exchanges=1))
+    session_drain_started = asyncio.Event()
+    finish_session_drain = asyncio.Event()
+    graceful_close_called = asyncio.Event()
+    registration = None
+
+    async def begin_session_drain(reason: CloseReason) -> None:
+        assert reason is CloseReason.SERVICE_DRAIN
+        session_drain_started.set()
+        await finish_session_drain.wait()
+
+    async def graceful_close(reason: CloseReason) -> None:
+        assert reason is CloseReason.SERVICE_DRAIN
+        graceful_close_called.set()
+        assert registration is not None
+        await coordinator.release(registration)
+
+    async def force_close(reason: CloseReason) -> None:
+        raise AssertionError(f"force close was not expected: {reason}")
+
+    coordinator = RuntimeWebDrainCoordinator(
+        policy=RuntimeWebDrainPolicy(
+            finite_http_grace_seconds=1,
+            long_lived_grace_seconds=0.5,
+            termination_grace_seconds=2,
+            scale_down_stabilization_seconds=1,
+        ),
+        resources=resources,
+        begin_session_drain=begin_session_drain,
+    )
+    registration = await coordinator.register(
+        kind=RuntimeWebDrainStreamKind.FINITE_HTTP,
+        request_graceful_close=graceful_close,
+        force_close=force_close,
+    )
+    assert registration is not None
+
+    draining = asyncio.create_task(coordinator.drain())
+    await session_drain_started.wait()
+    assert await coordinator.reclassify(
+        registration,
+        kind=RuntimeWebDrainStreamKind.LONG_LIVED,
+    )
+    await graceful_close_called.wait()
+    finish_session_drain.set()
+    result = await draining
+
+    assert result.gracefully_closed == (registration.registration_id,)
+    assert result.force_closed == ()
+    assert result.callback_failures == ()
+
+
 def test_openmetrics_uses_only_bounded_process_labels() -> None:
+    resources = RuntimeWebGatewayResourceTracker(_limits())
+    resources.record_transport_open(
+        protocol=StreamProtocol.HTTP,
+        path="local",
+        setup_seconds=0.1,
+    )
+    resources.record_transport_frame(
+        protocol=StreamProtocol.HTTP,
+        direction="response",
+        path="local",
+        size_bytes=64,
+    )
+    resources.record_transport_ttfb(0.2)
+    resources.record_transport_terminal(
+        protocol=StreamProtocol.HTTP,
+        path="local",
+        reason=None,
+        duration_seconds=0.5,
+        application_bytes=64,
+    )
     rendered = render_openmetrics(
         pressure=RuntimeWebGatewayPressure(0.1, 0.2, 0.3, 0.4, 0.5),
         health=_health(),
         backend=RuntimeWebCapacityBackend.MEMORY,
         capacity_degraded=True,
+        active_exchanges=0,
+        local_open_count=2,
+        relay_open_count=1,
+        application_buffer_bytes=1024,
+        application_buffer_limit_bytes=4096,
+        control_buffer_bytes=128,
+        scheduler_waiters=3,
+        scheduler_waiter_limit=32,
+        resident_memory_bytes=2048,
+        resident_memory_limit_bytes=8192,
+        transport=resources,
     )
 
     assert 'backend="memory"' in rendered
     assert "runtime_web_gateway_pressure 0.5" in rendered
+    assert "runtime_web_gateway_active_exchanges 0" in rendered
+    assert 'runtime_web_gateway_open_total{route="local"} 2' in rendered
+    assert 'runtime_web_gateway_open_total{route="relay"} 1' in rendered
+    assert "runtime_web_gateway_application_buffer_bytes 1024" in rendered
+    assert "runtime_web_gateway_application_buffer_limit_bytes 4096" in rendered
+    assert "runtime_web_gateway_control_buffer_bytes 128" in rendered
+    assert "runtime_web_gateway_scheduler_waiters 3" in rendered
+    assert "runtime_web_gateway_scheduler_waiter_limit 32" in rendered
+    assert "runtime_web_gateway_resident_memory_bytes 2048" in rendered
+    assert "runtime_web_gateway_resident_memory_limit_bytes 8192" in rendered
+    assert (
+        "runtime_web_gateway_transport_frames_total"
+        '{protocol="http",path="local",direction="response"} 1'
+    ) in rendered
+    assert "runtime_web_gateway_transport_ttfb_seconds_sum 0.2" in rendered
+    assert "runtime_web_gateway_transport_goodput_bytes_per_second 128.0" in rendered
     assert "runtime_web_gateway_ready 1" in rendered
-    for forbidden in ("runtime_id=", "user=", "session=", "path=", "query="):
+    for forbidden in ("runtime_id=", "user=", "session=", 'path="/', "query="):
         assert forbidden not in rendered

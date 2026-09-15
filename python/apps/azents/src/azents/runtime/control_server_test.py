@@ -1,13 +1,20 @@
 """Runtime Control server settings tests."""
 
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+from azents_runtime_control.runtime_web_session import (
+    RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+    OwnerSessionEpoch,
+    RunnerSessionOffer,
+)
 from cryptography.fernet import Fernet
 from pydantic import ValidationError
 
 from azents.runtime.control_server import (
     RuntimeControlSettings,
+    _owner_offer_blocks_reissue,
     runtime_control_transport,
     runtime_web_trusted_transport,
     validate_runtime_control_web_settings,
@@ -24,10 +31,54 @@ def _settings() -> RuntimeControlSettings:
     )
 
 
+def _web_offer(*, deadline_at: datetime) -> RunnerSessionOffer:
+    owner = OwnerSessionEpoch(
+        owner_boot_id="owner-boot",
+        session_lease_id="owner-lease",
+        lease_generation=1,
+        runtime_id="runtime",
+        desired_generation=2,
+        runner_generation=3,
+    )
+    return RunnerSessionOffer(
+        owner=owner,
+        owner_replica_id="control-a",
+        connect_address="control-a.internal:8030",
+        tls_server_name="runtime-control.internal",
+        session_nonce="nonce",
+        protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+        deadline_at=deadline_at,
+    )
+
+
+def test_joined_owner_offer_blocks_reissue_after_join_deadline() -> None:
+    now = datetime(2026, 9, 14, tzinfo=UTC)
+    offer = _web_offer(deadline_at=now - timedelta(seconds=1))
+
+    assert _owner_offer_blocks_reissue(
+        offer,
+        joined={offer.owner},
+        runner_generation=3,
+        now=now,
+    )
+    assert not _owner_offer_blocks_reissue(
+        offer,
+        joined=set(),
+        runner_generation=3,
+        now=now,
+    )
+    assert not _owner_offer_blocks_reissue(
+        offer,
+        joined={offer.owner},
+        runner_generation=4,
+        now=now,
+    )
+
+
 def test_runtime_control_heartbeat_interval_defaults_to_production_value() -> None:
     assert _settings().testenv_runtime_control_heartbeat_interval_seconds == 20
     assert not _settings().runtime_control_web_transport_enabled
-    assert _settings().runtime_control_web_max_active_connections == 128
+    assert _settings().runtime_control_runner_web_connect_address == ""
 
 
 def test_runtime_control_heartbeat_interval_accepts_positive_testenv_override() -> None:

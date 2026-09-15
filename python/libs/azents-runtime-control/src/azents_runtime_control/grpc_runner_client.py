@@ -18,7 +18,7 @@ from azents_runtime_control.proto import (
     runtime_runner_control_pb2,
     runtime_runner_terminal_pb2,
     runtime_runner_transfer_pb2,
-    runtime_web_transport_pb2,
+    runtime_web_session_pb2,
 )
 from azents_runtime_control.runner import (
     JsonValue,
@@ -56,20 +56,24 @@ from azents_runtime_control.runner_transfer import (
     RunnerTransferOutcome,
     RunnerTransferResult,
 )
-from azents_runtime_control.runner_web import (
-    RunnerWebCancelIntent,
-    RunnerWebCancelIntentHandler,
-    RunnerWebCancelReason,
-    RunnerWebIdentity,
-    RunnerWebOpenIntent,
-    RunnerWebOpenIntentHandler,
-)
 from azents_runtime_control.runtime_configuration import (
     RuntimeConfigurationEvidence,
     parse_configuration_sequence,
     serialize_configuration_sequence,
 )
+from azents_runtime_control.runtime_web_session import (
+    CloseReason,
+    OwnerSessionEpoch,
+    RunnerSessionOffer,
+    RunnerSessionOfferHandler,
+    StreamDirection,
+    StreamProtocol,
+)
 from azents_runtime_control.system_metrics import (
+    RunnerRuntimeWebMetrics,
+    RunnerRuntimeWebProtocolCount,
+    RunnerRuntimeWebReasonCount,
+    RunnerRuntimeWebTrafficCount,
     RunnerSystemMetricAvailability,
     RunnerSystemMetricObservation,
     RunnerSystemMetricsReport,
@@ -136,8 +140,7 @@ class GrpcRunnerControlClient(RunnerControlClient):
         self._terminal_terminate_intent_handler: (
             RunnerTerminalTerminateIntentHandler | None
         ) = None
-        self._web_open_intent_handler: RunnerWebOpenIntentHandler | None = None
-        self._web_cancel_intent_handler: RunnerWebCancelIntentHandler | None = None
+        self._web_session_offer_handler: RunnerSessionOfferHandler | None = None
         self._pending_heartbeat_acks: dict[
             str, asyncio.Future[RunnerHeartbeatAcknowledgement]
         ] = {}
@@ -211,19 +214,12 @@ class GrpcRunnerControlClient(RunnerControlClient):
         """Set the direct metadata-only Terminal termination handler."""
         self._terminal_terminate_intent_handler = handler
 
-    def set_web_open_intent_handler(
+    def set_web_session_offer_handler(
         self,
-        handler: RunnerWebOpenIntentHandler,
+        handler: RunnerSessionOfferHandler,
     ) -> None:
-        """Set the direct metadata-only Runtime Web admission handler."""
-        self._web_open_intent_handler = handler
-
-    def set_web_cancel_intent_handler(
-        self,
-        handler: RunnerWebCancelIntentHandler,
-    ) -> None:
-        """Set the direct metadata-only Runtime Web cancellation handler."""
-        self._web_cancel_intent_handler = handler
+        """Set the exact replacement Runtime Web session offer handler."""
+        self._web_session_offer_handler = handler
 
     async def register_runner(
         self,
@@ -498,22 +494,13 @@ class GrpcRunnerControlClient(RunnerControlClient):
                 )
             )
             return
-        if payload == "web_open_intent":
-            if self._web_open_intent_handler is None:
+        if payload == "web_session_offer":
+            if self._web_session_offer_handler is None:
                 raise RuntimeRunnerControlStreamClosed(
-                    "Runner Web admission handler is not registered"
+                    "Runner Web session offer handler is not registered"
                 )
-            await self._web_open_intent_handler(
-                runner_web_open_intent_from_message(message.web_open_intent)
-            )
-            return
-        if payload == "web_cancel_intent":
-            if self._web_cancel_intent_handler is None:
-                raise RuntimeRunnerControlStreamClosed(
-                    "Runner Web cancellation handler is not registered"
-                )
-            await self._web_cancel_intent_handler(
-                runner_web_cancel_intent_from_message(message.web_cancel_intent)
+            await self._web_session_offer_handler(
+                runner_session_offer_from_message(message.web_session_offer)
             )
             return
         if payload == "error":
@@ -677,6 +664,7 @@ def runner_system_metrics_from_message(
         cpu=_system_metric_observation_from_message(message.cpu),
         memory=_system_metric_observation_from_message(message.memory),
         disk=_system_metric_observation_from_message(message.disk),
+        runtime_web=_runtime_web_metrics_from_message(message.runtime_web),
     )
 
 
@@ -691,6 +679,252 @@ def runner_system_metrics_to_message(
         cpu=_system_metric_observation_to_message(report.cpu),
         memory=_system_metric_observation_to_message(report.memory),
         disk=_system_metric_observation_to_message(report.disk),
+        runtime_web=_runtime_web_metrics_to_message(report.runtime_web),
+    )
+
+
+def _runtime_web_metrics_from_message(
+    message: runtime_runner_control_pb2.RunnerRuntimeWebMetrics,
+) -> RunnerRuntimeWebMetrics:
+    return RunnerRuntimeWebMetrics(
+        active_sessions=message.active_sessions,
+        active_streams=message.active_streams,
+        maximum_sessions=message.maximum_sessions,
+        maximum_active_streams=message.maximum_active_streams,
+        application_buffer_bytes=message.application_buffer_bytes,
+        application_buffer_limit_bytes=message.application_buffer_limit_bytes,
+        control_buffer_bytes=message.control_buffer_bytes,
+        control_buffer_limit_bytes=message.control_buffer_limit_bytes,
+        queued_envelopes=message.queued_envelopes,
+        queued_envelope_limit=message.queued_envelope_limit,
+        pending_tasks=message.pending_tasks,
+        pending_task_limit=message.pending_task_limit,
+        event_loop_lag_milliseconds=message.event_loop_lag_milliseconds,
+        event_loop_lag_limit_milliseconds=(message.event_loop_lag_limit_milliseconds),
+        resident_memory_bytes=message.resident_memory_bytes,
+        resident_memory_limit_bytes=message.resident_memory_limit_bytes,
+        credit_stalls_total=message.credit_stalls_total,
+        credit_stall_seconds=message.credit_stall_seconds,
+        request_consumed_bytes=message.request_consumed_bytes,
+        response_sent_bytes=message.response_sent_bytes,
+        response_consumed_bytes=message.response_consumed_bytes,
+        heartbeats_total=message.heartbeats_total,
+        go_aways_total=message.go_aways_total,
+        epoch_transitions_total=message.epoch_transitions_total,
+        setup_seconds_sum=message.setup_seconds_sum,
+        setup_count=message.setup_count,
+        ttfb_seconds_sum=message.ttfb_seconds_sum,
+        ttfb_count=message.ttfb_count,
+        duration_seconds_sum=message.duration_seconds_sum,
+        duration_count=message.duration_count,
+        goodput_bytes=message.goodput_bytes,
+        active_streams_by_protocol=tuple(
+            RunnerRuntimeWebProtocolCount(
+                protocol=_runtime_web_protocol_from_message(item.protocol),
+                value=item.value,
+            )
+            for item in message.active_streams_by_protocol
+        ),
+        opens_accepted_by_protocol=tuple(
+            RunnerRuntimeWebProtocolCount(
+                protocol=_runtime_web_protocol_from_message(item.protocol),
+                value=item.value,
+            )
+            for item in message.opens_accepted_by_protocol
+        ),
+        opens_rejected_by_reason=tuple(
+            RunnerRuntimeWebReasonCount(
+                reason=_runtime_web_reason_from_message(item.reason),
+                value=item.value,
+            )
+            for item in message.opens_rejected_by_reason
+        ),
+        resets_by_reason=tuple(
+            RunnerRuntimeWebReasonCount(
+                reason=_runtime_web_reason_from_message(item.reason),
+                value=item.value,
+            )
+            for item in message.resets_by_reason
+        ),
+        closes_by_reason=tuple(
+            RunnerRuntimeWebReasonCount(
+                reason=_runtime_web_reason_from_message(item.reason),
+                value=item.value,
+            )
+            for item in message.closes_by_reason
+        ),
+        traffic=tuple(
+            RunnerRuntimeWebTrafficCount(
+                protocol=_runtime_web_protocol_from_message(item.protocol),
+                direction=_runtime_web_direction_from_message(item.direction),
+                frames=item.frames,
+                bytes=item.bytes,
+            )
+            for item in message.traffic
+        ),
+    )
+
+
+def _runtime_web_metrics_to_message(
+    metrics: RunnerRuntimeWebMetrics,
+) -> runtime_runner_control_pb2.RunnerRuntimeWebMetrics:
+    return runtime_runner_control_pb2.RunnerRuntimeWebMetrics(
+        active_sessions=metrics.active_sessions,
+        active_streams=metrics.active_streams,
+        maximum_sessions=metrics.maximum_sessions,
+        maximum_active_streams=metrics.maximum_active_streams,
+        application_buffer_bytes=metrics.application_buffer_bytes,
+        application_buffer_limit_bytes=metrics.application_buffer_limit_bytes,
+        control_buffer_bytes=metrics.control_buffer_bytes,
+        control_buffer_limit_bytes=metrics.control_buffer_limit_bytes,
+        queued_envelopes=metrics.queued_envelopes,
+        queued_envelope_limit=metrics.queued_envelope_limit,
+        pending_tasks=metrics.pending_tasks,
+        pending_task_limit=metrics.pending_task_limit,
+        event_loop_lag_milliseconds=metrics.event_loop_lag_milliseconds,
+        event_loop_lag_limit_milliseconds=metrics.event_loop_lag_limit_milliseconds,
+        resident_memory_bytes=metrics.resident_memory_bytes,
+        resident_memory_limit_bytes=metrics.resident_memory_limit_bytes,
+        credit_stalls_total=metrics.credit_stalls_total,
+        credit_stall_seconds=metrics.credit_stall_seconds,
+        request_consumed_bytes=metrics.request_consumed_bytes,
+        response_sent_bytes=metrics.response_sent_bytes,
+        response_consumed_bytes=metrics.response_consumed_bytes,
+        heartbeats_total=metrics.heartbeats_total,
+        go_aways_total=metrics.go_aways_total,
+        epoch_transitions_total=metrics.epoch_transitions_total,
+        setup_seconds_sum=metrics.setup_seconds_sum,
+        setup_count=metrics.setup_count,
+        ttfb_seconds_sum=metrics.ttfb_seconds_sum,
+        ttfb_count=metrics.ttfb_count,
+        duration_seconds_sum=metrics.duration_seconds_sum,
+        duration_count=metrics.duration_count,
+        goodput_bytes=metrics.goodput_bytes,
+        active_streams_by_protocol=[
+            runtime_runner_control_pb2.RunnerRuntimeWebProtocolCount(
+                protocol=_runtime_web_protocol_to_message(item.protocol),
+                value=item.value,
+            )
+            for item in metrics.active_streams_by_protocol
+        ],
+        opens_accepted_by_protocol=[
+            runtime_runner_control_pb2.RunnerRuntimeWebProtocolCount(
+                protocol=_runtime_web_protocol_to_message(item.protocol),
+                value=item.value,
+            )
+            for item in metrics.opens_accepted_by_protocol
+        ],
+        opens_rejected_by_reason=[
+            runtime_runner_control_pb2.RunnerRuntimeWebReasonCount(
+                reason=_runtime_web_reason_to_message(item.reason),
+                value=item.value,
+            )
+            for item in metrics.opens_rejected_by_reason
+        ],
+        resets_by_reason=[
+            runtime_runner_control_pb2.RunnerRuntimeWebReasonCount(
+                reason=_runtime_web_reason_to_message(item.reason),
+                value=item.value,
+            )
+            for item in metrics.resets_by_reason
+        ],
+        closes_by_reason=[
+            runtime_runner_control_pb2.RunnerRuntimeWebReasonCount(
+                reason=_runtime_web_reason_to_message(item.reason),
+                value=item.value,
+            )
+            for item in metrics.closes_by_reason
+        ],
+        traffic=[
+            runtime_runner_control_pb2.RunnerRuntimeWebTrafficCount(
+                protocol=_runtime_web_protocol_to_message(item.protocol),
+                direction=_runtime_web_direction_to_message(item.direction),
+                frames=item.frames,
+                bytes=item.bytes,
+            )
+            for item in metrics.traffic
+        ],
+    )
+
+
+def _runtime_web_protocol_from_message(
+    value: runtime_web_session_pb2.RuntimeWebSessionProtocol.ValueType,
+) -> StreamProtocol:
+    mapping = {
+        runtime_web_session_pb2.RUNTIME_WEB_SESSION_PROTOCOL_HTTP: (
+            StreamProtocol.HTTP
+        ),
+        runtime_web_session_pb2.RUNTIME_WEB_SESSION_PROTOCOL_WEBSOCKET: (
+            StreamProtocol.WEBSOCKET
+        ),
+    }
+    try:
+        return mapping[value]
+    except KeyError as error:
+        raise ValueError("Runtime Web metrics protocol is invalid") from error
+
+
+def _runtime_web_protocol_to_message(
+    protocol: StreamProtocol,
+) -> runtime_web_session_pb2.RuntimeWebSessionProtocol.ValueType:
+    return {
+        StreamProtocol.HTTP: (
+            runtime_web_session_pb2.RUNTIME_WEB_SESSION_PROTOCOL_HTTP
+        ),
+        StreamProtocol.WEBSOCKET: (
+            runtime_web_session_pb2.RUNTIME_WEB_SESSION_PROTOCOL_WEBSOCKET
+        ),
+    }[protocol]
+
+
+def _runtime_web_direction_from_message(
+    value: runtime_web_session_pb2.RuntimeWebSessionDirection.ValueType,
+) -> StreamDirection:
+    mapping = {
+        runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_REQUEST: (
+            StreamDirection.REQUEST
+        ),
+        runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_RESPONSE: (
+            StreamDirection.RESPONSE
+        ),
+    }
+    try:
+        return mapping[value]
+    except KeyError as error:
+        raise ValueError("Runtime Web metrics direction is invalid") from error
+
+
+def _runtime_web_direction_to_message(
+    direction: StreamDirection,
+) -> runtime_web_session_pb2.RuntimeWebSessionDirection.ValueType:
+    return {
+        StreamDirection.REQUEST: (
+            runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_REQUEST
+        ),
+        StreamDirection.RESPONSE: (
+            runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_RESPONSE
+        ),
+    }[direction]
+
+
+def _runtime_web_reason_from_message(
+    value: runtime_web_session_pb2.RuntimeWebSessionCloseReason.ValueType,
+) -> CloseReason:
+    try:
+        name = runtime_web_session_pb2.RuntimeWebSessionCloseReason.Name(value)
+    except ValueError as error:
+        raise ValueError("Runtime Web metrics reason is invalid") from error
+    prefix = "RUNTIME_WEB_SESSION_CLOSE_REASON_"
+    if not name.startswith(prefix) or name == f"{prefix}UNSPECIFIED":
+        raise ValueError("Runtime Web metrics reason is invalid")
+    return CloseReason(name.removeprefix(prefix).lower())
+
+
+def _runtime_web_reason_to_message(
+    reason: CloseReason,
+) -> runtime_web_session_pb2.RuntimeWebSessionCloseReason.ValueType:
+    return runtime_web_session_pb2.RuntimeWebSessionCloseReason.Value(
+        f"RUNTIME_WEB_SESSION_CLOSE_REASON_{reason.value.upper()}"
     )
 
 
@@ -1878,41 +2112,47 @@ def runner_terminal_terminate_intent_to_message(
     )
 
 
-def runner_web_open_intent_from_message(
-    message: runtime_web_transport_pb2.RunnerWebOpenIntent,
-) -> RunnerWebOpenIntent:
-    """Deserialize one bounded Runner Web open intent."""
-    return RunnerWebOpenIntent(
-        identity=runner_web_identity_from_message(message.identity)
+def runner_session_offer_from_message(
+    message: runtime_runner_control_pb2.RunnerSessionOffer,
+) -> RunnerSessionOffer:
+    """Deserialize one exact replacement Runtime Web session offer."""
+    if not message.HasField("registration_deadline_at"):
+        raise ValueError("Runner Web session registration deadline is required")
+    return RunnerSessionOffer(
+        owner=OwnerSessionEpoch(
+            owner_boot_id=message.owner_boot_id,
+            session_lease_id=message.session_lease_id,
+            lease_generation=message.lease_generation,
+            runtime_id=message.runtime_id,
+            desired_generation=message.desired_generation,
+            runner_generation=message.runner_generation,
+        ),
+        owner_replica_id=message.owner_replica_id,
+        connect_address=message.connect_address,
+        tls_server_name=message.tls_server_name,
+        session_nonce=message.join_nonce,
+        protocol_fingerprint=message.protocol_fingerprint,
+        deadline_at=_datetime(message.registration_deadline_at),
     )
 
 
-def runner_web_open_intent_to_message(
-    intent: RunnerWebOpenIntent,
-) -> runtime_web_transport_pb2.RunnerWebOpenIntent:
-    """Serialize one bounded Runner Web open intent."""
-    return runtime_web_transport_pb2.RunnerWebOpenIntent(
-        identity=runner_web_identity_to_message(intent.identity)
-    )
-
-
-def runner_web_cancel_intent_from_message(
-    message: runtime_web_transport_pb2.RunnerWebCancelIntent,
-) -> RunnerWebCancelIntent:
-    """Deserialize one bounded Runner Web cancellation intent."""
-    return RunnerWebCancelIntent(
-        identity=runner_web_identity_from_message(message.identity),
-        reason=_runner_web_cancel_reason_from_message(message.reason),
-    )
-
-
-def runner_web_cancel_intent_to_message(
-    intent: RunnerWebCancelIntent,
-) -> runtime_web_transport_pb2.RunnerWebCancelIntent:
-    """Serialize one bounded Runner Web cancellation intent."""
-    return runtime_web_transport_pb2.RunnerWebCancelIntent(
-        identity=runner_web_identity_to_message(intent.identity),
-        reason=_runner_web_cancel_reason_to_message(intent.reason),
+def runner_session_offer_to_message(
+    offer: RunnerSessionOffer,
+) -> runtime_runner_control_pb2.RunnerSessionOffer:
+    """Serialize one exact replacement Runtime Web session offer."""
+    return runtime_runner_control_pb2.RunnerSessionOffer(
+        runtime_id=offer.owner.runtime_id,
+        desired_generation=offer.owner.desired_generation,
+        runner_generation=offer.owner.runner_generation,
+        owner_replica_id=offer.owner_replica_id,
+        owner_boot_id=offer.owner.owner_boot_id,
+        session_lease_id=offer.owner.session_lease_id,
+        lease_generation=offer.owner.lease_generation,
+        connect_address=offer.connect_address,
+        tls_server_name=offer.tls_server_name,
+        join_nonce=offer.session_nonce,
+        protocol_fingerprint=offer.protocol_fingerprint,
+        registration_deadline_at=_timestamp(offer.deadline_at),
     )
 
 
@@ -2049,108 +2289,6 @@ def _terminal_identity_to_message(
         runtime_id=identity.runtime_id,
         runner_generation=identity.runner_generation,
     )
-
-
-def runner_web_identity_from_message(
-    message: runtime_web_transport_pb2.RuntimeWebTunnelIdentity,
-) -> RunnerWebIdentity:
-    if (
-        not message.HasField("registration_deadline_at")
-        or not message.HasField("approval_deadline_at")
-        or not message.HasField("transport_deadline_at")
-    ):
-        raise ValueError("Runner Web identity deadlines are required")
-    return RunnerWebIdentity(
-        tunnel_id=message.tunnel_id,
-        endpoint_id=message.endpoint_id,
-        cycle_id=message.cycle_id,
-        endpoint_authority_revision=message.endpoint_authority_revision,
-        close_barrier=message.close_barrier,
-        runtime_id=message.runtime_id,
-        desired_generation=message.desired_generation,
-        runner_generation=message.runner_generation,
-        port=message.port,
-        join_nonce=message.join_nonce,
-        registration_deadline_at=_datetime(message.registration_deadline_at),
-        approval_deadline_at=_datetime(message.approval_deadline_at),
-        transport_deadline_at=_datetime(message.transport_deadline_at),
-    )
-
-
-def runner_web_identity_to_message(
-    identity: RunnerWebIdentity,
-) -> runtime_web_transport_pb2.RuntimeWebTunnelIdentity:
-    return runtime_web_transport_pb2.RuntimeWebTunnelIdentity(
-        tunnel_id=identity.tunnel_id,
-        endpoint_id=identity.endpoint_id,
-        cycle_id=identity.cycle_id,
-        endpoint_authority_revision=identity.endpoint_authority_revision,
-        close_barrier=identity.close_barrier,
-        runtime_id=identity.runtime_id,
-        desired_generation=identity.desired_generation,
-        runner_generation=identity.runner_generation,
-        port=identity.port,
-        join_nonce=identity.join_nonce,
-        registration_deadline_at=_timestamp(identity.registration_deadline_at),
-        approval_deadline_at=_timestamp(identity.approval_deadline_at),
-        transport_deadline_at=_timestamp(identity.transport_deadline_at),
-    )
-
-
-def _runner_web_cancel_reason_from_message(
-    value: runtime_web_transport_pb2.RuntimeWebCancelReason.ValueType,
-) -> RunnerWebCancelReason:
-    return {
-        runtime_web_transport_pb2.RUNTIME_WEB_CANCEL_REASON_CALLER: (
-            RunnerWebCancelReason.CALLER
-        ),
-        runtime_web_transport_pb2.RUNTIME_WEB_CANCEL_REASON_APPROVAL_EXPIRED: (
-            RunnerWebCancelReason.APPROVAL_EXPIRED
-        ),
-        runtime_web_transport_pb2.RUNTIME_WEB_CANCEL_REASON_AUTHORITY_REVOKED: (
-            RunnerWebCancelReason.AUTHORITY_REVOKED
-        ),
-        runtime_web_transport_pb2.RUNTIME_WEB_CANCEL_REASON_RUNTIME_REPLACED: (
-            RunnerWebCancelReason.RUNTIME_REPLACED
-        ),
-        runtime_web_transport_pb2.RUNTIME_WEB_CANCEL_REASON_DEADLINE: (
-            RunnerWebCancelReason.DEADLINE
-        ),
-        runtime_web_transport_pb2.RUNTIME_WEB_CANCEL_REASON_SHUTDOWN: (
-            RunnerWebCancelReason.SHUTDOWN
-        ),
-        runtime_web_transport_pb2.RUNTIME_WEB_CANCEL_REASON_PROTOCOL_VIOLATION: (
-            RunnerWebCancelReason.PROTOCOL_VIOLATION
-        ),
-    }[value]
-
-
-def _runner_web_cancel_reason_to_message(
-    reason: RunnerWebCancelReason,
-) -> runtime_web_transport_pb2.RuntimeWebCancelReason.ValueType:
-    return {
-        RunnerWebCancelReason.CALLER: (
-            runtime_web_transport_pb2.RUNTIME_WEB_CANCEL_REASON_CALLER
-        ),
-        RunnerWebCancelReason.APPROVAL_EXPIRED: (
-            runtime_web_transport_pb2.RUNTIME_WEB_CANCEL_REASON_APPROVAL_EXPIRED
-        ),
-        RunnerWebCancelReason.AUTHORITY_REVOKED: (
-            runtime_web_transport_pb2.RUNTIME_WEB_CANCEL_REASON_AUTHORITY_REVOKED
-        ),
-        RunnerWebCancelReason.RUNTIME_REPLACED: (
-            runtime_web_transport_pb2.RUNTIME_WEB_CANCEL_REASON_RUNTIME_REPLACED
-        ),
-        RunnerWebCancelReason.DEADLINE: (
-            runtime_web_transport_pb2.RUNTIME_WEB_CANCEL_REASON_DEADLINE
-        ),
-        RunnerWebCancelReason.SHUTDOWN: (
-            runtime_web_transport_pb2.RUNTIME_WEB_CANCEL_REASON_SHUTDOWN
-        ),
-        RunnerWebCancelReason.PROTOCOL_VIOLATION: (
-            runtime_web_transport_pb2.RUNTIME_WEB_CANCEL_REASON_PROTOCOL_VIOLATION
-        ),
-    }[reason]
 
 
 def _terminal_termination_reason_from_message(
@@ -2295,12 +2433,8 @@ __all__ = [
     "runner_terminal_open_intent_to_message",
     "runner_terminal_terminate_intent_from_message",
     "runner_terminal_terminate_intent_to_message",
-    "runner_web_identity_from_message",
-    "runner_web_identity_to_message",
-    "runner_web_cancel_intent_from_message",
-    "runner_web_cancel_intent_to_message",
-    "runner_web_open_intent_from_message",
-    "runner_web_open_intent_to_message",
+    "runner_session_offer_from_message",
+    "runner_session_offer_to_message",
     "runner_transfer_cancel_from_message",
     "runner_transfer_intent_from_message",
     "runner_transfer_result_from_message",

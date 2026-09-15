@@ -428,10 +428,15 @@ class CoordinatedRuntimeRunnerTerminalStream(RuntimeRunnerTerminalStream):
             changed = change_task.result()
             if changed is not None:
                 self._record_revision = changed.revision
-            return None
+            if not outbound_task.done():
+                outbound_task.cancel()
+            try:
+                return await outbound_task
+            except asyncio.CancelledError:
+                return None
         finally:
             for task in (outbound_task, change_task):
-                if task not in done:
+                if not task.done():
                     task.cancel()
             await asyncio.gather(
                 outbound_task,

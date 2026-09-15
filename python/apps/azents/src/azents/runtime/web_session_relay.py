@@ -5,8 +5,8 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 from collections import deque
-from collections.abc import AsyncIterable, AsyncIterator, Awaitable, Sequence
-from typing import Protocol, Self
+from collections.abc import AsyncIterable, AsyncIterator, Awaitable, Callable, Sequence
+from typing import Protocol, Self, TypeVar
 
 from azents_runtime_control.proto import runtime_web_session_pb2
 from azents_runtime_control.runtime_web_session import (
@@ -21,6 +21,18 @@ from azents_runtime_control.runtime_web_session import (
 from azents.runtime.web_session_broker import BrokerTarget
 
 _MAX_PENDING_RELAY_ENVELOPES = 32
+_HEARTBEAT_INTERVAL_SECONDS = 5.0
+_MAX_MISSED_HEARTBEATS = 2
+_TaskResult = TypeVar("_TaskResult")
+_IGNORED_TOMBSTONE_PAYLOADS = frozenset(
+    {
+        "window_update",
+        "direction_end",
+        "cancel",
+        "reset",
+        "stream_end",
+    }
+)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -96,6 +108,73 @@ class ControlRelayEnvelopeHandler(Protocol):
     ) -> Awaitable[None]: ...
 
 
+class ControlRelayResources(Protocol):
+    """Control process hard-limit accounting used by outbound relays."""
+
+    def try_open_session(self) -> bool: ...
+
+    def close_session(self) -> None: ...
+
+    def try_begin_task(self) -> bool: ...
+
+    def end_task(self) -> None: ...
+
+    def try_reserve_envelope(
+        self,
+        *,
+        application_bytes: int,
+        control_bytes: int,
+    ) -> bool: ...
+
+    def release_envelope(
+        self,
+        *,
+        application_bytes: int,
+        control_bytes: int,
+    ) -> None: ...
+
+
+@dataclasses.dataclass(frozen=True)
+class _BufferedRelayEnvelope:
+    envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope
+    application_bytes: int
+    control_bytes: int
+
+
+def _create_relay_task(
+    resources: ControlRelayResources | None,
+    task: Callable[[], Awaitable[_TaskResult]],
+    *,
+    name: str | None = None,
+) -> asyncio.Task[_TaskResult]:
+    """Create one relay task with an exactly paired process reservation."""
+    if resources is not None and not resources.try_begin_task():
+        raise RuntimeError("Runtime Web relay hard task limit is exhausted")
+    released = False
+
+    def release() -> None:
+        nonlocal released
+        if resources is not None and not released:
+            resources.end_task()
+            released = True
+
+    async def run() -> _TaskResult:
+        try:
+            return await task()
+        finally:
+            release()
+
+    managed = run()
+    try:
+        created = asyncio.create_task(managed, name=name)
+    except BaseException:
+        managed.close()
+        release()
+        raise
+    created.add_done_callback(lambda _completed: release())
+    return created
+
+
 class GrpcPersistentControlRelay:
     """Own one exact byte-bounded Control-to-Owner persistent Relay RPC."""
 
@@ -106,20 +185,24 @@ class GrpcPersistentControlRelay:
         stream: ControlRelayStream,
         handler: ControlRelayEnvelopeHandler,
         local_peer_boot_id: str,
+        resources: ControlRelayResources | None,
     ) -> None:
         self.key = key
         self.stream = stream
         self.handler = handler
         self.local_peer_boot_id = local_peer_boot_id
-        self.outbound: deque[runtime_web_session_pb2.RuntimeWebSessionEnvelope] = (
-            deque()
-        )
+        self.resources = resources
+        self.outbound: deque[_BufferedRelayEnvelope] = deque()
         self.outbound_bytes = 0
         self.condition = asyncio.Condition()
         self.receiver: asyncio.Task[None] | None = None
         self.closed = asyncio.Event()
         self.active = False
         self.failure: Exception | None = None
+        self.session_reserved = False
+        self.heartbeat_task: asyncio.Task[None] | None = None
+        self.heartbeat_sequence = 0
+        self.heartbeat_acknowledged_sequence = 0
 
     @classmethod
     async def connect(
@@ -130,6 +213,7 @@ class GrpcPersistentControlRelay:
         hello: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
         handler: ControlRelayEnvelopeHandler,
         timeout_seconds: float,
+        resources: ControlRelayResources | None,
     ) -> Self:
         """Start and authenticate one exact persistent Owner relay."""
         if timeout_seconds <= 0:
@@ -141,7 +225,12 @@ class GrpcPersistentControlRelay:
             stream=stream,
             handler=handler,
             local_peer_boot_id=hello.peer_boot_id,
+            resources=resources,
         )
+        if resources is not None:
+            if not resources.try_open_session():
+                raise RuntimeError("Runtime Web relay hard session limit is exhausted")
+            relay.session_reserved = True
         accepted = asyncio.get_running_loop().create_future()
         relay.active = True
         try:
@@ -149,13 +238,33 @@ class GrpcPersistentControlRelay:
         except Exception:
             relay.active = False
             relay.closed.set()
+            await relay.close()
             raise
-        relay.receiver = asyncio.create_task(relay._receive(responses, accepted))
+        try:
+            relay.receiver = _create_relay_task(
+                resources,
+                lambda: relay._receive(responses, accepted),
+                name=f"runtime-web-control-relay-reader:{key.owner.session_lease_id}",
+            )
+        except Exception:
+            await relay.close()
+            raise
         try:
             await asyncio.wait_for(accepted, timeout_seconds)
         except asyncio.CancelledError:
             await relay.close()
             raise
+        except Exception:
+            await relay.close()
+            raise
+        try:
+            relay.heartbeat_task = _create_relay_task(
+                resources,
+                relay._heartbeat_loop,
+                name=(
+                    f"runtime-web-control-relay-heartbeat:{key.owner.session_lease_id}"
+                ),
+            )
         except Exception:
             await relay.close()
             raise
@@ -173,6 +282,9 @@ class GrpcPersistentControlRelay:
         size_bytes = envelope.ByteSize()
         if not 1 <= size_bytes <= MAX_ENVELOPE_BYTES:
             raise ValueError("Runtime Web relay envelope size is invalid")
+        application_bytes = _application_bytes(envelope)
+        control_bytes = size_bytes - application_bytes
+        reserved = False
         async with self.condition:
             await self.condition.wait_for(
                 lambda: (
@@ -188,21 +300,48 @@ class GrpcPersistentControlRelay:
                 raise RuntimeError("Runtime Web relay session is not active") from (
                     self.failure
                 )
+            if self.resources is not None:
+                if not self.resources.try_reserve_envelope(
+                    application_bytes=application_bytes,
+                    control_bytes=control_bytes,
+                ):
+                    raise RuntimeError(
+                        "Runtime Web relay hard queue limit is exhausted"
+                    )
+                reserved = True
             queued = runtime_web_session_pb2.RuntimeWebSessionEnvelope()
-            queued.CopyFrom(envelope)
-            self.outbound.append(queued)
-            self.outbound_bytes += size_bytes
-            self.condition.notify_all()
+            try:
+                queued.CopyFrom(envelope)
+                self.outbound.append(
+                    _BufferedRelayEnvelope(
+                        envelope=queued,
+                        application_bytes=application_bytes,
+                        control_bytes=control_bytes,
+                    )
+                )
+                self.outbound_bytes += size_bytes
+                self.condition.notify_all()
+            except BaseException:
+                if self.resources is not None and reserved:
+                    self.resources.release_envelope(
+                        application_bytes=application_bytes,
+                        control_bytes=control_bytes,
+                    )
+                raise
 
     async def close(self) -> None:
         """Close once and discard queued envelopes without replay."""
         async with self.condition:
             self.active = False
+            buffered = tuple(self.outbound)
             self.outbound.clear()
             self.outbound_bytes = 0
             receiver = self.receiver
             self.receiver = None
+            heartbeat_task = self.heartbeat_task
+            self.heartbeat_task = None
             self.condition.notify_all()
+        self._release_buffered(buffered)
         if receiver is not None:
             if not receiver.done():
                 receiver.cancel()
@@ -210,6 +349,15 @@ class GrpcPersistentControlRelay:
                 await receiver
             except asyncio.CancelledError:
                 pass
+        if heartbeat_task is not None and heartbeat_task is not asyncio.current_task():
+            if not heartbeat_task.done():
+                heartbeat_task.cancel()
+            await asyncio.gather(heartbeat_task, return_exceptions=True)
+        if self.session_reserved:
+            resources = self.resources
+            if resources is not None:
+                resources.close_session()
+            self.session_reserved = False
         self.closed.set()
 
     async def wait_closed(self) -> None:
@@ -227,10 +375,11 @@ class GrpcPersistentControlRelay:
                 )
                 if not self.active:
                     return
-                envelope = self.outbound.popleft()
-                self.outbound_bytes -= envelope.ByteSize()
+                buffered = self.outbound.popleft()
+                self.outbound_bytes -= buffered.envelope.ByteSize()
                 self.condition.notify_all()
-            yield envelope
+            self._release_buffered((buffered,))
+            yield buffered.envelope
 
     async def _receive(
         self,
@@ -253,6 +402,18 @@ class GrpcPersistentControlRelay:
                         raise RuntimeError("Runtime Web relay acceptance must be first")
                     accepted.set_result(envelope)
                     continue
+                if envelope.WhichOneof("payload") == "heartbeat_ack":
+                    sequence = envelope.heartbeat_ack.monotonic_sequence
+                    if (
+                        envelope.stream_id != 0
+                        or sequence <= self.heartbeat_acknowledged_sequence
+                        or sequence > self.heartbeat_sequence
+                    ):
+                        raise RuntimeError(
+                            "Runtime Web relay heartbeat acknowledgement is invalid"
+                        )
+                    self.heartbeat_acknowledged_sequence = sequence
+                    continue
                 await self.handler(envelope)
             if not accepted.done():
                 accepted.set_exception(
@@ -267,16 +428,70 @@ class GrpcPersistentControlRelay:
         finally:
             async with self.condition:
                 self.active = False
+                buffered = tuple(self.outbound)
                 self.outbound.clear()
                 self.outbound_bytes = 0
                 self.condition.notify_all()
+            self._release_buffered(buffered)
             self.closed.set()
+
+    async def _heartbeat_loop(self) -> None:
+        """Send application-independent heartbeats and fail after two misses."""
+        while True:
+            await asyncio.sleep(_HEARTBEAT_INTERVAL_SECONDS)
+            if not self.active:
+                return
+            if (
+                self.heartbeat_sequence - self.heartbeat_acknowledged_sequence
+                >= _MAX_MISSED_HEARTBEATS
+            ):
+                self.failure = TimeoutError(
+                    "Runtime Web relay heartbeat acknowledgement timed out"
+                )
+                receiver = self.receiver
+                if receiver is not None:
+                    receiver.cancel()
+                return
+            self.heartbeat_sequence += 1
+            owner = self.key.owner
+            heartbeat = runtime_web_session_pb2.RuntimeWebSessionEnvelope(
+                protocol_fingerprint=self.key.protocol_fingerprint,
+                session_id=owner.session_lease_id,
+                peer_boot_id=self.local_peer_boot_id,
+                owner_boot_id=owner.owner_boot_id,
+                session_lease_id=owner.session_lease_id,
+                lease_generation=owner.lease_generation,
+            )
+            heartbeat.heartbeat.monotonic_sequence = self.heartbeat_sequence
+            try:
+                await self.send(heartbeat)
+            except RuntimeError:
+                return
+
+    def _release_buffered(
+        self,
+        buffered: tuple[_BufferedRelayEnvelope, ...],
+    ) -> None:
+        resources = self.resources
+        if resources is None:
+            return
+        for item in buffered:
+            resources.release_envelope(
+                application_bytes=item.application_bytes,
+                control_bytes=item.control_bytes,
+            )
 
 
 class RelayConnector(Protocol):
     """Create one persistent connection for an exact remote Owner epoch."""
 
     async def __call__(self, key: RelaySessionKey) -> PersistentRelayConnection: ...
+
+
+type RelayRetirementHandler = Callable[
+    [RelaySessionKey, tuple[RelayStreamBinding, ...]],
+    Awaitable[None],
+]
 
 
 class RuntimeWebRelayPool:
@@ -294,6 +509,8 @@ class RuntimeWebRelayPool:
         self.connector = connector
         self.maximum_sessions = maximum_sessions
         self.peer_boot_id = peer_boot_id
+        self.resources: ControlRelayResources | None = None
+        self.retirement_handler: RelayRetirementHandler | None = None
         self.sessions: dict[RelaySessionKey, PersistentRelayConnection] = {}
         self.monitors: dict[RelaySessionKey, asyncio.Task[None]] = {}
         self.next_stream_ids: dict[RelaySessionKey, int] = {}
@@ -301,6 +518,14 @@ class RuntimeWebRelayPool:
             tuple[RelaySessionKey, RelaySourceStreamKey], RelayStreamBinding
         ] = {}
         self.relay_bindings: dict[tuple[RelaySessionKey, int], RelayStreamBinding] = {}
+        self.source_response_session_consumed: dict[tuple[str, str], int] = {}
+        self.source_response_stream_consumed: dict[
+            tuple[RelaySessionKey, RelaySourceStreamKey], int
+        ] = {}
+        self.relay_response_session_consumed: dict[RelaySessionKey, int] = {}
+        self.owner_request_session_consumed: dict[RelaySessionKey, int] = {}
+        self.relay_request_stream_consumed: dict[tuple[RelaySessionKey, int], int] = {}
+        self.source_request_session_consumed: dict[tuple[str, str], int] = {}
         self.relay_tombstones: deque[tuple[RelaySessionKey, int]] = deque(
             maxlen=MAX_STREAM_TOMBSTONES
         )
@@ -313,12 +538,24 @@ class RuntimeWebRelayPool:
         )
         self.lock = asyncio.Lock()
 
+    def bind_retirement_handler(self, handler: RelayRetirementHandler) -> None:
+        """Bind the exact data-plane callback for asynchronous relay loss."""
+        if self.retirement_handler is not None:
+            raise RuntimeError("Runtime Web relay retirement handler is already bound")
+        self.retirement_handler = handler
+
+    def bind_resources(self, resources: ControlRelayResources) -> None:
+        """Bind the process-wide Control task budget before relay use."""
+        if self.resources is not None and self.resources is not resources:
+            raise RuntimeError("Runtime Web relay resources are already bound")
+        self.resources = resources
+
     async def forward(
         self,
         *,
         target: BrokerTarget,
         envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
-    ) -> RelayStreamBinding:
+    ) -> RelayStreamBinding | None:
         """Map and send one source envelope over exactly one persistent relay."""
         if target.local or target.relay_count != 1:
             raise ValueError("Runtime Web relay requires one remote Owner hop")
@@ -347,11 +584,15 @@ class RuntimeWebRelayPool:
             source_stream_id=envelope.stream_id,
         )
         key = RelaySessionKey(target.owner, RUNTIME_WEB_PROTOCOL_FINGERPRINT)
-        connection, binding = await self._route(
+        routed = await self._route(
             key,
             source,
             create=envelope.WhichOneof("payload") == "open",
+            payload=envelope.WhichOneof("payload"),
         )
+        if routed is None:
+            return None
+        connection, binding = routed
         forwarded = runtime_web_session_pb2.RuntimeWebSessionEnvelope()
         forwarded.CopyFrom(envelope)
         forwarded.session_id = key.owner.session_lease_id
@@ -360,6 +601,52 @@ class RuntimeWebRelayPool:
         forwarded.session_lease_id = key.owner.session_lease_id
         forwarded.lease_generation = key.owner.lease_generation
         forwarded.stream_id = binding.relay_stream_id
+        if (
+            forwarded.WhichOneof("payload") == "window_update"
+            and forwarded.window_update.direction
+            == runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_RESPONSE
+        ):
+            async with self.lock:
+                if (
+                    self.sessions.get(key) is not connection
+                    or self.source_bindings.get((key, binding.source)) is not binding
+                ):
+                    raise RuntimeError(
+                        "Runtime Web relay route changed before credit translation"
+                    )
+                source_session = (
+                    binding.source.source_session_id,
+                    binding.source.source_peer_boot_id,
+                )
+                source_session_total = forwarded.window_update.session_consumed_total
+                previous_source_session_total = (
+                    self.source_response_session_consumed.get(source_session)
+                )
+                if (
+                    previous_source_session_total is not None
+                    and source_session_total < previous_source_session_total
+                ):
+                    raise ValueError(
+                        "Runtime Web relay source response consumed total decreased"
+                    )
+                stream_key = (key, binding.source)
+                previous_stream_total = self.source_response_stream_consumed.get(
+                    stream_key,
+                    0,
+                )
+                stream_total = forwarded.window_update.stream_consumed_total
+                if stream_total < previous_stream_total:
+                    raise ValueError(
+                        "Runtime Web relay source response stream total decreased"
+                    )
+                self.source_response_session_consumed[source_session] = (
+                    source_session_total
+                )
+                self.source_response_stream_consumed[stream_key] = stream_total
+                relay_session_total = self.relay_response_session_consumed.get(key, 0)
+                relay_session_total += stream_total - previous_stream_total
+                self.relay_response_session_consumed[key] = relay_session_total
+                forwarded.window_update.session_consumed_total = relay_session_total
         try:
             await connection.send(forwarded)
         except asyncio.CancelledError:
@@ -395,6 +682,58 @@ class RuntimeWebRelayPool:
             translated.session_id = binding.source.source_session_id
             translated.peer_boot_id = self.peer_boot_id
             translated.stream_id = binding.source.source_stream_id
+            if (
+                envelope.WhichOneof("payload") == "window_update"
+                and envelope.window_update.direction
+                == runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_REQUEST
+            ):
+                owner_session_total = envelope.window_update.session_consumed_total
+                previous_owner_session_total = self.owner_request_session_consumed.get(
+                    key
+                )
+                if (
+                    previous_owner_session_total is not None
+                    and owner_session_total < previous_owner_session_total
+                ):
+                    raise ValueError(
+                        "Runtime Web relay Owner request consumed total decreased"
+                    )
+                stream_key = (key, binding.relay_stream_id)
+                previous_stream_total = self.relay_request_stream_consumed.get(
+                    stream_key,
+                    0,
+                )
+                stream_total = envelope.window_update.stream_consumed_total
+                if stream_total < previous_stream_total:
+                    raise ValueError(
+                        "Runtime Web relay Owner request stream total decreased"
+                    )
+                source_session = (
+                    binding.source.source_session_id,
+                    binding.source.source_peer_boot_id,
+                )
+                source_session_total = self.source_request_session_consumed.get(
+                    source_session,
+                    0,
+                )
+                source_session_total += stream_total - previous_stream_total
+                self.owner_request_session_consumed[key] = owner_session_total
+                self.relay_request_stream_consumed[stream_key] = stream_total
+                self.source_request_session_consumed[source_session] = (
+                    source_session_total
+                )
+                translated.window_update.session_consumed_total = source_session_total
+            if envelope.WhichOneof("payload") == "open_accepted":
+                if (
+                    envelope.open_accepted.route_path
+                    != runtime_web_session_pb2.RUNTIME_WEB_SESSION_ROUTE_PATH_LOCAL
+                ):
+                    raise ValueError(
+                        "Runtime Web Owner-local route acceptance is invalid"
+                    )
+                translated.open_accepted.route_path = (
+                    runtime_web_session_pb2.RUNTIME_WEB_SESSION_ROUTE_PATH_RELAY
+                )
             if envelope.WhichOneof("payload") in {
                 "open_rejected",
                 "reset",
@@ -421,6 +760,12 @@ class RuntimeWebRelayPool:
             self.next_stream_ids.clear()
             self.source_bindings.clear()
             self.relay_bindings.clear()
+            self.source_response_session_consumed.clear()
+            self.source_response_stream_consumed.clear()
+            self.relay_response_session_consumed.clear()
+            self.owner_request_session_consumed.clear()
+            self.relay_request_stream_consumed.clear()
+            self.source_request_session_consumed.clear()
         for monitor in monitors:
             monitor.cancel()
         await asyncio.gather(*monitors, return_exceptions=True)
@@ -432,17 +777,43 @@ class RuntimeWebRelayPool:
         if errors:
             raise ExceptionGroup("Runtime Web relay close failed", errors)
 
+    async def release_source(
+        self,
+        *,
+        source_session_id: str,
+        source_peer_boot_id: str,
+    ) -> None:
+        """Release one disconnected source session and its hop-local credit."""
+        source_session = (source_session_id, source_peer_boot_id)
+        async with self.lock:
+            bindings = tuple(
+                (key, binding)
+                for (key, _), binding in self.source_bindings.items()
+                if (
+                    binding.source.source_session_id,
+                    binding.source.source_peer_boot_id,
+                )
+                == source_session
+            )
+            for key, binding in bindings:
+                self._release_binding(key, binding)
+            self.source_response_session_consumed.pop(source_session, None)
+            self.source_request_session_consumed.pop(source_session, None)
+
     async def _route(
         self,
         key: RelaySessionKey,
         source: RelaySourceStreamKey,
         *,
         create: bool,
-    ) -> tuple[PersistentRelayConnection, RelayStreamBinding]:
+        payload: str | None,
+    ) -> tuple[PersistentRelayConnection, RelayStreamBinding] | None:
         async with self.lock:
             mapping_key = (key, source)
             binding = self.source_bindings.get(mapping_key)
             if binding is None and mapping_key in self.source_tombstone_set:
+                if not create and payload in _IGNORED_TOMBSTONE_PAYLOADS:
+                    return None
                 raise ValueError("Runtime Web relay source stream is not reusable")
             if binding is None and not create:
                 raise ValueError("Runtime Web relay source stream is unknown")
@@ -454,7 +825,20 @@ class RuntimeWebRelayPool:
                     )
                 connection = await self.connector(key)
                 self.sessions[key] = connection
-                self.monitors[key] = asyncio.create_task(self._monitor(key, connection))
+                try:
+                    monitor = _create_relay_task(
+                        self.resources,
+                        lambda: self._monitor(key, connection),
+                        name=(
+                            "runtime-web-control-relay-monitor:"
+                            f"{key.owner.session_lease_id}"
+                        ),
+                    )
+                except Exception:
+                    self.sessions.pop(key)
+                    await connection.close()
+                    raise
+                self.monitors[key] = monitor
             if binding is None:
                 relay_stream_id = self.next_stream_ids.get(key, 1)
                 self.next_stream_ids[key] = relay_stream_id + 1
@@ -491,9 +875,17 @@ class RuntimeWebRelayPool:
             )
             for binding in bindings:
                 self._release_binding(key, binding)
+            self.relay_response_session_consumed.pop(key, None)
+            self.owner_request_session_consumed.pop(key, None)
+            retirement_handler = self.retirement_handler if from_monitor else None
         if monitor is not None and not from_monitor:
             monitor.cancel()
-        await connection.close()
+            await asyncio.gather(monitor, return_exceptions=True)
+        try:
+            if retirement_handler is not None and bindings:
+                await retirement_handler(key, bindings)
+        finally:
+            await connection.close()
         return True
 
     def _release_binding(
@@ -501,6 +893,11 @@ class RuntimeWebRelayPool:
     ) -> None:
         self.source_bindings.pop((key, binding.source), None)
         self.relay_bindings.pop((key, binding.relay_stream_id), None)
+        self.source_response_stream_consumed.pop((key, binding.source), None)
+        self.relay_request_stream_consumed.pop(
+            (key, binding.relay_stream_id),
+            None,
+        )
         source_tombstone = (key, binding.source)
         if len(self.source_tombstones) == MAX_STREAM_TOMBSTONES:
             expired_source = self.source_tombstones.popleft()
@@ -529,3 +926,14 @@ def _matches_epoch(
         and envelope.HasField("lease_generation")
         and envelope.lease_generation == key.owner.lease_generation
     )
+
+
+def _application_bytes(
+    envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+) -> int:
+    payload = envelope.WhichOneof("payload")
+    if payload == "data":
+        return len(envelope.data.data)
+    if payload == "websocket":
+        return len(envelope.websocket.data)
+    return 0

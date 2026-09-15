@@ -105,7 +105,7 @@ def test_schema_and_fingerprint_are_exact() -> None:
     assert RUNTIME_WEB_CAPABILITY == "runtime-web-http"
     assert (
         RUNTIME_WEB_PROTOCOL_FINGERPRINT
-        == "daae0e1009d1a546ed8e1b55166a83ccd64bc47b074a103240264f2b4e90c1e2"
+        == "d81d33a004e4089e07f00b0c24a7b9e0e770b35bd624f06b576da2cd110bdb6e"
     )
     assert (
         protocol_fingerprint(descriptor=b"different")
@@ -115,12 +115,22 @@ def test_schema_and_fingerprint_are_exact() -> None:
         protocol_fingerprint(material={"changed": True})
         != RUNTIME_WEB_PROTOCOL_FINGERPRINT
     )
+    assert (
+        protocol_fingerprint(runner_offer_descriptor=b"different")
+        != RUNTIME_WEB_PROTOCOL_FINGERPRINT
+    )
+    assert (
+        protocol_fingerprint(runner_offer_field_descriptor=b"different")
+        != RUNTIME_WEB_PROTOCOL_FINGERPRINT
+    )
 
 
 @pytest.mark.parametrize(
     "address",
     (
-        "control.internal:8032",
+        "control.internal:not-a-port",
+        "control.internal:0",
+        "control.internal:65536",
         "https://control.internal:8030",
         "control.internal:8030/path",
         "control.internal",
@@ -130,7 +140,7 @@ def test_schema_and_fingerprint_are_exact() -> None:
 def test_runner_offer_requires_direct_authenticated_control_port(
     address: str,
 ) -> None:
-    with pytest.raises(ValueError, match="connect address|port 8030"):
+    with pytest.raises(ValueError, match="connect address|port"):
         RunnerSessionOffer(
             owner=OwnerSessionEpoch(
                 owner_boot_id="boot-1",
@@ -140,12 +150,35 @@ def test_runner_offer_requires_direct_authenticated_control_port(
                 desired_generation=2,
                 runner_generation=3,
             ),
+            owner_replica_id="control-1",
             connect_address=address,
             tls_server_name="runtime-control.internal",
             session_nonce="nonce",
             protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
             deadline_at=NOW + timedelta(seconds=10),
         )
+
+
+@pytest.mark.parametrize("address", ("control.internal:8030", "control.internal:8031"))
+def test_runner_offer_accepts_configured_authenticated_control_port(
+    address: str,
+) -> None:
+    RunnerSessionOffer(
+        owner=OwnerSessionEpoch(
+            owner_boot_id="boot-1",
+            session_lease_id="lease-1",
+            lease_generation=1,
+            runtime_id="runtime-1",
+            desired_generation=2,
+            runner_generation=3,
+        ),
+        owner_replica_id="control-1",
+        connect_address=address,
+        tls_server_name="runtime-control.internal",
+        session_nonce="nonce",
+        protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+        deadline_at=NOW + timedelta(seconds=10),
+    )
 
 
 def test_profile_accepts_only_approved_frame_sizes() -> None:

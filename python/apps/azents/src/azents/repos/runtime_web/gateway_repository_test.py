@@ -13,11 +13,9 @@ from azents.repos.runtime_web.data import (
     RuntimeWebOperationIdentity,
 )
 from azents.repos.runtime_web.gateway_data import (
-    RuntimeWebAdmissionLimits,
     RuntimeWebDesiredConfiguration,
 )
 from azents.repos.runtime_web.gateway_repository import (
-    RuntimeWebGatewayCapacityExceeded,
     RuntimeWebGatewayRepository,
 )
 from azents.repos.runtime_web.repository import (
@@ -189,69 +187,3 @@ async def test_configuration_change_applies_without_a_version(
     assert updated is not None
     assert updated.enabled is not configured.enabled
     assert updated.fingerprint == "1" * 64
-
-
-async def test_gateway_admission_enforces_and_releases_shared_scope_limits(
-    rdb_session: AsyncSession,
-) -> None:
-    now = datetime.now(UTC)
-    workspace_id, agent_id, agent_session_id, user_id = await _authority_fixture(
-        rdb_session,
-        handle="runtime-web-gateway-quota",
-        email="runtime-web-gateway-quota@example.com",
-    )
-    endpoint = await RuntimeWebRepository().prepare_endpoint(
-        rdb_session,
-        workspace_id=workspace_id,
-        agent_id=agent_id,
-        agent_session_id=agent_session_id,
-        port=8081,
-        label="Quota",
-        operation=RuntimeWebOperationIdentity(
-            actor_kind=RuntimeWebRequesterKind.AGENT,
-            actor_id=agent_id,
-            execution_id="gateway-quota-run",
-            operation_key="gateway-quota-prepare",
-        ),
-        endpoint_limit=16,
-    )
-    repository = RuntimeWebGatewayRepository()
-    limits = RuntimeWebAdmissionLimits(endpoint=1, user=2, agent=2)
-    await repository.acquire_admission(
-        rdb_session,
-        tunnel_id="tunnel-one",
-        endpoint_id=endpoint.endpoint.id,
-        user_id=user_id,
-        agent_id=agent_id,
-        websocket=False,
-        lease_expires_at=now + timedelta(minutes=1),
-        now=now,
-        limits=limits,
-    )
-
-    with pytest.raises(RuntimeWebGatewayCapacityExceeded) as captured:
-        await repository.acquire_admission(
-            rdb_session,
-            tunnel_id="tunnel-two",
-            endpoint_id=endpoint.endpoint.id,
-            user_id=user_id,
-            agent_id=agent_id,
-            websocket=False,
-            lease_expires_at=now + timedelta(minutes=1),
-            now=now,
-            limits=limits,
-        )
-    assert captured.value.scope == "endpoint"
-
-    await repository.release_admission(rdb_session, tunnel_id="tunnel-one")
-    await repository.acquire_admission(
-        rdb_session,
-        tunnel_id="tunnel-two",
-        endpoint_id=endpoint.endpoint.id,
-        user_id=user_id,
-        agent_id=agent_id,
-        websocket=False,
-        lease_expires_at=now + timedelta(minutes=1),
-        now=now,
-        limits=limits,
-    )

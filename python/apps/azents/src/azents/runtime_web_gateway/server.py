@@ -2,37 +2,37 @@
 
 import asyncio
 import contextlib
+import dataclasses
 import datetime
 import html
+import itertools
 import logging
+import os
+import secrets
 import signal
+import sys
 import urllib.parse
 from collections.abc import AsyncGenerator, Mapping
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Protocol
 
 import boto3
-import grpc
 from aiohttp import WSMessage, WSMsgType, web
 from azcommon.logging import configure_logging_for_runtime
-from azents_runtime_control.runner_web import (
-    MAX_RUNTIME_WEB_FRAME_BYTES,
-    RunnerWebBodyChunk,
-    RunnerWebCancel,
-    RunnerWebCancelReason,
-    RunnerWebHeader,
-    RunnerWebIdentity,
-    RunnerWebProtocol,
-    RunnerWebRequestHead,
-    RunnerWebResponseHead,
-    RunnerWebSocketFrame,
-    RunnerWebSocketOpcode,
-    RunnerWebStreamEnd,
-    RunnerWebStreamError,
-    RunnerWebStreamErrorCode,
+from azents_runtime_control.runtime_web_session import (
+    MANDATORY_DATA_FRAME_BYTES,
+    MAX_WEBSOCKET_MESSAGE_BYTES,
+    CloseReason,
+    Header,
+    RequestHead,
+    StreamAuthority,
+    StreamProtocol,
+    WebSocketOpcode,
 )
 from mypy_boto3_rds import RDSClient
 from sqlalchemy import event
+from sqlalchemy import text as sql_text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 
 from azents.core.config import PostgreSQLConfig
@@ -41,7 +41,6 @@ from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.runtime_web.data import RuntimeWebEndpoint
 from azents.repos.runtime_web.gateway_data import (
-    RuntimeWebAdmissionLimits,
     RuntimeWebBrokerBinding,
     RuntimeWebDesiredConfiguration,
     RuntimeWebRedeemedIdentity,
@@ -50,7 +49,6 @@ from azents.repos.runtime_web.gateway_data import (
     RuntimeWebGatewayAuthority as RuntimeWebGatewayAuthorityData,
 )
 from azents.repos.runtime_web.gateway_repository import (
-    RuntimeWebGatewayCapacityExceeded,
     RuntimeWebGatewayRepository,
 )
 from azents.repos.runtime_web.repository import (
@@ -58,6 +56,21 @@ from azents.repos.runtime_web.repository import (
     RuntimeWebRepositoryConflict,
 )
 from azents.repos.workspace_user import WorkspaceUserRepository
+from azents.runtime_web_gateway.operations import (
+    RuntimeWebCapacityBackend,
+    RuntimeWebDrainCoordinator,
+    RuntimeWebDrainPolicy,
+    RuntimeWebDrainRegistration,
+    RuntimeWebDrainStreamKind,
+    RuntimeWebGatewayDependencyEvidence,
+    RuntimeWebGatewayHardLimits,
+    RuntimeWebGatewayHealth,
+    RuntimeWebGatewayOperationalState,
+    RuntimeWebGatewayOperationsCoordinator,
+    RuntimeWebGatewayPressure,
+    RuntimeWebGatewayResourceTracker,
+    render_openmetrics,
+)
 from azents.runtime_web_gateway.policy import (
     RuntimeWebCorsDecision,
     RuntimeWebPolicyCode,
@@ -70,15 +83,20 @@ from azents.runtime_web_gateway.policy import (
     parse_target_host,
     reject_service_worker_request,
 )
+from azents.runtime_web_gateway.session_runtime import (
+    RuntimeWebGatewayControlSessions,
+)
 from azents.runtime_web_gateway.settings import (
     RuntimeWebGatewayConfig,
     RuntimeWebGatewaySettings,
 )
-from azents.runtime_web_gateway.transport import (
-    GrpcRuntimeWebProxyClient,
-    RuntimeWebProxyClosed,
-    RuntimeWebProxySession,
+from azents.runtime_web_gateway.web_session_bridge import (
+    BrowserStreamEvent,
+    RuntimeWebBrowserStreamBridge,
+    RuntimeWebGatewayResourceExhausted,
+    RuntimeWebOpenRejected,
 )
+from azents.runtime_web_gateway.web_session_pool import RuntimeWebGatewaySessionPool
 from azents.services.runtime_web.gateway_auth import RuntimeWebGatewayAuthService
 from azents.services.runtime_web.gateway_authority import (
     RuntimeWebGatewayAuthorityCode,
@@ -88,18 +106,67 @@ from azents.services.runtime_web.gateway_authority import (
 
 _LOGGER = logging.getLogger(__name__)
 _BROKER_BINDING_COOKIE = "__Host-Azents-Runtime-Web-Broker-Binding"
+_WEBSOCKET_SUBPROTOCOL_HEADER = b"sec-websocket-protocol"
+_WEBSOCKET_TOKEN_BYTES = frozenset(
+    b"!#$%&'*+-.^_`|~0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+)
 _SECURITY_CSP = (
     "default-src 'none'; base-uri 'none'; form-action 'self'; "
     "frame-ancestors 'none'; script-src 'nonce-runtime-web'"
 )
 
 
-class RuntimeWebProxyClient(Protocol):
-    """Process-owned trusted Control client."""
+class RuntimeWebResidentMemorySampler(Protocol):
+    """Return current process resident memory without lifetime high-water state."""
 
-    def open(self) -> RuntimeWebProxySession: ...
+    def current_bytes(self) -> int: ...
 
-    async def close(self) -> None: ...
+
+class _RuntimeWebSocketSubprotocolError(ValueError):
+    """One bounded WebSocket subprotocol handshake rejection."""
+
+
+class LinuxProcResidentMemorySampler:
+    """Read current Linux resident pages from one injected procfs statm path."""
+
+    def __init__(self, *, statm_path: Path, page_size_bytes: int) -> None:
+        if page_size_bytes <= 0:
+            raise ValueError("Runtime Web RSS page size must be positive")
+        self.statm_path = statm_path
+        self.page_size_bytes = page_size_bytes
+
+    def current_bytes(self) -> int:
+        """Return current RSS bytes from the Linux procfs resident-page field."""
+        try:
+            fields = self.statm_path.read_text(encoding="ascii").split()
+        except OSError as error:
+            raise RuntimeError(
+                "Runtime Web current RSS sample is unavailable"
+            ) from error
+        if len(fields) < 2:
+            raise RuntimeError("Runtime Web current RSS sample is invalid")
+        try:
+            resident_pages = int(fields[1])
+        except ValueError as error:
+            raise RuntimeError("Runtime Web current RSS sample is invalid") from error
+        if resident_pages < 0:
+            raise RuntimeError("Runtime Web current RSS sample is invalid")
+        return resident_pages * self.page_size_bytes
+
+
+def create_runtime_web_resident_memory_sampler(
+    *,
+    platform: str,
+) -> RuntimeWebResidentMemorySampler:
+    """Select one explicit current-RSS backend or fail safely."""
+    if platform.startswith("linux"):
+        return LinuxProcResidentMemorySampler(
+            statm_path=Path("/proc/self/statm"),
+            page_size_bytes=int(os.sysconf("SC_PAGE_SIZE")),
+        )
+    raise RuntimeError(
+        f"Runtime Web current RSS sampling is unsupported on platform {platform!r}"
+    )
 
 
 class RuntimeWebGatewayAuth(Protocol):
@@ -119,6 +186,12 @@ class RuntimeWebGatewayAuth(Protocol):
         broker_binding_secret: str,
         now: datetime.datetime,
     ) -> RuntimeWebRedeemedIdentity: ...
+
+
+class RuntimeWebGatewaySessionProvider(Protocol):
+    """Active replacement Control sessions used by public dispatch."""
+
+    pool: RuntimeWebGatewaySessionPool
 
 
 class RuntimeWebGatewayAuthorityProvider(Protocol):
@@ -148,28 +221,8 @@ class RuntimeWebGatewayAuthorityProvider(Protocol):
         *,
         hostname_key: str,
         identity_secret: str,
-        protocol: RunnerWebProtocol,
+        protocol: StreamProtocol,
     ) -> RuntimeWebGatewayAuthorityData: ...
-
-    def tunnel_identity(
-        self,
-        *,
-        authority: RuntimeWebGatewayAuthorityData,
-        protocol: RunnerWebProtocol,
-        now: datetime.datetime,
-    ) -> RunnerWebIdentity: ...
-
-    async def acquire_admission(
-        self,
-        *,
-        authority: RuntimeWebGatewayAuthorityData,
-        identity: RunnerWebIdentity,
-        protocol: RunnerWebProtocol,
-        limits: RuntimeWebAdmissionLimits,
-        now: datetime.datetime,
-    ) -> None: ...
-
-    async def release_admission(self, *, tunnel_id: str) -> None: ...
 
     async def identity_and_access_current(
         self,
@@ -188,16 +241,43 @@ class _GatewayState:
         settings: RuntimeWebGatewaySettings,
         auth: RuntimeWebGatewayAuth,
         authority: RuntimeWebGatewayAuthorityProvider,
-        proxy: RuntimeWebProxyClient,
+        control_sessions: RuntimeWebGatewaySessionProvider,
+        operations: RuntimeWebGatewayOperationsCoordinator,
+        operational_state: RuntimeWebGatewayOperationalState,
     ) -> None:
         self.config = config
         self.settings = settings
         self.auth = auth
         self.authority = authority
-        self.proxy = proxy
+        self.control_sessions = control_sessions
+        self.operations = operations
+        self.operational_state = operational_state
+        self.stream_ids = itertools.count(1)
+
+    def next_stream_id(self) -> int:
+        """Allocate one process-lifetime non-reusable logical stream ID."""
+        return next(self.stream_ids)
 
 
 _STATE = web.AppKey("runtime-web-gateway-state", _GatewayState)
+
+
+class _OperationsState:
+    """Typed dependencies exposed only by the internal operations server."""
+
+    def __init__(
+        self,
+        *,
+        config: RuntimeWebGatewayConfig,
+        state: RuntimeWebGatewayOperationalState,
+        operations: RuntimeWebGatewayOperationsCoordinator,
+    ) -> None:
+        self.config = config
+        self.state = state
+        self.operations = operations
+
+
+_OPERATIONS_STATE = web.AppKey("runtime-web-gateway-operations", _OperationsState)
 
 
 def create_runtime_web_gateway_application(
@@ -206,7 +286,9 @@ def create_runtime_web_gateway_application(
     settings: RuntimeWebGatewaySettings,
     auth: RuntimeWebGatewayAuth,
     authority: RuntimeWebGatewayAuthorityProvider,
-    proxy: RuntimeWebProxyClient,
+    control_sessions: RuntimeWebGatewaySessionProvider,
+    operations: RuntimeWebGatewayOperationsCoordinator,
+    operational_state: RuntimeWebGatewayOperationalState,
 ) -> web.Application:
     """Create the independently deployable Gateway HTTP application."""
     application = web.Application(
@@ -217,10 +299,31 @@ def create_runtime_web_gateway_application(
         settings=settings,
         auth=auth,
         authority=authority,
-        proxy=proxy,
+        control_sessions=control_sessions,
+        operations=operations,
+        operational_state=operational_state,
+    )
+    application.router.add_route("*", "/{path:.*}", _dispatch)
+    return application
+
+
+def create_runtime_web_gateway_operations_application(
+    *,
+    config: RuntimeWebGatewayConfig,
+    state: RuntimeWebGatewayOperationalState,
+    operations: RuntimeWebGatewayOperationsCoordinator,
+) -> web.Application:
+    """Create the internal-only health, metrics, and drain application."""
+    application = web.Application(client_max_size=1024)
+    application[_OPERATIONS_STATE] = _OperationsState(
+        config=config,
+        state=state,
+        operations=operations,
     )
     application.router.add_get("/__azents/ready", _ready)
-    application.router.add_route("*", "/{path:.*}", _dispatch)
+    application.router.add_get("/__azents/live", _live)
+    application.router.add_get("/__azents/metrics", _metrics)
+    application.router.add_route("*", "/__azents/drain", _drain)
     return application
 
 
@@ -232,6 +335,9 @@ async def runtime_web_gateway_lifespan(
     if not settings.runtime_web_gateway_enabled:
         raise RuntimeError("Runtime Web Gateway is disabled")
     config = RuntimeWebGatewayConfig.from_settings(settings)
+    resident_memory_sampler = create_runtime_web_resident_memory_sampler(
+        platform=sys.platform,
+    )
     engine = _create_engine(settings)
     session_manager = _session_manager(engine)
     gateway_repository = RuntimeWebGatewayRepository()
@@ -261,35 +367,115 @@ async def runtime_web_gateway_lifespan(
     control_endpoint = settings.runtime_web_gateway_control_endpoint
     if control_endpoint is None:
         raise RuntimeError("Runtime Web Control endpoint is required")
-    proxy = GrpcRuntimeWebProxyClient.from_endpoint(
+    resources = RuntimeWebGatewayResourceTracker(
+        RuntimeWebGatewayHardLimits(
+            maximum_active_exchanges=(
+                settings.runtime_web_gateway_maximum_active_exchanges
+            ),
+            maximum_application_buffer_bytes=(
+                settings.runtime_web_gateway_maximum_application_buffer_bytes
+            ),
+            maximum_control_buffer_bytes=(
+                settings.runtime_web_gateway_maximum_control_buffer_bytes
+            ),
+            maximum_pending_tasks=(settings.runtime_web_gateway_maximum_pending_tasks),
+            maximum_scheduler_waiters=(
+                settings.runtime_web_gateway_maximum_scheduler_waiters
+            ),
+            maximum_event_loop_lag_milliseconds=(
+                settings.runtime_web_gateway_maximum_event_loop_lag_milliseconds
+            ),
+            maximum_resident_memory_bytes=(
+                settings.runtime_web_gateway_maximum_resident_memory_bytes
+            ),
+        )
+    )
+    control_sessions = RuntimeWebGatewayControlSessions.from_endpoint(
         control_endpoint,
         allow_insecure=settings.runtime_web_gateway_control_allow_insecure,
         ca_file=settings.runtime_web_gateway_control_tls_ca_file,
         certificate_file=(settings.runtime_web_gateway_control_tls_certificate_file),
         private_key_file=(settings.runtime_web_gateway_control_tls_private_key_file),
+        session_count=settings.runtime_web_gateway_control_session_pool_size,
+        resources=resources,
+    )
+    await control_sessions.start()
+    operational_state = RuntimeWebGatewayOperationalState(
+        health=RuntimeWebGatewayHealth(
+            configuration_valid=True,
+            maintenance=settings.runtime_web_gateway_maintenance,
+            draining=False,
+            authority_query_available=False,
+            replacement_protocol_compatible=False,
+            local_pressure_acceptable=True,
+            event_loop_responsive=True,
+            redis_available=True,
+        ),
+        pressure=RuntimeWebGatewayPressure(0, 0, 0, 0, 0),
+        backend=RuntimeWebCapacityBackend.MEMORY,
+        capacity_degraded=False,
+        resources=resources,
+        local_open_count=0,
+        relay_open_count=0,
+        event_loop_lag_milliseconds=0,
+        resident_memory_bytes=0,
+    )
+    drain = RuntimeWebDrainCoordinator(
+        policy=RuntimeWebDrainPolicy(),
+        resources=resources,
+        begin_session_drain=control_sessions.begin_drain,
+    )
+    operations = RuntimeWebGatewayOperationsCoordinator(
+        state=operational_state,
+        drain=drain,
     )
     application = create_runtime_web_gateway_application(
         config=config,
         settings=settings,
         auth=auth,
         authority=authority,
-        proxy=proxy,
+        control_sessions=control_sessions,
+        operations=operations,
+        operational_state=operational_state,
     )
-    runner = web.AppRunner(
-        application,
+    operations_application = create_runtime_web_gateway_operations_application(
+        config=config,
+        state=operational_state,
+        operations=operations,
+    )
+    runner = create_runtime_web_gateway_public_runner(application)
+    operations_runner = web.AppRunner(
+        operations_application,
         access_log_class=_ContentFreeAccessLogger,
     )
     await runner.setup()
+    await operations_runner.setup()
     site = web.TCPSite(
         runner,
         host="0.0.0.0",
         port=settings.runtime_web_gateway_port,
     )
+    operations_site = web.TCPSite(
+        operations_runner,
+        host="0.0.0.0",
+        port=settings.runtime_web_gateway_metrics_port,
+    )
     await site.start()
+    await operations_site.start()
+    sampler = asyncio.create_task(
+        _refresh_operational_state(
+            engine=engine,
+            control_sessions=control_sessions,
+            state=operational_state,
+            resident_memory_sampler=resident_memory_sampler,
+        ),
+        name="runtime-web-gateway-operational-state",
+    )
     _LOGGER.info(
         "Runtime Web Gateway started",
         extra={
             "port": settings.runtime_web_gateway_port,
+            "operations_port": settings.runtime_web_gateway_metrics_port,
             "auth_mode": config.auth_mode.value,
             "service_suffix": config.service_suffix,
         },
@@ -297,9 +483,25 @@ async def runtime_web_gateway_lifespan(
     try:
         yield runner
     finally:
+        await operations.drain()
+        sampler.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await sampler
         await runner.cleanup()
-        await proxy.close()
+        await operations_runner.cleanup()
+        await control_sessions.close()
         await engine.dispose()
+
+
+def create_runtime_web_gateway_public_runner(
+    application: web.Application,
+) -> web.AppRunner:
+    """Create the public runner with immediate disconnected-handler cancellation."""
+    return web.AppRunner(
+        application,
+        access_log_class=_ContentFreeAccessLogger,
+        handler_cancellation=True,
+    )
 
 
 async def run_runtime_web_gateway() -> None:
@@ -320,18 +522,131 @@ async def run_runtime_web_gateway() -> None:
 
 
 async def _ready(request: web.Request) -> web.Response:
-    state = request.app[_STATE]
+    operations = request.app[_OPERATIONS_STATE]
+    state = operations.state
+    state.refresh_resource_pressure()
     return web.json_response(
         {
-            "ready": True,
-            "auth_mode": state.config.auth_mode.value,
+            "ready": state.health.ready,
+            "auth_mode": operations.config.auth_mode.value,
         },
-        headers=_security_headers(state.config),
+        status=200 if state.health.ready else 503,
+        headers=_security_headers(operations.config),
     )
+
+
+async def _live(request: web.Request) -> web.Response:
+    operations = request.app[_OPERATIONS_STATE]
+    return web.json_response(
+        {"live": operations.state.health.live},
+        status=200 if operations.state.health.live else 503,
+        headers=_security_headers(operations.config),
+    )
+
+
+async def _metrics(request: web.Request) -> web.Response:
+    operations = request.app[_OPERATIONS_STATE]
+    operations.state.refresh_resource_pressure()
+    resources = operations.state.resources.snapshot()
+    limits = operations.state.resources.limits
+    return web.Response(
+        text=render_openmetrics(
+            pressure=operations.state.pressure,
+            health=operations.state.health,
+            backend=operations.state.backend,
+            capacity_degraded=operations.state.capacity_degraded,
+            active_exchanges=resources.active_exchanges,
+            local_open_count=operations.state.local_open_count,
+            relay_open_count=operations.state.relay_open_count,
+            application_buffer_bytes=resources.application_buffer_bytes,
+            application_buffer_limit_bytes=(limits.maximum_application_buffer_bytes),
+            control_buffer_bytes=resources.control_buffer_bytes,
+            scheduler_waiters=resources.scheduler_waiters,
+            scheduler_waiter_limit=limits.maximum_scheduler_waiters,
+            resident_memory_bytes=operations.state.resident_memory_bytes,
+            resident_memory_limit_bytes=limits.maximum_resident_memory_bytes,
+            transport=operations.state.resources,
+        ),
+        content_type="text/plain",
+    )
+
+
+async def _drain(request: web.Request) -> web.Response:
+    operations = request.app[_OPERATIONS_STATE]
+    result = await operations.operations.drain()
+    return web.json_response(
+        {
+            "gracefully_closed": len(result.gracefully_closed),
+            "force_closed": len(result.force_closed),
+            "callback_failures": len(result.callback_failures),
+        },
+        headers=_security_headers(operations.config),
+    )
+
+
+async def _refresh_operational_state(
+    *,
+    engine: AsyncEngine,
+    control_sessions: RuntimeWebGatewayControlSessions,
+    state: RuntimeWebGatewayOperationalState,
+    resident_memory_sampler: RuntimeWebResidentMemorySampler,
+) -> None:
+    """Refresh durable authority, exact peer, event-loop, and RSS evidence."""
+    loop = asyncio.get_running_loop()
+    expected = loop.time()
+    while True:
+        expected += 0.25
+        await asyncio.sleep(max(0.0, expected - loop.time()))
+        observed = loop.time()
+        lag_milliseconds = max(0.0, (observed - expected) * 1000)
+        state.update_process_pressure(
+            event_loop_lag_milliseconds=lag_milliseconds,
+            resident_memory_bytes=resident_memory_sampler.current_bytes(),
+        )
+        if int(observed * 4) % 20 != 0:
+            continue
+        try:
+            async with engine.connect() as connection:
+                await connection.execute(sql_text("SELECT 1"))
+            authority_available = True
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            _LOGGER.exception("Runtime Web authority readiness query failed")
+            authority_available = False
+        fingerprints = await control_sessions.compatible_fingerprints()
+        state.update_dependencies(
+            evidence=RuntimeWebGatewayDependencyEvidence.from_observation(
+                authority_query_succeeded=authority_available,
+                control_protocol_fingerprints=fingerprints,
+            ),
+            redis_available=True,
+        )
 
 
 async def _dispatch(request: web.Request) -> web.StreamResponse:
     state = request.app[_STATE]
+    if state.operational_state.health.maintenance:
+        return _bounded_error(
+            request,
+            state.config,
+            status=503,
+            code="maintenance",
+        )
+    if state.operational_state.health.draining:
+        return _bounded_error(
+            request,
+            state.config,
+            status=503,
+            code=CloseReason.SERVICE_DRAIN.value,
+        )
+    if state.operational_state.current_pressure().value >= 1.0:
+        return _bounded_error(
+            request,
+            state.config,
+            status=429,
+            code=CloseReason.RESOURCE_EXHAUSTED.value,
+        )
     try:
         target = parse_target_host(
             request.headers.get("Host", ""),
@@ -513,9 +828,9 @@ async def _endpoint(
         state.config.identity_cookie_name,
     )
     protocol = (
-        RunnerWebProtocol.WEBSOCKET
+        StreamProtocol.WEBSOCKET
         if request.headers.get("Upgrade", "").lower() == "websocket"
-        else RunnerWebProtocol.HTTP
+        else StreamProtocol.HTTP
     )
     navigation = _safe_navigation(request)
     if identity_secret is None:
@@ -562,11 +877,6 @@ async def _endpoint(
         source_origins=source_origins,
     )
     now = datetime.datetime.now(datetime.UTC)
-    identity = state.authority.tunnel_identity(
-        authority=authority,
-        protocol=protocol,
-        now=now,
-    )
     headers = normalize_request_headers(
         request.raw_headers,
         port=endpoint.port,
@@ -576,36 +886,61 @@ async def _endpoint(
     target = request.raw_path.encode("ascii", errors="strict")
     if not target.startswith(b"/") or target.startswith(b"//"):
         raise RuntimeWebPolicyError(RuntimeWebPolicyCode.BAD_REQUEST)
-    head = RunnerWebRequestHead(
-        identity=identity,
+    stream_authority = _stream_authority(
+        authority=authority,
+        protocol=protocol,
+        now=now,
+    )
+    head = RequestHead(
         protocol=protocol,
         method=request.method.encode("ascii"),
         target=target,
-        headers=tuple(
-            RunnerWebHeader(name=name, value=value) for name, value in headers
-        ),
+        headers=tuple(Header(name=name, value=value) for name, value in headers),
     )
-    limits = _admission_limits(state.settings, protocol)
-    try:
-        await state.authority.acquire_admission(
-            authority=authority,
-            identity=identity,
-            protocol=protocol,
-            limits=limits,
-            now=now,
-        )
-    except RuntimeWebGatewayCapacityExceeded:
+    bridge_box: list[RuntimeWebBrowserStreamBridge | None] = [None]
+
+    async def _graceful_close(reason: CloseReason) -> None:
+        bridge = bridge_box[0]
+        if bridge is not None:
+            await bridge.cancel(reason)
+
+    registration = await state.operations.drain_coordinator.register(
+        kind=(
+            RuntimeWebDrainStreamKind.LONG_LIVED
+            if protocol is StreamProtocol.WEBSOCKET
+            else RuntimeWebDrainStreamKind.FINITE_HTTP
+        ),
+        request_graceful_close=_graceful_close,
+        force_close=_graceful_close,
+    )
+    if registration is None:
         return _bounded_error(
             request,
             state.config,
             status=429,
-            code="capacity_exhausted",
+            code=CloseReason.RESOURCE_EXHAUSTED.value,
         )
     try:
-        if protocol is RunnerWebProtocol.WEBSOCKET:
+        bridge = await RuntimeWebBrowserStreamBridge.open(
+            pool=state.control_sessions.pool,
+            stream_id=state.next_stream_id(),
+            authority=stream_authority,
+            request_head=head,
+        )
+        bridge_box[0] = bridge
+        await bridge.wait_accepted(
+            timeout_seconds=max(
+                0.001,
+                (stream_authority.open_deadline_at - now).total_seconds(),
+            ),
+        )
+        assert bridge.route is not None
+        state.operational_state.record_route(bridge.route)
+        if protocol is StreamProtocol.WEBSOCKET:
             return await _proxy_websocket(
                 request,
                 state,
+                bridge=bridge,
                 head=head,
                 cors=cors,
                 target_origin=target_origin,
@@ -614,86 +949,140 @@ async def _endpoint(
         return await _proxy_http(
             request,
             state,
+            bridge=bridge,
             head=head,
+            registration=registration,
             cors=cors,
             target_origin=target_origin,
             authority=authority,
         )
+    except RuntimeWebOpenRejected as error:
+        return _stream_error(request, state.config, error.reason)
+    except RuntimeWebGatewayResourceExhausted:
+        return _stream_error(request, state.config, CloseReason.RESOURCE_EXHAUSTED)
+    except RuntimeError, TimeoutError:
+        return _bounded_error(
+            request,
+            state.config,
+            status=503,
+            code=CloseReason.TRANSPORT_UNAVAILABLE.value,
+        )
     finally:
-        await state.authority.release_admission(tunnel_id=identity.tunnel_id)
+        try:
+            bridge = bridge_box[0]
+            if bridge is not None and not bridge.released:
+                with contextlib.suppress(RuntimeError):
+                    await bridge.cancel()
+        finally:
+            await state.operations.drain_coordinator.release(registration)
 
 
 async def _proxy_http(
     request: web.Request,
     state: _GatewayState,
     *,
-    head: RunnerWebRequestHead,
+    bridge: RuntimeWebBrowserStreamBridge,
+    head: RequestHead,
+    registration: RuntimeWebDrainRegistration,
     cors: RuntimeWebCorsDecision,
     target_origin: str,
     authority: RuntimeWebGatewayAuthorityData,
 ) -> web.StreamResponse:
-    session = state.proxy.open()
     response: web.StreamResponse | None = None
     body_task: asyncio.Task[None] | None = None
+    event_task: asyncio.Task[BrowserStreamEvent] | None = None
     guard_task: asyncio.Task[None] | None = None
     try:
-        await session.start(head)
         guard_task = asyncio.create_task(
-            _guard_identity_and_access(state.authority, authority, session),
-            name=f"runtime-web-authority-guard:{head.identity.tunnel_id}",
+            _guard_identity_and_access(state.authority, authority, bridge),
+            name=f"runtime-web-authority-guard:{bridge.binding.stream_id}",
         )
         body_task = asyncio.create_task(
-            _send_request_body(request, session, state.config.request_body_bytes),
-            name=f"runtime-web-request-body:{head.identity.tunnel_id}",
+            _send_request_body(
+                request,
+                bridge,
+                state.operational_state.resources,
+                state.config.request_body_bytes,
+            ),
+            name=f"runtime-web-request-body:{bridge.binding.stream_id}",
         )
-        async for frame in session.events():
-            if isinstance(frame, RunnerWebResponseHead):
-                if response is not None:
-                    raise RuntimeWebProxyClosed(
-                        "Runtime Web response head was duplicated"
-                    )
-                response = web.StreamResponse(
-                    status=frame.status,
-                    headers=normalize_response_headers(
-                        ((header.name, header.value) for header in frame.headers),
-                        config=state.config,
-                        cors=cors,
-                        target_origin=target_origin,
-                        port=head.identity.port,
-                    ),
+        while True:
+            event_task = asyncio.create_task(bridge.next_event())
+            if body_task is not None:
+                done, _ = await asyncio.wait(
+                    (body_task, event_task),
+                    return_when=asyncio.FIRST_COMPLETED,
                 )
-                await response.prepare(request)
-                continue
-            if isinstance(frame, RunnerWebBodyChunk):
-                if response is None:
-                    raise RuntimeWebProxyClosed(
-                        "Runtime Web response body preceded headers"
+                if body_task in done:
+                    await body_task
+                    body_task = None
+            event = await event_task
+            event_task = None
+            if event.payload == "response_head":
+                try:
+                    if response is not None:
+                        raise RuntimeError("Runtime Web response head was duplicated")
+                    if event.status is None:
+                        raise RuntimeError("Runtime Web response status is absent")
+                    if _response_is_sse(event.headers):
+                        await state.operations.drain_coordinator.reclassify(
+                            registration,
+                            kind=RuntimeWebDrainStreamKind.LONG_LIVED,
+                        )
+                    response = web.StreamResponse(
+                        status=event.status,
+                        headers=normalize_response_headers(
+                            ((header.name, header.value) for header in event.headers),
+                            config=state.config,
+                            cors=cors,
+                            target_origin=target_origin,
+                            port=authority.endpoint.port,
+                        ),
                     )
-                await response.write(frame.data)
+                    await response.prepare(request)
+                finally:
+                    await bridge.release_event(event)
                 continue
-            if isinstance(frame, RunnerWebStreamEnd):
-                break
-            if isinstance(frame, RunnerWebStreamError):
+            if event.payload == "data":
                 if response is None:
-                    return _stream_error(request, state.config, frame.code)
+                    raise RuntimeError("Runtime Web response body preceded headers")
+                written = False
+                try:
+                    await response.write(event.data)
+                    written = True
+                finally:
+                    if written:
+                        await bridge.release_event(event)
+                    else:
+                        await bridge.discard_event(event)
+                continue
+            if event.payload == "direction_end":
+                await bridge.release_event(event)
+                continue
+            if event.payload == "terminal":
+                await bridge.release_event(event)
+                if event.terminal_reason is not None and response is None:
+                    return _stream_error(request, state.config, event.terminal_reason)
                 break
-        if body_task is not None:
-            await body_task
+            await bridge.release_event(event)
+            raise RuntimeError("Runtime Web HTTP event is invalid")
         if response is None:
             return _bounded_error(
                 request,
                 state.config,
                 status=502,
-                code="application_unavailable",
+                code=CloseReason.APPLICATION_UNAVAILABLE.value,
             )
         await response.write_eof()
         return response
-    except grpc.aio.AioRpcError as error:
-        if response is not None:
-            await response.write_eof()
-            return response
-        return _grpc_error(request, state.config, error)
     finally:
+        if event_task is not None:
+            if not event_task.done():
+                event_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await event_task
+            elif not event_task.cancelled() and event_task.exception() is None:
+                await bridge.discard_event(event_task.result())
         if body_task is not None and not body_task.done():
             body_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -702,84 +1091,257 @@ async def _proxy_http(
             guard_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await guard_task
-        await session.close()
+        await bridge.discard_buffered_events()
+
+
+def _response_is_sse(headers: tuple[Header, ...]) -> bool:
+    """Return whether the normalized response is an SSE stream."""
+    for header in headers:
+        if header.name.lower() == b"content-type":
+            return (
+                header.value.split(b";", 1)[0].strip().lower() == b"text/event-stream"
+            )
+    return False
+
+
+def _websocket_subprotocol_tokens(
+    headers: tuple[tuple[bytes, bytes], ...],
+) -> tuple[str, ...]:
+    """Return ordered case-preserved RFC tokens from subprotocol fields."""
+    tokens: list[str] = []
+    seen: set[str] = set()
+    field_seen = False
+    for name, value in headers:
+        if name.lower() != _WEBSOCKET_SUBPROTOCOL_HEADER:
+            continue
+        if field_seen:
+            raise _RuntimeWebSocketSubprotocolError(
+                "Runtime WebSocket subprotocol field is repeated"
+            )
+        field_seen = True
+        for item in value.split(b","):
+            token = item.strip(b" \t")
+            if not token or any(byte not in _WEBSOCKET_TOKEN_BYTES for byte in token):
+                raise _RuntimeWebSocketSubprotocolError(
+                    "Runtime WebSocket subprotocol is invalid"
+                )
+            protocol = token.decode("ascii")
+            if protocol in seen:
+                raise _RuntimeWebSocketSubprotocolError(
+                    "Runtime WebSocket subprotocol is duplicated"
+                )
+            seen.add(protocol)
+            tokens.append(protocol)
+    return tuple(tokens)
+
+
+def _selected_websocket_subprotocol(
+    *,
+    offered: tuple[str, ...],
+    response_headers: tuple[Header, ...],
+) -> str | None:
+    """Validate one exact replacement-selected browser subprotocol."""
+    selected = _websocket_subprotocol_tokens(
+        tuple((header.name, header.value) for header in response_headers)
+    )
+    if len(selected) > 1:
+        raise _RuntimeWebSocketSubprotocolError(
+            "Runtime WebSocket selected subprotocol is duplicated"
+        )
+    if not selected:
+        return None
+    protocol = selected[0]
+    if protocol not in offered:
+        raise _RuntimeWebSocketSubprotocolError(
+            "Runtime WebSocket selected subprotocol was not offered"
+        )
+    return protocol
+
+
+def _stream_authority(
+    *,
+    authority: RuntimeWebGatewayAuthorityData,
+    protocol: StreamProtocol,
+    now: datetime.datetime,
+) -> StreamAuthority:
+    """Create one exact non-replayable replacement stream authority."""
+    cycle = authority.cycle
+    runtime_id = authority.runtime_id
+    desired_generation = authority.desired_generation
+    runner_generation = authority.runner_generation
+    if (
+        cycle is None
+        or runtime_id is None
+        or desired_generation is None
+        or runner_generation is None
+    ):
+        raise RuntimeWebGatewayAuthorityError(
+            RuntimeWebGatewayAuthorityCode.RUNTIME_UNAVAILABLE
+        )
+    transport_deadline = (
+        min(cycle.expires_at, now + datetime.timedelta(minutes=30))
+        if protocol is StreamProtocol.HTTP
+        else cycle.expires_at
+    )
+    return StreamAuthority(
+        correlation_id=secrets.token_hex(32),
+        endpoint_id=authority.endpoint.id,
+        cycle_id=cycle.id,
+        endpoint_authority_revision=authority.endpoint.authority_revision,
+        close_barrier=authority.endpoint.close_barrier,
+        identity_id=authority.identity.id,
+        authentication_session_id=authority.identity.auth_session_id,
+        user_id=authority.identity.user_id,
+        agent_session_id=authority.endpoint.agent_session_id,
+        runtime_id=runtime_id,
+        desired_generation=desired_generation,
+        runner_generation=runner_generation,
+        port=authority.endpoint.port,
+        open_deadline_at=min(
+            cycle.expires_at,
+            now + datetime.timedelta(seconds=10),
+        ),
+        approval_deadline_at=cycle.expires_at,
+        transport_deadline_at=transport_deadline,
+    )
 
 
 async def _send_request_body(
     request: web.Request,
-    session: RuntimeWebProxySession,
+    bridge: RuntimeWebBrowserStreamBridge,
+    resources: RuntimeWebGatewayResourceTracker,
     maximum_bytes: int,
 ) -> None:
-    sequence = 0
     total = 0
-    async for data in request.content.iter_chunked(MAX_RUNTIME_WEB_FRAME_BYTES):
+    async for data in request.content.iter_chunked(MANDATORY_DATA_FRAME_BYTES):
         total += len(data)
         if total > maximum_bytes:
-            await session.send(
-                RunnerWebCancel(RunnerWebCancelReason.PROTOCOL_VIOLATION)
-            )
+            await bridge.cancel(CloseReason.PROTOCOL_VIOLATION)
             raise RuntimeWebPolicyError(RuntimeWebPolicyCode.BAD_REQUEST)
-        sequence += 1
-        await session.send(RunnerWebBodyChunk(sequence=sequence, data=data))
-    await session.send(RunnerWebStreamEnd(final_sequence=sequence))
-    await session.finish_input()
+        if not await resources.reserve_application_buffer(len(data)):
+            await bridge.cancel(CloseReason.RESOURCE_EXHAUSTED)
+            raise RuntimeError("Runtime Web application buffer is exhausted")
+        try:
+            await bridge.send_request_data(data)
+        finally:
+            await resources.release_application_buffer(len(data))
+    await bridge.finish_request()
 
 
 async def _proxy_websocket(
     request: web.Request,
     state: _GatewayState,
     *,
-    head: RunnerWebRequestHead,
+    bridge: RuntimeWebBrowserStreamBridge,
+    head: RequestHead,
     cors: RuntimeWebCorsDecision,
     target_origin: str,
     authority: RuntimeWebGatewayAuthorityData,
 ) -> web.StreamResponse:
-    session = state.proxy.open()
     websocket: web.WebSocketResponse | None = None
     client_task: asyncio.Task[None] | None = None
     guard_task: asyncio.Task[None] | None = None
+    response_assembler = _WebSocketResponseAssembler()
     try:
-        await session.start(head)
+        try:
+            offered_subprotocols = _websocket_subprotocol_tokens(request.raw_headers)
+        except _RuntimeWebSocketSubprotocolError:
+            await bridge.cancel(CloseReason.PROTOCOL_VIOLATION)
+            return _stream_error(
+                request,
+                state.config,
+                CloseReason.PROTOCOL_VIOLATION,
+            )
         guard_task = asyncio.create_task(
-            _guard_identity_and_access(state.authority, authority, session),
-            name=f"runtime-web-authority-guard:{head.identity.tunnel_id}",
+            _guard_identity_and_access(state.authority, authority, bridge),
+            name=f"runtime-web-authority-guard:{bridge.binding.stream_id}",
         )
-        async for frame in session.events():
-            if isinstance(frame, RunnerWebResponseHead):
-                if frame.status != 101:
-                    return web.Response(
-                        status=frame.status,
-                        headers=normalize_response_headers(
-                            ((header.name, header.value) for header in frame.headers),
-                            config=state.config,
-                            cors=cors,
-                            target_origin=target_origin,
-                            port=head.identity.port,
+        while True:
+            event = await bridge.next_event()
+            if event.payload == "response_head":
+                try:
+                    if event.status is None:
+                        raise RuntimeError("Runtime Web response status is absent")
+                    if event.status != 101:
+                        return web.Response(
+                            status=event.status,
+                            headers=normalize_response_headers(
+                                (
+                                    (header.name, header.value)
+                                    for header in event.headers
+                                ),
+                                config=state.config,
+                                cors=cors,
+                                target_origin=target_origin,
+                                port=authority.endpoint.port,
+                            ),
+                        )
+                    try:
+                        selected_subprotocol = _selected_websocket_subprotocol(
+                            offered=offered_subprotocols,
+                            response_headers=event.headers,
+                        )
+                    except _RuntimeWebSocketSubprotocolError:
+                        await bridge.cancel(CloseReason.PROTOCOL_VIOLATION)
+                        return _stream_error(
+                            request,
+                            state.config,
+                            CloseReason.PROTOCOL_VIOLATION,
+                        )
+                    websocket = web.WebSocketResponse(
+                        autoping=False,
+                        heartbeat=None,
+                        protocols=(
+                            (selected_subprotocol,)
+                            if selected_subprotocol is not None
+                            else ()
                         ),
+                        max_msg_size=MAX_WEBSOCKET_MESSAGE_BYTES,
+                        compress=False,
                     )
-                websocket = web.WebSocketResponse(
-                    autoping=False,
-                    heartbeat=None,
-                    max_msg_size=8 * 1024 * 1024,
-                    compress=False,
-                )
-                await websocket.prepare(request)
-                client_task = asyncio.create_task(
-                    _send_websocket_frames(websocket, session),
-                    name=f"runtime-web-websocket-input:{head.identity.tunnel_id}",
-                )
+                    await websocket.prepare(request)
+                    client_task = asyncio.create_task(
+                        _send_websocket_frames(websocket, bridge),
+                        name=f"runtime-web-websocket-input:{bridge.binding.stream_id}",
+                    )
+                finally:
+                    await bridge.release_event(event)
                 continue
-            if isinstance(frame, RunnerWebSocketFrame):
+            if event.payload == "websocket":
                 if websocket is None:
-                    raise RuntimeWebProxyClosed(
-                        "Runtime WebSocket frame preceded upgrade"
-                    )
-                await _write_websocket_frame(websocket, frame)
+                    raise RuntimeError("Runtime WebSocket frame preceded upgrade")
+                partial_close = (
+                    event.websocket_opcode is WebSocketOpcode.CLOSE
+                    and response_assembler.partial_message
+                )
+                batch = await _assemble_websocket_response_event(
+                    response_assembler,
+                    bridge,
+                    event,
+                )
+                if batch is None:
+                    continue
+                written = False
+                try:
+                    await _write_websocket_event(websocket, batch.event)
+                    written = True
+                finally:
+                    for original in batch.release_events:
+                        if written:
+                            await bridge.release_event(original)
+                        else:
+                            await bridge.discard_event(original)
+                if partial_close:
+                    for pending in response_assembler.discard_pending():
+                        await bridge.discard_event(pending)
+                    await bridge.cancel(CloseReason.CALLER)
+                    break
                 continue
-            if isinstance(frame, RunnerWebStreamEnd):
+            if event.payload == "terminal":
+                await bridge.release_event(event)
                 break
-            if isinstance(frame, RunnerWebStreamError):
-                break
+            await bridge.release_event(event)
+            raise RuntimeError("Runtime WebSocket event is invalid")
         if client_task is not None and not client_task.done():
             client_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -793,11 +1355,6 @@ async def _proxy_websocket(
             )
         await websocket.close(code=1001, message=b"Runtime Web transport closed")
         return websocket
-    except grpc.aio.AioRpcError as error:
-        if websocket is not None:
-            await websocket.close(code=1011, message=b"Runtime Web unavailable")
-            return websocket
-        return _grpc_error(request, state.config, error)
     finally:
         if client_task is not None and not client_task.done():
             client_task.cancel()
@@ -807,13 +1364,15 @@ async def _proxy_websocket(
             guard_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await guard_task
-        await session.close()
+        for event in response_assembler.discard_pending():
+            await bridge.discard_event(event)
+        await bridge.discard_buffered_events()
 
 
 async def _guard_identity_and_access(
     authority_service: RuntimeWebGatewayAuthorityProvider,
     authority: RuntimeWebGatewayAuthorityData,
-    session: RuntimeWebProxySession,
+    bridge: RuntimeWebBrowserStreamBridge,
 ) -> None:
     while True:
         await asyncio.sleep(5)
@@ -828,80 +1387,166 @@ async def _guard_identity_and_access(
             current = False
         if current:
             continue
-        await session.send(RunnerWebCancel(RunnerWebCancelReason.AUTHORITY_REVOKED))
-        await session.finish_input()
+        await bridge.cancel(CloseReason.AUTHORITY_REVOKED)
         return
 
 
 async def _send_websocket_frames(
     websocket: web.WebSocketResponse,
-    session: RuntimeWebProxySession,
+    bridge: RuntimeWebBrowserStreamBridge,
 ) -> None:
-    sequence = 0
     async for message in websocket:
         opcode = {
-            WSMsgType.TEXT: RunnerWebSocketOpcode.TEXT,
-            WSMsgType.BINARY: RunnerWebSocketOpcode.BINARY,
-            WSMsgType.PING: RunnerWebSocketOpcode.PING,
-            WSMsgType.PONG: RunnerWebSocketOpcode.PONG,
-            WSMsgType.CLOSE: RunnerWebSocketOpcode.CLOSE,
+            WSMsgType.TEXT: WebSocketOpcode.TEXT,
+            WSMsgType.BINARY: WebSocketOpcode.BINARY,
+            WSMsgType.PING: WebSocketOpcode.PING,
+            WSMsgType.PONG: WebSocketOpcode.PONG,
+            WSMsgType.CLOSE: WebSocketOpcode.CLOSE,
         }.get(message.type)
         if opcode is None:
             if message.type in {WSMsgType.CLOSED, WSMsgType.CLOSING}:
                 break
             if message.type is WSMsgType.ERROR:
-                raise RuntimeWebProxyClosed("Browser WebSocket failed")
+                raise RuntimeError("Browser WebSocket failed")
             continue
         data = _websocket_data(message, opcode)
-        chunks = _websocket_chunks(data, text=opcode is RunnerWebSocketOpcode.TEXT)
-        for index, chunk in enumerate(chunks):
-            sequence += 1
-            await session.send(
-                RunnerWebSocketFrame(
-                    sequence=sequence,
-                    opcode=opcode,
+        if data and not await bridge.resources.reserve_application_buffer(len(data)):
+            await bridge.cancel(CloseReason.RESOURCE_EXHAUSTED)
+            raise RuntimeWebGatewayResourceExhausted(
+                "Runtime Web browser input buffer is exhausted"
+            )
+        try:
+            chunks = _websocket_chunks(data, text=opcode is WebSocketOpcode.TEXT)
+            for index, chunk in enumerate(chunks):
+                await bridge.send_websocket(
+                    opcode=(opcode if index == 0 else WebSocketOpcode.CONTINUATION),
                     final=index == len(chunks) - 1,
                     data=chunk,
                 )
-            )
-        if opcode is RunnerWebSocketOpcode.CLOSE:
+        finally:
+            if data:
+                await bridge.resources.release_application_buffer(len(data))
+        if opcode is WebSocketOpcode.CLOSE:
             break
-    await session.send(RunnerWebStreamEnd(final_sequence=sequence))
-    await session.finish_input()
+    await bridge.finish_request()
 
 
-async def _write_websocket_frame(
+@dataclasses.dataclass(frozen=True)
+class _WebSocketWriteBatch:
+    event: BrowserStreamEvent
+    release_events: tuple[BrowserStreamEvent, ...]
+
+
+class _WebSocketResponseAssembler:
+    """Reassemble data fragments while allowing interleaved control frames."""
+
+    def __init__(self) -> None:
+        self.opcode: WebSocketOpcode | None = None
+        self.data = bytearray()
+        self.events: list[BrowserStreamEvent] = []
+
+    @property
+    def partial_message(self) -> bool:
+        """Return whether one incomplete data message is buffered."""
+        return self.opcode is not None
+
+    def feed(self, event: BrowserStreamEvent) -> _WebSocketWriteBatch | None:
+        opcode = event.websocket_opcode
+        final = event.websocket_final
+        if opcode is None or final is None:
+            raise RuntimeError("Runtime WebSocket event metadata is absent")
+        if opcode in {
+            WebSocketOpcode.PING,
+            WebSocketOpcode.PONG,
+            WebSocketOpcode.CLOSE,
+        }:
+            return _WebSocketWriteBatch(event=event, release_events=(event,))
+        if opcode in {WebSocketOpcode.TEXT, WebSocketOpcode.BINARY}:
+            if self.opcode is not None:
+                raise RuntimeError(
+                    "Runtime WebSocket message opcode changed mid-message"
+                )
+            if final:
+                return _WebSocketWriteBatch(event=event, release_events=(event,))
+            self.opcode = opcode
+            self.data.extend(event.data)
+            self.events.append(event)
+            return None
+        if opcode is not WebSocketOpcode.CONTINUATION or self.opcode is None:
+            raise RuntimeError("Runtime WebSocket continuation is invalid")
+        self.data.extend(event.data)
+        self.events.append(event)
+        if not final:
+            return None
+        assembled = dataclasses.replace(
+            event,
+            data=bytes(self.data),
+            websocket_opcode=self.opcode,
+            websocket_final=True,
+        )
+        release_events = tuple(self.events)
+        self.opcode = None
+        self.data.clear()
+        self.events.clear()
+        return _WebSocketWriteBatch(
+            event=assembled,
+            release_events=release_events,
+        )
+
+    def discard_pending(self) -> tuple[BrowserStreamEvent, ...]:
+        pending = tuple(self.events)
+        self.opcode = None
+        self.data.clear()
+        self.events.clear()
+        return pending
+
+
+async def _assemble_websocket_response_event(
+    assembler: _WebSocketResponseAssembler,
+    bridge: RuntimeWebBrowserStreamBridge,
+    event: BrowserStreamEvent,
+) -> _WebSocketWriteBatch | None:
+    """Discard the dequeued event when response assembly rejects it."""
+    try:
+        return assembler.feed(event)
+    except RuntimeError:
+        await bridge.discard_event(event)
+        raise
+
+
+async def _write_websocket_event(
     websocket: web.WebSocketResponse,
-    frame: RunnerWebSocketFrame,
+    event: BrowserStreamEvent,
 ) -> None:
-    if frame.opcode is RunnerWebSocketOpcode.TEXT:
-        await websocket.send_str(frame.data.decode("utf-8"))
-    elif frame.opcode is RunnerWebSocketOpcode.BINARY:
-        await websocket.send_bytes(frame.data)
-    elif frame.opcode is RunnerWebSocketOpcode.PING:
-        await websocket.ping(frame.data)
-    elif frame.opcode is RunnerWebSocketOpcode.PONG:
-        await websocket.pong(frame.data)
-    elif frame.opcode is RunnerWebSocketOpcode.CLOSE:
-        code = int.from_bytes(frame.data[:2], "big") if len(frame.data) >= 2 else 1000
-        await websocket.close(code=code, message=frame.data[2:125])
+    opcode = event.websocket_opcode
+    if opcode is WebSocketOpcode.TEXT:
+        await websocket.send_str(event.data.decode("utf-8"))
+    elif opcode is WebSocketOpcode.BINARY:
+        await websocket.send_bytes(event.data)
+    elif opcode is WebSocketOpcode.PING:
+        await websocket.ping(event.data)
+    elif opcode is WebSocketOpcode.PONG:
+        await websocket.pong(event.data)
+    elif opcode is WebSocketOpcode.CLOSE:
+        code = int.from_bytes(event.data[:2], "big") if len(event.data) >= 2 else 1000
+        await websocket.close(code=code, message=event.data[2:125])
 
 
 def _websocket_data(
     message: WSMessage,
-    opcode: RunnerWebSocketOpcode,
+    opcode: WebSocketOpcode,
 ) -> bytes:
-    if opcode is RunnerWebSocketOpcode.TEXT:
+    if opcode is WebSocketOpcode.TEXT:
         if not isinstance(message.data, str):
-            raise RuntimeWebProxyClosed("Browser WebSocket text is invalid")
+            raise RuntimeError("Browser WebSocket text is invalid")
         return message.data.encode()
-    if opcode is RunnerWebSocketOpcode.CLOSE:
+    if opcode is WebSocketOpcode.CLOSE:
         code = message.data if isinstance(message.data, int) else 1000
         reason = message.extra if isinstance(message.extra, str) else ""
         return code.to_bytes(2, "big") + reason.encode()
-    if not isinstance(message.data, bytes):
-        raise RuntimeWebProxyClosed("Browser WebSocket bytes are invalid")
-    return message.data
+    if not isinstance(message.data, (bytes, bytearray, memoryview)):
+        raise RuntimeError("Browser WebSocket bytes are invalid")
+    return bytes(message.data)
 
 
 def _websocket_chunks(data: bytes, *, text: bool) -> tuple[bytes, ...]:
@@ -910,14 +1555,12 @@ def _websocket_chunks(data: bytes, *, text: bool) -> tuple[bytes, ...]:
     chunks: list[bytes] = []
     offset = 0
     while offset < len(data):
-        end = min(offset + MAX_RUNTIME_WEB_FRAME_BYTES, len(data))
+        end = min(offset + MANDATORY_DATA_FRAME_BYTES, len(data))
         if text:
             while end < len(data) and data[end] & 0xC0 == 0x80:
                 end -= 1
             if end == offset:
-                raise RuntimeWebProxyClosed(
-                    "Browser WebSocket text cannot be fragmented"
-                )
+                raise RuntimeError("Browser WebSocket text cannot be fragmented")
         chunks.append(data[offset:end])
         offset = end
     return tuple(chunks)
@@ -993,33 +1636,17 @@ def _policy_error(
 def _stream_error(
     request: web.Request,
     config: RuntimeWebGatewayConfig,
-    code: RunnerWebStreamErrorCode,
+    code: CloseReason,
 ) -> web.Response:
     status = {
-        RunnerWebStreamErrorCode.APPLICATION_UNAVAILABLE: 502,
-        RunnerWebStreamErrorCode.TRANSPORT_UNAVAILABLE: 503,
-        RunnerWebStreamErrorCode.RESOURCE_EXHAUSTED: 429,
-        RunnerWebStreamErrorCode.DEADLINE_EXCEEDED: 410,
+        CloseReason.APPLICATION_UNAVAILABLE: 502,
+        CloseReason.TRANSPORT_UNAVAILABLE: 503,
+        CloseReason.OWNER_LOST: 503,
+        CloseReason.RESOURCE_EXHAUSTED: 429,
+        CloseReason.DEADLINE: 410,
+        CloseReason.APPROVAL_EXPIRED: 410,
     }.get(code, 409)
     return _bounded_error(request, config, status=status, code=code.value)
-
-
-def _grpc_error(
-    request: web.Request,
-    config: RuntimeWebGatewayConfig,
-    error: grpc.aio.AioRpcError,
-) -> web.Response:
-    status = {
-        grpc.StatusCode.RESOURCE_EXHAUSTED: 429,
-        grpc.StatusCode.DEADLINE_EXCEEDED: 410,
-        grpc.StatusCode.UNAVAILABLE: 503,
-    }.get(error.code(), 409)
-    return _bounded_error(
-        request,
-        config,
-        status=status,
-        code="transport_unavailable",
-    )
 
 
 def _bounded_error(
@@ -1154,23 +1781,6 @@ def _source_endpoint_key(
     if target.broker:
         return None
     return target.endpoint_label
-
-
-def _admission_limits(
-    settings: RuntimeWebGatewaySettings,
-    protocol: RunnerWebProtocol,
-) -> RuntimeWebAdmissionLimits:
-    if protocol is RunnerWebProtocol.WEBSOCKET:
-        return RuntimeWebAdmissionLimits(
-            endpoint=(settings.runtime_web_gateway_websocket_endpoint_connections),
-            user=settings.runtime_web_gateway_websocket_user_connections,
-            agent=settings.runtime_web_gateway_websocket_agent_connections,
-        )
-    return RuntimeWebAdmissionLimits(
-        endpoint=settings.runtime_web_gateway_http_endpoint_connections,
-        user=settings.runtime_web_gateway_http_user_connections,
-        agent=settings.runtime_web_gateway_http_agent_connections,
-    )
 
 
 def _public_request_secure(

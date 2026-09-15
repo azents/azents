@@ -38,6 +38,12 @@ enum RuntimeWebSessionDirection {
   RUNTIME_WEB_SESSION_DIRECTION_RESPONSE = 2;
 }
 
+enum RuntimeWebSessionRoutePath {
+  RUNTIME_WEB_SESSION_ROUTE_PATH_UNSPECIFIED = 0;
+  RUNTIME_WEB_SESSION_ROUTE_PATH_LOCAL = 1;
+  RUNTIME_WEB_SESSION_ROUTE_PATH_RELAY = 2;
+}
+
 enum RuntimeWebSessionWebSocketOpcode {
   RUNTIME_WEB_SESSION_WEBSOCKET_OPCODE_UNSPECIFIED = 0;
   RUNTIME_WEB_SESSION_WEBSOCKET_OPCODE_TEXT = 1;
@@ -175,6 +181,7 @@ message RuntimeWebSessionOpenAccepted {
   uint32 data_frame_bytes = 1;
   uint64 request_credit_bytes = 2;
   uint64 response_credit_bytes = 3;
+  RuntimeWebSessionRoutePath route_path = 4;
 }
 
 message RuntimeWebSessionOpenRejected {

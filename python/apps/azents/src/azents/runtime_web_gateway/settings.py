@@ -46,6 +46,16 @@ class RuntimeWebGatewaySettings(BaseSettings):
         ge=1024 * 1024,
         le=16 * 1024 * 1024 * 1024,
     )
+    runtime_web_gateway_maximum_control_buffer_bytes: int = Field(
+        default=32 * 1024 * 1024,
+        ge=1024 * 1024,
+        le=1024 * 1024 * 1024,
+    )
+    runtime_web_gateway_maximum_pending_tasks: int = Field(
+        default=4096,
+        ge=4,
+        le=65_536,
+    )
     runtime_web_gateway_maximum_scheduler_waiters: int = Field(
         default=1024,
         ge=1,
@@ -92,41 +102,6 @@ class RuntimeWebGatewaySettings(BaseSettings):
         ge=64 * 1024,
         le=1024 * 1024 * 1024,
     )
-    runtime_web_gateway_frame_bytes: int = Field(
-        default=64 * 1024,
-        ge=4 * 1024,
-        le=64 * 1024,
-    )
-    runtime_web_gateway_http_endpoint_connections: int = Field(
-        default=32,
-        ge=1,
-        le=128,
-    )
-    runtime_web_gateway_http_user_connections: int = Field(
-        default=64,
-        ge=1,
-        le=256,
-    )
-    runtime_web_gateway_http_agent_connections: int = Field(
-        default=128,
-        ge=1,
-        le=512,
-    )
-    runtime_web_gateway_websocket_endpoint_connections: int = Field(
-        default=4,
-        ge=1,
-        le=16,
-    )
-    runtime_web_gateway_websocket_user_connections: int = Field(
-        default=8,
-        ge=1,
-        le=32,
-    )
-    runtime_web_gateway_websocket_agent_connections: int = Field(
-        default=16,
-        ge=1,
-        le=64,
-    )
     runtime_web_gateway_security_permissions_policy: str = (
         "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
     )
@@ -161,6 +136,15 @@ class RuntimeWebGatewaySettings(BaseSettings):
             )
         if self.runtime_web_gateway_identity_cookie_name != _IDENTITY_COOKIE_NAME:
             raise ValueError("Runtime Web identity cookie name is reserved")
+        minimum_pending_tasks = (
+            self.runtime_web_gateway_maximum_active_exchanges * 4
+            + self.runtime_web_gateway_control_session_pool_size * 2
+        )
+        if self.runtime_web_gateway_maximum_pending_tasks < minimum_pending_tasks:
+            raise ValueError(
+                "Runtime Web Gateway pending-task limit must cover exchange and "
+                "Control-session reservations"
+            )
         main = _exact_origin(self.runtime_web_gateway_main_web_origin)
         broker = _exact_origin(self.runtime_web_gateway_broker_origin)
         main_hostname = main.hostname
@@ -259,7 +243,6 @@ class RuntimeWebGatewayConfig(BaseModel):
     identity_lifetime_seconds: int
     request_header_bytes: int
     request_body_bytes: int
-    frame_bytes: int
     permissions_policy: str
 
     @classmethod
@@ -291,7 +274,6 @@ class RuntimeWebGatewayConfig(BaseModel):
             ),
             request_header_bytes=settings.runtime_web_gateway_request_header_bytes,
             request_body_bytes=settings.runtime_web_gateway_request_body_bytes,
-            frame_bytes=settings.runtime_web_gateway_frame_bytes,
             permissions_policy=(
                 settings.runtime_web_gateway_security_permissions_policy
             ),

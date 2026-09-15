@@ -694,6 +694,15 @@ def valkey_container(
 
 
 @pytest.fixture(scope="session")
+def runtime_web_capacity_backend() -> str:
+    """Select one explicit Runtime Web capacity E2E lane."""
+    backend = os.environ.get("AZENTS_E2E_RUNTIME_WEB_CAPACITY_BACKEND", "memory")
+    if backend not in {"memory", "redis"}:
+        pytest.fail("AZENTS_E2E_RUNTIME_WEB_CAPACITY_BACKEND must be memory or redis")
+    return backend
+
+
+@pytest.fixture(scope="session")
 def rustfs_container(
     core_prerequisites: _CorePrerequisites,
 ) -> DockerContainer:
@@ -1795,6 +1804,7 @@ def azents_runtime_control_container(
     postgres_container: PostgresContainer,
     rustfs_container: DockerContainer,
     valkey_container: DockerContainer,
+    runtime_web_capacity_backend: str,
     rustfs_access_key: str,
     rustfs_secret_key: str,
     s3_bucket_name: str,
@@ -1817,7 +1827,7 @@ def azents_runtime_control_container(
         .with_name(f"azents-runtime-control-{random_secret(4)}")
         .with_network_aliases("runtime-control")
         .with_command(["python", "src/cli/runtime_control_server.py"])
-        .with_exposed_ports(8030)
+        .with_exposed_ports(8030, 8033)
     )
     container = _configure_azents_server_container(
         base_container,
@@ -1838,6 +1848,61 @@ def azents_runtime_control_container(
         .with_env(
             "AZ_RUNTIME_CONTROL_TRUSTED_ADVERTISE_ADDRESS",
             "runtime-control:8032",
+        )
+        .with_env(
+            "AZ_RUNTIME_CONTROL_RUNNER_WEB_CONNECT_ADDRESS",
+            "runtime-control:8030",
+        )
+        .with_env(
+            "AZ_RUNTIME_CONTROL_RUNNER_WEB_TLS_SERVER_NAME",
+            "runtime-control",
+        )
+        .with_env("AZ_RUNTIME_CONTROL_WEB_METRICS_PORT", "8033")
+        .with_env(
+            "AZ_RUNTIME_CONTROL_WEB_CAPACITY_BACKEND",
+            runtime_web_capacity_backend,
+        )
+        .with_env("AZ_RUNTIME_CONTROL_WEB_CAPACITY_MAXIMUM_ACTIVE_STREAMS", "128")
+        .with_env("AZ_RUNTIME_CONTROL_WEB_CAPACITY_MAXIMUM_SSE_STREAMS", "32")
+        .with_env(
+            "AZ_RUNTIME_CONTROL_WEB_CAPACITY_MAXIMUM_WEBSOCKET_STREAMS",
+            "32",
+        )
+        .with_env("AZ_RUNTIME_CONTROL_WEB_CAPACITY_MAXIMUM_PENDING_OPENS", "128")
+        .with_env("AZ_RUNTIME_CONTROL_WEB_CAPACITY_MAXIMUM_BUFFER_BYTES", "67108864")
+        .with_env(
+            "AZ_RUNTIME_CONTROL_WEB_CAPACITY_INBOUND_BYTES_PER_SECOND",
+            "268435456",
+        )
+        .with_env(
+            "AZ_RUNTIME_CONTROL_WEB_CAPACITY_OUTBOUND_BYTES_PER_SECOND",
+            "268435456",
+        )
+        .with_env("AZ_RUNTIME_CONTROL_WEB_CAPACITY_BURST_BYTES", "67108864")
+        .with_env(
+            "AZ_RUNTIME_CONTROL_WEB_CAPACITY_REDIS_NAMESPACE",
+            "azents:e2e:runtime-web:capacity",
+        )
+        .with_env("AZ_RUNTIME_CONTROL_WEB_CAPACITY_REDIS_TTL_SECONDS", "30")
+        .with_env("AZ_RUNTIME_CONTROL_WEB_HARD_MAXIMUM_SESSIONS", "128")
+        .with_env("AZ_RUNTIME_CONTROL_WEB_HARD_MAXIMUM_ACTIVE_STREAMS", "1024")
+        .with_env(
+            "AZ_RUNTIME_CONTROL_WEB_HARD_MAXIMUM_APPLICATION_BUFFER_BYTES",
+            "536870912",
+        )
+        .with_env(
+            "AZ_RUNTIME_CONTROL_WEB_HARD_MAXIMUM_CONTROL_BUFFER_BYTES",
+            "67108864",
+        )
+        .with_env("AZ_RUNTIME_CONTROL_WEB_HARD_MAXIMUM_QUEUED_ENVELOPES", "4096")
+        .with_env("AZ_RUNTIME_CONTROL_WEB_HARD_MAXIMUM_PENDING_TASKS", "2048")
+        .with_env(
+            "AZ_RUNTIME_CONTROL_WEB_HARD_MAXIMUM_EVENT_LOOP_LAG_MILLISECONDS",
+            "250",
+        )
+        .with_env(
+            "AZ_RUNTIME_CONTROL_WEB_HARD_MAXIMUM_RESIDENT_MEMORY_BYTES",
+            "1073741824",
         )
         .with_env("AZ_RUNTIME_CONTROL_INSTANCE_ID", "azents-e2e-runtime-control")
         .with_env("AZ_RUNTIME_CONTROL_RECONCILE_INTERVAL_SECONDS", "1")

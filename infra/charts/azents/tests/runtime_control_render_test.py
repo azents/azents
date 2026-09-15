@@ -112,6 +112,158 @@ def test_runtime_control_enabled_render_contract() -> None:
     assert rendered.count("mountPath: /var/run/secrets/azents/runtime-control-tls") == 3
 
 
+def test_runtime_control_web_transport_renders_capacity_and_internal_lifecycle() -> (
+    None
+):
+    """Runtime Web capacity and operations stay explicit and internal-only."""
+    rendered = _helm_template(
+        "server.runtimeControl.enabled=true",
+        "server.runtimeControl.runnerImage.repository=repo/runner",
+        "server.runtimeControl.runnerImage.tag=sha",
+        f"server.runtimeControl.runnerImage.digest={_RUNNER_DIGEST}",
+        "server.runtimeControl.webTransport.enabled=true",
+        "server.runtimeControl.webTransport.gatewayPeerIdentities=runtime-web-gateway",
+        "server.runtimeControl.webTransport.controlPeerIdentities=runtime-control",
+    )
+    deployment_start = rendered.index(
+        "kind: Deployment\nmetadata:\n  name: runtime-control"
+    )
+    deployment = rendered[
+        deployment_start : rendered.index("\n---\n", deployment_start)
+    ]
+    service_start = rendered.index("kind: Service\nmetadata:\n  name: runtime-control")
+    service = rendered[service_start : rendered.index("\n---\n", service_start)]
+
+    assert "terminationGracePeriodSeconds: 150" in deployment
+    assert "name: operations" in deployment
+    assert "containerPort: 8033" in deployment
+    assert (
+        'name: AZ_RUNTIME_CONTROL_WEB_METRICS_PORT\n              value: "8033"'
+    ) in deployment
+    expected_capacity = {
+        "AZ_RUNTIME_CONTROL_WEB_CAPACITY_BACKEND": "memory",
+        "AZ_RUNTIME_CONTROL_WEB_CAPACITY_MAXIMUM_ACTIVE_STREAMS": "64",
+        "AZ_RUNTIME_CONTROL_WEB_CAPACITY_MAXIMUM_SSE_STREAMS": "8",
+        "AZ_RUNTIME_CONTROL_WEB_CAPACITY_MAXIMUM_WEBSOCKET_STREAMS": "8",
+        "AZ_RUNTIME_CONTROL_WEB_CAPACITY_MAXIMUM_PENDING_OPENS": "64",
+        "AZ_RUNTIME_CONTROL_WEB_CAPACITY_MAXIMUM_BUFFER_BYTES": "67108864",
+        "AZ_RUNTIME_CONTROL_WEB_CAPACITY_INBOUND_BYTES_PER_SECOND": "1073741824",
+        "AZ_RUNTIME_CONTROL_WEB_CAPACITY_OUTBOUND_BYTES_PER_SECOND": "1073741824",
+        "AZ_RUNTIME_CONTROL_WEB_CAPACITY_BURST_BYTES": "67108864",
+        "AZ_RUNTIME_CONTROL_WEB_CAPACITY_REDIS_NAMESPACE": (
+            "azents:runtime:web:capacity"
+        ),
+        "AZ_RUNTIME_CONTROL_WEB_CAPACITY_REDIS_TTL_SECONDS": "30",
+        "AZ_RUNTIME_CONTROL_WEB_MAXIMUM_RELAY_SESSIONS": "32",
+        "AZ_RUNTIME_CONTROL_WEB_HARD_MAXIMUM_SESSIONS": "128",
+        "AZ_RUNTIME_CONTROL_WEB_HARD_MAXIMUM_ACTIVE_STREAMS": "1024",
+        "AZ_RUNTIME_CONTROL_WEB_HARD_MAXIMUM_APPLICATION_BUFFER_BYTES": "536870912",
+        "AZ_RUNTIME_CONTROL_WEB_HARD_MAXIMUM_CONTROL_BUFFER_BYTES": "67108864",
+        "AZ_RUNTIME_CONTROL_WEB_HARD_MAXIMUM_QUEUED_ENVELOPES": "4096",
+        "AZ_RUNTIME_CONTROL_WEB_HARD_MAXIMUM_PENDING_TASKS": "2048",
+        "AZ_RUNTIME_CONTROL_WEB_HARD_MAXIMUM_EVENT_LOOP_LAG_MILLISECONDS": "250",
+        "AZ_RUNTIME_CONTROL_WEB_HARD_MAXIMUM_RESIDENT_MEMORY_BYTES": "1073741824",
+    }
+    for name, value in expected_capacity.items():
+        assert f'name: {name}\n              value: "{value}"' in deployment
+    assert "path: /__azents/runtime-web/ready" not in deployment
+    assert (
+        "readinessProbe:\n            tcpSocket:\n              port: grpc"
+        in deployment
+    )
+    assert deployment.count("path: /__azents/runtime-web/live") == 2
+    assert "/__azents/runtime-web/drain" in deployment
+    assert 'method="POST"' in deployment
+    assert "timeout=140" in deployment
+    assert "port: operations" in deployment
+    assert "name: operations" not in service
+    assert "8033" not in service
+
+
+@pytest.mark.parametrize(
+    "invalid_value",
+    (
+        "server.runtimeControl.metricsPort=0",
+        "server.runtimeControl.webCapacity.maximumActiveStreams=0",
+        "server.runtimeControl.webCapacity.maximumSseStreams=0",
+        "server.runtimeControl.webCapacity.maximumWebsocketStreams=0",
+        "server.runtimeControl.webCapacity.maximumPendingOpens=0",
+        "server.runtimeControl.webCapacity.maximumBufferBytes=0",
+        "server.runtimeControl.webCapacity.inboundBytesPerSecond=0",
+        "server.runtimeControl.webCapacity.outboundBytesPerSecond=0",
+        "server.runtimeControl.webCapacity.burstBytes=0",
+        "server.runtimeControl.webCapacity.backend=other",
+        "server.runtimeControl.webCapacity.redisNamespace=",
+        "server.runtimeControl.webCapacity.redisTtlSeconds=0",
+        "server.runtimeControl.webCapacity.redisTtlSeconds=301",
+        "server.runtimeControl.webCapacity.maximumRelaySessions=0",
+        "server.runtimeControl.webCapacity.maximumRelaySessions=257",
+        "server.runtimeControl.terminationGracePeriodSeconds=149",
+    ),
+)
+def test_runtime_control_web_capacity_schema_rejects_invalid_values(
+    invalid_value: str,
+) -> None:
+    with pytest.raises(subprocess.CalledProcessError):
+        _helm_template(
+            "server.runtimeControl.enabled=true",
+            "server.runtimeControl.webTransport.enabled=true",
+            "server.runtimeControl.webTransport.gatewayPeerIdentities=runtime-web-gateway",
+            "server.runtimeControl.webTransport.controlPeerIdentities=runtime-control",
+            "server.runtimeControl.runnerImage.repository=repo/runner",
+            "server.runtimeControl.runnerImage.tag=sha",
+            f"server.runtimeControl.runnerImage.digest={_RUNNER_DIGEST}",
+            invalid_value,
+        )
+
+
+@pytest.mark.parametrize(
+    "invalid_value",
+    (
+        "server.runtimeControl.webCapacity.maximumActiveStreams=7",
+        "server.runtimeControl.webCapacity.maximumWebsocketStreams=65",
+        "server.runtimeControl.metricsPort=8030",
+        "server.runtimeControl.metricsPort=8032",
+    ),
+)
+def test_runtime_control_web_template_rejects_cross_field_conflicts(
+    invalid_value: str,
+) -> None:
+    with pytest.raises(subprocess.CalledProcessError):
+        _helm_template(
+            "server.runtimeControl.enabled=true",
+            "server.runtimeControl.webTransport.enabled=true",
+            "server.runtimeControl.webTransport.gatewayPeerIdentities=runtime-web-gateway",
+            "server.runtimeControl.webTransport.controlPeerIdentities=runtime-control",
+            "server.runtimeControl.runnerImage.repository=repo/runner",
+            "server.runtimeControl.runnerImage.tag=sha",
+            f"server.runtimeControl.runnerImage.digest={_RUNNER_DIGEST}",
+            invalid_value,
+        )
+
+
+def test_runtime_control_web_capacity_can_select_redis_explicitly() -> None:
+    rendered = _helm_template(
+        "server.runtimeControl.enabled=true",
+        "server.runtimeControl.webTransport.enabled=true",
+        "server.runtimeControl.webTransport.gatewayPeerIdentities=runtime-web-gateway",
+        "server.runtimeControl.webTransport.controlPeerIdentities=runtime-control",
+        "server.runtimeControl.webCapacity.backend=redis",
+        "server.runtimeControl.webCapacity.redisNamespace=custom:web:capacity",
+        "server.runtimeControl.runnerImage.repository=repo/runner",
+        "server.runtimeControl.runnerImage.tag=sha",
+        f"server.runtimeControl.runnerImage.digest={_RUNNER_DIGEST}",
+    )
+
+    assert (
+        'name: AZ_RUNTIME_CONTROL_WEB_CAPACITY_BACKEND\n              value: "redis"'
+    ) in rendered
+    assert (
+        "name: AZ_RUNTIME_CONTROL_WEB_CAPACITY_REDIS_NAMESPACE\n"
+        '              value: "custom:web:capacity"'
+    ) in rendered
+
+
 def test_runtime_control_renders_values_object_numbers_as_decimal_integers() -> None:
     """ArgoCD valuesObject numbers remain valid integer environment values."""
     rendered = _helm_template(

@@ -44,6 +44,8 @@ spec:
           ports:
             - name: http
               containerPort: {{ $gateway.port }}
+            - name: operations
+              containerPort: {{ $gateway.metricsPort }}
           envFrom:
             - configMapRef:
                 name: {{ include "azents.serverConfigMapName" . | quote }}
@@ -52,6 +54,26 @@ spec:
               value: "true"
             - name: AZ_RUNTIME_WEB_GATEWAY_PORT
               value: {{ printf "%d" (int64 $gateway.port) | quote }}
+            - name: AZ_RUNTIME_WEB_GATEWAY_METRICS_PORT
+              value: {{ printf "%d" (int64 $gateway.metricsPort) | quote }}
+            - name: AZ_RUNTIME_WEB_GATEWAY_MAINTENANCE
+              value: {{ $gateway.maintenance | quote }}
+            - name: AZ_RUNTIME_WEB_GATEWAY_CONTROL_SESSION_POOL_SIZE
+              value: {{ printf "%d" (int64 $gateway.controlSessionPoolSize) | quote }}
+            - name: AZ_RUNTIME_WEB_GATEWAY_MAXIMUM_ACTIVE_EXCHANGES
+              value: {{ printf "%d" (int64 $gateway.hardLimits.activeExchanges) | quote }}
+            - name: AZ_RUNTIME_WEB_GATEWAY_MAXIMUM_APPLICATION_BUFFER_BYTES
+              value: {{ printf "%d" (int64 $gateway.hardLimits.applicationBufferBytes) | quote }}
+            - name: AZ_RUNTIME_WEB_GATEWAY_MAXIMUM_CONTROL_BUFFER_BYTES
+              value: {{ printf "%d" (int64 $gateway.hardLimits.controlBufferBytes) | quote }}
+            - name: AZ_RUNTIME_WEB_GATEWAY_MAXIMUM_PENDING_TASKS
+              value: {{ printf "%d" (int64 $gateway.hardLimits.pendingTasks) | quote }}
+            - name: AZ_RUNTIME_WEB_GATEWAY_MAXIMUM_SCHEDULER_WAITERS
+              value: {{ printf "%d" (int64 $gateway.hardLimits.schedulerWaiters) | quote }}
+            - name: AZ_RUNTIME_WEB_GATEWAY_MAXIMUM_EVENT_LOOP_LAG_MILLISECONDS
+              value: {{ printf "%d" (int64 $gateway.hardLimits.eventLoopLagMilliseconds) | quote }}
+            - name: AZ_RUNTIME_WEB_GATEWAY_MAXIMUM_RESIDENT_MEMORY_BYTES
+              value: {{ printf "%d" (int64 $gateway.hardLimits.residentMemoryBytes) | quote }}
             - name: AZ_RUNTIME_WEB_GATEWAY_AUTH_MODE
               value: {{ $gateway.authMode | quote }}
             - name: AZ_RUNTIME_WEB_GATEWAY_MAIN_WEB_ORIGIN
@@ -72,20 +94,6 @@ spec:
               value: {{ printf "%d" (int64 $gateway.request.headerBytes) | quote }}
             - name: AZ_RUNTIME_WEB_GATEWAY_REQUEST_BODY_BYTES
               value: {{ printf "%d" (int64 $gateway.request.bodyBytes) | quote }}
-            - name: AZ_RUNTIME_WEB_GATEWAY_FRAME_BYTES
-              value: {{ printf "%d" (int64 $gateway.request.frameBytes) | quote }}
-            - name: AZ_RUNTIME_WEB_GATEWAY_HTTP_ENDPOINT_CONNECTIONS
-              value: {{ printf "%d" (int64 $gateway.connectionLimits.http.endpoint) | quote }}
-            - name: AZ_RUNTIME_WEB_GATEWAY_HTTP_USER_CONNECTIONS
-              value: {{ printf "%d" (int64 $gateway.connectionLimits.http.user) | quote }}
-            - name: AZ_RUNTIME_WEB_GATEWAY_HTTP_AGENT_CONNECTIONS
-              value: {{ printf "%d" (int64 $gateway.connectionLimits.http.agent) | quote }}
-            - name: AZ_RUNTIME_WEB_GATEWAY_WEBSOCKET_ENDPOINT_CONNECTIONS
-              value: {{ printf "%d" (int64 $gateway.connectionLimits.websocket.endpoint) | quote }}
-            - name: AZ_RUNTIME_WEB_GATEWAY_WEBSOCKET_USER_CONNECTIONS
-              value: {{ printf "%d" (int64 $gateway.connectionLimits.websocket.user) | quote }}
-            - name: AZ_RUNTIME_WEB_GATEWAY_WEBSOCKET_AGENT_CONNECTIONS
-              value: {{ printf "%d" (int64 $gateway.connectionLimits.websocket.agent) | quote }}
             - name: AZ_RUNTIME_WEB_GATEWAY_SECURITY_PERMISSIONS_POLICY
               value: {{ $gateway.permissionsPolicy | quote }}
             - name: AZ_RUNTIME_WEB_GATEWAY_CONTROL_ENDPOINT
@@ -106,17 +114,29 @@ spec:
           readinessProbe:
             httpGet:
               path: /__azents/ready
-              port: http
+              port: operations
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 2
+          livenessProbe:
+            httpGet:
+              path: /__azents/live
+              port: operations
             initialDelaySeconds: 5
             periodSeconds: 10
             timeoutSeconds: 2
           startupProbe:
             httpGet:
-              path: /__azents/ready
-              port: http
+              path: /__azents/live
+              port: operations
             initialDelaySeconds: 2
             periodSeconds: 2
             failureThreshold: 30
+          lifecycle:
+            preStop:
+              httpGet:
+                path: /__azents/drain
+                port: operations
           {{- with $gateway.resources }}
           resources:
             {{- toYaml . | nindent 12 }}

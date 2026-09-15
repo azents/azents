@@ -26,6 +26,7 @@ from azents_runtime_control.runner import (
     RuntimeRunnerState,
 )
 from azents_runtime_control.runtime_configuration import RuntimeConfigurationEvidence
+from azents_runtime_control.runtime_web_session import RunnerSessionOffer
 from azents_runtime_control.transfer import (
     RUNNER_TRANSFER_CAPABILITY,
     RUNNER_TRANSFER_PROTOCOL_VERSION,
@@ -74,6 +75,7 @@ from azentspublicclient.models.workspace_runtime_profile_default_replace_request
 from azentspublicclient.models.workspace_runtime_profile_response import (
     WorkspaceRuntimeProfileResponse,
 )
+from docker.models.containers import Container
 from redis import Redis
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
@@ -110,6 +112,7 @@ class _RunnerProbeSettings:
     endpoint: str
     auth_token: str = dataclasses.field(repr=False)
     registration: RunnerRegistration
+    runner_container: Container
 
 
 @dataclasses.dataclass(frozen=True)
@@ -121,6 +124,7 @@ class _InflightProbeOperation:
     operation: RunnerOperationEnvelope
     response_task: asyncio.Task[requests.Response]
     path: str
+    runner_container: Container
 
 
 def _headers(token: str) -> dict[str, str]:
@@ -259,6 +263,7 @@ def _runner_probe_settings(
                 ),
             ),
         ),
+        runner_container=runner,
     )
 
 
@@ -310,82 +315,103 @@ async def _start_inflight_probe_operation(
         operations.append(operation)
         operation_received.set()
 
-    client = GrpcRunnerControlClient.from_endpoint(
-        settings.endpoint,
-        runner_auth_token=settings.auth_token,
-        tls=None,
-        allow_insecure=True,
-    )
-    client.set_operation_handler(capture_operation)
-    accepted = await client.register_runner(
-        settings.registration,
-        connection_id=f"inflight-probe-{unique()}",
-        registered_at=datetime.now(UTC),
-    )
-    await client.report_runner_state(
-        RunnerStateReport(
-            runtime_id=accepted.runtime_id,
-            runner_id=accepted.runner_id,
-            runner_generation=accepted.generation,
-            runner_state=RuntimeRunnerState.READY,
-            capabilities=settings.registration.capabilities,
-            active_operation_ids=(),
-            health="ready",
-            diagnostic={"source": "inflight-probe"},
-            workspace_path=settings.registration.workspace_path,
-            reported_at=datetime.now(UTC),
-            runtime_configuration=settings.registration.runtime_configuration,
-        )
-    )
-    projection_deadline = asyncio.get_running_loop().time() + 10
-    while asyncio.get_running_loop().time() < projection_deadline:
-        projected = runtime_api.agent_runtime_v1_get_agent_runtime(
-            agent_id=agent_id,
-            handle=handle,
-            _headers=headers,
-        )
-        if (
-            projected.runtime is not None
-            and projected.runtime.runner_generation == str(accepted.generation)
-            and projected.runtime.runner_state.value == "ready"
-        ):
-            break
-        await asyncio.sleep(0.2)
-    else:
-        await client.close()
-        raise AssertionError("Runner probe generation was not durably projected")
-    response_task = asyncio.create_task(
-        asyncio.to_thread(
-            requests.post,
-            f"{public_server_url}/chat/v1/agents/{agent_id}/workspace/directories",
-            headers=_headers(token),
-            json={"path": path, "parents": False},
-            timeout=150,
-        )
-    )
+    async def ignore_web_session_offer(_offer: RunnerSessionOffer) -> None:
+        """Keep the synthetic operation probe attached without opening Web work."""
+
+    client: GrpcRunnerControlClient | None = None
+    response_task: asyncio.Task[requests.Response] | None = None
+    pause_transferred = False
     try:
+        settings.runner_container.pause()
+        settings.runner_container.reload()
+        assert settings.runner_container.status == "paused"
+        client = GrpcRunnerControlClient.from_endpoint(
+            settings.endpoint,
+            runner_auth_token=settings.auth_token,
+            tls=None,
+            allow_insecure=True,
+        )
+        client.set_operation_handler(capture_operation)
+        client.set_web_session_offer_handler(ignore_web_session_offer)
+        accepted = await client.register_runner(
+            settings.registration,
+            connection_id=f"inflight-probe-{unique()}",
+            registered_at=datetime.now(UTC),
+        )
+        await client.report_runner_state(
+            RunnerStateReport(
+                runtime_id=accepted.runtime_id,
+                runner_id=accepted.runner_id,
+                runner_generation=accepted.generation,
+                runner_state=RuntimeRunnerState.READY,
+                capabilities=settings.registration.capabilities,
+                active_operation_ids=(),
+                health="ready",
+                diagnostic={"source": "inflight-probe"},
+                workspace_path=settings.registration.workspace_path,
+                reported_at=datetime.now(UTC),
+                runtime_configuration=settings.registration.runtime_configuration,
+            )
+        )
+        projection_deadline = asyncio.get_running_loop().time() + 10
+        while asyncio.get_running_loop().time() < projection_deadline:
+            projected = runtime_api.agent_runtime_v1_get_agent_runtime(
+                agent_id=agent_id,
+                handle=handle,
+                _headers=headers,
+            )
+            if (
+                projected.runtime is not None
+                and projected.runtime.runner_generation == str(accepted.generation)
+                and projected.runtime.runner_state.value == "ready"
+            ):
+                break
+            await asyncio.sleep(0.2)
+        else:
+            raise AssertionError("Runner probe generation was not durably projected")
+        response_task = asyncio.create_task(
+            asyncio.to_thread(
+                requests.post,
+                f"{public_server_url}/chat/v1/agents/{agent_id}/workspace/directories",
+                headers=_headers(token),
+                json={"path": path, "parents": False},
+                timeout=150,
+            )
+        )
         await asyncio.wait_for(operation_received.wait(), timeout=10)
         operation = operations[0]
         assert operation.operation_type == "file.mkdir"
         assert operation.payload["path"] == path
         assert await client.start_runner_operation(operation)
-    except asyncio.CancelledError:
-        await client.close()
-        if not response_task.done():
-            response_task.cancel()
-        raise
-    except Exception:
-        await client.close()
-        if not response_task.done():
-            response_task.cancel()
-        raise
-    return _InflightProbeOperation(
-        client=client,
-        accepted=accepted,
-        operation=operation,
-        response_task=response_task,
-        path=path,
-    )
+        assert response_task is not None
+        inflight = _InflightProbeOperation(
+            client=client,
+            accepted=accepted,
+            operation=operation,
+            response_task=response_task,
+            path=path,
+            runner_container=settings.runner_container,
+        )
+        pause_transferred = True
+        return inflight
+    finally:
+        if not pause_transferred:
+            try:
+                if response_task is not None and not response_task.done():
+                    response_task.cancel()
+                if client is not None:
+                    await client.close()
+            finally:
+                _resume_runner(settings.runner_container)
+
+
+def _resume_runner(runner: Container) -> None:
+    """Resume one paused E2E Runner and require it to remain running."""
+    runner.reload()
+    if runner.status == "paused":
+        runner.unpause()
+        runner.reload()
+    assert runner.status == "running"
 
 
 async def _assert_inflight_request_did_not_succeed(
@@ -480,6 +506,7 @@ async def _reset_with_inflight_operation(
     )
     try:
         await asyncio.to_thread(redis.flushall)
+        _resume_runner(inflight.runner_container)
         recovered = await _wait_for_empty_store_recovery(
             runtime_api,
             agent_id=agent_id,
@@ -501,6 +528,7 @@ async def _reset_with_inflight_operation(
         )
         return recovered
     finally:
+        _resume_runner(inflight.runner_container)
         redis.close()
         await inflight.client.close()
 
@@ -546,6 +574,8 @@ async def _assert_stale_runner_action_is_fenced(
             connection_id=f"stale-probe-{action}-{unique()}",
             registered_at=datetime.now(UTC),
         )
+    if inflight is not None:
+        _resume_runner(inflight.runner_container)
     current = await _wait_for_runner_generation_above(
         runtime_api,
         agent_id=agent_id,
@@ -658,6 +688,8 @@ async def _assert_stale_runner_action_is_fenced(
                 message="Runtime Control did not ignore the stale Runner revoke",
             )
     finally:
+        if inflight is not None:
+            _resume_runner(inflight.runner_container)
         await client.close()
 
     after = runtime_api.agent_runtime_v1_get_agent_runtime(

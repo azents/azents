@@ -23,6 +23,14 @@ class _Redis:
     def __init__(self) -> None:
         self.closed = False
 
+    async def get(self, name: str) -> bytes | str | None:
+        del name
+        return None
+
+    async def set(self, name: str, value: str, *, ex: int) -> object:
+        del name, value, ex
+        return True
+
     async def aclose(self) -> None:
         self.closed = True
 
@@ -38,6 +46,26 @@ class _Engine:
 class _S3:
     def __init__(self) -> None:
         self.closed = False
+
+
+class _AppRunner:
+    def __init__(self, application: object) -> None:
+        self.application = application
+        self.cleaned = False
+
+    async def setup(self) -> None:
+        pass
+
+    async def cleanup(self) -> None:
+        self.cleaned = True
+
+
+class _TCPSite:
+    def __init__(self, runner: _AppRunner, *, host: str, port: int) -> None:
+        del runner, host, port
+
+    async def start(self) -> None:
+        pass
 
 
 class _Coordinator:
@@ -97,6 +125,24 @@ def _settings() -> RuntimeControlSettings:
         runtime_control_port=0,
         runtime_control_trusted_port=0,
         runtime_control_trusted_advertise_address="127.0.0.1:0",
+        runtime_control_runner_web_connect_address="runtime-control:8030",
+        runtime_control_runner_web_tls_server_name="runtime-control",
+        runtime_control_web_capacity_maximum_active_streams=64,
+        runtime_control_web_capacity_maximum_sse_streams=8,
+        runtime_control_web_capacity_maximum_websocket_streams=8,
+        runtime_control_web_capacity_maximum_pending_opens=64,
+        runtime_control_web_capacity_maximum_buffer_bytes=64 * 1024 * 1024,
+        runtime_control_web_capacity_inbound_bytes_per_second=1024 * 1024 * 1024,
+        runtime_control_web_capacity_outbound_bytes_per_second=1024 * 1024 * 1024,
+        runtime_control_web_capacity_burst_bytes=64 * 1024 * 1024,
+        runtime_control_web_hard_maximum_sessions=128,
+        runtime_control_web_hard_maximum_active_streams=1024,
+        runtime_control_web_hard_maximum_application_buffer_bytes=(512 * 1024 * 1024),
+        runtime_control_web_hard_maximum_control_buffer_bytes=64 * 1024 * 1024,
+        runtime_control_web_hard_maximum_queued_envelopes=4096,
+        runtime_control_web_hard_maximum_pending_tasks=2048,
+        runtime_control_web_hard_maximum_event_loop_lag_milliseconds=250,
+        runtime_control_web_hard_maximum_resident_memory_bytes=1024 * 1024 * 1024,
         runtime_control_transfer_backend="memory",
         runtime_control_workspace_s3_bucket="transfer-bucket",
         runtime_control_workspace_s3_access_key_id="access-key",
@@ -132,18 +178,8 @@ async def test_lifespan_composes_all_transfer_services_and_closes_resources(
     )
     monkeypatch.setattr(
         control_server,
-        "add_runtime_runner_web_servicer",
-        lambda _server, **kwargs: registrations.append(("runner-web", kwargs)),
-    )
-    monkeypatch.setattr(
-        control_server,
-        "add_runtime_web_proxy_servicer",
-        lambda _server, **kwargs: registrations.append(("web-proxy", kwargs)),
-    )
-    monkeypatch.setattr(
-        control_server,
-        "add_runtime_web_relay_servicer",
-        lambda _server, **kwargs: registrations.append(("web-relay", kwargs)),
+        "add_runtime_web_session_servicers",
+        lambda **kwargs: registrations.append(("runtime-web-sessions", kwargs)),
     )
     monkeypatch.setattr(
         control_server,
@@ -188,30 +224,29 @@ async def test_lifespan_composes_all_transfer_services_and_closes_resources(
     monkeypatch.setattr(control_server, "_runtime_transfer_s3_service", s3_service)
     monkeypatch.setattr(control_server, "_run_reconciler", idle)
     monkeypatch.setattr(control_server, "_run_transfer_repair", idle)
+    monkeypatch.setattr(control_server, "_run_terminal_repair", idle)
+    monkeypatch.setattr(control_server.web, "AppRunner", _AppRunner)
+    monkeypatch.setattr(control_server.web, "TCPSite", _TCPSite)
 
     async with runtime_control_server_lifespan(_settings()):
         names = [name for name, _kwargs in registrations]
         assert names == [
+            "runtime-web-sessions",
             "provider",
             "runner",
-            "runner-web",
             "transfer",
             "coordinator",
-            "web-proxy",
-            "web-relay",
         ]
         transfer = dict(registrations)["transfer"]
         runner = dict(registrations)["runner"]
-        runner_web = dict(registrations)["runner-web"]
-        web_proxy = dict(registrations)["web-proxy"]
-        web_relay = dict(registrations)["web-relay"]
+        sessions = dict(registrations)["runtime-web-sessions"]
         assert transfer["object_store"] is s3
         assert transfer["bucket"] == "transfer-bucket"
         assert transfer["object_prefix"] == "v1/runtime-transfer"
         assert runner["transfer_result_sink"] is not None
-        assert runner_web["broker"] is not None
-        assert web_proxy["coordinator"] is web_relay["coordinator"]
-        assert web_relay["registry"] is not None
+        assert sessions["data_plane"] is not None
+        assert sessions["owner_registry"] is not None
+        assert sessions["offer_provider"] is not None
         assert "secret-key" not in repr(registrations)
 
     assert redis.closed

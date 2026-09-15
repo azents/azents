@@ -25,6 +25,7 @@ from azents.runtime.control_protocol.grpc.runner_terminal_server import (
     RuntimeRunnerTerminalAdmissionError,
     RuntimeRunnerTerminalAuthority,
     RuntimeRunnerTerminalGrpcServicer,
+    _control_messages,
 )
 from azents.testing.grpc import FakeGrpcContext, GrpcMetadata
 
@@ -118,6 +119,17 @@ class _Broker:
         return self.stream
 
 
+class _CancellationStream(_Stream):
+    def __init__(self) -> None:
+        super().__init__()
+        self.control_waiting = asyncio.Event()
+
+    async def control_frames(self) -> AsyncIterator[RunnerTerminalControlFrame]:
+        yield RunnerTerminalHeartbeatAcknowledgement(monotonic_sequence=9)
+        self.control_waiting.set()
+        await asyncio.Future()
+
+
 @pytest.mark.asyncio
 async def test_terminal_stream_authenticates_fences_and_bridges_frames() -> None:
     broker = _Broker()
@@ -154,6 +166,34 @@ async def test_terminal_stream_authenticates_fences_and_bridges_frames() -> None
     with pytest.raises(StopAsyncIteration):
         await anext(responses)
     assert broker.stream.closed is True
+
+
+@pytest.mark.asyncio
+async def test_control_message_cancellation_reaps_pending_frame_task() -> None:
+    """Cancel the child frame read when the gRPC response iterator stops."""
+    stream = _CancellationStream()
+    inbound_task = asyncio.create_task(asyncio.sleep(60))
+    messages = _control_messages(stream, inbound_task)
+    first = await anext(messages)
+    assert first.heartbeat_ack.monotonic_sequence == 9
+    pending = asyncio.ensure_future(anext(messages))
+    await asyncio.wait_for(stream.control_waiting.wait(), timeout=1)
+
+    pending.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await pending
+    await asyncio.sleep(0)
+
+    leaked = [
+        task
+        for task in asyncio.all_tasks()
+        if task is not asyncio.current_task()
+        and task.get_name() == "runner-terminal-control-frame"
+    ]
+    assert leaked == []
+    inbound_task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await inbound_task
 
 
 @pytest.mark.asyncio

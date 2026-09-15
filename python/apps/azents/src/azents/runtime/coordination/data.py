@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import NamedTuple
 
 from azents_runtime_control.system_metrics import (
+    RunnerRuntimeWebMetrics,
     RunnerSystemMetricObservation,
     RunnerSystemMetricsScope,
 )
@@ -260,6 +261,7 @@ class RuntimeSystemMetricsSample:
     cpu: RunnerSystemMetricObservation
     memory: RunnerSystemMetricObservation
     disk: RunnerSystemMetricObservation
+    runtime_web: RunnerRuntimeWebMetrics
 
     def __post_init__(self) -> None:
         """Validate store ordering and canonical time."""
