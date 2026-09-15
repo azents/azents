@@ -8,7 +8,8 @@ import { userV1Me } from "@azents/public-client";
 import { getRequestConfig } from "next-intl/server";
 import { cookies, headers } from "next/headers";
 import { loadMessages } from "@/i18n/message-loader";
-import { getAccessToken, isTokenExpiringSoon } from "@/shared/lib/cookies";
+import { isAccessTokenUsableForAccountLocale } from "@/shared/lib/account-locale";
+import { getAccessToken } from "@/shared/lib/cookies";
 import {
   DEFAULT_LOCALE,
   isSupportedLocale,
@@ -20,7 +21,10 @@ import type { SupportedLocale } from "@/shared/lib/locale";
 
 async function resolveAccountLocale(): Promise<SupportedLocale | null> {
   const accessToken = await getAccessToken();
-  if (accessToken === null || isTokenExpiringSoon(accessToken.expiresAt)) {
+  if (
+    accessToken === null ||
+    !isAccessTokenUsableForAccountLocale(accessToken.expiresAt)
+  ) {
     return null;
   }
 

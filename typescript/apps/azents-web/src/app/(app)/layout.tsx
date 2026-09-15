@@ -79,7 +79,7 @@ export default async function RootAppLayout({
 }: {
   children: React.ReactNode;
 }): Promise<React.ReactElement> {
-  // SSR: read locale (cookie → Accept-Language → default)
+  // SSR: read locale (account → cookie → Accept-Language → default)
   const locale = await getLocale();
   const messages = await getMessages();
   const authState = await getInitialAuthState();
