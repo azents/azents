@@ -1,9 +1,13 @@
 import { rem } from "@mantine/core";
 import { useForm } from "@mantine/form";
-import { expect, within } from "storybook/test";
+import { expect, userEvent, within } from "storybook/test";
+import { reasoningEffortLevels } from "@/shared/lib/reasoning-effort";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import { useAgentFormTranslations } from "../containers/useAgentFormTranslations";
-import { selectableModelOptionFormValuesFromStoredOptions } from "../model-selection";
+import {
+  findSelectableModelOptionByLabel,
+  selectableModelOptionFormValuesFromStoredOptions,
+} from "../model-selection";
 import { AgentForm } from "./AgentForm";
 import type {
   ImageGenerationCatalogState,
@@ -269,6 +273,13 @@ function AgentFormStory(props: AgentFormProps): React.ReactElement {
     mode: "controlled",
     initialValues: storyFormValues(props.formState),
   });
+  const selectedMainModelOption = findSelectableModelOptionByLabel(
+    form.values.selectable_model_options,
+    form.values.main_model_label,
+  );
+  const selectedModelEffortLevels = reasoningEffortLevels(
+    selectedMainModelOption?.candidates[0]?.normalized_capabilities ?? null,
+  );
   return (
     <AgentForm
       {...props}
@@ -277,7 +288,7 @@ function AgentFormStory(props: AgentFormProps): React.ReactElement {
       form={form}
       hasSubmitAttempted={false}
       onSubmitAttempted={() => {}}
-      selectedModelEffortLevels={[]}
+      selectedModelEffortLevels={selectedModelEffortLevels}
       imageGenerationCatalogStates={emptyImageGenerationCatalogStates}
       canSyncImageCatalog={false}
       onSyncImageCatalog={async () => {}}
@@ -341,6 +352,11 @@ export const RuntimeFreeCreateHidesTerminalSettings = {
     ).not.toBeInTheDocument();
     await expect(canvas.getByText("Enable Memory")).toBeVisible();
     await expect(canvas.getByText("Enable Tool Search")).toBeVisible();
+
+    await userEvent.click(canvas.getByLabelText("Runtime profile"));
+    const documentBody = within(canvasElement.ownerDocument.body);
+    await userEvent.click(await documentBody.findByText("Standard runtime"));
+    await expect(canvas.getByText("Enable interactive Terminal")).toBeVisible();
   },
 } satisfies Story;
 
