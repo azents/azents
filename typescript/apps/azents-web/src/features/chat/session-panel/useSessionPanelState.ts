@@ -9,6 +9,7 @@ import type { PointerEvent, RefObject } from "react";
 
 export interface SessionPanelState {
   activeView: SessionPanelView;
+  activationRevision: number;
   opened: boolean;
   onSelect: (view: SessionPanelView) => void;
   onOpen: () => void;
@@ -30,6 +31,7 @@ export function useSessionPanelState(mobile: boolean): SessionPanelState {
   const [activeView, setActiveView] = useState<SessionPanelView>(
     selected ?? "files",
   );
+  const [activationRevision, setActivationRevision] = useState(0);
   const [opened, setOpened] = useState(selected !== null || !mobile);
   const pendingPageRef = useRef<{ value: string | null } | null>(null);
   useEffect(() => {
@@ -62,6 +64,7 @@ export function useSessionPanelState(mobile: boolean): SessionPanelState {
   const onSelect = useCallback(
     (view: SessionPanelView): void => {
       setActiveView(view);
+      setActivationRevision((revision) => revision + 1);
       setOpened(true);
       if (page === view) {
         return;
@@ -85,6 +88,7 @@ export function useSessionPanelState(mobile: boolean): SessionPanelState {
   }, [page, router, pathname, params]);
   const onOpen = useCallback((): void => {
     setOpened(true);
+    setActivationRevision((revision) => revision + 1);
     if (page === activeView) {
       return;
     }
@@ -128,6 +132,7 @@ export function useSessionPanelState(mobile: boolean): SessionPanelState {
   );
   return {
     activeView,
+    activationRevision,
     opened,
     onSelect,
     onOpen,

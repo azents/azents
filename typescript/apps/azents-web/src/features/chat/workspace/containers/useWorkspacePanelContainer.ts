@@ -25,6 +25,10 @@ import {
   type WorkspaceProjectPanelState,
 } from "../types";
 import { resolveWorkspaceDirectory } from "../workspaceDirectory";
+import {
+  type WorkspacePanelInvalidationTarget,
+  workspacePanelTabInvalidationPlan,
+} from "../workspacePanelTabs";
 import { shouldQueryProjectBrowserManifest } from "../workspaceQueryPolicy";
 import type {
   ProjectDirectoryPickerEntry,
@@ -40,6 +44,8 @@ interface UseWorkspacePanelContainerInput {
   handle: string;
   agentId: string;
   sessionId: string;
+  activeTab: WorkspacePanelTab;
+  activationRevision: number;
   autoRefreshVisible: boolean;
 }
 
@@ -143,6 +149,8 @@ export function useWorkspacePanelContainer({
   handle,
   agentId,
   sessionId,
+  activeTab,
+  activationRevision,
   autoRefreshVisible,
 }: UseWorkspacePanelContainerInput): WorkspacePanelContainerOutput {
   const [currentDirectoryPath, setCurrentDirectoryPath] = useState<
@@ -150,7 +158,6 @@ export function useWorkspacePanelContainer({
   >(null);
   const [browserMode, setBrowserMode] =
     useState<WorkspaceBrowserMode>("projects");
-  const [activeTab, setActiveTab] = useState<WorkspacePanelTab>("workspace");
   const [restartConfirmOpen, setRestartConfirmOpen] = useState(false);
   const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
   const [fileBrowserQuery, setFileBrowserQuery] = useState("");
@@ -213,7 +220,6 @@ export function useWorkspacePanelContainer({
   >(null);
   const [isManualRefreshing, setIsManualRefreshing] = useState(false);
   const [isInspectingRepository, setIsInspectingRepository] = useState(false);
-  const autoRefreshKeyRef = useRef<string | null>(null);
   const repositoryInspectionRequestRef = useRef(0);
 
   useEffect(() => {
@@ -323,6 +329,10 @@ export function useWorkspacePanelContainer({
   const activeDirectoryPath =
     currentDirectoryPath ??
     (browserMode === "projects" ? projectBrowserRoot : (manifest?.cwd ?? ""));
+  const activeDirectoryPathRef = useRef(activeDirectoryPath);
+  activeDirectoryPathRef.current = activeDirectoryPath;
+  const selectedFilePathRef = useRef(selectedFilePath);
+  selectedFilePathRef.current = selectedFilePath;
 
   useEffect(() => {
     if (!manifest) {
@@ -807,27 +817,100 @@ export function useWorkspacePanelContainer({
     utils.chat.readAgentWorkspacePath,
   ]);
 
+  const invalidateTabTarget = useCallback(
+    async (target: WorkspacePanelInvalidationTarget): Promise<void> => {
+      switch (target) {
+        case "agent":
+          await utils.agent.get.invalidate({ handle, agentId });
+          return;
+        case "metrics":
+          await utils.chat.getAgentRuntimeSystemMetrics.invalidate({
+            handle,
+            agentId,
+          });
+          return;
+        case "projects":
+          await utils.chat.listAgentProjects.invalidate({
+            agentId,
+            sessionId,
+          });
+          return;
+        case "runtime":
+          await utils.chat.getAgentRuntime.invalidate({ handle, agentId });
+          return;
+        case "services":
+          await utils.runtimeWeb.list.invalidate({ handle, agentId });
+          return;
+        case "session":
+          await utils.chat.getAgentSession.invalidate({ agentId, sessionId });
+          return;
+        case "workspace":
+          await utils.chat.getAgentWorkspace.invalidate({ agentId });
+          return;
+        case "workspaceManifest":
+          await utils.chat.getSessionProjectBrowserManifest.invalidate({
+            agentId,
+            sessionId,
+          });
+          return;
+        case "workspacePaths":
+          await Promise.all(
+            [activeDirectoryPathRef.current, selectedFilePathRef.current]
+              .filter(
+                (path, index, paths): path is string =>
+                  path !== null && path !== "" && paths.indexOf(path) === index,
+              )
+              .map((path) =>
+                utils.chat.readAgentWorkspacePath.invalidate({
+                  agentId,
+                  sessionId,
+                  path,
+                }),
+              ),
+          );
+          return;
+        case "workspacePathStats":
+          if (selectedFilePathRef.current !== null) {
+            await utils.chat.statAgentWorkspacePath.invalidate({
+              agentId,
+              path: selectedFilePathRef.current,
+            });
+          }
+          return;
+      }
+    },
+    [
+      agentId,
+      handle,
+      sessionId,
+      utils.agent.get,
+      utils.chat.getAgentRuntime,
+      utils.chat.getAgentRuntimeSystemMetrics,
+      utils.chat.getAgentSession,
+      utils.chat.getAgentWorkspace,
+      utils.chat.getSessionProjectBrowserManifest,
+      utils.chat.listAgentProjects,
+      utils.chat.readAgentWorkspacePath,
+      utils.chat.statAgentWorkspacePath,
+      utils.runtimeWeb.list,
+    ],
+  );
+
+  const invalidateActiveTab = useCallback(
+    async (tab: WorkspacePanelTab): Promise<void> => {
+      await Promise.all(
+        workspacePanelTabInvalidationPlan(tab).map(invalidateTabTarget),
+      );
+    },
+    [invalidateTabTarget],
+  );
+
   useEffect(() => {
     if (!autoRefreshVisible) {
-      autoRefreshKeyRef.current = null;
       return;
     }
-    if (workspaceQuery.data?.workspace.type !== "READY") {
-      return;
-    }
-    const autoRefreshKey = `${agentId}:${sessionId}`;
-    if (autoRefreshKeyRef.current === autoRefreshKey) {
-      return;
-    }
-    autoRefreshKeyRef.current = autoRefreshKey;
-    onRefresh();
-  }, [
-    agentId,
-    autoRefreshVisible,
-    onRefresh,
-    sessionId,
-    workspaceQuery.data?.workspace.type,
-  ]);
+    void invalidateActiveTab(activeTab);
+  }, [activationRevision, activeTab, autoRefreshVisible, invalidateActiveTab]);
 
   const getDownloadHref = useCallback(
     (path: string): string =>
@@ -1233,18 +1316,6 @@ export function useWorkspacePanelContainer({
     workspaceView,
   ]);
 
-  const metricsTabAvailable =
-    state.type === "SERVER" || state.type === "REMOVING";
-
-  useEffect(() => {
-    if (activeTab === "metrics" && !metricsTabAvailable) {
-      setActiveTab("workspace");
-    }
-  }, [activeTab, metricsTabAvailable]);
-
-  const onSetActiveTab = useCallback((tab: WorkspacePanelTab): void => {
-    setActiveTab(tab);
-  }, []);
   const onOpenRestartConfirm = useCallback((): void => {
     setRestartConfirmOpen(true);
   }, []);
@@ -1371,7 +1442,6 @@ export function useWorkspacePanelContainer({
     activeTab,
     restartConfirmOpen,
     resetConfirmOpen,
-    onSetActiveTab,
     onOpenRestartConfirm,
     onCloseRestartConfirm,
     onConfirmRestart,

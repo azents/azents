@@ -22,6 +22,7 @@ export interface ScheduledTasksContainerProps {
   agent: AgentResponse;
   sessionId: string;
   session: AgentSessionResponse;
+  activationRevision: number;
   initialTaskId: string | null;
   openInitialTaskForEdit: boolean;
 }
@@ -82,6 +83,7 @@ export function useScheduledTasksContainer({
   agent,
   sessionId,
   session,
+  activationRevision,
   initialTaskId,
   openInitialTaskForEdit,
 }: ScheduledTasksContainerProps): ScheduledTasksContainerOutput {
@@ -116,6 +118,8 @@ export function useScheduledTasksContainer({
     !tasksQuery.data.items.some((task) => task.id === requestedTaskId)
       ? null
       : requestedTaskId;
+  const selectedTaskIdRef = useRef(selectedTaskId);
+  selectedTaskIdRef.current = selectedTaskId;
   const detailQuery = trpc.scheduledTask.get.useQuery(
     { handle, agentId: agent.id, taskId: selectedTaskId ?? "" },
     {
@@ -136,6 +140,37 @@ export function useScheduledTasksContainer({
     { handle, agentId: agent.id, sessionId },
     { enabled: form.type !== "CLOSED" },
   );
+
+  useEffect(() => {
+    const activeTaskId = selectedTaskIdRef.current;
+    const detailInvalidations =
+      activeTaskId === null
+        ? []
+        : [
+            utils.scheduledTask.get.invalidate({
+              handle,
+              agentId: agent.id,
+              taskId: activeTaskId,
+            }),
+            utils.scheduledTask.getCycle.invalidate({
+              handle,
+              agentId: agent.id,
+              taskId: activeTaskId,
+            }),
+          ];
+    void Promise.all([
+      utils.scheduledTask.list.invalidate(taskListInput),
+      ...detailInvalidations,
+    ]);
+  }, [
+    activationRevision,
+    agent.id,
+    handle,
+    taskListInput,
+    utils.scheduledTask.get,
+    utils.scheduledTask.getCycle,
+    utils.scheduledTask.list,
+  ]);
 
   const refresh = useCallback(
     async (taskId?: string): Promise<void> => {
