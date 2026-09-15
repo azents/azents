@@ -34,6 +34,7 @@ def _wait(driver: WebDriver) -> WebDriverWait:
     return WebDriverWait(
         driver,
         20,
+        poll_frequency=0.1,
         ignored_exceptions=(StaleElementReferenceException,),
     )
 

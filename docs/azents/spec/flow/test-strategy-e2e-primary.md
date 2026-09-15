@@ -516,11 +516,12 @@ Local/PR environment without live substrate does not fake live PASS. Instead, se
 
 - **2026-09-15** (spec_version 63) — Extended immutable snapshot reuse and
   prerequisite pre-pulls to every Web E2E image, reused the session Chromium across
-  isolated Runtime Web scenarios, overlapped Chromium startup with Main Web and Admin
-  Web container preparation, refreshed authoritative Runtime metrics instead of
-  waiting for a stale UI polling cycle, started independent Runtime Web topology
-  containers concurrently, and defined the full gated E2E critical path across every
-  enabled suite lane.
+  isolated Runtime Web scenarios, launched Chromium through a Web-suite-only session
+  dependency before other Web fixtures, refreshed authoritative Runtime metrics
+  instead of waiting for a stale UI polling cycle, reduced browser-wait polling only
+  for selected non-Runtime browser journeys while retaining the same timeout bounds,
+  started independent Runtime Web topology containers concurrently,
+  and defined the full gated E2E critical path across every enabled suite lane.
 - **2026-09-14** (spec_version 61) — Made recurring Runtime Web verification a
   four-test lightweight 1 MiB/eight-asset matrix with relay, hard-limit,
   maintenance, protocol, and optional Redis recovery coverage; added bounded

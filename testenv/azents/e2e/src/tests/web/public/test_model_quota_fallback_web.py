@@ -36,7 +36,7 @@ class _ConfiguredSession(NamedTuple):
 
 def _wait(driver: WebDriver) -> WebDriverWait[WebDriver]:
     """Return the bounded browser wait for recovery UI."""
-    return WebDriverWait(driver, 20)
+    return WebDriverWait(driver, 20, poll_frequency=0.1)
 
 
 def _model_trigger(driver: WebDriver) -> WebElement:

@@ -2859,6 +2859,7 @@ def selenium_container_start(
     container_network: Network,
 ) -> Generator[_SeleniumContainerStart, None, None]:
     """Start Chromium while independent Web services are still preparing."""
+    _initialize_testcontainers_reaper()
     container = (
         DockerContainer(
             image=_SELENIUM_IMAGE,

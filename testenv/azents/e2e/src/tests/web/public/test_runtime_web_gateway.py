@@ -286,6 +286,36 @@ def _container_logs(container: DockerContainer) -> str:
     return (stdout + stderr).decode(errors="replace")[-12_000:]
 
 
+def _log_runtime_web_container(
+    *,
+    name: str,
+    container: DockerContainer,
+) -> None:
+    """Emit bounded diagnostics without replacing the active failure."""
+    try:
+        container_logs = _container_logs(container)
+    except Exception as error:
+        logger.warning(
+            "Runtime Web E2E container logs for %s were unavailable: %s",
+            name,
+            type(error).__name__,
+            extra={
+                "container_name": name,
+                "diagnostic_error": type(error).__name__,
+            },
+        )
+        return
+    logger.warning(
+        "Runtime Web E2E container logs for %s:\n%s",
+        name,
+        container_logs,
+        extra={
+            "container_name": name,
+            "container_logs": container_logs,
+        },
+    )
+
+
 def _wait_for_log(container: DockerContainer, marker: str, *, name: str) -> None:
     """Wait for one explicit process readiness log."""
     deadline = time.monotonic() + 60
@@ -769,30 +799,37 @@ def _runtime_web_stack(
             private_key_path=private_key_path,
             config_path=config_path,
         )
-        started_containers: list[DockerContainer] = []
+        started_containers: list[tuple[str, DockerContainer]] = []
         started_containers_lock = threading.Lock()
 
-        def start_container(container: DockerContainer) -> None:
+        def start_container(name: str, container: DockerContainer) -> None:
             try:
                 container.start()
             except BaseException:
+                _log_runtime_web_container(name=name, container=container)
                 with suppress(Exception):
                     container.stop()
                 raise
             with started_containers_lock:
-                started_containers.append(container)
+                started_containers.append((name, container))
 
         try:
-            start_container(relay)
+            start_container("Runtime Control relay", relay)
             _wait_for_log(
                 relay,
                 "Runtime Control gRPC server started",
                 name="Runtime Control relay",
             )
+            concurrent_containers = (
+                ("Runtime Web Gateway", gateway),
+                ("Runtime Web Public API", public_api),
+                ("Runtime Web Main Web", main_web),
+                ("Runtime Web TLS edge", edge),
+            )
             with ThreadPoolExecutor(max_workers=4) as executor:
                 futures = [
-                    executor.submit(start_container, container)
-                    for container in (gateway, public_api, main_web, edge)
+                    executor.submit(start_container, name, container)
+                    for name, container in concurrent_containers
                 ]
                 for future in futures:
                     future.result()
@@ -814,91 +851,75 @@ def _runtime_web_stack(
                 path="/login",
                 name="Runtime Web Main Web",
             )
-            try:
-                edge_host = edge.get_container_host_ip()
-                edge_port = edge.get_exposed_port(443)
-                deadline = time.monotonic() + 30
-                while time.monotonic() < deadline:
-                    try:
-                        response = requests.get(
-                            f"https://{edge_host}:{edge_port}/login",
-                            headers={"Host": "web.runtime-e2e.test"},
-                            verify=False,
-                            timeout=2,
-                        )
-                        if response.status_code < 500:
-                            break
-                    except requests.RequestException:
-                        pass
-                    time.sleep(0.5)
-                else:
-                    edge_logs = _container_logs(edge)
-                    raise AssertionError(
-                        f"Runtime Web TLS edge did not become ready:\n{edge_logs}"
+            edge_host = edge.get_container_host_ip()
+            edge_port = edge.get_exposed_port(443)
+            deadline = time.monotonic() + 30
+            while time.monotonic() < deadline:
+                try:
+                    response = requests.get(
+                        f"https://{edge_host}:{edge_port}/login",
+                        headers={"Host": "web.runtime-e2e.test"},
+                        verify=False,
+                        timeout=2,
                     )
-                wrapped = edge.get_wrapped_container()
-                wrapped.reload()
-                edge_ip = wrapped.attrs["NetworkSettings"]["Networks"][network.name][
-                    "IPAddress"
-                ]
-                if not isinstance(edge_ip, str) or not edge_ip:
-                    raise AssertionError("Runtime Web TLS edge has no network address")
-                yield _RuntimeWebStack(
-                    main_origin=_MAIN_ORIGIN,
-                    public_api_url=(
-                        f"http://{public_api.get_container_host_ip()}:"
-                        f"{public_api.get_exposed_port(8010)}"
-                    ),
-                    operations_url=(
-                        f"http://{gateway.get_container_host_ip()}:"
-                        f"{gateway.get_exposed_port(8041)}"
-                    ),
-                    owner_control_operations_url=(
+                    if response.status_code < 500:
+                        break
+                except requests.RequestException:
+                    pass
+                time.sleep(0.5)
+            else:
+                edge_logs = _container_logs(edge)
+                raise AssertionError(
+                    f"Runtime Web TLS edge did not become ready:\n{edge_logs}"
+                )
+            wrapped = edge.get_wrapped_container()
+            wrapped.reload()
+            edge_ip = wrapped.attrs["NetworkSettings"]["Networks"][network.name][
+                "IPAddress"
+            ]
+            if not isinstance(edge_ip, str) or not edge_ip:
+                raise AssertionError("Runtime Web TLS edge has no network address")
+            yield _RuntimeWebStack(
+                main_origin=_MAIN_ORIGIN,
+                public_api_url=(
+                    f"http://{public_api.get_container_host_ip()}:"
+                    f"{public_api.get_exposed_port(8010)}"
+                ),
+                operations_url=(
+                    f"http://{gateway.get_container_host_ip()}:"
+                    f"{gateway.get_exposed_port(8041)}"
+                ),
+                owner_control_operations_url=(
+                    f"http://{owner_control.get_container_host_ip()}:"
+                    f"{owner_control.get_exposed_port(8033)}"
+                ),
+                accepting_control_operations_url=(
+                    (
+                        f"http://{relay.get_container_host_ip()}:"
+                        f"{relay.get_exposed_port(8034)}"
+                    )
+                    if relay_path
+                    else (
                         f"http://{owner_control.get_container_host_ip()}:"
                         f"{owner_control.get_exposed_port(8033)}"
-                    ),
-                    accepting_control_operations_url=(
-                        (
-                            f"http://{relay.get_container_host_ip()}:"
-                            f"{relay.get_exposed_port(8034)}"
-                        )
-                        if relay_path
-                        else (
-                            f"http://{owner_control.get_container_host_ip()}:"
-                            f"{owner_control.get_exposed_port(8033)}"
-                        )
-                    ),
-                    capacity_backend=capacity_backend,
-                    edge_ip=edge_ip,
-                    edge_host_url=f"https://{edge_host}:{edge_port}",
-                    selenium_url=selenium_url,
-                )
-            except Exception:
-                for name, container in (
-                    ("Runtime Control relay", relay),
-                    ("Runtime Web Gateway", gateway),
-                    ("Runtime Web Public API", public_api),
-                    ("Runtime Web Main Web", main_web),
-                    ("Runtime Web TLS edge", edge),
-                ):
-                    container_logs = _container_logs(container)
-                    logger.warning(
-                        "Runtime Web E2E container logs for %s:\n%s",
-                        name,
-                        container_logs,
-                        extra={
-                            "container_name": name,
-                            "container_logs": container_logs,
-                        },
                     )
-                raise
+                ),
+                capacity_backend=capacity_backend,
+                edge_ip=edge_ip,
+                edge_host_url=f"https://{edge_host}:{edge_port}",
+                selenium_url=selenium_url,
+            )
+        except Exception:
+            for name, container in started_containers:
+                _log_runtime_web_container(name=name, container=container)
+            raise
         finally:
             with ThreadPoolExecutor(
                 max_workers=max(len(started_containers), 1)
             ) as executor:
                 stop_futures = [
                     executor.submit(container.stop)
-                    for container in reversed(started_containers)
+                    for _, container in reversed(started_containers)
                 ]
                 for future in stop_futures:
                     future.result()
