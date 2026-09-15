@@ -7,67 +7,67 @@
     "invalidResponse": "認証応答が無効です。",
     "failed": "Runtime Web 認証に失敗しました。"
   },
-  "confirmation": {
-    "title": "Web サービスへのアクセスを確認",
-    "subtitle": "この Session の正確なサービス要求だけをここで承認できます。",
-    "loading": "現在のサービス要求を読み込んでいます…",
+  "activation": {
+    "title": "Web サービスをオンにする",
+    "subtitle": "公開 URL を利用できる時間を選択してください。",
+    "loading": "現在の Web サービスを読み込んでいます…",
     "errorTitle": "Web サービスを読み込めませんでした",
-    "duration": "アクセスは {minutes} 分後に期限切れになります。",
     "untrustedNotice": "Runtime アプリケーションは Azents によって検証されていません。コンテンツ、ダウンロード、機密情報の要求を信頼しないでください。",
-    "alreadyActive": "このサービスは現在公開中です。開いても有効期限は延長されません。",
-    "stale": "この要求は承認待ちではありません。承認操作なしで現在の状態を表示します。"
+    "alreadyOn": "このサービスはすでにオンです。開いても有効期限は延長されません。"
   },
   "panel": {
     "tab": "サービス",
     "title": "Web サービス",
-    "description": "この Session ですでに実行中のアプリケーションを停止せずに公開します。",
+    "description": "ローカルポート上のアプリケーションに公開 URL を提供します。サービスをオフにしてもアプリケーションは停止しません。",
     "loading": "Web サービスを読み込んでいます…",
     "errorTitle": "Web サービスを読み込めませんでした",
     "emptyTitle": "Web サービスはまだありません",
-    "emptyDescription": "アプリケーションの準備ができたら、数値の localhost ポートに安定したアドレスを作成します。",
-    "create": "サービスを作成",
-    "createTitle": "Web サービスを作成",
+    "emptyDescription": "アプリケーションの準備ができたら、数値の localhost ポートにサービスを追加します。",
+    "create": "サービスを追加",
+    "createTitle": "Web サービスを追加",
+    "editTitle": "Web サービスを編集",
+    "deleteTitle": "Web サービスを削除しますか？",
+    "deleteDescription": "公開 URL は永久に廃止されます。サービスを再作成すると別のアドレスが生成されます。",
     "port": "ローカルポート",
     "portPlaceholder": "3000",
     "label": "サービス名",
     "labelPlaceholder": "プレビューアプリ",
-    "continue": "公開を確認",
-    "confirmTitle": "このサービスを公開しますか？",
-    "confirmDescription": "承認された Session メンバーは {minutes} 分間このアドレスにアクセスできます。公開を閉じてもアプリケーションは停止しません。",
+    "duration": "公開時間",
+    "turnOnAfterCreate": "作成後にオンにする",
+    "durationDeferred": "現在の有効期限は変わりません。期限をリセットするか、オフにしてから再度オンにすると新しい時間が適用されます。",
     "cancelDialog": "キャンセル"
+  },
+  "duration": {
+    "oneHour": "1 時間",
+    "sixHours": "6 時間",
+    "twentyFourHours": "24 時間"
   },
   "service": {
     "portLabel": "ポート {port}",
     "localPort": "localhost:{port}",
-    "expiresAt": "{time} に期限切れ",
-    "endedAt": "{time} に終了"
+    "expiresAt": "{time} に期限切れ"
   },
   "status": {
-    "active": "公開中",
-    "pending": "承認待ち",
-    "activePending": "公開中 · 新しい承認待ち",
-    "inactive": "停止中",
-    "expired": "期限切れ",
-    "closed": "公開終了",
+    "on": "オン",
+    "off": "オフ",
     "unconfigured": "セットアップが必要",
-    "runtimeUnavailable": "Runtime を利用できないため、アプリケーションへの接続状態は確認されていません"
+    "runtimeUnavailable": "現在 Runtime を利用できないため、アプリケーションに接続できません。"
   },
   "actions": {
-    "approve": "承認",
-    "approveDuration": "{minutes} 分間承認",
-    "reject": "拒否",
-    "cancel": "要求をキャンセル",
-    "requestAgain": "再要求",
-    "close": "公開を閉じる",
+    "turnOn": "オンにする",
+    "turnOff": "オフにする",
+    "resetExpiration": "有効期限をリセット",
+    "edit": "編集",
+    "delete": "削除",
+    "save": "保存",
     "copy": "URL をコピー",
     "copied": "URL をコピーしました",
     "open": "サービスを開く"
   },
   "chat": {
     "request": "Web サービスを要求",
-    "preparing": "Web サービスを準備",
     "listing": "Web サービスを確認",
-    "closing": "Web サービスを閉じました",
-    "stale": "この Chat 項目は古いため、現在のサービス状態を表示します。"
+    "closing": "Web サービスをオフにしました",
+    "stale": "この Chat 項目は古い可能性があります。現在の状態はサービス画面で確認してください。"
   }
 }

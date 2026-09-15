@@ -12,8 +12,8 @@ Details of all living specs. Synchronized from frontmatter.
 
 | Domain | Title | Owner | Last Verified | Version |
 |---|---|---|---|---|
-| agent | [Agent Domain Spec](domain/agent.md) | @Hardtack | 2026-09-15 | 80 |
-| conversation | [Conversation & Events](domain/conversation.md) | @Hardtack | 2026-09-15 | 171 |
+| agent | [Agent Domain Spec](domain/agent.md) | @Hardtack | 2026-09-15 | 81 |
+| conversation | [Conversation & Events](domain/conversation.md) | @Hardtack | 2026-09-15 | 172 |
 | external-channel | [External Channel](domain/external-channel.md) | @Hardtack | 2026-09-15 | 80 |
 | goal | [Goal Domain Spec](domain/goal.md) | - | 2026-08-23 | 15 |
 | memory | [Memory](domain/memory.md) | @Hardtack | 2026-08-18 | 7 |
@@ -21,18 +21,18 @@ Details of all living specs. Synchronized from frontmatter.
 | runtime-provider | [Runtime Provider](domain/runtime-provider.md) | - | 2026-08-26 | 28 |
 | scheduled-task | [Scheduled Task Domain Spec](domain/scheduled-task.md) | - | 2026-09-15 | 12 |
 | system-settings | [System Settings](domain/system-settings.md) | @Hardtack | 2026-09-15 | 6 |
-| toolkit | [Toolkit](domain/toolkit.md) | @Hardtack | 2026-09-15 | 117 |
-| user-auth | [User & Authentication](domain/user-auth.md) | @Hardtack | 2026-09-13 | 19 |
+| toolkit | [Toolkit](domain/toolkit.md) | @Hardtack | 2026-09-15 | 118 |
+| user-auth | [User & Authentication](domain/user-auth.md) | @Hardtack | 2026-09-15 | 20 |
 | workspace | [Workspace & Membership](domain/workspace.md) | @Hardtack | 2026-09-15 | 83 |
 
 ## Flow Specs
 
 | Title | Owner | Last Verified | Version |
 |---|---|---|---|
-| [Agent Execution Loop](flow/agent-execution-loop.md) | @Hardtack | 2026-09-13 | 180 |
-| [Agent Runtime Control](flow/agent-runtime-control.md) | @Hardtack | 2026-09-15 | 85 |
-| [Agent Runtime Persistence](flow/agent-runtime-persistence.md) | @Hardtack | 2026-09-15 | 38 |
-| [Chat Session Resync](flow/chat-session-resync.md) | @Hardtack | 2026-09-13 | 51 |
+| [Agent Execution Loop](flow/agent-execution-loop.md) | @Hardtack | 2026-09-15 | 181 |
+| [Agent Runtime Control](flow/agent-runtime-control.md) | @Hardtack | 2026-09-15 | 86 |
+| [Agent Runtime Persistence](flow/agent-runtime-persistence.md) | @Hardtack | 2026-09-15 | 39 |
+| [Chat Session Resync](flow/chat-session-resync.md) | @Hardtack | 2026-09-15 | 52 |
 | [ChatGPT OAuth Flow](flow/chatgpt-oauth.md) | @Hardtack | 2026-09-12 | 23 |
 | [Context Compaction](flow/context-compaction.md) | @Hardtack | 2026-09-13 | 41 |
 | [External Channel Authorization](flow/external-channel-authorization.md) | @Hardtack | 2026-09-13 | 26 |
@@ -46,6 +46,6 @@ Details of all living specs. Synchronized from frontmatter.
 | [Periodic Execution Flow Spec](flow/periodic-execution.md) | - | 2026-09-15 | 20 |
 | [Run Resume](flow/run-resume.md) | @Hardtack | 2026-09-13 | 37 |
 | [Session Context Inspector](flow/session-context-inspector.md) | @Hardtack | 2026-09-13 | 22 |
-| [E2E Primary Test Strategy](flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-09-15 | 63 |
+| [E2E Primary Test Strategy](flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-09-15 | 64 |
 | [xAI API Key Provider Flow](flow/xai-api-key.md) | @Hardtack | 2026-09-15 | 4 |
 | [xAI OAuth Flow](flow/xai-oauth.md) | @Hardtack | 2026-09-15 | 8 |

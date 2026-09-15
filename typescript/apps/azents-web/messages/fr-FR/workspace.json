@@ -604,6 +604,10 @@
           "managed": "Géré",
           "removing": "Suppression"
         }
+      },
+      "services": {
+        "label": "Services web",
+        "description": "URL publiques des applications exécutées sur les ports locaux du Runtime"
       }
     },
     "automaticProjects": {

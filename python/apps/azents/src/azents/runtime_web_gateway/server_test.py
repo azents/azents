@@ -25,7 +25,7 @@ from azents_runtime_control.runtime_web_session import (
 from multidict import CIMultiDict
 
 from azents.rdb.models.runtime_web import RuntimeWebAuthMode
-from azents.repos.runtime_web.data import RuntimeWebCycle, RuntimeWebEndpoint
+from azents.repos.runtime_web.data import RuntimeWebServiceRecord
 from azents.repos.runtime_web.gateway_data import (
     RuntimeWebAuthBinding,
     RuntimeWebBrokerBinding,
@@ -101,18 +101,16 @@ _SETTINGS = RuntimeWebGatewaySettings.model_validate(
     }
 )
 _NOW = datetime.now(UTC)
-_ENDPOINT = RuntimeWebEndpoint(
+_SERVICE = RuntimeWebServiceRecord(
     id="e" * 32,
     workspace_id="w" * 32,
     agent_id="a" * 32,
-    agent_session_id="s" * 32,
     port=8080,
     hostname_key="endpoint",
     label="Preview",
-    authority_revision=1,
-    close_barrier=0,
-    current_pending_request_id=None,
-    current_cycle_id=None,
+    selected_duration_seconds=3600,
+    exposure_deadline_at=_NOW + timedelta(minutes=5),
+    revision=1,
     created_at=_NOW,
     updated_at=_NOW,
 )
@@ -131,7 +129,7 @@ class _Auth:
                 initiation_id=initiation_id,
                 user_id="u" * 32,
                 auth_session_id="s" * 32,
-                endpoint_id=_ENDPOINT.id,
+                service_id=_SERVICE.id,
                 expires_at=now + timedelta(seconds=120),
                 broker_bound=True,
                 settled=False,
@@ -151,27 +149,27 @@ class _Auth:
 
 
 class _Authority:
-    async def resolve_endpoint(
+    async def resolve_service(
         self,
         *,
         hostname_key: str,
-    ) -> RuntimeWebEndpoint | None:
-        return _ENDPOINT if hostname_key == "endpoint" else None
+    ) -> RuntimeWebServiceRecord | None:
+        return _SERVICE if hostname_key == "endpoint" else None
 
-    async def source_endpoint_matches_root(
+    async def source_service_matches_agent(
         self,
         *,
         source_hostname_key: str,
-        target_endpoint: RuntimeWebEndpoint,
+        target_service: RuntimeWebServiceRecord,
     ) -> bool:
-        return source_hostname_key == "source" and target_endpoint.id == _ENDPOINT.id
+        return source_hostname_key == "source" and target_service.id == _SERVICE.id
 
-    async def resolve_endpoint_by_id(
+    async def resolve_service_by_id(
         self,
         *,
-        endpoint_id: str,
-    ) -> RuntimeWebEndpoint | None:
-        del endpoint_id
+        service_id: str,
+    ) -> RuntimeWebServiceRecord | None:
+        del service_id
         raise AssertionError("Broker authentication is not expected")
 
     async def authorize(
@@ -210,26 +208,11 @@ class _WebSocketAuthority(_Authority):
                 issued_at=_NOW,
                 expires_at=_NOW + timedelta(minutes=5),
             ),
-            endpoint=_ENDPOINT,
-            request=None,
-            cycle=RuntimeWebCycle(
-                id="c" * 32,
-                endpoint_id=_ENDPOINT.id,
-                request_id="r" * 32,
-                approver_user_id="u" * 32,
-                duration_seconds=300,
-                approved_at=_NOW,
-                expires_at=_NOW + timedelta(minutes=5),
-                close_barrier=0,
-                ended_at=None,
-                end_reason=None,
-                created_at=_NOW,
-            ),
+            service=_SERVICE,
             runtime_id="t" * 32,
             desired_generation=1,
             runner_generation=1,
-            active=True,
-            runtime_ready=True,
+            exposure_deadline_at=_NOW + timedelta(minutes=5),
         )
 
     async def authorize(

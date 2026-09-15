@@ -18,27 +18,44 @@ import re  # noqa: F401
 import json
 
 from datetime import datetime
-from pydantic import BaseModel, ConfigDict, Field, StrictBool
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr, field_validator
 from typing import Any, ClassVar, Dict, List, Optional
 from typing_extensions import Annotated
-from azentspublicclient.models.runtime_web_cycle_response import RuntimeWebCycleResponse
-from azentspublicclient.models.runtime_web_endpoint_response import RuntimeWebEndpointResponse
-from azentspublicclient.models.runtime_web_request_response import RuntimeWebRequestResponse
 from typing import Optional, Set
 from typing_extensions import Self
 
 class RuntimeWebServiceResponse(BaseModel):
     """
-    Orthogonal endpoint, request, cycle, and active-state projection.
+    Current user-relevant Runtime Web service projection.
     """ # noqa: E501
-    endpoint: RuntimeWebEndpointResponse
-    current_request: Optional[RuntimeWebRequestResponse]
-    current_cycle: Optional[RuntimeWebCycleResponse]
-    active: StrictBool
-    duration_seconds: Annotated[int, Field(le=28800, strict=True, ge=300)]
+    id: Annotated[str, Field(min_length=32, strict=True, max_length=32)]
+    port: Annotated[int, Field(le=65535, strict=True, ge=1)]
+    label: Optional[StrictStr]
+    url: Optional[StrictStr]
+    configuration_state: StrictStr
+    on: StrictBool
+    selected_duration_seconds: StrictInt
+    expires_at: Optional[datetime]
+    revision: Annotated[int, Field(strict=True, ge=0)]
+    created_at: datetime
+    updated_at: datetime
     observed_at: datetime
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["endpoint", "current_request", "current_cycle", "active", "duration_seconds", "observed_at"]
+    __properties: ClassVar[List[str]] = ["id", "port", "label", "url", "configuration_state", "on", "selected_duration_seconds", "expires_at", "revision", "created_at", "updated_at", "observed_at"]
+
+    @field_validator('configuration_state')
+    def configuration_state_validate_enum(cls, value):
+        """Validates the enum"""
+        if value not in set(['configured', 'unconfigured']):
+            raise ValueError("must be one of enum values ('configured', 'unconfigured')")
+        return value
+
+    @field_validator('selected_duration_seconds')
+    def selected_duration_seconds_validate_enum(cls, value):
+        """Validates the enum"""
+        if value not in set([3600, 21600, 86400]):
+            raise ValueError("must be one of enum values (3600, 21600, 86400)")
+        return value
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -81,29 +98,25 @@ class RuntimeWebServiceResponse(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
-        # override the default output from pydantic by calling `to_dict()` of endpoint
-        if self.endpoint:
-            _dict['endpoint'] = self.endpoint.to_dict()
-        # override the default output from pydantic by calling `to_dict()` of current_request
-        if self.current_request:
-            _dict['current_request'] = self.current_request.to_dict()
-        # override the default output from pydantic by calling `to_dict()` of current_cycle
-        if self.current_cycle:
-            _dict['current_cycle'] = self.current_cycle.to_dict()
         # puts key-value pairs in additional_properties in the top level
         if self.additional_properties is not None:
             for _key, _value in self.additional_properties.items():
                 _dict[_key] = _value
 
-        # set to None if current_request (nullable) is None
+        # set to None if label (nullable) is None
         # and model_fields_set contains the field
-        if self.current_request is None and "current_request" in self.model_fields_set:
-            _dict['current_request'] = None
+        if self.label is None and "label" in self.model_fields_set:
+            _dict['label'] = None
 
-        # set to None if current_cycle (nullable) is None
+        # set to None if url (nullable) is None
         # and model_fields_set contains the field
-        if self.current_cycle is None and "current_cycle" in self.model_fields_set:
-            _dict['current_cycle'] = None
+        if self.url is None and "url" in self.model_fields_set:
+            _dict['url'] = None
+
+        # set to None if expires_at (nullable) is None
+        # and model_fields_set contains the field
+        if self.expires_at is None and "expires_at" in self.model_fields_set:
+            _dict['expires_at'] = None
 
         return _dict
 
@@ -117,11 +130,17 @@ class RuntimeWebServiceResponse(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "endpoint": RuntimeWebEndpointResponse.from_dict(obj["endpoint"]) if obj.get("endpoint") is not None else None,
-            "current_request": RuntimeWebRequestResponse.from_dict(obj["current_request"]) if obj.get("current_request") is not None else None,
-            "current_cycle": RuntimeWebCycleResponse.from_dict(obj["current_cycle"]) if obj.get("current_cycle") is not None else None,
-            "active": obj.get("active"),
-            "duration_seconds": obj.get("duration_seconds"),
+            "id": obj.get("id"),
+            "port": obj.get("port"),
+            "label": obj.get("label"),
+            "url": obj.get("url"),
+            "configuration_state": obj.get("configuration_state"),
+            "on": obj.get("on"),
+            "selected_duration_seconds": obj.get("selected_duration_seconds"),
+            "expires_at": obj.get("expires_at"),
+            "revision": obj.get("revision"),
+            "created_at": obj.get("created_at"),
+            "updated_at": obj.get("updated_at"),
             "observed_at": obj.get("observed_at")
         })
         # store additional fields in additional_properties

@@ -39,6 +39,7 @@ class TestChatLiveRunStateResponse(unittest.TestCase):
                 phase = 'idle',
                 status = 'pending',
                 inference_profile = { },
+                using_fallback = True,
                 model_call_started_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
                 operation = azentspublicclient.models.chat_live_run_operation_response.ChatLiveRunOperationResponse(
                     kind = 'preparing_context', 
@@ -72,6 +73,7 @@ class TestChatLiveRunStateResponse(unittest.TestCase):
                 phase = 'idle',
                 status = 'pending',
                 inference_profile = { },
+                using_fallback = True,
                 model_call_started_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
         )
         """

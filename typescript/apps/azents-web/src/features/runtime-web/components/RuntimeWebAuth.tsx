@@ -14,7 +14,7 @@ import { useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
 
 interface RuntimeWebAuthProps {
-  endpointId: string;
+  serviceId: string;
 }
 
 type AuthState = { type: "CHECKING" } | { type: "ERROR"; message: string };
@@ -33,7 +33,7 @@ async function responseError(response: Response): Promise<string> {
 }
 
 export function RuntimeWebAuth({
-  endpointId,
+  serviceId,
 }: RuntimeWebAuthProps): React.ReactElement {
   const t = useTranslations("runtimeWeb");
   const [state, setState] = useState<AuthState>({ type: "CHECKING" });
@@ -46,7 +46,7 @@ export function RuntimeWebAuth({
           method: "POST",
           credentials: "same-origin",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ endpointId }),
+          body: JSON.stringify({ serviceId }),
         });
         if (!response.ok) {
           throw new Error(await responseError(response));
@@ -100,7 +100,7 @@ export function RuntimeWebAuth({
     return () => {
       active = false;
     };
-  }, [endpointId, t]);
+  }, [serviceId, t]);
 
   return (
     <Container size="xs" py="xl">

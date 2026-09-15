@@ -163,7 +163,7 @@ def _open_services_tab(driver: WebDriver) -> None:
     ).click()
     _wait(driver).until(ec.url_contains("page=services"))
     _assert_visible_text(driver, "Web services")
-    _assert_visible_text(driver, "Create service")
+    _assert_visible_text(driver, "Add service")
 
 
 def _assert_mobile_session_panel(driver: WebDriver) -> None:
@@ -204,7 +204,7 @@ def _assert_mobile_session_panel(driver: WebDriver) -> None:
     services_tab.click()
     _wait(driver).until(ec.url_contains("page=services"))
     _assert_visible_text(driver, "Web services")
-    _assert_visible_text(driver, "Create service")
+    _assert_visible_text(driver, "Add service")
     context_tab = driver.find_element(
         By.CSS_SELECTOR, "[role='tab'][aria-label='Context']"
     )

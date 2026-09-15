@@ -36,13 +36,13 @@ class TestRuntimeWebSeparateTicketResponse(unittest.TestCase):
         if include_optional:
             return RuntimeWebSeparateTicketResponse(
                 ticket_secret = '012345678910111213141516171819202122232425262728293031',
-                endpoint_id = '012345678910111213141516171819202122232425262728293031',
+                service_id = '012345678910111213141516171819202122232425262728293031',
                 expires_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f')
             )
         else:
             return RuntimeWebSeparateTicketResponse(
                 ticket_secret = '012345678910111213141516171819202122232425262728293031',
-                endpoint_id = '012345678910111213141516171819202122232425262728293031',
+                service_id = '012345678910111213141516171819202122232425262728293031',
                 expires_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
         )
         """

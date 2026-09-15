@@ -1,6 +1,7 @@
-"""Runtime-independent durable Runtime Web service operations."""
+"""Agent-scoped Runtime Web service operations."""
 
 import datetime
+from collections.abc import Awaitable, Callable
 from typing import Annotated
 
 import sqlalchemy as sa
@@ -8,28 +9,33 @@ from azcommon.result import Failure, Result, Success
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.rdb.deps import get_session_manager
-from azents.rdb.models.runtime_web import (
-    RuntimeWebOperationKind,
-    RuntimeWebRequesterKind,
-    RuntimeWebRequestState,
+from azents.core.enums import (
+    AgentLifecycleStatus,
+    AgentRuntimeCapability,
+    AgentType,
+    WorkspaceUserRole,
 )
+from azents.rdb.deps import get_session_manager
+from azents.rdb.models.runtime_web import RuntimeWebActorKind
 from azents.rdb.session import SessionManager
-from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.agent import AgentRepository
+from azents.repos.agent_admin import AgentAdminRepository
 from azents.repos.runtime_web.data import (
     RuntimeWebConfiguration,
-    RuntimeWebEndpoint,
-    derived_operation_key,
+    RuntimeWebMutationResult,
+    RuntimeWebServiceRecord,
 )
 from azents.repos.runtime_web.repository import (
     RuntimeWebRepository,
     RuntimeWebRepositoryConflict,
     RuntimeWebRepositoryQuotaExceeded,
+    get_runtime_web_repository,
 )
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.services.runtime_web.data import (
     RuntimeWebAccessDenied,
     RuntimeWebActor,
+    RuntimeWebCapabilityUnavailable,
     RuntimeWebConfigurationUnavailable,
     RuntimeWebConflict,
     RuntimeWebError,
@@ -40,651 +46,591 @@ from azents.services.runtime_web.data import (
     RuntimeWebServiceProjection,
     operation_identity,
 )
-from azents.services.runtime_web.url import (
-    RuntimeWebEndpointUrlResolver,
-    get_runtime_web_endpoint_url_resolver,
-)
-from azents.services.session_resource_authority import (
-    AuthorizedPublicSessionResource,
-    PublicSessionResourceDenied,
-    authorize_public_session_resource,
-    resolve_agent_session_resource,
+from azents.services.runtime_web.service_url import (
+    RuntimeWebServiceUrlResolver,
+    get_runtime_web_service_url_resolver,
 )
 
-_ENDPOINT_LIMIT = 16
-_ACTIVE_SESSION_LIMIT = 4
+_SERVICE_LIMIT = 16
 _ACTIVE_AGENT_LIMIT = 16
 
 
 class RuntimeWebService:
-    """Authorize and coordinate durable Runtime Web state."""
+    """Authorize and coordinate durable Runtime Web service state."""
 
     def __init__(
         self,
         *,
         session_manager: SessionManager[AsyncSession],
         repository: RuntimeWebRepository,
-        agent_session_repository: AgentSessionRepository,
+        agent_repository: AgentRepository,
+        agent_admin_repository: AgentAdminRepository,
         workspace_user_repository: WorkspaceUserRepository,
-        url_resolver: RuntimeWebEndpointUrlResolver,
+        url_resolver: RuntimeWebServiceUrlResolver,
     ) -> None:
         self.session_manager = session_manager
         self.repository = repository
-        self.agent_session_repository = agent_session_repository
+        self.agent_repository = agent_repository
+        self.agent_admin_repository = agent_admin_repository
         self.workspace_user_repository = workspace_user_repository
         self.url_resolver = url_resolver
 
-    async def prepare_endpoint(
+    async def create_service(
         self,
         *,
         workspace_id: str,
         agent_id: str,
-        session_id: str,
-        user_id: str | None,
+        user_id: str,
+        workspace_user_id: str,
+        role: WorkspaceUserRole,
         port: int,
         label: str | None,
+        selected_duration_seconds: int,
+        turn_on: bool,
         actor: RuntimeWebActor,
         operation: RuntimeWebOperation,
     ) -> Result[RuntimeWebServiceProjection, RuntimeWebError]:
-        """Prepare a stable endpoint without creating an exposure request."""
-        async with self.session_manager() as session:
-            access = await self._authorize(
-                session,
-                workspace_id=workspace_id,
-                agent_id=agent_id,
-                session_id=session_id,
-                user_id=user_id,
-                actor=actor,
-            )
-            if not isinstance(access, AuthorizedPublicSessionResource):
-                return Failure(access)
-            configuration = await self._configuration(session)
-            if isinstance(configuration, RuntimeWebConfigurationUnavailable):
-                return Failure(configuration)
-            try:
-                result = await self.repository.prepare_endpoint(
-                    session,
-                    workspace_id=workspace_id,
-                    agent_id=agent_id,
-                    agent_session_id=session_id,
-                    port=port,
-                    label=label,
-                    operation=operation_identity(actor, operation),
-                    endpoint_limit=_ENDPOINT_LIMIT,
-                )
-            except RuntimeWebRepositoryQuotaExceeded as error:
-                return Failure(RuntimeWebQuotaExceeded(scope=error.scope))
-            return Success(
-                await self._projection(session, result.endpoint, configuration)
-            )
-
-    async def request_exposure(
-        self,
-        *,
-        workspace_id: str,
-        agent_id: str,
-        session_id: str,
-        user_id: str | None,
-        port: int,
-        label: str | None,
-        actor: RuntimeWebActor,
-        operation: RuntimeWebOperation,
-    ) -> Result[RuntimeWebServiceProjection, RuntimeWebError]:
-        """Submit a pending request without awaiting human approval."""
-        async with self.session_manager() as session:
-            access = await self._authorize(
-                session,
-                workspace_id=workspace_id,
-                agent_id=agent_id,
-                session_id=session_id,
-                user_id=user_id,
-                actor=actor,
-            )
-            if not isinstance(access, AuthorizedPublicSessionResource):
-                return Failure(access)
-            configuration = await self._configuration(session)
-            if isinstance(configuration, RuntimeWebConfigurationUnavailable):
-                return Failure(configuration)
-            identity = operation_identity(actor, operation)
-            try:
-                prepared = await self.repository.prepare_endpoint(
-                    session,
-                    workspace_id=workspace_id,
-                    agent_id=agent_id,
-                    agent_session_id=session_id,
-                    port=port,
-                    label=label,
-                    operation=identity.model_copy(
-                        update={"operation_key": self._subkey(operation, "prepare")}
-                    ),
-                    endpoint_limit=_ENDPOINT_LIMIT,
-                )
-                result = await self.repository.request_exposure(
-                    session,
-                    endpoint_id=prepared.endpoint.id,
-                    actor_kind=actor.kind,
-                    requester_user_id=(
-                        actor.actor_id
-                        if actor.kind is RuntimeWebRequesterKind.USER
-                        else None
-                    ),
-                    requester_agent_id=(
-                        actor.actor_id
-                        if actor.kind is RuntimeWebRequesterKind.AGENT
-                        else None
-                    ),
-                    requester_call_id=actor.call_id,
-                    label=label,
-                    operation=identity,
-                )
-            except RuntimeWebRepositoryQuotaExceeded as error:
-                return Failure(RuntimeWebQuotaExceeded(scope=error.scope))
-            except RuntimeWebRepositoryConflict:
-                return Failure(RuntimeWebConflict())
-            return Success(
-                await self._projection(session, result.endpoint, configuration)
-            )
-
-    async def direct_create(
-        self,
-        *,
-        workspace_id: str,
-        agent_id: str,
-        session_id: str,
-        user_id: str | None,
-        port: int,
-        label: str | None,
-        actor: RuntimeWebActor,
-        operation: RuntimeWebOperation,
-        duration_seconds: int,
-    ) -> Result[RuntimeWebServiceProjection, RuntimeWebError]:
-        """Create and approve one user-confirmed exposure atomically."""
-        if (
-            user_id is None
-            or actor.kind is not RuntimeWebRequesterKind.USER
-            or actor.actor_id != user_id
-        ):
+        """Create one user-managed service."""
+        if actor.kind is not RuntimeWebActorKind.USER or actor.actor_id != user_id:
             return Failure(RuntimeWebAccessDenied())
         async with self.session_manager() as session:
-            access = await self._authorize(
+            access = await self._authorize_user(
                 session,
                 workspace_id=workspace_id,
                 agent_id=agent_id,
-                session_id=session_id,
                 user_id=user_id,
-                actor=actor,
+                workspace_user_id=workspace_user_id,
+                role=role,
             )
-            if not isinstance(access, AuthorizedPublicSessionResource):
+            if access is not None:
                 return Failure(access)
             configuration = await self._configuration(session)
             if isinstance(configuration, RuntimeWebConfigurationUnavailable):
                 return Failure(configuration)
             try:
-                result = await self.repository.direct_create(
+                result = await self.repository.create_service(
                     session,
                     workspace_id=workspace_id,
                     agent_id=agent_id,
-                    agent_session_id=session_id,
                     port=port,
                     label=label,
-                    requester_user_id=user_id,
-                    requester_call_id=actor.call_id,
-                    duration_seconds=duration_seconds,
+                    selected_duration_seconds=selected_duration_seconds,
+                    turn_on=turn_on,
                     operation=operation_identity(actor, operation),
-                    endpoint_limit=_ENDPOINT_LIMIT,
-                    active_session_limit=_ACTIVE_SESSION_LIMIT,
+                    service_limit=_SERVICE_LIMIT,
                     active_agent_limit=_ACTIVE_AGENT_LIMIT,
                 )
             except RuntimeWebRepositoryQuotaExceeded as error:
                 return Failure(RuntimeWebQuotaExceeded(scope=error.scope))
             except RuntimeWebRepositoryConflict:
                 return Failure(RuntimeWebConflict())
-            return Success(
-                await self._projection(session, result.endpoint, configuration)
-            )
+            return Success(await self._projection(session, result.service))
 
-    async def approve_request(
+    async def request_service(
         self,
         *,
         workspace_id: str,
         agent_id: str,
-        session_id: str,
-        user_id: str,
+        port: int,
+        label: str | None,
         actor: RuntimeWebActor,
-        request_id: str,
-        expected_revision: int,
         operation: RuntimeWebOperation,
-        duration_seconds: int,
     ) -> Result[RuntimeWebServiceProjection, RuntimeWebError]:
-        """Approve an exact pending request."""
-        if actor.kind is not RuntimeWebRequesterKind.USER or actor.actor_id != user_id:
-            return Failure(RuntimeWebAccessDenied())
+        """Create a missing Off service or return the existing row unchanged."""
         async with self.session_manager() as session:
-            endpoint = await self._authorize_resource(
+            access = await self._authorize_agent(
                 session,
                 workspace_id=workspace_id,
                 agent_id=agent_id,
-                session_id=session_id,
-                user_id=user_id,
                 actor=actor,
-                resource=await self.repository.endpoint_for_request(
-                    session, request_id
-                ),
             )
-            if not isinstance(endpoint, RuntimeWebEndpoint):
-                return Failure(endpoint)
+            if access is not None:
+                return Failure(access)
             configuration = await self._configuration(session)
             if isinstance(configuration, RuntimeWebConfigurationUnavailable):
                 return Failure(configuration)
             try:
-                result = await self.repository.approve_request(
+                result = await self.repository.request_service(
                     session,
-                    request_id=request_id,
-                    expected_revision=expected_revision,
-                    approver_user_id=user_id,
-                    duration_seconds=duration_seconds,
+                    workspace_id=workspace_id,
+                    agent_id=agent_id,
+                    port=port,
+                    label=label,
                     operation=operation_identity(actor, operation),
-                    active_session_limit=_ACTIVE_SESSION_LIMIT,
-                    active_agent_limit=_ACTIVE_AGENT_LIMIT,
+                    service_limit=_SERVICE_LIMIT,
                 )
             except RuntimeWebRepositoryQuotaExceeded as error:
                 return Failure(RuntimeWebQuotaExceeded(scope=error.scope))
             except RuntimeWebRepositoryConflict:
                 return Failure(RuntimeWebConflict())
-            return Success(
-                await self._projection(session, result.endpoint, configuration)
-            )
+            return Success(await self._projection(session, result.service))
 
-    async def reject_request(
+    async def update_service(
         self,
         *,
         workspace_id: str,
         agent_id: str,
-        session_id: str,
+        service_id: str,
         user_id: str,
-        actor: RuntimeWebActor,
-        request_id: str,
+        workspace_user_id: str,
+        role: WorkspaceUserRole,
         expected_revision: int,
+        label_present: bool,
+        label: str | None,
+        selected_duration_seconds: int | None,
+        actor: RuntimeWebActor,
         operation: RuntimeWebOperation,
     ) -> Result[RuntimeWebServiceProjection, RuntimeWebError]:
-        """Reject an exact pending request."""
-        return await self._decide_user_request(
+        """Update service label or selected duration."""
+        return await self._user_mutation(
             workspace_id=workspace_id,
             agent_id=agent_id,
-            session_id=session_id,
+            service_id=service_id,
             user_id=user_id,
+            workspace_user_id=workspace_user_id,
+            role=role,
             actor=actor,
-            request_id=request_id,
-            expected_revision=expected_revision,
-            operation=operation,
-            state=RuntimeWebRequestState.REJECTED,
-            kind=RuntimeWebOperationKind.REJECT,
+            mutate=lambda session: self.repository.update_service(
+                session,
+                service_id=service_id,
+                expected_revision=expected_revision,
+                label_present=label_present,
+                label=label,
+                selected_duration_seconds=selected_duration_seconds,
+                operation=operation_identity(actor, operation),
+            ),
         )
 
-    async def cancel_request(
+    async def turn_on(
         self,
         *,
         workspace_id: str,
         agent_id: str,
-        session_id: str,
-        user_id: str | None,
-        request_id: str,
+        service_id: str,
+        user_id: str,
+        workspace_user_id: str,
+        role: WorkspaceUserRole,
+        expected_revision: int,
+        selected_duration_seconds: int | None,
+        actor: RuntimeWebActor,
+        operation: RuntimeWebOperation,
+    ) -> Result[RuntimeWebServiceProjection, RuntimeWebError]:
+        """Turn an Off service On."""
+        return await self._user_mutation(
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+            service_id=service_id,
+            user_id=user_id,
+            workspace_user_id=workspace_user_id,
+            role=role,
+            actor=actor,
+            mutate=lambda session: self.repository.turn_on(
+                session,
+                service_id=service_id,
+                expected_revision=expected_revision,
+                selected_duration_seconds=selected_duration_seconds,
+                operation=operation_identity(actor, operation),
+                active_agent_limit=_ACTIVE_AGENT_LIMIT,
+            ),
+        )
+
+    async def turn_off(
+        self,
+        *,
+        workspace_id: str,
+        agent_id: str,
+        service_id: str,
+        user_id: str,
+        workspace_user_id: str,
+        role: WorkspaceUserRole,
         expected_revision: int,
         actor: RuntimeWebActor,
         operation: RuntimeWebOperation,
     ) -> Result[RuntimeWebServiceProjection, RuntimeWebError]:
-        """Cancel a pending request without closing an active cycle."""
-        async with self.session_manager() as session:
-            endpoint = await self._authorize_resource(
+        """Turn one exact service Off."""
+        return await self._user_mutation(
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+            service_id=service_id,
+            user_id=user_id,
+            workspace_user_id=workspace_user_id,
+            role=role,
+            actor=actor,
+            mutate=lambda session: self.repository.turn_off(
                 session,
-                workspace_id=workspace_id,
-                agent_id=agent_id,
-                session_id=session_id,
-                user_id=user_id,
-                actor=actor,
-                resource=await self.repository.endpoint_for_request(
-                    session, request_id
-                ),
-            )
-            if not isinstance(endpoint, RuntimeWebEndpoint):
-                return Failure(endpoint)
-            configuration = await self._configuration(session)
-            if isinstance(configuration, RuntimeWebConfigurationUnavailable):
-                return Failure(configuration)
-            try:
-                result = await self.repository.decide_request(
-                    session,
-                    request_id=request_id,
-                    expected_revision=expected_revision,
-                    decided_by_user_id=(
-                        actor.actor_id
-                        if actor.kind is RuntimeWebRequesterKind.USER
-                        else None
-                    ),
-                    state=RuntimeWebRequestState.CANCELLED,
-                    operation=operation_identity(actor, operation),
-                    kind=RuntimeWebOperationKind.CANCEL,
-                )
-            except RuntimeWebRepositoryConflict:
-                return Failure(RuntimeWebConflict())
-            return Success(
-                await self._projection(session, result.endpoint, configuration)
-            )
+                service_id=service_id,
+                expected_revision=expected_revision,
+                operation=operation_identity(actor, operation),
+            ),
+        )
 
-    async def close_cycle(
+    async def reset_expiration(
         self,
         *,
         workspace_id: str,
         agent_id: str,
-        session_id: str,
-        user_id: str | None,
-        cycle_id: str,
-        expected_endpoint_revision: int,
+        service_id: str,
+        user_id: str,
+        workspace_user_id: str,
+        role: WorkspaceUserRole,
+        expected_revision: int,
         actor: RuntimeWebActor,
         operation: RuntimeWebOperation,
     ) -> Result[RuntimeWebServiceProjection, RuntimeWebError]:
-        """Close an exact cycle without changing the application process."""
+        """Restart one current service exposure window."""
+        return await self._user_mutation(
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+            service_id=service_id,
+            user_id=user_id,
+            workspace_user_id=workspace_user_id,
+            role=role,
+            actor=actor,
+            mutate=lambda session: self.repository.reset_expiration(
+                session,
+                service_id=service_id,
+                expected_revision=expected_revision,
+                operation=operation_identity(actor, operation),
+            ),
+        )
+
+    async def delete_service(
+        self,
+        *,
+        workspace_id: str,
+        agent_id: str,
+        service_id: str,
+        user_id: str,
+        workspace_user_id: str,
+        role: WorkspaceUserRole,
+        expected_revision: int,
+        actor: RuntimeWebActor,
+        operation: RuntimeWebOperation,
+    ) -> Result[bool, RuntimeWebError]:
+        """Delete one exact service after Agent authorization."""
+        if actor.kind is not RuntimeWebActorKind.USER or actor.actor_id != user_id:
+            return Failure(RuntimeWebAccessDenied())
         async with self.session_manager() as session:
-            endpoint = await self._authorize_resource(
+            access = await self._authorize_user(
                 session,
                 workspace_id=workspace_id,
                 agent_id=agent_id,
-                session_id=session_id,
                 user_id=user_id,
-                actor=actor,
-                resource=await self.repository.endpoint_for_cycle(session, cycle_id),
+                workspace_user_id=workspace_user_id,
+                role=role,
             )
-            if not isinstance(endpoint, RuntimeWebEndpoint):
-                return Failure(endpoint)
+            if access is not None:
+                return Failure(access)
             configuration = await self._configuration(session)
             if isinstance(configuration, RuntimeWebConfigurationUnavailable):
                 return Failure(configuration)
             try:
-                result = await self.repository.close_cycle(
+                deleted = await self.repository.delete_service(
                     session,
-                    cycle_id=cycle_id,
-                    expected_endpoint_revision=expected_endpoint_revision,
+                    agent_id=agent_id,
+                    service_id=service_id,
+                    expected_revision=expected_revision,
                     operation=operation_identity(actor, operation),
                 )
             except RuntimeWebRepositoryConflict:
                 return Failure(RuntimeWebConflict())
-            return Success(
-                await self._projection(session, result.endpoint, configuration)
+            return Success(deleted)
+
+    async def close_service(
+        self,
+        *,
+        workspace_id: str,
+        agent_id: str,
+        service_id: str,
+        actor: RuntimeWebActor,
+        operation: RuntimeWebOperation,
+    ) -> Result[RuntimeWebServiceProjection, RuntimeWebError]:
+        """Idempotently turn one exact service Off for an Agent caller."""
+        async with self.session_manager() as session:
+            access = await self._authorize_agent(
+                session,
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                actor=actor,
             )
+            if access is not None:
+                return Failure(access)
+            record = await self.repository.get_service_by_id(session, service_id)
+            if record is None or record.agent_id != agent_id:
+                return Failure(RuntimeWebNotFound())
+            configuration = await self._configuration(session)
+            if isinstance(configuration, RuntimeWebConfigurationUnavailable):
+                return Failure(configuration)
+            try:
+                result = await self.repository.close_service(
+                    session,
+                    service_id=service_id,
+                    operation=operation_identity(actor, operation),
+                )
+            except RuntimeWebRepositoryConflict:
+                return Failure(RuntimeWebConflict())
+            return Success(await self._projection(session, result.service))
 
     async def get_service(
         self,
         *,
         workspace_id: str,
         agent_id: str,
-        session_id: str,
-        user_id: str | None,
-        port: int,
-        actor: RuntimeWebActor | None,
+        service_id: str,
+        user_id: str,
+        workspace_user_id: str,
+        role: WorkspaceUserRole,
     ) -> Result[RuntimeWebServiceProjection, RuntimeWebError]:
-        """Get one current service projection."""
+        """Get one current service through an Agent-nested route."""
         async with self.session_manager() as session:
-            access = await self._authorize(
+            access = await self._authorize_user(
                 session,
                 workspace_id=workspace_id,
                 agent_id=agent_id,
-                session_id=session_id,
                 user_id=user_id,
-                actor=actor,
+                workspace_user_id=workspace_user_id,
+                role=role,
             )
-            if not isinstance(access, AuthorizedPublicSessionResource):
+            if access is not None:
                 return Failure(access)
-            configuration = await self._configuration(session, require_enabled=False)
-            if isinstance(configuration, RuntimeWebConfigurationUnavailable):
-                return Failure(configuration)
-            endpoint = await self.repository.get_endpoint(
-                session,
-                agent_session_id=session_id,
-                port=port,
-            )
-            if endpoint is None:
+            record = await self.repository.get_service_by_id(session, service_id)
+            if record is None or record.agent_id != agent_id:
                 return Failure(RuntimeWebNotFound())
-            return Success(await self._projection(session, endpoint, configuration))
+            return Success(await self._projection(session, record))
 
-    async def get_service_by_endpoint_id(
+    async def get_service_by_id_for_user(
         self,
         *,
-        endpoint_id: str,
+        service_id: str,
         user_id: str,
-        actor: RuntimeWebActor,
     ) -> Result[RuntimeWebServiceProjection, RuntimeWebError]:
-        """Get one authorized service projection by opaque endpoint ID."""
+        """Get one authorized service by opaque ID for trusted Main Web."""
         async with self.session_manager() as session:
-            endpoint = await self.repository.get_endpoint_by_id(
-                session,
-                endpoint_id,
-            )
-            if endpoint is None:
+            record = await self.repository.get_service_by_id(session, service_id)
+            if record is None:
                 return Failure(RuntimeWebNotFound())
-            access = await self._authorize(
+            member = await self.workspace_user_repository.get_by_workspace_and_user(
                 session,
-                workspace_id=endpoint.workspace_id,
-                agent_id=endpoint.agent_id,
-                session_id=endpoint.agent_session_id,
-                user_id=user_id,
-                actor=actor,
+                record.workspace_id,
+                user_id,
             )
-            if not isinstance(access, AuthorizedPublicSessionResource):
+            if member is None:
+                return Failure(RuntimeWebNotFound())
+            access = await self._authorize_user(
+                session,
+                workspace_id=record.workspace_id,
+                agent_id=record.agent_id,
+                user_id=user_id,
+                workspace_user_id=member.id,
+                role=member.role,
+            )
+            if access is not None:
                 return Failure(access)
-            configuration = await self._configuration(session, require_enabled=False)
-            if isinstance(configuration, RuntimeWebConfigurationUnavailable):
-                return Failure(configuration)
-            return Success(await self._projection(session, endpoint, configuration))
+            return Success(await self._projection(session, record))
+
+    async def turn_on_by_id_for_user(
+        self,
+        *,
+        service_id: str,
+        user_id: str,
+        expected_revision: int,
+        selected_duration_seconds: int,
+        actor: RuntimeWebActor,
+        operation: RuntimeWebOperation,
+    ) -> Result[RuntimeWebServiceProjection, RuntimeWebError]:
+        """Turn On through the trusted service URL activation surface."""
+        async with self.session_manager() as session:
+            record = await self.repository.get_service_by_id(session, service_id)
+            if record is None:
+                return Failure(RuntimeWebNotFound())
+            member = await self.workspace_user_repository.get_by_workspace_and_user(
+                session,
+                record.workspace_id,
+                user_id,
+            )
+            if member is None:
+                return Failure(RuntimeWebNotFound())
+        return await self.turn_on(
+            workspace_id=record.workspace_id,
+            agent_id=record.agent_id,
+            service_id=record.id,
+            user_id=user_id,
+            workspace_user_id=member.id,
+            role=member.role,
+            expected_revision=expected_revision,
+            selected_duration_seconds=selected_duration_seconds,
+            actor=actor,
+            operation=operation,
+        )
 
     async def list_services(
         self,
         *,
         workspace_id: str,
         agent_id: str,
-        session_id: str,
         user_id: str | None,
+        workspace_user_id: str | None,
+        role: WorkspaceUserRole | None,
         offset: int,
         limit: int,
         actor: RuntimeWebActor | None,
     ) -> Result[RuntimeWebServicePage, RuntimeWebError]:
-        """List current services for one concrete Session."""
+        """List current services for one Agent."""
         async with self.session_manager() as session:
-            access = await self._authorize(
-                session,
-                workspace_id=workspace_id,
-                agent_id=agent_id,
-                session_id=session_id,
-                user_id=user_id,
-                actor=actor,
-            )
-            if not isinstance(access, AuthorizedPublicSessionResource):
+            if user_id is None:
+                if actor is None:
+                    return Failure(RuntimeWebAccessDenied())
+                access = await self._authorize_agent(
+                    session,
+                    workspace_id=workspace_id,
+                    agent_id=agent_id,
+                    actor=actor,
+                )
+            else:
+                if workspace_user_id is None or role is None:
+                    return Failure(RuntimeWebAccessDenied())
+                access = await self._authorize_user(
+                    session,
+                    workspace_id=workspace_id,
+                    agent_id=agent_id,
+                    user_id=user_id,
+                    workspace_user_id=workspace_user_id,
+                    role=role,
+                )
+            if access is not None:
                 return Failure(access)
-            configuration = await self._configuration(session, require_enabled=False)
-            if isinstance(configuration, RuntimeWebConfigurationUnavailable):
-                return Failure(configuration)
-            endpoints, total = await self.repository.list_endpoints(
+            page = await self.repository.list_services(
                 session,
-                agent_session_id=session_id,
+                agent_id=agent_id,
                 offset=offset,
                 limit=limit,
             )
             return Success(
                 RuntimeWebServicePage(
                     items=[
-                        await self._projection(session, endpoint, configuration)
-                        for endpoint in endpoints
+                        await self._projection(session, record) for record in page.items
                     ],
-                    total_count=total,
+                    total_count=page.total,
                 )
             )
 
-    async def _decide_user_request(
+    async def _user_mutation(
         self,
         *,
         workspace_id: str,
         agent_id: str,
-        session_id: str,
+        service_id: str,
         user_id: str,
+        workspace_user_id: str,
+        role: WorkspaceUserRole,
         actor: RuntimeWebActor,
-        request_id: str,
-        expected_revision: int,
-        operation: RuntimeWebOperation,
-        state: RuntimeWebRequestState,
-        kind: RuntimeWebOperationKind,
+        mutate: Callable[[AsyncSession], Awaitable[RuntimeWebMutationResult]],
     ) -> Result[RuntimeWebServiceProjection, RuntimeWebError]:
-        if actor.kind is not RuntimeWebRequesterKind.USER or actor.actor_id != user_id:
+        if actor.kind is not RuntimeWebActorKind.USER or actor.actor_id != user_id:
             return Failure(RuntimeWebAccessDenied())
         async with self.session_manager() as session:
-            endpoint = await self._authorize_resource(
+            access = await self._authorize_user(
                 session,
                 workspace_id=workspace_id,
                 agent_id=agent_id,
-                session_id=session_id,
                 user_id=user_id,
-                actor=actor,
-                resource=await self.repository.endpoint_for_request(
-                    session, request_id
-                ),
+                workspace_user_id=workspace_user_id,
+                role=role,
             )
-            if not isinstance(endpoint, RuntimeWebEndpoint):
-                return Failure(endpoint)
+            if access is not None:
+                return Failure(access)
+            record = await self.repository.get_service_by_id(session, service_id)
+            if record is None or record.agent_id != agent_id:
+                return Failure(RuntimeWebNotFound())
             configuration = await self._configuration(session)
             if isinstance(configuration, RuntimeWebConfigurationUnavailable):
                 return Failure(configuration)
             try:
-                result = await self.repository.decide_request(
-                    session,
-                    request_id=request_id,
-                    expected_revision=expected_revision,
-                    decided_by_user_id=user_id,
-                    state=state,
-                    operation=operation_identity(actor, operation),
-                    kind=kind,
-                )
+                result = await mutate(session)
+            except RuntimeWebRepositoryQuotaExceeded as error:
+                return Failure(RuntimeWebQuotaExceeded(scope=error.scope))
             except RuntimeWebRepositoryConflict:
                 return Failure(RuntimeWebConflict())
-            return Success(
-                await self._projection(session, result.endpoint, configuration)
-            )
+            return Success(await self._projection(session, result.service))
 
-    async def _authorize(
+    async def _authorize_user(
         self,
         session: AsyncSession,
         *,
         workspace_id: str,
         agent_id: str,
-        session_id: str,
-        user_id: str | None,
-        actor: RuntimeWebActor | None,
-    ) -> AuthorizedPublicSessionResource | RuntimeWebError:
-        agent_session = await self.agent_session_repository.get_by_id(
-            session, session_id
-        )
-        if agent_session is None:
-            return RuntimeWebNotFound()
-        if user_id is None:
-            if (
-                actor is None
-                or actor.kind is not RuntimeWebRequesterKind.AGENT
-                or actor.actor_id != agent_id
-            ):
-                return RuntimeWebAccessDenied()
-            result = await resolve_agent_session_resource(
-                session,
-                agent_session=agent_session,
-                expected_workspace_id=workspace_id,
-                expected_agent_id=agent_id,
-                agent_session_repository=self.agent_session_repository,
-            )
-            if isinstance(result, AuthorizedPublicSessionResource):
-                return result
-            return RuntimeWebNotFound()
-        result = await authorize_public_session_resource(
+        user_id: str,
+        workspace_user_id: str,
+        role: WorkspaceUserRole,
+    ) -> RuntimeWebError | None:
+        member = await self.workspace_user_repository.get_by_workspace_and_user(
             session,
-            agent_session=agent_session,
-            user_id=user_id,
-            require_active=True,
-            denied_as_not_found=True,
-            expected_workspace_id=workspace_id,
-            expected_agent_id=agent_id,
-            agent_session_repository=self.agent_session_repository,
-            workspace_user_repository=self.workspace_user_repository,
+            workspace_id,
+            user_id,
         )
-        if isinstance(result, AuthorizedPublicSessionResource):
-            return result
-        if isinstance(result, PublicSessionResourceDenied):
+        if member is None or member.id != workspace_user_id or member.role is not role:
             return RuntimeWebAccessDenied()
-        return RuntimeWebNotFound()
-
-    async def _authorize_resource(
-        self,
-        session: AsyncSession,
-        *,
-        workspace_id: str,
-        agent_id: str,
-        session_id: str,
-        user_id: str | None,
-        actor: RuntimeWebActor | None,
-        resource: RuntimeWebEndpoint | None,
-    ) -> RuntimeWebEndpoint | RuntimeWebError:
+        agent = await self.agent_repository.get_by_id(session, agent_id)
         if (
-            resource is None
-            or resource.workspace_id != workspace_id
-            or resource.agent_id != agent_id
-            or resource.agent_session_id != session_id
+            agent is None
+            or agent.workspace_id != workspace_id
+            or agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE
         ):
             return RuntimeWebNotFound()
-        access = await self._authorize(
-            session,
-            workspace_id=workspace_id,
-            agent_id=agent_id,
-            session_id=session_id,
-            user_id=user_id,
-            actor=actor,
-        )
-        if not isinstance(access, AuthorizedPublicSessionResource):
-            return access
-        return resource
+        if agent.type is AgentType.PRIVATE and role is not WorkspaceUserRole.OWNER:
+            if not await self.agent_admin_repository.is_admin(
+                session,
+                agent_id,
+                workspace_user_id,
+            ):
+                return RuntimeWebAccessDenied()
+        if agent.runtime_capability is not AgentRuntimeCapability.MANAGED:
+            return RuntimeWebCapabilityUnavailable()
+        return None
+
+    async def _authorize_agent(
+        self,
+        session: AsyncSession,
+        *,
+        workspace_id: str,
+        agent_id: str,
+        actor: RuntimeWebActor,
+    ) -> RuntimeWebError | None:
+        if actor.kind is not RuntimeWebActorKind.AGENT or actor.actor_id != agent_id:
+            return RuntimeWebAccessDenied()
+        agent = await self.agent_repository.get_by_id(session, agent_id)
+        if (
+            agent is None
+            or agent.workspace_id != workspace_id
+            or agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE
+        ):
+            return RuntimeWebNotFound()
+        if agent.runtime_capability is not AgentRuntimeCapability.MANAGED:
+            return RuntimeWebCapabilityUnavailable()
+        return None
 
     async def _configuration(
         self,
         session: AsyncSession,
-        *,
-        require_enabled: bool = True,
     ) -> RuntimeWebConfiguration | RuntimeWebConfigurationUnavailable:
         configuration = await self.repository.get_configuration(session)
-        if configuration is None or (require_enabled and not configuration.enabled):
+        if configuration is None or not configuration.enabled:
             return RuntimeWebConfigurationUnavailable()
         return configuration
 
     async def _projection(
         self,
         session: AsyncSession,
-        endpoint: RuntimeWebEndpoint,
-        configuration: RuntimeWebConfiguration,
+        record: RuntimeWebServiceRecord,
     ) -> RuntimeWebServiceProjection:
         now = await session.scalar(sa.select(sa.func.now()))
         if not isinstance(now, datetime.datetime):
             raise RuntimeError("Database did not return current timestamp")
-        request = await self.repository.current_request(session, endpoint)
-        cycle = await self.repository.current_cycle(session, endpoint)
-        url = self.url_resolver.resolve(endpoint.hostname_key)
-        return RuntimeWebServiceProjection(
-            endpoint=endpoint,
-            url=url,
-            configuration_state="configured" if url is not None else "unconfigured",
-            current_request=request,
-            current_cycle=cycle,
-            active=(
-                cycle is not None and cycle.ended_at is None and cycle.expires_at > now
-            ),
-            duration_seconds=configuration.active_duration_seconds,
+        return RuntimeWebServiceProjection.from_record(
+            record,
+            url=self.url_resolver.resolve(record.hostname_key),
             observed_at=now,
         )
-
-    @staticmethod
-    def _subkey(operation: RuntimeWebOperation, suffix: str) -> str:
-        return derived_operation_key(operation.operation_key, suffix)
 
 
 def get_runtime_web_service(
@@ -692,25 +638,30 @@ def get_runtime_web_service(
         SessionManager[AsyncSession],
         Depends(get_session_manager),
     ],
-    repository: Annotated[RuntimeWebRepository, Depends(RuntimeWebRepository)],
-    agent_session_repository: Annotated[
-        AgentSessionRepository,
-        Depends(AgentSessionRepository),
+    repository: Annotated[
+        RuntimeWebRepository,
+        Depends(get_runtime_web_repository),
+    ],
+    agent_repository: Annotated[AgentRepository, Depends(AgentRepository)],
+    agent_admin_repository: Annotated[
+        AgentAdminRepository,
+        Depends(AgentAdminRepository),
     ],
     workspace_user_repository: Annotated[
         WorkspaceUserRepository,
         Depends(WorkspaceUserRepository),
     ],
     url_resolver: Annotated[
-        RuntimeWebEndpointUrlResolver,
-        Depends(get_runtime_web_endpoint_url_resolver),
+        RuntimeWebServiceUrlResolver,
+        Depends(get_runtime_web_service_url_resolver),
     ],
 ) -> RuntimeWebService:
     """Create the Runtime Web domain service."""
     return RuntimeWebService(
         session_manager=session_manager,
         repository=repository,
-        agent_session_repository=agent_session_repository,
+        agent_repository=agent_repository,
+        agent_admin_repository=agent_admin_repository,
         workspace_user_repository=workspace_user_repository,
         url_resolver=url_resolver,
     )

@@ -1159,21 +1159,15 @@ void test("falls back for malformed two-field list_agents results", () => {
 
 void test("specializes a strict Runtime Web request from matching metadata", () => {
   const projection = {
-    endpoint_id: "endpoint000000000000000000000000",
+    service_id: "service0000000000000000000000000",
     port: 3000,
     label: "Preview app",
     url: "https://preview.services.example.com",
     configuration_state: "configured",
-    endpoint_revision: 1,
-    close_barrier: 0,
-    request: {
-      id: "request0000000000000000000000000",
-      state: "pending",
-      revision: 1,
-    },
-    cycle: null,
-    active: false,
-    duration_seconds: 3600,
+    on: false,
+    selected_duration_seconds: 3600,
+    expires_at: null,
+    revision: 1,
     observed_at: "2026-09-12T00:00:00Z",
   };
   const result = knownToolPresentation(
@@ -1188,14 +1182,12 @@ void test("specializes a strict Runtime Web request from matching metadata", () 
       arguments: JSON.stringify({ port: 3000, label: "Preview app" }),
       result: JSON.stringify(projection),
       resultMetadata: {
-        kind: "runtime_web_service_request",
-        endpoint_id: projection.endpoint_id,
+        kind: "runtime_web_service",
+        service_id: projection.service_id,
         port: projection.port,
         url: projection.url,
-        endpoint_revision: 1,
-        request_id: projection.request.id,
-        request_revision: projection.request.revision,
-        cycle_id: null,
+        revision: projection.revision,
+        expires_at: projection.expires_at,
       },
     }),
   );
@@ -1205,16 +1197,34 @@ void test("specializes a strict Runtime Web request from matching metadata", () 
     presentation: {
       action: "runtimeWeb",
       subject: "Preview app",
-      qualifier: "pending",
+      qualifier: "off",
       detail: {
         type: "runtimeWeb",
-        endpointId: projection.endpoint_id,
+        serviceId: projection.service_id,
         port: 3000,
-        requestId: projection.request.id,
         url: projection.url,
       },
     },
   });
+});
+
+void test("keeps removed Runtime Web tool names generic", () => {
+  for (const name of ["prepare_web_service", "cancel_web_service_request"]) {
+    const result = knownToolPresentation(
+      toolCall({
+        name,
+        toolkitSource: {
+          toolkit_config_id: "runtime-web",
+          toolkit_type: "runtime_web",
+          toolkit_name: "Runtime Web",
+          toolkit_slug: "runtime_web",
+        },
+        arguments: "{}",
+      }),
+    );
+
+    assert.deepEqual(result, { type: "generic", reason: "unregistered" });
+  }
 });
 
 void test("rejects Runtime Web metadata that does not match the projection", () => {
@@ -1223,26 +1233,24 @@ void test("rejects Runtime Web metadata that does not match the projection", () 
       name: "request_web_service",
       arguments: JSON.stringify({ port: 3000, label: null }),
       result: JSON.stringify({
-        endpoint_id: "endpoint000000000000000000000000",
+        service_id: "service0000000000000000000000000",
         port: 3000,
         label: null,
         url: "https://preview.services.example.com",
-        request: {
-          id: "request0000000000000000000000000",
-          state: "pending",
-          revision: 1,
-        },
-        cycle: null,
-        active: false,
+        configuration_state: "configured",
+        on: false,
+        selected_duration_seconds: 3600,
+        expires_at: null,
+        revision: 1,
+        observed_at: "2026-09-12T00:00:00Z",
       }),
       resultMetadata: {
-        kind: "runtime_web_service_request",
-        endpoint_id: "different00000000000000000000000",
+        kind: "runtime_web_service",
+        service_id: "different00000000000000000000000",
         port: 3000,
         url: "https://preview.services.example.com",
-        request_id: "request0000000000000000000000000",
-        request_revision: 1,
-        cycle_id: null,
+        revision: 1,
+        expires_at: null,
       },
     }),
   );

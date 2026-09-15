@@ -73,7 +73,7 @@ code_paths:
 api_routes:
   - /toolkit/v1
 last_verified_at: 2026-09-15
-spec_version: 117
+spec_version: 118
 ---
 
 # Toolkit
@@ -121,12 +121,14 @@ tools, and Session/Run capabilities remain available without a User. Authenticat
 OAuth setup remain requester-authorized operations and do not leak their requester into runtime
 contexts. User-brought credentials are not a Team capability.
 
-Runtime Web is a Runtime-independent auto-bound Toolkit. Root Agents and subagents
-may prepare or request the same-root Session's numeric loopback service, inspect its
-current projection, and close its current approved cycle. The Toolkit returns only
-recognized endpoint/request/cycle metadata. It cannot approve access, extend a cycle,
-control the application process, expose browser authentication material, or access a
-different root Session.
+Runtime Web is an auto-bound Toolkit available only while the Agent has managed
+Runtime capability. Root Agents and subagents receive exactly request, list, and
+close tools over the Agent-owned service set. Request creates a missing numeric-port
+service in the Off state or returns the existing service unchanged; list returns
+bounded content-free service projections; close idempotently turns one service Off.
+The Toolkit cannot turn a service On, reset or extend expiration, update metadata,
+delete a service, control the application process, expose browser authentication
+material, or access another Agent's services.
 
 ## Domain Model
 
@@ -1016,6 +1018,9 @@ without requiring a separate Toolkit setup row.
 
 ## Changelog
 
+- **2026-09-15** (spec_version 118) — Replaced same-root Session approval tools
+  with managed-Runtime-gated Agent request/list/close tools and content-free service
+  projections.
 - **2026-09-13** (spec_version 117) — Added Runtime Web as a
   Runtime-independent auto-bound Toolkit with same-root Session and human-approval
   boundaries, and mapped its service implementation.

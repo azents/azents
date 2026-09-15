@@ -14,6 +14,7 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/runtime_profile.py
   - python/apps/azents/src/azents/rdb/models/runtime_web.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/097a97177350_create_operational_schema_baseline.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/a32efa82fd63_replace_runtime_web_service_authority.py
   - python/apps/azents/src/azents/rdb/models/agent.py
   - python/apps/azents/src/azents/core/runtime_profile.py
   - python/apps/azents/src/azents/repos/agent_runtime/**
@@ -47,7 +48,7 @@ code_paths:
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
   - infra/charts/azents/**
 last_verified_at: 2026-09-15
-spec_version: 38
+spec_version: 39
 ---
 
 # Agent Runtime Persistence
@@ -87,15 +88,20 @@ summaries and aggregate byte counts may be projected while the bounded volatile 
 exists. Coordination loss ends the Terminal path without changing durable Runtime,
 Session, Project, or Agent Workspace state.
 
-Runtime Web persists stable Session-and-port endpoints, exposure requests, approved
-cycles, current authentication configuration, browser-identity hashes,
-broker/ticket hashes, and one current `runtime_web_session_routes` Owner lease per
-Runtime. The route row contains only the exact Runtime and Runner generations, Owner
-replica and boot identities, trusted Owner address, session lease identity and
-generation, join-nonce hash, protocol fingerprint, lease timestamps, and bounded
-drain marker needed to fence the persistent Runner Web session. Exact acquisition,
-renewal, and release compare the complete epoch. The row is deleted when the Owner
-session ends; no route history is retained.
+Runtime Web persists one `runtime_web_services` row for each Agent and numeric local
+port, current authentication configuration, browser-identity hashes, broker/ticket
+hashes, and one current `runtime_web_session_routes` Owner lease per Runtime. The
+service row owns its opaque ID, Workspace and Agent identity, 12-character hostname
+key, label, selected duration, nullable exposure deadline, and monotonic revision.
+Effective On state exists only while the deadline is in the future; no request,
+approval, cycle, origin, or service-history row exists.
+
+The route row contains only the exact Runtime and Runner generations, Owner replica
+and boot identities, trusted Owner address, session lease identity and generation,
+join-nonce hash, protocol fingerprint, lease timestamps, and bounded drain marker
+needed to fence the persistent Runner Web session. Exact acquisition, renewal, and
+release compare the complete epoch. The row is deleted when the Owner session ends;
+no route history is retained.
 
 Runtime Web stream counts, pending opens, buffer and bandwidth grants, fair-scheduler
 state, logical-stream registries, tombstones, and live session state are ephemeral.
@@ -111,17 +117,17 @@ headers, cookies, upstream errors, WebSocket payloads, flow-control frames, and
 application outcomes are never written to PostgreSQL, Redis, object storage, events,
 Chat history, or Runtime configuration history. A transport or coordination loss
 therefore ends only active work; it does not replay application requests or change
-the stable endpoint and finite approval records.
+the stable service or its exposure deadline.
 
-The legacy `runtime_web_tunnel_routes`, `runtime_web_admission_leases`, and
-`runtime_web_gateway_admission_leases` tables do not exist. Their request-scoped
-route and endpoint/user/Agent admission semantics have no reader, compatibility
-view, alias, or fallback after the forward-only clean-cutover migration.
-Gateway identities contain no browser-vendor or browser-profile state. An endpoint's
-current-cycle pointer retains the latest active or ended cycle so projections can
-distinguish active, expired, and explicitly closed authority. Closing advances the
-endpoint revision and close barrier and marks the cycle ended without deleting that
-latest-cycle pointer; a later approval replaces it with the new cycle ID.
+The legacy `runtime_web_endpoints`, `runtime_web_requests`, `runtime_web_cycles`,
+`runtime_web_tunnel_routes`, `runtime_web_admission_leases`, and
+`runtime_web_gateway_admission_leases` tables do not exist. Their Session ownership,
+approval lifecycle, request-scoped route, and endpoint/user/Agent admission
+semantics have no reader, compatibility view, alias, or fallback after the
+forward-only clean-cutover migration. Gateway identities contain no browser-vendor
+or browser-profile state. Ordinary Agent Runtime removal explicitly deletes every
+service for that Agent before Runtime finalization; deleting and recreating a service
+or Runtime produces a new ID and hostname key.
 
 The logical Runtime persists durable Provider routing IDs and a monotonic
 `configuration_sequence` high-water mark. A one-to-one `runtime_configuration_states` row exists
@@ -452,6 +458,9 @@ Required checks:
 
 ## Changelog
 
+- **2026-09-15 (spec_version=39)** — Replaced Session endpoint, request, and cycle
+  persistence with one Agent-and-port service row, exposure deadline, revision, and
+  destructive legacy-data cutover.
 - **2026-09-14 (spec_version=38)** — Added one exact current
   `runtime_web_session_routes` Owner lease, made logical streams and Runtime capacity
   Redis-optional ephemeral state, and removed the legacy tunnel and

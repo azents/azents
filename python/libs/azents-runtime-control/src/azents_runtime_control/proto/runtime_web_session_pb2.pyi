@@ -189,7 +189,7 @@ class _RuntimeWebSessionCloseReasonEnumTypeWrapper(
     RUNTIME_WEB_SESSION_CLOSE_REASON_CALLER: (
         _RuntimeWebSessionCloseReason.ValueType
     )  # 1
-    RUNTIME_WEB_SESSION_CLOSE_REASON_APPROVAL_EXPIRED: (
+    RUNTIME_WEB_SESSION_CLOSE_REASON_SERVICE_EXPIRED: (
         _RuntimeWebSessionCloseReason.ValueType
     )  # 2
     RUNTIME_WEB_SESSION_CLOSE_REASON_AUTHORITY_REVOKED: (
@@ -229,7 +229,7 @@ RUNTIME_WEB_SESSION_CLOSE_REASON_UNSPECIFIED: (
     RuntimeWebSessionCloseReason.ValueType
 )  # 0
 RUNTIME_WEB_SESSION_CLOSE_REASON_CALLER: RuntimeWebSessionCloseReason.ValueType  # 1
-RUNTIME_WEB_SESSION_CLOSE_REASON_APPROVAL_EXPIRED: (
+RUNTIME_WEB_SESSION_CLOSE_REASON_SERVICE_EXPIRED: (
     RuntimeWebSessionCloseReason.ValueType
 )  # 2
 RUNTIME_WEB_SESSION_CLOSE_REASON_AUTHORITY_REVOKED: (
@@ -818,36 +818,32 @@ class RuntimeWebSessionAuthority(_message.Message):
     DESCRIPTOR: _descriptor.Descriptor
 
     CORRELATION_ID_FIELD_NUMBER: _builtins.int
-    ENDPOINT_ID_FIELD_NUMBER: _builtins.int
-    CYCLE_ID_FIELD_NUMBER: _builtins.int
-    ENDPOINT_AUTHORITY_REVISION_FIELD_NUMBER: _builtins.int
-    CLOSE_BARRIER_FIELD_NUMBER: _builtins.int
+    SERVICE_ID_FIELD_NUMBER: _builtins.int
+    SERVICE_REVISION_FIELD_NUMBER: _builtins.int
     IDENTITY_ID_FIELD_NUMBER: _builtins.int
     AUTHENTICATION_SESSION_ID_FIELD_NUMBER: _builtins.int
     USER_ID_FIELD_NUMBER: _builtins.int
-    AGENT_SESSION_ID_FIELD_NUMBER: _builtins.int
+    AGENT_ID_FIELD_NUMBER: _builtins.int
     RUNTIME_ID_FIELD_NUMBER: _builtins.int
     DESIRED_GENERATION_FIELD_NUMBER: _builtins.int
     RUNNER_GENERATION_FIELD_NUMBER: _builtins.int
     PORT_FIELD_NUMBER: _builtins.int
-    APPROVAL_DEADLINE_AT_FIELD_NUMBER: _builtins.int
+    EXPOSURE_DEADLINE_AT_FIELD_NUMBER: _builtins.int
     TRANSPORT_DEADLINE_AT_FIELD_NUMBER: _builtins.int
     OPEN_DEADLINE_AT_FIELD_NUMBER: _builtins.int
     correlation_id: _builtins.str
-    endpoint_id: _builtins.str
-    cycle_id: _builtins.str
-    endpoint_authority_revision: _builtins.int
-    close_barrier: _builtins.int
+    service_id: _builtins.str
+    service_revision: _builtins.int
     identity_id: _builtins.str
     authentication_session_id: _builtins.str
     user_id: _builtins.str
-    agent_session_id: _builtins.str
+    agent_id: _builtins.str
     runtime_id: _builtins.str
     desired_generation: _builtins.int
     runner_generation: _builtins.int
     port: _builtins.int
     @_builtins.property
-    def approval_deadline_at(self) -> _timestamp_pb2.Timestamp: ...
+    def exposure_deadline_at(self) -> _timestamp_pb2.Timestamp: ...
     @_builtins.property
     def transport_deadline_at(self) -> _timestamp_pb2.Timestamp: ...
     @_builtins.property
@@ -856,25 +852,23 @@ class RuntimeWebSessionAuthority(_message.Message):
         self,
         *,
         correlation_id: _builtins.str = ...,
-        endpoint_id: _builtins.str = ...,
-        cycle_id: _builtins.str = ...,
-        endpoint_authority_revision: _builtins.int = ...,
-        close_barrier: _builtins.int = ...,
+        service_id: _builtins.str = ...,
+        service_revision: _builtins.int = ...,
         identity_id: _builtins.str = ...,
         authentication_session_id: _builtins.str = ...,
         user_id: _builtins.str = ...,
-        agent_session_id: _builtins.str = ...,
+        agent_id: _builtins.str = ...,
         runtime_id: _builtins.str = ...,
         desired_generation: _builtins.int = ...,
         runner_generation: _builtins.int = ...,
         port: _builtins.int = ...,
-        approval_deadline_at: _timestamp_pb2.Timestamp | None = ...,
+        exposure_deadline_at: _timestamp_pb2.Timestamp | None = ...,
         transport_deadline_at: _timestamp_pb2.Timestamp | None = ...,
         open_deadline_at: _timestamp_pb2.Timestamp | None = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _typing.Literal[
-        "approval_deadline_at",
-        b"approval_deadline_at",
+        "exposure_deadline_at",
+        b"exposure_deadline_at",
         "open_deadline_at",
         b"open_deadline_at",
         "transport_deadline_at",
@@ -882,24 +876,16 @@ class RuntimeWebSessionAuthority(_message.Message):
     ]
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
     _ClearFieldArgType: _TypeAlias = _typing.Literal[
-        "agent_session_id",
-        b"agent_session_id",
-        "approval_deadline_at",
-        b"approval_deadline_at",
+        "agent_id",
+        b"agent_id",
         "authentication_session_id",
         b"authentication_session_id",
-        "close_barrier",
-        b"close_barrier",
         "correlation_id",
         b"correlation_id",
-        "cycle_id",
-        b"cycle_id",
         "desired_generation",
         b"desired_generation",
-        "endpoint_authority_revision",
-        b"endpoint_authority_revision",
-        "endpoint_id",
-        b"endpoint_id",
+        "exposure_deadline_at",
+        b"exposure_deadline_at",
         "identity_id",
         b"identity_id",
         "open_deadline_at",
@@ -910,6 +896,10 @@ class RuntimeWebSessionAuthority(_message.Message):
         b"runner_generation",
         "runtime_id",
         b"runtime_id",
+        "service_id",
+        b"service_id",
+        "service_revision",
+        b"service_revision",
         "transport_deadline_at",
         b"transport_deadline_at",
         "user_id",

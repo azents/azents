@@ -60,20 +60,18 @@ def _identity(role: SessionPeerRole = SessionPeerRole.RUNNER) -> SessionIdentity
 def _authority() -> StreamAuthority:
     return StreamAuthority(
         correlation_id="correlation-1",
-        endpoint_id="endpoint-1",
-        cycle_id="cycle-1",
-        endpoint_authority_revision=4,
-        close_barrier=5,
+        service_id="endpoint-1",
+        service_revision=4,
         identity_id="identity-1",
         authentication_session_id="auth-session-1",
         user_id="user-1",
-        agent_session_id="agent-session-1",
+        agent_id="agent-session-1",
         runtime_id="runtime-1",
         desired_generation=2,
         runner_generation=3,
         port=6006,
         open_deadline_at=NOW + timedelta(seconds=10),
-        approval_deadline_at=NOW + timedelta(hours=1),
+        exposure_deadline_at=NOW + timedelta(hours=1),
         transport_deadline_at=NOW + timedelta(minutes=30),
     )
 
@@ -105,7 +103,7 @@ def test_schema_and_fingerprint_are_exact() -> None:
     assert RUNTIME_WEB_CAPABILITY == "runtime-web-http"
     assert (
         RUNTIME_WEB_PROTOCOL_FINGERPRINT
-        == "0228697aa1df0aa123b6a53f2b661f4292e3a226b02819d72b759e197376fd9b"
+        == "3e0dcc00e011b6e7ad0fa3d2ce445eee0c1f8822e9f0c9d792d6f2c6d7586089"
     )
     assert (
         protocol_fingerprint(descriptor=b"different")

@@ -99,7 +99,7 @@ api_routes:
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ticket
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ws
-  - /runtime-web/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/services
+  - /runtime-web/v1/workspaces/{handle}/agents/{agent_id}/services
   - /runtime-profile/v1/workspaces/{handle}/profiles
   - /runtime-profile/v1/workspaces/{handle}/profiles/{profile_id}
   - /runtime-profile/v1/workspaces/{handle}/default
@@ -114,19 +114,19 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack
 last_verified_at: 2026-09-15
-spec_version: 80
+spec_version: 81
 ---
 
 # Agent Domain Spec
 
 Agent is central execution unit of azents. Within Workspace, it bundles an ordered selectable model option list, effective model selection snapshots, system prompt, model parameters, Toolkit access, and an optional managed Runtime capability; worker resolves these into `RunRequest` and passes them to `AgentEngine` execution loop. Session-scoped subagents do not create a separate persistent Agent role; they are represented by `SessionAgent` tree nodes linked to hidden child `AgentSession` rows under the same Agent.
 
-The auto-bound Runtime Web Toolkit is available to root Agents and subagents even
-when the Agent is Runtime-free. It prepares stable Session-and-port endpoints,
-creates nonblocking exposure requests, lists current projections, and closes an
-approved cycle. A running application and human approval are separate concerns:
-Agent execution never grants browser access, and a Runtime lifecycle transition
-does not rewrite the durable endpoint or approval record.
+The auto-bound Runtime Web Toolkit is available to root Agents and subagents only
+while the Agent has managed Runtime capability. It requests or returns the one
+Agent-and-port service in the Off state, lists the Agent's services, and turns an On
+service Off. Agent execution cannot turn a service On, reset or extend exposure,
+delete a service, or control the application process. Human management through any
+Session or Agent settings operates on the same Agent-owned service.
 
 ## 1. Core Model
 
@@ -708,6 +708,9 @@ Following contracts do not exist in current system.
 
 ## 8. Change History
 
+- **2026-09-15** (spec_version 81) — Replaced Session-owned Runtime Web approval
+  resources with Agent-and-port services, managed-Runtime capability gating, and
+  bounded Agent request/list/close authority.
 - **2026-09-13** (spec_version 79) — Replaced flat selectable labels with ordered one-to-five
   candidate chains, Primary-derived internal mirrors, Workspace cooldown/probe authority, and
   generation-fenced Session Primary reservations.

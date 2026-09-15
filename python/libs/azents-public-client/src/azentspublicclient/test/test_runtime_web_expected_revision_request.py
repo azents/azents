@@ -35,12 +35,12 @@ class TestRuntimeWebExpectedRevisionRequest(unittest.TestCase):
         model = RuntimeWebExpectedRevisionRequest()
         if include_optional:
             return RuntimeWebExpectedRevisionRequest(
-                expected_revision = 1.0,
+                expected_revision = 0.0,
                 operation_key = '0'
             )
         else:
             return RuntimeWebExpectedRevisionRequest(
-                expected_revision = 1.0,
+                expected_revision = 0.0,
                 operation_key = '0',
         )
         """

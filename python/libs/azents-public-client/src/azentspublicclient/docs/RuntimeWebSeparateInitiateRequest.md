@@ -6,7 +6,7 @@ Start one browser-bound separate-domain exchange.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**endpoint_id** | **str** |  | 
+**service_id** | **str** |  | 
 
 ## Example
 

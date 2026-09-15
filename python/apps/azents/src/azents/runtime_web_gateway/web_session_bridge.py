@@ -1463,14 +1463,12 @@ def _open_envelope(
     envelope.open.authority.CopyFrom(
         runtime_web_session_pb2.RuntimeWebSessionAuthority(
             correlation_id=authority.correlation_id,
-            endpoint_id=authority.endpoint_id,
-            cycle_id=authority.cycle_id,
-            endpoint_authority_revision=authority.endpoint_authority_revision,
-            close_barrier=authority.close_barrier,
+            service_id=authority.service_id,
+            service_revision=authority.service_revision,
             identity_id=authority.identity_id,
             authentication_session_id=authority.authentication_session_id,
             user_id=authority.user_id,
-            agent_session_id=authority.agent_session_id,
+            agent_id=authority.agent_id,
             runtime_id=authority.runtime_id,
             desired_generation=authority.desired_generation,
             runner_generation=authority.runner_generation,
@@ -1481,8 +1479,8 @@ def _open_envelope(
     envelope.open.authority.transport_deadline_at.FromDatetime(
         authority.transport_deadline_at
     )
-    envelope.open.authority.approval_deadline_at.FromDatetime(
-        authority.approval_deadline_at
+    envelope.open.authority.exposure_deadline_at.FromDatetime(
+        authority.exposure_deadline_at
     )
     envelope.open.request_head.protocol = (
         runtime_web_session_pb2.RUNTIME_WEB_SESSION_PROTOCOL_WEBSOCKET
@@ -1632,8 +1630,8 @@ _CLOSE_REASON_TO_PROTO: dict[
     runtime_web_session_pb2.RuntimeWebSessionCloseReason.ValueType,
 ] = {
     CloseReason.CALLER: runtime_web_session_pb2.RUNTIME_WEB_SESSION_CLOSE_REASON_CALLER,
-    CloseReason.APPROVAL_EXPIRED: (
-        runtime_web_session_pb2.RUNTIME_WEB_SESSION_CLOSE_REASON_APPROVAL_EXPIRED
+    CloseReason.SERVICE_EXPIRED: (
+        runtime_web_session_pb2.RUNTIME_WEB_SESSION_CLOSE_REASON_SERVICE_EXPIRED
     ),
     CloseReason.AUTHORITY_REVOKED: (
         runtime_web_session_pb2.RUNTIME_WEB_SESSION_CLOSE_REASON_AUTHORITY_REVOKED

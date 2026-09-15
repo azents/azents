@@ -57,7 +57,7 @@ enum RuntimeWebSessionWebSocketOpcode {
 enum RuntimeWebSessionCloseReason {
   RUNTIME_WEB_SESSION_CLOSE_REASON_UNSPECIFIED = 0;
   RUNTIME_WEB_SESSION_CLOSE_REASON_CALLER = 1;
-  RUNTIME_WEB_SESSION_CLOSE_REASON_APPROVAL_EXPIRED = 2;
+  RUNTIME_WEB_SESSION_CLOSE_REASON_SERVICE_EXPIRED = 2;
   RUNTIME_WEB_SESSION_CLOSE_REASON_AUTHORITY_REVOKED = 3;
   RUNTIME_WEB_SESSION_CLOSE_REASON_GENERATION_REPLACED = 4;
   RUNTIME_WEB_SESSION_CLOSE_REASON_DEADLINE = 5;
@@ -148,21 +148,19 @@ message RuntimeWebSessionHeader {
 
 message RuntimeWebSessionAuthority {
   string correlation_id = 1;
-  string endpoint_id = 2;
-  string cycle_id = 3;
-  uint64 endpoint_authority_revision = 4;
-  uint64 close_barrier = 5;
-  string identity_id = 6;
-  string authentication_session_id = 7;
-  string user_id = 8;
-  string agent_session_id = 9;
-  string runtime_id = 10;
-  uint64 desired_generation = 11;
-  uint64 runner_generation = 12;
-  uint32 port = 13;
-  google.protobuf.Timestamp approval_deadline_at = 14;
-  google.protobuf.Timestamp transport_deadline_at = 15;
-  google.protobuf.Timestamp open_deadline_at = 16;
+  string service_id = 2;
+  uint64 service_revision = 3;
+  string identity_id = 4;
+  string authentication_session_id = 5;
+  string user_id = 6;
+  string agent_id = 7;
+  string runtime_id = 8;
+  uint64 desired_generation = 9;
+  uint64 runner_generation = 10;
+  uint32 port = 11;
+  google.protobuf.Timestamp exposure_deadline_at = 12;
+  google.protobuf.Timestamp transport_deadline_at = 13;
+  google.protobuf.Timestamp open_deadline_at = 14;
 }
 
 message RuntimeWebSessionRequestHead {

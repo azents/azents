@@ -2979,20 +2979,18 @@ def _authority(
 ) -> StreamAuthority:
     return StreamAuthority(
         correlation_id=message.correlation_id,
-        endpoint_id=message.endpoint_id,
-        cycle_id=message.cycle_id,
-        endpoint_authority_revision=message.endpoint_authority_revision,
-        close_barrier=message.close_barrier,
+        service_id=message.service_id,
+        service_revision=message.service_revision,
         identity_id=message.identity_id,
         authentication_session_id=message.authentication_session_id,
         user_id=message.user_id,
-        agent_session_id=message.agent_session_id,
+        agent_id=message.agent_id,
         runtime_id=message.runtime_id,
         desired_generation=message.desired_generation,
         runner_generation=message.runner_generation,
         port=message.port,
         open_deadline_at=message.open_deadline_at.ToDatetime(tzinfo=datetime.UTC),
-        approval_deadline_at=message.approval_deadline_at.ToDatetime(
+        exposure_deadline_at=message.exposure_deadline_at.ToDatetime(
             tzinfo=datetime.UTC
         ),
         transport_deadline_at=message.transport_deadline_at.ToDatetime(
@@ -3096,8 +3094,8 @@ def _close_reason(
         CloseReason.CALLER: (
             runtime_web_session_pb2.RUNTIME_WEB_SESSION_CLOSE_REASON_CALLER
         ),
-        CloseReason.APPROVAL_EXPIRED: (
-            runtime_web_session_pb2.RUNTIME_WEB_SESSION_CLOSE_REASON_APPROVAL_EXPIRED
+        CloseReason.SERVICE_EXPIRED: (
+            runtime_web_session_pb2.RUNTIME_WEB_SESSION_CLOSE_REASON_SERVICE_EXPIRED
         ),
         CloseReason.AUTHORITY_REVOKED: (
             runtime_web_session_pb2.RUNTIME_WEB_SESSION_CLOSE_REASON_AUTHORITY_REVOKED

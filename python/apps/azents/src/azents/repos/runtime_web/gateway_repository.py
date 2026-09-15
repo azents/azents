@@ -9,8 +9,8 @@ from azents.rdb.models.runtime_web import (
     RDBRuntimeWebAuthBinding,
     RDBRuntimeWebAuthConfiguration,
     RDBRuntimeWebAuthTicket,
-    RDBRuntimeWebEndpoint,
     RDBRuntimeWebGatewayIdentity,
+    RDBRuntimeWebService,
     RuntimeWebAuthMode,
 )
 from azents.rdb.models.session import RDBSession
@@ -47,7 +47,6 @@ class RuntimeWebGatewayRepository:
                 enabled=desired.enabled,
                 mode=desired.mode,
                 fingerprint=desired.fingerprint,
-                active_duration_seconds=desired.active_duration_seconds,
             )
             session.add(configuration)
             await session.flush()
@@ -60,7 +59,6 @@ class RuntimeWebGatewayRepository:
         configuration.enabled = desired.enabled
         configuration.mode = desired.mode
         configuration.fingerprint = desired.fingerprint
-        configuration.active_duration_seconds = desired.active_duration_seconds
         if security_changed:
             await session.execute(
                 sa.update(RDBRuntimeWebGatewayIdentity)
@@ -213,12 +211,12 @@ class RuntimeWebGatewayRepository:
         main_binding_hash: str,
         user_id: str,
         auth_session_id: str,
-        endpoint_id: str,
+        service_id: str,
         expires_at: datetime.datetime,
         now: datetime.datetime,
         main_binding_secret: str,
     ) -> RuntimeWebIssuedBinding:
-        """Create a trusted Main-origin initiation for one endpoint."""
+        """Create a trusted Main-origin initiation for one service."""
         configuration = await self._locked_enabled_configuration(session)
         if configuration.mode is not RuntimeWebAuthMode.SEPARATE_DOMAIN:
             raise RuntimeWebRepositoryConflict(
@@ -230,15 +228,15 @@ class RuntimeWebGatewayRepository:
             auth_session_id=auth_session_id,
             now=now,
         )
-        endpoint = await session.get(RDBRuntimeWebEndpoint, endpoint_id)
-        if endpoint is None:
-            raise RuntimeWebRepositoryConflict("Runtime Web endpoint not found")
+        service = await session.get(RDBRuntimeWebService, service_id)
+        if service is None:
+            raise RuntimeWebRepositoryConflict("Runtime Web service not found")
         rdb = RDBRuntimeWebAuthBinding(
             initiation_id=initiation_id,
             main_binding_hash=main_binding_hash,
             user_id=user_id,
             auth_session_id=auth_session_id,
-            endpoint_id=endpoint_id,
+            service_id=service_id,
             expires_at=expires_at,
         )
         session.add(rdb)
@@ -354,7 +352,7 @@ class RuntimeWebGatewayRepository:
             secret_hash=ticket_hash,
             user_id=binding.user_id,
             auth_session_id=binding.auth_session_id,
-            endpoint_id=binding.endpoint_id,
+            service_id=binding.service_id,
             issued_at=issued_at,
             expires_at=expires_at,
         )
@@ -362,7 +360,7 @@ class RuntimeWebGatewayRepository:
         await session.flush()
         return RuntimeWebIssuedTicket(
             ticket_secret=ticket_secret,
-            endpoint_id=binding.endpoint_id,
+            service_id=binding.service_id,
             expires_at=expires_at,
         )
 
@@ -401,7 +399,7 @@ class RuntimeWebGatewayRepository:
             or binding.broker_bound_at is None
             or ticket.consumed_at is not None
             or ticket.expires_at <= now
-            or ticket.endpoint_id != binding.endpoint_id
+            or ticket.service_id != binding.service_id
             or ticket.auth_session_id != binding.auth_session_id
             or ticket.user_id != binding.user_id
         ):
@@ -427,30 +425,30 @@ class RuntimeWebGatewayRepository:
         return RuntimeWebRedeemedIdentity(
             secret=identity_secret,
             expires_at=identity_expires_at,
-            endpoint_id=ticket.endpoint_id,
+            service_id=ticket.service_id,
         )
 
-    async def get_endpoint_by_hostname(
+    async def get_service_by_hostname(
         self,
         session: AsyncSession,
         *,
         hostname_key: str,
-    ) -> RDBRuntimeWebEndpoint | None:
-        """Resolve the permanent random endpoint host label."""
+    ) -> RDBRuntimeWebService | None:
+        """Resolve the permanent random service host label."""
         return await session.scalar(
-            sa.select(RDBRuntimeWebEndpoint).where(
-                RDBRuntimeWebEndpoint.hostname_key == hostname_key
+            sa.select(RDBRuntimeWebService).where(
+                RDBRuntimeWebService.hostname_key == hostname_key
             )
         )
 
-    async def get_endpoint_by_id(
+    async def get_service_by_id(
         self,
         session: AsyncSession,
         *,
-        endpoint_id: str,
-    ) -> RDBRuntimeWebEndpoint | None:
-        """Resolve one stable endpoint by its opaque identifier."""
-        return await session.get(RDBRuntimeWebEndpoint, endpoint_id)
+        service_id: str,
+    ) -> RDBRuntimeWebService | None:
+        """Resolve one stable service by its opaque identifier."""
+        return await session.get(RDBRuntimeWebService, service_id)
 
     async def _locked_enabled_configuration(
         self,
@@ -512,7 +510,7 @@ class RuntimeWebGatewayRepository:
             initiation_id=binding.initiation_id,
             user_id=binding.user_id,
             auth_session_id=binding.auth_session_id,
-            endpoint_id=binding.endpoint_id,
+            service_id=binding.service_id,
             expires_at=binding.expires_at,
             broker_bound=binding.broker_bound_at is not None,
             settled=binding.settled_at is not None,

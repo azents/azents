@@ -511,14 +511,12 @@ def _open_envelope(
     now = datetime.now(UTC)
     authority = runtime_web_session_pb2.RuntimeWebSessionAuthority(
         correlation_id="correlation",
-        endpoint_id="endpoint",
-        cycle_id="cycle",
-        endpoint_authority_revision=1,
-        close_barrier=1,
+        service_id="endpoint",
+        service_revision=1,
         identity_id="identity",
         authentication_session_id="authentication",
         user_id="user",
-        agent_session_id="agent-session",
+        agent_id="agent-session",
         runtime_id="runtime",
         desired_generation=1,
         runner_generation=1,
@@ -526,7 +524,7 @@ def _open_envelope(
     )
     authority.open_deadline_at.FromDatetime(now + timedelta(seconds=10))
     authority.transport_deadline_at.FromDatetime(now + timedelta(minutes=1))
-    authority.approval_deadline_at.FromDatetime(now + timedelta(hours=1))
+    authority.exposure_deadline_at.FromDatetime(now + timedelta(hours=1))
     return runtime_web_session_pb2.RuntimeWebSessionEnvelope(
         protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
         session_id=session_id,

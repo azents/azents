@@ -1,4 +1,4 @@
-"""Durable Runtime Web endpoint, approval, and authentication models."""
+"""Durable Runtime Web service and authentication models."""
 
 import datetime
 import enum
@@ -17,29 +17,11 @@ def _enum_values(enum_cls: type[enum.StrEnum]) -> list[str]:
     return [value.value for value in enum_cls]
 
 
-class RuntimeWebRequestState(enum.StrEnum):
-    """Durable Runtime Web request outcome."""
-
-    PENDING = "pending"
-    APPROVED = "approved"
-    REJECTED = "rejected"
-    CANCELLED = "cancelled"
-
-
-class RuntimeWebRequesterKind(enum.StrEnum):
-    """Principal kind that created a Runtime Web request."""
+class RuntimeWebActorKind(enum.StrEnum):
+    """Principal kind that performs an idempotent service operation."""
 
     USER = "user"
     AGENT = "agent"
-
-
-class RuntimeWebCycleEndReason(enum.StrEnum):
-    """Reason an approved exposure cycle stopped being current."""
-
-    CLOSED = "closed"
-    EXPIRED = "expired"
-    REPLACED = "replaced"
-    SESSION_REMOVED = "session_removed"
 
 
 class RuntimeWebAuthMode(enum.StrEnum):
@@ -52,37 +34,19 @@ class RuntimeWebAuthMode(enum.StrEnum):
 class RuntimeWebOperationKind(enum.StrEnum):
     """Idempotent Runtime Web mutation kind."""
 
-    PREPARE = "prepare"
+    CREATE = "create"
     REQUEST = "request"
-    DIRECT_CREATE = "direct_create"
-    APPROVE = "approve"
-    REJECT = "reject"
-    CANCEL = "cancel"
+    UPDATE = "update"
+    TURN_ON = "turn_on"
+    TURN_OFF = "turn_off"
+    RESET = "reset"
+    DELETE = "delete"
     CLOSE = "close"
 
 
-class RuntimeWebQuotaScopeKind(enum.StrEnum):
-    """Logical quota serialization scope."""
-
-    AGENT = "agent"
-    SESSION = "session"
-
-
-runtime_web_request_state_enum = ENUM(
-    RuntimeWebRequestState,
-    name="runtime_web_request_state",
-    create_type=False,
-    values_callable=_enum_values,
-)
-runtime_web_requester_kind_enum = ENUM(
-    RuntimeWebRequesterKind,
-    name="runtime_web_requester_kind",
-    create_type=False,
-    values_callable=_enum_values,
-)
-runtime_web_cycle_end_reason_enum = ENUM(
-    RuntimeWebCycleEndReason,
-    name="runtime_web_cycle_end_reason",
+runtime_web_actor_kind_enum = ENUM(
+    RuntimeWebActorKind,
+    name="runtime_web_actor_kind",
     create_type=False,
     values_callable=_enum_values,
 )
@@ -98,59 +62,43 @@ runtime_web_operation_kind_enum = ENUM(
     create_type=False,
     values_callable=_enum_values,
 )
-runtime_web_quota_scope_kind_enum = ENUM(
-    RuntimeWebQuotaScopeKind,
-    name="runtime_web_quota_scope_kind",
-    create_type=False,
-    values_callable=_enum_values,
-)
 
 
-class RDBRuntimeWebEndpoint(RDBModel):
-    """Stable Runtime Web endpoint identity for one concrete Session and port."""
+class RDBRuntimeWebService(RDBModel):
+    """Stable Runtime Web service identity for one Agent and local port."""
 
-    __tablename__ = "runtime_web_endpoints"
+    __tablename__ = "runtime_web_services"
 
     CK_PORT = sa.CheckConstraint(
         "port >= 1 AND port <= 65535",
-        name="ck_runtime_web_endpoints_port",
+        name="ck_runtime_web_services_port",
     )
-    CK_REVISIONS = sa.CheckConstraint(
-        "authority_revision >= 0 AND close_barrier >= 0",
-        name="ck_runtime_web_endpoints_revisions",
+    CK_DURATION = sa.CheckConstraint(
+        "selected_duration_seconds IN (3600, 21600, 86400)",
+        name="ck_runtime_web_services_duration",
     )
-    UQ_SESSION_PORT = sa.UniqueConstraint(
-        "agent_session_id",
+    CK_REVISION = sa.CheckConstraint(
+        "revision >= 0",
+        name="ck_runtime_web_services_revision",
+    )
+    UQ_AGENT_PORT = sa.UniqueConstraint(
+        "agent_id",
         "port",
-        name="uq_runtime_web_endpoints_session_port",
+        name="uq_runtime_web_services_agent_port",
     )
     UQ_HOSTNAME_KEY = sa.UniqueConstraint(
         "hostname_key",
-        name="uq_runtime_web_endpoints_hostname_key",
-    )
-    FK_CURRENT_PENDING = sa.ForeignKeyConstraint(
-        ["current_pending_request_id"],
-        ["runtime_web_requests.id"],
-        name="fk_runtime_web_endpoints_current_pending",
-        use_alter=True,
-        ondelete="SET NULL",
-    )
-    FK_CURRENT_CYCLE = sa.ForeignKeyConstraint(
-        ["current_cycle_id"],
-        ["runtime_web_cycles.id"],
-        name="fk_runtime_web_endpoints_current_cycle",
-        use_alter=True,
-        ondelete="SET NULL",
-    )
-    IX_SESSION = sa.Index(
-        "ix_runtime_web_endpoints_session",
-        "agent_session_id",
-        "created_at",
+        name="uq_runtime_web_services_hostname_key",
     )
     IX_AGENT = sa.Index(
-        "ix_runtime_web_endpoints_agent",
+        "ix_runtime_web_services_agent",
         "agent_id",
         "created_at",
+    )
+    IX_DEADLINE = sa.Index(
+        "ix_runtime_web_services_deadline",
+        "exposure_deadline_at",
+        postgresql_where=sa.text("exposure_deadline_at IS NOT NULL"),
     )
 
     id: Mapped[str] = mapped_column(
@@ -166,42 +114,32 @@ class RDBRuntimeWebEndpoint(RDBModel):
     )
     agent_id: Mapped[str] = mapped_column(
         sa.String(32),
-        sa.ForeignKey("agents.id", ondelete="RESTRICT"),
-        nullable=False,
-    )
-    agent_session_id: Mapped[str] = mapped_column(
-        sa.String(32),
-        sa.ForeignKey("agent_sessions.id", ondelete="CASCADE"),
+        sa.ForeignKey("agents.id", ondelete="CASCADE"),
         nullable=False,
     )
     port: Mapped[int] = mapped_column(sa.Integer, nullable=False)
-    hostname_key: Mapped[str] = mapped_column(sa.String(52), nullable=False)
+    hostname_key: Mapped[str] = mapped_column(sa.String(12), nullable=False)
     label: Mapped[str | None] = mapped_column(
         sa.String(120),
         nullable=True,
         default=None,
     )
-    authority_revision: Mapped[int] = mapped_column(
+    selected_duration_seconds: Mapped[int] = mapped_column(
+        sa.Integer,
+        nullable=False,
+        default=3_600,
+        server_default="3600",
+    )
+    exposure_deadline_at: Mapped[datetime.datetime | None] = mapped_column(
+        TimeZoneDateTime,
+        nullable=True,
+        default=None,
+    )
+    revision: Mapped[int] = mapped_column(
         sa.BigInteger,
         nullable=False,
         default=0,
         server_default="0",
-    )
-    close_barrier: Mapped[int] = mapped_column(
-        sa.BigInteger,
-        nullable=False,
-        default=0,
-        server_default="0",
-    )
-    current_pending_request_id: Mapped[str | None] = mapped_column(
-        sa.String(32),
-        nullable=True,
-        default=None,
-    )
-    current_cycle_id: Mapped[str | None] = mapped_column(
-        sa.String(32),
-        nullable=True,
-        default=None,
     )
     created_at: Mapped[datetime.datetime] = mapped_column(
         TimeZoneDateTime,
@@ -219,233 +157,12 @@ class RDBRuntimeWebEndpoint(RDBModel):
 
     __table_args__ = (
         CK_PORT,
-        CK_REVISIONS,
-        UQ_SESSION_PORT,
-        UQ_HOSTNAME_KEY,
-        FK_CURRENT_PENDING,
-        FK_CURRENT_CYCLE,
-        IX_SESSION,
-        IX_AGENT,
-    )
-
-
-class RDBRuntimeWebRequest(RDBModel):
-    """One durable exposure request for a stable endpoint."""
-
-    __tablename__ = "runtime_web_requests"
-
-    CK_REVISION = sa.CheckConstraint(
-        "revision >= 1",
-        name="ck_runtime_web_requests_revision",
-    )
-    CK_REQUESTER = sa.CheckConstraint(
-        "(requester_kind = 'user' AND requester_user_id IS NOT NULL "
-        "AND requester_agent_id IS NULL) OR "
-        "(requester_kind = 'agent' AND requester_user_id IS NULL "
-        "AND requester_agent_id IS NOT NULL)",
-        name="ck_runtime_web_requests_requester",
-    )
-    CK_DECISION = sa.CheckConstraint(
-        "(state = 'pending' AND decided_at IS NULL "
-        "AND decided_by_user_id IS NULL) OR "
-        "(state <> 'pending' AND decided_at IS NOT NULL)",
-        name="ck_runtime_web_requests_decision",
-    )
-    UQ_PENDING_ENDPOINT = sa.Index(
-        "uq_runtime_web_requests_pending_endpoint",
-        "endpoint_id",
-        unique=True,
-        postgresql_where=sa.text("state = 'pending'"),
-    )
-    IX_ENDPOINT_CREATED = sa.Index(
-        "ix_runtime_web_requests_endpoint_created",
-        "endpoint_id",
-        "created_at",
-    )
-
-    id: Mapped[str] = mapped_column(
-        sa.String(32),
-        primary_key=True,
-        init=False,
-        default_factory=lambda: uuid7().hex,
-    )
-    endpoint_id: Mapped[str] = mapped_column(
-        sa.String(32),
-        sa.ForeignKey("runtime_web_endpoints.id", ondelete="CASCADE"),
-        nullable=False,
-    )
-    requester_kind: Mapped[RuntimeWebRequesterKind] = mapped_column(
-        runtime_web_requester_kind_enum,
-        nullable=False,
-    )
-    operation_key: Mapped[str] = mapped_column(sa.String(128), nullable=False)
-    state: Mapped[RuntimeWebRequestState] = mapped_column(
-        runtime_web_request_state_enum,
-        nullable=False,
-        default=RuntimeWebRequestState.PENDING,
-    )
-    revision: Mapped[int] = mapped_column(
-        sa.BigInteger,
-        nullable=False,
-        default=1,
-        server_default="1",
-    )
-    requester_user_id: Mapped[str | None] = mapped_column(
-        sa.String(32),
-        sa.ForeignKey("users.id", ondelete="RESTRICT"),
-        nullable=True,
-        default=None,
-    )
-    requester_agent_id: Mapped[str | None] = mapped_column(
-        sa.String(32),
-        sa.ForeignKey("agents.id", ondelete="RESTRICT"),
-        nullable=True,
-        default=None,
-    )
-    requester_execution_id: Mapped[str | None] = mapped_column(
-        sa.String(32),
-        nullable=True,
-        default=None,
-    )
-    requester_call_id: Mapped[str | None] = mapped_column(
-        sa.String(255),
-        nullable=True,
-        default=None,
-    )
-    label_snapshot: Mapped[str | None] = mapped_column(
-        sa.String(120),
-        nullable=True,
-        default=None,
-    )
-    decided_by_user_id: Mapped[str | None] = mapped_column(
-        sa.String(32),
-        sa.ForeignKey("users.id", ondelete="RESTRICT"),
-        nullable=True,
-        default=None,
-    )
-    decided_at: Mapped[datetime.datetime | None] = mapped_column(
-        TimeZoneDateTime,
-        nullable=True,
-        default=None,
-    )
-    created_at: Mapped[datetime.datetime] = mapped_column(
-        TimeZoneDateTime,
-        init=False,
-        nullable=False,
-        server_default=sa.func.now(),
-    )
-    updated_at: Mapped[datetime.datetime] = mapped_column(
-        TimeZoneDateTime,
-        init=False,
-        nullable=False,
-        server_default=sa.func.now(),
-        onupdate=sa.func.now(),
-    )
-
-    __table_args__ = (
-        CK_REVISION,
-        CK_REQUESTER,
-        CK_DECISION,
-        UQ_PENDING_ENDPOINT,
-        IX_ENDPOINT_CREATED,
-    )
-
-
-class RDBRuntimeWebCycle(RDBModel):
-    """One finite approved exposure cycle."""
-
-    __tablename__ = "runtime_web_cycles"
-
-    CK_DURATION = sa.CheckConstraint(
-        "duration_seconds >= 300 AND duration_seconds <= 28800",
-        name="ck_runtime_web_cycles_duration",
-    )
-    CK_DEADLINE = sa.CheckConstraint(
-        "expires_at > approved_at",
-        name="ck_runtime_web_cycles_deadline",
-    )
-    CK_END = sa.CheckConstraint(
-        "(ended_at IS NULL AND end_reason IS NULL) OR "
-        "(ended_at IS NOT NULL AND end_reason IS NOT NULL)",
-        name="ck_runtime_web_cycles_end",
-    )
-    CK_CLOSE_BARRIER = sa.CheckConstraint(
-        "close_barrier >= 0",
-        name="ck_runtime_web_cycles_close_barrier",
-    )
-    UQ_CURRENT_ENDPOINT = sa.Index(
-        "uq_runtime_web_cycles_current_endpoint",
-        "endpoint_id",
-        unique=True,
-        postgresql_where=sa.text("ended_at IS NULL"),
-    )
-    IX_ENDPOINT_APPROVED = sa.Index(
-        "ix_runtime_web_cycles_endpoint_approved",
-        "endpoint_id",
-        "approved_at",
-    )
-    IX_EXPIRES = sa.Index(
-        "ix_runtime_web_cycles_expires",
-        "expires_at",
-        postgresql_where=sa.text("ended_at IS NULL"),
-    )
-
-    id: Mapped[str] = mapped_column(
-        sa.String(32),
-        primary_key=True,
-        init=False,
-        default_factory=lambda: uuid7().hex,
-    )
-    endpoint_id: Mapped[str] = mapped_column(
-        sa.String(32),
-        sa.ForeignKey("runtime_web_endpoints.id", ondelete="CASCADE"),
-        nullable=False,
-    )
-    request_id: Mapped[str] = mapped_column(
-        sa.String(32),
-        sa.ForeignKey("runtime_web_requests.id", ondelete="RESTRICT"),
-        nullable=False,
-    )
-    approver_user_id: Mapped[str] = mapped_column(
-        sa.String(32),
-        sa.ForeignKey("users.id", ondelete="RESTRICT"),
-        nullable=False,
-    )
-    duration_seconds: Mapped[int] = mapped_column(sa.Integer, nullable=False)
-    approved_at: Mapped[datetime.datetime] = mapped_column(
-        TimeZoneDateTime,
-        nullable=False,
-    )
-    expires_at: Mapped[datetime.datetime] = mapped_column(
-        TimeZoneDateTime,
-        nullable=False,
-    )
-    close_barrier: Mapped[int] = mapped_column(sa.BigInteger, nullable=False)
-    ended_at: Mapped[datetime.datetime | None] = mapped_column(
-        TimeZoneDateTime,
-        nullable=True,
-        default=None,
-    )
-    end_reason: Mapped[RuntimeWebCycleEndReason | None] = mapped_column(
-        runtime_web_cycle_end_reason_enum,
-        nullable=True,
-        default=None,
-    )
-    created_at: Mapped[datetime.datetime] = mapped_column(
-        TimeZoneDateTime,
-        init=False,
-        nullable=False,
-        server_default=sa.func.now(),
-    )
-
-    __table_args__ = (
         CK_DURATION,
-        CK_DEADLINE,
-        CK_END,
-        CK_CLOSE_BARRIER,
-        UQ_CURRENT_ENDPOINT,
-        IX_ENDPOINT_APPROVED,
-        IX_EXPIRES,
+        CK_REVISION,
+        UQ_AGENT_PORT,
+        UQ_HOSTNAME_KEY,
+        IX_AGENT,
+        IX_DEADLINE,
     )
 
 
@@ -462,9 +179,9 @@ class RDBRuntimeWebOperationReceipt(RDBModel):
         "operation_kind",
         name="uq_runtime_web_operation_receipts_operation",
     )
-    IX_ENDPOINT = sa.Index(
-        "ix_runtime_web_operation_receipts_endpoint",
-        "endpoint_id",
+    IX_SERVICE = sa.Index(
+        "ix_runtime_web_operation_receipts_service",
+        "service_id",
         "created_at",
     )
 
@@ -474,8 +191,8 @@ class RDBRuntimeWebOperationReceipt(RDBModel):
         init=False,
         default_factory=lambda: uuid7().hex,
     )
-    actor_kind: Mapped[RuntimeWebRequesterKind] = mapped_column(
-        runtime_web_requester_kind_enum,
+    actor_kind: Mapped[RuntimeWebActorKind] = mapped_column(
+        runtime_web_actor_kind_enum,
         nullable=False,
     )
     actor_id: Mapped[str] = mapped_column(sa.String(32), nullable=False)
@@ -485,22 +202,11 @@ class RDBRuntimeWebOperationReceipt(RDBModel):
         runtime_web_operation_kind_enum,
         nullable=False,
     )
+    input_fingerprint: Mapped[str] = mapped_column(sa.String(64), nullable=False)
     result: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
-    endpoint_id: Mapped[str | None] = mapped_column(
+    service_id: Mapped[str | None] = mapped_column(
         sa.String(32),
-        sa.ForeignKey("runtime_web_endpoints.id", ondelete="CASCADE"),
-        nullable=True,
-        default=None,
-    )
-    request_id: Mapped[str | None] = mapped_column(
-        sa.String(32),
-        sa.ForeignKey("runtime_web_requests.id", ondelete="CASCADE"),
-        nullable=True,
-        default=None,
-    )
-    cycle_id: Mapped[str | None] = mapped_column(
-        sa.String(32),
-        sa.ForeignKey("runtime_web_cycles.id", ondelete="CASCADE"),
+        sa.ForeignKey("runtime_web_services.id", ondelete="CASCADE"),
         nullable=True,
         default=None,
     )
@@ -511,19 +217,19 @@ class RDBRuntimeWebOperationReceipt(RDBModel):
         server_default=sa.func.now(),
     )
 
-    __table_args__ = (UQ_OPERATION, IX_ENDPOINT)
+    __table_args__ = (UQ_OPERATION, IX_SERVICE)
 
 
 class RDBRuntimeWebQuotaScope(RDBModel):
-    """Durable aggregate-quota serialization row."""
+    """Durable Agent aggregate-quota serialization row."""
 
     __tablename__ = "runtime_web_quota_scopes"
 
-    scope_kind: Mapped[RuntimeWebQuotaScopeKind] = mapped_column(
-        runtime_web_quota_scope_kind_enum,
+    agent_id: Mapped[str] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey("agents.id", ondelete="CASCADE"),
         primary_key=True,
     )
-    subject_id: Mapped[str] = mapped_column(sa.String(32), primary_key=True)
     created_at: Mapped[datetime.datetime] = mapped_column(
         TimeZoneDateTime,
         init=False,
@@ -533,7 +239,7 @@ class RDBRuntimeWebQuotaScope(RDBModel):
 
 
 class RDBRuntimeWebAuthConfiguration(RDBModel):
-    """Current Runtime Web authentication and duration configuration."""
+    """Current Runtime Web authentication configuration."""
 
     __tablename__ = "runtime_web_auth_configuration"
 
@@ -541,11 +247,6 @@ class RDBRuntimeWebAuthConfiguration(RDBModel):
         "id = 1",
         name="ck_runtime_web_auth_configuration_singleton",
     )
-    CK_DURATION = sa.CheckConstraint(
-        "active_duration_seconds >= 300 AND active_duration_seconds <= 28800",
-        name="ck_runtime_web_auth_configuration_duration",
-    )
-
     id: Mapped[int] = mapped_column(
         sa.SmallInteger,
         primary_key=True,
@@ -558,10 +259,6 @@ class RDBRuntimeWebAuthConfiguration(RDBModel):
         nullable=False,
     )
     fingerprint: Mapped[str] = mapped_column(sa.String(64), nullable=False)
-    active_duration_seconds: Mapped[int] = mapped_column(
-        sa.Integer,
-        nullable=False,
-    )
     created_at: Mapped[datetime.datetime] = mapped_column(
         TimeZoneDateTime,
         init=False,
@@ -576,7 +273,7 @@ class RDBRuntimeWebAuthConfiguration(RDBModel):
         onupdate=sa.func.now(),
     )
 
-    __table_args__ = (CK_SINGLETON, CK_DURATION)
+    __table_args__ = (CK_SINGLETON,)
 
 
 class RDBRuntimeWebGatewayIdentity(RDBModel):
@@ -697,9 +394,9 @@ class RDBRuntimeWebAuthBinding(RDBModel):
         sa.ForeignKey("sessions.id", ondelete="CASCADE"),
         nullable=False,
     )
-    endpoint_id: Mapped[str] = mapped_column(
+    service_id: Mapped[str] = mapped_column(
         sa.String(32),
-        sa.ForeignKey("runtime_web_endpoints.id", ondelete="CASCADE"),
+        sa.ForeignKey("runtime_web_services.id", ondelete="CASCADE"),
         nullable=False,
     )
     expires_at: Mapped[datetime.datetime] = mapped_column(
@@ -778,9 +475,9 @@ class RDBRuntimeWebAuthTicket(RDBModel):
         sa.ForeignKey("sessions.id", ondelete="CASCADE"),
         nullable=False,
     )
-    endpoint_id: Mapped[str] = mapped_column(
+    service_id: Mapped[str] = mapped_column(
         sa.String(32),
-        sa.ForeignKey("runtime_web_endpoints.id", ondelete="CASCADE"),
+        sa.ForeignKey("runtime_web_services.id", ondelete="CASCADE"),
         nullable=False,
     )
     issued_at: Mapped[datetime.datetime] = mapped_column(

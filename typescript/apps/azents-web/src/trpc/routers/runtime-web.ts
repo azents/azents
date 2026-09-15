@@ -1,38 +1,36 @@
 import {
-  runtimeWebV1ApproveRuntimeWebRequest,
-  runtimeWebV1ApproveRuntimeWebRequestByEndpointId,
-  runtimeWebV1CancelRuntimeWebRequest,
-  runtimeWebV1CancelRuntimeWebRequestByEndpointId,
-  runtimeWebV1CloseRuntimeWebCycle,
-  runtimeWebV1CloseRuntimeWebCycleByEndpointId,
-  runtimeWebV1DirectCreateRuntimeWebExposure,
+  runtimeWebV1CreateRuntimeWebService,
+  runtimeWebV1DeleteRuntimeWebService,
+  runtimeWebV1GetRuntimeWebServiceById,
   runtimeWebV1GetRuntimeWebServiceProjection,
-  runtimeWebV1GetServiceByEndpointId,
   runtimeWebV1ListRuntimeWebServices,
-  runtimeWebV1PrepareRuntimeWebEndpoint,
-  runtimeWebV1RejectRuntimeWebRequest,
-  runtimeWebV1RejectRuntimeWebRequestByEndpointId,
-  runtimeWebV1RequestRuntimeWebExposure,
+  runtimeWebV1ResetRuntimeWebServiceExpiration,
+  runtimeWebV1TurnOffRuntimeWebService,
+  runtimeWebV1TurnOnRuntimeWebService,
+  runtimeWebV1TurnOnRuntimeWebServiceById,
+  runtimeWebV1UpdateRuntimeWebService,
 } from "@azents/public-client";
 import { z } from "zod/v4";
 import { mapExpectedError } from "../api-error";
 import { publicProcedure, router } from "../init";
 
-const resourceSchema = z.object({
+const durationSchema = z.union([
+  z.literal(3600),
+  z.literal(21_600),
+  z.literal(86_400),
+]);
+const agentSchema = z.object({
   handle: z.string().min(1),
   agentId: z.string().min(1),
-  sessionId: z.string().min(1),
 });
-const serviceSchema = resourceSchema.extend({
-  port: z.number().int().min(1).max(65_535),
+const serviceSchema = agentSchema.extend({
+  serviceId: z.string().length(32),
 });
-const endpointSchema = z.object({ endpointId: z.string().length(32) });
-const requestDecisionSchema = z.object({
-  requestId: z.string().min(1),
-  expectedRevision: z.number().int().min(1),
+const operationSchema = z.object({
+  operationKey: z.string().min(1).max(128),
 });
-const approvalSchema = requestDecisionSchema.extend({
-  durationSeconds: z.number().int().min(300).max(28_800),
+const revisionSchema = operationSchema.extend({
+  expectedRevision: z.number().int().min(0),
 });
 
 const expectedErrors = {
@@ -42,20 +40,12 @@ const expectedErrors = {
   429: "TOO_MANY_REQUESTS",
 } as const;
 
-function operationKey(): string {
-  return crypto.randomUUID();
-}
-
 export const runtimeWebRouter = router({
-  list: publicProcedure.input(resourceSchema).query(async ({ ctx, input }) => {
+  list: publicProcedure.input(agentSchema).query(async ({ ctx, input }) => {
     try {
       const { data } = await runtimeWebV1ListRuntimeWebServices({
         client: ctx.apiClient,
-        path: {
-          handle: input.handle,
-          agent_id: input.agentId,
-          session_id: input.sessionId,
-        },
+        path: { handle: input.handle, agent_id: input.agentId },
         throwOnError: true,
       });
       return data;
@@ -71,8 +61,7 @@ export const runtimeWebRouter = router({
         path: {
           handle: input.handle,
           agent_id: input.agentId,
-          session_id: input.sessionId,
-          port: input.port,
+          service_id: input.serviceId,
         },
         throwOnError: true,
       });
@@ -82,13 +71,13 @@ export const runtimeWebRouter = router({
     }
   }),
 
-  getByEndpointId: publicProcedure
-    .input(endpointSchema)
+  getById: publicProcedure
+    .input(z.object({ serviceId: z.string().length(32) }))
     .query(async ({ ctx, input }) => {
       try {
-        const { data } = await runtimeWebV1GetServiceByEndpointId({
+        const { data } = await runtimeWebV1GetRuntimeWebServiceById({
           client: ctx.apiClient,
-          path: { endpoint_id: input.endpointId },
+          path: { service_id: input.serviceId },
           throwOnError: true,
         });
         return data;
@@ -97,69 +86,26 @@ export const runtimeWebRouter = router({
       }
     }),
 
-  prepare: publicProcedure
-    .input(serviceSchema.extend({ label: z.string().max(120).nullable() }))
-    .mutation(async ({ ctx, input }) => {
-      try {
-        const { data } = await runtimeWebV1PrepareRuntimeWebEndpoint({
-          client: ctx.apiClient,
-          path: {
-            handle: input.handle,
-            agent_id: input.agentId,
-            session_id: input.sessionId,
-            port: input.port,
-          },
-          body: { label: input.label, operation_key: operationKey() },
-          throwOnError: true,
-        });
-        return data;
-      } catch (error) {
-        throw mapExpectedError(error, expectedErrors);
-      }
-    }),
-
-  request: publicProcedure
-    .input(serviceSchema.extend({ label: z.string().max(120).nullable() }))
-    .mutation(async ({ ctx, input }) => {
-      try {
-        const { data } = await runtimeWebV1RequestRuntimeWebExposure({
-          client: ctx.apiClient,
-          path: {
-            handle: input.handle,
-            agent_id: input.agentId,
-            session_id: input.sessionId,
-            port: input.port,
-          },
-          body: { label: input.label, operation_key: operationKey() },
-          throwOnError: true,
-        });
-        return data;
-      } catch (error) {
-        throw mapExpectedError(error, expectedErrors);
-      }
-    }),
-
-  directCreate: publicProcedure
+  create: publicProcedure
     .input(
-      serviceSchema.extend({
+      agentSchema.merge(operationSchema).extend({
+        port: z.number().int().min(1).max(65_535),
         label: z.string().max(120).nullable(),
-        durationSeconds: z.number().int().min(300).max(28_800),
+        selectedDurationSeconds: durationSchema,
+        turnOn: z.boolean(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
       try {
-        const { data } = await runtimeWebV1DirectCreateRuntimeWebExposure({
+        const { data } = await runtimeWebV1CreateRuntimeWebService({
           client: ctx.apiClient,
-          path: {
-            handle: input.handle,
-            agent_id: input.agentId,
-            session_id: input.sessionId,
+          path: { handle: input.handle, agent_id: input.agentId },
+          body: {
             port: input.port,
-          },
-          body: {
             label: input.label,
-            duration_seconds: input.durationSeconds,
-            operation_key: operationKey(),
+            selected_duration_seconds: input.selectedDurationSeconds,
+            turn_on: input.turnOn,
+            operation_key: input.operationKey,
           },
           throwOnError: true,
         });
@@ -169,168 +115,58 @@ export const runtimeWebRouter = router({
       }
     }),
 
-  approve: publicProcedure
-    .input(resourceSchema.merge(approvalSchema))
-    .mutation(async ({ ctx, input }) => {
-      try {
-        const { data } = await runtimeWebV1ApproveRuntimeWebRequest({
-          client: ctx.apiClient,
-          path: {
-            handle: input.handle,
-            agent_id: input.agentId,
-            session_id: input.sessionId,
-            request_id: input.requestId,
-          },
-          body: {
-            expected_revision: input.expectedRevision,
-            duration_seconds: input.durationSeconds,
-            operation_key: operationKey(),
-          },
-          throwOnError: true,
-        });
-        return data;
-      } catch (error) {
-        throw mapExpectedError(error, expectedErrors);
-      }
-    }),
-
-  approveByEndpointId: publicProcedure
-    .input(endpointSchema.merge(approvalSchema))
-    .mutation(async ({ ctx, input }) => {
-      try {
-        const { data } = await runtimeWebV1ApproveRuntimeWebRequestByEndpointId(
-          {
-            client: ctx.apiClient,
-            path: {
-              endpoint_id: input.endpointId,
-              request_id: input.requestId,
-            },
-            body: {
-              expected_revision: input.expectedRevision,
-              duration_seconds: input.durationSeconds,
-              operation_key: operationKey(),
-            },
-            throwOnError: true,
-          },
-        );
-        return data;
-      } catch (error) {
-        throw mapExpectedError(error, expectedErrors);
-      }
-    }),
-
-  reject: publicProcedure
-    .input(resourceSchema.merge(requestDecisionSchema))
-    .mutation(async ({ ctx, input }) => {
-      try {
-        const { data } = await runtimeWebV1RejectRuntimeWebRequest({
-          client: ctx.apiClient,
-          path: {
-            handle: input.handle,
-            agent_id: input.agentId,
-            session_id: input.sessionId,
-            request_id: input.requestId,
-          },
-          body: {
-            expected_revision: input.expectedRevision,
-            operation_key: operationKey(),
-          },
-          throwOnError: true,
-        });
-        return data;
-      } catch (error) {
-        throw mapExpectedError(error, expectedErrors);
-      }
-    }),
-
-  rejectByEndpointId: publicProcedure
-    .input(endpointSchema.merge(requestDecisionSchema))
-    .mutation(async ({ ctx, input }) => {
-      try {
-        const { data } = await runtimeWebV1RejectRuntimeWebRequestByEndpointId({
-          client: ctx.apiClient,
-          path: {
-            endpoint_id: input.endpointId,
-            request_id: input.requestId,
-          },
-          body: {
-            expected_revision: input.expectedRevision,
-            operation_key: operationKey(),
-          },
-          throwOnError: true,
-        });
-        return data;
-      } catch (error) {
-        throw mapExpectedError(error, expectedErrors);
-      }
-    }),
-
-  cancel: publicProcedure
-    .input(resourceSchema.merge(requestDecisionSchema))
-    .mutation(async ({ ctx, input }) => {
-      try {
-        const { data } = await runtimeWebV1CancelRuntimeWebRequest({
-          client: ctx.apiClient,
-          path: {
-            handle: input.handle,
-            agent_id: input.agentId,
-            session_id: input.sessionId,
-            request_id: input.requestId,
-          },
-          body: {
-            expected_revision: input.expectedRevision,
-            operation_key: operationKey(),
-          },
-          throwOnError: true,
-        });
-        return data;
-      } catch (error) {
-        throw mapExpectedError(error, expectedErrors);
-      }
-    }),
-
-  cancelByEndpointId: publicProcedure
-    .input(endpointSchema.merge(requestDecisionSchema))
-    .mutation(async ({ ctx, input }) => {
-      try {
-        const { data } = await runtimeWebV1CancelRuntimeWebRequestByEndpointId({
-          client: ctx.apiClient,
-          path: {
-            endpoint_id: input.endpointId,
-            request_id: input.requestId,
-          },
-          body: {
-            expected_revision: input.expectedRevision,
-            operation_key: operationKey(),
-          },
-          throwOnError: true,
-        });
-        return data;
-      } catch (error) {
-        throw mapExpectedError(error, expectedErrors);
-      }
-    }),
-
-  close: publicProcedure
+  update: publicProcedure
     .input(
-      resourceSchema.extend({
-        cycleId: z.string().min(1),
-        expectedEndpointRevision: z.number().int().min(0),
+      serviceSchema.merge(revisionSchema).extend({
+        label: z.string().max(120).nullable().optional(),
+        selectedDurationSeconds: durationSchema.optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
       try {
-        const { data } = await runtimeWebV1CloseRuntimeWebCycle({
+        const body = {
+          expected_revision: input.expectedRevision,
+          operation_key: input.operationKey,
+          ...("label" in input ? { label: input.label } : {}),
+          ...("selectedDurationSeconds" in input
+            ? { selected_duration_seconds: input.selectedDurationSeconds }
+            : {}),
+        };
+        const { data } = await runtimeWebV1UpdateRuntimeWebService({
           client: ctx.apiClient,
           path: {
             handle: input.handle,
             agent_id: input.agentId,
-            session_id: input.sessionId,
-            cycle_id: input.cycleId,
+            service_id: input.serviceId,
+          },
+          body,
+          throwOnError: true,
+        });
+        return data;
+      } catch (error) {
+        throw mapExpectedError(error, expectedErrors);
+      }
+    }),
+
+  turnOn: publicProcedure
+    .input(
+      serviceSchema.merge(revisionSchema).extend({
+        selectedDurationSeconds: durationSchema.optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const { data } = await runtimeWebV1TurnOnRuntimeWebService({
+          client: ctx.apiClient,
+          path: {
+            handle: input.handle,
+            agent_id: input.agentId,
+            service_id: input.serviceId,
           },
           body: {
-            expected_endpoint_revision: input.expectedEndpointRevision,
-            operation_key: operationKey(),
+            expected_revision: input.expectedRevision,
+            operation_key: input.operationKey,
+            selected_duration_seconds: input.selectedDurationSeconds,
           },
           throwOnError: true,
         });
@@ -340,24 +176,93 @@ export const runtimeWebRouter = router({
       }
     }),
 
-  closeByEndpointId: publicProcedure
+  turnOnById: publicProcedure
     .input(
-      endpointSchema.extend({
-        cycleId: z.string().min(1),
-        expectedEndpointRevision: z.number().int().min(0),
-      }),
+      z
+        .object({ serviceId: z.string().length(32) })
+        .merge(revisionSchema)
+        .extend({
+          selectedDurationSeconds: durationSchema,
+        }),
     )
     .mutation(async ({ ctx, input }) => {
       try {
-        const { data } = await runtimeWebV1CloseRuntimeWebCycleByEndpointId({
+        const { data } = await runtimeWebV1TurnOnRuntimeWebServiceById({
+          client: ctx.apiClient,
+          path: { service_id: input.serviceId },
+          body: {
+            expected_revision: input.expectedRevision,
+            operation_key: input.operationKey,
+            selected_duration_seconds: input.selectedDurationSeconds,
+          },
+          throwOnError: true,
+        });
+        return data;
+      } catch (error) {
+        throw mapExpectedError(error, expectedErrors);
+      }
+    }),
+
+  turnOff: publicProcedure
+    .input(serviceSchema.merge(revisionSchema))
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const { data } = await runtimeWebV1TurnOffRuntimeWebService({
           client: ctx.apiClient,
           path: {
-            endpoint_id: input.endpointId,
-            cycle_id: input.cycleId,
+            handle: input.handle,
+            agent_id: input.agentId,
+            service_id: input.serviceId,
           },
           body: {
-            expected_endpoint_revision: input.expectedEndpointRevision,
-            operation_key: operationKey(),
+            expected_revision: input.expectedRevision,
+            operation_key: input.operationKey,
+          },
+          throwOnError: true,
+        });
+        return data;
+      } catch (error) {
+        throw mapExpectedError(error, expectedErrors);
+      }
+    }),
+
+  reset: publicProcedure
+    .input(serviceSchema.merge(revisionSchema))
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const { data } = await runtimeWebV1ResetRuntimeWebServiceExpiration({
+          client: ctx.apiClient,
+          path: {
+            handle: input.handle,
+            agent_id: input.agentId,
+            service_id: input.serviceId,
+          },
+          body: {
+            expected_revision: input.expectedRevision,
+            operation_key: input.operationKey,
+          },
+          throwOnError: true,
+        });
+        return data;
+      } catch (error) {
+        throw mapExpectedError(error, expectedErrors);
+      }
+    }),
+
+  delete: publicProcedure
+    .input(serviceSchema.merge(revisionSchema))
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const { data } = await runtimeWebV1DeleteRuntimeWebService({
+          client: ctx.apiClient,
+          path: {
+            handle: input.handle,
+            agent_id: input.agentId,
+            service_id: input.serviceId,
+          },
+          body: {
+            expected_revision: input.expectedRevision,
+            operation_key: input.operationKey,
           },
           throwOnError: true,
         });

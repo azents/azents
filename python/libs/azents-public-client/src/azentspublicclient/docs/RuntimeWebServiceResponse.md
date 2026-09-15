@@ -1,16 +1,22 @@
 # RuntimeWebServiceResponse
 
-Orthogonal endpoint, request, cycle, and active-state projection.
+Current user-relevant Runtime Web service projection.
 
 ## Properties
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**endpoint** | [**RuntimeWebEndpointResponse**](RuntimeWebEndpointResponse.md) |  | 
-**current_request** | [**RuntimeWebRequestResponse**](RuntimeWebRequestResponse.md) |  | 
-**current_cycle** | [**RuntimeWebCycleResponse**](RuntimeWebCycleResponse.md) |  | 
-**active** | **bool** |  | 
-**duration_seconds** | **int** |  | 
+**id** | **str** |  | 
+**port** | **int** |  | 
+**label** | **str** |  | 
+**url** | **str** |  | 
+**configuration_state** | **str** |  | 
+**on** | **bool** |  | 
+**selected_duration_seconds** | **int** |  | 
+**expires_at** | **datetime** |  | 
+**revision** | **int** |  | 
+**created_at** | **datetime** |  | 
+**updated_at** | **datetime** |  | 
 **observed_at** | **datetime** |  | 
 
 ## Example

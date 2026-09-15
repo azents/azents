@@ -40,7 +40,7 @@ async def _owned(
     clock: Callable[[], datetime.datetime] = _now,
 ) -> tuple[RuntimeWebSessionOwnerManager, RuntimeWebOwnedSession]:
     async with session_manager() as session:
-        workspace_id, agent_id, _, _ = await _authority_fixture(session)
+        workspace_id, agent_id, _ = await _authority_fixture(session)
         runtime = RDBAgentRuntime(workspace_id=workspace_id, agent_id=agent_id)
         session.add(runtime)
         await session.flush()

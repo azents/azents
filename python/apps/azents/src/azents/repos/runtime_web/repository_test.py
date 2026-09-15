@@ -1,32 +1,19 @@
-"""Runtime Web durable authority repository tests."""
+"""Runtime Web durable Agent service repository tests."""
 
-import asyncio
 from typing import NamedTuple
 
 import pytest
-import sqlalchemy as sa
 from azcommon.result import Success
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.enums import (
-    AgentRuntimeCapability,
-    AgentSessionProductMode,
-    LLMProvider,
-)
+from azents.core.enums import AgentRuntimeCapability, LLMProvider
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.models.runtime_web import (
     RDBRuntimeWebAuthConfiguration,
-    RuntimeWebCycleEndReason,
-    RuntimeWebRequesterKind,
-    RuntimeWebRequestState,
+    RuntimeWebActorKind,
 )
-from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSessionCreate
-from azents.repos.runtime_web.data import (
-    RuntimeWebOperationIdentity,
-    derived_operation_key,
-)
+from azents.repos.runtime_web.data import RuntimeWebOperationIdentity
 from azents.repos.runtime_web.repository import (
     RuntimeWebRepository,
     RuntimeWebRepositoryConflict,
@@ -47,7 +34,6 @@ class _RuntimeWebAuthorityFixture(NamedTuple):
 
     workspace_id: str
     agent_id: str
-    agent_session_id: str
     user_id: str
 
 
@@ -81,7 +67,7 @@ async def _authority_fixture(
     agent = RDBAgent(
         workspace_id=workspace_id,
         name="Runtime Web agent",
-        runtime_capability=AgentRuntimeCapability.NONE,
+        runtime_capability=AgentRuntimeCapability.MANAGED,
         model_selection=model_selection,
         lightweight_model_selection=model_selection,
         selectable_model_options=make_test_selectable_model_option_dicts(
@@ -93,448 +79,221 @@ async def _authority_fixture(
     )
     session.add(agent)
     await session.flush()
-    agent_session = await AgentSessionRepository().create(
-        session,
-        AgentSessionCreate(
-            workspace_id=workspace_id,
-            product_mode=AgentSessionProductMode.TEAM,
-            associated_user_id=None,
-            agent_id=agent.id,
-            title=None,
-        ),
-    )
-    user = await UserRepository().create(
-        session,
-        UserCreate(email=email),
-    )
+    user = await UserRepository().create(session, UserCreate(email=email))
     configuration = await session.get(RDBRuntimeWebAuthConfiguration, 1)
     assert configuration is not None
     configuration.enabled = True
     await session.flush()
-    return _RuntimeWebAuthorityFixture(
-        workspace_id=workspace_id,
-        agent_id=agent.id,
-        agent_session_id=agent_session.id,
-        user_id=user.id,
-    )
+    return _RuntimeWebAuthorityFixture(workspace_id, agent.id, user.id)
 
 
-def _operation(key: str, *, actor_id: str = "agent-id") -> RuntimeWebOperationIdentity:
+def _operation(
+    key: str,
+    *,
+    actor_id: str,
+    actor_kind: RuntimeWebActorKind = RuntimeWebActorKind.AGENT,
+) -> RuntimeWebOperationIdentity:
     return RuntimeWebOperationIdentity(
-        actor_kind=RuntimeWebRequesterKind.AGENT,
+        actor_kind=actor_kind,
         actor_id=actor_id,
-        execution_id="run-id",
+        execution_id="runtime-web-test-run",
         operation_key=key,
     )
 
 
-def test_derived_operation_key_uses_the_complete_parent_key() -> None:
-    """Composite operation keys do not collide on a shared long prefix."""
-    prefix = "a" * 118
-
-    assert derived_operation_key(f"{prefix}first", "prepare") != (
-        derived_operation_key(f"{prefix}second", "prepare")
-    )
-
-
-async def test_concurrent_identical_prepare_replays_one_committed_result(
-    rdb_engine: AsyncEngine,
-    latest_db_schema: None,
-) -> None:
-    """Concurrent identical operations serialize before receipt lookup."""
-    del latest_db_schema
-    async with AsyncSession(rdb_engine, expire_on_commit=False) as setup:
-        workspace_id, agent_id, session_id, user_id = await _authority_fixture(
-            setup,
-            handle="runtime-web-concurrent",
-            email="runtime-web-concurrent@example.com",
-        )
-        await setup.commit()
-
-    repository = RuntimeWebRepository()
-    operation = _operation("concurrent-prepare", actor_id=agent_id)
-
-    async def prepare() -> str:
-        async with AsyncSession(rdb_engine, expire_on_commit=False) as session:
-            result = await repository.prepare_endpoint(
-                session,
-                workspace_id=workspace_id,
-                agent_id=agent_id,
-                agent_session_id=session_id,
-                port=3000,
-                label="Concurrent",
-                operation=operation,
-                endpoint_limit=16,
-            )
-            await session.commit()
-            return result.endpoint.id
-
-    try:
-        first, second = await asyncio.gather(prepare(), prepare())
-        assert first == second
-    finally:
-        async with AsyncSession(rdb_engine) as cleanup:
-            configuration = await cleanup.get(RDBRuntimeWebAuthConfiguration, 1)
-            assert configuration is not None
-            configuration.enabled = False
-            await cleanup.execute(
-                sa.text(
-                    """
-                    DELETE FROM runtime_web_operation_receipts
-                    WHERE actor_id = :agent_id
-                    """
-                ),
-                {"agent_id": agent_id},
-            )
-            await cleanup.execute(
-                sa.text(
-                    """
-                    DELETE FROM runtime_web_endpoints
-                    WHERE agent_session_id = :session_id
-                    """
-                ),
-                {"session_id": session_id},
-            )
-            await cleanup.execute(
-                sa.text(
-                    """
-                    DELETE FROM runtime_web_quota_scopes
-                    WHERE subject_id = :agent_id OR subject_id = :session_id
-                    """
-                ),
-                {"agent_id": agent_id, "session_id": session_id},
-            )
-            await cleanup.execute(
-                sa.text(
-                    """
-                    UPDATE session_agent_contexts
-                    SET root_session_agent_id = NULL
-                    WHERE agent_id = :agent_id AND workspace_id = :workspace_id
-                    """
-                ),
-                {"agent_id": agent_id, "workspace_id": workspace_id},
-            )
-            await cleanup.execute(
-                sa.text(
-                    """
-                    DELETE FROM session_agents
-                    WHERE agent_session_id = :session_id
-                    """
-                ),
-                {"session_id": session_id},
-            )
-            await cleanup.execute(
-                sa.text(
-                    """
-                    DELETE FROM session_agent_contexts
-                    WHERE agent_id = :agent_id AND workspace_id = :workspace_id
-                    """
-                ),
-                {"agent_id": agent_id, "workspace_id": workspace_id},
-            )
-            await cleanup.execute(
-                sa.text("DELETE FROM agent_sessions WHERE id = :session_id"),
-                {"session_id": session_id},
-            )
-            await cleanup.execute(
-                sa.text("DELETE FROM agents WHERE id = :agent_id"),
-                {"agent_id": agent_id},
-            )
-            await cleanup.execute(
-                sa.text(
-                    """
-                    DELETE FROM llm_provider_integrations
-                    WHERE workspace_id = :workspace_id
-                    """
-                ),
-                {"workspace_id": workspace_id},
-            )
-            await cleanup.execute(
-                sa.text("DELETE FROM users WHERE id = :user_id"),
-                {"user_id": user_id},
-            )
-            await cleanup.execute(
-                sa.text("DELETE FROM workspaces WHERE id = :workspace_id"),
-                {"workspace_id": workspace_id},
-            )
-            await cleanup.commit()
-
-
-async def test_endpoint_request_cycle_and_rerequest_are_orthogonal(
+async def test_agent_request_creates_off_service_and_replays_exact_identity(
     rdb_session: AsyncSession,
 ) -> None:
-    """Persist stable endpoint, one pending request, and active plus pending state."""
-    workspace_id, agent_id, session_id, user_id = await _authority_fixture(rdb_session)
+    fixture = await _authority_fixture(rdb_session)
+    repository = RuntimeWebRepository(random_bytes=lambda size: b"a" * size)
+    operation = _operation("request", actor_id=fixture.agent_id)
+
+    created = await repository.request_service(
+        rdb_session,
+        workspace_id=fixture.workspace_id,
+        agent_id=fixture.agent_id,
+        port=3000,
+        label="Preview",
+        operation=operation,
+        service_limit=16,
+    )
+    replay = await repository.request_service(
+        rdb_session,
+        workspace_id=fixture.workspace_id,
+        agent_id=fixture.agent_id,
+        port=3000,
+        label="Preview",
+        operation=operation,
+        service_limit=16,
+    )
+
+    assert replay.service.id == created.service.id
+    assert replay.service.hostname_key == created.service.hostname_key
+    assert created.service.exposure_deadline_at is None
+    assert created.service.selected_duration_seconds == 3_600
+    assert len(created.service.hostname_key) == 12
+
+
+async def test_user_transitions_preserve_selected_duration_contract(
+    rdb_session: AsyncSession,
+) -> None:
+    fixture = await _authority_fixture(
+        rdb_session,
+        handle="runtime-web-transitions",
+        email="runtime-web-transitions@example.com",
+    )
     repository = RuntimeWebRepository()
-
-    prepared = await repository.prepare_endpoint(
+    created = await repository.create_service(
         rdb_session,
-        workspace_id=workspace_id,
-        agent_id=agent_id,
-        agent_session_id=session_id,
-        port=3000,
-        label="Preview",
-        operation=_operation("prepare", actor_id=agent_id),
-        endpoint_limit=16,
-    )
-    replay = await repository.prepare_endpoint(
-        rdb_session,
-        workspace_id=workspace_id,
-        agent_id=agent_id,
-        agent_session_id=session_id,
-        port=3000,
-        label="Preview",
-        operation=_operation("prepare", actor_id=agent_id),
-        endpoint_limit=16,
-    )
-    assert replay.endpoint.id == prepared.endpoint.id
-    assert replay.endpoint.hostname_key == prepared.endpoint.hostname_key
-
-    pending = await repository.request_exposure(
-        rdb_session,
-        endpoint_id=prepared.endpoint.id,
-        actor_kind=RuntimeWebRequesterKind.AGENT,
-        requester_user_id=None,
-        requester_agent_id=agent_id,
-        requester_call_id="call-request",
-        label="Preview",
-        operation=_operation("request", actor_id=agent_id),
-    )
-    duplicate_request = await repository.request_exposure(
-        rdb_session,
-        endpoint_id=prepared.endpoint.id,
-        actor_kind=RuntimeWebRequesterKind.AGENT,
-        requester_user_id=None,
-        requester_agent_id=agent_id,
-        requester_call_id="call-request-2",
-        label="Preview",
-        operation=_operation("request-2", actor_id=agent_id),
-    )
-    assert pending.request is not None
-    assert duplicate_request.request is not None
-    assert duplicate_request.request.id == pending.request.id
-
-    approved = await repository.approve_request(
-        rdb_session,
-        request_id=pending.request.id,
-        expected_revision=pending.request.revision,
-        approver_user_id=user_id,
-        duration_seconds=7_200,
-        operation=_operation("approve", actor_id=user_id),
-        active_session_limit=4,
+        workspace_id=fixture.workspace_id,
+        agent_id=fixture.agent_id,
+        port=8080,
+        label=None,
+        selected_duration_seconds=3_600,
+        turn_on=True,
+        operation=_operation(
+            "create",
+            actor_id=fixture.user_id,
+            actor_kind=RuntimeWebActorKind.USER,
+        ),
+        service_limit=16,
         active_agent_limit=16,
     )
-    assert approved.request is not None
-    assert approved.request.state is RuntimeWebRequestState.APPROVED
-    assert approved.cycle is not None
+    original_deadline = created.service.exposure_deadline_at
+    assert original_deadline is not None
 
-    rerequest = await repository.request_exposure(
+    updated = await repository.update_service(
         rdb_session,
-        endpoint_id=prepared.endpoint.id,
-        actor_kind=RuntimeWebRequesterKind.AGENT,
-        requester_user_id=None,
-        requester_agent_id=agent_id,
-        requester_call_id="call-rerequest",
-        label="Preview",
-        operation=_operation("rerequest", actor_id=agent_id),
+        service_id=created.service.id,
+        expected_revision=created.service.revision,
+        label_present=True,
+        label="Application",
+        selected_duration_seconds=21_600,
+        operation=_operation(
+            "update",
+            actor_id=fixture.user_id,
+            actor_kind=RuntimeWebActorKind.USER,
+        ),
     )
-    assert rerequest.request is not None
-    assert rerequest.request.state is RuntimeWebRequestState.PENDING
-    assert rerequest.cycle is not None
-    assert rerequest.cycle.id == approved.cycle.id
+    assert updated.service.exposure_deadline_at == original_deadline
+    assert updated.service.selected_duration_seconds == 21_600
 
-    closed = await repository.close_cycle(
+    reset = await repository.reset_expiration(
         rdb_session,
-        cycle_id=approved.cycle.id,
-        expected_endpoint_revision=rerequest.endpoint.authority_revision,
-        operation=_operation("close", actor_id=agent_id),
+        service_id=updated.service.id,
+        expected_revision=updated.service.revision,
+        operation=_operation(
+            "reset",
+            actor_id=fixture.user_id,
+            actor_kind=RuntimeWebActorKind.USER,
+        ),
     )
-    assert closed.cycle is not None
-    assert closed.cycle.ended_at is not None
-    assert closed.request is not None
-    assert closed.request.id == rerequest.request.id
-    current_cycle = await repository.current_cycle(rdb_session, closed.endpoint)
-    assert current_cycle is not None
-    assert current_cycle.id == closed.cycle.id
-    assert current_cycle.end_reason is RuntimeWebCycleEndReason.CLOSED
+    assert reset.service.exposure_deadline_at is not None
+    assert reset.service.exposure_deadline_at > original_deadline
+
+    closed = await repository.close_service(
+        rdb_session,
+        service_id=reset.service.id,
+        operation=_operation("close", actor_id=fixture.agent_id),
+    )
+    repeated = await repository.close_service(
+        rdb_session,
+        service_id=reset.service.id,
+        operation=_operation("close-again", actor_id=fixture.agent_id),
+    )
+    assert closed.service.exposure_deadline_at is None
+    assert repeated.service.exposure_deadline_at is None
+    assert repeated.service.revision == closed.service.revision
 
 
-async def test_stale_duration_and_endpoint_quota_fail_closed(
+async def test_stale_revision_and_quota_fail_without_partial_mutation(
     rdb_session: AsyncSession,
 ) -> None:
-    """Reject stale displayed duration and bounded endpoint overflow."""
-    workspace_id, agent_id, session_id, user_id = await _authority_fixture(rdb_session)
-    repository = RuntimeWebRepository()
-    prepared = await repository.prepare_endpoint(
+    fixture = await _authority_fixture(
         rdb_session,
-        workspace_id=workspace_id,
-        agent_id=agent_id,
-        agent_session_id=session_id,
+        handle="runtime-web-conflicts",
+        email="runtime-web-conflicts@example.com",
+    )
+    repository = RuntimeWebRepository()
+    created = await repository.request_service(
+        rdb_session,
+        workspace_id=fixture.workspace_id,
+        agent_id=fixture.agent_id,
         port=3000,
         label=None,
-        operation=_operation("prepare-one", actor_id=agent_id),
-        endpoint_limit=1,
+        operation=_operation("first", actor_id=fixture.agent_id),
+        service_limit=1,
     )
-    pending = await repository.request_exposure(
-        rdb_session,
-        endpoint_id=prepared.endpoint.id,
-        actor_kind=RuntimeWebRequesterKind.AGENT,
-        requester_user_id=None,
-        requester_agent_id=agent_id,
-        requester_call_id=None,
-        label=None,
-        operation=_operation("request-one", actor_id=agent_id),
-    )
-    assert pending.request is not None
 
-    with pytest.raises(RuntimeWebRepositoryConflict, match="Duration"):
-        await repository.approve_request(
+    with pytest.raises(RuntimeWebRepositoryConflict, match="revision"):
+        await repository.update_service(
             rdb_session,
-            request_id=pending.request.id,
-            expected_revision=pending.request.revision,
-            approver_user_id=user_id,
-            duration_seconds=3_600,
-            operation=_operation("approve-stale", actor_id=user_id),
-            active_session_limit=4,
-            active_agent_limit=16,
+            service_id=created.service.id,
+            expected_revision=created.service.revision + 1,
+            label_present=True,
+            label="stale",
+            selected_duration_seconds=None,
+            operation=_operation(
+                "stale",
+                actor_id=fixture.user_id,
+                actor_kind=RuntimeWebActorKind.USER,
+            ),
         )
 
-    with pytest.raises(RuntimeWebRepositoryQuotaExceeded) as raised:
-        await repository.prepare_endpoint(
+    with pytest.raises(RuntimeWebRepositoryQuotaExceeded) as error:
+        await repository.request_service(
             rdb_session,
-            workspace_id=workspace_id,
-            agent_id=agent_id,
-            agent_session_id=session_id,
-            port=4000,
+            workspace_id=fixture.workspace_id,
+            agent_id=fixture.agent_id,
+            port=3001,
             label=None,
-            operation=_operation("prepare-two", actor_id=agent_id),
-            endpoint_limit=1,
+            operation=_operation("second", actor_id=fixture.agent_id),
+            service_limit=1,
         )
-    assert raised.value.scope == "session_endpoints"
+    assert error.value.scope == "agent_services"
+    current = await repository.get_service_by_id(rdb_session, created.service.id)
+    assert current is not None
+    assert current.label is None
 
 
-async def test_direct_create_is_atomic_and_replays_completed_result(
+async def test_delete_and_recreate_never_reuses_service_identity(
     rdb_session: AsyncSession,
 ) -> None:
-    """Direct creation rolls back partial state and replays one completed cycle."""
-    workspace_id, agent_id, session_id, user_id = await _authority_fixture(rdb_session)
-    repository = RuntimeWebRepository()
-    stale_operation = RuntimeWebOperationIdentity(
-        actor_kind=RuntimeWebRequesterKind.USER,
-        actor_id=user_id,
-        execution_id="browser-session",
-        operation_key="direct-stale",
-    )
-
-    with pytest.raises(RuntimeWebRepositoryConflict):
-        await repository.direct_create(
-            rdb_session,
-            workspace_id=workspace_id,
-            agent_id=agent_id,
-            agent_session_id=session_id,
-            port=4000,
-            label="Failed preview",
-            requester_user_id=user_id,
-            requester_call_id=None,
-            duration_seconds=3_600,
-            operation=stale_operation,
-            endpoint_limit=16,
-            active_session_limit=4,
-            active_agent_limit=16,
-        )
-    assert (
-        await repository.get_endpoint(
-            rdb_session,
-            agent_session_id=session_id,
-            port=4000,
-        )
-        is None
-    )
-
-    operation = stale_operation.model_copy(update={"operation_key": "direct-success"})
-    created = await repository.direct_create(
+    fixture = await _authority_fixture(
         rdb_session,
-        workspace_id=workspace_id,
-        agent_id=agent_id,
-        agent_session_id=session_id,
-        port=4000,
-        label="Preview",
-        requester_user_id=user_id,
-        requester_call_id=None,
-        duration_seconds=7_200,
-        operation=operation,
-        endpoint_limit=16,
-        active_session_limit=4,
-        active_agent_limit=16,
+        handle="runtime-web-recreate",
+        email="runtime-web-recreate@example.com",
     )
-    replay = await repository.direct_create(
+    random_values = iter((b"a" * 8, b"b" * 8))
+    repository = RuntimeWebRepository(random_bytes=lambda _size: next(random_values))
+    created = await repository.request_service(
         rdb_session,
-        workspace_id=workspace_id,
-        agent_id=agent_id,
-        agent_session_id=session_id,
-        port=4000,
-        label="Preview",
-        requester_user_id=user_id,
-        requester_call_id=None,
-        duration_seconds=7_200,
-        operation=operation,
-        endpoint_limit=16,
-        active_session_limit=4,
-        active_agent_limit=16,
-    )
-
-    assert created.request is not None
-    assert created.cycle is not None
-    assert replay.endpoint.id == created.endpoint.id
-    assert replay.request is not None
-    assert replay.request.id == created.request.id
-    assert replay.cycle is not None
-    assert replay.cycle.id == created.cycle.id
-
-
-async def test_stale_close_does_not_terminate_current_cycle(
-    rdb_session: AsyncSession,
-) -> None:
-    """Fence delayed closure by the endpoint revision the caller observed."""
-    workspace_id, agent_id, session_id, user_id = await _authority_fixture(rdb_session)
-    repository = RuntimeWebRepository()
-    prepared = await repository.prepare_endpoint(
-        rdb_session,
-        workspace_id=workspace_id,
-        agent_id=agent_id,
-        agent_session_id=session_id,
+        workspace_id=fixture.workspace_id,
+        agent_id=fixture.agent_id,
         port=3000,
         label=None,
-        operation=_operation("prepare", actor_id=agent_id),
-        endpoint_limit=16,
+        operation=_operation("request-one", actor_id=fixture.agent_id),
+        service_limit=16,
     )
-    pending = await repository.request_exposure(
+    assert await repository.delete_service(
         rdb_session,
-        endpoint_id=prepared.endpoint.id,
-        actor_kind=RuntimeWebRequesterKind.AGENT,
-        requester_user_id=None,
-        requester_agent_id=agent_id,
-        requester_call_id=None,
+        agent_id=fixture.agent_id,
+        service_id=created.service.id,
+        expected_revision=created.service.revision,
+        operation=_operation(
+            "delete",
+            actor_id=fixture.user_id,
+            actor_kind=RuntimeWebActorKind.USER,
+        ),
+    )
+    recreated = await repository.request_service(
+        rdb_session,
+        workspace_id=fixture.workspace_id,
+        agent_id=fixture.agent_id,
+        port=3000,
         label=None,
-        operation=_operation("request", actor_id=agent_id),
+        operation=_operation("request-two", actor_id=fixture.agent_id),
+        service_limit=16,
     )
-    assert pending.request is not None
-    approved = await repository.approve_request(
-        rdb_session,
-        request_id=pending.request.id,
-        expected_revision=pending.request.revision,
-        approver_user_id=user_id,
-        duration_seconds=7_200,
-        operation=_operation("approve", actor_id=user_id),
-        active_session_limit=4,
-        active_agent_limit=16,
-    )
-    assert approved.cycle is not None
-
-    with pytest.raises(RuntimeWebRepositoryConflict, match="Current cycle"):
-        await repository.close_cycle(
-            rdb_session,
-            cycle_id=approved.cycle.id,
-            expected_endpoint_revision=approved.endpoint.authority_revision - 1,
-            operation=_operation("stale-close", actor_id=agent_id),
-        )
+    assert recreated.service.id != created.service.id
+    assert recreated.service.hostname_key != created.service.hostname_key

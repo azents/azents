@@ -39,21 +39,19 @@ def _authority() -> StreamAuthority:
     now = datetime.now(UTC)
     return StreamAuthority(
         correlation_id="correlation",
-        endpoint_id="endpoint",
-        cycle_id="cycle",
-        endpoint_authority_revision=1,
-        close_barrier=1,
+        service_id="endpoint",
+        service_revision=1,
         identity_id="identity",
         authentication_session_id="authentication",
         user_id="user",
-        agent_session_id="agent-session",
+        agent_id="agent-session",
         runtime_id="runtime",
         desired_generation=1,
         runner_generation=1,
         port=6006,
         open_deadline_at=now + timedelta(seconds=10),
         transport_deadline_at=now + timedelta(minutes=1),
-        approval_deadline_at=now + timedelta(hours=1),
+        exposure_deadline_at=now + timedelta(hours=1),
     )
 
 

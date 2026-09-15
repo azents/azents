@@ -34,8 +34,8 @@ class RuntimeWebActionErrorDetail(BaseModel):
     @field_validator('code')
     def code_validate_enum(cls, value):
         """Validates the enum"""
-        if value not in set(['not_found', 'access_denied', 'conflict', 'quota_exceeded', 'configuration_unavailable']):
-            raise ValueError("must be one of enum values ('not_found', 'access_denied', 'conflict', 'quota_exceeded', 'configuration_unavailable')")
+        if value not in set(['not_found', 'access_denied', 'conflict', 'quota_exceeded', 'configuration_unavailable', 'runtime_capability_unavailable']):
+            raise ValueError("must be one of enum values ('not_found', 'access_denied', 'conflict', 'quota_exceeded', 'configuration_unavailable', 'runtime_capability_unavailable')")
         return value
 
     model_config = ConfigDict(

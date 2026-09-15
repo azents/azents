@@ -5,20 +5,20 @@ import { getInitialAuthState } from "@/shared/lib/getInitialAuthState";
 export const revalidate = 0;
 
 interface RuntimeWebAuthPageProps {
-  searchParams: Promise<{ endpoint_id?: string }>;
+  searchParams: Promise<{ service_id?: string }>;
 }
 
 export default async function RuntimeWebAuthPage({
   searchParams,
 }: RuntimeWebAuthPageProps): Promise<React.ReactElement> {
-  const { endpoint_id: endpointId } = await searchParams;
-  if (endpointId == null || !/^[a-zA-Z0-9_-]{32}$/.test(endpointId)) {
+  const { service_id: serviceId } = await searchParams;
+  if (serviceId == null || !/^[a-zA-Z0-9_-]{32}$/.test(serviceId)) {
     notFound();
   }
   const auth = await getInitialAuthState();
   if (auth.status === "unauthenticated") {
-    const next = `/runtime-web/auth?endpoint_id=${encodeURIComponent(endpointId)}`;
+    const next = `/runtime-web/auth?service_id=${encodeURIComponent(serviceId)}`;
     redirect(`/login?next=${encodeURIComponent(next)}`);
   }
-  return <RuntimeWebAuth endpointId={endpointId} />;
+  return <RuntimeWebAuth serviceId={serviceId} />;
 }

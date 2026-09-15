@@ -27,9 +27,9 @@ class RuntimeWebSeparateInitiateRequest(BaseModel):
     """
     Start one browser-bound separate-domain exchange.
     """ # noqa: E501
-    endpoint_id: Annotated[str, Field(min_length=32, strict=True, max_length=32)]
+    service_id: Annotated[str, Field(min_length=32, strict=True, max_length=32)]
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["endpoint_id"]
+    __properties: ClassVar[List[str]] = ["service_id"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -89,7 +89,7 @@ class RuntimeWebSeparateInitiateRequest(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "endpoint_id": obj.get("endpoint_id")
+            "service_id": obj.get("service_id")
         })
         # store additional fields in additional_properties
         for _key in obj.keys():
