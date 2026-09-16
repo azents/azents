@@ -9,8 +9,8 @@ code_paths:
   - .github/workflows/release.yaml
   - infra/charts/azents/Chart.yaml
   - testenv/azents/e2e/src/support_tests/test_release_workflow.py
-last_verified_at: 2026-09-15
-spec_version: 1
+last_verified_at: 2026-09-16
+spec_version: 2
 ---
 
 # Public Release Publication
@@ -20,8 +20,10 @@ spec_version: 1
 The protected manual GitHub Actions Release workflow is the supported Azents public
 publication authority. One invocation from `main` accepts a version and channel,
 publishes the release image matrix and OCI Helm chart, creates the matching Git tag,
-and creates a GitHub Release. Publication does not require or create a preparatory
-source version commit and does not deploy the release.
+creates a GitHub Release, and can hand the completed release metadata to a configured
+downstream deployment repository. Publication does not require or create a
+preparatory source version commit. Azents does not own the downstream deployment
+implementation.
 
 The workflow uses the `release` GitHub Environment for validation, every image build,
 chart publication, and final GitHub publication. Version-specific concurrency does
@@ -87,6 +89,27 @@ The workflow then creates and pushes the requested Git tag at the workflow commi
 It creates a GitHub Release only after verifying that tag; prerelease versions mark
 the GitHub Release as a prerelease.
 
+## Downstream Release Handoff
+
+After the GitHub Release succeeds, a separate job checks the generic downstream
+configuration:
+
+- `DOWNSTREAM_DEPLOY_REPOSITORY` identifies the target repository;
+- `DOWNSTREAM_DEPLOY_TOKEN` authorizes `repository_dispatch`;
+- `DOWNSTREAM_RELEASE_EVENT_TYPE` optionally overrides the default
+  `azents_release_published` event type.
+
+When the repository or token is absent, the job reports a skip and leaves the
+successful public release valid. When both are present, it downloads the completed
+image metadata and dispatches a versioned payload containing the Azents repository,
+`main` ref, immutable source commit SHA, workflow run ID, requested version and
+channel, OCI chart reference and chart version, and every release image repository,
+exact version tag, and digest. Image entries are sorted by component.
+
+Azents does not encode downstream file paths, GitOps layout, cluster operations, pull
+request behavior, or merge policy. A configured dispatch API failure fails the
+handoff job visibly, but it cannot roll back artifacts that were already published.
+
 ## Failure and Recovery
 
 Publication is not transactionally atomic across GHCR, the Git tag, and the GitHub
@@ -96,7 +119,7 @@ blind workflow replay for the same version. Operators must inspect and reconcile
 partial external artifacts before completing or replacing a failed release.
 
 The workflow never changes package visibility, deletes published artifacts, writes a
-source commit, or invokes downstream deployment.
+source commit, or directly invokes downstream deployment infrastructure.
 
 ## Verification
 
@@ -106,6 +129,8 @@ artifacts:
 - explicit `main`-ref validation and absence of source-chart version lockstep;
 - Helm `--version` and `--app-version` overrides;
 - packaged metadata validation before the OCI push;
+- release-note generation from the sorted metadata stream;
+- post-publication downstream payload, configuration, skip, and dispatch contracts;
 - workflow YAML and normal repository checks.
 
 The first protected release invocation is the live end-to-end verification. Its
@@ -114,5 +139,7 @@ and GitHub Release.
 
 ## Changelog
 
+- **2026-09-16** (spec_version 2) — Added the optional generic downstream release
+  handoff after successful public publication.
 - **2026-09-15** (spec_version 1) — Added the current protected one-invocation
   image, Helm chart, Git tag, and GitHub Release publication flow.
