@@ -246,7 +246,7 @@ jobs:
           {
             printf '# Azents %s\n\n' "$VERSION"
             printf '## Images\n\n'
-            jq -rsr '. | sort_by(.component)[] | "- `\(.image):\(.version)`\n  - digest: `\(.digest)`"' image-metadata/*.json
+            jq -rs '. | sort_by(.component)[] | "- `\(.image):\(.version)`\n  - digest: `\(.digest)`"' image-metadata/*.json
             printf '\n## Helm chart\n\n'
             printf '- `oci://ghcr.io/azents/charts/azents:%s`\n\n' "$CHART_VERSION"
             printf '## Provenance and SBOM\n\n'
