@@ -22,7 +22,7 @@ Details of all living specs. Synchronized from frontmatter.
 | scheduled-task | [Scheduled Task Domain Spec](domain/scheduled-task.md) | - | 2026-09-15 | 12 |
 | system-settings | [System Settings](domain/system-settings.md) | @Hardtack | 2026-09-15 | 6 |
 | toolkit | [Toolkit](domain/toolkit.md) | @Hardtack | 2026-09-15 | 118 |
-| user-auth | [User & Authentication](domain/user-auth.md) | @Hardtack | 2026-09-15 | 21 |
+| user-auth | [User & Authentication](domain/user-auth.md) | @Hardtack | 2026-09-16 | 22 |
 | workspace | [Workspace & Membership](domain/workspace.md) | @Hardtack | 2026-09-16 | 84 |
 
 ## Flow Specs

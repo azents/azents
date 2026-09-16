@@ -191,6 +191,10 @@ def test_dual_web_auth_link_logout_self_revoke_and_path_routing(
     azents_admin_server_url: str,
 ) -> None:
     """Exercise both web apps, independent cookies, and gateway path routing."""
+    browser_driver.delete_all_cookies()
+    browser_driver.get(f"{azents_main_web_url}/")
+    _wait(browser_driver).until(ec.url_contains("/login"))
+
     ordinary_token, _, ordinary_email = authenticate_user(
         public_api_client,
         admin_api_client,
@@ -204,6 +208,8 @@ def test_dual_web_auth_link_logout_self_revoke_and_path_routing(
         email=system_bootstrap_evidence.email,
         password=_BOOTSTRAP_PASSWORD,
     )
+    browser_driver.get(f"{azents_main_web_url}/")
+    _wait(browser_driver).until(ec.url_contains("/workspaces"))
     _assert_auth_cookies(
         browser_driver,
         names=_MAIN_COOKIE_NAMES,

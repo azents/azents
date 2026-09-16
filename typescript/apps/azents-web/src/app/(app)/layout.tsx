@@ -34,8 +34,6 @@ export const viewport: Viewport = {
  *
  * Reflects user color mode setting (cookie-based),
  * and supports realtime theme switching through ColorModeProvider.
- *
- * Color mode is isolated with separate root layout from (landing) route group.
  */
 
 export async function generateMetadata(): Promise<Metadata> {
