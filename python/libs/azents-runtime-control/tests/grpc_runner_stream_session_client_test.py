@@ -6,15 +6,15 @@ from collections.abc import AsyncIterator
 
 import pytest
 
-from azents_runtime_control.grpc_runner_web_session_client import (
-    GrpcRunnerWebSessionClient,
-    RunnerWebResourceExhausted,
+from azents_runtime_control.grpc_runner_stream_session_client import (
+    GrpcRunnerStreamSessionClient,
+    RunnerStreamResourceExhausted,
 )
-from azents_runtime_control.proto import runtime_web_session_pb2
+from azents_runtime_control.proto import runtime_stream_session_pb2
 
 
-def _envelope(payload: str) -> runtime_web_session_pb2.RuntimeWebSessionEnvelope:
-    envelope = runtime_web_session_pb2.RuntimeWebSessionEnvelope(
+def _envelope(payload: str) -> runtime_stream_session_pb2.RuntimeStreamSessionEnvelope:
+    envelope = runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(
         protocol_fingerprint="f" * 64,
         session_id="session-a",
         peer_boot_id="owner-a",
@@ -33,11 +33,13 @@ async def _failure_handler() -> None:
 class _Resources:
     def __init__(self, *, accepting: bool = True) -> None:
         self.accepting = accepting
-        self.reserved: list[runtime_web_session_pb2.RuntimeWebSessionEnvelope] = []
+        self.reserved: list[
+            runtime_stream_session_pb2.RuntimeStreamSessionEnvelope
+        ] = []
 
     def try_reserve_envelope(
         self,
-        envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+        envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
     ) -> bool:
         if not self.accepting:
             return False
@@ -46,13 +48,13 @@ class _Resources:
 
     def release_envelope(
         self,
-        envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+        envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
     ) -> None:
         self.reserved.remove(envelope)
 
 
 def test_activation_gate_is_synchronous() -> None:
-    assert not inspect.iscoroutinefunction(GrpcRunnerWebSessionClient.activate)
+    assert not inspect.iscoroutinefunction(GrpcRunnerStreamSessionClient.activate)
 
 
 async def test_client_outbound_queue_enforces_and_releases_process_resources() -> None:
@@ -60,21 +62,23 @@ async def test_client_outbound_queue_enforces_and_releases_process_resources() -
     resources = _Resources()
 
     async def stream(
-        requests: AsyncIterator[runtime_web_session_pb2.RuntimeWebSessionEnvelope],
+        requests: AsyncIterator[
+            runtime_stream_session_pb2.RuntimeStreamSessionEnvelope
+        ],
         *,
         metadata: object = None,
-    ) -> AsyncIterator[runtime_web_session_pb2.RuntimeWebSessionEnvelope]:
+    ) -> AsyncIterator[runtime_stream_session_pb2.RuntimeStreamSessionEnvelope]:
         del metadata
         await anext(requests)
         yield _envelope("accepted")
         await release.wait()
 
     async def handler(
-        envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+        envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
     ) -> None:
         del envelope
 
-    client = GrpcRunnerWebSessionClient(
+    client = GrpcRunnerStreamSessionClient(
         stream,
         runner_auth_token="token-a",
         channel=None,
@@ -91,7 +95,7 @@ async def test_client_outbound_queue_enforces_and_releases_process_resources() -
     await client.close()
     assert resources.reserved == []
 
-    rejecting = GrpcRunnerWebSessionClient(
+    rejecting = GrpcRunnerStreamSessionClient(
         stream,
         runner_auth_token="token-a",
         channel=None,
@@ -101,22 +105,26 @@ async def test_client_outbound_queue_enforces_and_releases_process_resources() -
         _envelope("heartbeat"), handler, _failure_handler, timeout_seconds=1
     )
     rejecting.activate()
-    with pytest.raises(RunnerWebResourceExhausted):
+    with pytest.raises(RunnerStreamResourceExhausted):
         await rejecting.send(_envelope("heartbeat"))
     await rejecting.close()
 
 
 async def test_client_requires_acceptance_first_and_dispatches_later_frames() -> None:
-    observed_requests: list[runtime_web_session_pb2.RuntimeWebSessionEnvelope] = []
+    observed_requests: list[
+        runtime_stream_session_pb2.RuntimeStreamSessionEnvelope
+    ] = []
     observed_metadata: object = None
-    handled: list[runtime_web_session_pb2.RuntimeWebSessionEnvelope] = []
+    handled: list[runtime_stream_session_pb2.RuntimeStreamSessionEnvelope] = []
     failed = asyncio.Event()
 
     async def stream(
-        requests: AsyncIterator[runtime_web_session_pb2.RuntimeWebSessionEnvelope],
+        requests: AsyncIterator[
+            runtime_stream_session_pb2.RuntimeStreamSessionEnvelope
+        ],
         *,
         metadata: object = None,
-    ) -> AsyncIterator[runtime_web_session_pb2.RuntimeWebSessionEnvelope]:
+    ) -> AsyncIterator[runtime_stream_session_pb2.RuntimeStreamSessionEnvelope]:
         nonlocal observed_metadata
         observed_metadata = metadata
         observed_requests.append(await anext(requests))
@@ -124,14 +132,14 @@ async def test_client_requires_acceptance_first_and_dispatches_later_frames() ->
         yield _envelope("heartbeat")
 
     async def handler(
-        envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+        envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
     ) -> None:
         handled.append(envelope)
 
     async def failure_handler() -> None:
         failed.set()
 
-    client = GrpcRunnerWebSessionClient(
+    client = GrpcRunnerStreamSessionClient(
         stream,
         runner_auth_token="token-a",
         channel=None,
@@ -152,20 +160,22 @@ async def test_client_requires_acceptance_first_and_dispatches_later_frames() ->
 
 async def test_client_rejects_non_acceptance_first_frame() -> None:
     async def stream(
-        requests: AsyncIterator[runtime_web_session_pb2.RuntimeWebSessionEnvelope],
+        requests: AsyncIterator[
+            runtime_stream_session_pb2.RuntimeStreamSessionEnvelope
+        ],
         *,
         metadata: object = None,
-    ) -> AsyncIterator[runtime_web_session_pb2.RuntimeWebSessionEnvelope]:
+    ) -> AsyncIterator[runtime_stream_session_pb2.RuntimeStreamSessionEnvelope]:
         del metadata
         await anext(requests)
         yield _envelope("heartbeat")
 
     async def handler(
-        envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+        envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
     ) -> None:
         del envelope
 
-    client = GrpcRunnerWebSessionClient(
+    client = GrpcRunnerStreamSessionClient(
         stream,
         runner_auth_token="token-a",
         channel=None,
@@ -183,20 +193,22 @@ async def test_client_rejects_stream_scoped_session_acceptance() -> None:
     accepted.stream_id = 7
 
     async def stream(
-        requests: AsyncIterator[runtime_web_session_pb2.RuntimeWebSessionEnvelope],
+        requests: AsyncIterator[
+            runtime_stream_session_pb2.RuntimeStreamSessionEnvelope
+        ],
         *,
         metadata: object = None,
-    ) -> AsyncIterator[runtime_web_session_pb2.RuntimeWebSessionEnvelope]:
+    ) -> AsyncIterator[runtime_stream_session_pb2.RuntimeStreamSessionEnvelope]:
         del metadata
         await anext(requests)
         yield accepted
 
     async def handler(
-        envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+        envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
     ) -> None:
         del envelope
 
-    client = GrpcRunnerWebSessionClient(
+    client = GrpcRunnerStreamSessionClient(
         stream,
         runner_auth_token="token-a",
         channel=None,
@@ -216,21 +228,23 @@ async def test_close_fails_sender_blocked_on_full_queue() -> None:
     release = asyncio.Event()
 
     async def stream(
-        requests: AsyncIterator[runtime_web_session_pb2.RuntimeWebSessionEnvelope],
+        requests: AsyncIterator[
+            runtime_stream_session_pb2.RuntimeStreamSessionEnvelope
+        ],
         *,
         metadata: object = None,
-    ) -> AsyncIterator[runtime_web_session_pb2.RuntimeWebSessionEnvelope]:
+    ) -> AsyncIterator[runtime_stream_session_pb2.RuntimeStreamSessionEnvelope]:
         del metadata
         await anext(requests)
         yield _envelope("accepted")
         await release.wait()
 
     async def handler(
-        envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+        envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
     ) -> None:
         del envelope
 
-    client = GrpcRunnerWebSessionClient(
+    client = GrpcRunnerStreamSessionClient(
         stream,
         runner_auth_token="token-a",
         channel=None,
@@ -259,23 +273,25 @@ async def test_close_cleans_up_before_propagating_handler_failure() -> None:
     handled = asyncio.Event()
 
     async def stream(
-        requests: AsyncIterator[runtime_web_session_pb2.RuntimeWebSessionEnvelope],
+        requests: AsyncIterator[
+            runtime_stream_session_pb2.RuntimeStreamSessionEnvelope
+        ],
         *,
         metadata: object = None,
-    ) -> AsyncIterator[runtime_web_session_pb2.RuntimeWebSessionEnvelope]:
+    ) -> AsyncIterator[runtime_stream_session_pb2.RuntimeStreamSessionEnvelope]:
         del metadata
         await anext(requests)
         yield _envelope("accepted")
         yield _envelope("heartbeat")
 
     async def handler(
-        envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+        envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
     ) -> None:
         del envelope
         handled.set()
         raise ValueError("handler failed")
 
-    client = GrpcRunnerWebSessionClient(
+    client = GrpcRunnerStreamSessionClient(
         stream,
         runner_auth_token="token-a",
         channel=None,
@@ -296,19 +312,21 @@ async def test_close_cleans_up_before_propagating_handler_failure() -> None:
 
 async def test_start_failure_cleans_up_without_receiver_task() -> None:
     def stream(
-        requests: AsyncIterator[runtime_web_session_pb2.RuntimeWebSessionEnvelope],
+        requests: AsyncIterator[
+            runtime_stream_session_pb2.RuntimeStreamSessionEnvelope
+        ],
         *,
         metadata: object = None,
-    ) -> AsyncIterator[runtime_web_session_pb2.RuntimeWebSessionEnvelope]:
+    ) -> AsyncIterator[runtime_stream_session_pb2.RuntimeStreamSessionEnvelope]:
         del requests, metadata
         raise RuntimeError("stream failed")
 
     async def handler(
-        envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+        envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
     ) -> None:
         del envelope
 
-    client = GrpcRunnerWebSessionClient(
+    client = GrpcRunnerStreamSessionClient(
         stream,
         runner_auth_token="token-a",
         channel=None,
@@ -325,10 +343,12 @@ async def test_start_failure_cleans_up_without_receiver_task() -> None:
 
 async def test_start_timeout_cancels_and_retrieves_receiver_task() -> None:
     async def stream(
-        requests: AsyncIterator[runtime_web_session_pb2.RuntimeWebSessionEnvelope],
+        requests: AsyncIterator[
+            runtime_stream_session_pb2.RuntimeStreamSessionEnvelope
+        ],
         *,
         metadata: object = None,
-    ) -> AsyncIterator[runtime_web_session_pb2.RuntimeWebSessionEnvelope]:
+    ) -> AsyncIterator[runtime_stream_session_pb2.RuntimeStreamSessionEnvelope]:
         del metadata
         await anext(requests)
         await asyncio.Event().wait()
@@ -336,11 +356,11 @@ async def test_start_timeout_cancels_and_retrieves_receiver_task() -> None:
             yield _envelope("accepted")
 
     async def handler(
-        envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+        envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
     ) -> None:
         del envelope
 
-    client = GrpcRunnerWebSessionClient(
+    client = GrpcRunnerStreamSessionClient(
         stream,
         runner_auth_token="token-a",
         channel=None,

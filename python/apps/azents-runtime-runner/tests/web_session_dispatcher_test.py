@@ -8,21 +8,21 @@ from typing import Literal
 
 import h11
 import pytest
-from azents_runtime_control.grpc_runner_web_session_client import (
+from azents_runtime_control.grpc_runner_stream_session_client import (
     EnvelopeHandler,
     FailureHandler,
-    GrpcRunnerWebSessionClient,
+    GrpcRunnerStreamSessionClient,
 )
-from azents_runtime_control.proto import runtime_web_session_pb2
-from azents_runtime_control.runtime_web_flow import (
+from azents_runtime_control.proto import runtime_stream_session_pb2
+from azents_runtime_control.runtime_stream_flow import (
     AbsoluteCreditWindow,
     HierarchicalCredit,
 )
-from azents_runtime_control.runtime_web_session import (
+from azents_runtime_control.runtime_stream_session import (
     APPROVED_SESSION_PROFILE,
     MANDATORY_DATA_FRAME_BYTES,
     MAX_STREAM_TOMBSTONES,
-    RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+    RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
     CloseReason,
     OwnerSessionEpoch,
     RequestHead,
@@ -33,9 +33,9 @@ from azents_runtime_control.runtime_web_session import (
 from wsproto.events import Event
 from wsproto.utilities import RemoteProtocolError as WsprotoRemoteProtocolError
 
-from azents_runtime_runner.web_session import (
+from azents_runtime_runner.stream_session import (
+    RunnerStreamSessionManager,
     RunnerWebLoopbackPool,
-    RunnerWebSessionManager,
     RunnerWebSocket,
 )
 from azents_runtime_runner.web_session_dispatcher import (
@@ -48,14 +48,14 @@ from azents_runtime_runner.web_session_dispatcher import (
 )
 
 
-class _RecordingClient(GrpcRunnerWebSessionClient):
+class _RecordingClient(GrpcRunnerStreamSessionClient):
     def __init__(self) -> None:
-        self.sent: list[runtime_web_session_pb2.RuntimeWebSessionEnvelope] = []
+        self.sent: list[runtime_stream_session_pb2.RuntimeStreamSessionEnvelope] = []
         self.closed = False
 
     async def send(
         self,
-        envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+        envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
     ) -> None:
         self.sent.append(envelope)
 
@@ -86,12 +86,12 @@ class _HandshakeClient(_RecordingClient):
 
     async def start(
         self,
-        hello: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+        hello: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
         handler: EnvelopeHandler,
         failure_handler: FailureHandler,
         *,
         timeout_seconds: float,
-    ) -> runtime_web_session_pb2.RuntimeWebSessionEnvelope:
+    ) -> runtime_stream_session_pb2.RuntimeStreamSessionEnvelope:
         del hello, handler, failure_handler, timeout_seconds
         if self.before_start is not None:
             self.before_start()
@@ -149,7 +149,7 @@ def _offer(*, boot: str = "owner-a", lease: str = "lease-a") -> RunnerSessionOff
             runner_generation=4,
         ),
         session_nonce=f"nonce-{lease}",
-        protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+        protocol_fingerprint=RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
         deadline_at=datetime.datetime.now(datetime.UTC)
         + datetime.timedelta(seconds=10),
     )
@@ -157,7 +157,7 @@ def _offer(*, boot: str = "owner-a", lease: str = "lease-a") -> RunnerSessionOff
 
 def _accepted(
     offer: RunnerSessionOffer,
-) -> runtime_web_session_pb2.RuntimeWebSessionEnvelope:
+) -> runtime_stream_session_pb2.RuntimeStreamSessionEnvelope:
     envelope = _envelope(offer)
     envelope.peer_boot_id = offer.owner.owner_boot_id
     envelope.session_accepted.data_frame_bytes = 256 * 1024
@@ -168,15 +168,15 @@ def _accepted(
     return envelope
 
 
-def _unused_client_factory() -> GrpcRunnerWebSessionClient:
+def _unused_client_factory() -> GrpcRunnerStreamSessionClient:
     raise AssertionError("test must not create a Runner Web client")
 
 
 def _manager(
     *,
-    client_factory: Callable[[], GrpcRunnerWebSessionClient] | None,
-) -> RunnerWebSessionManager:
-    return RunnerWebSessionManager(
+    client_factory: Callable[[], GrpcRunnerStreamSessionClient] | None,
+) -> RunnerStreamSessionManager:
+    return RunnerStreamSessionManager(
         runtime_id="runtime-a",
         runner_boot_id="runner-a",
         accepted_desired_generation=lambda: 3,
@@ -212,7 +212,7 @@ def _resources(
     )
 
 
-def _dispatcher(manager: RunnerWebSessionManager) -> RunnerWebSessionDispatcher:
+def _dispatcher(manager: RunnerStreamSessionManager) -> RunnerWebSessionDispatcher:
     return RunnerWebSessionDispatcher(
         manager,
         resources=_resources(),
@@ -223,7 +223,7 @@ def _dispatcher(manager: RunnerWebSessionManager) -> RunnerWebSessionDispatcher:
 def _stream(
     *,
     offer: RunnerSessionOffer,
-    client: GrpcRunnerWebSessionClient,
+    client: GrpcRunnerStreamSessionClient,
     session_credit: AbsoluteCreditWindow,
     credit_changed: asyncio.Condition | None = None,
 ) -> _Stream:
@@ -271,10 +271,10 @@ def _envelope(
     offer: RunnerSessionOffer,
     *,
     stream_id: int = 0,
-) -> runtime_web_session_pb2.RuntimeWebSessionEnvelope:
+) -> runtime_stream_session_pb2.RuntimeStreamSessionEnvelope:
     owner = offer.owner
-    return runtime_web_session_pb2.RuntimeWebSessionEnvelope(
-        protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+    return runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(
+        protocol_fingerprint=RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
         session_id=owner.session_lease_id,
         peer_boot_id=owner.owner_boot_id,
         owner_boot_id=owner.owner_boot_id,
@@ -316,7 +316,7 @@ async def test_shared_response_credit_wakes_another_stream() -> None:
 
     update = _envelope(offer, stream_id=1)
     update.window_update.direction = (
-        runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_RESPONSE
+        runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_DIRECTION_RESPONSE
     )
     update.window_update.stream_consumed_total = 1
     update.window_update.session_consumed_total = 1
@@ -375,19 +375,19 @@ async def test_late_terminal_control_for_completed_stream_preserves_session(
     envelope = _envelope(offer, stream_id=7)
     if payload == "window_update":
         envelope.window_update.direction = (
-            runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_RESPONSE
+            runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_DIRECTION_RESPONSE
         )
     elif payload == "direction_end":
         envelope.direction_end.direction = (
-            runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_REQUEST
+            runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_DIRECTION_REQUEST
         )
     elif payload == "cancel":
         envelope.cancel.reason = (
-            runtime_web_session_pb2.RUNTIME_WEB_SESSION_CLOSE_REASON_CALLER
+            runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_CLOSE_REASON_CALLER
         )
     elif payload == "reset":
         envelope.reset.reason = (
-            runtime_web_session_pb2.RUNTIME_WEB_SESSION_CLOSE_REASON_CALLER
+            runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_CLOSE_REASON_CALLER
         )
     else:
         envelope.stream_end.SetInParent()
@@ -411,7 +411,9 @@ async def test_tombstoned_stream_rejects_new_data_and_reused_open() -> None:
     dispatcher._retire(7)
     data = _envelope(offer, stream_id=7)
     data.frame_sequence = 1
-    data.data.direction = runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_REQUEST
+    data.data.direction = (
+        runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_DIRECTION_REQUEST
+    )
     data.data.data = b"new"
     opening = _envelope(offer, stream_id=7)
     opening.open.SetInParent()
@@ -435,7 +437,7 @@ async def test_sequential_completed_stream_late_credit_keeps_epoch_active() -> N
     dispatcher._retire(2)
     late = _envelope(offer, stream_id=1)
     late.window_update.direction = (
-        runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_RESPONSE
+        runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_DIRECTION_RESPONSE
     )
 
     await dispatcher(late)
@@ -476,17 +478,17 @@ async def test_websocket_request_returns_absolute_credit_past_one_window() -> No
         envelope = _envelope(offer, stream_id=7)
         envelope.frame_sequence = sequence
         envelope.websocket.direction = (
-            runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_REQUEST
+            runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_DIRECTION_REQUEST
         )
         envelope.websocket.opcode = (
-            runtime_web_session_pb2.RUNTIME_WEB_SESSION_WEBSOCKET_OPCODE_BINARY
+            runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_WEBSOCKET_OPCODE_BINARY
         )
         envelope.websocket.final = True
         envelope.websocket.data = b"x" * MANDATORY_DATA_FRAME_BYTES
         await stream.inbound.put(envelope)
     end = _envelope(offer, stream_id=7)
     end.direction_end.direction = (
-        runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_REQUEST
+        runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_DIRECTION_REQUEST
     )
     end.direction_end.final_sequence = frame_count
     await stream.inbound.put(end)
@@ -515,7 +517,7 @@ async def test_replacement_offer_closes_old_stream_before_new_client_starts() ->
         finally:
             old_task_finished.set()
 
-    def client_factory() -> GrpcRunnerWebSessionClient:
+    def client_factory() -> GrpcRunnerStreamSessionClient:
         offer = first_offer if not created else second_offer
         before_start = None
         if offer == second_offer:
@@ -590,7 +592,7 @@ async def test_go_away_refuses_new_streams_with_service_drain_reset() -> None:
     go_away = _envelope(offer)
     go_away.go_away.last_accepted_stream_id = 4
     go_away.go_away.reason = (
-        runtime_web_session_pb2.RUNTIME_WEB_SESSION_CLOSE_REASON_SERVICE_DRAIN
+        runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_CLOSE_REASON_SERVICE_DRAIN
     )
     go_away.go_away.drain_deadline_at.FromDatetime(
         datetime.datetime.now(datetime.UTC) + datetime.timedelta(seconds=1)
@@ -606,7 +608,7 @@ async def test_go_away_refuses_new_streams_with_service_drain_reset() -> None:
     assert len(client.sent) == 1
     assert client.sent[0].stream_id == 5
     assert client.sent[0].reset.reason == (
-        runtime_web_session_pb2.RUNTIME_WEB_SESSION_CLOSE_REASON_SERVICE_DRAIN
+        runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_CLOSE_REASON_SERVICE_DRAIN
     )
     await dispatcher.close()
 
@@ -614,20 +616,22 @@ async def test_go_away_refuses_new_streams_with_service_drain_reset() -> None:
 async def test_receiver_eof_retires_manager_and_dispatcher_work() -> None:
     offer = _offer()
     release = asyncio.Event()
-    created: list[GrpcRunnerWebSessionClient] = []
+    created: list[GrpcRunnerStreamSessionClient] = []
 
     async def transport(
-        requests: AsyncIterator[runtime_web_session_pb2.RuntimeWebSessionEnvelope],
+        requests: AsyncIterator[
+            runtime_stream_session_pb2.RuntimeStreamSessionEnvelope
+        ],
         *,
         metadata: object = None,
-    ) -> AsyncIterator[runtime_web_session_pb2.RuntimeWebSessionEnvelope]:
+    ) -> AsyncIterator[runtime_stream_session_pb2.RuntimeStreamSessionEnvelope]:
         del metadata
         await anext(requests)
         yield _accepted(offer)
         await release.wait()
 
-    def client_factory() -> GrpcRunnerWebSessionClient:
-        client = GrpcRunnerWebSessionClient(
+    def client_factory() -> GrpcRunnerStreamSessionClient:
+        client = GrpcRunnerStreamSessionClient(
             transport,
             runner_auth_token="token",
             channel=None,
@@ -693,8 +697,8 @@ async def test_go_away_deadline_marks_pending_stream_service_drain() -> None:
 
 
 def test_request_head_rejects_unspecified_protocol() -> None:
-    message = runtime_web_session_pb2.RuntimeWebSessionRequestHead(
-        protocol=runtime_web_session_pb2.RUNTIME_WEB_SESSION_PROTOCOL_UNSPECIFIED,
+    message = runtime_stream_session_pb2.RuntimeStreamSessionRequestHead(
+        protocol=runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_PROTOCOL_UNSPECIFIED,
         method=b"GET",
         target=b"/",
     )
@@ -736,7 +740,7 @@ async def test_websocket_protocol_failure_emits_stream_reset(
     assert len(client.sent) == 1
     assert client.sent[0].WhichOneof("payload") == "reset"
     assert client.sent[0].reset.reason == (
-        runtime_web_session_pb2.RUNTIME_WEB_SESSION_CLOSE_REASON_PROTOCOL_VIOLATION
+        runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_CLOSE_REASON_PROTOCOL_VIOLATION
     )
     assert "Runtime Web Runner WebSocket protocol failed" in caplog.text
     assert "raw handshake detail" not in caplog.text
@@ -752,7 +756,7 @@ def test_runner_resource_tracker_rejects_and_releases_process_ceilings() -> None
         maximum_pending_tasks=1,
         maximum_resident_memory_bytes=8,
     )
-    data = runtime_web_session_pb2.RuntimeWebSessionEnvelope()
+    data = runtime_stream_session_pb2.RuntimeStreamSessionEnvelope()
     data.data.data = b"four"
 
     assert resources.try_open_session()
@@ -810,12 +814,14 @@ async def test_runner_inbound_queue_rejects_without_blocking_other_streams() -> 
     dispatcher.streams[7] = stream
     first = _envelope(offer, stream_id=7)
     first.frame_sequence = 1
-    first.data.direction = runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_REQUEST
+    first.data.direction = (
+        runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_DIRECTION_REQUEST
+    )
     first.data.data = b"one"
     second = _envelope(offer, stream_id=7)
     second.frame_sequence = 2
     second.data.direction = (
-        runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_REQUEST
+        runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_DIRECTION_REQUEST
     )
     second.data.data = b"two"
 

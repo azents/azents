@@ -330,7 +330,7 @@ class _ObjectStore:
         self.uploads.pop(key, None)
 
 
-class _NoWebSessionOfferProvider:
+class _NoStreamSessionOfferProvider:
     async def offer_for_runner(
         self,
         *,
@@ -361,7 +361,7 @@ class _RecordingRunnerServicer(RuntimeRunnerControlGrpcServicer):
             consumer_id=consumer_id,
             runner_authenticator=runner_authenticator,
             transfer_result_sink=_TransferResultSink(),
-            web_session_offer_provider=_NoWebSessionOfferProvider(),
+            stream_session_offer_provider=_NoStreamSessionOfferProvider(),
             operation_block_ms=operation_block_ms,
         )
         self.peers: list[str] = []

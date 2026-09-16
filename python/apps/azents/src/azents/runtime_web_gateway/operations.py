@@ -8,8 +8,8 @@ import enum
 import math
 from collections.abc import Awaitable, Callable, Collection
 
-from azents_runtime_control.runtime_web_session import (
-    RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+from azents_runtime_control.runtime_stream_session import (
+    RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
     CloseReason,
     StreamProtocol,
 )
@@ -112,7 +112,7 @@ class RuntimeWebGatewayDependencyEvidence:
     @property
     def replacement_protocol_compatible(self) -> bool:
         """Require one Control with the exact approved replacement fingerprint."""
-        return RUNTIME_WEB_PROTOCOL_FINGERPRINT in self.control_protocol_fingerprints
+        return RUNTIME_STREAM_PROTOCOL_FINGERPRINT in self.control_protocol_fingerprints
 
 
 @dataclasses.dataclass(frozen=True)

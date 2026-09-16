@@ -24,8 +24,8 @@ from azents_runtime_control.runner_transfer import RunnerTransferResult
 from azents_runtime_control.runtime_configuration import (
     RuntimeConfigurationEvidence,
 )
-from azents_runtime_control.runtime_web_session import (
-    RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+from azents_runtime_control.runtime_stream_session import (
+    RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
     OwnerSessionEpoch,
     RunnerSessionOffer,
 )
@@ -53,7 +53,7 @@ from azents.runtime.control_protocol.data import (
 from azents.runtime.control_protocol.grpc import runner_server as runner_server_module
 from azents.runtime.control_protocol.grpc.runner_server import (
     RuntimeRunnerControlGrpcServicer,
-    RuntimeWebSessionOfferProvider,
+    RuntimeStreamSessionOfferProvider,
     _runner_transfer_cancel,
     _runner_transfer_intent,
     _RunnerOutbound,
@@ -159,7 +159,7 @@ class FakeStateSink:
         return self.heartbeat_configuration
 
 
-class _NoWebOfferProvider:
+class _NoStreamOfferProvider:
     async def offer_for_runner(
         self,
         *,
@@ -203,7 +203,7 @@ def _web_offer(*, lease_generation: int) -> RunnerSessionOffer:
     return RunnerSessionOffer(
         owner=owner,
         session_nonce=f"nonce-{lease_generation}",
-        protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+        protocol_fingerprint=RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
         deadline_at=datetime.now(UTC) + timedelta(minutes=1),
     )
 
@@ -328,7 +328,7 @@ async def test_transfer_result_delegates_only_valid_structural_result() -> None:
         consumer_id="consumer-1",
         runner_authenticator=FakeRunnerAuthenticator(),
         transfer_result_sink=sink,
-        web_session_offer_provider=_NoWebOfferProvider(),
+        stream_session_offer_provider=_NoStreamOfferProvider(),
     )
 
     await servicer._append_transfer_result(  # Test the bounded bridge path directly.
@@ -378,7 +378,7 @@ async def test_transfer_result_rejects_unbounded_identity_before_store_lookup() 
         consumer_id="consumer-1",
         runner_authenticator=FakeRunnerAuthenticator(),
         transfer_result_sink=sink,
-        web_session_offer_provider=_NoWebOfferProvider(),
+        stream_session_offer_provider=_NoStreamOfferProvider(),
     )
     message = _transfer_result_message(committed=True)
     message.transfer_result.operation_id = "o" * 129
@@ -753,7 +753,7 @@ async def test_runner_grpc_isolates_metrics_store_failure_from_heartbeat() -> No
         consumer_id="runner-consumer-a",
         runner_authenticator=FakeRunnerAuthenticator(),
         transfer_result_sink=RecordingTransferResultSink(),
-        web_session_offer_provider=_NoWebOfferProvider(),
+        stream_session_offer_provider=_NoStreamOfferProvider(),
         operation_block_ms=1,
     )
     inbound = QueueIterator()
@@ -1265,7 +1265,7 @@ async def test_runner_operation_relay_backpressures_durable_claims() -> None:
         operation_block_ms=1,
         runner_authenticator=FakeRunnerAuthenticator(),
         transfer_result_sink=RecordingTransferResultSink(),
-        web_session_offer_provider=_NoWebOfferProvider(),
+        stream_session_offer_provider=_NoStreamOfferProvider(),
     )
     outbound: asyncio.Queue[
         runtime_runner_control_pb2.RunnerControlMessage | _RunnerOutboundItem
@@ -1310,7 +1310,7 @@ async def test_runner_operation_relay_checks_authority_before_claim() -> None:
         operation_block_ms=1,
         runner_authenticator=authenticator,
         transfer_result_sink=RecordingTransferResultSink(),
-        web_session_offer_provider=_NoWebOfferProvider(),
+        stream_session_offer_provider=_NoStreamOfferProvider(),
     )
 
     await servicer._relay_runner_operations(  # Verify auth precedes durable claim.
@@ -1350,7 +1350,7 @@ async def test_runner_transfer_relay_deduplicates_only_identical_intent() -> Non
         operation_block_ms=1,
         runner_authenticator=authenticator,
         transfer_result_sink=RecordingTransferResultSink(),
-        web_session_offer_provider=_NoWebOfferProvider(),
+        stream_session_offer_provider=_NoStreamOfferProvider(),
     )
     task = asyncio.create_task(
         servicer._relay_runner_operations(
@@ -1388,7 +1388,7 @@ async def test_runner_transfer_relay_fails_closed_on_conflicting_duplicate() -> 
         operation_block_ms=1,
         runner_authenticator=authenticator,
         transfer_result_sink=RecordingTransferResultSink(),
-        web_session_offer_provider=_NoWebOfferProvider(),
+        stream_session_offer_provider=_NoStreamOfferProvider(),
     )
 
     with pytest.raises(RuntimeError, match="Conflicting duplicate"):
@@ -1461,7 +1461,7 @@ async def test_transfer_results_do_not_evict_dispatch_tombstone() -> None:
         operation_block_ms=1,
         runner_authenticator=authenticator,
         transfer_result_sink=sink,
-        web_session_offer_provider=_NoWebOfferProvider(),
+        stream_session_offer_provider=_NoStreamOfferProvider(),
     )
     envelope = _transfer_envelope()
     intent = _runner_transfer_intent(envelope)
@@ -2299,12 +2299,12 @@ def test_connect_runner_outbound_queue_is_bounded() -> None:
 
 
 @pytest.mark.asyncio
-async def test_runner_control_reissues_web_session_offer_for_current_generation(
+async def test_runner_control_reissues_stream_session_offer_for_current_generation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
         runner_server_module,
-        "_WEB_SESSION_OFFER_RETRY_SECONDS",
+        "_STREAM_SESSION_OFFER_RETRY_SECONDS",
         0.01,
     )
     first = _web_offer(lease_generation=1)
@@ -2316,12 +2316,12 @@ async def test_runner_control_reissues_web_session_offer_for_current_generation(
         service,
         store,
         FakeStateSink(),
-        web_session_offer_provider=provider,
+        stream_session_offer_provider=provider,
     )
     outbound: asyncio.Queue[_RunnerOutbound] = asyncio.Queue()
 
     relaying = asyncio.create_task(
-        servicer._relay_web_session_offers(
+        servicer._relay_stream_session_offers(
             outbound,
             runtime_id="runtime-1",
             generation=3,
@@ -2336,8 +2336,8 @@ async def test_runner_control_reissues_web_session_offer_for_current_generation(
 
     assert isinstance(first_message, runtime_runner_control_pb2.RunnerControlMessage)
     assert isinstance(second_message, runtime_runner_control_pb2.RunnerControlMessage)
-    assert first_message.web_session_offer.session_lease_id == "lease-1"
-    assert second_message.web_session_offer.session_lease_id == "lease-2"
+    assert first_message.stream_session_offer.session_lease_id == "lease-1"
+    assert second_message.stream_session_offer.session_lease_id == "lease-2"
     assert provider.calls[:2] == [("runtime-1", 3), ("runtime-1", 3)]
 
 
@@ -2347,7 +2347,7 @@ def _servicer(
     sink: FakeStateSink,
     *,
     runner_authenticator: FakeRunnerAuthenticator | None = None,
-    web_session_offer_provider: RuntimeWebSessionOfferProvider | None = None,
+    stream_session_offer_provider: RuntimeStreamSessionOfferProvider | None = None,
 ) -> RuntimeRunnerControlGrpcServicer:
     return RuntimeRunnerControlGrpcServicer(
         control_protocol=service,
@@ -2358,8 +2358,8 @@ def _servicer(
         consumer_id="runner-consumer-a",
         runner_authenticator=runner_authenticator or FakeRunnerAuthenticator(),
         transfer_result_sink=RecordingTransferResultSink(),
-        web_session_offer_provider=(
-            web_session_offer_provider or _NoWebOfferProvider()
+        stream_session_offer_provider=(
+            stream_session_offer_provider or _NoStreamOfferProvider()
         ),
         operation_block_ms=1,
     )

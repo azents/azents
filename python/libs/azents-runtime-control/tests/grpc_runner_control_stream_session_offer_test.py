@@ -15,20 +15,20 @@ from azents_runtime_control.grpc_runner_client import (
 from azents_runtime_control.proto import (
     runtime_runner_control_pb2,
     runtime_runner_control_pb2_grpc,
-    runtime_web_session_pb2,
-    runtime_web_session_pb2_grpc,
+    runtime_stream_session_pb2,
+    runtime_stream_session_pb2_grpc,
 )
 from azents_runtime_control.runner import RunnerRegistration
 from azents_runtime_control.runtime_configuration import RuntimeConfigurationEvidence
-from azents_runtime_control.runtime_web_session import (
-    RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+from azents_runtime_control.runtime_stream_session import (
+    RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
     OwnerSessionEpoch,
     RunnerSessionOffer,
 )
 
 
 @pytest.mark.asyncio
-async def test_runner_control_delivers_exact_web_session_offer() -> None:
+async def test_runner_control_delivers_exact_stream_session_offer() -> None:
     """Deliver the one replacement offer through the ordinary control stream."""
     received: list[RunnerSessionOffer] = []
     offer_received = asyncio.Event()
@@ -53,8 +53,8 @@ async def test_runner_control_delivers_exact_web_session_offer() -> None:
             ),
         )
         yield runtime_runner_control_pb2.RunnerControlMessage(
-            request_id="web-session-offer-1",
-            web_session_offer=runner_session_offer_to_message(offer),
+            request_id="stream-session-offer-1",
+            stream_session_offer=runner_session_offer_to_message(offer),
         )
         offer_received.set()
         await release_stream.wait()
@@ -64,7 +64,7 @@ async def test_runner_control_delivers_exact_web_session_offer() -> None:
     async def on_offer(value: RunnerSessionOffer) -> None:
         received.append(value)
 
-    client.set_web_session_offer_handler(on_offer)
+    client.set_stream_session_offer_handler(on_offer)
     accepted = await client.register_runner(
         _registration(),
         connection_id="connection-1",
@@ -83,14 +83,14 @@ async def test_runner_control_delivers_exact_web_session_offer() -> None:
 async def test_runner_web_rpc_shares_the_live_control_channel() -> None:
     """Run both authenticated RPC streams through one live gRPC channel."""
     control_servicer = _ControlServicer()
-    web_servicer = _WebServicer()
+    stream_servicer = _StreamServicer()
     server = grpc.aio.server()
     runtime_runner_control_pb2_grpc.add_RuntimeRunnerControlServicer_to_server(
         control_servicer,
         server,
     )
-    runtime_web_session_pb2_grpc.add_RuntimeRunnerWebSessionServicer_to_server(
-        web_servicer,
+    runtime_stream_session_pb2_grpc.add_RuntimeRunnerStreamSessionServicer_to_server(
+        stream_servicer,
         server,
     )
     port = server.add_insecure_port("127.0.0.1:0")
@@ -102,31 +102,31 @@ async def test_runner_web_rpc_shares_the_live_control_channel() -> None:
         tls=None,
         allow_insecure=True,
     )
-    web_client = None
+    stream_client = None
     try:
         accepted = await client.register_runner(
             _registration(),
             connection_id="connection-1",
             registered_at=datetime.now(UTC),
         )
-        web_client = client.create_web_session_client(outbound_resources=None)
-        session_accepted = await web_client.start(
-            runtime_web_session_pb2.RuntimeWebSessionEnvelope(
+        stream_client = client.create_stream_session_client(outbound_resources=None)
+        session_accepted = await stream_client.start(
+            runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(
                 stream_id=0,
-                hello=runtime_web_session_pb2.RuntimeWebSessionHello(),
+                hello=runtime_stream_session_pb2.RuntimeStreamSessionHello(),
             ),
-            _ignore_web_envelope,
-            _ignore_web_failure,
+            _ignore_stream_envelope,
+            _ignore_stream_failure,
             timeout_seconds=1,
         )
-        web_client.activate()
+        stream_client.activate()
 
         assert accepted.generation == 7
         assert session_accepted.WhichOneof("payload") == "session_accepted"
-        assert control_servicer.peers == web_servicer.peers
-        assert web_client.metadata == (("authorization", "Bearer runner-token"),)
+        assert control_servicer.peers == stream_servicer.peers
+        assert stream_client.metadata == (("authorization", "Bearer runner-token"),)
 
-        await web_client.close()
+        await stream_client.close()
         heartbeat = await client.heartbeat_runner(
             runtime_id="runtime-1",
             generation=accepted.generation,
@@ -134,20 +134,20 @@ async def test_runner_web_rpc_shares_the_live_control_channel() -> None:
         )
         assert heartbeat.accepted
     finally:
-        if web_client is not None:
-            await web_client.close()
+        if stream_client is not None:
+            await stream_client.close()
         await client.close()
         await server.stop(None)
 
 
-def test_web_session_offer_round_trip_preserves_exact_authority() -> None:
+def test_stream_session_offer_round_trip_preserves_exact_authority() -> None:
     """Preserve every Owner, generation, nonce, fingerprint, and deadline field."""
     offer = _offer()
 
     message = runner_session_offer_to_message(offer)
 
     assert message.join_nonce == "join-nonce-1"
-    assert message.protocol_fingerprint == RUNTIME_WEB_PROTOCOL_FINGERPRINT
+    assert message.protocol_fingerprint == RUNTIME_STREAM_PROTOCOL_FINGERPRINT
     fields = runtime_runner_control_pb2.RunnerSessionOffer.DESCRIPTOR.fields_by_name
     assert "owner_replica_id" not in fields
     assert "connect_address" not in fields
@@ -155,7 +155,7 @@ def test_web_session_offer_round_trip_preserves_exact_authority() -> None:
     assert runner_session_offer_from_message(message) == offer
 
 
-def test_web_session_offer_requires_registration_deadline() -> None:
+def test_stream_session_offer_requires_registration_deadline() -> None:
     """Reject an offer that cannot enforce the bounded join window."""
     message = runner_session_offer_to_message(_offer())
     message.ClearField("registration_deadline_at")
@@ -175,7 +175,7 @@ def _offer() -> RunnerSessionOffer:
             runner_generation=7,
         ),
         session_nonce="join-nonce-1",
-        protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+        protocol_fingerprint=RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
         deadline_at=datetime(2026, 9, 14, tzinfo=UTC) + timedelta(seconds=10),
     )
 
@@ -232,35 +232,37 @@ class _ControlServicer(runtime_runner_control_pb2_grpc.RuntimeRunnerControlServi
                 )
 
 
-class _WebServicer(runtime_web_session_pb2_grpc.RuntimeRunnerWebSessionServicer):
+class _StreamServicer(
+    runtime_stream_session_pb2_grpc.RuntimeRunnerStreamSessionServicer
+):
     def __init__(self) -> None:
         self.peers: list[str] = []
 
     async def Connect(
         self,
         request_iterator: AsyncIterator[
-            runtime_web_session_pb2.RuntimeWebSessionEnvelope
+            runtime_stream_session_pb2.RuntimeStreamSessionEnvelope
         ],
         context: grpc.aio.ServicerContext[
-            runtime_web_session_pb2.RuntimeWebSessionEnvelope,
-            runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+            runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
+            runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
         ],
-    ) -> AsyncIterator[runtime_web_session_pb2.RuntimeWebSessionEnvelope]:
+    ) -> AsyncIterator[runtime_stream_session_pb2.RuntimeStreamSessionEnvelope]:
         self.peers.append(context.peer())
         await anext(request_iterator)
-        yield runtime_web_session_pb2.RuntimeWebSessionEnvelope(
+        yield runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(
             stream_id=0,
-            session_accepted=runtime_web_session_pb2.RuntimeWebSessionAccepted(),
+            session_accepted=runtime_stream_session_pb2.RuntimeStreamSessionAccepted(),
         )
         async for _ in request_iterator:
             pass
 
 
-async def _ignore_web_envelope(
-    envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+async def _ignore_stream_envelope(
+    envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
 ) -> None:
     del envelope
 
 
-async def _ignore_web_failure() -> None:
+async def _ignore_stream_failure() -> None:
     pass

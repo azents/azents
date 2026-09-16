@@ -17,7 +17,6 @@ from typing import Any
 
 import frontmatter
 
-
 RULE_ROOT_NAMES = (".claude", ".opencode")
 MAX_WALK_UP = 200
 RULE_BODY_CAP_BYTES = 32 * 1024
@@ -80,7 +79,7 @@ def _display_path(path: Path, project_root: Path, home: Path | None) -> str:
 def _parse_frontmatter(text: str) -> tuple[tuple[str, ...], str]:
     try:
         post = frontmatter.loads(text)
-    except Exception:
+    except Exception:  # noqa: BLE001
         return (), text.strip()
     return _extract_paths(post.metadata), post.content.strip()
 

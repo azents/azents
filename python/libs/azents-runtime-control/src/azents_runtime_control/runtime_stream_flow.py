@@ -7,7 +7,7 @@ import enum
 from collections import deque
 from typing import Generic, TypeVar
 
-from azents_runtime_control.runtime_web_session import (
+from azents_runtime_control.runtime_stream_session import (
     CONTROL_RESERVE_BYTES,
     MANDATORY_DATA_FRAME_BYTES,
     MAX_CONTROL_FRAME_BYTES,

@@ -6,7 +6,7 @@ from google.protobuf import descriptor_pb2
 
 from azents_runtime_control.proto import (
     runtime_runner_control_pb2,
-    runtime_web_session_pb2,
+    runtime_stream_session_pb2,
 )
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
@@ -146,7 +146,7 @@ def test_runner_control_exposes_only_the_session_offer() -> None:
     ]
     field_names = {field.name for field in payload.fields}
 
-    assert "web_session_offer" in field_names
+    assert "stream_session_offer" in field_names
     assert "web_open_intent" not in field_names
     assert "web_cancel_intent" not in field_names
     file_descriptor = descriptor_pb2.FileDescriptorProto.FromString(
@@ -199,15 +199,12 @@ def test_runner_control_exposes_only_the_session_offer() -> None:
 
 def test_open_acceptance_uses_the_bounded_route_path_enum() -> None:
     """Expose only local or one-hop relay path classification."""
-    field = (
-        runtime_web_session_pb2.RuntimeWebSessionOpenAccepted.DESCRIPTOR.fields_by_name[
-            "route_path"
-        ]
-    )
+    descriptor = runtime_stream_session_pb2.RuntimeStreamSessionOpenAccepted.DESCRIPTOR
+    field = descriptor.fields_by_name["route_path"]
     assert field.number == 4
     assert field.enum_type is not None
     assert {value.name: value.number for value in field.enum_type.values} == {
-        "RUNTIME_WEB_SESSION_ROUTE_PATH_UNSPECIFIED": 0,
-        "RUNTIME_WEB_SESSION_ROUTE_PATH_LOCAL": 1,
-        "RUNTIME_WEB_SESSION_ROUTE_PATH_RELAY": 2,
+        "RUNTIME_STREAM_SESSION_ROUTE_PATH_UNSPECIFIED": 0,
+        "RUNTIME_STREAM_SESSION_ROUTE_PATH_LOCAL": 1,
+        "RUNTIME_STREAM_SESSION_ROUTE_PATH_RELAY": 2,
     }

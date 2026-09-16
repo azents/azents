@@ -33,8 +33,8 @@ Design documents are accumulated records and are not listed individually in this
 | Title | Owner | Last Verified At | Spec Version |
 |---|---|---|---|
 | [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-09-15 | 181 |
-| [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-09-15 | 86 |
-| [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-09-15 | 39 |
+| [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-09-16 | 87 |
+| [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-09-16 | 39 |
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-09-15 | 52 |
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-09-12 | 23 |
 | [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-09-13 | 41 |
@@ -428,6 +428,7 @@ Design documents are accumulated records and are not listed individually in this
 | [stdio MCP Infrastructure + Google Analytics Toolkit Integration Historical Requirements Reconstruction](requirements/stdio-260326-stdio-mcp-ga4-integration.md) | stdio-260326 | 2026-03-26 | 2026-03-26 |
 | [stdio MCP Resolve Flow Integration Historical Requirements Reconstruction](requirements/stdio-260328-stdio-mcp-integration.md) | stdio-260328 | 2026-03-28 | 2026-03-28 |
 | [Bound Model Streams by Parsed-Event Idle and Absolute Attempt Time Historical Requirements Reconstruction](requirements/stream-260715-stream-parsed-event-idle-and-attempt-bounds.md) | stream-260715 | 2026-07-15 | - |
+| [Runtime Stream Session Naming Cutover Requirements](requirements/stream-260916-runtime-session-cutover.md) | stream-260916 | 2026-09-16 | - |
 | [Streaming Responsibility Migration — From Handler to Worker Historical Requirements Reconstruction](requirements/streaming-260314-streaming-responsibility-migration.md) | streaming-260314 | 2026-03-14 | 2026-03-23 |
 | [Subagent Historical Requirements Reconstruction](requirements/subagent-260306-subagent.md) | subagent-260306 | 2026-03-06 | 2026-04-13 |
 | [Subagent Toolkit/Model Inherit Historical Requirements Reconstruction](requirements/subagent-260424-subagent-inherit-2026.md) | subagent-260424 | 2026-04-24 | 2026-04-24 |
@@ -867,6 +868,7 @@ Design documents are accumulated records and are not listed individually in this
 - [stdio MCP Infrastructure + Google Analytics Toolkit Integration Historical Decision Reconstruction](adr/stdio-260326-stdio-mcp-ga4-integration.md)
 - [stdio MCP Resolve Flow Integration Historical Decision Reconstruction](adr/stdio-260328-stdio-mcp-integration.md)
 - [Bound Model Streams by Parsed-Event Idle and Absolute Attempt Time](adr/stream-260715-stream-parsed-event-idle-and-attempt-bounds.md)
+- [Runtime Stream Session Naming Cutover Decisions](adr/stream-260916-runtime-session-cutover.md)
 - [Streaming Responsibility Migration — From Handler to Worker Historical Decision Reconstruction](adr/streaming-260314-streaming-responsibility-migration.md)
 - [Subagent Historical Decision Reconstruction](adr/subagent-260306-subagent.md)
 - [Subagent Toolkit/Model Inherit Historical Decision Reconstruction](adr/subagent-260424-subagent-inherit-2026.md)

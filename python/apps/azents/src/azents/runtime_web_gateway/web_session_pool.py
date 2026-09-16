@@ -8,9 +8,9 @@ from collections import deque
 from collections.abc import Awaitable
 from typing import Protocol
 
-from azents_runtime_control.proto import runtime_web_session_pb2
-from azents_runtime_control.runtime_web_flow import AbsoluteCreditWindow
-from azents_runtime_control.runtime_web_session import (
+from azents_runtime_control.proto import runtime_stream_session_pb2
+from azents_runtime_control.runtime_stream_flow import AbsoluteCreditWindow
+from azents_runtime_control.runtime_stream_session import (
     CloseReason,
     LogicalStreamState,
     PeerSessionState,
@@ -30,7 +30,7 @@ class GatewayStreamHandler(Protocol):
 
     def __call__(
         self,
-        envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+        envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
         /,
     ) -> Awaitable[None]: ...
 
@@ -57,7 +57,7 @@ class GatewaySessionTransport(Protocol):
 
     async def send(
         self,
-        envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+        envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
     ) -> None: ...
 
 

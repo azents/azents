@@ -14,7 +14,7 @@ import builtins as _builtins
 from . import runtime_configuration_pb2 as _runtime_configuration_pb2
 from . import runtime_runner_terminal_pb2 as _runtime_runner_terminal_pb2
 from . import runtime_runner_transfer_pb2 as _runtime_runner_transfer_pb2
-from . import runtime_web_session_pb2 as _runtime_web_session_pb2
+from . import runtime_stream_session_pb2 as _runtime_stream_session_pb2
 import sys
 import typing as _typing
 
@@ -306,7 +306,7 @@ class RunnerControlMessage(_message.Message):
     TRANSFER_CANCEL_FIELD_NUMBER: _builtins.int
     TERMINAL_OPEN_INTENT_FIELD_NUMBER: _builtins.int
     TERMINAL_TERMINATE_INTENT_FIELD_NUMBER: _builtins.int
-    WEB_SESSION_OFFER_FIELD_NUMBER: _builtins.int
+    STREAM_SESSION_OFFER_FIELD_NUMBER: _builtins.int
     ERROR_FIELD_NUMBER: _builtins.int
     request_id: _builtins.str
     @_builtins.property
@@ -328,7 +328,7 @@ class RunnerControlMessage(_message.Message):
     @_builtins.property
     def terminal_terminate_intent(self) -> Global___RunnerTerminalTerminateIntent: ...
     @_builtins.property
-    def web_session_offer(self) -> Global___RunnerSessionOffer: ...
+    def stream_session_offer(self) -> Global___RunnerSessionOffer: ...
     @_builtins.property
     def error(self) -> Global___RunnerError: ...
     def __init__(
@@ -344,7 +344,7 @@ class RunnerControlMessage(_message.Message):
         transfer_cancel: Global___RunnerTransferCancel | None = ...,
         terminal_open_intent: Global___RunnerTerminalOpenIntent | None = ...,
         terminal_terminate_intent: Global___RunnerTerminalTerminateIntent | None = ...,
-        web_session_offer: Global___RunnerSessionOffer | None = ...,
+        stream_session_offer: Global___RunnerSessionOffer | None = ...,
         error: Global___RunnerError | None = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _typing.Literal[
@@ -362,6 +362,8 @@ class RunnerControlMessage(_message.Message):
         b"payload",
         "register_accepted",
         b"register_accepted",
+        "stream_session_offer",
+        b"stream_session_offer",
         "terminal_open_intent",
         b"terminal_open_intent",
         "terminal_terminate_intent",
@@ -370,8 +372,6 @@ class RunnerControlMessage(_message.Message):
         b"transfer_cancel",
         "transfer_intent",
         b"transfer_intent",
-        "web_session_offer",
-        b"web_session_offer",
     ]
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
     _ClearFieldArgType: _TypeAlias = _typing.Literal[
@@ -391,6 +391,8 @@ class RunnerControlMessage(_message.Message):
         b"register_accepted",
         "request_id",
         b"request_id",
+        "stream_session_offer",
+        b"stream_session_offer",
         "terminal_open_intent",
         b"terminal_open_intent",
         "terminal_terminate_intent",
@@ -399,8 +401,6 @@ class RunnerControlMessage(_message.Message):
         b"transfer_cancel",
         "transfer_intent",
         b"transfer_intent",
-        "web_session_offer",
-        b"web_session_offer",
     ]
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     _WhichOneofReturnType_payload: _TypeAlias = _typing.Literal[
@@ -413,7 +413,7 @@ class RunnerControlMessage(_message.Message):
         "transfer_cancel",
         "terminal_open_intent",
         "terminal_terminate_intent",
-        "web_session_offer",
+        "stream_session_offer",
         "error",
     ]
     _WhichOneofArgType_payload: _TypeAlias = _typing.Literal["payload", b"payload"]
@@ -1308,12 +1308,12 @@ class RunnerRuntimeWebProtocolCount(_message.Message):
 
     PROTOCOL_FIELD_NUMBER: _builtins.int
     VALUE_FIELD_NUMBER: _builtins.int
-    protocol: _runtime_web_session_pb2.RuntimeWebSessionProtocol.ValueType
+    protocol: _runtime_stream_session_pb2.RuntimeStreamSessionProtocol.ValueType
     value: _builtins.int
     def __init__(
         self,
         *,
-        protocol: _runtime_web_session_pb2.RuntimeWebSessionProtocol.ValueType = ...,
+        protocol: _runtime_stream_session_pb2.RuntimeStreamSessionProtocol.ValueType = ...,
         value: _builtins.int = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _Never
@@ -1332,12 +1332,12 @@ class RunnerRuntimeWebReasonCount(_message.Message):
 
     REASON_FIELD_NUMBER: _builtins.int
     VALUE_FIELD_NUMBER: _builtins.int
-    reason: _runtime_web_session_pb2.RuntimeWebSessionCloseReason.ValueType
+    reason: _runtime_stream_session_pb2.RuntimeStreamSessionCloseReason.ValueType
     value: _builtins.int
     def __init__(
         self,
         *,
-        reason: _runtime_web_session_pb2.RuntimeWebSessionCloseReason.ValueType = ...,
+        reason: _runtime_stream_session_pb2.RuntimeStreamSessionCloseReason.ValueType = ...,
         value: _builtins.int = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _Never
@@ -1358,15 +1358,15 @@ class RunnerRuntimeWebTrafficCount(_message.Message):
     DIRECTION_FIELD_NUMBER: _builtins.int
     FRAMES_FIELD_NUMBER: _builtins.int
     BYTES_FIELD_NUMBER: _builtins.int
-    protocol: _runtime_web_session_pb2.RuntimeWebSessionProtocol.ValueType
-    direction: _runtime_web_session_pb2.RuntimeWebSessionDirection.ValueType
+    protocol: _runtime_stream_session_pb2.RuntimeStreamSessionProtocol.ValueType
+    direction: _runtime_stream_session_pb2.RuntimeStreamSessionDirection.ValueType
     frames: _builtins.int
     bytes: _builtins.int
     def __init__(
         self,
         *,
-        protocol: _runtime_web_session_pb2.RuntimeWebSessionProtocol.ValueType = ...,
-        direction: _runtime_web_session_pb2.RuntimeWebSessionDirection.ValueType = ...,
+        protocol: _runtime_stream_session_pb2.RuntimeStreamSessionProtocol.ValueType = ...,
+        direction: _runtime_stream_session_pb2.RuntimeStreamSessionDirection.ValueType = ...,
         frames: _builtins.int = ...,
         bytes: _builtins.int = ...,
     ) -> None: ...

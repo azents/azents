@@ -8,17 +8,17 @@ from collections import deque
 from collections.abc import AsyncIterable, AsyncIterator, Awaitable, Callable, Sequence
 from typing import Protocol, Self, TypeVar
 
-from azents_runtime_control.proto import runtime_web_session_pb2
-from azents_runtime_control.runtime_web_session import (
+from azents_runtime_control.proto import runtime_stream_session_pb2
+from azents_runtime_control.runtime_stream_session import (
     CONTROL_RESERVE_BYTES,
     MAX_ENVELOPE_BYTES,
     MAX_STREAM_TOMBSTONES,
-    RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+    RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
     SESSION_WINDOW_BYTES,
     OwnerSessionEpoch,
 )
 
-from azents.runtime.web_session_broker import BrokerTarget
+from azents.runtime.stream_session_broker import BrokerTarget
 
 _MAX_PENDING_RELAY_ENVELOPES = 32
 _HEARTBEAT_INTERVAL_SECONDS = 5.0
@@ -43,7 +43,7 @@ class RelaySessionKey:
     protocol_fingerprint: str
 
     def __post_init__(self) -> None:
-        if self.protocol_fingerprint != RUNTIME_WEB_PROTOCOL_FINGERPRINT:
+        if self.protocol_fingerprint != RUNTIME_STREAM_PROTOCOL_FINGERPRINT:
             raise ValueError("Runtime Web relay fingerprint is incompatible")
 
 
@@ -82,7 +82,7 @@ class PersistentRelayConnection(Protocol):
     """One already-authenticated persistent Control-to-Control session."""
 
     async def send(
-        self, envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope
+        self, envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope
     ) -> None: ...
 
     async def close(self) -> None: ...
@@ -96,12 +96,12 @@ class ControlRelayStream(Protocol):
     def __call__(
         self,
         request_iterator: AsyncIterator[
-            runtime_web_session_pb2.RuntimeWebSessionEnvelope
+            runtime_stream_session_pb2.RuntimeStreamSessionEnvelope
         ],
         /,
         *,
         metadata: Sequence[tuple[str, str]] | None = None,
-    ) -> AsyncIterable[runtime_web_session_pb2.RuntimeWebSessionEnvelope]: ...
+    ) -> AsyncIterable[runtime_stream_session_pb2.RuntimeStreamSessionEnvelope]: ...
 
 
 class ControlRelayEnvelopeHandler(Protocol):
@@ -109,7 +109,7 @@ class ControlRelayEnvelopeHandler(Protocol):
 
     def __call__(
         self,
-        envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+        envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
         /,
     ) -> Awaitable[None]: ...
 
@@ -142,7 +142,7 @@ class ControlRelayResources(Protocol):
 
 @dataclasses.dataclass(frozen=True)
 class _BufferedRelayEnvelope:
-    envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope
+    envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope
     application_bytes: int
     control_bytes: int
 
@@ -216,7 +216,7 @@ class GrpcPersistentControlRelay:
         *,
         key: RelaySessionKey,
         stream: ControlRelayStream,
-        hello: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+        hello: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
         handler: ControlRelayEnvelopeHandler,
         timeout_seconds: float,
         resources: ControlRelayResources | None,
@@ -277,7 +277,7 @@ class GrpcPersistentControlRelay:
         return relay
 
     async def send(
-        self, envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope
+        self, envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope
     ) -> None:
         """Queue one exact byte-bounded relay envelope without replay."""
         if (
@@ -315,7 +315,7 @@ class GrpcPersistentControlRelay:
                         "Runtime Web relay hard queue limit is exhausted"
                     )
                 reserved = True
-            queued = runtime_web_session_pb2.RuntimeWebSessionEnvelope()
+            queued = runtime_stream_session_pb2.RuntimeStreamSessionEnvelope()
             try:
                 queued.CopyFrom(envelope)
                 self.outbound.append(
@@ -371,8 +371,8 @@ class GrpcPersistentControlRelay:
         await self.closed.wait()
 
     async def _outbound_messages(
-        self, hello: runtime_web_session_pb2.RuntimeWebSessionEnvelope
-    ) -> AsyncIterator[runtime_web_session_pb2.RuntimeWebSessionEnvelope]:
+        self, hello: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope
+    ) -> AsyncIterator[runtime_stream_session_pb2.RuntimeStreamSessionEnvelope]:
         yield hello
         while True:
             async with self.condition:
@@ -389,8 +389,12 @@ class GrpcPersistentControlRelay:
 
     async def _receive(
         self,
-        responses: AsyncIterable[runtime_web_session_pb2.RuntimeWebSessionEnvelope],
-        accepted: asyncio.Future[runtime_web_session_pb2.RuntimeWebSessionEnvelope],
+        responses: AsyncIterable[
+            runtime_stream_session_pb2.RuntimeStreamSessionEnvelope
+        ],
+        accepted: asyncio.Future[
+            runtime_stream_session_pb2.RuntimeStreamSessionEnvelope
+        ],
     ) -> None:
         first = True
         try:
@@ -460,7 +464,7 @@ class GrpcPersistentControlRelay:
                 return
             self.heartbeat_sequence += 1
             owner = self.key.owner
-            heartbeat = runtime_web_session_pb2.RuntimeWebSessionEnvelope(
+            heartbeat = runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(
                 protocol_fingerprint=self.key.protocol_fingerprint,
                 session_id=owner.session_lease_id,
                 peer_boot_id=self.local_peer_boot_id,
@@ -500,7 +504,7 @@ type RelayRetirementHandler = Callable[
 ]
 
 
-class RuntimeWebRelayPool:
+class RuntimeStreamRelayPool:
     """Reuse one bounded relay per Owner epoch without retry or replay."""
 
     def __init__(
@@ -560,12 +564,12 @@ class RuntimeWebRelayPool:
         self,
         *,
         target: BrokerTarget,
-        envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+        envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
     ) -> RelayStreamBinding | None:
         """Map and send one source envelope over exactly one persistent relay."""
         if target.local or target.relay_count != 1:
             raise ValueError("Runtime Web relay requires one remote Owner hop")
-        if envelope.protocol_fingerprint != RUNTIME_WEB_PROTOCOL_FINGERPRINT:
+        if envelope.protocol_fingerprint != RUNTIME_STREAM_PROTOCOL_FINGERPRINT:
             raise ValueError("Runtime Web relay envelope fingerprint is incompatible")
         if not 1 <= envelope.ByteSize() <= MAX_ENVELOPE_BYTES:
             raise ValueError("Runtime Web relay envelope size is invalid")
@@ -589,7 +593,7 @@ class RuntimeWebRelayPool:
             source_peer_boot_id=envelope.peer_boot_id,
             source_stream_id=envelope.stream_id,
         )
-        key = RelaySessionKey(target.owner, RUNTIME_WEB_PROTOCOL_FINGERPRINT)
+        key = RelaySessionKey(target.owner, RUNTIME_STREAM_PROTOCOL_FINGERPRINT)
         routed = await self._route(
             key,
             source,
@@ -600,7 +604,7 @@ class RuntimeWebRelayPool:
             return None
         connection = routed.connection
         binding = routed.binding
-        forwarded = runtime_web_session_pb2.RuntimeWebSessionEnvelope()
+        forwarded = runtime_stream_session_pb2.RuntimeStreamSessionEnvelope()
         forwarded.CopyFrom(envelope)
         forwarded.session_id = key.owner.session_lease_id
         forwarded.peer_boot_id = self.peer_boot_id
@@ -611,7 +615,7 @@ class RuntimeWebRelayPool:
         if (
             forwarded.WhichOneof("payload") == "window_update"
             and forwarded.window_update.direction
-            == runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_RESPONSE
+            == runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_DIRECTION_RESPONSE
         ):
             async with self.lock:
                 if (
@@ -668,8 +672,8 @@ class RuntimeWebRelayPool:
         self,
         *,
         key: RelaySessionKey,
-        envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
-    ) -> runtime_web_session_pb2.RuntimeWebSessionEnvelope | None:
+        envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
+    ) -> runtime_stream_session_pb2.RuntimeStreamSessionEnvelope | None:
         """Translate one exact Owner relay stream ID back to its source session."""
         if (
             not _matches_epoch(envelope, key)
@@ -684,7 +688,7 @@ class RuntimeWebRelayPool:
                 if (key, envelope.stream_id) in self.relay_tombstone_set:
                     return None
                 raise ValueError("Runtime Web relay response stream is unknown")
-            translated = runtime_web_session_pb2.RuntimeWebSessionEnvelope()
+            translated = runtime_stream_session_pb2.RuntimeStreamSessionEnvelope()
             translated.CopyFrom(envelope)
             translated.session_id = binding.source.source_session_id
             translated.peer_boot_id = self.peer_boot_id
@@ -692,7 +696,7 @@ class RuntimeWebRelayPool:
             if (
                 envelope.WhichOneof("payload") == "window_update"
                 and envelope.window_update.direction
-                == runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_REQUEST
+                == runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_DIRECTION_REQUEST
             ):
                 owner_session_total = envelope.window_update.session_consumed_total
                 previous_owner_session_total = self.owner_request_session_consumed.get(
@@ -731,15 +735,14 @@ class RuntimeWebRelayPool:
                 )
                 translated.window_update.session_consumed_total = source_session_total
             if envelope.WhichOneof("payload") == "open_accepted":
-                if (
-                    envelope.open_accepted.route_path
-                    != runtime_web_session_pb2.RUNTIME_WEB_SESSION_ROUTE_PATH_LOCAL
+                if envelope.open_accepted.route_path != (
+                    runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_ROUTE_PATH_LOCAL
                 ):
                     raise ValueError(
                         "Runtime Web Owner-local route acceptance is invalid"
                     )
                 translated.open_accepted.route_path = (
-                    runtime_web_session_pb2.RUNTIME_WEB_SESSION_ROUTE_PATH_RELAY
+                    runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_ROUTE_PATH_RELAY
                 )
             if envelope.WhichOneof("payload") in {
                 "open_rejected",
@@ -920,7 +923,7 @@ class RuntimeWebRelayPool:
 
 
 def _matches_epoch(
-    envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+    envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
     key: RelaySessionKey,
 ) -> bool:
     return (
@@ -936,7 +939,7 @@ def _matches_epoch(
 
 
 def _application_bytes(
-    envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+    envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
 ) -> int:
     payload = envelope.WhichOneof("payload")
     if payload == "data":

@@ -5,7 +5,7 @@
 import grpc
 import warnings
 
-from . import runtime_web_session_pb2 as runtime__web__session__pb2
+from . import runtime_stream_session_pb2 as runtime__stream__session__pb2
 
 GRPC_GENERATED_VERSION = "1.83.0"
 GRPC_VERSION = grpc.__version__
@@ -23,14 +23,14 @@ except ImportError:
 if _version_not_supported:
     raise RuntimeError(
         f"The grpc package installed is at version {GRPC_VERSION},"
-        + " but the generated code in runtime_web_session_pb2_grpc.py depends on"
+        + " but the generated code in runtime_stream_session_pb2_grpc.py depends on"
         + f" grpcio>={GRPC_GENERATED_VERSION}."
         + f" Please upgrade your grpc module to grpcio>={GRPC_GENERATED_VERSION}"
         + f" or downgrade your generated code using grpcio-tools<={GRPC_VERSION}."
     )
 
 
-class RuntimeWebGatewaySessionStub:
+class RuntimeStreamGatewaySessionStub:
     """Missing associated documentation comment in .proto file."""
 
     def __init__(self, channel):
@@ -40,14 +40,14 @@ class RuntimeWebGatewaySessionStub:
             channel: A grpc.Channel.
         """
         self.Connect = channel.stream_stream(
-            "/azents.runtime_control.v1.RuntimeWebGatewaySession/Connect",
-            request_serializer=runtime__web__session__pb2.RuntimeWebSessionEnvelope.SerializeToString,
-            response_deserializer=runtime__web__session__pb2.RuntimeWebSessionEnvelope.FromString,
+            "/azents.runtime_control.v1.RuntimeStreamGatewaySession/Connect",
+            request_serializer=runtime__stream__session__pb2.RuntimeStreamSessionEnvelope.SerializeToString,
+            response_deserializer=runtime__stream__session__pb2.RuntimeStreamSessionEnvelope.FromString,
             _registered_method=True,
         )
 
 
-class RuntimeWebGatewaySessionServicer:
+class RuntimeStreamGatewaySessionServicer:
     """Missing associated documentation comment in .proto file."""
 
     def Connect(self, request_iterator, context):
@@ -57,25 +57,25 @@ class RuntimeWebGatewaySessionServicer:
         raise NotImplementedError("Method not implemented!")
 
 
-def add_RuntimeWebGatewaySessionServicer_to_server(servicer, server):
+def add_RuntimeStreamGatewaySessionServicer_to_server(servicer, server):
     rpc_method_handlers = {
         "Connect": grpc.stream_stream_rpc_method_handler(
             servicer.Connect,
-            request_deserializer=runtime__web__session__pb2.RuntimeWebSessionEnvelope.FromString,
-            response_serializer=runtime__web__session__pb2.RuntimeWebSessionEnvelope.SerializeToString,
+            request_deserializer=runtime__stream__session__pb2.RuntimeStreamSessionEnvelope.FromString,
+            response_serializer=runtime__stream__session__pb2.RuntimeStreamSessionEnvelope.SerializeToString,
         ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
-        "azents.runtime_control.v1.RuntimeWebGatewaySession", rpc_method_handlers
+        "azents.runtime_control.v1.RuntimeStreamGatewaySession", rpc_method_handlers
     )
     server.add_generic_rpc_handlers((generic_handler,))
     server.add_registered_method_handlers(
-        "azents.runtime_control.v1.RuntimeWebGatewaySession", rpc_method_handlers
+        "azents.runtime_control.v1.RuntimeStreamGatewaySession", rpc_method_handlers
     )
 
 
 # This class is part of an EXPERIMENTAL API.
-class RuntimeWebGatewaySession:
+class RuntimeStreamGatewaySession:
     """Missing associated documentation comment in .proto file."""
 
     @staticmethod
@@ -94,9 +94,9 @@ class RuntimeWebGatewaySession:
         return grpc.experimental.stream_stream(
             request_iterator,
             target,
-            "/azents.runtime_control.v1.RuntimeWebGatewaySession/Connect",
-            runtime__web__session__pb2.RuntimeWebSessionEnvelope.SerializeToString,
-            runtime__web__session__pb2.RuntimeWebSessionEnvelope.FromString,
+            "/azents.runtime_control.v1.RuntimeStreamGatewaySession/Connect",
+            runtime__stream__session__pb2.RuntimeStreamSessionEnvelope.SerializeToString,
+            runtime__stream__session__pb2.RuntimeStreamSessionEnvelope.FromString,
             options,
             channel_credentials,
             insecure,
@@ -109,7 +109,7 @@ class RuntimeWebGatewaySession:
         )
 
 
-class RuntimeWebControlSessionStub:
+class RuntimeStreamControlSessionStub:
     """Missing associated documentation comment in .proto file."""
 
     def __init__(self, channel):
@@ -119,14 +119,14 @@ class RuntimeWebControlSessionStub:
             channel: A grpc.Channel.
         """
         self.Relay = channel.stream_stream(
-            "/azents.runtime_control.v1.RuntimeWebControlSession/Relay",
-            request_serializer=runtime__web__session__pb2.RuntimeWebSessionEnvelope.SerializeToString,
-            response_deserializer=runtime__web__session__pb2.RuntimeWebSessionEnvelope.FromString,
+            "/azents.runtime_control.v1.RuntimeStreamControlSession/Relay",
+            request_serializer=runtime__stream__session__pb2.RuntimeStreamSessionEnvelope.SerializeToString,
+            response_deserializer=runtime__stream__session__pb2.RuntimeStreamSessionEnvelope.FromString,
             _registered_method=True,
         )
 
 
-class RuntimeWebControlSessionServicer:
+class RuntimeStreamControlSessionServicer:
     """Missing associated documentation comment in .proto file."""
 
     def Relay(self, request_iterator, context):
@@ -136,25 +136,25 @@ class RuntimeWebControlSessionServicer:
         raise NotImplementedError("Method not implemented!")
 
 
-def add_RuntimeWebControlSessionServicer_to_server(servicer, server):
+def add_RuntimeStreamControlSessionServicer_to_server(servicer, server):
     rpc_method_handlers = {
         "Relay": grpc.stream_stream_rpc_method_handler(
             servicer.Relay,
-            request_deserializer=runtime__web__session__pb2.RuntimeWebSessionEnvelope.FromString,
-            response_serializer=runtime__web__session__pb2.RuntimeWebSessionEnvelope.SerializeToString,
+            request_deserializer=runtime__stream__session__pb2.RuntimeStreamSessionEnvelope.FromString,
+            response_serializer=runtime__stream__session__pb2.RuntimeStreamSessionEnvelope.SerializeToString,
         ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
-        "azents.runtime_control.v1.RuntimeWebControlSession", rpc_method_handlers
+        "azents.runtime_control.v1.RuntimeStreamControlSession", rpc_method_handlers
     )
     server.add_generic_rpc_handlers((generic_handler,))
     server.add_registered_method_handlers(
-        "azents.runtime_control.v1.RuntimeWebControlSession", rpc_method_handlers
+        "azents.runtime_control.v1.RuntimeStreamControlSession", rpc_method_handlers
     )
 
 
 # This class is part of an EXPERIMENTAL API.
-class RuntimeWebControlSession:
+class RuntimeStreamControlSession:
     """Missing associated documentation comment in .proto file."""
 
     @staticmethod
@@ -173,9 +173,9 @@ class RuntimeWebControlSession:
         return grpc.experimental.stream_stream(
             request_iterator,
             target,
-            "/azents.runtime_control.v1.RuntimeWebControlSession/Relay",
-            runtime__web__session__pb2.RuntimeWebSessionEnvelope.SerializeToString,
-            runtime__web__session__pb2.RuntimeWebSessionEnvelope.FromString,
+            "/azents.runtime_control.v1.RuntimeStreamControlSession/Relay",
+            runtime__stream__session__pb2.RuntimeStreamSessionEnvelope.SerializeToString,
+            runtime__stream__session__pb2.RuntimeStreamSessionEnvelope.FromString,
             options,
             channel_credentials,
             insecure,
@@ -188,7 +188,7 @@ class RuntimeWebControlSession:
         )
 
 
-class RuntimeRunnerWebSessionStub:
+class RuntimeRunnerStreamSessionStub:
     """Missing associated documentation comment in .proto file."""
 
     def __init__(self, channel):
@@ -198,14 +198,14 @@ class RuntimeRunnerWebSessionStub:
             channel: A grpc.Channel.
         """
         self.Connect = channel.stream_stream(
-            "/azents.runtime_control.v1.RuntimeRunnerWebSession/Connect",
-            request_serializer=runtime__web__session__pb2.RuntimeWebSessionEnvelope.SerializeToString,
-            response_deserializer=runtime__web__session__pb2.RuntimeWebSessionEnvelope.FromString,
+            "/azents.runtime_control.v1.RuntimeRunnerStreamSession/Connect",
+            request_serializer=runtime__stream__session__pb2.RuntimeStreamSessionEnvelope.SerializeToString,
+            response_deserializer=runtime__stream__session__pb2.RuntimeStreamSessionEnvelope.FromString,
             _registered_method=True,
         )
 
 
-class RuntimeRunnerWebSessionServicer:
+class RuntimeRunnerStreamSessionServicer:
     """Missing associated documentation comment in .proto file."""
 
     def Connect(self, request_iterator, context):
@@ -215,25 +215,25 @@ class RuntimeRunnerWebSessionServicer:
         raise NotImplementedError("Method not implemented!")
 
 
-def add_RuntimeRunnerWebSessionServicer_to_server(servicer, server):
+def add_RuntimeRunnerStreamSessionServicer_to_server(servicer, server):
     rpc_method_handlers = {
         "Connect": grpc.stream_stream_rpc_method_handler(
             servicer.Connect,
-            request_deserializer=runtime__web__session__pb2.RuntimeWebSessionEnvelope.FromString,
-            response_serializer=runtime__web__session__pb2.RuntimeWebSessionEnvelope.SerializeToString,
+            request_deserializer=runtime__stream__session__pb2.RuntimeStreamSessionEnvelope.FromString,
+            response_serializer=runtime__stream__session__pb2.RuntimeStreamSessionEnvelope.SerializeToString,
         ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
-        "azents.runtime_control.v1.RuntimeRunnerWebSession", rpc_method_handlers
+        "azents.runtime_control.v1.RuntimeRunnerStreamSession", rpc_method_handlers
     )
     server.add_generic_rpc_handlers((generic_handler,))
     server.add_registered_method_handlers(
-        "azents.runtime_control.v1.RuntimeRunnerWebSession", rpc_method_handlers
+        "azents.runtime_control.v1.RuntimeRunnerStreamSession", rpc_method_handlers
     )
 
 
 # This class is part of an EXPERIMENTAL API.
-class RuntimeRunnerWebSession:
+class RuntimeRunnerStreamSession:
     """Missing associated documentation comment in .proto file."""
 
     @staticmethod
@@ -252,9 +252,9 @@ class RuntimeRunnerWebSession:
         return grpc.experimental.stream_stream(
             request_iterator,
             target,
-            "/azents.runtime_control.v1.RuntimeRunnerWebSession/Connect",
-            runtime__web__session__pb2.RuntimeWebSessionEnvelope.SerializeToString,
-            runtime__web__session__pb2.RuntimeWebSessionEnvelope.FromString,
+            "/azents.runtime_control.v1.RuntimeRunnerStreamSession/Connect",
+            runtime__stream__session__pb2.RuntimeStreamSessionEnvelope.SerializeToString,
+            runtime__stream__session__pb2.RuntimeStreamSessionEnvelope.FromString,
             options,
             channel_credentials,
             insecure,

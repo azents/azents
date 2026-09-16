@@ -9,9 +9,9 @@ from typing import TYPE_CHECKING, Protocol
 import grpc
 from google.protobuf import timestamp_pb2
 
-from azents_runtime_control.grpc_runner_web_session_client import (
-    GrpcRunnerWebSessionClient,
-    RunnerWebEnvelopeResources,
+from azents_runtime_control.grpc_runner_stream_session_client import (
+    GrpcRunnerStreamSessionClient,
+    RunnerStreamEnvelopeResources,
 )
 from azents_runtime_control.grpc_tls import (
     GrpcClientTlsConfig,
@@ -22,7 +22,7 @@ from azents_runtime_control.proto import (
     runtime_runner_control_pb2,
     runtime_runner_terminal_pb2,
     runtime_runner_transfer_pb2,
-    runtime_web_session_pb2,
+    runtime_stream_session_pb2,
 )
 from azents_runtime_control.runner import (
     JsonValue,
@@ -65,7 +65,7 @@ from azents_runtime_control.runtime_configuration import (
     parse_configuration_sequence,
     serialize_configuration_sequence,
 )
-from azents_runtime_control.runtime_web_session import (
+from azents_runtime_control.runtime_stream_session import (
     CloseReason,
     OwnerSessionEpoch,
     RunnerSessionOffer,
@@ -88,15 +88,15 @@ if TYPE_CHECKING:
     from azents_runtime_control.proto.runtime_runner_control_pb2_grpc import (
         RuntimeRunnerControlAsyncStub as _RuntimeRunnerControlStub,
     )
-    from azents_runtime_control.proto.runtime_web_session_pb2_grpc import (
-        RuntimeRunnerWebSessionAsyncStub as _RuntimeRunnerWebSessionStub,
+    from azents_runtime_control.proto.runtime_stream_session_pb2_grpc import (
+        RuntimeRunnerStreamSessionAsyncStub as _RuntimeRunnerStreamSessionStub,
     )
 else:
     from azents_runtime_control.proto.runtime_runner_control_pb2_grpc import (
         RuntimeRunnerControlStub as _RuntimeRunnerControlStub,
     )
-    from azents_runtime_control.proto.runtime_web_session_pb2_grpc import (
-        RuntimeRunnerWebSessionStub as _RuntimeRunnerWebSessionStub,
+    from azents_runtime_control.proto.runtime_stream_session_pb2_grpc import (
+        RuntimeRunnerStreamSessionStub as _RuntimeRunnerStreamSessionStub,
     )
 
 
@@ -151,7 +151,7 @@ class GrpcRunnerControlClient(RunnerControlClient):
         self._terminal_terminate_intent_handler: (
             RunnerTerminalTerminateIntentHandler | None
         ) = None
-        self._web_session_offer_handler: RunnerSessionOfferHandler | None = None
+        self._stream_session_offer_handler: RunnerSessionOfferHandler | None = None
         self._pending_heartbeat_acks: dict[
             str, asyncio.Future[RunnerHeartbeatAcknowledgement]
         ] = {}
@@ -225,23 +225,23 @@ class GrpcRunnerControlClient(RunnerControlClient):
         """Set the direct metadata-only Terminal termination handler."""
         self._terminal_terminate_intent_handler = handler
 
-    def set_web_session_offer_handler(
+    def set_stream_session_offer_handler(
         self,
         handler: RunnerSessionOfferHandler,
     ) -> None:
         """Set the exact replacement Runtime Web session offer handler."""
-        self._web_session_offer_handler = handler
+        self._stream_session_offer_handler = handler
 
-    def create_web_session_client(
+    def create_stream_session_client(
         self,
         *,
-        outbound_resources: RunnerWebEnvelopeResources | None,
-    ) -> GrpcRunnerWebSessionClient:
+        outbound_resources: RunnerStreamEnvelopeResources | None,
+    ) -> GrpcRunnerStreamSessionClient:
         """Create one Runner Web RPC client borrowing this Control channel."""
         if self._channel is None:
             raise RuntimeError("Runner Control client does not own a gRPC channel")
-        return GrpcRunnerWebSessionClient(
-            _RuntimeRunnerWebSessionStub(self._channel).Connect,
+        return GrpcRunnerStreamSessionClient(
+            _RuntimeRunnerStreamSessionStub(self._channel).Connect,
             runner_auth_token=self._runner_auth_token,
             channel=None,
             outbound_resources=outbound_resources,
@@ -520,13 +520,13 @@ class GrpcRunnerControlClient(RunnerControlClient):
                 )
             )
             return
-        if payload == "web_session_offer":
-            if self._web_session_offer_handler is None:
+        if payload == "stream_session_offer":
+            if self._stream_session_offer_handler is None:
                 raise RuntimeRunnerControlStreamClosed(
                     "Runner Web session offer handler is not registered"
                 )
-            await self._web_session_offer_handler(
-                runner_session_offer_from_message(message.web_session_offer)
+            await self._stream_session_offer_handler(
+                runner_session_offer_from_message(message.stream_session_offer)
             )
             return
         if payload == "error":
@@ -874,13 +874,13 @@ def _runtime_web_metrics_to_message(
 
 
 def _runtime_web_protocol_from_message(
-    value: runtime_web_session_pb2.RuntimeWebSessionProtocol.ValueType,
+    value: runtime_stream_session_pb2.RuntimeStreamSessionProtocol.ValueType,
 ) -> StreamProtocol:
     mapping = {
-        runtime_web_session_pb2.RUNTIME_WEB_SESSION_PROTOCOL_HTTP: (
+        runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_PROTOCOL_HTTP: (
             StreamProtocol.HTTP
         ),
-        runtime_web_session_pb2.RUNTIME_WEB_SESSION_PROTOCOL_WEBSOCKET: (
+        runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_PROTOCOL_WEBSOCKET: (
             StreamProtocol.WEBSOCKET
         ),
     }
@@ -892,25 +892,25 @@ def _runtime_web_protocol_from_message(
 
 def _runtime_web_protocol_to_message(
     protocol: StreamProtocol,
-) -> runtime_web_session_pb2.RuntimeWebSessionProtocol.ValueType:
+) -> runtime_stream_session_pb2.RuntimeStreamSessionProtocol.ValueType:
     return {
         StreamProtocol.HTTP: (
-            runtime_web_session_pb2.RUNTIME_WEB_SESSION_PROTOCOL_HTTP
+            runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_PROTOCOL_HTTP
         ),
         StreamProtocol.WEBSOCKET: (
-            runtime_web_session_pb2.RUNTIME_WEB_SESSION_PROTOCOL_WEBSOCKET
+            runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_PROTOCOL_WEBSOCKET
         ),
     }[protocol]
 
 
 def _runtime_web_direction_from_message(
-    value: runtime_web_session_pb2.RuntimeWebSessionDirection.ValueType,
+    value: runtime_stream_session_pb2.RuntimeStreamSessionDirection.ValueType,
 ) -> StreamDirection:
     mapping = {
-        runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_REQUEST: (
+        runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_DIRECTION_REQUEST: (
             StreamDirection.REQUEST
         ),
-        runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_RESPONSE: (
+        runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_DIRECTION_RESPONSE: (
             StreamDirection.RESPONSE
         ),
     }
@@ -922,25 +922,25 @@ def _runtime_web_direction_from_message(
 
 def _runtime_web_direction_to_message(
     direction: StreamDirection,
-) -> runtime_web_session_pb2.RuntimeWebSessionDirection.ValueType:
+) -> runtime_stream_session_pb2.RuntimeStreamSessionDirection.ValueType:
     return {
         StreamDirection.REQUEST: (
-            runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_REQUEST
+            runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_DIRECTION_REQUEST
         ),
         StreamDirection.RESPONSE: (
-            runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_RESPONSE
+            runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_DIRECTION_RESPONSE
         ),
     }[direction]
 
 
 def _runtime_web_reason_from_message(
-    value: runtime_web_session_pb2.RuntimeWebSessionCloseReason.ValueType,
+    value: runtime_stream_session_pb2.RuntimeStreamSessionCloseReason.ValueType,
 ) -> CloseReason:
     try:
-        name = runtime_web_session_pb2.RuntimeWebSessionCloseReason.Name(value)
+        name = runtime_stream_session_pb2.RuntimeStreamSessionCloseReason.Name(value)
     except ValueError as error:
         raise ValueError("Runtime Web metrics reason is invalid") from error
-    prefix = "RUNTIME_WEB_SESSION_CLOSE_REASON_"
+    prefix = "RUNTIME_STREAM_SESSION_CLOSE_REASON_"
     if not name.startswith(prefix) or name == f"{prefix}UNSPECIFIED":
         raise ValueError("Runtime Web metrics reason is invalid")
     return CloseReason(name.removeprefix(prefix).lower())
@@ -948,9 +948,9 @@ def _runtime_web_reason_from_message(
 
 def _runtime_web_reason_to_message(
     reason: CloseReason,
-) -> runtime_web_session_pb2.RuntimeWebSessionCloseReason.ValueType:
-    return runtime_web_session_pb2.RuntimeWebSessionCloseReason.Value(
-        f"RUNTIME_WEB_SESSION_CLOSE_REASON_{reason.value.upper()}"
+) -> runtime_stream_session_pb2.RuntimeStreamSessionCloseReason.ValueType:
+    return runtime_stream_session_pb2.RuntimeStreamSessionCloseReason.Value(
+        f"RUNTIME_STREAM_SESSION_CLOSE_REASON_{reason.value.upper()}"
     )
 
 

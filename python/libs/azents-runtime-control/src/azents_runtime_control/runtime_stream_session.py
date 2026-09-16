@@ -16,7 +16,7 @@ from google.protobuf.descriptor import Descriptor, FieldDescriptor
 
 from azents_runtime_control.proto import (
     runtime_runner_control_pb2,
-    runtime_web_session_pb2,
+    runtime_stream_session_pb2,
 )
 
 RUNTIME_WEB_CAPABILITY = "runtime-web-http"
@@ -169,7 +169,7 @@ def protocol_fingerprint(
     """Return the exact replacement-protocol equality fingerprint."""
     digest = hashlib.sha256()
     digest.update(
-        runtime_web_session_pb2.DESCRIPTOR.serialized_pb
+        runtime_stream_session_pb2.DESCRIPTOR.serialized_pb
         if descriptor is None
         else descriptor
     )
@@ -183,7 +183,7 @@ def protocol_fingerprint(
     digest.update(
         _field_descriptor_bytes(
             runtime_runner_control_pb2.RunnerControlMessage.DESCRIPTOR.fields_by_name[
-                "web_session_offer"
+                "stream_session_offer"
             ],
             runtime_runner_control_pb2.DESCRIPTOR.serialized_pb,
         )
@@ -231,7 +231,7 @@ def _field_descriptor_bytes(
     return field.SerializeToString(deterministic=True)
 
 
-RUNTIME_WEB_PROTOCOL_FINGERPRINT = protocol_fingerprint()
+RUNTIME_STREAM_PROTOCOL_FINGERPRINT = protocol_fingerprint()
 
 
 @dataclasses.dataclass(frozen=True)
@@ -272,7 +272,7 @@ class RunnerSessionOffer:
         """Reject an incomplete, stale-capable, or incompatible offer."""
         _validate_text(self.session_nonce, "session_nonce", _MAX_NONCE_BYTES)
         _validate_deadline(self.deadline_at, "deadline_at")
-        if self.protocol_fingerprint != RUNTIME_WEB_PROTOCOL_FINGERPRINT:
+        if self.protocol_fingerprint != RUNTIME_STREAM_PROTOCOL_FINGERPRINT:
             raise ValueError("Runtime Web session protocol fingerprint is incompatible")
 
 

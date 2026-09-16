@@ -8,11 +8,11 @@ import secrets
 from collections.abc import Callable
 from typing import Protocol
 
-from azents_runtime_control.proto import runtime_web_session_pb2
-from azents_runtime_control.runtime_web_session import (
+from azents_runtime_control.proto import runtime_stream_session_pb2
+from azents_runtime_control.runtime_stream_session import (
     MANDATORY_DATA_FRAME_BYTES,
     OPTIONAL_DATA_FRAME_BYTES,
-    RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+    RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
     OwnerSessionEpoch,
     RunnerSessionOffer,
     SessionProfile,
@@ -27,7 +27,7 @@ from azents.repos.runtime_web.session_route_repository import (
 
 
 @dataclasses.dataclass(frozen=True)
-class RuntimeWebOwnedSession:
+class RuntimeStreamOwnedSession:
     """Exact durable Owner route and plaintext one-time join offer."""
 
     route: RuntimeWebSessionRoute
@@ -35,7 +35,7 @@ class RuntimeWebOwnedSession:
 
 
 @dataclasses.dataclass(frozen=True)
-class RuntimeWebAcceptedRunnerSession:
+class RuntimeStreamAcceptedRunnerSession:
     """One exact process-local Runner join for an Owner epoch."""
 
     owner: OwnerSessionEpoch
@@ -45,7 +45,7 @@ class RuntimeWebAcceptedRunnerSession:
 
 
 @dataclasses.dataclass(frozen=True)
-class RuntimeWebAuthenticatedRunnerConnection:
+class RuntimeStreamAuthenticatedRunnerConnection:
     """Current identity proven by the ordinary authenticated Runner connection."""
 
     runtime_id: str
@@ -54,7 +54,7 @@ class RuntimeWebAuthenticatedRunnerConnection:
     runner_generation: int
 
 
-class RuntimeWebSessionJoinRepository(Protocol):
+class RuntimeStreamSessionJoinRepository(Protocol):
     """Consume one exact durable Runner join authority."""
 
     async def consume_join(
@@ -71,28 +71,28 @@ class RuntimeWebSessionJoinRepository(Protocol):
     ) -> RuntimeWebSessionRoute: ...
 
 
-class RuntimeWebOwnerSessionRegistry:
+class RuntimeStreamOwnerSessionRegistry:
     """Accept one nonce-bound Runner join per live Owner epoch."""
 
     def __init__(
         self,
         *,
         session_manager: SessionManager[AsyncSession],
-        repository: RuntimeWebSessionJoinRepository,
+        repository: RuntimeStreamSessionJoinRepository,
         clock: Callable[[], datetime.datetime],
     ) -> None:
         self.session_manager = session_manager
         self.repository = repository
         self.clock = clock
         self.lock = asyncio.Lock()
-        self.sessions: dict[OwnerSessionEpoch, RuntimeWebAcceptedRunnerSession] = {}
+        self.sessions: dict[OwnerSessionEpoch, RuntimeStreamAcceptedRunnerSession] = {}
 
     async def accept(
         self,
-        owned: RuntimeWebOwnedSession,
-        envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
-        authenticated: RuntimeWebAuthenticatedRunnerConnection,
-    ) -> RuntimeWebAcceptedRunnerSession:
+        owned: RuntimeStreamOwnedSession,
+        envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
+        authenticated: RuntimeStreamAuthenticatedRunnerConnection,
+    ) -> RuntimeStreamAcceptedRunnerSession:
         """Validate and consume the exact one-time Owner session offer."""
         now = self._now()
         owner = owned.offer.owner
@@ -107,7 +107,7 @@ class RuntimeWebOwnerSessionRegistry:
             or envelope.lease_generation != owner.lease_generation
             or envelope.peer_boot_id != authenticated.runner_boot_id
             or hello.role
-            != runtime_web_session_pb2.RUNTIME_WEB_SESSION_PEER_ROLE_RUNNER
+            != runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_PEER_ROLE_RUNNER
             or hello.runtime_id != owner.runtime_id
             or hello.desired_generation != owner.desired_generation
             or hello.runner_generation != owner.runner_generation
@@ -147,7 +147,7 @@ class RuntimeWebOwnerSessionRegistry:
             )
         if owned.offer.deadline_at <= self._now():
             raise ValueError("Runtime Web Runner session offer expired during join")
-        accepted = RuntimeWebAcceptedRunnerSession(
+        accepted = RuntimeStreamAcceptedRunnerSession(
             owner=owner,
             runner_boot_id=authenticated.runner_boot_id,
             profile=profile,
@@ -159,7 +159,7 @@ class RuntimeWebOwnerSessionRegistry:
             self.sessions[owner] = accepted
         return accepted
 
-    async def release(self, accepted: RuntimeWebAcceptedRunnerSession) -> bool:
+    async def release(self, accepted: RuntimeStreamAcceptedRunnerSession) -> bool:
         """Release only the exact process-local Runner session."""
         async with self.lock:
             current = self.sessions.get(accepted.owner)
@@ -175,7 +175,7 @@ class RuntimeWebOwnerSessionRegistry:
         return now
 
 
-class RuntimeWebSessionOwnerManager:
+class RuntimeStreamSessionOwnerManager:
     """Acquire and maintain one inactive Owner session without application data."""
 
     def __init__(
@@ -212,7 +212,7 @@ class RuntimeWebSessionOwnerManager:
         runtime_id: str,
         desired_generation: int,
         runner_generation: int,
-    ) -> RuntimeWebOwnedSession:
+    ) -> RuntimeStreamOwnedSession:
         """Acquire one Owner epoch and return its plaintext join offer once."""
         nonce = secrets.token_urlsafe(32)
         nonce_hash = hashlib.sha256(nonce.encode()).hexdigest()
@@ -226,7 +226,7 @@ class RuntimeWebSessionOwnerManager:
                 owner_boot_id=self.owner_boot_id,
                 owner_address=self.trusted_owner_address,
                 join_nonce_hash=nonce_hash,
-                protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+                protocol_fingerprint=RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
                 lease_seconds=self.lease_seconds,
             )
         owner = OwnerSessionEpoch(
@@ -237,7 +237,7 @@ class RuntimeWebSessionOwnerManager:
             desired_generation=route.desired_generation,
             runner_generation=route.runner_generation,
         )
-        return RuntimeWebOwnedSession(
+        return RuntimeStreamOwnedSession(
             route=route,
             offer=RunnerSessionOffer(
                 owner=owner,
@@ -251,7 +251,9 @@ class RuntimeWebSessionOwnerManager:
             ),
         )
 
-    async def renew(self, owned: RuntimeWebOwnedSession) -> RuntimeWebOwnedSession:
+    async def renew(
+        self, owned: RuntimeStreamOwnedSession
+    ) -> RuntimeStreamOwnedSession:
         """Renew the exact lease without extending the one-time join deadline."""
         async with self.session_manager() as session:
             route = await self.repository.renew(
@@ -267,8 +269,8 @@ class RuntimeWebSessionOwnerManager:
 
     async def mark_draining(
         self,
-        owned: RuntimeWebOwnedSession,
-    ) -> RuntimeWebOwnedSession:
+        owned: RuntimeStreamOwnedSession,
+    ) -> RuntimeStreamOwnedSession:
         """Fence new work while the exact Owner drains existing streams."""
         async with self.session_manager() as session:
             route = await self.repository.mark_draining(
@@ -280,7 +282,7 @@ class RuntimeWebSessionOwnerManager:
             )
         return dataclasses.replace(owned, route=route)
 
-    async def release(self, owned: RuntimeWebOwnedSession) -> bool:
+    async def release(self, owned: RuntimeStreamOwnedSession) -> bool:
         """Release only the exact current Owner epoch."""
         async with self.session_manager() as session:
             return await self.repository.release(

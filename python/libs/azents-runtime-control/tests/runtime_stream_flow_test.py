@@ -2,7 +2,7 @@
 
 import pytest
 
-from azents_runtime_control.runtime_web_flow import (
+from azents_runtime_control.runtime_stream_flow import (
     AbsoluteCreditWindow,
     FairFrameScheduler,
     HierarchicalCredit,

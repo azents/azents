@@ -10,18 +10,18 @@ from datetime import UTC, datetime, timedelta
 from typing import AsyncContextManager, NamedTuple
 
 import pytest
-from azents_runtime_control.proto import runtime_web_session_pb2
-from azents_runtime_control.runtime_web_capacity import (
-    CapacityProfile,
-    CapacityProtocol,
-)
-from azents_runtime_control.runtime_web_session import (
+from azents_runtime_control.proto import runtime_stream_session_pb2
+from azents_runtime_control.runtime_stream_session import (
     APPROVED_SESSION_PROFILE,
-    RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+    RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
     CloseReason,
     OwnerSessionEpoch,
     StreamDirection,
     StreamProtocol,
+)
+from azents_runtime_control.runtime_web_capacity import (
+    CapacityProfile,
+    CapacityProtocol,
 )
 from azents_runtime_control.system_metrics import (
     RunnerRuntimeWebMetrics,
@@ -40,17 +40,17 @@ from azents.repos.runtime_web.session_route_repository import (
     RuntimeWebSessionRouteRepository,
 )
 from azents.runtime.control_protocol.grpc import (
-    runtime_web_session_server as runtime_web_session_server_module,
+    runtime_stream_session_server as runtime_stream_session_server_module,
 )
-from azents.runtime.control_protocol.grpc.runtime_web_session_server import (
+from azents.runtime.control_protocol.grpc.runtime_stream_session_server import (
+    RuntimeStreamControlDataPlane,
+    RuntimeStreamControlHardLimits,
+    RuntimeStreamControlResourceTracker,
+    RuntimeStreamGatewaySessionGrpcServicer,
+    RuntimeStreamTrustedPeerAuthenticator,
     RuntimeWebCapacityBackend,
     RuntimeWebCapacityConfig,
     RuntimeWebCapacityRegistry,
-    RuntimeWebControlDataPlane,
-    RuntimeWebControlHardLimits,
-    RuntimeWebControlResourceTracker,
-    RuntimeWebGatewaySessionGrpcServicer,
-    RuntimeWebTrustedPeerAuthenticator,
     _BoundedEnvelopeQueue,
     _register_joined_runner,
     _renew_owner_session,
@@ -59,18 +59,18 @@ from azents.runtime.control_protocol.grpc.runtime_web_session_server import (
     _StreamBinding,
 )
 from azents.runtime.coordination.data import RuntimeSystemMetricsSample
-from azents.runtime.web_session_broker import BrokerStreamKey, BrokerTarget
-from azents.runtime.web_session_owner import (
-    RuntimeWebAcceptedRunnerSession,
-    RuntimeWebOwnedSession,
-    RuntimeWebOwnerSessionRegistry,
+from azents.runtime.stream_session_broker import BrokerStreamKey, BrokerTarget
+from azents.runtime.stream_session_owner import (
+    RuntimeStreamAcceptedRunnerSession,
+    RuntimeStreamOwnedSession,
+    RuntimeStreamOwnerSessionRegistry,
 )
-from azents.runtime.web_session_relay import (
+from azents.runtime.stream_session_relay import (
     PersistentRelayConnection,
     RelaySessionKey,
     RelaySourceStreamKey,
     RelayStreamBinding,
-    RuntimeWebRelayPool,
+    RuntimeStreamRelayPool,
 )
 from azents.testing.grpc import FakeGrpcContext
 
@@ -148,7 +148,7 @@ class _OwnerLifecycle:
         *,
         runtime_id: str,
         runner_generation: int,
-    ) -> RuntimeWebOwnedSession | None:
+    ) -> RuntimeStreamOwnedSession | None:
         del runtime_id, runner_generation
         return None
 
@@ -169,23 +169,23 @@ class _OwnerLifecycle:
         return True
 
 
-class _FailingRegistrationDataPlane(RuntimeWebControlDataPlane):
+class _FailingRegistrationDataPlane(RuntimeStreamControlDataPlane):
     def __init__(self) -> None:
         pass
 
     async def register_runner(
         self,
-        accepted: RuntimeWebAcceptedRunnerSession,
+        accepted: RuntimeStreamAcceptedRunnerSession,
     ) -> _RunnerConnection:
         del accepted
         raise asyncio.CancelledError
 
 
-class _RecordingOwnerRegistry(RuntimeWebOwnerSessionRegistry):
+class _RecordingOwnerRegistry(RuntimeStreamOwnerSessionRegistry):
     def __init__(self) -> None:
-        self.released: list[RuntimeWebAcceptedRunnerSession] = []
+        self.released: list[RuntimeStreamAcceptedRunnerSession] = []
 
-    async def release(self, accepted: RuntimeWebAcceptedRunnerSession) -> bool:
+    async def release(self, accepted: RuntimeStreamAcceptedRunnerSession) -> bool:
         self.released.append(accepted)
         return True
 
@@ -264,7 +264,7 @@ def _owner() -> OwnerSessionEpoch:
 
 @pytest.mark.asyncio
 async def test_joined_owner_registration_cancellation_rolls_back_offer() -> None:
-    accepted = RuntimeWebAcceptedRunnerSession(
+    accepted = RuntimeStreamAcceptedRunnerSession(
         owner=_owner(),
         runner_boot_id="runner-boot",
         profile=APPROVED_SESSION_PROFILE,
@@ -397,8 +397,8 @@ def _hard_limits(
     maximum_pending_tasks: int = 256,
     maximum_event_loop_lag_milliseconds: int = 250,
     maximum_resident_memory_bytes: int = 1024 * 1024 * 1024,
-) -> RuntimeWebControlHardLimits:
-    return RuntimeWebControlHardLimits(
+) -> RuntimeStreamControlHardLimits:
+    return RuntimeStreamControlHardLimits(
         maximum_sessions=maximum_sessions,
         maximum_active_streams=maximum_active_streams,
         maximum_application_buffer_bytes=maximum_application_buffer_bytes,
@@ -412,22 +412,22 @@ def _hard_limits(
 
 def _data_plane(
     *,
-    hard_limits: RuntimeWebControlHardLimits | None = None,
+    hard_limits: RuntimeStreamControlHardLimits | None = None,
     resident_memory_bytes: Callable[[], int] = lambda: 1,
     runner_metrics: _RunnerMetrics | None = None,
-) -> RuntimeWebControlDataPlane:
+) -> RuntimeStreamControlDataPlane:
     capacity = RuntimeWebCapacityRegistry(
         config=_capacity_config(),
         redis=_Redis(),
         monotonic_clock_milliseconds=lambda: 0,
         recoverable_errors=(RedisConnectionError,),
     )
-    relay = RuntimeWebRelayPool(
+    relay = RuntimeStreamRelayPool(
         connector=_UnusedRelayConnector(),
         maximum_sessions=1,
         peer_boot_id="control-boot",
     )
-    return RuntimeWebControlDataPlane(
+    return RuntimeStreamControlDataPlane(
         session_manager=_UnusedSessionManager(),
         route_repository=RuntimeWebSessionRouteRepository(),
         owner_replica_id="control-a",
@@ -448,7 +448,7 @@ def _data_plane(
 
 
 class _LocalDataPlane(NamedTuple):
-    data_plane: RuntimeWebControlDataPlane
+    data_plane: RuntimeStreamControlDataPlane
     lifecycle: _OwnerLifecycle
 
 
@@ -456,7 +456,7 @@ def _local_data_plane(
     *,
     lifecycle: _OwnerLifecycle | None = None,
     capacity_config: RuntimeWebCapacityConfig | None = None,
-    hard_limits: RuntimeWebControlHardLimits | None = None,
+    hard_limits: RuntimeStreamControlHardLimits | None = None,
     resident_memory_bytes: Callable[[], int] = lambda: 1,
 ) -> _LocalDataPlane:
     owner = _owner()
@@ -470,7 +470,7 @@ def _local_data_plane(
         session_lease_id=owner.session_lease_id,
         lease_generation=owner.lease_generation,
         join_nonce_hash="a" * 64,
-        protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+        protocol_fingerprint=RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
         lease_expires_at=datetime.now(UTC) + timedelta(minutes=1),
         draining_at=None,
     )
@@ -480,14 +480,14 @@ def _local_data_plane(
         monotonic_clock_milliseconds=lambda: 0,
         recoverable_errors=(RedisConnectionError,),
     )
-    relay = RuntimeWebRelayPool(
+    relay = RuntimeStreamRelayPool(
         connector=_UnusedRelayConnector(),
         maximum_sessions=1,
         peer_boot_id="control-boot",
     )
     effective_lifecycle = lifecycle or _OwnerLifecycle()
     return _LocalDataPlane(
-        data_plane=RuntimeWebControlDataPlane(
+        data_plane=RuntimeStreamControlDataPlane(
             session_manager=_RouteSessionManager(),
             route_repository=_RouteRepository(route),
             owner_replica_id="control-a",
@@ -512,9 +512,9 @@ def _open_envelope(
     session_id: str,
     peer_boot_id: str,
     stream_id: int,
-) -> runtime_web_session_pb2.RuntimeWebSessionEnvelope:
+) -> runtime_stream_session_pb2.RuntimeStreamSessionEnvelope:
     now = datetime.now(UTC)
-    authority = runtime_web_session_pb2.RuntimeWebSessionAuthority(
+    authority = runtime_stream_session_pb2.RuntimeStreamSessionAuthority(
         correlation_id="correlation",
         service_id="endpoint",
         service_revision=1,
@@ -530,15 +530,15 @@ def _open_envelope(
     authority.open_deadline_at.FromDatetime(now + timedelta(seconds=10))
     authority.transport_deadline_at.FromDatetime(now + timedelta(minutes=1))
     authority.exposure_deadline_at.FromDatetime(now + timedelta(hours=1))
-    return runtime_web_session_pb2.RuntimeWebSessionEnvelope(
-        protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+    return runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(
+        protocol_fingerprint=RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
         session_id=session_id,
         peer_boot_id=peer_boot_id,
         stream_id=stream_id,
-        open=runtime_web_session_pb2.RuntimeWebSessionOpen(
+        open=runtime_stream_session_pb2.RuntimeStreamSessionOpen(
             authority=authority,
-            request_head=runtime_web_session_pb2.RuntimeWebSessionRequestHead(
-                protocol=runtime_web_session_pb2.RUNTIME_WEB_SESSION_PROTOCOL_HTTP,
+            request_head=runtime_stream_session_pb2.RuntimeStreamSessionRequestHead(
+                protocol=runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_PROTOCOL_HTTP,
                 method=b"GET",
                 target=b"/",
             ),
@@ -546,10 +546,10 @@ def _open_envelope(
     )
 
 
-def _hello() -> runtime_web_session_pb2.RuntimeWebSessionEnvelope:
+def _hello() -> runtime_stream_session_pb2.RuntimeStreamSessionEnvelope:
     deadline = datetime.now(UTC) + timedelta(seconds=10)
-    hello = runtime_web_session_pb2.RuntimeWebSessionHello(
-        role=runtime_web_session_pb2.RUNTIME_WEB_SESSION_PEER_ROLE_GATEWAY,
+    hello = runtime_stream_session_pb2.RuntimeStreamSessionHello(
+        role=runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_PEER_ROLE_GATEWAY,
         session_nonce="nonce",
         maximum_data_frame_bytes=APPROVED_SESSION_PROFILE.data_frame_bytes,
         request_stream_window_bytes=(
@@ -566,8 +566,8 @@ def _hello() -> runtime_web_session_pb2.RuntimeWebSessionEnvelope:
         ),
     )
     hello.deadline_at.FromDatetime(deadline)
-    return runtime_web_session_pb2.RuntimeWebSessionEnvelope(
-        protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+    return runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(
+        protocol_fingerprint=RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
         session_id="gateway-session",
         peer_boot_id="gateway-boot",
         hello=hello,
@@ -577,9 +577,9 @@ def _hello() -> runtime_web_session_pb2.RuntimeWebSessionEnvelope:
 @pytest.mark.asyncio
 async def test_gateway_servicer_accepts_exact_replacement_handshake() -> None:
     data_plane = _data_plane()
-    servicer = RuntimeWebGatewaySessionGrpcServicer(
+    servicer = RuntimeStreamGatewaySessionGrpcServicer(
         data_plane=data_plane,
-        peers=RuntimeWebTrustedPeerAuthenticator(
+        peers=RuntimeStreamTrustedPeerAuthenticator(
             allow_insecure=True,
             gateway_identities=frozenset(),
             control_identities=frozenset(),
@@ -588,7 +588,7 @@ async def test_gateway_servicer_accepts_exact_replacement_handshake() -> None:
     )
 
     async def messages() -> AsyncIterator[
-        runtime_web_session_pb2.RuntimeWebSessionEnvelope
+        runtime_stream_session_pb2.RuntimeStreamSessionEnvelope
     ]:
         yield _hello()
         await asyncio.Event().wait()
@@ -596,14 +596,14 @@ async def test_gateway_servicer_accepts_exact_replacement_handshake() -> None:
     responses = servicer.Connect(
         messages(),
         FakeGrpcContext[
-            runtime_web_session_pb2.RuntimeWebSessionEnvelope,
-            runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+            runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
+            runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
         ](),
     )
     accepted = await asyncio.wait_for(anext(responses), timeout=1)
 
     assert accepted.WhichOneof("payload") == "session_accepted"
-    assert accepted.protocol_fingerprint == RUNTIME_WEB_PROTOCOL_FINGERPRINT
+    assert accepted.protocol_fingerprint == RUNTIME_STREAM_PROTOCOL_FINGERPRINT
     assert accepted.session_id == "gateway-session"
     assert accepted.peer_boot_id == "control-boot"
     assert await data_plane.subready() is False
@@ -620,9 +620,9 @@ async def test_gateway_servicer_rejects_reader_task_budget_without_leak(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     data_plane = _data_plane(hard_limits=_hard_limits(maximum_pending_tasks=1))
-    servicer = RuntimeWebGatewaySessionGrpcServicer(
+    servicer = RuntimeStreamGatewaySessionGrpcServicer(
         data_plane=data_plane,
-        peers=RuntimeWebTrustedPeerAuthenticator(
+        peers=RuntimeStreamTrustedPeerAuthenticator(
             allow_insecure=True,
             gateway_identities=frozenset(),
             control_identities=frozenset(),
@@ -642,7 +642,7 @@ async def test_gateway_servicer_rejects_reader_task_budget_without_leak(
     monkeypatch.setattr(data_plane.resources, "try_begin_task", try_begin_task)
 
     async def messages() -> AsyncIterator[
-        runtime_web_session_pb2.RuntimeWebSessionEnvelope
+        runtime_stream_session_pb2.RuntimeStreamSessionEnvelope
     ]:
         yield _hello()
         await asyncio.Event().wait()
@@ -650,8 +650,8 @@ async def test_gateway_servicer_rejects_reader_task_budget_without_leak(
     responses = servicer.Connect(
         messages(),
         FakeGrpcContext[
-            runtime_web_session_pb2.RuntimeWebSessionEnvelope,
-            runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+            runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
+            runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
         ](),
     )
 
@@ -672,9 +672,9 @@ async def test_gateway_servicer_rejects_reader_task_budget_without_leak(
 async def test_gateway_servicer_rejects_session_registered_after_global_drain() -> None:
     data_plane = _data_plane()
     await data_plane.begin_drain()
-    servicer = RuntimeWebGatewaySessionGrpcServicer(
+    servicer = RuntimeStreamGatewaySessionGrpcServicer(
         data_plane=data_plane,
-        peers=RuntimeWebTrustedPeerAuthenticator(
+        peers=RuntimeStreamTrustedPeerAuthenticator(
             allow_insecure=True,
             gateway_identities=frozenset(),
             control_identities=frozenset(),
@@ -683,15 +683,15 @@ async def test_gateway_servicer_rejects_session_registered_after_global_drain() 
     )
 
     async def messages() -> AsyncIterator[
-        runtime_web_session_pb2.RuntimeWebSessionEnvelope
+        runtime_stream_session_pb2.RuntimeStreamSessionEnvelope
     ]:
         yield _hello()
 
     responses = servicer.Connect(
         messages(),
         FakeGrpcContext[
-            runtime_web_session_pb2.RuntimeWebSessionEnvelope,
-            runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+            runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
+            runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
         ](),
     )
 
@@ -713,24 +713,24 @@ async def test_gateway_goaway_refuses_new_stream_without_database_access() -> No
         peer_boot_id="gateway-boot",
         owner=None,
     )
-    go_away = runtime_web_session_pb2.RuntimeWebSessionEnvelope(
-        protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+    go_away = runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(
+        protocol_fingerprint=RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
         session_id="gateway-session",
         peer_boot_id="gateway-boot",
-        go_away=runtime_web_session_pb2.RuntimeWebSessionGoAway(
+        go_away=runtime_stream_session_pb2.RuntimeStreamSessionGoAway(
             last_accepted_stream_id=0,
             reason=(
-                runtime_web_session_pb2.RUNTIME_WEB_SESSION_CLOSE_REASON_SERVICE_DRAIN
+                runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_CLOSE_REASON_SERVICE_DRAIN
             ),
         ),
     )
     await data_plane.handle(source, go_away)
-    opening = runtime_web_session_pb2.RuntimeWebSessionEnvelope(
-        protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+    opening = runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(
+        protocol_fingerprint=RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
         session_id="gateway-session",
         peer_boot_id="gateway-boot",
         stream_id=1,
-        open=runtime_web_session_pb2.RuntimeWebSessionOpen(),
+        open=runtime_stream_session_pb2.RuntimeStreamSessionOpen(),
     )
     await data_plane.handle(source, opening)
     responses = source.queue.__aiter__()
@@ -738,7 +738,7 @@ async def test_gateway_goaway_refuses_new_stream_without_database_access() -> No
 
     assert rejected.WhichOneof("payload") == "open_rejected"
     assert rejected.open_rejected.reason == (
-        runtime_web_session_pb2.RUNTIME_WEB_SESSION_CLOSE_REASON_SERVICE_DRAIN
+        runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_CLOSE_REASON_SERVICE_DRAIN
     )
     await data_plane.unregister_source(source)
     await data_plane.close()
@@ -750,7 +750,7 @@ async def test_global_drain_wins_open_registration_race(
 ) -> None:
     data_plane, _lifecycle = _local_data_plane()
     owner = _owner()
-    accepted = RuntimeWebAcceptedRunnerSession(
+    accepted = RuntimeStreamAcceptedRunnerSession(
         owner=owner,
         runner_boot_id="runner-boot",
         profile=APPROVED_SESSION_PROFILE,
@@ -803,7 +803,7 @@ async def test_global_drain_wins_open_registration_race(
     assert go_away.WhichOneof("payload") == "go_away"
     assert rejected.WhichOneof("payload") == "open_rejected"
     assert rejected.open_rejected.reason == (
-        runtime_web_session_pb2.RUNTIME_WEB_SESSION_CLOSE_REASON_SERVICE_DRAIN
+        runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_CLOSE_REASON_SERVICE_DRAIN
     )
     assert [queued.envelope.WhichOneof("payload") for queued in runner.queue.items] == [
         "go_away"
@@ -903,7 +903,7 @@ async def test_control_metrics_aggregate_latest_active_runner_snapshots() -> Non
     )
     data_plane = _data_plane(runner_metrics=runner_metrics)
     accepted = tuple(
-        RuntimeWebAcceptedRunnerSession(
+        RuntimeStreamAcceptedRunnerSession(
             owner=owner,
             runner_boot_id=f"runner-{index}",
             profile=APPROVED_SESSION_PROFILE,
@@ -982,7 +982,7 @@ async def test_control_metrics_aggregate_latest_active_runner_snapshots() -> Non
 
 
 def test_control_resource_tracker_rejects_and_releases_every_ceiling() -> None:
-    tracker = RuntimeWebControlResourceTracker(
+    tracker = RuntimeStreamControlResourceTracker(
         limits=_hard_limits(
             maximum_sessions=1,
             maximum_active_streams=1,
@@ -1019,7 +1019,7 @@ def test_control_resource_tracker_rejects_and_releases_every_ceiling() -> None:
 
 def test_control_resource_tracker_rejects_lag_and_rss_pressure() -> None:
     resident_memory_bytes = 1
-    tracker = RuntimeWebControlResourceTracker(
+    tracker = RuntimeStreamControlResourceTracker(
         limits=_hard_limits(
             maximum_event_loop_lag_milliseconds=10,
             maximum_resident_memory_bytes=8,
@@ -1035,7 +1035,7 @@ def test_control_resource_tracker_rejects_lag_and_rss_pressure() -> None:
 
 @pytest.mark.asyncio
 async def test_control_managed_task_releases_every_exit_path() -> None:
-    tracker = RuntimeWebControlResourceTracker(
+    tracker = RuntimeStreamControlResourceTracker(
         limits=_hard_limits(maximum_pending_tasks=1),
         resident_memory_bytes=lambda: 1,
     )
@@ -1043,7 +1043,7 @@ async def test_control_managed_task_releases_every_exit_path() -> None:
     async def complete() -> int:
         return 7
 
-    completed = runtime_web_session_server_module._create_control_task(
+    completed = runtime_stream_session_server_module._create_control_task(
         tracker,
         complete,
     )
@@ -1054,7 +1054,7 @@ async def test_control_managed_task_releases_every_exit_path() -> None:
     async def fail() -> None:
         raise RuntimeError("task failed")
 
-    failed = runtime_web_session_server_module._create_control_task(tracker, fail)
+    failed = runtime_stream_session_server_module._create_control_task(tracker, fail)
     with pytest.raises(RuntimeError, match="task failed"):
         await failed
     assert tracker.snapshot().pending_tasks == 0
@@ -1066,7 +1066,7 @@ async def test_control_managed_task_releases_every_exit_path() -> None:
         started.set()
         await blocked.wait()
 
-    cancelled = runtime_web_session_server_module._create_control_task(
+    cancelled = runtime_stream_session_server_module._create_control_task(
         tracker,
         wait_until_cancelled,
     )
@@ -1083,9 +1083,9 @@ async def test_control_managed_task_releases_every_exit_path() -> None:
         called = True
 
     with pytest.raises(
-        runtime_web_session_server_module._RuntimeWebControlResourceExhausted
+        runtime_stream_session_server_module._RuntimeStreamControlResourceExhausted
     ):
-        runtime_web_session_server_module._create_control_task(
+        runtime_stream_session_server_module._create_control_task(
             tracker,
             must_not_start,
         )
@@ -1097,7 +1097,7 @@ async def test_control_managed_task_releases_every_exit_path() -> None:
 def test_control_managed_task_releases_when_create_task_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    tracker = RuntimeWebControlResourceTracker(
+    tracker = RuntimeStreamControlResourceTracker(
         limits=_hard_limits(maximum_pending_tasks=1),
         resident_memory_bytes=lambda: 1,
     )
@@ -1111,7 +1111,7 @@ def test_control_managed_task_releases_when_create_task_fails(
         raise RuntimeError("create failed")
 
     monkeypatch.setattr(
-        runtime_web_session_server_module.asyncio,
+        runtime_stream_session_server_module.asyncio,
         "create_task",
         fail_create_task,
     )
@@ -1120,20 +1120,20 @@ def test_control_managed_task_releases_when_create_task_fails(
         raise AssertionError("task must not start")
 
     with pytest.raises(RuntimeError, match="create failed"):
-        runtime_web_session_server_module._create_control_task(tracker, task)
+        runtime_stream_session_server_module._create_control_task(tracker, task)
     assert tracker.snapshot().pending_tasks == 0
 
 
 @pytest.mark.asyncio
 async def test_control_queue_releases_process_bytes_on_dequeue_and_close() -> None:
-    tracker = RuntimeWebControlResourceTracker(
+    tracker = RuntimeStreamControlResourceTracker(
         limits=_hard_limits(),
         resident_memory_bytes=lambda: 1,
     )
     queue = _BoundedEnvelopeQueue(tracker)
-    data = runtime_web_session_pb2.RuntimeWebSessionEnvelope()
+    data = runtime_stream_session_pb2.RuntimeStreamSessionEnvelope()
     data.data.data = b"payload"
-    control = runtime_web_session_pb2.RuntimeWebSessionEnvelope()
+    control = runtime_stream_session_pb2.RuntimeStreamSessionEnvelope()
     control.heartbeat.monotonic_sequence = 1
 
     await queue.put(data)
@@ -1160,7 +1160,7 @@ async def test_control_session_and_stream_hard_limits_reject_without_leak() -> N
         hard_limits=_hard_limits(maximum_sessions=2, maximum_active_streams=1),
     )
     owner = _owner()
-    accepted = RuntimeWebAcceptedRunnerSession(
+    accepted = RuntimeStreamAcceptedRunnerSession(
         owner=owner,
         runner_boot_id="runner-boot",
         profile=APPROVED_SESSION_PROFILE,
@@ -1197,7 +1197,7 @@ async def test_control_session_and_stream_hard_limits_reject_without_leak() -> N
     )
     rejected = await anext(source.queue.__aiter__())
     assert rejected.open_rejected.reason == (
-        runtime_web_session_pb2.RUNTIME_WEB_SESSION_CLOSE_REASON_RESOURCE_EXHAUSTED
+        runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_CLOSE_REASON_RESOURCE_EXHAUSTED
     )
     assert data_plane.resources.snapshot().active_streams == 1
 
@@ -1213,13 +1213,13 @@ async def test_control_runner_heartbeat_ack_is_session_scoped_and_observable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        runtime_web_session_server_module,
+        runtime_stream_session_server_module,
         "_HEARTBEAT_INTERVAL_SECONDS",
         0.01,
     )
     data_plane, _lifecycle = _local_data_plane()
     owner = _owner()
-    accepted = RuntimeWebAcceptedRunnerSession(
+    accepted = RuntimeStreamAcceptedRunnerSession(
         owner=owner,
         runner_boot_id="runner-boot",
         profile=APPROVED_SESSION_PROFILE,
@@ -1233,8 +1233,8 @@ async def test_control_runner_heartbeat_ack_is_session_scoped_and_observable(
         anext(connection.queue.__aiter__()),
         timeout=1,
     )
-    acknowledgement = runtime_web_session_pb2.RuntimeWebSessionEnvelope(
-        protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+    acknowledgement = runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(
+        protocol_fingerprint=RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
         session_id=owner.session_lease_id,
         peer_boot_id=accepted.runner_boot_id,
         owner_boot_id=owner.owner_boot_id,
@@ -1259,18 +1259,18 @@ async def test_control_runner_missed_heartbeat_closes_only_that_session(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        runtime_web_session_server_module,
+        runtime_stream_session_server_module,
         "_HEARTBEAT_INTERVAL_SECONDS",
         0.01,
     )
     monkeypatch.setattr(
-        runtime_web_session_server_module,
+        runtime_stream_session_server_module,
         "_MAX_MISSED_HEARTBEATS",
         1,
     )
     data_plane, _lifecycle = _local_data_plane()
     owner = _owner()
-    accepted = RuntimeWebAcceptedRunnerSession(
+    accepted = RuntimeStreamAcceptedRunnerSession(
         owner=owner,
         runner_boot_id="runner-boot",
         profile=APPROVED_SESSION_PROFILE,
@@ -1315,7 +1315,7 @@ async def test_multiple_relays_to_one_owner_use_distinct_composite_sources() -> 
 @pytest.mark.asyncio
 async def test_runner_connection_translates_hop_local_session_credit() -> None:
     owner = _owner()
-    accepted = RuntimeWebAcceptedRunnerSession(
+    accepted = RuntimeStreamAcceptedRunnerSession(
         owner=owner,
         runner_boot_id="runner-boot",
         profile=APPROVED_SESSION_PROFILE,
@@ -1355,26 +1355,26 @@ async def test_runner_connection_translates_hop_local_session_credit() -> None:
     await anext(runner_messages)
     await anext(runner_messages)
 
-    first_response_credit = runtime_web_session_pb2.RuntimeWebSessionEnvelope(
-        protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+    first_response_credit = runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(
+        protocol_fingerprint=RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
         session_id="gateway-a",
         peer_boot_id="gateway-boot",
         stream_id=1,
     )
     first_response_credit.window_update.direction = (
-        runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_RESPONSE
+        runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_DIRECTION_RESPONSE
     )
     first_response_credit.window_update.stream_consumed_total = 5
     first_response_credit.window_update.session_consumed_total = 5
     await connection.send(first, first_response_credit)
-    second_response_credit = runtime_web_session_pb2.RuntimeWebSessionEnvelope(
-        protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+    second_response_credit = runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(
+        protocol_fingerprint=RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
         session_id="gateway-b",
         peer_boot_id="gateway-boot",
         stream_id=2,
     )
     second_response_credit.window_update.direction = (
-        runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_RESPONSE
+        runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_DIRECTION_RESPONSE
     )
     second_response_credit.window_update.stream_consumed_total = 3
     second_response_credit.window_update.session_consumed_total = 3
@@ -1383,8 +1383,8 @@ async def test_runner_connection_translates_hop_local_session_credit() -> None:
     assert (await anext(runner_messages)).window_update.session_consumed_total == 5
     assert (await anext(runner_messages)).window_update.session_consumed_total == 8
 
-    first_request_credit = runtime_web_session_pb2.RuntimeWebSessionEnvelope(
-        protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+    first_request_credit = runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(
+        protocol_fingerprint=RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
         session_id=owner.session_lease_id,
         peer_boot_id="runner-boot",
         owner_boot_id=owner.owner_boot_id,
@@ -1393,13 +1393,13 @@ async def test_runner_connection_translates_hop_local_session_credit() -> None:
         stream_id=first_runner_stream,
     )
     first_request_credit.window_update.direction = (
-        runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_REQUEST
+        runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_DIRECTION_REQUEST
     )
     first_request_credit.window_update.stream_consumed_total = 5
     first_request_credit.window_update.session_consumed_total = 5
     await connection.receive(first_request_credit)
-    second_request_credit = runtime_web_session_pb2.RuntimeWebSessionEnvelope(
-        protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+    second_request_credit = runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(
+        protocol_fingerprint=RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
         session_id=owner.session_lease_id,
         peer_boot_id="runner-boot",
         owner_boot_id=owner.owner_boot_id,
@@ -1408,7 +1408,7 @@ async def test_runner_connection_translates_hop_local_session_credit() -> None:
         stream_id=second_runner_stream,
     )
     second_request_credit.window_update.direction = (
-        runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_REQUEST
+        runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_DIRECTION_REQUEST
     )
     second_request_credit.window_update.stream_consumed_total = 3
     second_request_credit.window_update.session_consumed_total = 8
@@ -1436,7 +1436,7 @@ async def test_runner_connection_enqueues_concurrent_opens_in_stream_id_order() 
 
         async def put(
             self,
-            envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+            envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
             *,
             on_dequeued: Callable[[], Awaitable[None]] | None = None,
         ) -> None:
@@ -1448,7 +1448,7 @@ async def test_runner_connection_enqueues_concurrent_opens_in_stream_id_order() 
 
     owner = _owner()
     connection = _RunnerConnection(
-        accepted=RuntimeWebAcceptedRunnerSession(
+        accepted=RuntimeStreamAcceptedRunnerSession(
             owner=owner,
             runner_boot_id="runner-boot",
             profile=APPROVED_SESSION_PROFILE,
@@ -1520,7 +1520,7 @@ async def test_runner_connection_enqueues_concurrent_opens_in_stream_id_order() 
 async def test_relay_runner_round_trip_restores_source_stream_and_epoch() -> None:
     data_plane, _lifecycle = _local_data_plane()
     owner = _owner()
-    accepted = RuntimeWebAcceptedRunnerSession(
+    accepted = RuntimeStreamAcceptedRunnerSession(
         owner=owner,
         runner_boot_id="runner-boot",
         profile=APPROVED_SESSION_PROFILE,
@@ -1542,15 +1542,15 @@ async def test_relay_runner_round_trip_restores_source_stream_and_epoch() -> Non
     )
     runner_messages = runner.queue.__aiter__()
     forwarded = await anext(runner_messages)
-    response = runtime_web_session_pb2.RuntimeWebSessionEnvelope(
-        protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+    response = runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(
+        protocol_fingerprint=RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
         session_id=owner.session_lease_id,
         peer_boot_id="runner-boot",
         owner_boot_id=owner.owner_boot_id,
         session_lease_id=owner.session_lease_id,
         lease_generation=owner.lease_generation,
         stream_id=forwarded.stream_id,
-        open_accepted=runtime_web_session_pb2.RuntimeWebSessionOpenAccepted(
+        open_accepted=runtime_stream_session_pb2.RuntimeStreamSessionOpenAccepted(
             data_frame_bytes=APPROVED_SESSION_PROFILE.data_frame_bytes,
             request_credit_bytes=1024,
             response_credit_bytes=1024,
@@ -1607,7 +1607,7 @@ async def test_async_relay_disconnect_resets_and_releases_source_binding() -> No
     )
 
     await data_plane.relay_disconnected(
-        RelaySessionKey(owner, RUNTIME_WEB_PROTOCOL_FINGERPRINT),
+        RelaySessionKey(owner, RUNTIME_STREAM_PROTOCOL_FINGERPRINT),
         (relay_binding,),
     )
     reset = await anext(source.queue.__aiter__())
@@ -1615,7 +1615,7 @@ async def test_async_relay_disconnect_resets_and_releases_source_binding() -> No
     assert reset.stream_id == 7
     assert reset.WhichOneof("payload") == "reset"
     assert reset.reset.reason == (
-        runtime_web_session_pb2.RUNTIME_WEB_SESSION_CLOSE_REASON_TRANSPORT_UNAVAILABLE
+        runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_CLOSE_REASON_TRANSPORT_UNAVAILABLE
     )
     assert data_plane.bindings == {}
     assert data_plane.resources.snapshot().active_streams == 0
@@ -1627,7 +1627,7 @@ async def test_async_relay_disconnect_resets_and_releases_source_binding() -> No
 async def test_runner_late_response_to_closed_source_releases_only_its_stream() -> None:
     data_plane, _lifecycle = _local_data_plane()
     owner = _owner()
-    accepted = RuntimeWebAcceptedRunnerSession(
+    accepted = RuntimeStreamAcceptedRunnerSession(
         owner=owner,
         runner_boot_id="runner-boot",
         profile=APPROVED_SESSION_PROFILE,
@@ -1649,15 +1649,15 @@ async def test_runner_late_response_to_closed_source_releases_only_its_stream() 
     )
     forwarded = await anext(runner.queue.__aiter__())
     await source.queue.close()
-    response = runtime_web_session_pb2.RuntimeWebSessionEnvelope(
-        protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+    response = runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(
+        protocol_fingerprint=RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
         session_id=owner.session_lease_id,
         peer_boot_id="runner-boot",
         owner_boot_id=owner.owner_boot_id,
         session_lease_id=owner.session_lease_id,
         lease_generation=owner.lease_generation,
         stream_id=forwarded.stream_id,
-        open_accepted=runtime_web_session_pb2.RuntimeWebSessionOpenAccepted(
+        open_accepted=runtime_stream_session_pb2.RuntimeStreamSessionOpenAccepted(
             data_frame_bytes=APPROVED_SESSION_PROFILE.data_frame_bytes,
             request_credit_bytes=(APPROVED_SESSION_PROFILE.request_stream_window_bytes),
             response_credit_bytes=(
@@ -1685,12 +1685,12 @@ async def test_relay_late_response_to_closed_source_is_ignored(
         peer_boot_id="gateway-boot",
         owner=None,
     )
-    translated = runtime_web_session_pb2.RuntimeWebSessionEnvelope(
-        protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+    translated = runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(
+        protocol_fingerprint=RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
         session_id=source.session_id,
         peer_boot_id="control-boot",
         stream_id=1,
-        open_accepted=runtime_web_session_pb2.RuntimeWebSessionOpenAccepted(
+        open_accepted=runtime_stream_session_pb2.RuntimeStreamSessionOpenAccepted(
             data_frame_bytes=APPROVED_SESSION_PROFILE.data_frame_bytes,
             request_credit_bytes=(APPROVED_SESSION_PROFILE.request_stream_window_bytes),
             response_credit_bytes=(
@@ -1702,8 +1702,8 @@ async def test_relay_late_response_to_closed_source_is_ignored(
     async def route_response(
         *,
         key: RelaySessionKey,
-        envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
-    ) -> runtime_web_session_pb2.RuntimeWebSessionEnvelope:
+        envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
+    ) -> runtime_stream_session_pb2.RuntimeStreamSessionEnvelope:
         del key, envelope
         return translated
 
@@ -1711,8 +1711,8 @@ async def test_relay_late_response_to_closed_source_is_ignored(
     await source.queue.close()
 
     await data_plane.relay_response(
-        RelaySessionKey(_owner(), RUNTIME_WEB_PROTOCOL_FINGERPRINT),
-        runtime_web_session_pb2.RuntimeWebSessionEnvelope(),
+        RelaySessionKey(_owner(), RUNTIME_STREAM_PROTOCOL_FINGERPRINT),
+        runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(),
     )
 
     await data_plane.unregister_source(source)
@@ -1723,7 +1723,7 @@ async def test_relay_late_response_to_closed_source_is_ignored(
 async def test_owner_capacity_tracks_buffer_until_runner_queue_dequeue() -> None:
     data_plane, _lifecycle = _local_data_plane()
     owner = _owner()
-    accepted = RuntimeWebAcceptedRunnerSession(
+    accepted = RuntimeStreamAcceptedRunnerSession(
         owner=owner,
         runner_boot_id="runner-boot",
         profile=APPROVED_SESSION_PROFILE,
@@ -1745,14 +1745,14 @@ async def test_owner_capacity_tracks_buffer_until_runner_queue_dequeue() -> None
     )
     runner_messages = runner.queue.__aiter__()
     await anext(runner_messages)
-    data = runtime_web_session_pb2.RuntimeWebSessionEnvelope(
-        protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+    data = runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(
+        protocol_fingerprint=RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
         session_id="gateway-session",
         peer_boot_id="gateway-boot",
         stream_id=1,
         frame_sequence=1,
-        data=runtime_web_session_pb2.RuntimeWebSessionData(
-            direction=runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_REQUEST,
+        data=runtime_stream_session_pb2.RuntimeStreamSessionData(
+            direction=runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_DIRECTION_REQUEST,
             data=b"x" * 512,
         ),
     )
@@ -1773,7 +1773,7 @@ async def test_capacity_rejection_resets_runner_and_ignores_late_output() -> Non
         capacity_config=_capacity_config(burst_bytes=1)
     )
     owner = _owner()
-    accepted = RuntimeWebAcceptedRunnerSession(
+    accepted = RuntimeStreamAcceptedRunnerSession(
         owner=owner,
         runner_boot_id="runner-boot",
         profile=APPROVED_SESSION_PROFILE,
@@ -1797,15 +1797,15 @@ async def test_capacity_rejection_resets_runner_and_ignores_late_output() -> Non
     forwarded = await anext(runner_messages)
     await data_plane.handle(
         source,
-        runtime_web_session_pb2.RuntimeWebSessionEnvelope(
-            protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+        runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(
+            protocol_fingerprint=RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
             session_id="gateway-session",
             peer_boot_id="gateway-boot",
             stream_id=1,
             frame_sequence=1,
-            data=runtime_web_session_pb2.RuntimeWebSessionData(
+            data=runtime_stream_session_pb2.RuntimeStreamSessionData(
                 direction=(
-                    runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_REQUEST
+                    runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_DIRECTION_REQUEST
                 ),
                 data=b"x" * 512,
             ),
@@ -1818,8 +1818,8 @@ async def test_capacity_rejection_resets_runner_and_ignores_late_output() -> Non
     assert source_reset.stream_id == 1
     assert source_reset.WhichOneof("payload") == "reset"
 
-    late = runtime_web_session_pb2.RuntimeWebSessionEnvelope(
-        protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+    late = runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(
+        protocol_fingerprint=RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
         session_id=owner.session_lease_id,
         peer_boot_id="runner-boot",
         owner_boot_id=owner.owner_boot_id,
@@ -1827,8 +1827,10 @@ async def test_capacity_rejection_resets_runner_and_ignores_late_output() -> Non
         lease_generation=owner.lease_generation,
         stream_id=forwarded.stream_id,
         frame_sequence=1,
-        data=runtime_web_session_pb2.RuntimeWebSessionData(
-            direction=(runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_RESPONSE),
+        data=runtime_stream_session_pb2.RuntimeStreamSessionData(
+            direction=(
+                runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_DIRECTION_RESPONSE
+            ),
             data=b"late",
         ),
     )
@@ -1842,7 +1844,7 @@ async def test_capacity_rejection_resets_runner_and_ignores_late_output() -> Non
 async def test_late_terminal_credit_does_not_stop_sequential_opens() -> None:
     data_plane, _lifecycle = _local_data_plane()
     owner = _owner()
-    accepted = RuntimeWebAcceptedRunnerSession(
+    accepted = RuntimeStreamAcceptedRunnerSession(
         owner=owner,
         runner_boot_id="runner-boot",
         profile=APPROVED_SESSION_PROFILE,
@@ -1865,28 +1867,28 @@ async def test_late_terminal_credit_does_not_stop_sequential_opens() -> None:
     )
     first = await anext(runner_messages)
     await data_plane.runner_response(
-        runtime_web_session_pb2.RuntimeWebSessionEnvelope(
-            protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+        runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(
+            protocol_fingerprint=RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
             session_id=owner.session_lease_id,
             peer_boot_id="runner-boot",
             owner_boot_id=owner.owner_boot_id,
             session_lease_id=owner.session_lease_id,
             lease_generation=owner.lease_generation,
             stream_id=first.stream_id,
-            stream_end=runtime_web_session_pb2.RuntimeWebSessionStreamEnd(),
+            stream_end=runtime_stream_session_pb2.RuntimeStreamSessionStreamEnd(),
         )
     )
     await anext(source.queue.__aiter__())
     await data_plane.handle(
         source,
-        runtime_web_session_pb2.RuntimeWebSessionEnvelope(
-            protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+        runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(
+            protocol_fingerprint=RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
             session_id="gateway-session",
             peer_boot_id="gateway-boot",
             stream_id=1,
-            window_update=runtime_web_session_pb2.RuntimeWebSessionWindowUpdate(
+            window_update=runtime_stream_session_pb2.RuntimeStreamSessionWindowUpdate(
                 direction=(
-                    runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_RESPONSE
+                    runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_DIRECTION_RESPONSE
                 ),
                 stream_consumed_total=1,
                 session_consumed_total=1,
@@ -1914,7 +1916,7 @@ async def test_late_terminal_credit_does_not_stop_sequential_opens() -> None:
 async def test_owner_renewal_failure_closes_exact_runner_session() -> None:
     lifecycle = _OwnerLifecycle(renew_results=(True, False))
     data_plane, _lifecycle = _local_data_plane(lifecycle=lifecycle)
-    accepted = RuntimeWebAcceptedRunnerSession(
+    accepted = RuntimeStreamAcceptedRunnerSession(
         owner=_owner(),
         runner_boot_id="runner-boot",
         profile=APPROVED_SESSION_PROFILE,
@@ -1939,7 +1941,7 @@ async def test_owner_renewal_failure_closes_exact_runner_session() -> None:
 async def test_control_drain_marks_owner_and_resets_long_lived_stream() -> None:
     data_plane, lifecycle = _local_data_plane()
     owner = _owner()
-    accepted = RuntimeWebAcceptedRunnerSession(
+    accepted = RuntimeStreamAcceptedRunnerSession(
         owner=owner,
         runner_boot_id="runner-boot",
         profile=APPROVED_SESSION_PROFILE,
@@ -1957,7 +1959,7 @@ async def test_control_drain_marks_owner_and_resets_long_lived_stream() -> None:
         stream_id=1,
     )
     opening.open.request_head.protocol = (
-        runtime_web_session_pb2.RUNTIME_WEB_SESSION_PROTOCOL_WEBSOCKET
+        runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_PROTOCOL_WEBSOCKET
     )
     await data_plane.handle(source, opening)
     runner_messages = runner.queue.__aiter__()
@@ -1972,7 +1974,7 @@ async def test_control_drain_marks_owner_and_resets_long_lived_stream() -> None:
     reset = await anext(source_messages)
     assert reset.WhichOneof("payload") == "reset"
     assert reset.reset.reason == (
-        runtime_web_session_pb2.RUNTIME_WEB_SESSION_CLOSE_REASON_SERVICE_DRAIN
+        runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_CLOSE_REASON_SERVICE_DRAIN
     )
     runner_go_away = await anext(runner_messages)
     runner_reset = await anext(runner_messages)

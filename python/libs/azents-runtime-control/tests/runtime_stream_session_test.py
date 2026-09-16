@@ -5,16 +5,16 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-import azents_runtime_control.runtime_web_session as runtime_web_session_module
-from azents_runtime_control.proto import runtime_web_session_pb2
-from azents_runtime_control.runtime_web_session import (
+import azents_runtime_control.runtime_stream_session as runtime_stream_session_module
+from azents_runtime_control.proto import runtime_stream_session_pb2
+from azents_runtime_control.runtime_stream_session import (
     APPROVED_SESSION_PROFILE,
     MANDATORY_DATA_FRAME_BYTES,
     MAX_STREAM_TOMBSTONES,
     MAX_WEBSOCKET_MESSAGE_BYTES,
     OPTIONAL_DATA_FRAME_BYTES,
+    RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
     RUNTIME_WEB_CAPABILITY,
-    RUNTIME_WEB_PROTOCOL_FINGERPRINT,
     CloseReason,
     Header,
     LogicalStreamState,
@@ -95,31 +95,31 @@ def _stream(protocol: StreamProtocol = StreamProtocol.HTTP) -> LogicalStreamStat
 
 
 def test_schema_and_fingerprint_are_exact() -> None:
-    assert set(runtime_web_session_pb2.DESCRIPTOR.services_by_name) == {
-        "RuntimeRunnerWebSession",
-        "RuntimeWebControlSession",
-        "RuntimeWebGatewaySession",
+    assert set(runtime_stream_session_pb2.DESCRIPTOR.services_by_name) == {
+        "RuntimeRunnerStreamSession",
+        "RuntimeStreamControlSession",
+        "RuntimeStreamGatewaySession",
     }
     assert RUNTIME_WEB_CAPABILITY == "runtime-web-http"
     assert (
-        RUNTIME_WEB_PROTOCOL_FINGERPRINT
-        == "3e0dcc00e011b6e7ad0fa3d2ce445eee0c1f8822e9f0c9d792d6f2c6d7586089"
+        RUNTIME_STREAM_PROTOCOL_FINGERPRINT
+        == "08b7e14af4ec64ba18029fe279f0ecfa2e60e63c154b7f350ac9ca678f60014f"
     )
     assert (
         protocol_fingerprint(descriptor=b"different")
-        != RUNTIME_WEB_PROTOCOL_FINGERPRINT
+        != RUNTIME_STREAM_PROTOCOL_FINGERPRINT
     )
     assert (
         protocol_fingerprint(material={"changed": True})
-        != RUNTIME_WEB_PROTOCOL_FINGERPRINT
+        != RUNTIME_STREAM_PROTOCOL_FINGERPRINT
     )
     assert (
         protocol_fingerprint(runner_offer_descriptor=b"different")
-        != RUNTIME_WEB_PROTOCOL_FINGERPRINT
+        != RUNTIME_STREAM_PROTOCOL_FINGERPRINT
     )
     assert (
         protocol_fingerprint(runner_offer_field_descriptor=b"different")
-        != RUNTIME_WEB_PROTOCOL_FINGERPRINT
+        != RUNTIME_STREAM_PROTOCOL_FINGERPRINT
     )
 
 
@@ -134,7 +134,7 @@ def test_runner_offer_accepts_authority_without_destination() -> None:
             runner_generation=3,
         ),
         session_nonce="nonce",
-        protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+        protocol_fingerprint=RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
         deadline_at=NOW + timedelta(seconds=10),
     )
 
@@ -198,7 +198,7 @@ def test_http_and_websocket_frame_kinds_and_effective_size_are_separate() -> Non
 def test_http_request_body_limit_is_enforced_across_data_frames(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(runtime_web_session_module, "MAX_REQUEST_BODY_BYTES", 4)
+    monkeypatch.setattr(runtime_stream_session_module, "MAX_REQUEST_BODY_BYTES", 4)
     stream = _stream()
     stream.accept()
 

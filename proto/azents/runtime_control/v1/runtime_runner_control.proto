@@ -6,7 +6,7 @@ import "google/protobuf/timestamp.proto";
 import "runtime_configuration.proto";
 import "runtime_runner_terminal.proto";
 import "runtime_runner_transfer.proto";
-import "runtime_web_session.proto";
+import "runtime_stream_session.proto";
 
 // Runtime-internal Runners open this outbound stream to Runtime Control.
 service RuntimeRunnerControl {
@@ -45,7 +45,7 @@ message RunnerControlMessage {
     RunnerTransferCancel transfer_cancel = 24;
     RunnerTerminalOpenIntent terminal_open_intent = 25;
     RunnerTerminalTerminateIntent terminal_terminate_intent = 26;
-    RunnerSessionOffer web_session_offer = 29;
+    RunnerSessionOffer stream_session_offer = 29;
     RunnerError error = 40;
   }
 }
@@ -222,18 +222,18 @@ message RunnerSystemMetricObservation {
 }
 
 message RunnerRuntimeWebProtocolCount {
-  RuntimeWebSessionProtocol protocol = 1;
+  RuntimeStreamSessionProtocol protocol = 1;
   uint64 value = 2;
 }
 
 message RunnerRuntimeWebReasonCount {
-  RuntimeWebSessionCloseReason reason = 1;
+  RuntimeStreamSessionCloseReason reason = 1;
   uint64 value = 2;
 }
 
 message RunnerRuntimeWebTrafficCount {
-  RuntimeWebSessionProtocol protocol = 1;
-  RuntimeWebSessionDirection direction = 2;
+  RuntimeStreamSessionProtocol protocol = 1;
+  RuntimeStreamSessionDirection direction = 2;
   uint64 frames = 3;
   uint64 bytes = 4;
 }
