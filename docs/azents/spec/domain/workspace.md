@@ -121,7 +121,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/agents
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/channel-defaults
 last_verified_at: 2026-09-16
-spec_version: 84
+spec_version: 85
 ---
 
 # Workspace & Membership
@@ -562,25 +562,37 @@ Membership is created through four paths.
 3. **Invitation acceptance** — existing member (manager or higher) invites by email. When invited user accepts, WorkspaceUser is created with that role (except OWNER). Display name is automatically set to prefix before `@` of invitation email.
 4. **JoinRequest approval** — user requests to join by handle. When existing member approves, WorkspaceUser is created with role=MEMBER. Display name is automatically set to first 8 chars of `user_id[:8]` (drift candidate — needs better default).
 
-Membership is removed by `WorkspaceUserService.delete()`. Workspace has no deletion route or
-service path: restrictive parent relationships prevent Workspace deletion from bypassing Agent
-decommission and Session retention purge. Membership, invitation, and join-request cleanup remain
-their own scoped operations.
+Ordinary Workspace membership removal uses `WorkspaceUserService.delete()`, which
+applies Workspace-actor self-protection. The Admin API uses
+`WorkspaceUserService.delete_force()`, which has no Workspace actor to compare but
+still blocks Owner deletion. Both paths archive the removed membership lifecycle and
+publish User Terminal invalidation after the transaction commits. Workspace has no
+deletion route or service path: restrictive parent relationships prevent Workspace
+deletion from bypassing Agent decommission and Session retention purge. Membership,
+invitation, and join-request cleanup remain their own scoped operations.
 
 ### Role Invariants
 
 These OWNER/MANAGER/MEMBER invariants apply only inside one Workspace. Instance-wide `system_admin` authorization is stored and enforced separately.
 
-`WorkspaceUserService.update_role()`, `update_role_admin()`, `delete()`, and
-`delete_force()` enforce these invariants. Role change and deletion lock the
-Workspace row and reread the target membership before applying the mutation, so a
-concurrent ownership transfer cannot expose the newly promoted Owner to direct
-demotion or deletion.
+`WorkspaceUserService.update_role()` and `delete()` apply Workspace-actor
+self-protection. `update_role_admin()` and `delete_force()` are system-administrator
+operations and therefore have no Workspace actor or self comparison. All four paths
+lock the Workspace row and reread the target membership before applying the
+mutation, so a concurrent ownership transfer cannot expose the newly promoted Owner
+to direct demotion or deletion.
 
-- **Cannot modify/delete self** — if `actor_workspace_user_id == target`, immediately fail with `CannotModifySelf`.
-- **Cannot demote/delete OWNER (normal path)** — if target is OWNER, fail with `CannotModifyOwner`. OWNER can be replaced only through `transfer_ownership` flow.
-- **Cannot promote to OWNER** — if role update input is `OWNER`, return `InvalidRole`. API cannot directly set new OWNER; must use dedicated transfer endpoint.
-- **Admin forced delete** — `delete_force()` skips self-check but still blocks OWNER deletion. (called only by admin API)
+- **Normal-path self protection** — `update_role()` and `delete()` fail with
+  `CannotModifySelf` when `actor_workspace_user_id == target`.
+- **Cannot demote/delete OWNER** — every direct role-change or deletion path fails
+  with `CannotModifyOwner` when the target is OWNER. OWNER can be replaced only
+  through `transfer_ownership`.
+- **Cannot promote to OWNER** — ordinary and Admin role-update input of `OWNER`
+  returns `InvalidRole`. The dedicated ownership-transfer operation is the only
+  promotion path.
+- **Admin actor boundary** — `update_role_admin()` and `delete_force()` skip only
+  the Workspace self check; they retain Owner protection and the serialized
+  Workspace lock.
 
 ### Invitation Flow
 
@@ -863,6 +875,9 @@ stateDiagram-v2
 
 ## Changelog
 
+- **2026-09-16 (spec_version=85)** — Clarified ordinary versus system-admin
+  membership removal, self-protection, Owner protection, and post-removal lifecycle
+  effects.
 - **2026-09-16 (spec_version=84)** — Added system-administrator Workspace
   membership creation, non-Owner role updates, Owner-safe deletion, serialized
   initial Owner creation and ownership transfer, generated Admin clients, and the

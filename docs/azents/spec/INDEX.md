@@ -23,7 +23,7 @@ Details of all living specs. Synchronized from frontmatter.
 | system-settings | [System Settings](domain/system-settings.md) | @Hardtack | 2026-09-15 | 6 |
 | toolkit | [Toolkit](domain/toolkit.md) | @Hardtack | 2026-09-15 | 118 |
 | user-auth | [User & Authentication](domain/user-auth.md) | @Hardtack | 2026-09-16 | 22 |
-| workspace | [Workspace & Membership](domain/workspace.md) | @Hardtack | 2026-09-16 | 84 |
+| workspace | [Workspace & Membership](domain/workspace.md) | @Hardtack | 2026-09-16 | 85 |
 
 ## Flow Specs
 
@@ -44,7 +44,7 @@ Details of all living specs. Synchronized from frontmatter.
 | [MCP OAuth Flow](flow/mcp-oauth.md) | @Hardtack | 2026-09-07 | 6 |
 | [OpenRouter API Key Provider Flow](flow/openrouter-api-key.md) | @Hardtack | 2026-09-15 | 4 |
 | [Periodic Execution Flow Spec](flow/periodic-execution.md) | - | 2026-09-15 | 20 |
-| [Public Release Publication](flow/public-release.md) | @Hardtack | 2026-09-16 | 2 |
+| [Public Release Publication](flow/public-release.md) | @Hardtack | 2026-09-16 | 3 |
 | [Run Resume](flow/run-resume.md) | @Hardtack | 2026-09-13 | 37 |
 | [Session Context Inspector](flow/session-context-inspector.md) | @Hardtack | 2026-09-13 | 22 |
 | [E2E Primary Test Strategy](flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-09-15 | 64 |

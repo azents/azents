@@ -10,7 +10,7 @@ code_paths:
   - infra/charts/azents/Chart.yaml
   - testenv/azents/e2e/src/support_tests/test_release_workflow.py
 last_verified_at: 2026-09-16
-spec_version: 2
+spec_version: 3
 ---
 
 # Public Release Publication
@@ -80,10 +80,10 @@ not mutate `Chart.yaml`.
 
 ## Tag and GitHub Release
 
-The final job starts only after validation, every image build, and chart publication
-succeed. It downloads all image metadata, creates release notes listing image tags
-and digests plus the OCI chart reference, and identifies provenance and SBOM
-availability.
+The GitHub Release job starts only after validation, every image build, and chart
+publication succeed. It downloads all image metadata, creates release notes listing
+image tags and digests plus the OCI chart reference, and identifies provenance and
+SBOM availability.
 
 The workflow then creates and pushes the requested Git tag at the workflow commit.
 It creates a GitHub Release only after verifying that tag; prerelease versions mark
@@ -139,6 +139,8 @@ and GitHub Release.
 
 ## Changelog
 
+- **2026-09-16** (spec_version 3) — Renamed the GitHub Release job precisely after
+  downstream dispatch became the post-publication final job.
 - **2026-09-16** (spec_version 2) — Added the optional generic downstream release
   handoff after successful public publication.
 - **2026-09-15** (spec_version 1) — Added the current protected one-invocation
