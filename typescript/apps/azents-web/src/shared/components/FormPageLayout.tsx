@@ -28,7 +28,7 @@ export function FormPageLayout({
     <Box
       style={{
         display: "flex",
-        minHeight: "calc(100dvh - var(--app-shell-header-offset, 0px))",
+        minHeight: "calc(100dvh - var(--app-shell-header-offset, 0rem))",
         alignItems: "center",
         justifyContent: "center",
         paddingTop: rem(32),

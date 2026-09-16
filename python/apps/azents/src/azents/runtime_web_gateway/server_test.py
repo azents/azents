@@ -4,6 +4,7 @@ import asyncio
 import dataclasses
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import NamedTuple
 
 import pytest
 from aiohttp import WSMessage, WSMsgType, WSServerHandshakeError, web
@@ -462,10 +463,12 @@ async def _ignore_drain(reason: CloseReason) -> None:
     assert reason is CloseReason.SERVICE_DRAIN
 
 
-def _operations() -> tuple[
-    RuntimeWebGatewayOperationsCoordinator,
-    RuntimeWebGatewayOperationalState,
-]:
+class _Operations(NamedTuple):
+    coordinator: RuntimeWebGatewayOperationsCoordinator
+    state: RuntimeWebGatewayOperationalState
+
+
+def _operations() -> _Operations:
     resources = RuntimeWebGatewayResourceTracker(
         RuntimeWebGatewayHardLimits(
             maximum_active_exchanges=4,
@@ -507,7 +510,10 @@ def _operations() -> tuple[
         resources=resources,
         begin_session_drain=_ignore_drain,
     )
-    return RuntimeWebGatewayOperationsCoordinator(state=state, drain=drain), state
+    return _Operations(
+        coordinator=RuntimeWebGatewayOperationsCoordinator(state=state, drain=drain),
+        state=state,
+    )
 
 
 async def _client(

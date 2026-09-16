@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import datetime
 import logging
 import random
@@ -42,6 +43,12 @@ else:
 _HANDSHAKE_SECONDS = 10.0
 _LOCAL_SUBCHANNEL_POOL = (("grpc.use_local_subchannel_pool", 1),)
 _LOGGER = logging.getLogger(__name__)
+
+
+@dataclasses.dataclass(frozen=True)
+class _GatewayHello:
+    identity: SessionIdentity
+    envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope
 
 
 class RuntimeWebGatewayControlSessions:
@@ -198,14 +205,14 @@ class RuntimeWebGatewayControlSessions:
             transport.set_go_away_handler(handle_go_away)
             self.transports.add(transport)
             try:
-                identity, hello = _gateway_hello(self.gateway_boot_id)
+                gateway_hello = _gateway_hello(self.gateway_boot_id)
                 accepted = await transport.start(
-                    hello,
+                    gateway_hello.envelope,
                     timeout_seconds=_HANDSHAKE_SECONDS,
                 )
                 profile = _accepted_profile(accepted)
                 registration = await self.pool.register(
-                    identity=identity,
+                    identity=gateway_hello.identity,
                     profile=profile,
                     transport=transport,
                 )
@@ -240,10 +247,7 @@ class RuntimeWebGatewayControlSessions:
 
 def _gateway_hello(
     gateway_boot_id: str,
-) -> tuple[
-    SessionIdentity,
-    runtime_web_session_pb2.RuntimeWebSessionEnvelope,
-]:
+) -> _GatewayHello:
     now = datetime.datetime.now(datetime.UTC)
     deadline = now + datetime.timedelta(seconds=_HANDSHAKE_SECONDS)
     session_id = secrets.token_hex(16)
@@ -274,11 +278,14 @@ def _gateway_hello(
         ),
     )
     hello.deadline_at.FromDatetime(deadline)
-    return identity, runtime_web_session_pb2.RuntimeWebSessionEnvelope(
-        protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
-        session_id=session_id,
-        peer_boot_id=gateway_boot_id,
-        hello=hello,
+    return _GatewayHello(
+        identity=identity,
+        envelope=runtime_web_session_pb2.RuntimeWebSessionEnvelope(
+            protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+            session_id=session_id,
+            peer_boot_id=gateway_boot_id,
+            hello=hello,
+        ),
     )
 
 

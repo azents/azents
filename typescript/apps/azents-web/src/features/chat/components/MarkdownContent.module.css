@@ -32,7 +32,7 @@
 }
 
 .markdown h2 {
-  font-size: calc(var(--mantine-font-size-sm) + 1px);
+  font-size: calc(var(--mantine-font-size-sm) + rem(1px));
   font-weight: 700;
   margin: 0.5em 0 0.3em;
   line-height: 1.3;
@@ -180,7 +180,7 @@
 .markdown hr {
   margin: 0.6em 0;
   border: none;
-  border-top: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+  border-top: rem(1px) solid color-mix(in srgb, currentColor 20%, transparent);
 }
 
 /* table */
@@ -197,7 +197,7 @@
 .markdown th,
 .markdown td {
   padding: 0.3em 0.6em;
-  border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+  border: rem(1px) solid color-mix(in srgb, currentColor 20%, transparent);
   text-align: left;
 }
 

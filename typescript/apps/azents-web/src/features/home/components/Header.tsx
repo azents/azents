@@ -12,7 +12,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { AppLogo } from "@/shared/components/AppLogo";
 
-/** Scroll detection threshold (px) */
+/** Scroll detection threshold in CSS pixels. */
 const SCROLL_THRESHOLD = 50;
 
 /** Landing page fixed header — switches to blur background on scroll */
@@ -43,7 +43,7 @@ export function Header(): React.ReactElement {
         background: scrolled
           ? "color-mix(in srgb, var(--mantine-color-body) 80%, transparent)"
           : "transparent",
-        backdropFilter: scrolled ? "blur(12px)" : "none",
+        backdropFilter: scrolled ? `blur(${rem(12)})` : "none",
         transition: "background 0.3s ease, backdrop-filter 0.3s ease",
       }}
     >

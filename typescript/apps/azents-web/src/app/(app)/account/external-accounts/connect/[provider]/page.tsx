@@ -1,6 +1,6 @@
 import { TRPCError } from "@trpc/server";
 import { redirect } from "next/navigation";
-import { ExternalAccountOAuthResult } from "@/features/external-account-links/components/ExternalAccountOAuthResult";
+import { ExternalAccountOAuthPage } from "@/features/external-account-links/ExternalAccountOAuthPage";
 import { trpc } from "@/trpc/server";
 import type {
   AccountLinkFailureReason,
@@ -28,13 +28,15 @@ export default async function Page({
 }: PageProps): Promise<React.ReactElement> {
   const { provider: providerParam } = await params;
   const provider = parseProvider(providerParam);
+  const state = await resolveState(provider);
+  return <ExternalAccountOAuthPage state={state} />;
+}
 
+async function resolveState(
+  provider: ExternalAccountProvider | null,
+): Promise<ExternalAccountOAuthResultState> {
   if (provider === null) {
-    return (
-      <ExternalAccountOAuthResult
-        state={{ type: "FAILED", provider: null, reason: "invalid_provider" }}
-      />
-    );
+    return { type: "FAILED", provider: null, reason: "invalid_provider" };
   }
 
   try {
@@ -43,32 +45,22 @@ export default async function Page({
       (item) => item.provider === provider,
     );
     if (providerAvailability == null || !providerAvailability.available) {
-      return (
-        <ExternalAccountOAuthResult
-          state={{
-            type: "PROVIDER_UNAVAILABLE",
-            provider,
-            status: providerAvailability?.status ?? "unavailable",
-          }}
-        />
-      );
+      return {
+        type: "PROVIDER_UNAVAILABLE",
+        provider,
+        status: providerAvailability?.status ?? "unavailable",
+      };
     }
 
     const result = await trpc.accountLinks.startOauth({ provider });
     if (result.type === "FAILURE") {
-      return (
-        <ExternalAccountOAuthResult
-          state={
-            result.reason === "provider_unavailable"
-              ? {
-                  type: "PROVIDER_UNAVAILABLE",
-                  provider,
-                  status: providerAvailability.status,
-                }
-              : failedState(provider, result.reason)
+      return result.reason === "provider_unavailable"
+        ? {
+            type: "PROVIDER_UNAVAILABLE",
+            provider,
+            status: providerAvailability.status,
           }
-        />
-      );
+        : failedState(provider, result.reason);
     }
 
     redirect(result.data.authorization_url);
@@ -76,10 +68,6 @@ export default async function Page({
     if (!(error instanceof TRPCError)) {
       throw error;
     }
-    return (
-      <ExternalAccountOAuthResult
-        state={failedState(provider, "provider_unavailable")}
-      />
-    );
+    return failedState(provider, "provider_unavailable");
   }
 }

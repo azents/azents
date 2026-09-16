@@ -20,20 +20,28 @@ interface AgentResponse {
   color: string;
 }
 
-/** Agent list (only color hardcoded, text is i18n) */
+/** Agent list (text is i18n and colors use theme tokens). */
 const AGENTS: AgentResponse[] = [
   {
     nameKey: "contentWriter",
     messageKey: "contentWriterMessage",
-    color: "#0070f3",
+    color: "var(--mantine-color-blue-6)",
   },
   {
     nameKey: "socialManager",
     messageKey: "socialManagerMessage",
-    color: "#8b5cf6",
+    color: "var(--mantine-color-violet-6)",
   },
-  { nameKey: "analytics", messageKey: "analyticsMessage", color: "#10b981" },
-  { nameKey: "design", messageKey: "designMessage", color: "#f97316" },
+  {
+    nameKey: "analytics",
+    messageKey: "analyticsMessage",
+    color: "var(--mantine-color-teal-6)",
+  },
+  {
+    nameKey: "design",
+    messageKey: "designMessage",
+    color: "var(--mantine-color-orange-6)",
+  },
 ];
 
 export function ChatPreview(): React.ReactElement {
@@ -46,7 +54,7 @@ export function ChatPreview(): React.ReactElement {
         width: "100%",
         maxWidth: rem(500),
         borderRadius: "var(--mantine-radius-lg)",
-        border: "1px solid var(--mantine-color-default-border)",
+        border: `${rem(1)} solid var(--mantine-color-default-border)`,
         backgroundColor: "var(--mantine-color-default)",
         padding: rem(24),
       }}

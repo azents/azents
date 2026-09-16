@@ -6,7 +6,7 @@
  * Guides setup for API Key, AWS Bedrock, and Google Vertex AI providers.
  */
 
-import { Button, Code, Collapse, Stack, Text } from "@mantine/core";
+import { Button, Code, Collapse, rem, Stack, Text } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import { IconHelp } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
@@ -42,7 +42,7 @@ export function SetupGuide({
           style={{
             backgroundColor: "var(--mantine-color-default)",
             borderRadius: "var(--mantine-radius-sm)",
-            border: "1px solid var(--mantine-color-default-border)",
+            border: `${rem(1)} solid var(--mantine-color-default-border)`,
           }}
         >
           {credType === "api_key" && provider === "openrouter" && (

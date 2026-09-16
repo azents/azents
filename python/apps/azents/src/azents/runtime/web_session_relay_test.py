@@ -16,7 +16,7 @@ from azents.runtime import web_session_relay as web_session_relay_module
 from azents.runtime.web_session_broker import BrokerTarget
 from azents.runtime.web_session_relay import (
     GrpcPersistentControlRelay,
-    PersistentRelayConnection,
+    RelayRoute,
     RelaySessionKey,
     RelaySourceStreamKey,
     RelayStreamBinding,
@@ -136,7 +136,7 @@ class _RouteGateRelayPool(RuntimeWebRelayPool):
         *,
         create: bool,
         payload: str | None,
-    ) -> tuple[PersistentRelayConnection, RelayStreamBinding] | None:
+    ) -> RelayRoute | None:
         routed = await super()._route(
             key,
             source,

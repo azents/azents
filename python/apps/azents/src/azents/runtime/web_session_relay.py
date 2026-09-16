@@ -72,6 +72,12 @@ class RelayStreamBinding:
     relay_stream_id: int
 
 
+@dataclasses.dataclass(frozen=True)
+class RelayRoute:
+    connection: PersistentRelayConnection
+    binding: RelayStreamBinding
+
+
 class PersistentRelayConnection(Protocol):
     """One already-authenticated persistent Control-to-Control session."""
 
@@ -592,7 +598,8 @@ class RuntimeWebRelayPool:
         )
         if routed is None:
             return None
-        connection, binding = routed
+        connection = routed.connection
+        binding = routed.binding
         forwarded = runtime_web_session_pb2.RuntimeWebSessionEnvelope()
         forwarded.CopyFrom(envelope)
         forwarded.session_id = key.owner.session_lease_id
@@ -807,7 +814,7 @@ class RuntimeWebRelayPool:
         *,
         create: bool,
         payload: str | None,
-    ) -> tuple[PersistentRelayConnection, RelayStreamBinding] | None:
+    ) -> RelayRoute | None:
         async with self.lock:
             mapping_key = (key, source)
             binding = self.source_bindings.get(mapping_key)
@@ -845,7 +852,7 @@ class RuntimeWebRelayPool:
                 binding = RelayStreamBinding(source, relay_stream_id)
                 self.source_bindings[mapping_key] = binding
                 self.relay_bindings[(key, relay_stream_id)] = binding
-            return connection, binding
+            return RelayRoute(connection=connection, binding=binding)
 
     async def _monitor(
         self,
