@@ -4,6 +4,7 @@ from typing import Sequence
 
 from pydantic import BaseModel, Field
 
+from azents.core.enums import WorkspaceUserRole
 from azents.services.workspace_user.data import (
     WorkspaceUserCreateInput,
     WorkspaceUserOutput,
@@ -27,6 +28,12 @@ class WorkspaceUserUpdateRequest(WorkspaceUserUpdateInput):
     """WorkspaceUser update request schema."""
 
     pass
+
+
+class WorkspaceUserRoleUpdateRequest(BaseModel):
+    """WorkspaceUser role update request schema."""
+
+    role: WorkspaceUserRole = Field(description="Role (manager, member)")
 
 
 class WorkspaceUserListResponse(BaseModel):

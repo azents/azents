@@ -59,3 +59,18 @@ class WorkspaceNotFound:
     """Workspace not found."""
 
     workspace_id: str
+
+
+@dataclasses.dataclass(frozen=True)
+class UserNotFound:
+    """User not found."""
+
+    user_id: str
+
+
+@dataclasses.dataclass(frozen=True)
+class WorkspaceUserAlreadyExists:
+    """User already belongs to the Workspace."""
+
+    workspace_id: str
+    user_id: str

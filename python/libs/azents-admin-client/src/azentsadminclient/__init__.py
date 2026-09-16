@@ -193,6 +193,7 @@ __all__ = [
     "WorkspaceUserListResponse",
     "WorkspaceUserResponse",
     "WorkspaceUserRole",
+    "WorkspaceUserRoleUpdateRequest",
     "WorkspaceUserUpdateRequest",
 ]
 
@@ -376,5 +377,6 @@ from azentsadminclient.models.workspace_user_create_request import WorkspaceUser
 from azentsadminclient.models.workspace_user_list_response import WorkspaceUserListResponse as WorkspaceUserListResponse
 from azentsadminclient.models.workspace_user_response import WorkspaceUserResponse as WorkspaceUserResponse
 from azentsadminclient.models.workspace_user_role import WorkspaceUserRole as WorkspaceUserRole
+from azentsadminclient.models.workspace_user_role_update_request import WorkspaceUserRoleUpdateRequest as WorkspaceUserRoleUpdateRequest
 from azentsadminclient.models.workspace_user_update_request import WorkspaceUserUpdateRequest as WorkspaceUserUpdateRequest
 

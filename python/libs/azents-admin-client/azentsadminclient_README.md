@@ -157,6 +157,7 @@ Class | Method | HTTP request | Description
 *WorkspaceUserV1Api* | [**workspaceuser_v1_list_workspace_users**](azentsadminclient/docs/WorkspaceUserV1Api.md#workspaceuser_v1_list_workspace_users) | **GET** /workspace-user/v1/workspaces/{handle}/workspace-users | List Workspace Users
 *WorkspaceUserV1Api* | [**workspaceuser_v1_transfer_workspace_ownership**](azentsadminclient/docs/WorkspaceUserV1Api.md#workspaceuser_v1_transfer_workspace_ownership) | **POST** /workspace-user/v1/workspaces/{handle}/transfer-ownership | Transfer Workspace Ownership
 *WorkspaceUserV1Api* | [**workspaceuser_v1_update_workspace_user**](azentsadminclient/docs/WorkspaceUserV1Api.md#workspaceuser_v1_update_workspace_user) | **PATCH** /workspace-user/v1/workspace-users/{workspace_user_id} | Update Workspace User
+*WorkspaceUserV1Api* | [**workspaceuser_v1_update_workspace_user_role**](azentsadminclient/docs/WorkspaceUserV1Api.md#workspaceuser_v1_update_workspace_user_role) | **PATCH** /workspace-user/v1/workspace-users/{workspace_user_id}/role | Update Workspace User Role
 *WorkspaceV1Api* | [**workspace_v1_create_workspace**](azentsadminclient/docs/WorkspaceV1Api.md#workspace_v1_create_workspace) | **POST** /workspace/v1/workspaces | Create Workspace
 *WorkspaceV1Api* | [**workspace_v1_get_workspace**](azentsadminclient/docs/WorkspaceV1Api.md#workspace_v1_get_workspace) | **GET** /workspace/v1/workspaces/{handle} | Get Workspace
 *WorkspaceV1Api* | [**workspace_v1_list_workspaces**](azentsadminclient/docs/WorkspaceV1Api.md#workspace_v1_list_workspaces) | **GET** /workspace/v1/workspaces | List Workspaces
@@ -318,6 +319,7 @@ Class | Method | HTTP request | Description
  - [WorkspaceUserListResponse](azentsadminclient/docs/WorkspaceUserListResponse.md)
  - [WorkspaceUserResponse](azentsadminclient/docs/WorkspaceUserResponse.md)
  - [WorkspaceUserRole](azentsadminclient/docs/WorkspaceUserRole.md)
+ - [WorkspaceUserRoleUpdateRequest](azentsadminclient/docs/WorkspaceUserRoleUpdateRequest.md)
  - [WorkspaceUserUpdateRequest](azentsadminclient/docs/WorkspaceUserUpdateRequest.md)
 
 

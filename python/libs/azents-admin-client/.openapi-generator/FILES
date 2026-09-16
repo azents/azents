@@ -180,6 +180,7 @@ azentsadminclient/docs/WorkspaceUserCreateRequest.md
 azentsadminclient/docs/WorkspaceUserListResponse.md
 azentsadminclient/docs/WorkspaceUserResponse.md
 azentsadminclient/docs/WorkspaceUserRole.md
+azentsadminclient/docs/WorkspaceUserRoleUpdateRequest.md
 azentsadminclient/docs/WorkspaceUserUpdateRequest.md
 azentsadminclient/docs/WorkspaceUserV1Api.md
 azentsadminclient/docs/WorkspaceV1Api.md
@@ -338,6 +339,7 @@ azentsadminclient/models/workspace_user_create_request.py
 azentsadminclient/models/workspace_user_list_response.py
 azentsadminclient/models/workspace_user_response.py
 azentsadminclient/models/workspace_user_role.py
+azentsadminclient/models/workspace_user_role_update_request.py
 azentsadminclient/models/workspace_user_update_request.py
 azentsadminclient/rest.py
 azentsadminclient/test/__init__.py
@@ -505,6 +507,7 @@ azentsadminclient/test/test_workspace_user_create_request.py
 azentsadminclient/test/test_workspace_user_list_response.py
 azentsadminclient/test/test_workspace_user_response.py
 azentsadminclient/test/test_workspace_user_role.py
+azentsadminclient/test/test_workspace_user_role_update_request.py
 azentsadminclient/test/test_workspace_user_update_request.py
 azentsadminclient/test/test_workspace_user_v1_api.py
 azentsadminclient/test/test_workspace_v1_api.py

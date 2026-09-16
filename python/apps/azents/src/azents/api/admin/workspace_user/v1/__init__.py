@@ -8,11 +8,18 @@ from typing import Annotated, assert_never
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from azents.repos.workspace_user.data import NotFound, WorkspaceNotFound
+from azents.repos.workspace_user.data import (
+    NotFound,
+    UserNotFound,
+    WorkspaceNotFound,
+    WorkspaceUserAlreadyExists,
+)
 from azents.services.workspace_user import WorkspaceUserService
 from azents.services.workspace_user.data import (
     CannotModifyOwner,
+    InvalidRole,
     NotMemberOfWorkspace,
+    OwnerAlreadyExists,
 )
 from azents.utils.fastapi.route import RouteMounter
 
@@ -21,6 +28,7 @@ from .data import (
     WorkspaceUserCreateRequest,
     WorkspaceUserListResponse,
     WorkspaceUserResponse,
+    WorkspaceUserRoleUpdateRequest,
     WorkspaceUserUpdateRequest,
 )
 
@@ -44,6 +52,30 @@ async def create_workspace_user(
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail="Workspace not found.",
+                )
+            case UserNotFound():
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="User not found.",
+                )
+            case WorkspaceUserAlreadyExists():
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        "code": "workspace_user_already_exists",
+                        "message": "The User already belongs to this Workspace.",
+                    },
+                )
+            case OwnerAlreadyExists():
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        "code": "workspace_owner_already_exists",
+                        "message": (
+                            "The Workspace already has an Owner. "
+                            "Transfer ownership instead."
+                        ),
+                    },
                 )
             case _:
                 assert_never(error)
@@ -102,6 +134,45 @@ async def update_workspace_user(
                 assert_never(error)
 
 
+@router.patch("/workspace-users/{workspace_user_id}/role")
+async def update_workspace_user_role(
+    user_service: Annotated[WorkspaceUserService, Depends()],
+    *,
+    workspace_user_id: str,
+    request: WorkspaceUserRoleUpdateRequest,
+) -> WorkspaceUserResponse:
+    """Update a non-Owner WorkspaceUser role."""
+    result = await user_service.update_role_admin(workspace_user_id, request.role)
+    if result.success:
+        return WorkspaceUserResponse.convert_from(result.value)
+
+    error = result.error
+    match error:
+        case NotFound():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="WorkspaceUser not found.",
+            )
+        case CannotModifyOwner():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "workspace_owner_role_locked",
+                    "message": (
+                        "The Owner role cannot be changed directly. "
+                        "Transfer ownership first."
+                    ),
+                },
+            )
+        case InvalidRole():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Assign Owner through the ownership-transfer operation.",
+            )
+        case _:
+            assert_never(error)
+
+
 @router.delete(
     "/workspace-users/{workspace_user_id}", status_code=status.HTTP_204_NO_CONTENT
 )
@@ -127,11 +198,14 @@ async def delete_workspace_user(
                 )
             case CannotModifyOwner():
                 raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=(
-                        "Owners cannot be deleted. Transfer ownership first, "
-                        "then delete."
-                    ),
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        "code": "workspace_owner_delete_blocked",
+                        "message": (
+                            "Owners cannot be deleted. Transfer ownership first, "
+                            "then delete."
+                        ),
+                    },
                 )
             case _:
                 assert_never(error)

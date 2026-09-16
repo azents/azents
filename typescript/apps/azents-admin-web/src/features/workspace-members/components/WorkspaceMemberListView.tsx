@@ -3,6 +3,7 @@
 import {
   Badge,
   Box,
+  Button,
   Center,
   Group,
   Loader,
@@ -10,6 +11,7 @@ import {
   Text,
   Title,
 } from "@mantine/core";
+import { IconPlus } from "@tabler/icons-react";
 import dayjs from "dayjs";
 import type { WorkspaceMemberListComponentProps } from "../containers/useWorkspaceMemberListContainer";
 import type { WorkspaceMemberListState, WorkspaceUserResponse } from "../types";
@@ -42,7 +44,10 @@ function renderContent(
       if (state.members.length === 0) {
         return (
           <Center p="xl">
-            <Text c="dimmed">No workspace members found.</Text>
+            <Text c="dimmed">
+              No members yet. Add the initial Owner to finish setting up this
+              Workspace.
+            </Text>
           </Center>
         );
       }
@@ -94,12 +99,22 @@ function renderContent(
 export function WorkspaceMemberListView({
   state,
   selectedMemberId,
+  canCreate,
   onRowClick,
+  onCreateNew,
 }: WorkspaceMemberListComponentProps): React.ReactElement {
   return (
     <Box h="100%" display="flex" style={{ flexDirection: "column" }}>
       <Group p="md" justify="space-between">
         <Title order={5}>Workspace Members</Title>
+        <Button
+          size="xs"
+          leftSection={<IconPlus size={14} />}
+          onClick={onCreateNew}
+          disabled={!canCreate}
+        >
+          Add Member
+        </Button>
       </Group>
       <Box style={{ flex: 1, overflow: "auto" }}>
         {renderContent(state, selectedMemberId, onRowClick)}
