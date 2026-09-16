@@ -5,6 +5,7 @@
  * Uses the generated client (@azents/admin-client).
  */
 import {
+  type UserResponse,
   userV1DeleteUser,
   userV1GetUser,
   userV1ListUsers,
@@ -12,6 +13,8 @@ import {
 import { z } from "zod/v4";
 import { mapExpectedError } from "../api-error";
 import { protectedProcedure, router } from "../init";
+
+const USER_PAGE_SIZE = 200;
 
 // --- Router ---
 export const userRouter = router({
@@ -28,6 +31,31 @@ export const userRouter = router({
       items: data.items,
       total: data.total,
     };
+  }),
+
+  /**
+   * List every user for Admin selectors
+   */
+  listAll: protectedProcedure.query(async ({ ctx }) => {
+    const items: UserResponse[] = [];
+    let offset = 0;
+    let total = 0;
+
+    do {
+      const { data } = await userV1ListUsers({
+        client: ctx.adminApiClient,
+        query: { offset, limit: USER_PAGE_SIZE },
+        throwOnError: true,
+      });
+      items.push(...data.items);
+      total = data.total;
+      if (data.items.length === 0) {
+        break;
+      }
+      offset += data.items.length;
+    } while (items.length < total);
+
+    return { items, total };
   }),
 
   /**

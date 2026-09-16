@@ -68,6 +68,13 @@ class TestWorkspaceUserV1Api(unittest.TestCase):
         """
         pass
 
+    def test_workspaceuser_v1_update_workspace_user_role(self) -> None:
+        """Test case for workspaceuser_v1_update_workspace_user_role
+
+        Update Workspace User Role
+        """
+        pass
+
 
 if __name__ == '__main__':
     unittest.main()

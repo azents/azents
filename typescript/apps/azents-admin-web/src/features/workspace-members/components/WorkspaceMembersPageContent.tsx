@@ -1,32 +1,29 @@
 "use client";
 
-import { Box, Select } from "@mantine/core";
+import { Alert, Box, Select } from "@mantine/core";
 import { MasterDetailLayout } from "@/shared/components/MasterDetailLayout";
-import { trpc } from "@/trpc/client";
 import { WorkspaceMemberDetail } from "./WorkspaceMemberDetail";
 import { WorkspaceMemberList } from "./WorkspaceMemberList";
 import type { WorkspaceMembersPageContentProps } from "../containers/useWorkspaceMembersPageContainer";
 
-/**
- * Workspace members page content component
- *
- * Workspace selector and responsive two-panel MasterDetailLayout
- */
+/** Workspace selector and responsive member-management master-detail layout. */
 export function WorkspaceMembersPageContent({
+  workspaceSelectorState,
   selectedWorkspaceHandle,
   selectedMemberId,
+  isCreateMode,
   onWorkspaceChange,
   onMemberSelect,
+  onCreateNew,
+  onSaved,
   onDeleted,
+  onCancel,
   onDetailClose,
 }: WorkspaceMembersPageContentProps): React.ReactElement {
-  const { data: workspacesData } = trpc.workspace.list.useQuery();
-  const workspaces = workspacesData?.items ?? [];
-
-  const workspaceOptions = workspaces.map((ws) => ({
-    value: ws.handle,
-    label: `${ws.name} (${ws.handle})`,
-  }));
+  const workspaceOptions =
+    workspaceSelectorState.type === "READY"
+      ? workspaceSelectorState.options
+      : [];
 
   return (
     <Box h="100%" display="flex" style={{ flexDirection: "column" }}>
@@ -36,14 +33,21 @@ export function WorkspaceMembersPageContent({
           borderBottom: "1px solid var(--mantine-color-default-border)",
         }}
       >
+        {workspaceSelectorState.type === "ERROR" && (
+          <Alert color="red" mb="sm" title="Unable to load Workspaces">
+            {workspaceSelectorState.message}
+          </Alert>
+        )}
         <Select
           label="Workspace"
+          description="Choose the Workspace whose membership you want to manage."
           placeholder="Select a workspace"
           data={workspaceOptions}
           value={selectedWorkspaceHandle}
           onChange={onWorkspaceChange}
           searchable
           clearable
+          disabled={workspaceSelectorState.type === "LOADING"}
         />
       </Box>
       <Box style={{ flex: 1, minHeight: 0 }}>
@@ -53,15 +57,20 @@ export function WorkspaceMembersPageContent({
               selectedWorkspaceHandle={selectedWorkspaceHandle}
               selectedMemberId={selectedMemberId}
               onRowClick={onMemberSelect}
+              onCreateNew={onCreateNew}
             />
           }
           detail={
             <WorkspaceMemberDetail
+              workspaceHandle={selectedWorkspaceHandle}
               memberId={selectedMemberId}
+              isCreateMode={isCreateMode}
+              onSaved={onSaved}
               onDeleted={onDeleted}
+              onCancel={onCancel}
             />
           }
-          detailOpen={selectedMemberId !== null}
+          detailOpen={selectedMemberId !== null || isCreateMode}
           onDetailClose={onDetailClose}
         />
       </Box>

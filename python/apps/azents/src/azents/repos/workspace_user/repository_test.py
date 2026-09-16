@@ -19,7 +19,9 @@ from azents.repos.workspace_user.data import WorkspaceUserRole
 from . import WorkspaceUserRepository
 from .data import (
     NotFound,
+    UserNotFound,
     WorkspaceNotFound,
+    WorkspaceUserAlreadyExists,
     WorkspaceUserCreate,
     WorkspaceUserUpdate,
 )
@@ -187,6 +189,52 @@ class TestWorkspaceUserRepository:
         assert user.id
         assert user.created_at
         assert user.updated_at
+
+    async def test_create_duplicate_membership_returns_conflict(
+        self, rdb_session: AsyncSession
+    ) -> None:
+        """Duplicate Workspace membership maps the exact unique constraint."""
+        workspace_id = await _create_workspace(rdb_session)
+        created_user_id = await _create_user(
+            rdb_session, email="duplicate-membership@example.com"
+        )
+        repo = WorkspaceUserRepository()
+        create = WorkspaceUserCreate(
+            workspace_id=workspace_id,
+            user_id=created_user_id,
+            name="Duplicate user",
+            role=WorkspaceUserRole.MEMBER,
+        )
+        first = await repo.create(rdb_session, create)
+        assert isinstance(first, Success)
+
+        result = await repo.create_with_conflict(rdb_session, create)
+
+        assert isinstance(result, Failure)
+        assert isinstance(result.error, WorkspaceUserAlreadyExists)
+        assert result.error.workspace_id == workspace_id
+        assert result.error.user_id == created_user_id
+
+    async def test_create_with_conflict_user_not_found(
+        self, rdb_session: AsyncSession
+    ) -> None:
+        """Admin creation maps a missing global User before deferred FK commit."""
+        workspace_id = await _create_workspace(rdb_session)
+        repo = WorkspaceUserRepository()
+
+        result = await repo.create_with_conflict(
+            rdb_session,
+            WorkspaceUserCreate(
+                workspace_id=workspace_id,
+                user_id="missing-user",
+                name="Missing user",
+                role=WorkspaceUserRole.MEMBER,
+            ),
+        )
+
+        assert isinstance(result, Failure)
+        assert isinstance(result.error, UserNotFound)
+        assert result.error.user_id == "missing-user"
 
     async def test_create_workspace_not_found(self, rdb_session: AsyncSession) -> None:
         """Creating WorkspaceUser in nonexistent Workspace returns NotFound."""

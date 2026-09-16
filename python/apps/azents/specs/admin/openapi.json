@@ -4296,6 +4296,64 @@
         }
       }
     },
+    "/workspace-user/v1/workspace-users/{workspace_user_id}/role": {
+      "patch": {
+        "tags": [
+          "WorkspaceUser v1"
+        ],
+        "summary": "Update Workspace User Role",
+        "description": "Update a non-Owner WorkspaceUser role.",
+        "operationId": "workspaceuser_v1_update_workspace_user_role",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "workspace_user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Workspace User Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkspaceUserRoleUpdateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceUserResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/workspace-user/v1/workspaces/{handle}/transfer-ownership": {
       "post": {
         "tags": [
@@ -9948,6 +10006,20 @@
         ],
         "title": "WorkspaceUserRole",
         "description": "WorkspaceUser role."
+      },
+      "WorkspaceUserRoleUpdateRequest": {
+        "properties": {
+          "role": {
+            "$ref": "#/components/schemas/WorkspaceUserRole",
+            "description": "Role (manager, member)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "role"
+        ],
+        "title": "WorkspaceUserRoleUpdateRequest",
+        "description": "WorkspaceUser role update request schema."
       },
       "WorkspaceUserUpdateRequest": {
         "properties": {

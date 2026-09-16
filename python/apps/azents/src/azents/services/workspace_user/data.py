@@ -64,3 +64,10 @@ class NotMemberOfWorkspace:
     """Target is not member of that workspace."""
 
     workspace_user_id: str
+
+
+@dataclasses.dataclass(frozen=True)
+class OwnerAlreadyExists:
+    """Workspace already has an Owner."""
+
+    workspace_user_id: str

@@ -7,6 +7,8 @@ code_paths:
   - python/apps/azents/db-schemas/rdb/migrations/versions/097a97177350_create_operational_schema_baseline.py
   - python/apps/azents/src/azents/services/workspace/**
   - python/apps/azents/src/azents/services/workspace_user/**
+  - python/apps/azents/src/azents/repos/workspace_user/**
+  - python/apps/azents/src/azents/api/admin/workspace_user/**
   - python/apps/azents/src/azents/services/workspace_invitation/**
   - python/apps/azents/src/azents/services/workspace_join_request/**
   - python/apps/azents/src/azents/services/external_channel/management.py
@@ -81,6 +83,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/agents/components/AgentRuntimeSettings.tsx
   - typescript/apps/azents-web/src/features/agents/containers/useAgentRuntimeSettingsContainer.ts
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
+  - typescript/apps/azents-admin-web/src/features/workspace-members/**
+  - typescript/apps/azents-admin-web/src/trpc/routers/workspaceMember.ts
 api_routes:
   - /workspace/v1
   - /workspace-user/v1
@@ -116,8 +120,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/agents
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/channel-defaults
-last_verified_at: 2026-09-15
-spec_version: 83
+last_verified_at: 2026-09-16
+spec_version: 84
 ---
 
 # Workspace & Membership
@@ -126,11 +130,11 @@ spec_version: 83
 
 Workspace is the top-level product collaboration unit in Azents. It is the permission boundary that shares agents, sessions, toolkits, Runtime Profiles, and other workspace-scoped resources. It is used in URLs and external references through a globally unique handle. Users belonging to Workspace are represented as `WorkspaceUser` and have one of three roles: OWNER/MANAGER/MEMBER.
 
-Workspace roles are unrelated to the instance-wide `system_admin` role. OWNER or MANAGER membership grants no Admin Web or Admin API access, and system-administrator assignment grants no implicit Workspace membership. Fresh Admin bootstrap creates no Workspace; a bootstrapped administrator creates or joins Workspaces later through ordinary Public API product flows.
+Workspace roles are unrelated to the instance-wide `system_admin` role. OWNER or MANAGER membership grants no Admin Web or Admin API access, and system-administrator assignment grants no implicit Workspace membership. Fresh Admin bootstrap creates no Workspace. A system administrator may later create a Workspace and explicitly add an existing global User as its initial Owner through Admin Web, but that operation does not implicitly add the administrator.
 
 In this document, **Workspace** refers only to the organization unit above. Runtime working storage owned by AgentRuntime is called **Agent Workspace**. Its absolute path is current-generation Runtime metadata reported by Runner, and server stores and uses this value in `agent_runtimes.workspace_path`. The `workspace` naming in code/API paths may remain for compatibility, but documents distinguish organization-level Workspace from Agent Workspace.
 
-There are two membership acquisition paths: (1) `WorkspaceInvitation` flow where an existing member invites by email, and (2) `WorkspaceJoinRequest` flow where an external user requests to join. Both converge into creation of a `WorkspaceUser` record. WorkspaceUser is the only current workspace membership model; sub-workspace Team and TeamMember concepts are not part of current behavior.
+There are four membership acquisition paths: (1) explicit Workspace creation with its creating User as Owner, (2) Admin member creation for an existing global User, (3) `WorkspaceInvitation` acceptance, and (4) `WorkspaceJoinRequest` approval. All converge into creation of a `WorkspaceUser` record. WorkspaceUser is the only current workspace membership model; sub-workspace Team and TeamMember concepts are not part of current behavior.
 
 ## Domain Model
 
@@ -509,6 +513,19 @@ Membership UI has these routes:
 - `/join/[handle]` — entrypoint where external user requests to join by workspace handle or checks pending state.
 - invitation/join request tRPC router wraps backend REST API. UI exposes management actions to users with OWNER/MANAGER permission, and provides read/request-centered screen to MEMBER.
 
+Admin Web `/workspace-members` is a separate system-administrator surface. It keeps
+the selected Workspace and member/create mode in URL query state, lists current
+membership, and lets the administrator select an existing global User, set a
+Workspace display name, and create an OWNER, MANAGER, or MEMBER membership. OWNER is
+offered during creation only when the Workspace has no current Owner. The User
+selector pages through the complete Admin User inventory rather than stopping at the
+first API page. Existing members support display-name updates and MANAGER/MEMBER role
+changes. A non-Owner member exposes a dedicated ownership-transfer action; the
+current Owner exposes neither direct role change nor deletion. Successful mutations
+invalidate the Workspace member list and selected-member queries and restore the
+Workspace handle where the mutation started, even if navigation changed while the
+request was in flight.
+
 ### Workspace Settings UI
 
 azents-web `/w/[handle]/settings` is the Workspace settings overview inside
@@ -538,11 +555,12 @@ authority across navigation.
 
 ### Membership Lifecycle
 
-Membership is created through three paths.
+Membership is created through four paths.
 
 1. **Explicit Workspace creation (automatic OWNER)** — `WorkspaceService.create_with_owner()` creates the Workspace and OWNER-role WorkspaceUser in one transaction. Runtime Profiles and execution policy are configured separately. Creator automatically becomes OWNER and this is not selectable in UI. Account or Admin bootstrap does not call this path.
-2. **Invitation acceptance** — existing member (manager or higher) invites by email. When invited user accepts, WorkspaceUser is created with that role (except OWNER). Display name is automatically set to prefix before `@` of invitation email.
-3. **JoinRequest approval** — user requests to join by handle. When existing member approves, WorkspaceUser is created with role=MEMBER. Display name is automatically set to first 8 chars of `user_id[:8]` (drift candidate — needs better default).
+2. **Admin member creation** — a system administrator selects an existing global User and supplies the Workspace display name and role. An Admin-created Workspace may temporarily have no Owner. Admin creation key-share locks both parent rows, so Workspace/User deletion cannot cross the deferred foreign-key boundary after validation. A missing User returns not found. Initial OWNER creation additionally locks the Workspace row, checks that no Owner exists, and creates the membership in the same transaction. Duplicate membership and second-Owner attempts return conflict responses.
+3. **Invitation acceptance** — existing member (manager or higher) invites by email. When invited user accepts, WorkspaceUser is created with that role (except OWNER). Display name is automatically set to prefix before `@` of invitation email.
+4. **JoinRequest approval** — user requests to join by handle. When existing member approves, WorkspaceUser is created with role=MEMBER. Display name is automatically set to first 8 chars of `user_id[:8]` (drift candidate — needs better default).
 
 Membership is removed by `WorkspaceUserService.delete()`. Workspace has no deletion route or
 service path: restrictive parent relationships prevent Workspace deletion from bypassing Agent
@@ -553,7 +571,11 @@ their own scoped operations.
 
 These OWNER/MANAGER/MEMBER invariants apply only inside one Workspace. Instance-wide `system_admin` authorization is stored and enforced separately.
 
-`WorkspaceUserService.update_role()` and `delete()` enforce these invariants.
+`WorkspaceUserService.update_role()`, `update_role_admin()`, `delete()`, and
+`delete_force()` enforce these invariants. Role change and deletion lock the
+Workspace row and reread the target membership before applying the mutation, so a
+concurrent ownership transfer cannot expose the newly promoted Owner to direct
+demotion or deletion.
 
 - **Cannot modify/delete self** — if `actor_workspace_user_id == target`, immediately fail with `CannotModifySelf`.
 - **Cannot demote/delete OWNER (normal path)** — if target is OWNER, fail with `CannotModifyOwner`. OWNER can be replaced only through `transfer_ownership` flow.
@@ -591,13 +613,17 @@ Approval (`approve`) creates WorkspaceUser (role=MEMBER) and deletes request. Re
 
 ### Ownership Transfer
 
-`WorkspaceUserService.transfer_ownership()` performs two role updates in one session.
+`WorkspaceUserService.transfer_ownership()` locks the Workspace row and performs
+both role updates in one session.
 
 1. Check new OWNER candidate is member of same workspace → otherwise `NotMemberOfWorkspace`.
-2. Find current OWNER and demote to MANAGER.
-3. Promote new OWNER candidate to OWNER.
+2. If the candidate is already the current OWNER, return it without role writes.
+3. Find current OWNER and demote to MANAGER.
+4. Promote new OWNER candidate to OWNER.
 
-Because it runs within transaction boundary, there is no state where Workspace has no OWNER.
+The Workspace lock serializes transfer against initial Owner creation, direct role
+change, and deletion. The committed result has at most one OWNER; a Workspace created
+through Admin may remain Ownerless until an initial Owner is added.
 
 ### Git worktree-created Projects
 
@@ -667,7 +693,9 @@ At least 7 rules — all actually verified in code:
 - `[workspace-role-not-system-role]` — Workspace OWNER/MANAGER/MEMBER state never grants instance-wide system-administrator access.
 - `[unique-handle]` — Workspace `handle` is globally unique. DB-level `UQ_HANDLE`.
 - `[unique-membership]` — one WorkspaceUser per `(workspace_id, user_id)`. `UQ_WORKSPACE_USER`.
-- `[owner-required]` — `create_with_owner` atomically creates Workspace + OWNER, guaranteeing Workspace without OWNER cannot exist.
+- `[public-workspace-owner]` — `create_with_owner` atomically creates Workspace + OWNER for the ordinary product creation path.
+- `[admin-workspace-owner-optional]` — Admin Workspace creation does not assign membership; Admin member creation may add the initial OWNER later.
+- `[single-owner]` — initial OWNER creation and ownership transfer lock the Workspace row and reject a second committed OWNER.
 - `[no-owner-via-update]` — `update_role()` rejects OWNER promotion input with `InvalidRole`. OWNER can be changed only through transfer path.
 - `[no-self-modification]` — actor cannot change own role or delete self (`CannotModifySelf`).
 - `[no-owner-demotion]` — direct demotion/deletion of OWNER target is `CannotModifyOwner`. Replacement only through `transfer_ownership` path.
@@ -807,12 +835,13 @@ stateDiagram-v2
 | `workspace_v1_create_workspace` (admin) | POST | `[unique-handle]` |
 | `workspace_v1_get_workspace` | GET | — |
 | `workspace_v1_update_workspace` | PATCH | `[unique-handle]` |
-| `workspaceuser_v1_create_workspace_user` | POST | `[unique-membership]` |
+| `workspaceuser_v1_create_workspace_user` | POST | `[unique-membership]`, `[single-owner]` |
 | `workspaceuser_v1_list_workspace_users` (admin) | GET | — |
 | `workspaceuser_v1_get_workspace_user` | GET | — |
 | `workspaceuser_v1_update_workspace_user` | PATCH | — |
+| `workspaceuser_v1_update_workspace_user_role` | PATCH | `[no-owner-via-update]`, `[no-owner-demotion]` |
 | `workspaceuser_v1_delete_workspace_user` (admin) | DELETE | `[no-owner-demotion]` (self-check bypass) |
-| `workspaceuser_v1_transfer_workspace_ownership` | POST | `[ownership-transfer-workspace-match]`, `[owner-required]` |
+| `workspaceuser_v1_transfer_workspace_ownership` | POST | `[ownership-transfer-workspace-match]`, `[single-owner]` |
 | `invitation_v1_list_workspace_invitations` (admin) | GET | — |
 | `invitation_v1_delete_invitation` | DELETE | — |
 | `runtime_provider_v1_get_workspace_profile_admin_detail` | GET `/runtime-provider/v1/workspaces/{handle}/runtime-profiles/{profile_id}` | System Admin read-only; Workspace membership not required |
@@ -834,6 +863,10 @@ stateDiagram-v2
 
 ## Changelog
 
+- **2026-09-16 (spec_version=84)** — Added system-administrator Workspace
+  membership creation, non-Owner role updates, Owner-safe deletion, serialized
+  initial Owner creation and ownership transfer, generated Admin clients, and the
+  Admin Web member-management and ownership-transfer flow.
 - **2026-09-13 (spec_version=83)** — Standardized the Session Panel's bounded
   flex and vertical-scroll contract across subviews and enforced mobile input
   sizing that avoids iOS focus zoom.

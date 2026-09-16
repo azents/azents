@@ -15,7 +15,9 @@ from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.repos.workspace_user.data import (
     NotFound,
+    UserNotFound,
     WorkspaceNotFound,
+    WorkspaceUserAlreadyExists,
     WorkspaceUserCreate,
 )
 from azents.services.runtime_terminal.invalidation import (
@@ -27,6 +29,7 @@ from .data import (
     CannotModifySelf,
     InvalidRole,
     NotMemberOfWorkspace,
+    OwnerAlreadyExists,
     WorkspaceUserCreateInput,
     WorkspaceUserListOutput,
     WorkspaceUserOutput,
@@ -48,7 +51,15 @@ class WorkspaceUserService:
 
     async def create(
         self, create: WorkspaceUserCreateInput
-    ) -> Result[WorkspaceUserOutput, WorkspaceNotFound]:
+    ) -> Result[
+        WorkspaceUserOutput,
+        (
+            WorkspaceNotFound
+            | UserNotFound
+            | WorkspaceUserAlreadyExists
+            | OwnerAlreadyExists
+        ),
+    ]:
         """Create WorkspaceUser.
 
         :param create: Create data
@@ -60,7 +71,20 @@ class WorkspaceUserService:
             )
             if workspace_id is None:
                 return Failure(WorkspaceNotFound(workspace_id=create.workspace_handle))
-            result = await self.user_repository.create(
+            if create.role == WorkspaceUserRole.OWNER:
+                locked_workspace = await self.workspace_repository.get_by_id_for_update(
+                    session, workspace_id
+                )
+                if locked_workspace is None:
+                    return Failure(WorkspaceNotFound(workspace_id=workspace_id))
+                current_owner = await self.user_repository.get_owner_by_workspace(
+                    session, workspace_id
+                )
+                if current_owner is not None:
+                    return Failure(
+                        OwnerAlreadyExists(workspace_user_id=current_owner.id)
+                    )
+            result = await self.user_repository.create_with_conflict(
                 session,
                 WorkspaceUserCreate(
                     workspace_id=workspace_id,
@@ -145,16 +169,22 @@ class WorkspaceUserService:
         :param role: Role to change
         :return: Updated WorkspaceUser or error
         """
-        # Cannot change own role
         if actor_workspace_user_id == workspace_user_id:
             return Failure(CannotModifySelf())
-
-        # Cannot change to Owner role
         if role == WorkspaceUserRole.OWNER:
             return Failure(InvalidRole())
 
         async with self.session_manager() as session:
-            # Fetch target user and check Owner status
+            target = await self.user_repository.get(session, workspace_user_id)
+            if target is None:
+                return Failure(NotFound(workspace_user_id=workspace_user_id))
+
+            locked_workspace = await self.workspace_repository.get_by_id_for_update(
+                session, target.workspace_id
+            )
+            if locked_workspace is None:
+                return Failure(NotFound(workspace_user_id=workspace_user_id))
+
             target = await self.user_repository.get(session, workspace_user_id)
             if target is None:
                 return Failure(NotFound(workspace_user_id=workspace_user_id))
@@ -167,6 +197,8 @@ class WorkspaceUserService:
 
         match result:
             case Success(value):
+                publisher = self.terminal_invalidation_publisher
+                await publisher.publish_user_terminal_invalidation(value.user_id)
                 return Success(WorkspaceUserOutput.convert_from(value))
             case Failure(error):
                 return Failure(error)
@@ -184,12 +216,20 @@ class WorkspaceUserService:
         :param workspace_user_id: Target WorkspaceUser ID
         :return: Success or error
         """
-        # Cannot delete self
         if actor_workspace_user_id == workspace_user_id:
             return Failure(CannotModifySelf())
 
         async with self.session_manager() as session:
-            # Fetch target user and check Owner status
+            target = await self.user_repository.get(session, workspace_user_id)
+            if target is None:
+                return Failure(NotFound(workspace_user_id=workspace_user_id))
+
+            locked_workspace = await self.workspace_repository.get_by_id_for_update(
+                session, target.workspace_id
+            )
+            if locked_workspace is None:
+                return Failure(NotFound(workspace_user_id=workspace_user_id))
+
             target = await self.user_repository.get(session, workspace_user_id)
             if target is None:
                 return Failure(NotFound(workspace_user_id=workspace_user_id))
@@ -207,6 +247,54 @@ class WorkspaceUserService:
         )
         return Success(None)
 
+    async def update_role_admin(
+        self,
+        workspace_user_id: str,
+        role: WorkspaceUserRole,
+    ) -> Result[
+        WorkspaceUserOutput,
+        NotFound | CannotModifyOwner | InvalidRole,
+    ]:
+        """Change a non-Owner WorkspaceUser role from the Admin API.
+
+        :param workspace_user_id: Target WorkspaceUser ID
+        :param role: Role to change
+        :return: Updated WorkspaceUser or error
+        """
+        if role == WorkspaceUserRole.OWNER:
+            return Failure(InvalidRole())
+
+        async with self.session_manager() as session:
+            target = await self.user_repository.get(session, workspace_user_id)
+            if target is None:
+                return Failure(NotFound(workspace_user_id=workspace_user_id))
+
+            locked_workspace = await self.workspace_repository.get_by_id_for_update(
+                session, target.workspace_id
+            )
+            if locked_workspace is None:
+                return Failure(NotFound(workspace_user_id=workspace_user_id))
+
+            target = await self.user_repository.get(session, workspace_user_id)
+            if target is None:
+                return Failure(NotFound(workspace_user_id=workspace_user_id))
+            if target.role == WorkspaceUserRole.OWNER:
+                return Failure(CannotModifyOwner())
+
+            result = await self.user_repository.update_role(
+                session, workspace_user_id, role
+            )
+
+        match result:
+            case Success(value):
+                publisher = self.terminal_invalidation_publisher
+                await publisher.publish_user_terminal_invalidation(value.user_id)
+                return Success(WorkspaceUserOutput.convert_from(value))
+            case Failure(error):
+                return Failure(error)
+            case _:
+                assert_never(result)
+
     async def delete_force(
         self, workspace_user_id: str
     ) -> Result[None, NotFound | CannotModifyOwner]:
@@ -218,6 +306,16 @@ class WorkspaceUserService:
         :return: Success or error
         """
         async with self.session_manager() as session:
+            target = await self.user_repository.get(session, workspace_user_id)
+            if target is None:
+                return Failure(NotFound(workspace_user_id=workspace_user_id))
+
+            locked_workspace = await self.workspace_repository.get_by_id_for_update(
+                session, target.workspace_id
+            )
+            if locked_workspace is None:
+                return Failure(NotFound(workspace_user_id=workspace_user_id))
+
             target = await self.user_repository.get(session, workspace_user_id)
             if target is None:
                 return Failure(NotFound(workspace_user_id=workspace_user_id))
@@ -239,7 +337,10 @@ class WorkspaceUserService:
         self,
         workspace_id: str,
         new_owner_workspace_user_id: str,
-    ) -> Result[WorkspaceUserOutput, NotFound | NotMemberOfWorkspace]:
+    ) -> Result[
+        WorkspaceUserOutput,
+        WorkspaceNotFound | NotFound | NotMemberOfWorkspace,
+    ]:
         """Change workspace Owner.
 
         Change existing Owner to Manager and new Owner to Owner.
@@ -249,8 +350,13 @@ class WorkspaceUserService:
         :return: New Owner WorkspaceUser or error
         """
         async with self.session_manager() as session:
-            # Fetch new Owner
-            new_owner = await self.user_repository.get(
+            locked_workspace = await self.workspace_repository.get_by_id_for_update(
+                session, workspace_id
+            )
+            if locked_workspace is None:
+                return Failure(WorkspaceNotFound(workspace_id=workspace_id))
+
+            new_owner = await self.user_repository.get_for_update(
                 session, new_owner_workspace_user_id
             )
             if new_owner is None:
@@ -262,19 +368,30 @@ class WorkspaceUserService:
                     NotMemberOfWorkspace(workspace_user_id=new_owner_workspace_user_id)
                 )
 
-            # Fetch current Owner and change to Manager
-            current_owner = await self.user_repository.get_owner_by_workspace(
-                session, workspace_id
+            current_owner = (
+                await self.user_repository.get_owner_by_workspace_for_update(
+                    session, workspace_id
+                )
             )
+            if (
+                current_owner is not None
+                and current_owner.id == new_owner_workspace_user_id
+            ):
+                return Success(WorkspaceUserOutput.convert_from(current_owner))
             if current_owner is not None:
-                await self.user_repository.update_role(
+                demotion_result = await self.user_repository.update_role(
                     session, current_owner.id, WorkspaceUserRole.MANAGER
                 )
+                if isinstance(demotion_result, Failure):
+                    await session.rollback()
+                    return Failure(demotion_result.error)
 
-            # Change to new Owner
             result = await self.user_repository.update_role(
                 session, new_owner_workspace_user_id, WorkspaceUserRole.OWNER
             )
+            if isinstance(result, Failure):
+                await session.rollback()
+                return Failure(result.error)
 
         match result:
             case Success(value):
@@ -283,6 +400,8 @@ class WorkspaceUserService:
                     await publisher.publish_user_terminal_invalidation(
                         current_owner.user_id,
                     )
+                publisher = self.terminal_invalidation_publisher
+                await publisher.publish_user_terminal_invalidation(value.user_id)
                 return Success(WorkspaceUserOutput.convert_from(value))
             case Failure(error):
                 return Failure(error)

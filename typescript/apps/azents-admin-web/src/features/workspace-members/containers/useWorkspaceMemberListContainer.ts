@@ -7,19 +7,18 @@ export interface WorkspaceMemberListContainerProps {
   selectedWorkspaceHandle: string | null;
   selectedMemberId: string | null;
   onRowClick: (member: WorkspaceUserResponse) => void;
+  onCreateNew: () => void;
 }
 
 export interface WorkspaceMemberListComponentProps {
   state: WorkspaceMemberListState;
   selectedMemberId: string | null;
+  canCreate: boolean;
   onRowClick: (member: WorkspaceUserResponse) => void;
+  onCreateNew: () => void;
 }
 
-/**
- * Workspace member list container hook
- *
- * Fetches the workspace member list server-side through tRPC and converts it to an ADT.
- */
+/** Fetch the member list and convert query state to the list ADT. */
 export function useWorkspaceMemberListContainer(
   props: WorkspaceMemberListContainerProps,
 ): WorkspaceMemberListComponentProps {
@@ -46,6 +45,8 @@ export function useWorkspaceMemberListContainer(
   return {
     state,
     selectedMemberId: props.selectedMemberId,
+    canCreate: props.selectedWorkspaceHandle !== null,
     onRowClick: props.onRowClick,
+    onCreateNew: props.onCreateNew,
   };
 }
