@@ -99,7 +99,7 @@ export function LoginPageView({
                 loading={submitting}
                 disabled={!email || !password || (bootstrapping && !setupToken)}
               >
-                {bootstrapping ? "Create system administrator" : "Sign in"}
+                {bootstrapping ? "Create admin" : "Sign in"}
               </Button>
             </Stack>
           </form>
