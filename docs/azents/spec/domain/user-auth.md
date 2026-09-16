@@ -4,7 +4,7 @@ spec_type: domain
 domain: user-auth
 owner: "@Hardtack"
 created: 2026-04-20
-updated: 2026-09-13
+updated: 2026-09-16
 tags: [backend, security, api]
 code_paths:
   - python/apps/azents/src/azents/core/auth/**
@@ -64,10 +64,10 @@ code_paths:
   - typescript/apps/azents-admin-web/src/shared/lib/auth-cookies.ts
   - typescript/apps/azents-admin-web/src/shared/lib/auth-policy.ts
   - typescript/apps/azents-admin-web/src/trpc/**
+  - typescript/apps/azents-web/src/app/(app)/page.tsx
   - typescript/apps/azents-web/src/app/(app)/login/**
   - typescript/apps/azents-web/src/features/auth/**
   - typescript/apps/azents-web/src/features/account/**
-  - typescript/apps/azents-web/src/features/home/components/LocaleSwitcher.tsx
   - typescript/apps/azents-web/src/features/signup/**
   - typescript/apps/azents-web/src/features/password-reset/**
   - typescript/apps/azents-web/src/features/security/**
@@ -86,7 +86,6 @@ code_paths:
   - typescript/apps/azents-web/src/shared/providers/locale.tsx
   - typescript/apps/azents-web/src/i18n/request.ts
   - typescript/apps/azents-web/src/app/(app)/layout.tsx
-  - typescript/apps/azents-web/src/app/(landing)/layout.tsx
   - typescript/apps/azents-web/src/app/providers.tsx
   - typescript/apps/azents-web/src/shared/components/AppLayout.tsx
   - python/apps/azents/src/azents/services/runtime_web/gateway_auth*
@@ -114,8 +113,8 @@ api_routes:
   - /system/v1
   - /system-setting/v1
   - /debug/v1
-last_verified_at: 2026-09-15
-spec_version: 21
+last_verified_at: 2026-09-16
+spec_version: 22
 ---
 
 # User & Authentication
@@ -444,19 +443,16 @@ order:
    language-prefix matches such as `ko` to `ko-KR`.
 4. Fall back to `en-US`.
 
-The resolved locale selects server messages and the document language. Authenticated
-application and landing layouts also read the current account on the client. If a
-valid account locale differs from the rendered locale, they write the supported
-locale to the one-year, path-rooted, `SameSite=Lax` locale cookie and reload the
-document so server-rendered messages converge. The client synchronization query is
-disabled for unauthenticated state, and the landing surface does not redirect to
-login when that optional query receives an authorization failure.
+The resolved locale selects server messages and the document language. The
+application layout also reads the current account on the client. If a valid account
+locale differs from the rendered locale, it writes the supported locale to the
+one-year, path-rooted, `SameSite=Lax` locale cookie and reloads the document so
+server-rendered messages converge. The client synchronization query is disabled for
+unauthenticated state.
 
 Saving a locale from Account settings updates the account first. A successful
 response uses the same cookie-and-reload boundary; the browser does not treat a
 local-only language selection as authoritative over the persisted account.
-When no authenticated account locale is available, the landing language switcher
-uses the cookie-and-reload boundary directly.
 
 ## 4. Session / Refresh Token Lifecycle
 
@@ -593,6 +589,7 @@ All other Admin API operations, including `/auth/v1` token operations, `/system-
 
 ## 8. Frontend Routes
 
+- `/` — has no presentation surface. Requests with Main Web authentication cookies redirect to `/workspaces`; requests without them redirect to `/login`. Protected routes retain authoritative downstream session checks.
 - `/login` — existing login page. Existing users continue with password or email OTP. It exposes a signup-link request action only when registration policy and email delivery allow it.
 - `/signup?token=...` — previews a signup token, shows a masked email hint, and redeems it with user-entered email and password.
 - `/reset-password?token=...` — previews an admin-issued reset token and submits a new password. Success does not auto-login; user signs in separately.
@@ -604,6 +601,9 @@ Admin-issued signup/password-reset token management and other instance-wide oper
 
 ## 9. Changelog
 
+- **2026-09-16** (v22) — Removed the public product-marketing landing surface and
+  made the Main Web root redirect unauthenticated requests to `/login` and
+  authenticated requests to `/workspaces`.
 - **2026-09-15** (v21) — Added account-locale persistence, SSR resolution
   precedence, authenticated client convergence, and Account settings update
   behavior.

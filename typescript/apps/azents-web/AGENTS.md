@@ -27,7 +27,6 @@ $ turbo run build --filter=@azents/web
 src/
 ├── app/                    # Next.js App Router pages
 ├── features/               # Feature modules
-│   └── home/               # Landing page feature
 ├── shared/
 │   ├── lib/                # Utilities such as color mode and locale
 │   ├── providers/          # React Context providers
@@ -37,13 +36,10 @@ src/
 
 ## Color Mode Architecture
 
-The landing page is always dark mode. Do **not** force this in `layout.tsx`; override at page level instead:
-
-```
-layout.tsx           → MantineProvider (default theme, no color scheme forced)
-  └── page.tsx       → MantineProvider forceColorScheme="dark" (landing only)
-  └── dashboard/     → default theme or future user preference
-```
+Main Web uses the cookie-backed `ColorModeProvider` in
+`src/app/(app)/layout.tsx`. The root route belongs to the same application route
+group and redirects according to authentication state; do not create a separate
+root layout solely for a presentation surface.
 
 Color mode utilities:
 

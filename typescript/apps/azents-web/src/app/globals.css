@@ -16,13 +16,3 @@
     font-size: var(--mantine-font-size-md) !important;
   }
 }
-
-/* Footer link hover effect */
-.footer-link {
-  color: var(--mantine-color-dimmed);
-  transition: color 0.15s ease;
-}
-
-.footer-link:hover {
-  color: var(--mantine-color-text);
-}
