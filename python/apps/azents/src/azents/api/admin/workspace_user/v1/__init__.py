@@ -8,18 +8,16 @@ from typing import Annotated, assert_never
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from azents.repos.workspace_user.data import (
-    NotFound,
-    UserNotFound,
-    WorkspaceNotFound,
-    WorkspaceUserAlreadyExists,
-)
 from azents.services.workspace_user import WorkspaceUserService
 from azents.services.workspace_user.data import (
     CannotModifyOwner,
     InvalidRole,
+    NotFound,
     NotMemberOfWorkspace,
     OwnerAlreadyExists,
+    UserNotFound,
+    WorkspaceNotFound,
+    WorkspaceUserAlreadyExists,
 )
 from azents.utils.fastapi.route import RouteMounter
 
