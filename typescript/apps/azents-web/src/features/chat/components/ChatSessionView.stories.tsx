@@ -449,10 +449,19 @@ export const RuntimePanel = {
   args: { panel: { ...args.panel, activeView: "runtime" } },
   play: async ({ canvasElement }) => {
     const title = canvasElement.querySelector("[data-session-panel-title]");
-    if (title === null) {
-      throw new Error("Expected the desktop session panel title.");
+    const sessionHeader = canvasElement.querySelector(
+      "[data-agent-session-header]",
+    );
+    const panelHeader = canvasElement.querySelector(
+      "[data-session-panel-header]",
+    );
+    if (title === null || sessionHeader === null || panelHeader === null) {
+      throw new Error("Expected aligned desktop session headers.");
     }
     await expect(title).toHaveTextContent("Runtime");
+    await expect(panelHeader.getBoundingClientRect().height).toBe(
+      sessionHeader.getBoundingClientRect().height,
+    );
   },
 } satisfies Story;
 

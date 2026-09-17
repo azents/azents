@@ -162,6 +162,7 @@ export function AgentSessionHeader({
         </Stack>
       </Modal>
       <Box
+        data-agent-session-header
         style={{
           borderBottom: "0.0625rem solid var(--mantine-color-default-border)",
           backgroundColor: "var(--mantine-color-body)",
