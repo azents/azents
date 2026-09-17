@@ -30,6 +30,7 @@ from azents_runtime_control.grpc_transfer_coordinator_client import (
 from azents_runtime_control.transfer import CoordinatorTransferIdentity
 
 from azents.runtime.transfer.runtime_to_server import (
+    RuntimeToServerConsumerRequest,
     RuntimeToServerPublicationCallback,
     RuntimeToServerTransferRequest,
     RuntimeToServerTransferService,
@@ -476,6 +477,131 @@ def _request(
         publication_id="stable-publication",
         callback=callback,
     )
+
+
+class _AmbiguousRenewalCoordinator(_Coordinator):
+    """Leave a renewal RPC in flight so completion must refresh its revision."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.renewal_started = asyncio.Event()
+        self.renewal_count = 0
+        self.status_calls = 0
+
+    async def renew_consumer_lease(
+        self, request: CoordinatorConsumerRequest
+    ) -> CoordinatorTransferStatus:
+        self.calls.append("renew")
+        self.renewal_count += 1
+        if self.renewal_count == 1:
+            return _status(6, request.identity, CoordinatorTransferPhase.CONSUMING)
+        self.renewal_started.set()
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+    async def get_transfer_status(
+        self, request: CoordinatorGetTransferStatusRequest
+    ) -> CoordinatorTransferStatus:
+        self.calls.append("status")
+        self.status_calls += 1
+        if self.status_calls == 1:
+            return _status(4, request.identity, CoordinatorTransferPhase.AVAILABLE)
+        return _status(9, request.identity, CoordinatorTransferPhase.CONSUMING)
+
+    async def acknowledge_consumer(
+        self, request: CoordinatorConsumerRequest
+    ) -> CoordinatorTransferStatus:
+        assert request.expected_revision == 9
+        return await super().acknowledge_consumer(request)
+
+
+def _consumer_request() -> RuntimeToServerConsumerRequest:
+    """Return one request without a publication callback."""
+    request = _request(_Callback([]))
+    return RuntimeToServerConsumerRequest(
+        target=request.target,
+        agent_id=request.agent_id,
+        session_id=request.session_id,
+        operation_id=request.operation_id,
+        runtime_path=request.runtime_path,
+        expected_size=request.expected_size,
+        expected_sha256=request.expected_sha256,
+        product_maximum_size=request.product_maximum_size,
+        provider_maximum_size=request.provider_maximum_size,
+        deadline_at=request.deadline_at,
+        resource_class=request.resource_class,
+        publication_id=request.publication_id,
+    )
+
+
+@pytest.mark.asyncio
+async def test_prepare_consumer_defers_ack_and_settlement_until_completion() -> None:
+    """A response consumer owns the claim until its caller commits EOF."""
+    coordinator = _Coordinator()
+    service = RuntimeToServerTransferService(
+        coordinator=coordinator,
+        clock=lambda: _NOW,
+        status_poll_interval=timedelta(milliseconds=1),
+        consumer_lease_renew_interval=timedelta(seconds=1),
+    )
+
+    consumer = await service.prepare_consumer(_consumer_request())
+
+    assert coordinator.calls == [
+        "admit",
+        "ready",
+        "dispatch",
+        "status",
+        "claim",
+        "verified",
+        "renew",
+    ]
+    await consumer.complete()
+    assert coordinator.calls[-2:] == ["ack", "settle"]
+    assert consumer.committed
+
+
+@pytest.mark.asyncio
+async def test_consumer_abandon_is_idempotent_and_stops_renewal() -> None:
+    """Early response termination runs unsuccessful cleanup exactly once."""
+    coordinator = _Coordinator()
+    service = RuntimeToServerTransferService(
+        coordinator=coordinator,
+        clock=lambda: _NOW,
+        status_poll_interval=timedelta(milliseconds=1),
+        consumer_lease_renew_interval=timedelta(seconds=1),
+    )
+
+    consumer = await service.prepare_consumer(_consumer_request())
+    await consumer.start_lease_renewal()
+    await consumer.abandon()
+    await consumer.abandon()
+
+    assert coordinator.calls[-3:] == ["status", "abandon", "cancel"]
+    assert coordinator.calls.count("abandon") == 1
+    assert coordinator.calls.count("cancel") == 1
+
+
+@pytest.mark.asyncio
+async def test_completion_refreshes_revision_after_inflight_renewal_cancellation() -> (
+    None
+):
+    """A cancelled renewal RPC is re-observed before acknowledgement fencing."""
+    coordinator = _AmbiguousRenewalCoordinator()
+    service = RuntimeToServerTransferService(
+        coordinator=coordinator,
+        clock=lambda: _NOW,
+        status_poll_interval=timedelta(milliseconds=1),
+        consumer_lease_renew_interval=timedelta(milliseconds=1),
+    )
+
+    consumer = await service.prepare_consumer(_consumer_request())
+    await consumer.start_lease_renewal()
+    await coordinator.renewal_started.wait()
+    await consumer.complete()
+
+    assert "status" in coordinator.calls
+    assert coordinator.calls[-2:] == ["ack", "settle"]
 
 
 @pytest.mark.asyncio

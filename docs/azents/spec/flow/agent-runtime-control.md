@@ -52,6 +52,8 @@ code_paths:
   - python/apps/azents/src/azents/utils/logging.py
   - python/apps/azents/src/azents/services/session_git_worktree/**
   - python/apps/azents/src/azents/services/chat/workspace.py
+  - python/apps/azents/src/azents/services/file_download_stream.py
+  - python/apps/azents/src/azents/api/public/file_download.py
   - python/apps/azents/src/azents/runtime/control_server.py
   - python/apps/azents/src/cli/devserver.py
   - python/apps/azents/src/cli/runtime_control_server.py
@@ -77,8 +79,8 @@ code_paths:
   - testenv/azents/e2e/src/tests/web/public/test_runtime_capability_web.py
   - testenv/azents/e2e/src/tests/web/public/test_runtime_web_gateway.py
   - infra/charts/azents/**
-last_verified_at: 2026-09-16
-spec_version: 87
+last_verified_at: 2026-09-17
+spec_version: 88
 ---
 
 # Agent Runtime Control
@@ -375,10 +377,16 @@ only for the current dispatch and cannot be replaced by a late result.
 
 Verified objects are claimed by trusted consumers through short leases. A consumer
 receives an opaque handle and bounded async stream, acknowledges only after its
-product/provider publication succeeds, and abandons or settles a failed claim. Cleanup
-removes terminal objects and incomplete multipart preparations according to their
-bounded retention policy. A provider mutation is attempted at most once: no transfer or
-provider call is replayed after mutation starts or its outcome is unknown.
+product/provider publication succeeds, and abandons or settles a failed claim. The
+Workspace HTTP response consumer keeps the lease renewed while its single-use object
+iterator is consumed, verifies exact EOF against the trusted size and SHA-256, and
+acknowledges plus settles only after the final ASGI body send returns successfully.
+Source failure, lease loss, deadline expiry, disconnect, or cancellation before that
+commit point abandons and cancels the attempt; a later cancellation cannot reverse a
+committed response. Cleanup removes terminal objects and incomplete multipart
+preparations according to their bounded retention policy. A provider mutation is
+attempted at most once: no transfer or provider call is replayed after mutation starts
+or its outcome is unknown.
 
 Every attempt has a non-extendable logical expiration no later than one hour after
 admission. Runtime Control rejects every access after that deadline even when the
@@ -1082,6 +1090,10 @@ Live/provider evidence belongs in the testenv prerequisite system and must redac
 
 ## Changelog
 
+- **2026-09-17 (spec_version=88)** — Added the response-scoped Runtime-to-server
+  consumer lifecycle used by Workspace HTTP downloads: bounded verified object
+  iteration, lease renewal through response consumption, exact-EOF/final-send
+  completion fencing, and shielded abandonment on early termination.
 - **2026-09-16 (spec_version=87)** — Renamed the reusable persistent Runtime Web
   session protocol and transport implementation to the stream-neutral Runtime
   Stream Session boundary. HTTP/WebSocket adapters, Owner routing, and Runtime Web
