@@ -2967,7 +2967,7 @@ async def test_platform_transfer_egress_is_available_in_no_network_mode() -> Non
         ("azents-runtime", "azents-runtime-runtime-1-execution")
     ]
     assert any(
-        alias.ip == "198.51.100.10" and "objects.example.com" in alias.hostnames
+        alias.ip == "198.51.100.10" and alias.hostnames == ("objects.example.com",)
         for alias in pod.spec.host_aliases
     )
     assert any(
