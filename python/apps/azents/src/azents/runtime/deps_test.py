@@ -10,6 +10,9 @@ from azents_runtime_control.grpc_tls import GrpcClientTlsConfig
 from azents_runtime_control.grpc_transfer_coordinator_client import (
     GrpcRuntimeTransferCoordinatorClient,
 )
+from azents_runtime_control.grpc_workspace_upload_client import (
+    GrpcRuntimeWorkspaceUploadCoordinatorClient,
+)
 
 from azents.core.config import (
     Config,
@@ -21,6 +24,7 @@ from azents.core.runtime_transfer_coordinator_credential import (
 )
 from azents.runtime.deps import (
     get_api_runtime_transfer_coordinator_client,
+    get_api_runtime_workspace_upload_coordinator_client,
     get_worker_runtime_transfer_coordinator_client,
 )
 from azents.utils.appctx import AppContext
@@ -145,12 +149,62 @@ async def test_api_coordinator_client_uses_explicit_api_identity(
     await appctx.close()
 
 
+async def test_api_workspace_upload_coordinator_uses_explicit_api_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Workspace upload client reuses secure API Coordinator composition."""
+    client = _FakeCoordinatorClient()
+    captured: dict[str, object] = {}
+
+    def create_client(*args: object, **kwargs: object) -> _FakeCoordinatorClient:
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+        return client
+
+    monkeypatch.setattr(
+        GrpcRuntimeWorkspaceUploadCoordinatorClient,
+        "from_endpoint",
+        create_client,
+    )
+    config = _config(
+        endpoint="runtime-control:8030",
+        tls_ca_file=None,
+        allow_insecure=True,
+    )
+    appctx = AppContext(config)
+
+    first = await get_api_runtime_workspace_upload_coordinator_client(appctx, config)
+    second = await get_api_runtime_workspace_upload_coordinator_client(appctx, config)
+
+    assert first is client
+    assert second is client
+    args = cast(tuple[object, ...], captured["args"])
+    kwargs = cast(dict[str, object], captured["kwargs"])
+    assert args == ("runtime-control:8030",)
+    assert kwargs["tls"] is None
+    assert kwargs["allow_insecure"] is True
+    credential_supplier = kwargs["credential_supplier"]
+    assert isinstance(
+        credential_supplier,
+        RuntimeTransferCoordinatorCredentialSupplier,
+    )
+    assert credential_supplier.service_identity == "azents-api"
+
+    await appctx.close()
+
+    assert client.closed
+
+
 async def test_coordinator_client_is_absent_without_cutover_configuration() -> None:
     """A non-cutover process has no implicit local transfer replacement."""
     config = _config(endpoint=None, tls_ca_file=None)
     appctx = AppContext(config)
 
     assert await get_worker_runtime_transfer_coordinator_client(appctx, config) is None
+    assert (
+        await get_api_runtime_workspace_upload_coordinator_client(appctx, config)
+        is None
+    )
 
     await appctx.close()
 

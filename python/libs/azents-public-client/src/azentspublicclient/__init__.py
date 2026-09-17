@@ -562,6 +562,18 @@ __all__ = [
     "WorkspaceRuntimeProfilePolicyV2",
     "WorkspaceRuntimeProfileReplaceRequest",
     "WorkspaceRuntimeProfileResponse",
+    "WorkspaceUploadCancelRequest",
+    "WorkspaceUploadCreateRequest",
+    "WorkspaceUploadCreateResponse",
+    "WorkspaceUploadDestinationEvidenceResponse",
+    "WorkspaceUploadFailure",
+    "WorkspaceUploadFinalizeRequest",
+    "WorkspaceUploadIdentityResponse",
+    "WorkspaceUploadOutcome",
+    "WorkspaceUploadPhase",
+    "WorkspaceUploadRetryRequest",
+    "WorkspaceUploadStatusResponse",
+    "WorkspaceUploadTicketResponse",
     "WorkspaceUserListResponse",
     "WorkspaceUserResponse",
     "WorkspaceUserRole",
@@ -1122,6 +1134,18 @@ from azentspublicclient.models.workspace_runtime_profile_policy_v1 import Worksp
 from azentspublicclient.models.workspace_runtime_profile_policy_v2 import WorkspaceRuntimeProfilePolicyV2 as WorkspaceRuntimeProfilePolicyV2
 from azentspublicclient.models.workspace_runtime_profile_replace_request import WorkspaceRuntimeProfileReplaceRequest as WorkspaceRuntimeProfileReplaceRequest
 from azentspublicclient.models.workspace_runtime_profile_response import WorkspaceRuntimeProfileResponse as WorkspaceRuntimeProfileResponse
+from azentspublicclient.models.workspace_upload_cancel_request import WorkspaceUploadCancelRequest as WorkspaceUploadCancelRequest
+from azentspublicclient.models.workspace_upload_create_request import WorkspaceUploadCreateRequest as WorkspaceUploadCreateRequest
+from azentspublicclient.models.workspace_upload_create_response import WorkspaceUploadCreateResponse as WorkspaceUploadCreateResponse
+from azentspublicclient.models.workspace_upload_destination_evidence_response import WorkspaceUploadDestinationEvidenceResponse as WorkspaceUploadDestinationEvidenceResponse
+from azentspublicclient.models.workspace_upload_failure import WorkspaceUploadFailure as WorkspaceUploadFailure
+from azentspublicclient.models.workspace_upload_finalize_request import WorkspaceUploadFinalizeRequest as WorkspaceUploadFinalizeRequest
+from azentspublicclient.models.workspace_upload_identity_response import WorkspaceUploadIdentityResponse as WorkspaceUploadIdentityResponse
+from azentspublicclient.models.workspace_upload_outcome import WorkspaceUploadOutcome as WorkspaceUploadOutcome
+from azentspublicclient.models.workspace_upload_phase import WorkspaceUploadPhase as WorkspaceUploadPhase
+from azentspublicclient.models.workspace_upload_retry_request import WorkspaceUploadRetryRequest as WorkspaceUploadRetryRequest
+from azentspublicclient.models.workspace_upload_status_response import WorkspaceUploadStatusResponse as WorkspaceUploadStatusResponse
+from azentspublicclient.models.workspace_upload_ticket_response import WorkspaceUploadTicketResponse as WorkspaceUploadTicketResponse
 from azentspublicclient.models.workspace_user_list_response import WorkspaceUserListResponse as WorkspaceUserListResponse
 from azentspublicclient.models.workspace_user_response import WorkspaceUserResponse as WorkspaceUserResponse
 from azentspublicclient.models.workspace_user_role import WorkspaceUserRole as WorkspaceUserRole
