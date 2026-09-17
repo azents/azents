@@ -7,22 +7,22 @@ import hashlib
 from collections.abc import AsyncIterator
 
 import pytest
-from azents_runtime_control.grpc_runner_web_session_client import (
+from azents_runtime_control.grpc_runner_stream_session_client import (
     EnvelopeHandler,
     FailureHandler,
-    GrpcRunnerWebSessionClient,
+    GrpcRunnerStreamSessionClient,
 )
-from azents_runtime_control.proto import runtime_web_session_pb2
-from azents_runtime_control.runtime_web_session import (
-    RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+from azents_runtime_control.proto import runtime_stream_session_pb2
+from azents_runtime_control.runtime_stream_session import (
+    RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
     OwnerSessionEpoch,
     RunnerSessionOffer,
 )
 
-from azents_runtime_runner.web_session import (
+from azents_runtime_runner.stream_session import (
+    RunnerStreamSessionManager,
     RunnerWebLoopbackPool,
     RunnerWebLoopbackProtocolError,
-    RunnerWebSessionManager,
     _hello,
 )
 
@@ -38,7 +38,7 @@ def _offer(*, runner_generation: int = 4) -> RunnerSessionOffer:
             runner_generation=runner_generation,
         ),
         session_nonce="nonce-a",
-        protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+        protocol_fingerprint=RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
         deadline_at=datetime.datetime.now(datetime.UTC)
         + datetime.timedelta(seconds=10),
     )
@@ -46,8 +46,8 @@ def _offer(*, runner_generation: int = 4) -> RunnerSessionOffer:
 
 def _accepted(
     offer: RunnerSessionOffer,
-) -> runtime_web_session_pb2.RuntimeWebSessionEnvelope:
-    envelope = runtime_web_session_pb2.RuntimeWebSessionEnvelope(
+) -> runtime_stream_session_pb2.RuntimeStreamSessionEnvelope:
+    envelope = runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(
         protocol_fingerprint=offer.protocol_fingerprint,
         session_id=offer.owner.session_lease_id,
         peer_boot_id=offer.owner.owner_boot_id,
@@ -67,7 +67,7 @@ async def _failure_handler() -> None:
     pass
 
 
-def _unused_client_factory() -> GrpcRunnerWebSessionClient:
+def _unused_client_factory() -> GrpcRunnerStreamSessionClient:
     raise AssertionError("test must not create a Runner Web client")
 
 
@@ -76,7 +76,7 @@ def test_runner_hello_binds_exact_owner_generation_and_profile() -> None:
 
     envelope = _hello(offer, "runner-boot-a")
 
-    assert envelope.protocol_fingerprint == RUNTIME_WEB_PROTOCOL_FINGERPRINT
+    assert envelope.protocol_fingerprint == RUNTIME_STREAM_PROTOCOL_FINGERPRINT
     assert envelope.owner_boot_id == "boot-a"
     assert envelope.session_lease_id == "lease-a"
     assert envelope.lease_generation == 1
@@ -376,12 +376,12 @@ async def test_loopback_websocket_rejects_unoffered_selected_subprotocol() -> No
 async def test_runner_manager_rejects_obsolete_generation_without_connecting() -> None:
     calls = 0
 
-    def client_factory() -> GrpcRunnerWebSessionClient:
+    def client_factory() -> GrpcRunnerStreamSessionClient:
         nonlocal calls
         calls += 1
         raise AssertionError("obsolete offer must not create a client")
 
-    manager = RunnerWebSessionManager(
+    manager = RunnerStreamSessionManager(
         runtime_id="runtime-a",
         runner_boot_id="runner-boot-a",
         accepted_desired_generation=lambda: 3,
@@ -407,7 +407,7 @@ async def test_runner_manager_rejects_obsolete_generation_without_connecting() -
 async def test_runner_manager_closes_loopback_when_client_shutdown_fails(
     invalidate: bool,
 ) -> None:
-    class FailingCloseClient(GrpcRunnerWebSessionClient):
+    class FailingCloseClient(GrpcRunnerStreamSessionClient):
         def __init__(self) -> None:
             pass
 
@@ -416,7 +416,7 @@ async def test_runner_manager_closes_loopback_when_client_shutdown_fails(
 
     loopback = RunnerWebLoopbackPool(maximum_connections=8)
     await loopback.start()
-    manager = RunnerWebSessionManager(
+    manager = RunnerStreamSessionManager(
         runtime_id="runtime-a",
         runner_boot_id="runner-boot-a",
         accepted_desired_generation=lambda: 3,
@@ -444,25 +444,27 @@ async def test_runner_manager_revalidates_generation_after_handshake() -> None:
     handled = asyncio.Event()
 
     async def stream(
-        requests: AsyncIterator[runtime_web_session_pb2.RuntimeWebSessionEnvelope],
+        requests: AsyncIterator[
+            runtime_stream_session_pb2.RuntimeStreamSessionEnvelope
+        ],
         *,
         metadata: object = None,
-    ) -> AsyncIterator[runtime_web_session_pb2.RuntimeWebSessionEnvelope]:
+    ) -> AsyncIterator[runtime_stream_session_pb2.RuntimeStreamSessionEnvelope]:
         del metadata
         await anext(requests)
         hello_seen.set()
         await permit_accept.wait()
         yield _accepted(offer)
 
-    def client_factory() -> GrpcRunnerWebSessionClient:
-        return GrpcRunnerWebSessionClient(
+    def client_factory() -> GrpcRunnerStreamSessionClient:
+        return GrpcRunnerStreamSessionClient(
             stream,
             runner_auth_token="runner-token",
             channel=None,
             outbound_resources=None,
         )
 
-    manager = RunnerWebSessionManager(
+    manager = RunnerStreamSessionManager(
         runtime_id="runtime-a",
         runner_boot_id="runner-boot-a",
         accepted_desired_generation=lambda: 3,
@@ -472,7 +474,7 @@ async def test_runner_manager_revalidates_generation_after_handshake() -> None:
     )
 
     async def handler(
-        envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+        envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
     ) -> None:
         del envelope
         handled.set()
@@ -494,19 +496,19 @@ async def test_runner_manager_revalidates_generation_after_handshake() -> None:
 async def test_runner_manager_rejects_stream_scoped_session_acceptance() -> None:
     offer = _offer()
 
-    class _StreamScopedClient(GrpcRunnerWebSessionClient):
+    class _StreamScopedClient(GrpcRunnerStreamSessionClient):
         def __init__(self) -> None:
             self.activated_flag = False
             self.closed = False
 
         async def start(
             self,
-            hello: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+            hello: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
             handler: EnvelopeHandler,
             failure_handler: FailureHandler,
             *,
             timeout_seconds: float,
-        ) -> runtime_web_session_pb2.RuntimeWebSessionEnvelope:
+        ) -> runtime_stream_session_pb2.RuntimeStreamSessionEnvelope:
             del hello, handler, failure_handler, timeout_seconds
             accepted = _accepted(offer)
             accepted.stream_id = 7
@@ -520,12 +522,12 @@ async def test_runner_manager_rejects_stream_scoped_session_acceptance() -> None
 
     client: _StreamScopedClient | None = None
 
-    def client_factory() -> GrpcRunnerWebSessionClient:
+    def client_factory() -> GrpcRunnerStreamSessionClient:
         nonlocal client
         client = _StreamScopedClient()
         return client
 
-    manager = RunnerWebSessionManager(
+    manager = RunnerStreamSessionManager(
         runtime_id="runtime-a",
         runner_boot_id="runner-boot-a",
         accepted_desired_generation=lambda: 3,
@@ -535,7 +537,7 @@ async def test_runner_manager_rejects_stream_scoped_session_acceptance() -> None
     )
 
     async def handler(
-        envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+        envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
     ) -> None:
         del envelope
 
@@ -554,26 +556,28 @@ async def test_runner_manager_ignores_consumed_offer_replay() -> None:
     clients = 0
 
     async def stream(
-        requests: AsyncIterator[runtime_web_session_pb2.RuntimeWebSessionEnvelope],
+        requests: AsyncIterator[
+            runtime_stream_session_pb2.RuntimeStreamSessionEnvelope
+        ],
         *,
         metadata: object = None,
-    ) -> AsyncIterator[runtime_web_session_pb2.RuntimeWebSessionEnvelope]:
+    ) -> AsyncIterator[runtime_stream_session_pb2.RuntimeStreamSessionEnvelope]:
         del metadata
         await anext(requests)
         yield _accepted(offer)
         await asyncio.Event().wait()
 
-    def client_factory() -> GrpcRunnerWebSessionClient:
+    def client_factory() -> GrpcRunnerStreamSessionClient:
         nonlocal clients
         clients += 1
-        return GrpcRunnerWebSessionClient(
+        return GrpcRunnerStreamSessionClient(
             stream,
             runner_auth_token="runner-token",
             channel=None,
             outbound_resources=None,
         )
 
-    manager = RunnerWebSessionManager(
+    manager = RunnerStreamSessionManager(
         runtime_id="runtime-a",
         runner_boot_id="runner-boot-a",
         accepted_desired_generation=lambda: 3,
@@ -583,7 +587,7 @@ async def test_runner_manager_ignores_consumed_offer_replay() -> None:
     )
 
     async def handler(
-        envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+        envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
     ) -> None:
         del envelope
 
@@ -610,10 +614,12 @@ async def test_runner_manager_rejects_invalid_accepted_profile(field: str) -> No
     offer = _offer()
 
     async def stream(
-        requests: AsyncIterator[runtime_web_session_pb2.RuntimeWebSessionEnvelope],
+        requests: AsyncIterator[
+            runtime_stream_session_pb2.RuntimeStreamSessionEnvelope
+        ],
         *,
         metadata: object = None,
-    ) -> AsyncIterator[runtime_web_session_pb2.RuntimeWebSessionEnvelope]:
+    ) -> AsyncIterator[runtime_stream_session_pb2.RuntimeStreamSessionEnvelope]:
         del metadata
         await anext(requests)
         accepted = _accepted(offer)
@@ -630,15 +636,15 @@ async def test_runner_manager_rejects_invalid_accepted_profile(field: str) -> No
                 accepted.session_accepted.response_session_window_bytes = 0
         yield accepted
 
-    def client_factory() -> GrpcRunnerWebSessionClient:
-        return GrpcRunnerWebSessionClient(
+    def client_factory() -> GrpcRunnerStreamSessionClient:
+        return GrpcRunnerStreamSessionClient(
             stream,
             runner_auth_token="runner-token",
             channel=None,
             outbound_resources=None,
         )
 
-    manager = RunnerWebSessionManager(
+    manager = RunnerStreamSessionManager(
         runtime_id="runtime-a",
         runner_boot_id="runner-boot-a",
         accepted_desired_generation=lambda: 3,
@@ -648,7 +654,7 @@ async def test_runner_manager_rejects_invalid_accepted_profile(field: str) -> No
     )
 
     async def handler(
-        envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+        envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
     ) -> None:
         del envelope
 

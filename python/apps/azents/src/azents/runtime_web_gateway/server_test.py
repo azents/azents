@@ -10,11 +10,11 @@ import pytest
 from aiohttp import WSMessage, WSMsgType, WSServerHandshakeError, web
 from aiohttp.test_utils import TestClient, TestServer
 from azcommon.logging import RuntimeEnvironment
-from azents_runtime_control.proto import runtime_web_session_pb2
-from azents_runtime_control.runtime_web_flow import AbsoluteCreditWindow
-from azents_runtime_control.runtime_web_session import (
+from azents_runtime_control.proto import runtime_stream_session_pb2
+from azents_runtime_control.runtime_stream_flow import AbsoluteCreditWindow
+from azents_runtime_control.runtime_stream_session import (
     APPROVED_SESSION_PROFILE,
-    RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+    RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
     SESSION_WINDOW_BYTES,
     CloseReason,
     Header,
@@ -249,7 +249,7 @@ class _WebSocketTransport:
         self.response_headers = response_headers
         self.response_frames = response_frames
         self.handlers: dict[int, RuntimeWebBrowserStreamBridge] = {}
-        self.sent: list[runtime_web_session_pb2.RuntimeWebSessionEnvelope] = []
+        self.sent: list[runtime_stream_session_pb2.RuntimeStreamSessionEnvelope] = []
         self.credit_condition = asyncio.Condition()
         self.request_session_credit = AbsoluteCreditWindow(
             initial_bytes=SESSION_WINDOW_BYTES,
@@ -271,9 +271,9 @@ class _WebSocketTransport:
         self.unbound.set()
 
     async def send(
-        self, envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope
+        self, envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope
     ) -> None:
-        copied = runtime_web_session_pb2.RuntimeWebSessionEnvelope()
+        copied = runtime_stream_session_pb2.RuntimeStreamSessionEnvelope()
         copied.CopyFrom(envelope)
         self.sent.append(copied)
         handler = self.handlers.get(envelope.stream_id)
@@ -300,9 +300,11 @@ class _WebSocketTransport:
             await handler.receive(self._reset(envelope.stream_id))
 
     @staticmethod
-    def _base(stream_id: int) -> runtime_web_session_pb2.RuntimeWebSessionEnvelope:
-        return runtime_web_session_pb2.RuntimeWebSessionEnvelope(
-            protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+    def _base(
+        stream_id: int,
+    ) -> runtime_stream_session_pb2.RuntimeStreamSessionEnvelope:
+        return runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(
+            protocol_fingerprint=RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
             session_id="gateway-session",
             peer_boot_id="control-boot",
             stream_id=stream_id,
@@ -312,7 +314,7 @@ class _WebSocketTransport:
     def _accepted(
         cls,
         stream_id: int,
-    ) -> runtime_web_session_pb2.RuntimeWebSessionEnvelope:
+    ) -> runtime_stream_session_pb2.RuntimeStreamSessionEnvelope:
         envelope = cls._base(stream_id)
         envelope.open_accepted.data_frame_bytes = (
             APPROVED_SESSION_PROFILE.data_frame_bytes
@@ -324,18 +326,20 @@ class _WebSocketTransport:
             APPROVED_SESSION_PROFILE.response_stream_window_bytes
         )
         envelope.open_accepted.route_path = (
-            runtime_web_session_pb2.RUNTIME_WEB_SESSION_ROUTE_PATH_LOCAL
+            runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_ROUTE_PATH_LOCAL
         )
         return envelope
 
     def _response_head(
         self,
         stream_id: int,
-    ) -> runtime_web_session_pb2.RuntimeWebSessionEnvelope:
+    ) -> runtime_stream_session_pb2.RuntimeStreamSessionEnvelope:
         envelope = self._base(stream_id)
         envelope.response_head.status = 101
         envelope.response_head.headers.extend(
-            runtime_web_session_pb2.RuntimeWebSessionHeader(name=name, value=value)
+            runtime_stream_session_pb2.RuntimeStreamSessionHeader(
+                name=name, value=value
+            )
             for name, value in self.response_headers
         )
         return envelope
@@ -344,10 +348,10 @@ class _WebSocketTransport:
     def _reset(
         cls,
         stream_id: int,
-    ) -> runtime_web_session_pb2.RuntimeWebSessionEnvelope:
+    ) -> runtime_stream_session_pb2.RuntimeStreamSessionEnvelope:
         envelope = cls._base(stream_id)
-        proto = runtime_web_session_pb2
-        reason = proto.RUNTIME_WEB_SESSION_CLOSE_REASON_APPLICATION_UNAVAILABLE
+        proto = runtime_stream_session_pb2
+        reason = proto.RUNTIME_STREAM_SESSION_CLOSE_REASON_APPLICATION_UNAVAILABLE
         envelope.reset.reason = reason
         return envelope
 
@@ -360,30 +364,30 @@ class _WebSocketTransport:
         opcode: WebSocketOpcode,
         final: bool,
         data: bytes,
-    ) -> runtime_web_session_pb2.RuntimeWebSessionEnvelope:
+    ) -> runtime_stream_session_pb2.RuntimeStreamSessionEnvelope:
         envelope = cls._base(stream_id)
         envelope.frame_sequence = sequence
         envelope.websocket.direction = (
-            runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_RESPONSE
+            runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_DIRECTION_RESPONSE
         )
         envelope.websocket.opcode = {
             WebSocketOpcode.TEXT: (
-                runtime_web_session_pb2.RUNTIME_WEB_SESSION_WEBSOCKET_OPCODE_TEXT
+                runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_WEBSOCKET_OPCODE_TEXT
             ),
             WebSocketOpcode.BINARY: (
-                runtime_web_session_pb2.RUNTIME_WEB_SESSION_WEBSOCKET_OPCODE_BINARY
+                runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_WEBSOCKET_OPCODE_BINARY
             ),
             WebSocketOpcode.CONTINUATION: (
-                runtime_web_session_pb2.RUNTIME_WEB_SESSION_WEBSOCKET_OPCODE_CONTINUATION
+                runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_WEBSOCKET_OPCODE_CONTINUATION
             ),
             WebSocketOpcode.PING: (
-                runtime_web_session_pb2.RUNTIME_WEB_SESSION_WEBSOCKET_OPCODE_PING
+                runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_WEBSOCKET_OPCODE_PING
             ),
             WebSocketOpcode.PONG: (
-                runtime_web_session_pb2.RUNTIME_WEB_SESSION_WEBSOCKET_OPCODE_PONG
+                runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_WEBSOCKET_OPCODE_PONG
             ),
             WebSocketOpcode.CLOSE: (
-                runtime_web_session_pb2.RUNTIME_WEB_SESSION_WEBSOCKET_OPCODE_CLOSE
+                runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_WEBSOCKET_OPCODE_CLOSE
             ),
         }[opcode]
         envelope.websocket.final = final
@@ -948,7 +952,7 @@ async def test_public_websocket_rejects_ambiguous_offered_subprotocol_before_101
         assert payloads == ["open", "cancel"]
         cancel = harness.transport.sent[-1]
         assert cancel.cancel.reason == (
-            runtime_web_session_pb2.RUNTIME_WEB_SESSION_CLOSE_REASON_PROTOCOL_VIOLATION
+            runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_CLOSE_REASON_PROTOCOL_VIOLATION
         )
         assert harness.operational_state.resources.active_exchanges == 0
         assert harness.operations.drain_coordinator.active == {}
@@ -1004,7 +1008,7 @@ async def test_public_websocket_rejects_invalid_selected_subprotocol_before_101(
             if envelope.WhichOneof("payload") == "cancel"
         )
         assert cancel.cancel.reason == (
-            runtime_web_session_pb2.RUNTIME_WEB_SESSION_CLOSE_REASON_PROTOCOL_VIOLATION
+            runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_CLOSE_REASON_PROTOCOL_VIOLATION
         )
         assert harness.operational_state.resources.active_exchanges == 0
         assert harness.operations.drain_coordinator.active == {}

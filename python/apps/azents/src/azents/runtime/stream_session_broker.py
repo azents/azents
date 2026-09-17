@@ -7,16 +7,16 @@ import dataclasses
 from collections import deque
 from typing import Protocol
 
-from azents_runtime_control.runtime_web_capacity import (
-    ActiveCapacityStream,
-    CapacityProtocol,
-    RuntimeWebCapacityCoordinator,
-)
-from azents_runtime_control.runtime_web_session import (
+from azents_runtime_control.runtime_stream_session import (
     MAX_STREAM_TOMBSTONES,
     OwnerSessionEpoch,
     StreamAuthority,
     StreamProtocol,
+)
+from azents_runtime_control.runtime_web_capacity import (
+    ActiveCapacityStream,
+    CapacityProtocol,
+    RuntimeWebCapacityCoordinator,
 )
 
 
@@ -58,7 +58,7 @@ class BrokerRouter(Protocol):
     async def resolve(self, authority: StreamAuthority) -> BrokerTarget | None: ...
 
 
-class RuntimeWebSessionBroker:
+class RuntimeStreamSessionBroker:
     """Admit exact peer-scoped streams without replay or multi-hop relay."""
 
     def __init__(

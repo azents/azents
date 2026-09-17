@@ -47,7 +47,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/workspace/**
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
   - infra/charts/azents/**
-last_verified_at: 2026-09-15
+last_verified_at: 2026-09-16
 spec_version: 39
 ---
 

@@ -9,13 +9,13 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from aiohttp import ClientSession, web
 from aiohttp.test_utils import unused_port
-from azents_runtime_control.proto import runtime_web_session_pb2
-from azents_runtime_control.runtime_web_flow import AbsoluteCreditWindow, QueueLane
-from azents_runtime_control.runtime_web_session import (
+from azents_runtime_control.proto import runtime_stream_session_pb2
+from azents_runtime_control.runtime_stream_flow import AbsoluteCreditWindow, QueueLane
+from azents_runtime_control.runtime_stream_session import (
     APPROVED_SESSION_PROFILE,
     MANDATORY_DATA_FRAME_BYTES,
     MAX_ENVELOPE_BYTES,
-    RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+    RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
     SESSION_WINDOW_BYTES,
     CloseReason,
     Header,
@@ -91,9 +91,9 @@ def _head(protocol: StreamProtocol = StreamProtocol.HTTP) -> RequestHead:
     )
 
 
-def _response() -> runtime_web_session_pb2.RuntimeWebSessionEnvelope:
-    return runtime_web_session_pb2.RuntimeWebSessionEnvelope(
-        protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+def _response() -> runtime_stream_session_pb2.RuntimeStreamSessionEnvelope:
+    return runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(
+        protocol_fingerprint=RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
         session_id="gateway-session",
         peer_boot_id="control-boot",
         stream_id=1,
@@ -104,18 +104,18 @@ def _accepted_response(
     *,
     session_id: str = "gateway-session",
     stream_id: int = 1,
-    route_path: runtime_web_session_pb2.RuntimeWebSessionRoutePath.ValueType = (
-        runtime_web_session_pb2.RUNTIME_WEB_SESSION_ROUTE_PATH_LOCAL
+    route_path: runtime_stream_session_pb2.RuntimeStreamSessionRoutePath.ValueType = (
+        runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_ROUTE_PATH_LOCAL
     ),
-) -> runtime_web_session_pb2.RuntimeWebSessionEnvelope:
-    envelope = runtime_web_session_pb2.RuntimeWebSessionEnvelope(
-        protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+) -> runtime_stream_session_pb2.RuntimeStreamSessionEnvelope:
+    envelope = runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(
+        protocol_fingerprint=RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
         session_id=session_id,
         peer_boot_id="control-boot",
         stream_id=stream_id,
     )
     envelope.open_accepted.CopyFrom(
-        runtime_web_session_pb2.RuntimeWebSessionOpenAccepted(
+        runtime_stream_session_pb2.RuntimeStreamSessionOpenAccepted(
             data_frame_bytes=APPROVED_SESSION_PROFILE.data_frame_bytes,
             route_path=route_path,
             request_credit_bytes=(APPROVED_SESSION_PROFILE.request_stream_window_bytes),
@@ -131,12 +131,12 @@ def _accepted_response(
 @pytest.mark.parametrize(
     ("route_path", "expected"),
     [
-        (runtime_web_session_pb2.RUNTIME_WEB_SESSION_ROUTE_PATH_LOCAL, "local"),
-        (runtime_web_session_pb2.RUNTIME_WEB_SESSION_ROUTE_PATH_RELAY, "relay"),
+        (runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_ROUTE_PATH_LOCAL, "local"),
+        (runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_ROUTE_PATH_RELAY, "relay"),
     ],
 )
 async def test_bridge_records_only_bounded_accepted_route(
-    route_path: runtime_web_session_pb2.RuntimeWebSessionRoutePath.ValueType,
+    route_path: runtime_stream_session_pb2.RuntimeStreamSessionRoutePath.ValueType,
     expected: str,
 ) -> None:
     pool = RuntimeWebGatewaySessionPool(maximum_sessions=1)
@@ -176,7 +176,7 @@ async def test_bridge_rejects_unspecified_accepted_route() -> None:
         await bridge.receive(
             _accepted_response(
                 route_path=(
-                    runtime_web_session_pb2.RUNTIME_WEB_SESSION_ROUTE_PATH_UNSPECIFIED
+                    runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_ROUTE_PATH_UNSPECIFIED
                 )
             )
         )
@@ -212,7 +212,7 @@ class _ObservedResources(RuntimeWebGatewayResourceTracker):
 
 class _CaptureTransport(PersistentGatewaySessionTransport):
     def __init__(self, resources: _ObservedResources | None = None) -> None:
-        self.sent: list[runtime_web_session_pb2.RuntimeWebSessionEnvelope] = []
+        self.sent: list[runtime_stream_session_pb2.RuntimeStreamSessionEnvelope] = []
         self.handlers = {}
         self.observed_resources = resources or _ObservedResources()
         self.resources: RuntimeWebGatewayResourceTracker = self.observed_resources
@@ -233,9 +233,9 @@ class _CaptureTransport(PersistentGatewaySessionTransport):
         self.handlers.pop(stream_id, None)
 
     async def send(
-        self, envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope
+        self, envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope
     ) -> None:
-        copied = runtime_web_session_pb2.RuntimeWebSessionEnvelope()
+        copied = runtime_stream_session_pb2.RuntimeStreamSessionEnvelope()
         copied.CopyFrom(envelope)
         self.sent.append(copied)
 
@@ -255,7 +255,7 @@ class _BlockingTransport(_CaptureTransport):
         await super().bind(stream_id, handler)
 
     async def send(
-        self, envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope
+        self, envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope
     ) -> None:
         if self.block_send:
             self.blocked.set()
@@ -282,7 +282,7 @@ class _BlockedCancelDisconnectTransport(_DisconnectTransport):
         self.cancel_completed = asyncio.Event()
 
     async def send(
-        self, envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope
+        self, envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope
     ) -> None:
         if envelope.WhichOneof("payload") != "cancel":
             await super().send(envelope)
@@ -299,7 +299,7 @@ class _BlockedCancelDisconnectTransport(_DisconnectTransport):
 
 class _FailingCancelTransport(_DisconnectTransport):
     async def send(
-        self, envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope
+        self, envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope
     ) -> None:
         if envelope.WhichOneof("payload") == "cancel":
             raise RuntimeError("sensitive-transport-detail")
@@ -467,7 +467,7 @@ async def test_bridge_ignores_response_terminal_frame_after_local_cancel(
     late = _response()
     if payload == "direction_end":
         late.direction_end.direction = (
-            runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_RESPONSE
+            runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_DIRECTION_RESPONSE
         )
         late.direction_end.final_sequence = 0
     else:
@@ -713,7 +713,7 @@ async def test_sse_and_websocket_open_concurrently_after_capacity_release() -> N
     sse_head.stream_id = 1
     sse_head.response_head.status = 200
     sse_head.response_head.headers.append(
-        runtime_web_session_pb2.RuntimeWebSessionHeader(
+        runtime_stream_session_pb2.RuntimeStreamSessionHeader(
             name=b"content-type",
             value=b"text/event-stream",
         )
@@ -738,11 +738,11 @@ async def test_sse_and_websocket_open_concurrently_after_capacity_release() -> N
     opened = {envelope.stream_id: envelope for envelope in transport.sent}
     assert (
         opened[1].open.request_head.protocol
-        == runtime_web_session_pb2.RUNTIME_WEB_SESSION_PROTOCOL_HTTP
+        == runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_PROTOCOL_HTTP
     )
     assert (
         opened[2].open.request_head.protocol
-        == runtime_web_session_pb2.RUNTIME_WEB_SESSION_PROTOCOL_WEBSOCKET
+        == runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_PROTOCOL_WEBSOCKET
     )
     assert (
         await drain.register(
@@ -837,7 +837,7 @@ async def test_bridge_enforces_absolute_stream_and_shared_session_credit() -> No
 
     update = _response()
     update.window_update.direction = (
-        runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_REQUEST
+        runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_DIRECTION_REQUEST
     )
     update.window_update.stream_consumed_total = MANDATORY_DATA_FRAME_BYTES
     update.window_update.session_consumed_total = MANDATORY_DATA_FRAME_BYTES
@@ -887,7 +887,7 @@ async def test_websocket_send_waits_for_stream_credit_update() -> None:
 
     update = _response()
     update.window_update.direction = (
-        runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_REQUEST
+        runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_DIRECTION_REQUEST
     )
     update.window_update.stream_consumed_total = MANDATORY_DATA_FRAME_BYTES
     update.window_update.session_consumed_total = MANDATORY_DATA_FRAME_BYTES
@@ -921,7 +921,7 @@ async def test_browser_consumption_returns_absolute_response_credit() -> None:
     response_data = _response()
     response_data.frame_sequence = 1
     response_data.data.direction = (
-        runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_RESPONSE
+        runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_DIRECTION_RESPONSE
     )
     response_data.data.data = b"x" * MANDATORY_DATA_FRAME_BYTES
     await bridge.receive(response_data)
@@ -967,10 +967,10 @@ async def test_websocket_control_payload_does_not_return_application_credit() ->
     ping = _response()
     ping.frame_sequence = 1
     ping.websocket.direction = (
-        runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_RESPONSE
+        runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_DIRECTION_RESPONSE
     )
     ping.websocket.opcode = (
-        runtime_web_session_pb2.RUNTIME_WEB_SESSION_WEBSOCKET_OPCODE_PING
+        runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_WEBSOCKET_OPCODE_PING
     )
     ping.websocket.final = True
     ping.websocket.data = b"ping"
@@ -1014,7 +1014,7 @@ async def test_discarded_browser_event_releases_buffers_without_credit() -> None
     response_data = _response()
     response_data.frame_sequence = 1
     response_data.data.direction = (
-        runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_RESPONSE
+        runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_DIRECTION_RESPONSE
     )
     response_data.data.data = b"unwritten"
     await bridge.receive(response_data)
@@ -1051,7 +1051,7 @@ async def test_terminal_uses_reserved_slot_when_browser_queue_is_full() -> None:
         response_data = _response()
         response_data.frame_sequence = sequence
         response_data.data.direction = (
-            runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_RESPONSE
+            runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_DIRECTION_RESPONSE
         )
         response_data.data.data = b"x"
         await bridge.receive(response_data)
@@ -1095,13 +1095,13 @@ async def test_control_event_queue_wait_charges_scheduler_waiter() -> None:
         response_data = _response()
         response_data.frame_sequence = sequence
         response_data.data.direction = (
-            runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_RESPONSE
+            runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_DIRECTION_RESPONSE
         )
         response_data.data.data = b"x"
         await bridge.receive(response_data)
     direction_end = _response()
     direction_end.direction_end.direction = (
-        runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_RESPONSE
+        runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_DIRECTION_RESPONSE
     )
     direction_end.direction_end.final_sequence = 7
 
@@ -1145,14 +1145,14 @@ async def test_control_event_cannot_bypass_scheduler_waiter_ceiling() -> None:
         response_data = _response()
         response_data.frame_sequence = sequence
         response_data.data.direction = (
-            runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_RESPONSE
+            runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_DIRECTION_RESPONSE
         )
         response_data.data.data = b"x"
         await bridge.receive(response_data)
     assert resources.try_add_scheduler_waiter()
     direction_end = _response()
     direction_end.direction_end.direction = (
-        runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_RESPONSE
+        runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_DIRECTION_RESPONSE
     )
     direction_end.direction_end.final_sequence = 7
 
@@ -1197,9 +1197,11 @@ async def test_bridge_preserves_raw_http_head_and_releases_terminal_stream() -> 
 
     accepted = _response()
     accepted.open_accepted.CopyFrom(
-        runtime_web_session_pb2.RuntimeWebSessionOpenAccepted(
+        runtime_stream_session_pb2.RuntimeStreamSessionOpenAccepted(
             data_frame_bytes=APPROVED_SESSION_PROFILE.data_frame_bytes,
-            route_path=(runtime_web_session_pb2.RUNTIME_WEB_SESSION_ROUTE_PATH_LOCAL),
+            route_path=(
+                runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_ROUTE_PATH_LOCAL
+            ),
             request_credit_bytes=(APPROVED_SESSION_PROFILE.request_stream_window_bytes),
             response_credit_bytes=(
                 APPROVED_SESSION_PROFILE.response_stream_window_bytes
@@ -1213,10 +1215,10 @@ async def test_bridge_preserves_raw_http_head_and_releases_terminal_stream() -> 
 
     response_head = _response()
     response_head.response_head.CopyFrom(
-        runtime_web_session_pb2.RuntimeWebSessionResponseHead(
+        runtime_stream_session_pb2.RuntimeStreamSessionResponseHead(
             status=200,
             headers=[
-                runtime_web_session_pb2.RuntimeWebSessionHeader(
+                runtime_stream_session_pb2.RuntimeStreamSessionHeader(
                     name=b"x-response", value=b"\xfe"
                 )
             ],
@@ -1226,22 +1228,24 @@ async def test_bridge_preserves_raw_http_head_and_releases_terminal_stream() -> 
     data = _response()
     data.frame_sequence = 1
     data.data.CopyFrom(
-        runtime_web_session_pb2.RuntimeWebSessionData(
-            direction=runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_RESPONSE,
+        runtime_stream_session_pb2.RuntimeStreamSessionData(
+            direction=runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_DIRECTION_RESPONSE,
             data=b"\xffresponse",
         )
     )
     await bridge.receive(data)
     direction_end = _response()
     direction_end.direction_end.CopyFrom(
-        runtime_web_session_pb2.RuntimeWebSessionDirectionEnd(
-            direction=runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_RESPONSE,
+        runtime_stream_session_pb2.RuntimeStreamSessionDirectionEnd(
+            direction=runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_DIRECTION_RESPONSE,
             final_sequence=1,
         )
     )
     await bridge.receive(direction_end)
     stream_end = _response()
-    stream_end.stream_end.CopyFrom(runtime_web_session_pb2.RuntimeWebSessionStreamEnd())
+    stream_end.stream_end.CopyFrom(
+        runtime_stream_session_pb2.RuntimeStreamSessionStreamEnd()
+    )
     await bridge.receive(stream_end)
     assert transport.handlers == {}
     assert pool.sessions["gateway-session"].state.streams == {}
@@ -1272,9 +1276,11 @@ async def test_bridge_preserves_typed_websocket_frames() -> None:
     )
     accepted = _response()
     accepted.open_accepted.CopyFrom(
-        runtime_web_session_pb2.RuntimeWebSessionOpenAccepted(
+        runtime_stream_session_pb2.RuntimeStreamSessionOpenAccepted(
             data_frame_bytes=APPROVED_SESSION_PROFILE.data_frame_bytes,
-            route_path=(runtime_web_session_pb2.RUNTIME_WEB_SESSION_ROUTE_PATH_LOCAL),
+            route_path=(
+                runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_ROUTE_PATH_LOCAL
+            ),
             request_credit_bytes=(APPROVED_SESSION_PROFILE.request_stream_window_bytes),
             response_credit_bytes=(
                 APPROVED_SESSION_PROFILE.response_stream_window_bytes
@@ -1284,7 +1290,7 @@ async def test_bridge_preserves_typed_websocket_frames() -> None:
     await bridge.receive(accepted)
     response_head = _response()
     response_head.response_head.CopyFrom(
-        runtime_web_session_pb2.RuntimeWebSessionResponseHead(status=101)
+        runtime_stream_session_pb2.RuntimeStreamSessionResponseHead(status=101)
     )
     await bridge.receive(response_head)
     await bridge.send_websocket(
@@ -1294,15 +1300,15 @@ async def test_bridge_preserves_typed_websocket_frames() -> None:
     )
     assert transport.sent[-1].websocket.data == b"\x00\xff"
     assert transport.sent[-1].websocket.opcode == (
-        runtime_web_session_pb2.RUNTIME_WEB_SESSION_WEBSOCKET_OPCODE_BINARY
+        runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_WEBSOCKET_OPCODE_BINARY
     )
     websocket = _response()
     websocket.frame_sequence = 1
     websocket.websocket.CopyFrom(
-        runtime_web_session_pb2.RuntimeWebSessionWebSocketFrame(
-            direction=runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_RESPONSE,
+        runtime_stream_session_pb2.RuntimeStreamSessionWebSocketFrame(
+            direction=runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_DIRECTION_RESPONSE,
             opcode=(
-                runtime_web_session_pb2.RUNTIME_WEB_SESSION_WEBSOCKET_OPCODE_BINARY
+                runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_WEBSOCKET_OPCODE_BINARY
             ),
             final=True,
             data=b"\xfe\x01",
@@ -1318,35 +1324,37 @@ async def test_bridge_preserves_typed_websocket_frames() -> None:
 
 class _DuplexStream:
     def __init__(self) -> None:
-        self.sent: asyncio.Queue[runtime_web_session_pb2.RuntimeWebSessionEnvelope] = (
-            asyncio.Queue()
-        )
+        self.sent: asyncio.Queue[
+            runtime_stream_session_pb2.RuntimeStreamSessionEnvelope
+        ] = asyncio.Queue()
         self.responses: asyncio.Queue[
-            runtime_web_session_pb2.RuntimeWebSessionEnvelope
+            runtime_stream_session_pb2.RuntimeStreamSessionEnvelope
         ] = asyncio.Queue()
         self.response_yielded = asyncio.Event()
 
     def __call__(
         self,
         request_iterator: AsyncIterator[
-            runtime_web_session_pb2.RuntimeWebSessionEnvelope
+            runtime_stream_session_pb2.RuntimeStreamSessionEnvelope
         ],
         /,
         *,
         metadata: Sequence[tuple[str, str]] | None = None,
-    ) -> AsyncIterable[runtime_web_session_pb2.RuntimeWebSessionEnvelope]:
+    ) -> AsyncIterable[runtime_stream_session_pb2.RuntimeStreamSessionEnvelope]:
         assert metadata is None
 
         async def exchange() -> AsyncIterator[
-            runtime_web_session_pb2.RuntimeWebSessionEnvelope
+            runtime_stream_session_pb2.RuntimeStreamSessionEnvelope
         ]:
             hello = await anext(request_iterator)
             await self.sent.put(hello)
-            yield runtime_web_session_pb2.RuntimeWebSessionEnvelope(
+            yield runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(
                 protocol_fingerprint=hello.protocol_fingerprint,
                 session_id=hello.session_id,
                 peer_boot_id="control-boot",
-                session_accepted=(runtime_web_session_pb2.RuntimeWebSessionAccepted()),
+                session_accepted=(
+                    runtime_stream_session_pb2.RuntimeStreamSessionAccepted()
+                ),
             )
             async for request in request_iterator:
                 await self.sent.put(request)
@@ -1358,32 +1366,32 @@ class _DuplexStream:
 
 class _PausedDuplexStream:
     def __init__(self) -> None:
-        self.sent: asyncio.Queue[runtime_web_session_pb2.RuntimeWebSessionEnvelope] = (
-            asyncio.Queue()
-        )
+        self.sent: asyncio.Queue[
+            runtime_stream_session_pb2.RuntimeStreamSessionEnvelope
+        ] = asyncio.Queue()
         self.release_requests = asyncio.Event()
 
     def __call__(
         self,
         request_iterator: AsyncIterator[
-            runtime_web_session_pb2.RuntimeWebSessionEnvelope
+            runtime_stream_session_pb2.RuntimeStreamSessionEnvelope
         ],
         /,
         *,
         metadata: Sequence[tuple[str, str]] | None = None,
-    ) -> AsyncIterable[runtime_web_session_pb2.RuntimeWebSessionEnvelope]:
+    ) -> AsyncIterable[runtime_stream_session_pb2.RuntimeStreamSessionEnvelope]:
         assert metadata is None
 
         async def exchange() -> AsyncIterator[
-            runtime_web_session_pb2.RuntimeWebSessionEnvelope
+            runtime_stream_session_pb2.RuntimeStreamSessionEnvelope
         ]:
             hello = await anext(request_iterator)
             await self.sent.put(hello)
-            yield runtime_web_session_pb2.RuntimeWebSessionEnvelope(
+            yield runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(
                 protocol_fingerprint=hello.protocol_fingerprint,
                 session_id=hello.session_id,
                 peer_boot_id="control-boot",
-                session_accepted=runtime_web_session_pb2.RuntimeWebSessionAccepted(),
+                session_accepted=runtime_stream_session_pb2.RuntimeStreamSessionAccepted(),
             )
             await self.release_requests.wait()
             async for request in request_iterator:
@@ -1392,25 +1400,25 @@ class _PausedDuplexStream:
         return exchange()
 
 
-def _gateway_hello() -> runtime_web_session_pb2.RuntimeWebSessionEnvelope:
-    return runtime_web_session_pb2.RuntimeWebSessionEnvelope(
-        protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+def _gateway_hello() -> runtime_stream_session_pb2.RuntimeStreamSessionEnvelope:
+    return runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(
+        protocol_fingerprint=RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
         session_id="gateway-session",
         peer_boot_id="gateway-boot",
-        hello=runtime_web_session_pb2.RuntimeWebSessionHello(
-            role=runtime_web_session_pb2.RUNTIME_WEB_SESSION_PEER_ROLE_GATEWAY
+        hello=runtime_stream_session_pb2.RuntimeStreamSessionHello(
+            role=runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_PEER_ROLE_GATEWAY
         ),
     )
 
 
 def _data_envelope_with_size(
     size_bytes: int,
-) -> runtime_web_session_pb2.RuntimeWebSessionEnvelope:
+) -> runtime_stream_session_pb2.RuntimeStreamSessionEnvelope:
     payload_bytes = size_bytes
     while True:
-        envelope = runtime_web_session_pb2.RuntimeWebSessionEnvelope(stream_id=7)
+        envelope = runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(stream_id=7)
         envelope.data.direction = (
-            runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_REQUEST
+            runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_DIRECTION_REQUEST
         )
         envelope.data.data = b"x" * payload_bytes
         difference = envelope.ByteSize() - size_bytes
@@ -1423,23 +1431,23 @@ def _data_envelope_with_size(
 
 class _IndependentDuplexStream:
     def __init__(self) -> None:
-        self.sent: asyncio.Queue[runtime_web_session_pb2.RuntimeWebSessionEnvelope] = (
-            asyncio.Queue()
-        )
+        self.sent: asyncio.Queue[
+            runtime_stream_session_pb2.RuntimeStreamSessionEnvelope
+        ] = asyncio.Queue()
         self.responses: asyncio.Queue[
-            runtime_web_session_pb2.RuntimeWebSessionEnvelope
+            runtime_stream_session_pb2.RuntimeStreamSessionEnvelope
         ] = asyncio.Queue()
         self.response_yielded = asyncio.Event()
 
     def __call__(
         self,
         request_iterator: AsyncIterator[
-            runtime_web_session_pb2.RuntimeWebSessionEnvelope
+            runtime_stream_session_pb2.RuntimeStreamSessionEnvelope
         ],
         /,
         *,
         metadata: Sequence[tuple[str, str]] | None = None,
-    ) -> AsyncIterable[runtime_web_session_pb2.RuntimeWebSessionEnvelope]:
+    ) -> AsyncIterable[runtime_stream_session_pb2.RuntimeStreamSessionEnvelope]:
         assert metadata is None
 
         async def consume_requests() -> None:
@@ -1447,18 +1455,18 @@ class _IndependentDuplexStream:
                 await self.sent.put(request)
 
         async def exchange() -> AsyncIterator[
-            runtime_web_session_pb2.RuntimeWebSessionEnvelope
+            runtime_stream_session_pb2.RuntimeStreamSessionEnvelope
         ]:
             hello = await anext(request_iterator)
             await self.sent.put(hello)
             consumer = asyncio.create_task(consume_requests())
             try:
-                yield runtime_web_session_pb2.RuntimeWebSessionEnvelope(
+                yield runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(
                     protocol_fingerprint=hello.protocol_fingerprint,
                     session_id=hello.session_id,
                     peer_boot_id="control-boot",
                     session_accepted=(
-                        runtime_web_session_pb2.RuntimeWebSessionAccepted()
+                        runtime_stream_session_pb2.RuntimeStreamSessionAccepted()
                     ),
                 )
                 while True:
@@ -1484,20 +1492,20 @@ async def test_gateway_session_heartbeat_ack_is_observed(
     resources = _ObservedResources()
     transport = PersistentGatewaySessionTransport(stream, resources=resources)
     identity = _identity()
-    hello = runtime_web_session_pb2.RuntimeWebSessionEnvelope(
-        protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+    hello = runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(
+        protocol_fingerprint=RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
         session_id=identity.session_id,
         peer_boot_id=identity.peer_boot_id,
-        hello=runtime_web_session_pb2.RuntimeWebSessionHello(
-            role=runtime_web_session_pb2.RUNTIME_WEB_SESSION_PEER_ROLE_GATEWAY
+        hello=runtime_stream_session_pb2.RuntimeStreamSessionHello(
+            role=runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_PEER_ROLE_GATEWAY
         ),
     )
     await transport.start(hello, timeout_seconds=1)
     await stream.sent.get()
 
     heartbeat = await asyncio.wait_for(stream.sent.get(), timeout=1)
-    acknowledgement = runtime_web_session_pb2.RuntimeWebSessionEnvelope(
-        protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+    acknowledgement = runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(
+        protocol_fingerprint=RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
         session_id=identity.session_id,
         peer_boot_id="control-boot",
     )
@@ -1530,12 +1538,12 @@ async def test_gateway_session_two_missed_heartbeats_fail_transport(
     resources = _ObservedResources()
     transport = PersistentGatewaySessionTransport(stream, resources=resources)
     identity = _identity()
-    hello = runtime_web_session_pb2.RuntimeWebSessionEnvelope(
-        protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+    hello = runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(
+        protocol_fingerprint=RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
         session_id=identity.session_id,
         peer_boot_id=identity.peer_boot_id,
-        hello=runtime_web_session_pb2.RuntimeWebSessionHello(
-            role=runtime_web_session_pb2.RUNTIME_WEB_SESSION_PEER_ROLE_GATEWAY
+        hello=runtime_stream_session_pb2.RuntimeStreamSessionHello(
+            role=runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_PEER_ROLE_GATEWAY
         ),
     )
     await transport.start(hello, timeout_seconds=1)
@@ -1558,12 +1566,12 @@ async def test_persistent_session_sends_next_open_after_preaccept_cancel() -> No
     resources = _ObservedResources()
     transport = PersistentGatewaySessionTransport(stream, resources=resources)
     identity = _identity()
-    hello = runtime_web_session_pb2.RuntimeWebSessionEnvelope(
-        protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+    hello = runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(
+        protocol_fingerprint=RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
         session_id=identity.session_id,
         peer_boot_id=identity.peer_boot_id,
-        hello=runtime_web_session_pb2.RuntimeWebSessionHello(
-            role=runtime_web_session_pb2.RUNTIME_WEB_SESSION_PEER_ROLE_GATEWAY
+        hello=runtime_stream_session_pb2.RuntimeStreamSessionHello(
+            role=runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_PEER_ROLE_GATEWAY
         ),
     )
     await transport.start(hello, timeout_seconds=1)
@@ -1617,7 +1625,7 @@ class _GoAwayHandler:
 
     async def __call__(
         self,
-        envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+        envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
     ) -> None:
         del envelope
         self.stream_frames += 1
@@ -1636,12 +1644,12 @@ async def test_transport_consumes_go_away_and_fences_only_above_boundary() -> No
     resources = _ObservedResources()
     transport = PersistentGatewaySessionTransport(stream, resources=resources)
     identity = _identity()
-    hello = runtime_web_session_pb2.RuntimeWebSessionEnvelope(
-        protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+    hello = runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(
+        protocol_fingerprint=RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
         session_id=identity.session_id,
         peer_boot_id=identity.peer_boot_id,
-        hello=runtime_web_session_pb2.RuntimeWebSessionHello(
-            role=runtime_web_session_pb2.RUNTIME_WEB_SESSION_PEER_ROLE_GATEWAY
+        hello=runtime_stream_session_pb2.RuntimeStreamSessionHello(
+            role=runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_PEER_ROLE_GATEWAY
         ),
     )
     await transport.start(hello, timeout_seconds=1)
@@ -1673,21 +1681,21 @@ async def test_transport_consumes_go_away_and_fences_only_above_boundary() -> No
 
     transport.set_go_away_handler(start_draining)
     await transport.send(
-        runtime_web_session_pb2.RuntimeWebSessionEnvelope(
-            heartbeat=runtime_web_session_pb2.RuntimeWebSessionHeartbeat(
+        runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(
+            heartbeat=runtime_stream_session_pb2.RuntimeStreamSessionHeartbeat(
                 monotonic_sequence=1
             )
         )
     )
     await stream.sent.get()
-    go_away = runtime_web_session_pb2.RuntimeWebSessionEnvelope(
-        protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+    go_away = runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(
+        protocol_fingerprint=RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
         session_id=identity.session_id,
         peer_boot_id="control-boot",
-        go_away=runtime_web_session_pb2.RuntimeWebSessionGoAway(
+        go_away=runtime_stream_session_pb2.RuntimeStreamSessionGoAway(
             last_accepted_stream_id=1,
             reason=(
-                runtime_web_session_pb2.RUNTIME_WEB_SESSION_CLOSE_REASON_SERVICE_DRAIN
+                runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_CLOSE_REASON_SERVICE_DRAIN
             ),
         ),
     )
@@ -1719,12 +1727,12 @@ async def test_transport_go_away_deadline_terminates_allowed_stream() -> None:
     resources = _ObservedResources()
     transport = PersistentGatewaySessionTransport(stream, resources=resources)
     identity = _identity()
-    hello = runtime_web_session_pb2.RuntimeWebSessionEnvelope(
-        protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+    hello = runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(
+        protocol_fingerprint=RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
         session_id=identity.session_id,
         peer_boot_id=identity.peer_boot_id,
-        hello=runtime_web_session_pb2.RuntimeWebSessionHello(
-            role=runtime_web_session_pb2.RUNTIME_WEB_SESSION_PEER_ROLE_GATEWAY
+        hello=runtime_stream_session_pb2.RuntimeStreamSessionHello(
+            role=runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_PEER_ROLE_GATEWAY
         ),
     )
     await transport.start(hello, timeout_seconds=1)
@@ -1752,21 +1760,21 @@ async def test_transport_go_away_deadline_terminates_allowed_stream() -> None:
 
     transport.set_go_away_handler(start_draining)
     await transport.send(
-        runtime_web_session_pb2.RuntimeWebSessionEnvelope(
-            heartbeat=runtime_web_session_pb2.RuntimeWebSessionHeartbeat(
+        runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(
+            heartbeat=runtime_stream_session_pb2.RuntimeStreamSessionHeartbeat(
                 monotonic_sequence=1
             )
         )
     )
     await stream.sent.get()
-    go_away = runtime_web_session_pb2.RuntimeWebSessionEnvelope(
-        protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+    go_away = runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(
+        protocol_fingerprint=RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
         session_id=identity.session_id,
         peer_boot_id="control-boot",
-        go_away=runtime_web_session_pb2.RuntimeWebSessionGoAway(
+        go_away=runtime_stream_session_pb2.RuntimeStreamSessionGoAway(
             last_accepted_stream_id=1,
             reason=(
-                runtime_web_session_pb2.RUNTIME_WEB_SESSION_CLOSE_REASON_SERVICE_DRAIN
+                runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_CLOSE_REASON_SERVICE_DRAIN
             ),
         ),
     )
@@ -1802,9 +1810,9 @@ async def test_transport_copy_fails_fast_when_original_owns_buffer_ceiling() -> 
             match="application buffer",
         ):
             await transport.send(
-                runtime_web_session_pb2.RuntimeWebSessionEnvelope(
+                runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(
                     stream_id=1,
-                    data=runtime_web_session_pb2.RuntimeWebSessionData(data=b"x"),
+                    data=runtime_stream_session_pb2.RuntimeStreamSessionData(data=b"x"),
                 )
             )
 
@@ -1821,23 +1829,25 @@ async def test_persistent_transport_accounts_queued_application_and_control_byte
 
     def stream(
         request_iterator: AsyncIterator[
-            runtime_web_session_pb2.RuntimeWebSessionEnvelope
+            runtime_stream_session_pb2.RuntimeStreamSessionEnvelope
         ],
         /,
         *,
         metadata: Sequence[tuple[str, str]] | None = None,
-    ) -> AsyncIterable[runtime_web_session_pb2.RuntimeWebSessionEnvelope]:
+    ) -> AsyncIterable[runtime_stream_session_pb2.RuntimeStreamSessionEnvelope]:
         assert metadata is None
 
         async def exchange() -> AsyncIterator[
-            runtime_web_session_pb2.RuntimeWebSessionEnvelope
+            runtime_stream_session_pb2.RuntimeStreamSessionEnvelope
         ]:
             hello = await anext(request_iterator)
-            yield runtime_web_session_pb2.RuntimeWebSessionEnvelope(
+            yield runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(
                 protocol_fingerprint=hello.protocol_fingerprint,
                 session_id=hello.session_id,
                 peer_boot_id="control-boot",
-                session_accepted=(runtime_web_session_pb2.RuntimeWebSessionAccepted()),
+                session_accepted=(
+                    runtime_stream_session_pb2.RuntimeStreamSessionAccepted()
+                ),
             )
             await permit_requests.wait()
 
@@ -1845,21 +1855,21 @@ async def test_persistent_transport_accounts_queued_application_and_control_byte
 
     resources = _ObservedResources()
     transport = PersistentGatewaySessionTransport(stream, resources=resources)
-    hello = runtime_web_session_pb2.RuntimeWebSessionEnvelope(
-        protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+    hello = runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(
+        protocol_fingerprint=RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
         session_id="gateway-session",
         peer_boot_id="gateway-boot",
-        hello=runtime_web_session_pb2.RuntimeWebSessionHello(
-            role=runtime_web_session_pb2.RUNTIME_WEB_SESSION_PEER_ROLE_GATEWAY
+        hello=runtime_stream_session_pb2.RuntimeStreamSessionHello(
+            role=runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_PEER_ROLE_GATEWAY
         ),
     )
     await transport.start(hello, timeout_seconds=1)
 
     data = b"buffered"
     await transport.send(
-        runtime_web_session_pb2.RuntimeWebSessionEnvelope(
+        runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(
             stream_id=1,
-            data=runtime_web_session_pb2.RuntimeWebSessionData(data=data),
+            data=runtime_stream_session_pb2.RuntimeStreamSessionData(data=data),
         )
     )
     snapshot = resources.snapshot()
@@ -1879,21 +1889,21 @@ async def test_persistent_transport_multiplexes_without_replay() -> None:
         stream,
         resources=_ObservedResources(),
     )
-    hello = runtime_web_session_pb2.RuntimeWebSessionEnvelope(
-        protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+    hello = runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(
+        protocol_fingerprint=RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
         session_id="gateway-session",
         peer_boot_id="gateway-boot",
-        hello=runtime_web_session_pb2.RuntimeWebSessionHello(
-            role=runtime_web_session_pb2.RUNTIME_WEB_SESSION_PEER_ROLE_GATEWAY
+        hello=runtime_stream_session_pb2.RuntimeStreamSessionHello(
+            role=runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_PEER_ROLE_GATEWAY
         ),
     )
     accepted = await transport.start(hello, timeout_seconds=1)
     assert accepted.WhichOneof("payload") == "session_accepted"
     assert (await stream.sent.get()).hello.role == (
-        runtime_web_session_pb2.RUNTIME_WEB_SESSION_PEER_ROLE_GATEWAY
+        runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_PEER_ROLE_GATEWAY
     )
-    oversized = runtime_web_session_pb2.RuntimeWebSessionEnvelope(
-        data=runtime_web_session_pb2.RuntimeWebSessionData(
+    oversized = runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(
+        data=runtime_stream_session_pb2.RuntimeStreamSessionData(
             data=b"x" * MAX_ENVELOPE_BYTES
         )
     )
@@ -1906,7 +1916,7 @@ async def test_persistent_transport_multiplexes_without_replay() -> None:
             self.failed = asyncio.Event()
 
         async def __call__(
-            self, envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope
+            self, envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope
         ) -> None:
             assert envelope.stream_id == 7
             self.delivered.set()
@@ -1921,22 +1931,26 @@ async def test_persistent_transport_multiplexes_without_replay() -> None:
     handler = _Handler()
     await transport.bind(7, handler)
     await transport.send(
-        runtime_web_session_pb2.RuntimeWebSessionEnvelope(
+        runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(
             stream_id=7,
-            cancel=runtime_web_session_pb2.RuntimeWebSessionCancel(
-                reason=(runtime_web_session_pb2.RUNTIME_WEB_SESSION_CLOSE_REASON_CALLER)
+            cancel=runtime_stream_session_pb2.RuntimeStreamSessionCancel(
+                reason=(
+                    runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_CLOSE_REASON_CALLER
+                )
             ),
         )
     )
     assert (await stream.sent.get()).stream_id == 7
     await stream.responses.put(
-        runtime_web_session_pb2.RuntimeWebSessionEnvelope(
-            protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+        runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(
+            protocol_fingerprint=RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
             session_id="gateway-session",
             peer_boot_id="control-boot",
             stream_id=7,
-            reset=runtime_web_session_pb2.RuntimeWebSessionReset(
-                reason=(runtime_web_session_pb2.RUNTIME_WEB_SESSION_CLOSE_REASON_CALLER)
+            reset=runtime_stream_session_pb2.RuntimeStreamSessionReset(
+                reason=(
+                    runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_CLOSE_REASON_CALLER
+                )
             ),
         )
     )
@@ -1956,15 +1970,15 @@ async def test_persistent_transport_prioritizes_control_over_queued_data() -> No
     await stream.sent.get()
 
     data = _data_envelope_with_size(SESSION_WINDOW_BYTES // 32)
-    cancel = runtime_web_session_pb2.RuntimeWebSessionEnvelope(stream_id=7)
+    cancel = runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(stream_id=7)
     cancel.cancel.reason = (
-        runtime_web_session_pb2.RUNTIME_WEB_SESSION_CLOSE_REASON_CALLER
+        runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_CLOSE_REASON_CALLER
     )
     for _ in range(32):
         await transport.send(data)
-    latency = runtime_web_session_pb2.RuntimeWebSessionEnvelope(stream_id=7)
+    latency = runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(stream_id=7)
     latency.direction_end.direction = (
-        runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_REQUEST
+        runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_DIRECTION_REQUEST
     )
     latency_task = asyncio.create_task(transport.send(latency))
     await resources.waiter_added.wait()
@@ -1985,12 +1999,12 @@ async def test_persistent_transport_prioritizes_control_over_queued_data() -> No
 
 
 def test_persistent_transport_routes_websocket_controls_to_data_lane() -> None:
-    ping = runtime_web_session_pb2.RuntimeWebSessionEnvelope(stream_id=7)
+    ping = runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(stream_id=7)
     ping.websocket.direction = (
-        runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_REQUEST
+        runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_DIRECTION_REQUEST
     )
     ping.websocket.opcode = (
-        runtime_web_session_pb2.RUNTIME_WEB_SESSION_WEBSOCKET_OPCODE_PING
+        runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_WEBSOCKET_OPCODE_PING
     )
     ping.websocket.final = True
     ping.websocket.data = b"ping"
@@ -2009,16 +2023,18 @@ async def test_persistent_transport_preserves_stream_order_across_priority_lanes
     )
     await transport.start(_gateway_hello(), timeout_seconds=1)
     await stream.sent.get()
-    data = runtime_web_session_pb2.RuntimeWebSessionEnvelope(stream_id=7)
+    data = runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(stream_id=7)
     data.frame_sequence = 1
-    data.data.direction = runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_REQUEST
+    data.data.direction = (
+        runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_DIRECTION_REQUEST
+    )
     data.data.data = b"data"
-    direction_end = runtime_web_session_pb2.RuntimeWebSessionEnvelope(stream_id=7)
+    direction_end = runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(stream_id=7)
     direction_end.direction_end.direction = (
-        runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_REQUEST
+        runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_DIRECTION_REQUEST
     )
     direction_end.direction_end.final_sequence = 1
-    session_control = runtime_web_session_pb2.RuntimeWebSessionEnvelope()
+    session_control = runtime_stream_session_pb2.RuntimeStreamSessionEnvelope()
     session_control.heartbeat_ack.monotonic_sequence = 1
 
     await transport.send(data)
@@ -2044,11 +2060,11 @@ async def test_persistent_transport_handles_session_frames_before_stream_lookup(
     await transport.start(_gateway_hello(), timeout_seconds=1)
     await stream.sent.get()
     await stream.responses.put(
-        runtime_web_session_pb2.RuntimeWebSessionEnvelope(
-            protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+        runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(
+            protocol_fingerprint=RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
             session_id="gateway-session",
             peer_boot_id="control-boot",
-            heartbeat=runtime_web_session_pb2.RuntimeWebSessionHeartbeat(
+            heartbeat=runtime_stream_session_pb2.RuntimeStreamSessionHeartbeat(
                 monotonic_sequence=9
             ),
         )
@@ -2071,14 +2087,16 @@ async def test_persistent_transport_session_error_closes_without_stream_lookup()
     )
     await transport.start(_gateway_hello(), timeout_seconds=1)
     await stream.sent.get()
-    session_error = runtime_web_session_pb2.RuntimeWebSessionEnvelope(
-        protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+    session_error = runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(
+        protocol_fingerprint=RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
         session_id="gateway-session",
         peer_boot_id="control-boot",
     )
-    session_error.session_error.reason = (
-        runtime_web_session_pb2.RUNTIME_WEB_SESSION_CLOSE_REASON_PROTOCOL_VIOLATION
+    stream_pb2 = runtime_stream_session_pb2
+    protocol_violation_reason = (
+        stream_pb2.RUNTIME_STREAM_SESSION_CLOSE_REASON_PROTOCOL_VIOLATION
     )
+    session_error.session_error.reason = protocol_violation_reason
     await stream.responses.put(session_error)
     assert transport.receiver is not None
     with pytest.raises(RuntimeError, match="session error"):
@@ -2094,31 +2112,31 @@ async def test_persistent_transport_session_error_closes_without_stream_lookup()
 async def test_persistent_transport_rejects_stream_scoped_session_acceptance() -> None:
     async def stream(
         request_iterator: AsyncIterator[
-            runtime_web_session_pb2.RuntimeWebSessionEnvelope
+            runtime_stream_session_pb2.RuntimeStreamSessionEnvelope
         ],
         *,
         metadata: Sequence[tuple[str, str]] | None = None,
-    ) -> AsyncIterator[runtime_web_session_pb2.RuntimeWebSessionEnvelope]:
+    ) -> AsyncIterator[runtime_stream_session_pb2.RuntimeStreamSessionEnvelope]:
         assert metadata is None
         hello = await anext(request_iterator)
-        yield runtime_web_session_pb2.RuntimeWebSessionEnvelope(
+        yield runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(
             protocol_fingerprint=hello.protocol_fingerprint,
             session_id=hello.session_id,
             peer_boot_id="control-boot",
             stream_id=7,
-            session_accepted=runtime_web_session_pb2.RuntimeWebSessionAccepted(),
+            session_accepted=runtime_stream_session_pb2.RuntimeStreamSessionAccepted(),
         )
 
     transport = PersistentGatewaySessionTransport(
         stream,
         resources=_ObservedResources(),
     )
-    hello = runtime_web_session_pb2.RuntimeWebSessionEnvelope(
-        protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+    hello = runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(
+        protocol_fingerprint=RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
         session_id="gateway-session",
         peer_boot_id="gateway-boot",
-        hello=runtime_web_session_pb2.RuntimeWebSessionHello(
-            role=runtime_web_session_pb2.RUNTIME_WEB_SESSION_PEER_ROLE_GATEWAY
+        hello=runtime_stream_session_pb2.RuntimeStreamSessionHello(
+            role=runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_PEER_ROLE_GATEWAY
         ),
     )
 
@@ -2137,12 +2155,12 @@ async def test_receiver_identity_failure_retires_pool_session_automatically() ->
         resources=_ObservedResources(),
     )
     identity = _identity()
-    hello = runtime_web_session_pb2.RuntimeWebSessionEnvelope(
-        protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+    hello = runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(
+        protocol_fingerprint=RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
         session_id=identity.session_id,
         peer_boot_id=identity.peer_boot_id,
-        hello=runtime_web_session_pb2.RuntimeWebSessionHello(
-            role=runtime_web_session_pb2.RUNTIME_WEB_SESSION_PEER_ROLE_GATEWAY
+        hello=runtime_stream_session_pb2.RuntimeStreamSessionHello(
+            role=runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_PEER_ROLE_GATEWAY
         ),
     )
     await transport.start(hello, timeout_seconds=1)
@@ -2167,9 +2185,11 @@ async def test_receiver_identity_failure_retires_pool_session_automatically() ->
     await stream.sent.get()
     stale = _response()
     stale.peer_boot_id = "replacement-control"
-    stale.reset.reason = (
-        runtime_web_session_pb2.RUNTIME_WEB_SESSION_CLOSE_REASON_TRANSPORT_UNAVAILABLE
+    stream_pb2 = runtime_stream_session_pb2
+    transport_unavailable_reason = (
+        stream_pb2.RUNTIME_STREAM_SESSION_CLOSE_REASON_TRANSPORT_UNAVAILABLE
     )
+    stale.reset.reason = transport_unavailable_reason
     await stream.responses.put(stale)
     terminal = await asyncio.wait_for(bridge.events.get(), timeout=1)
     assert terminal.terminal_reason is CloseReason.TRANSPORT_UNAVAILABLE

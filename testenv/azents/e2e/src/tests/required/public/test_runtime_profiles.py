@@ -26,7 +26,7 @@ from azents_runtime_control.runner import (
     RuntimeRunnerState,
 )
 from azents_runtime_control.runtime_configuration import RuntimeConfigurationEvidence
-from azents_runtime_control.runtime_web_session import RunnerSessionOffer
+from azents_runtime_control.runtime_stream_session import RunnerSessionOffer
 from azents_runtime_control.transfer import (
     RUNNER_TRANSFER_CAPABILITY,
     RUNNER_TRANSFER_PROTOCOL_VERSION,
@@ -315,7 +315,7 @@ async def _start_inflight_probe_operation(
         operations.append(operation)
         operation_received.set()
 
-    async def ignore_web_session_offer(_offer: RunnerSessionOffer) -> None:
+    async def ignore_stream_session_offer(_offer: RunnerSessionOffer) -> None:
         """Keep the synthetic operation probe attached without opening Web work."""
 
     client: GrpcRunnerControlClient | None = None
@@ -332,7 +332,7 @@ async def _start_inflight_probe_operation(
             allow_insecure=True,
         )
         client.set_operation_handler(capture_operation)
-        client.set_web_session_offer_handler(ignore_web_session_offer)
+        client.set_stream_session_offer_handler(ignore_stream_session_offer)
         accepted = await client.register_runner(
             settings.registration,
             connection_id=f"inflight-probe-{unique()}",

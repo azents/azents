@@ -5,7 +5,7 @@ import enum
 import hashlib
 
 import sqlalchemy as sa
-from azents_runtime_control.runtime_web_session import StreamProtocol
+from azents_runtime_control.runtime_stream_session import StreamProtocol
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (

@@ -21,244 +21,282 @@ else:
 
 DESCRIPTOR: _descriptor.FileDescriptor
 
-class _RuntimeWebSessionPeerRole:
+class _RuntimeStreamSessionPeerRole:
     ValueType = _typing.NewType("ValueType", _builtins.int)
     V: _TypeAlias = ValueType
 
-class _RuntimeWebSessionPeerRoleEnumTypeWrapper(
-    _enum_type_wrapper._EnumTypeWrapper[_RuntimeWebSessionPeerRole.ValueType],
+class _RuntimeStreamSessionPeerRoleEnumTypeWrapper(
+    _enum_type_wrapper._EnumTypeWrapper[_RuntimeStreamSessionPeerRole.ValueType],
     _builtins.type,
 ):
     DESCRIPTOR: _descriptor.EnumDescriptor
-    RUNTIME_WEB_SESSION_PEER_ROLE_UNSPECIFIED: _RuntimeWebSessionPeerRole.ValueType  # 0
-    RUNTIME_WEB_SESSION_PEER_ROLE_GATEWAY: _RuntimeWebSessionPeerRole.ValueType  # 1
-    RUNTIME_WEB_SESSION_PEER_ROLE_CONTROL: _RuntimeWebSessionPeerRole.ValueType  # 2
-    RUNTIME_WEB_SESSION_PEER_ROLE_RUNNER: _RuntimeWebSessionPeerRole.ValueType  # 3
-
-class RuntimeWebSessionPeerRole(
-    _RuntimeWebSessionPeerRole, metaclass=_RuntimeWebSessionPeerRoleEnumTypeWrapper
-): ...
-
-RUNTIME_WEB_SESSION_PEER_ROLE_UNSPECIFIED: RuntimeWebSessionPeerRole.ValueType  # 0
-RUNTIME_WEB_SESSION_PEER_ROLE_GATEWAY: RuntimeWebSessionPeerRole.ValueType  # 1
-RUNTIME_WEB_SESSION_PEER_ROLE_CONTROL: RuntimeWebSessionPeerRole.ValueType  # 2
-RUNTIME_WEB_SESSION_PEER_ROLE_RUNNER: RuntimeWebSessionPeerRole.ValueType  # 3
-Global___RuntimeWebSessionPeerRole: _TypeAlias = RuntimeWebSessionPeerRole
-
-class _RuntimeWebSessionProtocol:
-    ValueType = _typing.NewType("ValueType", _builtins.int)
-    V: _TypeAlias = ValueType
-
-class _RuntimeWebSessionProtocolEnumTypeWrapper(
-    _enum_type_wrapper._EnumTypeWrapper[_RuntimeWebSessionProtocol.ValueType],
-    _builtins.type,
-):
-    DESCRIPTOR: _descriptor.EnumDescriptor
-    RUNTIME_WEB_SESSION_PROTOCOL_UNSPECIFIED: _RuntimeWebSessionProtocol.ValueType  # 0
-    RUNTIME_WEB_SESSION_PROTOCOL_HTTP: _RuntimeWebSessionProtocol.ValueType  # 1
-    RUNTIME_WEB_SESSION_PROTOCOL_WEBSOCKET: _RuntimeWebSessionProtocol.ValueType  # 2
-
-class RuntimeWebSessionProtocol(
-    _RuntimeWebSessionProtocol, metaclass=_RuntimeWebSessionProtocolEnumTypeWrapper
-): ...
-
-RUNTIME_WEB_SESSION_PROTOCOL_UNSPECIFIED: RuntimeWebSessionProtocol.ValueType  # 0
-RUNTIME_WEB_SESSION_PROTOCOL_HTTP: RuntimeWebSessionProtocol.ValueType  # 1
-RUNTIME_WEB_SESSION_PROTOCOL_WEBSOCKET: RuntimeWebSessionProtocol.ValueType  # 2
-Global___RuntimeWebSessionProtocol: _TypeAlias = RuntimeWebSessionProtocol
-
-class _RuntimeWebSessionDirection:
-    ValueType = _typing.NewType("ValueType", _builtins.int)
-    V: _TypeAlias = ValueType
-
-class _RuntimeWebSessionDirectionEnumTypeWrapper(
-    _enum_type_wrapper._EnumTypeWrapper[_RuntimeWebSessionDirection.ValueType],
-    _builtins.type,
-):
-    DESCRIPTOR: _descriptor.EnumDescriptor
-    RUNTIME_WEB_SESSION_DIRECTION_UNSPECIFIED: (
-        _RuntimeWebSessionDirection.ValueType
+    RUNTIME_STREAM_SESSION_PEER_ROLE_UNSPECIFIED: (
+        _RuntimeStreamSessionPeerRole.ValueType
     )  # 0
-    RUNTIME_WEB_SESSION_DIRECTION_REQUEST: _RuntimeWebSessionDirection.ValueType  # 1
-    RUNTIME_WEB_SESSION_DIRECTION_RESPONSE: _RuntimeWebSessionDirection.ValueType  # 2
-
-class RuntimeWebSessionDirection(
-    _RuntimeWebSessionDirection, metaclass=_RuntimeWebSessionDirectionEnumTypeWrapper
-): ...
-
-RUNTIME_WEB_SESSION_DIRECTION_UNSPECIFIED: RuntimeWebSessionDirection.ValueType  # 0
-RUNTIME_WEB_SESSION_DIRECTION_REQUEST: RuntimeWebSessionDirection.ValueType  # 1
-RUNTIME_WEB_SESSION_DIRECTION_RESPONSE: RuntimeWebSessionDirection.ValueType  # 2
-Global___RuntimeWebSessionDirection: _TypeAlias = RuntimeWebSessionDirection
-
-class _RuntimeWebSessionRoutePath:
-    ValueType = _typing.NewType("ValueType", _builtins.int)
-    V: _TypeAlias = ValueType
-
-class _RuntimeWebSessionRoutePathEnumTypeWrapper(
-    _enum_type_wrapper._EnumTypeWrapper[_RuntimeWebSessionRoutePath.ValueType],
-    _builtins.type,
-):
-    DESCRIPTOR: _descriptor.EnumDescriptor
-    RUNTIME_WEB_SESSION_ROUTE_PATH_UNSPECIFIED: (
-        _RuntimeWebSessionRoutePath.ValueType
-    )  # 0
-    RUNTIME_WEB_SESSION_ROUTE_PATH_LOCAL: _RuntimeWebSessionRoutePath.ValueType  # 1
-    RUNTIME_WEB_SESSION_ROUTE_PATH_RELAY: _RuntimeWebSessionRoutePath.ValueType  # 2
-
-class RuntimeWebSessionRoutePath(
-    _RuntimeWebSessionRoutePath, metaclass=_RuntimeWebSessionRoutePathEnumTypeWrapper
-): ...
-
-RUNTIME_WEB_SESSION_ROUTE_PATH_UNSPECIFIED: RuntimeWebSessionRoutePath.ValueType  # 0
-RUNTIME_WEB_SESSION_ROUTE_PATH_LOCAL: RuntimeWebSessionRoutePath.ValueType  # 1
-RUNTIME_WEB_SESSION_ROUTE_PATH_RELAY: RuntimeWebSessionRoutePath.ValueType  # 2
-Global___RuntimeWebSessionRoutePath: _TypeAlias = RuntimeWebSessionRoutePath
-
-class _RuntimeWebSessionWebSocketOpcode:
-    ValueType = _typing.NewType("ValueType", _builtins.int)
-    V: _TypeAlias = ValueType
-
-class _RuntimeWebSessionWebSocketOpcodeEnumTypeWrapper(
-    _enum_type_wrapper._EnumTypeWrapper[_RuntimeWebSessionWebSocketOpcode.ValueType],
-    _builtins.type,
-):
-    DESCRIPTOR: _descriptor.EnumDescriptor
-    RUNTIME_WEB_SESSION_WEBSOCKET_OPCODE_UNSPECIFIED: (
-        _RuntimeWebSessionWebSocketOpcode.ValueType
-    )  # 0
-    RUNTIME_WEB_SESSION_WEBSOCKET_OPCODE_TEXT: (
-        _RuntimeWebSessionWebSocketOpcode.ValueType
+    RUNTIME_STREAM_SESSION_PEER_ROLE_GATEWAY: (
+        _RuntimeStreamSessionPeerRole.ValueType
     )  # 1
-    RUNTIME_WEB_SESSION_WEBSOCKET_OPCODE_BINARY: (
-        _RuntimeWebSessionWebSocketOpcode.ValueType
+    RUNTIME_STREAM_SESSION_PEER_ROLE_CONTROL: (
+        _RuntimeStreamSessionPeerRole.ValueType
     )  # 2
-    RUNTIME_WEB_SESSION_WEBSOCKET_OPCODE_CONTINUATION: (
-        _RuntimeWebSessionWebSocketOpcode.ValueType
+    RUNTIME_STREAM_SESSION_PEER_ROLE_RUNNER: (
+        _RuntimeStreamSessionPeerRole.ValueType
     )  # 3
-    RUNTIME_WEB_SESSION_WEBSOCKET_OPCODE_PING: (
-        _RuntimeWebSessionWebSocketOpcode.ValueType
-    )  # 4
-    RUNTIME_WEB_SESSION_WEBSOCKET_OPCODE_PONG: (
-        _RuntimeWebSessionWebSocketOpcode.ValueType
-    )  # 5
-    RUNTIME_WEB_SESSION_WEBSOCKET_OPCODE_CLOSE: (
-        _RuntimeWebSessionWebSocketOpcode.ValueType
-    )  # 6
 
-class RuntimeWebSessionWebSocketOpcode(
-    _RuntimeWebSessionWebSocketOpcode,
-    metaclass=_RuntimeWebSessionWebSocketOpcodeEnumTypeWrapper,
+class RuntimeStreamSessionPeerRole(
+    _RuntimeStreamSessionPeerRole,
+    metaclass=_RuntimeStreamSessionPeerRoleEnumTypeWrapper,
 ): ...
 
-RUNTIME_WEB_SESSION_WEBSOCKET_OPCODE_UNSPECIFIED: (
-    RuntimeWebSessionWebSocketOpcode.ValueType
+RUNTIME_STREAM_SESSION_PEER_ROLE_UNSPECIFIED: (
+    RuntimeStreamSessionPeerRole.ValueType
 )  # 0
-RUNTIME_WEB_SESSION_WEBSOCKET_OPCODE_TEXT: (
-    RuntimeWebSessionWebSocketOpcode.ValueType
-)  # 1
-RUNTIME_WEB_SESSION_WEBSOCKET_OPCODE_BINARY: (
-    RuntimeWebSessionWebSocketOpcode.ValueType
-)  # 2
-RUNTIME_WEB_SESSION_WEBSOCKET_OPCODE_CONTINUATION: (
-    RuntimeWebSessionWebSocketOpcode.ValueType
-)  # 3
-RUNTIME_WEB_SESSION_WEBSOCKET_OPCODE_PING: (
-    RuntimeWebSessionWebSocketOpcode.ValueType
-)  # 4
-RUNTIME_WEB_SESSION_WEBSOCKET_OPCODE_PONG: (
-    RuntimeWebSessionWebSocketOpcode.ValueType
-)  # 5
-RUNTIME_WEB_SESSION_WEBSOCKET_OPCODE_CLOSE: (
-    RuntimeWebSessionWebSocketOpcode.ValueType
-)  # 6
-Global___RuntimeWebSessionWebSocketOpcode: _TypeAlias = RuntimeWebSessionWebSocketOpcode
+RUNTIME_STREAM_SESSION_PEER_ROLE_GATEWAY: RuntimeStreamSessionPeerRole.ValueType  # 1
+RUNTIME_STREAM_SESSION_PEER_ROLE_CONTROL: RuntimeStreamSessionPeerRole.ValueType  # 2
+RUNTIME_STREAM_SESSION_PEER_ROLE_RUNNER: RuntimeStreamSessionPeerRole.ValueType  # 3
+Global___RuntimeStreamSessionPeerRole: _TypeAlias = RuntimeStreamSessionPeerRole
 
-class _RuntimeWebSessionCloseReason:
+class _RuntimeStreamSessionProtocol:
     ValueType = _typing.NewType("ValueType", _builtins.int)
     V: _TypeAlias = ValueType
 
-class _RuntimeWebSessionCloseReasonEnumTypeWrapper(
-    _enum_type_wrapper._EnumTypeWrapper[_RuntimeWebSessionCloseReason.ValueType],
+class _RuntimeStreamSessionProtocolEnumTypeWrapper(
+    _enum_type_wrapper._EnumTypeWrapper[_RuntimeStreamSessionProtocol.ValueType],
     _builtins.type,
 ):
     DESCRIPTOR: _descriptor.EnumDescriptor
-    RUNTIME_WEB_SESSION_CLOSE_REASON_UNSPECIFIED: (
-        _RuntimeWebSessionCloseReason.ValueType
+    RUNTIME_STREAM_SESSION_PROTOCOL_UNSPECIFIED: (
+        _RuntimeStreamSessionProtocol.ValueType
     )  # 0
-    RUNTIME_WEB_SESSION_CLOSE_REASON_CALLER: (
-        _RuntimeWebSessionCloseReason.ValueType
-    )  # 1
-    RUNTIME_WEB_SESSION_CLOSE_REASON_SERVICE_EXPIRED: (
-        _RuntimeWebSessionCloseReason.ValueType
+    RUNTIME_STREAM_SESSION_PROTOCOL_HTTP: _RuntimeStreamSessionProtocol.ValueType  # 1
+    RUNTIME_STREAM_SESSION_PROTOCOL_WEBSOCKET: (
+        _RuntimeStreamSessionProtocol.ValueType
     )  # 2
-    RUNTIME_WEB_SESSION_CLOSE_REASON_AUTHORITY_REVOKED: (
-        _RuntimeWebSessionCloseReason.ValueType
+
+class RuntimeStreamSessionProtocol(
+    _RuntimeStreamSessionProtocol,
+    metaclass=_RuntimeStreamSessionProtocolEnumTypeWrapper,
+): ...
+
+RUNTIME_STREAM_SESSION_PROTOCOL_UNSPECIFIED: RuntimeStreamSessionProtocol.ValueType  # 0
+RUNTIME_STREAM_SESSION_PROTOCOL_HTTP: RuntimeStreamSessionProtocol.ValueType  # 1
+RUNTIME_STREAM_SESSION_PROTOCOL_WEBSOCKET: RuntimeStreamSessionProtocol.ValueType  # 2
+Global___RuntimeStreamSessionProtocol: _TypeAlias = RuntimeStreamSessionProtocol
+
+class _RuntimeStreamSessionDirection:
+    ValueType = _typing.NewType("ValueType", _builtins.int)
+    V: _TypeAlias = ValueType
+
+class _RuntimeStreamSessionDirectionEnumTypeWrapper(
+    _enum_type_wrapper._EnumTypeWrapper[_RuntimeStreamSessionDirection.ValueType],
+    _builtins.type,
+):
+    DESCRIPTOR: _descriptor.EnumDescriptor
+    RUNTIME_STREAM_SESSION_DIRECTION_UNSPECIFIED: (
+        _RuntimeStreamSessionDirection.ValueType
+    )  # 0
+    RUNTIME_STREAM_SESSION_DIRECTION_REQUEST: (
+        _RuntimeStreamSessionDirection.ValueType
+    )  # 1
+    RUNTIME_STREAM_SESSION_DIRECTION_RESPONSE: (
+        _RuntimeStreamSessionDirection.ValueType
+    )  # 2
+
+class RuntimeStreamSessionDirection(
+    _RuntimeStreamSessionDirection,
+    metaclass=_RuntimeStreamSessionDirectionEnumTypeWrapper,
+): ...
+
+RUNTIME_STREAM_SESSION_DIRECTION_UNSPECIFIED: (
+    RuntimeStreamSessionDirection.ValueType
+)  # 0
+RUNTIME_STREAM_SESSION_DIRECTION_REQUEST: RuntimeStreamSessionDirection.ValueType  # 1
+RUNTIME_STREAM_SESSION_DIRECTION_RESPONSE: RuntimeStreamSessionDirection.ValueType  # 2
+Global___RuntimeStreamSessionDirection: _TypeAlias = RuntimeStreamSessionDirection
+
+class _RuntimeStreamSessionRoutePath:
+    ValueType = _typing.NewType("ValueType", _builtins.int)
+    V: _TypeAlias = ValueType
+
+class _RuntimeStreamSessionRoutePathEnumTypeWrapper(
+    _enum_type_wrapper._EnumTypeWrapper[_RuntimeStreamSessionRoutePath.ValueType],
+    _builtins.type,
+):
+    DESCRIPTOR: _descriptor.EnumDescriptor
+    RUNTIME_STREAM_SESSION_ROUTE_PATH_UNSPECIFIED: (
+        _RuntimeStreamSessionRoutePath.ValueType
+    )  # 0
+    RUNTIME_STREAM_SESSION_ROUTE_PATH_LOCAL: (
+        _RuntimeStreamSessionRoutePath.ValueType
+    )  # 1
+    RUNTIME_STREAM_SESSION_ROUTE_PATH_RELAY: (
+        _RuntimeStreamSessionRoutePath.ValueType
+    )  # 2
+
+class RuntimeStreamSessionRoutePath(
+    _RuntimeStreamSessionRoutePath,
+    metaclass=_RuntimeStreamSessionRoutePathEnumTypeWrapper,
+): ...
+
+RUNTIME_STREAM_SESSION_ROUTE_PATH_UNSPECIFIED: (
+    RuntimeStreamSessionRoutePath.ValueType
+)  # 0
+RUNTIME_STREAM_SESSION_ROUTE_PATH_LOCAL: RuntimeStreamSessionRoutePath.ValueType  # 1
+RUNTIME_STREAM_SESSION_ROUTE_PATH_RELAY: RuntimeStreamSessionRoutePath.ValueType  # 2
+Global___RuntimeStreamSessionRoutePath: _TypeAlias = RuntimeStreamSessionRoutePath
+
+class _RuntimeStreamSessionWebSocketOpcode:
+    ValueType = _typing.NewType("ValueType", _builtins.int)
+    V: _TypeAlias = ValueType
+
+class _RuntimeStreamSessionWebSocketOpcodeEnumTypeWrapper(
+    _enum_type_wrapper._EnumTypeWrapper[_RuntimeStreamSessionWebSocketOpcode.ValueType],
+    _builtins.type,
+):
+    DESCRIPTOR: _descriptor.EnumDescriptor
+    RUNTIME_STREAM_SESSION_WEBSOCKET_OPCODE_UNSPECIFIED: (
+        _RuntimeStreamSessionWebSocketOpcode.ValueType
+    )  # 0
+    RUNTIME_STREAM_SESSION_WEBSOCKET_OPCODE_TEXT: (
+        _RuntimeStreamSessionWebSocketOpcode.ValueType
+    )  # 1
+    RUNTIME_STREAM_SESSION_WEBSOCKET_OPCODE_BINARY: (
+        _RuntimeStreamSessionWebSocketOpcode.ValueType
+    )  # 2
+    RUNTIME_STREAM_SESSION_WEBSOCKET_OPCODE_CONTINUATION: (
+        _RuntimeStreamSessionWebSocketOpcode.ValueType
     )  # 3
-    RUNTIME_WEB_SESSION_CLOSE_REASON_GENERATION_REPLACED: (
-        _RuntimeWebSessionCloseReason.ValueType
+    RUNTIME_STREAM_SESSION_WEBSOCKET_OPCODE_PING: (
+        _RuntimeStreamSessionWebSocketOpcode.ValueType
     )  # 4
-    RUNTIME_WEB_SESSION_CLOSE_REASON_DEADLINE: (
-        _RuntimeWebSessionCloseReason.ValueType
+    RUNTIME_STREAM_SESSION_WEBSOCKET_OPCODE_PONG: (
+        _RuntimeStreamSessionWebSocketOpcode.ValueType
     )  # 5
-    RUNTIME_WEB_SESSION_CLOSE_REASON_SERVICE_DRAIN: (
-        _RuntimeWebSessionCloseReason.ValueType
+    RUNTIME_STREAM_SESSION_WEBSOCKET_OPCODE_CLOSE: (
+        _RuntimeStreamSessionWebSocketOpcode.ValueType
     )  # 6
-    RUNTIME_WEB_SESSION_CLOSE_REASON_OWNER_LOST: (
-        _RuntimeWebSessionCloseReason.ValueType
+
+class RuntimeStreamSessionWebSocketOpcode(
+    _RuntimeStreamSessionWebSocketOpcode,
+    metaclass=_RuntimeStreamSessionWebSocketOpcodeEnumTypeWrapper,
+): ...
+
+RUNTIME_STREAM_SESSION_WEBSOCKET_OPCODE_UNSPECIFIED: (
+    RuntimeStreamSessionWebSocketOpcode.ValueType
+)  # 0
+RUNTIME_STREAM_SESSION_WEBSOCKET_OPCODE_TEXT: (
+    RuntimeStreamSessionWebSocketOpcode.ValueType
+)  # 1
+RUNTIME_STREAM_SESSION_WEBSOCKET_OPCODE_BINARY: (
+    RuntimeStreamSessionWebSocketOpcode.ValueType
+)  # 2
+RUNTIME_STREAM_SESSION_WEBSOCKET_OPCODE_CONTINUATION: (
+    RuntimeStreamSessionWebSocketOpcode.ValueType
+)  # 3
+RUNTIME_STREAM_SESSION_WEBSOCKET_OPCODE_PING: (
+    RuntimeStreamSessionWebSocketOpcode.ValueType
+)  # 4
+RUNTIME_STREAM_SESSION_WEBSOCKET_OPCODE_PONG: (
+    RuntimeStreamSessionWebSocketOpcode.ValueType
+)  # 5
+RUNTIME_STREAM_SESSION_WEBSOCKET_OPCODE_CLOSE: (
+    RuntimeStreamSessionWebSocketOpcode.ValueType
+)  # 6
+Global___RuntimeStreamSessionWebSocketOpcode: _TypeAlias = (
+    RuntimeStreamSessionWebSocketOpcode
+)
+
+class _RuntimeStreamSessionCloseReason:
+    ValueType = _typing.NewType("ValueType", _builtins.int)
+    V: _TypeAlias = ValueType
+
+class _RuntimeStreamSessionCloseReasonEnumTypeWrapper(
+    _enum_type_wrapper._EnumTypeWrapper[_RuntimeStreamSessionCloseReason.ValueType],
+    _builtins.type,
+):
+    DESCRIPTOR: _descriptor.EnumDescriptor
+    RUNTIME_STREAM_SESSION_CLOSE_REASON_UNSPECIFIED: (
+        _RuntimeStreamSessionCloseReason.ValueType
+    )  # 0
+    RUNTIME_STREAM_SESSION_CLOSE_REASON_CALLER: (
+        _RuntimeStreamSessionCloseReason.ValueType
+    )  # 1
+    RUNTIME_STREAM_SESSION_CLOSE_REASON_SERVICE_EXPIRED: (
+        _RuntimeStreamSessionCloseReason.ValueType
+    )  # 2
+    RUNTIME_STREAM_SESSION_CLOSE_REASON_AUTHORITY_REVOKED: (
+        _RuntimeStreamSessionCloseReason.ValueType
+    )  # 3
+    RUNTIME_STREAM_SESSION_CLOSE_REASON_GENERATION_REPLACED: (
+        _RuntimeStreamSessionCloseReason.ValueType
+    )  # 4
+    RUNTIME_STREAM_SESSION_CLOSE_REASON_DEADLINE: (
+        _RuntimeStreamSessionCloseReason.ValueType
+    )  # 5
+    RUNTIME_STREAM_SESSION_CLOSE_REASON_SERVICE_DRAIN: (
+        _RuntimeStreamSessionCloseReason.ValueType
+    )  # 6
+    RUNTIME_STREAM_SESSION_CLOSE_REASON_OWNER_LOST: (
+        _RuntimeStreamSessionCloseReason.ValueType
     )  # 7
-    RUNTIME_WEB_SESSION_CLOSE_REASON_PROTOCOL_VIOLATION: (
-        _RuntimeWebSessionCloseReason.ValueType
+    RUNTIME_STREAM_SESSION_CLOSE_REASON_PROTOCOL_VIOLATION: (
+        _RuntimeStreamSessionCloseReason.ValueType
     )  # 8
-    RUNTIME_WEB_SESSION_CLOSE_REASON_RESOURCE_EXHAUSTED: (
-        _RuntimeWebSessionCloseReason.ValueType
+    RUNTIME_STREAM_SESSION_CLOSE_REASON_RESOURCE_EXHAUSTED: (
+        _RuntimeStreamSessionCloseReason.ValueType
     )  # 9
-    RUNTIME_WEB_SESSION_CLOSE_REASON_APPLICATION_UNAVAILABLE: (
-        _RuntimeWebSessionCloseReason.ValueType
+    RUNTIME_STREAM_SESSION_CLOSE_REASON_APPLICATION_UNAVAILABLE: (
+        _RuntimeStreamSessionCloseReason.ValueType
     )  # 10
-    RUNTIME_WEB_SESSION_CLOSE_REASON_TRANSPORT_UNAVAILABLE: (
-        _RuntimeWebSessionCloseReason.ValueType
+    RUNTIME_STREAM_SESSION_CLOSE_REASON_TRANSPORT_UNAVAILABLE: (
+        _RuntimeStreamSessionCloseReason.ValueType
     )  # 11
 
-class RuntimeWebSessionCloseReason(
-    _RuntimeWebSessionCloseReason,
-    metaclass=_RuntimeWebSessionCloseReasonEnumTypeWrapper,
+class RuntimeStreamSessionCloseReason(
+    _RuntimeStreamSessionCloseReason,
+    metaclass=_RuntimeStreamSessionCloseReasonEnumTypeWrapper,
 ): ...
 
-RUNTIME_WEB_SESSION_CLOSE_REASON_UNSPECIFIED: (
-    RuntimeWebSessionCloseReason.ValueType
+RUNTIME_STREAM_SESSION_CLOSE_REASON_UNSPECIFIED: (
+    RuntimeStreamSessionCloseReason.ValueType
 )  # 0
-RUNTIME_WEB_SESSION_CLOSE_REASON_CALLER: RuntimeWebSessionCloseReason.ValueType  # 1
-RUNTIME_WEB_SESSION_CLOSE_REASON_SERVICE_EXPIRED: (
-    RuntimeWebSessionCloseReason.ValueType
+RUNTIME_STREAM_SESSION_CLOSE_REASON_CALLER: (
+    RuntimeStreamSessionCloseReason.ValueType
+)  # 1
+RUNTIME_STREAM_SESSION_CLOSE_REASON_SERVICE_EXPIRED: (
+    RuntimeStreamSessionCloseReason.ValueType
 )  # 2
-RUNTIME_WEB_SESSION_CLOSE_REASON_AUTHORITY_REVOKED: (
-    RuntimeWebSessionCloseReason.ValueType
+RUNTIME_STREAM_SESSION_CLOSE_REASON_AUTHORITY_REVOKED: (
+    RuntimeStreamSessionCloseReason.ValueType
 )  # 3
-RUNTIME_WEB_SESSION_CLOSE_REASON_GENERATION_REPLACED: (
-    RuntimeWebSessionCloseReason.ValueType
+RUNTIME_STREAM_SESSION_CLOSE_REASON_GENERATION_REPLACED: (
+    RuntimeStreamSessionCloseReason.ValueType
 )  # 4
-RUNTIME_WEB_SESSION_CLOSE_REASON_DEADLINE: RuntimeWebSessionCloseReason.ValueType  # 5
-RUNTIME_WEB_SESSION_CLOSE_REASON_SERVICE_DRAIN: (
-    RuntimeWebSessionCloseReason.ValueType
+RUNTIME_STREAM_SESSION_CLOSE_REASON_DEADLINE: (
+    RuntimeStreamSessionCloseReason.ValueType
+)  # 5
+RUNTIME_STREAM_SESSION_CLOSE_REASON_SERVICE_DRAIN: (
+    RuntimeStreamSessionCloseReason.ValueType
 )  # 6
-RUNTIME_WEB_SESSION_CLOSE_REASON_OWNER_LOST: RuntimeWebSessionCloseReason.ValueType  # 7
-RUNTIME_WEB_SESSION_CLOSE_REASON_PROTOCOL_VIOLATION: (
-    RuntimeWebSessionCloseReason.ValueType
+RUNTIME_STREAM_SESSION_CLOSE_REASON_OWNER_LOST: (
+    RuntimeStreamSessionCloseReason.ValueType
+)  # 7
+RUNTIME_STREAM_SESSION_CLOSE_REASON_PROTOCOL_VIOLATION: (
+    RuntimeStreamSessionCloseReason.ValueType
 )  # 8
-RUNTIME_WEB_SESSION_CLOSE_REASON_RESOURCE_EXHAUSTED: (
-    RuntimeWebSessionCloseReason.ValueType
+RUNTIME_STREAM_SESSION_CLOSE_REASON_RESOURCE_EXHAUSTED: (
+    RuntimeStreamSessionCloseReason.ValueType
 )  # 9
-RUNTIME_WEB_SESSION_CLOSE_REASON_APPLICATION_UNAVAILABLE: (
-    RuntimeWebSessionCloseReason.ValueType
+RUNTIME_STREAM_SESSION_CLOSE_REASON_APPLICATION_UNAVAILABLE: (
+    RuntimeStreamSessionCloseReason.ValueType
 )  # 10
-RUNTIME_WEB_SESSION_CLOSE_REASON_TRANSPORT_UNAVAILABLE: (
-    RuntimeWebSessionCloseReason.ValueType
+RUNTIME_STREAM_SESSION_CLOSE_REASON_TRANSPORT_UNAVAILABLE: (
+    RuntimeStreamSessionCloseReason.ValueType
 )  # 11
-Global___RuntimeWebSessionCloseReason: _TypeAlias = RuntimeWebSessionCloseReason
+Global___RuntimeStreamSessionCloseReason: _TypeAlias = RuntimeStreamSessionCloseReason
 
 @_typing.final
-class RuntimeWebSessionEnvelope(_message.Message):
+class RuntimeStreamSessionEnvelope(_message.Message):
     DESCRIPTOR: _descriptor.Descriptor
 
     PROTOCOL_FINGERPRINT_FIELD_NUMBER: _builtins.int
@@ -295,39 +333,41 @@ class RuntimeWebSessionEnvelope(_message.Message):
     stream_id: _builtins.int
     frame_sequence: _builtins.int
     @_builtins.property
-    def hello(self) -> Global___RuntimeWebSessionHello: ...
+    def hello(self) -> Global___RuntimeStreamSessionHello: ...
     @_builtins.property
-    def session_accepted(self) -> Global___RuntimeWebSessionAccepted: ...
+    def session_accepted(self) -> Global___RuntimeStreamSessionAccepted: ...
     @_builtins.property
-    def heartbeat(self) -> Global___RuntimeWebSessionHeartbeat: ...
+    def heartbeat(self) -> Global___RuntimeStreamSessionHeartbeat: ...
     @_builtins.property
-    def heartbeat_ack(self) -> Global___RuntimeWebSessionHeartbeatAcknowledgement: ...
+    def heartbeat_ack(
+        self,
+    ) -> Global___RuntimeStreamSessionHeartbeatAcknowledgement: ...
     @_builtins.property
-    def go_away(self) -> Global___RuntimeWebSessionGoAway: ...
+    def go_away(self) -> Global___RuntimeStreamSessionGoAway: ...
     @_builtins.property
-    def session_error(self) -> Global___RuntimeWebSessionError: ...
+    def session_error(self) -> Global___RuntimeStreamSessionError: ...
     @_builtins.property
-    def open(self) -> Global___RuntimeWebSessionOpen: ...
+    def open(self) -> Global___RuntimeStreamSessionOpen: ...
     @_builtins.property
-    def open_accepted(self) -> Global___RuntimeWebSessionOpenAccepted: ...
+    def open_accepted(self) -> Global___RuntimeStreamSessionOpenAccepted: ...
     @_builtins.property
-    def open_rejected(self) -> Global___RuntimeWebSessionOpenRejected: ...
+    def open_rejected(self) -> Global___RuntimeStreamSessionOpenRejected: ...
     @_builtins.property
-    def response_head(self) -> Global___RuntimeWebSessionResponseHead: ...
+    def response_head(self) -> Global___RuntimeStreamSessionResponseHead: ...
     @_builtins.property
-    def data(self) -> Global___RuntimeWebSessionData: ...
+    def data(self) -> Global___RuntimeStreamSessionData: ...
     @_builtins.property
-    def window_update(self) -> Global___RuntimeWebSessionWindowUpdate: ...
+    def window_update(self) -> Global___RuntimeStreamSessionWindowUpdate: ...
     @_builtins.property
-    def direction_end(self) -> Global___RuntimeWebSessionDirectionEnd: ...
+    def direction_end(self) -> Global___RuntimeStreamSessionDirectionEnd: ...
     @_builtins.property
-    def websocket(self) -> Global___RuntimeWebSessionWebSocketFrame: ...
+    def websocket(self) -> Global___RuntimeStreamSessionWebSocketFrame: ...
     @_builtins.property
-    def cancel(self) -> Global___RuntimeWebSessionCancel: ...
+    def cancel(self) -> Global___RuntimeStreamSessionCancel: ...
     @_builtins.property
-    def reset(self) -> Global___RuntimeWebSessionReset: ...
+    def reset(self) -> Global___RuntimeStreamSessionReset: ...
     @_builtins.property
-    def stream_end(self) -> Global___RuntimeWebSessionStreamEnd: ...
+    def stream_end(self) -> Global___RuntimeStreamSessionStreamEnd: ...
     def __init__(
         self,
         *,
@@ -339,23 +379,24 @@ class RuntimeWebSessionEnvelope(_message.Message):
         lease_generation: _builtins.int | None = ...,
         stream_id: _builtins.int = ...,
         frame_sequence: _builtins.int = ...,
-        hello: Global___RuntimeWebSessionHello | None = ...,
-        session_accepted: Global___RuntimeWebSessionAccepted | None = ...,
-        heartbeat: Global___RuntimeWebSessionHeartbeat | None = ...,
-        heartbeat_ack: Global___RuntimeWebSessionHeartbeatAcknowledgement | None = ...,
-        go_away: Global___RuntimeWebSessionGoAway | None = ...,
-        session_error: Global___RuntimeWebSessionError | None = ...,
-        open: Global___RuntimeWebSessionOpen | None = ...,
-        open_accepted: Global___RuntimeWebSessionOpenAccepted | None = ...,
-        open_rejected: Global___RuntimeWebSessionOpenRejected | None = ...,
-        response_head: Global___RuntimeWebSessionResponseHead | None = ...,
-        data: Global___RuntimeWebSessionData | None = ...,
-        window_update: Global___RuntimeWebSessionWindowUpdate | None = ...,
-        direction_end: Global___RuntimeWebSessionDirectionEnd | None = ...,
-        websocket: Global___RuntimeWebSessionWebSocketFrame | None = ...,
-        cancel: Global___RuntimeWebSessionCancel | None = ...,
-        reset: Global___RuntimeWebSessionReset | None = ...,
-        stream_end: Global___RuntimeWebSessionStreamEnd | None = ...,
+        hello: Global___RuntimeStreamSessionHello | None = ...,
+        session_accepted: Global___RuntimeStreamSessionAccepted | None = ...,
+        heartbeat: Global___RuntimeStreamSessionHeartbeat | None = ...,
+        heartbeat_ack: Global___RuntimeStreamSessionHeartbeatAcknowledgement
+        | None = ...,
+        go_away: Global___RuntimeStreamSessionGoAway | None = ...,
+        session_error: Global___RuntimeStreamSessionError | None = ...,
+        open: Global___RuntimeStreamSessionOpen | None = ...,
+        open_accepted: Global___RuntimeStreamSessionOpenAccepted | None = ...,
+        open_rejected: Global___RuntimeStreamSessionOpenRejected | None = ...,
+        response_head: Global___RuntimeStreamSessionResponseHead | None = ...,
+        data: Global___RuntimeStreamSessionData | None = ...,
+        window_update: Global___RuntimeStreamSessionWindowUpdate | None = ...,
+        direction_end: Global___RuntimeStreamSessionDirectionEnd | None = ...,
+        websocket: Global___RuntimeStreamSessionWebSocketFrame | None = ...,
+        cancel: Global___RuntimeStreamSessionCancel | None = ...,
+        reset: Global___RuntimeStreamSessionReset | None = ...,
+        stream_end: Global___RuntimeStreamSessionStreamEnd | None = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _typing.Literal[
         "_lease_generation",
@@ -522,10 +563,10 @@ class RuntimeWebSessionEnvelope(_message.Message):
         self, oneof_group: _WhichOneofArgType_payload
     ) -> _WhichOneofReturnType_payload | None: ...
 
-Global___RuntimeWebSessionEnvelope: _TypeAlias = RuntimeWebSessionEnvelope
+Global___RuntimeStreamSessionEnvelope: _TypeAlias = RuntimeStreamSessionEnvelope
 
 @_typing.final
-class RuntimeWebSessionHello(_message.Message):
+class RuntimeStreamSessionHello(_message.Message):
     DESCRIPTOR: _descriptor.Descriptor
 
     ROLE_FIELD_NUMBER: _builtins.int
@@ -539,7 +580,7 @@ class RuntimeWebSessionHello(_message.Message):
     REQUEST_SESSION_WINDOW_BYTES_FIELD_NUMBER: _builtins.int
     RESPONSE_SESSION_WINDOW_BYTES_FIELD_NUMBER: _builtins.int
     DEADLINE_AT_FIELD_NUMBER: _builtins.int
-    role: Global___RuntimeWebSessionPeerRole.ValueType
+    role: Global___RuntimeStreamSessionPeerRole.ValueType
     runtime_id: _builtins.str
     desired_generation: _builtins.int
     runner_generation: _builtins.int
@@ -554,7 +595,7 @@ class RuntimeWebSessionHello(_message.Message):
     def __init__(
         self,
         *,
-        role: Global___RuntimeWebSessionPeerRole.ValueType = ...,
+        role: Global___RuntimeStreamSessionPeerRole.ValueType = ...,
         runtime_id: _builtins.str | None = ...,
         desired_generation: _builtins.int | None = ...,
         runner_generation: _builtins.int | None = ...,
@@ -643,10 +684,10 @@ class RuntimeWebSessionHello(_message.Message):
         self, oneof_group: _WhichOneofArgType__runtime_id
     ) -> _WhichOneofReturnType__runtime_id | None: ...
 
-Global___RuntimeWebSessionHello: _TypeAlias = RuntimeWebSessionHello
+Global___RuntimeStreamSessionHello: _TypeAlias = RuntimeStreamSessionHello
 
 @_typing.final
-class RuntimeWebSessionAccepted(_message.Message):
+class RuntimeStreamSessionAccepted(_message.Message):
     DESCRIPTOR: _descriptor.Descriptor
 
     DATA_FRAME_BYTES_FIELD_NUMBER: _builtins.int
@@ -691,10 +732,10 @@ class RuntimeWebSessionAccepted(_message.Message):
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     def WhichOneof(self, oneof_group: _Never) -> None: ...
 
-Global___RuntimeWebSessionAccepted: _TypeAlias = RuntimeWebSessionAccepted
+Global___RuntimeStreamSessionAccepted: _TypeAlias = RuntimeStreamSessionAccepted
 
 @_typing.final
-class RuntimeWebSessionHeartbeat(_message.Message):
+class RuntimeStreamSessionHeartbeat(_message.Message):
     DESCRIPTOR: _descriptor.Descriptor
 
     MONOTONIC_SEQUENCE_FIELD_NUMBER: _builtins.int
@@ -712,10 +753,10 @@ class RuntimeWebSessionHeartbeat(_message.Message):
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     def WhichOneof(self, oneof_group: _Never) -> None: ...
 
-Global___RuntimeWebSessionHeartbeat: _TypeAlias = RuntimeWebSessionHeartbeat
+Global___RuntimeStreamSessionHeartbeat: _TypeAlias = RuntimeStreamSessionHeartbeat
 
 @_typing.final
-class RuntimeWebSessionHeartbeatAcknowledgement(_message.Message):
+class RuntimeStreamSessionHeartbeatAcknowledgement(_message.Message):
     DESCRIPTOR: _descriptor.Descriptor
 
     MONOTONIC_SEQUENCE_FIELD_NUMBER: _builtins.int
@@ -733,26 +774,26 @@ class RuntimeWebSessionHeartbeatAcknowledgement(_message.Message):
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     def WhichOneof(self, oneof_group: _Never) -> None: ...
 
-Global___RuntimeWebSessionHeartbeatAcknowledgement: _TypeAlias = (
-    RuntimeWebSessionHeartbeatAcknowledgement
+Global___RuntimeStreamSessionHeartbeatAcknowledgement: _TypeAlias = (
+    RuntimeStreamSessionHeartbeatAcknowledgement
 )
 
 @_typing.final
-class RuntimeWebSessionGoAway(_message.Message):
+class RuntimeStreamSessionGoAway(_message.Message):
     DESCRIPTOR: _descriptor.Descriptor
 
     LAST_ACCEPTED_STREAM_ID_FIELD_NUMBER: _builtins.int
     REASON_FIELD_NUMBER: _builtins.int
     DRAIN_DEADLINE_AT_FIELD_NUMBER: _builtins.int
     last_accepted_stream_id: _builtins.int
-    reason: Global___RuntimeWebSessionCloseReason.ValueType
+    reason: Global___RuntimeStreamSessionCloseReason.ValueType
     @_builtins.property
     def drain_deadline_at(self) -> _timestamp_pb2.Timestamp: ...
     def __init__(
         self,
         *,
         last_accepted_stream_id: _builtins.int = ...,
-        reason: Global___RuntimeWebSessionCloseReason.ValueType = ...,
+        reason: Global___RuntimeStreamSessionCloseReason.ValueType = ...,
         drain_deadline_at: _timestamp_pb2.Timestamp | None = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _typing.Literal[
@@ -770,18 +811,18 @@ class RuntimeWebSessionGoAway(_message.Message):
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     def WhichOneof(self, oneof_group: _Never) -> None: ...
 
-Global___RuntimeWebSessionGoAway: _TypeAlias = RuntimeWebSessionGoAway
+Global___RuntimeStreamSessionGoAway: _TypeAlias = RuntimeStreamSessionGoAway
 
 @_typing.final
-class RuntimeWebSessionError(_message.Message):
+class RuntimeStreamSessionError(_message.Message):
     DESCRIPTOR: _descriptor.Descriptor
 
     REASON_FIELD_NUMBER: _builtins.int
-    reason: Global___RuntimeWebSessionCloseReason.ValueType
+    reason: Global___RuntimeStreamSessionCloseReason.ValueType
     def __init__(
         self,
         *,
-        reason: Global___RuntimeWebSessionCloseReason.ValueType = ...,
+        reason: Global___RuntimeStreamSessionCloseReason.ValueType = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _Never
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
@@ -789,10 +830,10 @@ class RuntimeWebSessionError(_message.Message):
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     def WhichOneof(self, oneof_group: _Never) -> None: ...
 
-Global___RuntimeWebSessionError: _TypeAlias = RuntimeWebSessionError
+Global___RuntimeStreamSessionError: _TypeAlias = RuntimeStreamSessionError
 
 @_typing.final
-class RuntimeWebSessionHeader(_message.Message):
+class RuntimeStreamSessionHeader(_message.Message):
     DESCRIPTOR: _descriptor.Descriptor
 
     NAME_FIELD_NUMBER: _builtins.int
@@ -811,10 +852,10 @@ class RuntimeWebSessionHeader(_message.Message):
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     def WhichOneof(self, oneof_group: _Never) -> None: ...
 
-Global___RuntimeWebSessionHeader: _TypeAlias = RuntimeWebSessionHeader
+Global___RuntimeStreamSessionHeader: _TypeAlias = RuntimeStreamSessionHeader
 
 @_typing.final
-class RuntimeWebSessionAuthority(_message.Message):
+class RuntimeStreamSessionAuthority(_message.Message):
     DESCRIPTOR: _descriptor.Descriptor
 
     CORRELATION_ID_FIELD_NUMBER: _builtins.int
@@ -908,32 +949,32 @@ class RuntimeWebSessionAuthority(_message.Message):
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     def WhichOneof(self, oneof_group: _Never) -> None: ...
 
-Global___RuntimeWebSessionAuthority: _TypeAlias = RuntimeWebSessionAuthority
+Global___RuntimeStreamSessionAuthority: _TypeAlias = RuntimeStreamSessionAuthority
 
 @_typing.final
-class RuntimeWebSessionRequestHead(_message.Message):
+class RuntimeStreamSessionRequestHead(_message.Message):
     DESCRIPTOR: _descriptor.Descriptor
 
     PROTOCOL_FIELD_NUMBER: _builtins.int
     METHOD_FIELD_NUMBER: _builtins.int
     TARGET_FIELD_NUMBER: _builtins.int
     HEADERS_FIELD_NUMBER: _builtins.int
-    protocol: Global___RuntimeWebSessionProtocol.ValueType
+    protocol: Global___RuntimeStreamSessionProtocol.ValueType
     method: _builtins.bytes
     target: _builtins.bytes
     @_builtins.property
     def headers(
         self,
     ) -> _containers.RepeatedCompositeFieldContainer[
-        Global___RuntimeWebSessionHeader
+        Global___RuntimeStreamSessionHeader
     ]: ...
     def __init__(
         self,
         *,
-        protocol: Global___RuntimeWebSessionProtocol.ValueType = ...,
+        protocol: Global___RuntimeStreamSessionProtocol.ValueType = ...,
         method: _builtins.bytes = ...,
         target: _builtins.bytes = ...,
-        headers: _abc.Iterable[Global___RuntimeWebSessionHeader] | None = ...,
+        headers: _abc.Iterable[Global___RuntimeStreamSessionHeader] | None = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _Never
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
@@ -950,23 +991,23 @@ class RuntimeWebSessionRequestHead(_message.Message):
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     def WhichOneof(self, oneof_group: _Never) -> None: ...
 
-Global___RuntimeWebSessionRequestHead: _TypeAlias = RuntimeWebSessionRequestHead
+Global___RuntimeStreamSessionRequestHead: _TypeAlias = RuntimeStreamSessionRequestHead
 
 @_typing.final
-class RuntimeWebSessionOpen(_message.Message):
+class RuntimeStreamSessionOpen(_message.Message):
     DESCRIPTOR: _descriptor.Descriptor
 
     AUTHORITY_FIELD_NUMBER: _builtins.int
     REQUEST_HEAD_FIELD_NUMBER: _builtins.int
     @_builtins.property
-    def authority(self) -> Global___RuntimeWebSessionAuthority: ...
+    def authority(self) -> Global___RuntimeStreamSessionAuthority: ...
     @_builtins.property
-    def request_head(self) -> Global___RuntimeWebSessionRequestHead: ...
+    def request_head(self) -> Global___RuntimeStreamSessionRequestHead: ...
     def __init__(
         self,
         *,
-        authority: Global___RuntimeWebSessionAuthority | None = ...,
-        request_head: Global___RuntimeWebSessionRequestHead | None = ...,
+        authority: Global___RuntimeStreamSessionAuthority | None = ...,
+        request_head: Global___RuntimeStreamSessionRequestHead | None = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _typing.Literal[
         "authority", b"authority", "request_head", b"request_head"
@@ -978,10 +1019,10 @@ class RuntimeWebSessionOpen(_message.Message):
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     def WhichOneof(self, oneof_group: _Never) -> None: ...
 
-Global___RuntimeWebSessionOpen: _TypeAlias = RuntimeWebSessionOpen
+Global___RuntimeStreamSessionOpen: _TypeAlias = RuntimeStreamSessionOpen
 
 @_typing.final
-class RuntimeWebSessionOpenAccepted(_message.Message):
+class RuntimeStreamSessionOpenAccepted(_message.Message):
     DESCRIPTOR: _descriptor.Descriptor
 
     DATA_FRAME_BYTES_FIELD_NUMBER: _builtins.int
@@ -991,14 +1032,14 @@ class RuntimeWebSessionOpenAccepted(_message.Message):
     data_frame_bytes: _builtins.int
     request_credit_bytes: _builtins.int
     response_credit_bytes: _builtins.int
-    route_path: Global___RuntimeWebSessionRoutePath.ValueType
+    route_path: Global___RuntimeStreamSessionRoutePath.ValueType
     def __init__(
         self,
         *,
         data_frame_bytes: _builtins.int = ...,
         request_credit_bytes: _builtins.int = ...,
         response_credit_bytes: _builtins.int = ...,
-        route_path: Global___RuntimeWebSessionRoutePath.ValueType = ...,
+        route_path: Global___RuntimeStreamSessionRoutePath.ValueType = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _Never
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
@@ -1015,18 +1056,18 @@ class RuntimeWebSessionOpenAccepted(_message.Message):
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     def WhichOneof(self, oneof_group: _Never) -> None: ...
 
-Global___RuntimeWebSessionOpenAccepted: _TypeAlias = RuntimeWebSessionOpenAccepted
+Global___RuntimeStreamSessionOpenAccepted: _TypeAlias = RuntimeStreamSessionOpenAccepted
 
 @_typing.final
-class RuntimeWebSessionOpenRejected(_message.Message):
+class RuntimeStreamSessionOpenRejected(_message.Message):
     DESCRIPTOR: _descriptor.Descriptor
 
     REASON_FIELD_NUMBER: _builtins.int
-    reason: Global___RuntimeWebSessionCloseReason.ValueType
+    reason: Global___RuntimeStreamSessionCloseReason.ValueType
     def __init__(
         self,
         *,
-        reason: Global___RuntimeWebSessionCloseReason.ValueType = ...,
+        reason: Global___RuntimeStreamSessionCloseReason.ValueType = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _Never
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
@@ -1034,10 +1075,10 @@ class RuntimeWebSessionOpenRejected(_message.Message):
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     def WhichOneof(self, oneof_group: _Never) -> None: ...
 
-Global___RuntimeWebSessionOpenRejected: _TypeAlias = RuntimeWebSessionOpenRejected
+Global___RuntimeStreamSessionOpenRejected: _TypeAlias = RuntimeStreamSessionOpenRejected
 
 @_typing.final
-class RuntimeWebSessionResponseHead(_message.Message):
+class RuntimeStreamSessionResponseHead(_message.Message):
     DESCRIPTOR: _descriptor.Descriptor
 
     STATUS_FIELD_NUMBER: _builtins.int
@@ -1047,13 +1088,13 @@ class RuntimeWebSessionResponseHead(_message.Message):
     def headers(
         self,
     ) -> _containers.RepeatedCompositeFieldContainer[
-        Global___RuntimeWebSessionHeader
+        Global___RuntimeStreamSessionHeader
     ]: ...
     def __init__(
         self,
         *,
         status: _builtins.int = ...,
-        headers: _abc.Iterable[Global___RuntimeWebSessionHeader] | None = ...,
+        headers: _abc.Iterable[Global___RuntimeStreamSessionHeader] | None = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _Never
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
@@ -1063,20 +1104,20 @@ class RuntimeWebSessionResponseHead(_message.Message):
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     def WhichOneof(self, oneof_group: _Never) -> None: ...
 
-Global___RuntimeWebSessionResponseHead: _TypeAlias = RuntimeWebSessionResponseHead
+Global___RuntimeStreamSessionResponseHead: _TypeAlias = RuntimeStreamSessionResponseHead
 
 @_typing.final
-class RuntimeWebSessionData(_message.Message):
+class RuntimeStreamSessionData(_message.Message):
     DESCRIPTOR: _descriptor.Descriptor
 
     DIRECTION_FIELD_NUMBER: _builtins.int
     DATA_FIELD_NUMBER: _builtins.int
-    direction: Global___RuntimeWebSessionDirection.ValueType
+    direction: Global___RuntimeStreamSessionDirection.ValueType
     data: _builtins.bytes
     def __init__(
         self,
         *,
-        direction: Global___RuntimeWebSessionDirection.ValueType = ...,
+        direction: Global___RuntimeStreamSessionDirection.ValueType = ...,
         data: _builtins.bytes = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _Never
@@ -1087,22 +1128,22 @@ class RuntimeWebSessionData(_message.Message):
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     def WhichOneof(self, oneof_group: _Never) -> None: ...
 
-Global___RuntimeWebSessionData: _TypeAlias = RuntimeWebSessionData
+Global___RuntimeStreamSessionData: _TypeAlias = RuntimeStreamSessionData
 
 @_typing.final
-class RuntimeWebSessionWindowUpdate(_message.Message):
+class RuntimeStreamSessionWindowUpdate(_message.Message):
     DESCRIPTOR: _descriptor.Descriptor
 
     DIRECTION_FIELD_NUMBER: _builtins.int
     STREAM_CONSUMED_TOTAL_FIELD_NUMBER: _builtins.int
     SESSION_CONSUMED_TOTAL_FIELD_NUMBER: _builtins.int
-    direction: Global___RuntimeWebSessionDirection.ValueType
+    direction: Global___RuntimeStreamSessionDirection.ValueType
     stream_consumed_total: _builtins.int
     session_consumed_total: _builtins.int
     def __init__(
         self,
         *,
-        direction: Global___RuntimeWebSessionDirection.ValueType = ...,
+        direction: Global___RuntimeStreamSessionDirection.ValueType = ...,
         stream_consumed_total: _builtins.int = ...,
         session_consumed_total: _builtins.int = ...,
     ) -> None: ...
@@ -1119,20 +1160,20 @@ class RuntimeWebSessionWindowUpdate(_message.Message):
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     def WhichOneof(self, oneof_group: _Never) -> None: ...
 
-Global___RuntimeWebSessionWindowUpdate: _TypeAlias = RuntimeWebSessionWindowUpdate
+Global___RuntimeStreamSessionWindowUpdate: _TypeAlias = RuntimeStreamSessionWindowUpdate
 
 @_typing.final
-class RuntimeWebSessionDirectionEnd(_message.Message):
+class RuntimeStreamSessionDirectionEnd(_message.Message):
     DESCRIPTOR: _descriptor.Descriptor
 
     DIRECTION_FIELD_NUMBER: _builtins.int
     FINAL_SEQUENCE_FIELD_NUMBER: _builtins.int
-    direction: Global___RuntimeWebSessionDirection.ValueType
+    direction: Global___RuntimeStreamSessionDirection.ValueType
     final_sequence: _builtins.int
     def __init__(
         self,
         *,
-        direction: Global___RuntimeWebSessionDirection.ValueType = ...,
+        direction: Global___RuntimeStreamSessionDirection.ValueType = ...,
         final_sequence: _builtins.int = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _Never
@@ -1143,25 +1184,25 @@ class RuntimeWebSessionDirectionEnd(_message.Message):
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     def WhichOneof(self, oneof_group: _Never) -> None: ...
 
-Global___RuntimeWebSessionDirectionEnd: _TypeAlias = RuntimeWebSessionDirectionEnd
+Global___RuntimeStreamSessionDirectionEnd: _TypeAlias = RuntimeStreamSessionDirectionEnd
 
 @_typing.final
-class RuntimeWebSessionWebSocketFrame(_message.Message):
+class RuntimeStreamSessionWebSocketFrame(_message.Message):
     DESCRIPTOR: _descriptor.Descriptor
 
     DIRECTION_FIELD_NUMBER: _builtins.int
     OPCODE_FIELD_NUMBER: _builtins.int
     FINAL_FIELD_NUMBER: _builtins.int
     DATA_FIELD_NUMBER: _builtins.int
-    direction: Global___RuntimeWebSessionDirection.ValueType
-    opcode: Global___RuntimeWebSessionWebSocketOpcode.ValueType
+    direction: Global___RuntimeStreamSessionDirection.ValueType
+    opcode: Global___RuntimeStreamSessionWebSocketOpcode.ValueType
     final: _builtins.bool
     data: _builtins.bytes
     def __init__(
         self,
         *,
-        direction: Global___RuntimeWebSessionDirection.ValueType = ...,
-        opcode: Global___RuntimeWebSessionWebSocketOpcode.ValueType = ...,
+        direction: Global___RuntimeStreamSessionDirection.ValueType = ...,
+        opcode: Global___RuntimeStreamSessionWebSocketOpcode.ValueType = ...,
         final: _builtins.bool = ...,
         data: _builtins.bytes = ...,
     ) -> None: ...
@@ -1180,18 +1221,20 @@ class RuntimeWebSessionWebSocketFrame(_message.Message):
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     def WhichOneof(self, oneof_group: _Never) -> None: ...
 
-Global___RuntimeWebSessionWebSocketFrame: _TypeAlias = RuntimeWebSessionWebSocketFrame
+Global___RuntimeStreamSessionWebSocketFrame: _TypeAlias = (
+    RuntimeStreamSessionWebSocketFrame
+)
 
 @_typing.final
-class RuntimeWebSessionCancel(_message.Message):
+class RuntimeStreamSessionCancel(_message.Message):
     DESCRIPTOR: _descriptor.Descriptor
 
     REASON_FIELD_NUMBER: _builtins.int
-    reason: Global___RuntimeWebSessionCloseReason.ValueType
+    reason: Global___RuntimeStreamSessionCloseReason.ValueType
     def __init__(
         self,
         *,
-        reason: Global___RuntimeWebSessionCloseReason.ValueType = ...,
+        reason: Global___RuntimeStreamSessionCloseReason.ValueType = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _Never
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
@@ -1199,18 +1242,18 @@ class RuntimeWebSessionCancel(_message.Message):
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     def WhichOneof(self, oneof_group: _Never) -> None: ...
 
-Global___RuntimeWebSessionCancel: _TypeAlias = RuntimeWebSessionCancel
+Global___RuntimeStreamSessionCancel: _TypeAlias = RuntimeStreamSessionCancel
 
 @_typing.final
-class RuntimeWebSessionReset(_message.Message):
+class RuntimeStreamSessionReset(_message.Message):
     DESCRIPTOR: _descriptor.Descriptor
 
     REASON_FIELD_NUMBER: _builtins.int
-    reason: Global___RuntimeWebSessionCloseReason.ValueType
+    reason: Global___RuntimeStreamSessionCloseReason.ValueType
     def __init__(
         self,
         *,
-        reason: Global___RuntimeWebSessionCloseReason.ValueType = ...,
+        reason: Global___RuntimeStreamSessionCloseReason.ValueType = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _Never
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
@@ -1218,10 +1261,10 @@ class RuntimeWebSessionReset(_message.Message):
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     def WhichOneof(self, oneof_group: _Never) -> None: ...
 
-Global___RuntimeWebSessionReset: _TypeAlias = RuntimeWebSessionReset
+Global___RuntimeStreamSessionReset: _TypeAlias = RuntimeStreamSessionReset
 
 @_typing.final
-class RuntimeWebSessionStreamEnd(_message.Message):
+class RuntimeStreamSessionStreamEnd(_message.Message):
     DESCRIPTOR: _descriptor.Descriptor
 
     def __init__(
@@ -1233,4 +1276,4 @@ class RuntimeWebSessionStreamEnd(_message.Message):
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     def WhichOneof(self, oneof_group: _Never) -> None: ...
 
-Global___RuntimeWebSessionStreamEnd: _TypeAlias = RuntimeWebSessionStreamEnd
+Global___RuntimeStreamSessionStreamEnd: _TypeAlias = RuntimeStreamSessionStreamEnd

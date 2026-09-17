@@ -34,7 +34,7 @@ from azents_runtime_control.runtime_configuration import (
     RuntimeConfigurationEvidence,
     parse_configuration_sequence,
 )
-from azents_runtime_control.runtime_web_session import RUNTIME_WEB_CAPABILITY
+from azents_runtime_control.runtime_stream_session import RUNTIME_WEB_CAPABILITY
 from azents_runtime_control.system_metrics import RUNNER_SYSTEM_METRICS_CAPABILITY
 from azents_runtime_control.transfer import (
     RUNNER_TRANSFER_CAPABILITY,
@@ -45,6 +45,10 @@ from azents_runtime_runner.execution import DirectExecutionBackend
 from azents_runtime_runner.network import prepare_runner_network_environment
 from azents_runtime_runner.operations import RunnerOperations
 from azents_runtime_runner.pixi import prepare_pixi_environment
+from azents_runtime_runner.stream_session import (
+    RunnerStreamSessionManager,
+    RunnerWebLoopbackPool,
+)
 from azents_runtime_runner.system_metrics import create_system_metrics_collector
 from azents_runtime_runner.terminal import (
     MAX_TERMINAL_CHUNK_BYTES,
@@ -57,10 +61,6 @@ from azents_runtime_runner.terminal import (
 from azents_runtime_runner.terminal_stream import RunnerTerminalStreamManager
 from azents_runtime_runner.transfer import RunnerTransferManager
 from azents_runtime_runner.trust import prepare_runner_trust_environment
-from azents_runtime_runner.web_session import (
-    RunnerWebLoopbackPool,
-    RunnerWebSessionManager,
-)
 from azents_runtime_runner.web_session_dispatcher import (
     RunnerWebHardLimits,
     RunnerWebResourceTracker,
@@ -438,7 +438,7 @@ async def run_runtime_runner(*, workspace_path: str | None = None) -> None:
                 environment=inherited_environment,
                 accepted_generation=accepted_generation,
             )
-            web_manager = RunnerWebSessionManager(
+            web_manager = RunnerStreamSessionManager(
                 runtime_id=runtime_id,
                 runner_boot_id=runner_id,
                 accepted_desired_generation=(
@@ -446,8 +446,10 @@ async def run_runtime_runner(*, workspace_path: str | None = None) -> None:
                 ),
                 accepted_generation=accepted_generation,
                 loopback=RunnerWebLoopbackPool(maximum_connections=128),
-                client_factory=lambda client=client: client.create_web_session_client(
-                    outbound_resources=web_resources
+                client_factory=lambda client=client: (
+                    client.create_stream_session_client(
+                        outbound_resources=web_resources
+                    )
                 ),
             )
             web_dispatcher = RunnerWebSessionDispatcher(
@@ -469,7 +471,7 @@ async def run_runtime_runner(*, workspace_path: str | None = None) -> None:
                 client.set_terminal_terminate_intent_handler(
                     terminal_manager.handle_terminate
                 )
-                client.set_web_session_offer_handler(web_dispatcher.handle_offer)
+                client.set_stream_session_offer_handler(web_dispatcher.handle_offer)
                 _LOGGER.info(
                     "Runtime Runner connecting to Control",
                     extra={

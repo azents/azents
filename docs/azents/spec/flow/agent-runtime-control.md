@@ -77,8 +77,8 @@ code_paths:
   - testenv/azents/e2e/src/tests/web/public/test_runtime_capability_web.py
   - testenv/azents/e2e/src/tests/web/public/test_runtime_web_gateway.py
   - infra/charts/azents/**
-last_verified_at: 2026-09-15
-spec_version: 86
+last_verified_at: 2026-09-16
+spec_version: 87
 ---
 
 # Agent Runtime Control
@@ -213,7 +213,7 @@ connection destination, or TLS server name. Local E2E may explicitly use isolate
 insecure listeners.
 
 Every peer requires exact equality with the unversioned
-`RUNTIME_WEB_PROTOCOL_FINGERPRINT`; there is no supported-version list,
+`RUNTIME_STREAM_PROTOCOL_FINGERPRINT`; there is no supported-version list,
 compatibility alias, or fallback protocol. Session identity includes peer boot
 identity and, where applicable, the complete Owner epoch: Runtime ID, desired
 generation, Runner generation, Owner boot ID, session lease ID, and lease
@@ -1082,6 +1082,11 @@ Live/provider evidence belongs in the testenv prerequisite system and must redac
 
 ## Changelog
 
+- **2026-09-16 (spec_version=87)** — Renamed the reusable persistent Runtime Web
+  session protocol and transport implementation to the stream-neutral Runtime
+  Stream Session boundary. HTTP/WebSocket adapters, Owner routing, and Runtime Web
+  route persistence remain unchanged; the exact descriptor fingerprint is now
+  `RUNTIME_STREAM_PROTOCOL_FINGERPRINT`.
 - **2026-09-15 (spec_version=86)** — Replaced Session endpoint/request/approval
   cycles with Agent-and-port services, direct revision-fenced On/Off management,
   bounded Agent request/list/close tools, and Off-URL activation.

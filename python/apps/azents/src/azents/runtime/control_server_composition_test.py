@@ -176,7 +176,7 @@ async def test_lifespan_composes_all_transfer_services_and_closes_resources(
     )
     monkeypatch.setattr(
         control_server,
-        "add_runtime_web_session_servicers",
+        "add_runtime_stream_session_servicers",
         lambda **kwargs: registrations.append(("runtime-web-sessions", kwargs)),
     )
     monkeypatch.setattr(

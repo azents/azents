@@ -8,8 +8,8 @@ from typing import NamedTuple
 from unittest.mock import AsyncMock
 
 import pytest
-from azents_runtime_control.proto import runtime_web_session_pb2
-from azents_runtime_control.runtime_web_session import (
+from azents_runtime_control.proto import runtime_stream_session_pb2
+from azents_runtime_control.runtime_stream_session import (
     APPROVED_SESSION_PROFILE,
     MANDATORY_DATA_FRAME_BYTES,
 )
@@ -23,11 +23,11 @@ from azents.repos.runtime_web.session_route_repository import (
     RuntimeWebSessionRouteConflict,
     RuntimeWebSessionRouteRepository,
 )
-from azents.runtime.web_session_owner import (
-    RuntimeWebAuthenticatedRunnerConnection,
-    RuntimeWebOwnedSession,
-    RuntimeWebOwnerSessionRegistry,
-    RuntimeWebSessionOwnerManager,
+from azents.runtime.stream_session_owner import (
+    RuntimeStreamAuthenticatedRunnerConnection,
+    RuntimeStreamOwnedSession,
+    RuntimeStreamOwnerSessionRegistry,
+    RuntimeStreamSessionOwnerManager,
 )
 
 
@@ -36,8 +36,8 @@ def _now() -> datetime.datetime:
 
 
 class _OwnedSession(NamedTuple):
-    manager: RuntimeWebSessionOwnerManager
-    session: RuntimeWebOwnedSession
+    manager: RuntimeStreamSessionOwnerManager
+    session: RuntimeStreamOwnedSession
 
 
 async def _owned(
@@ -54,7 +54,7 @@ async def _owned(
         runtime.runner_generation = 4
         await session.flush()
         runtime_id = runtime.id
-    manager = RuntimeWebSessionOwnerManager(
+    manager = RuntimeStreamSessionOwnerManager(
         session_manager=session_manager,
         repository=RuntimeWebSessionRouteRepository(),
         owner_replica_id="control-a",
@@ -74,16 +74,16 @@ async def _owned(
 
 
 def _hello(
-    owned: RuntimeWebOwnedSession,
+    owned: RuntimeStreamOwnedSession,
     *,
     runner_boot_id: str = "runner-boot-a",
     maximum_data_frame_bytes: int = MANDATORY_DATA_FRAME_BYTES,
     deadline_at: datetime.datetime | None = None,
     request_stream_window_bytes: int | None = None,
-) -> runtime_web_session_pb2.RuntimeWebSessionEnvelope:
+) -> runtime_stream_session_pb2.RuntimeStreamSessionEnvelope:
     owner = owned.offer.owner
-    hello = runtime_web_session_pb2.RuntimeWebSessionHello(
-        role=runtime_web_session_pb2.RUNTIME_WEB_SESSION_PEER_ROLE_RUNNER,
+    hello = runtime_stream_session_pb2.RuntimeStreamSessionHello(
+        role=runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_PEER_ROLE_RUNNER,
         runtime_id=owner.runtime_id,
         desired_generation=owner.desired_generation,
         runner_generation=owner.runner_generation,
@@ -105,7 +105,7 @@ def _hello(
         ),
     )
     hello.deadline_at.FromDatetime(deadline_at or owned.offer.deadline_at)
-    return runtime_web_session_pb2.RuntimeWebSessionEnvelope(
+    return runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(
         protocol_fingerprint=owned.offer.protocol_fingerprint,
         session_id=owner.session_lease_id,
         peer_boot_id=runner_boot_id,
@@ -117,12 +117,12 @@ def _hello(
 
 
 def _evidence(
-    owned: RuntimeWebOwnedSession,
+    owned: RuntimeStreamOwnedSession,
     *,
     runner_boot_id: str = "runner-boot-a",
-) -> RuntimeWebAuthenticatedRunnerConnection:
+) -> RuntimeStreamAuthenticatedRunnerConnection:
     owner = owned.offer.owner
-    return RuntimeWebAuthenticatedRunnerConnection(
+    return RuntimeStreamAuthenticatedRunnerConnection(
         runtime_id=owner.runtime_id,
         runner_boot_id=runner_boot_id,
         desired_generation=owner.desired_generation,
@@ -134,7 +134,7 @@ async def test_owner_registry_binds_authenticated_runner_boot(
     rdb_session_manager: SessionManager[AsyncSession],
 ) -> None:
     _, owned = await _owned(rdb_session_manager)
-    registry = RuntimeWebOwnerSessionRegistry(
+    registry = RuntimeStreamOwnerSessionRegistry(
         session_manager=rdb_session_manager,
         repository=RuntimeWebSessionRouteRepository(),
         clock=_now,
@@ -161,7 +161,7 @@ async def test_owner_registry_rejects_invalid_profile(
     request_stream_window_bytes: int | None,
 ) -> None:
     _, owned = await _owned(rdb_session_manager)
-    registry = RuntimeWebOwnerSessionRegistry(
+    registry = RuntimeStreamOwnerSessionRegistry(
         session_manager=rdb_session_manager,
         repository=RuntimeWebSessionRouteRepository(),
         clock=_now,
@@ -183,7 +183,7 @@ async def test_owner_registry_rejects_extended_offer_deadline(
     rdb_session_manager: SessionManager[AsyncSession],
 ) -> None:
     _, owned = await _owned(rdb_session_manager)
-    registry = RuntimeWebOwnerSessionRegistry(
+    registry = RuntimeStreamOwnerSessionRegistry(
         session_manager=rdb_session_manager,
         repository=RuntimeWebSessionRouteRepository(),
         clock=_now,
@@ -204,7 +204,7 @@ async def test_owner_registry_rejects_stale_snapshot_after_drain(
     rdb_session_manager: SessionManager[AsyncSession],
 ) -> None:
     manager, draining_owned = await _owned(rdb_session_manager)
-    registry = RuntimeWebOwnerSessionRegistry(
+    registry = RuntimeStreamOwnerSessionRegistry(
         session_manager=rdb_session_manager,
         repository=RuntimeWebSessionRouteRepository(),
         clock=_now,
@@ -222,7 +222,7 @@ async def test_owner_registry_rejects_stale_snapshot_after_release(
     rdb_session_manager: SessionManager[AsyncSession],
 ) -> None:
     manager, released_owned = await _owned(rdb_session_manager)
-    registry = RuntimeWebOwnerSessionRegistry(
+    registry = RuntimeStreamOwnerSessionRegistry(
         session_manager=rdb_session_manager,
         repository=RuntimeWebSessionRouteRepository(),
         clock=_now,
@@ -244,7 +244,7 @@ async def test_owner_registry_rejects_generation_replacement(
         runtime = await session.get(RDBAgentRuntime, owned.offer.owner.runtime_id)
         assert runtime is not None
         runtime.runner_generation = 5
-    registry = RuntimeWebOwnerSessionRegistry(
+    registry = RuntimeStreamOwnerSessionRegistry(
         session_manager=rdb_session_manager,
         repository=RuntimeWebSessionRouteRepository(),
         clock=_now,
@@ -301,7 +301,7 @@ async def test_owner_registry_consumes_join_once_under_concurrency(
         yield AsyncMock(spec=AsyncSession)
 
     repository = JoinRepository()
-    registry = RuntimeWebOwnerSessionRegistry(
+    registry = RuntimeStreamOwnerSessionRegistry(
         session_manager=session_manager,
         repository=repository,
         clock=_now,
@@ -357,7 +357,7 @@ async def test_owner_registry_rechecks_deadline_after_nonce_consumption(
     async def session_manager() -> AsyncIterator[AsyncSession]:
         yield AsyncMock(spec=AsyncSession)
 
-    registry = RuntimeWebOwnerSessionRegistry(
+    registry = RuntimeStreamOwnerSessionRegistry(
         session_manager=session_manager,
         repository=JoinRepository(),
         clock=lambda: current[0],

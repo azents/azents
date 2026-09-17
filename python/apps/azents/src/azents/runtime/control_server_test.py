@@ -4,8 +4,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from azents_runtime_control.runtime_web_session import (
-    RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+from azents_runtime_control.runtime_stream_session import (
+    RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
     OwnerSessionEpoch,
     RunnerSessionOffer,
 )
@@ -43,7 +43,7 @@ def _web_offer(*, deadline_at: datetime) -> RunnerSessionOffer:
     return RunnerSessionOffer(
         owner=owner,
         session_nonce="nonce",
-        protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+        protocol_fingerprint=RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
         deadline_at=deadline_at,
     )
 

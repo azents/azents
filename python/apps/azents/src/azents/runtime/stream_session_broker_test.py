@@ -6,21 +6,21 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from azents_runtime_control.runtime_stream_session import (
+    OwnerSessionEpoch,
+    StreamAuthority,
+    StreamProtocol,
+)
 from azents_runtime_control.runtime_web_capacity import (
     ActiveCapacityStream,
     CapacityProfile,
     InMemoryRuntimeWebCapacityCoordinator,
 )
-from azents_runtime_control.runtime_web_session import (
-    OwnerSessionEpoch,
-    StreamAuthority,
-    StreamProtocol,
-)
 
-from azents.runtime.web_session_broker import (
+from azents.runtime.stream_session_broker import (
     BrokerStreamKey,
     BrokerTarget,
-    RuntimeWebSessionBroker,
+    RuntimeStreamSessionBroker,
 )
 
 
@@ -104,7 +104,7 @@ def test_broker_target_rejects_invalid_relay_topology(
 async def test_broker_scopes_capacity_by_source_session_and_releases_exactly() -> None:
     capacity = _capacity()
     target = BrokerTarget(owner=_owner(), local=False, relay_count=1)
-    broker = RuntimeWebSessionBroker(router=_Router(target), capacity=capacity)
+    broker = RuntimeStreamSessionBroker(router=_Router(target), capacity=capacity)
     first_key = BrokerStreamKey("gateway-a", 1)
     second_key = BrokerStreamKey("gateway-b", 1)
 
@@ -137,7 +137,7 @@ async def test_broker_scopes_capacity_by_source_session_and_releases_exactly() -
 @pytest.mark.asyncio
 async def test_broker_rejects_missing_stale_and_exhausted_targets() -> None:
     capacity = _capacity(maximum_active_streams=1)
-    missing = RuntimeWebSessionBroker(router=_Router(None), capacity=capacity)
+    missing = RuntimeStreamSessionBroker(router=_Router(None), capacity=capacity)
     assert (
         await missing.admit(
             key=BrokerStreamKey("gateway", 1),
@@ -146,7 +146,7 @@ async def test_broker_rejects_missing_stale_and_exhausted_targets() -> None:
         )
         is None
     )
-    stale = RuntimeWebSessionBroker(
+    stale = RuntimeStreamSessionBroker(
         router=_Router(
             BrokerTarget(
                 owner=_owner(desired_generation=2),
@@ -162,7 +162,7 @@ async def test_broker_rejects_missing_stale_and_exhausted_targets() -> None:
             authority=_authority(),
             protocol=StreamProtocol.HTTP,
         )
-    admitted = RuntimeWebSessionBroker(
+    admitted = RuntimeStreamSessionBroker(
         router=_Router(BrokerTarget(owner=_owner(), local=True, relay_count=0)),
         capacity=capacity,
     )
@@ -204,7 +204,7 @@ async def test_broker_rolls_back_pending_capacity_on_failure(
     cancelled: bool,
 ) -> None:
     capacity = _FailingCapacity(cancelled=cancelled)
-    broker = RuntimeWebSessionBroker(
+    broker = RuntimeStreamSessionBroker(
         router=_Router(BrokerTarget(owner=_owner(), local=True, relay_count=0)),
         capacity=capacity,
     )

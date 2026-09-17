@@ -7,7 +7,7 @@ import json
 from collections.abc import Mapping, Sequence
 from datetime import datetime, timedelta, timezone
 
-from azents_runtime_control.runtime_web_session import (
+from azents_runtime_control.runtime_stream_session import (
     CloseReason,
     StreamDirection,
     StreamProtocol,

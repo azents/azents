@@ -15,21 +15,21 @@ from datetime import UTC, datetime
 
 import h11
 import httpcore
-from azents_runtime_control.grpc_runner_web_session_client import (
-    GrpcRunnerWebSessionClient,
-    RunnerWebResourceExhausted,
+from azents_runtime_control.grpc_runner_stream_session_client import (
+    GrpcRunnerStreamSessionClient,
+    RunnerStreamResourceExhausted,
 )
-from azents_runtime_control.proto import runtime_web_session_pb2
-from azents_runtime_control.runtime_web_flow import (
+from azents_runtime_control.proto import runtime_stream_session_pb2
+from azents_runtime_control.runtime_stream_flow import (
     AbsoluteCreditWindow,
     HierarchicalCredit,
 )
-from azents_runtime_control.runtime_web_session import (
+from azents_runtime_control.runtime_stream_session import (
     APPROVED_SESSION_PROFILE,
     MANDATORY_DATA_FRAME_BYTES,
     MAX_ENVELOPE_BYTES,
     MAX_STREAM_TOMBSTONES,
-    RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+    RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
     CloseReason,
     Header,
     RequestHead,
@@ -56,9 +56,9 @@ from wsproto.events import (
 from wsproto.utilities import LocalProtocolError as WsprotoLocalProtocolError
 from wsproto.utilities import RemoteProtocolError as WsprotoRemoteProtocolError
 
-from azents_runtime_runner.web_session import (
+from azents_runtime_runner.stream_session import (
+    RunnerStreamSessionManager,
     RunnerWebLoopbackProtocolError,
-    RunnerWebSessionManager,
     RunnerWebSocket,
 )
 
@@ -238,7 +238,7 @@ class RunnerWebResourceTracker:
 
     def try_reserve_envelope(
         self,
-        envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+        envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
     ) -> bool:
         """Reserve one queued envelope and its application/control bytes."""
         size = envelope.ByteSize()
@@ -262,7 +262,7 @@ class RunnerWebResourceTracker:
 
     def release_envelope(
         self,
-        envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+        envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
     ) -> None:
         """Release one exact queued-envelope reservation."""
         application_bytes = _application_payload_size(envelope)
@@ -597,13 +597,15 @@ class _RunnerInboundQueue:
 
     def __init__(self, resources: RunnerWebResourceTracker) -> None:
         self.resources = resources
-        self.items: deque[runtime_web_session_pb2.RuntimeWebSessionEnvelope] = deque()
+        self.items: deque[runtime_stream_session_pb2.RuntimeStreamSessionEnvelope] = (
+            deque()
+        )
         self.condition = asyncio.Condition()
         self.closed = False
 
     async def put(
         self,
-        envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+        envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
     ) -> bool:
         """Queue a copy or reject this stream without blocking peer multiplexing."""
         async with self.condition:
@@ -613,13 +615,13 @@ class _RunnerInboundQueue:
                 or not self.resources.try_reserve_envelope(envelope)
             ):
                 return False
-            copied = runtime_web_session_pb2.RuntimeWebSessionEnvelope()
+            copied = runtime_stream_session_pb2.RuntimeStreamSessionEnvelope()
             copied.CopyFrom(envelope)
             self.items.append(copied)
             self.condition.notify_all()
             return True
 
-    async def get(self) -> runtime_web_session_pb2.RuntimeWebSessionEnvelope:
+    async def get(self) -> runtime_stream_session_pb2.RuntimeStreamSessionEnvelope:
         """Pop one queued envelope and release its exact reservation."""
         async with self.condition:
             await self.condition.wait_for(lambda: bool(self.items) or self.closed)
@@ -643,7 +645,7 @@ class _RunnerInboundQueue:
 @dataclasses.dataclass
 class _Stream:
     offer: RunnerSessionOffer
-    client: GrpcRunnerWebSessionClient
+    client: GrpcRunnerStreamSessionClient
     authority: StreamAuthority
     head: RequestHead
     inbound: _RunnerInboundQueue
@@ -663,7 +665,7 @@ class RunnerWebSessionDispatcher:
 
     def __init__(
         self,
-        manager: RunnerWebSessionManager,
+        manager: RunnerStreamSessionManager,
         *,
         resources: RunnerWebResourceTracker,
         monotonic_clock: Callable[[], float],
@@ -710,13 +712,13 @@ class RunnerWebSessionDispatcher:
                 if accepted:
                     if not self.resources.try_open_session():
                         await self.manager.close()
-                        raise RunnerWebResourceExhausted(
+                        raise RunnerStreamResourceExhausted(
                             "Runner Web session hard limit is exhausted"
                         )
                     if not self.resources.try_begin_tasks():
                         self.resources.close_session()
                         await self.manager.close()
-                        raise RunnerWebResourceExhausted(
+                        raise RunnerStreamResourceExhausted(
                             "Runner Web session task limit is exhausted"
                         )
                     self.session_reserved = True
@@ -735,7 +737,7 @@ class RunnerWebSessionDispatcher:
 
     async def __call__(
         self,
-        envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+        envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
     ) -> None:
         offer = self.manager.offer
         client = self.manager.client
@@ -787,7 +789,7 @@ class RunnerWebSessionDispatcher:
         if payload == "window_update":
             if (
                 envelope.window_update.direction
-                != runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_RESPONSE
+                != runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_DIRECTION_RESPONSE
             ):
                 raise ValueError("Runner Web response credit direction is invalid")
             async with self.response_credit_changed:
@@ -891,7 +893,7 @@ class RunnerWebSessionDispatcher:
 
     async def _open(
         self,
-        envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+        envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
     ) -> None:
         started_at = self.monotonic_clock()
         stream_id = envelope.stream_id
@@ -952,7 +954,7 @@ class RunnerWebSessionDispatcher:
             APPROVED_SESSION_PROFILE.response_stream_window_bytes
         )
         accepted.open_accepted.route_path = (
-            runtime_web_session_pb2.RUNTIME_WEB_SESSION_ROUTE_PATH_LOCAL
+            runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_ROUTE_PATH_LOCAL
         )
         try:
             await self._send(accepted, client=client)
@@ -1010,7 +1012,7 @@ class RunnerWebSessionDispatcher:
                 CloseReason.PROTOCOL_VIOLATION,
                 stream=stream,
             )
-        except RunnerWebResourceExhausted:
+        except RunnerStreamResourceExhausted:
             stream.close_reason = CloseReason.RESOURCE_EXHAUSTED
             _LOGGER.warning("Runtime Web Runner hard process limit was exhausted")
             await self._reset(
@@ -1062,7 +1064,9 @@ class RunnerWebSessionDispatcher:
             head = self._envelope(stream_id=stream_id, offer=stream.offer)
             head.response_head.status = response.status
             head.response_head.headers.extend(
-                runtime_web_session_pb2.RuntimeWebSessionHeader(name=name, value=value)
+                runtime_stream_session_pb2.RuntimeStreamSessionHeader(
+                    name=name, value=value
+                )
                 for name, value in response.headers
             )
             await self._send(head, client=stream.client)
@@ -1074,7 +1078,7 @@ class RunnerWebSessionDispatcher:
                     await self._response_data(stream_id, stream, sequence, data)
             end = self._envelope(stream_id=stream_id, offer=stream.offer)
             end.direction_end.direction = (
-                runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_RESPONSE
+                runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_DIRECTION_RESPONSE
             )
             end.direction_end.final_sequence = sequence
             await self._send(end, client=stream.client)
@@ -1087,7 +1091,7 @@ class RunnerWebSessionDispatcher:
             if payload == "direction_end":
                 if (
                     envelope.direction_end.direction
-                    != runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_REQUEST
+                    != runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_DIRECTION_REQUEST
                     or envelope.direction_end.final_sequence != stream.request_sequence
                 ):
                     raise ValueError("Runner Web request end sequence is invalid")
@@ -1095,7 +1099,7 @@ class RunnerWebSessionDispatcher:
             if (
                 payload != "data"
                 or envelope.data.direction
-                != runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_REQUEST
+                != runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_DIRECTION_REQUEST
                 or envelope.frame_sequence != stream.request_sequence + 1
             ):
                 raise ValueError("Runner Web request body sequence is invalid")
@@ -1107,7 +1111,7 @@ class RunnerWebSessionDispatcher:
             self.resources.request_consumed_bytes += len(data)
             update = self._envelope(stream_id=stream_id, offer=stream.offer)
             update.window_update.direction = (
-                runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_REQUEST
+                runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_DIRECTION_REQUEST
             )
             update.window_update.stream_consumed_total = stream.request_consumed_total
             update.window_update.session_consumed_total = (
@@ -1128,13 +1132,15 @@ class RunnerWebSessionDispatcher:
             head = self._envelope(stream_id=stream_id, offer=stream.offer)
             head.response_head.status = 101
             head.response_head.headers.extend(
-                runtime_web_session_pb2.RuntimeWebSessionHeader(name=name, value=value)
+                runtime_stream_session_pb2.RuntimeStreamSessionHeader(
+                    name=name, value=value
+                )
                 for name, value in websocket.response_headers
             )
             await self._send(head, client=stream.client)
             self.resources.record_ttfb(self.monotonic_clock() - stream.started_at)
             if not self.resources.try_begin_tasks(2):
-                raise RunnerWebResourceExhausted(
+                raise RunnerStreamResourceExhausted(
                     "Runner WebSocket task hard limit is exhausted"
                 )
             try:
@@ -1168,7 +1174,7 @@ class RunnerWebSessionDispatcher:
             if envelope.WhichOneof("payload") == "direction_end":
                 if (
                     envelope.direction_end.direction
-                    != runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_REQUEST
+                    != runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_DIRECTION_REQUEST
                     or envelope.direction_end.final_sequence != stream.request_sequence
                 ):
                     raise ValueError("Runner WebSocket request end is invalid")
@@ -1176,7 +1182,7 @@ class RunnerWebSessionDispatcher:
             if (
                 envelope.WhichOneof("payload") != "websocket"
                 or envelope.websocket.direction
-                != runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_REQUEST
+                != runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_DIRECTION_REQUEST
                 or envelope.frame_sequence != stream.request_sequence + 1
             ):
                 raise ValueError("Runner WebSocket request frame is invalid")
@@ -1206,7 +1212,7 @@ class RunnerWebSessionDispatcher:
                     offer=stream.offer,
                 )
                 update.window_update.direction = (
-                    runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_REQUEST
+                    runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_DIRECTION_REQUEST
                 )
                 update.window_update.stream_consumed_total = (
                     stream.request_consumed_total
@@ -1256,7 +1262,7 @@ class RunnerWebSessionDispatcher:
             envelope = self._envelope(stream_id=stream_id, offer=stream.offer)
             envelope.frame_sequence = sequence
             envelope.websocket.direction = (
-                runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_RESPONSE
+                runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_DIRECTION_RESPONSE
             )
             envelope.websocket.opcode = _opcode_proto(wire_opcode)
             envelope.websocket.final = final
@@ -1278,7 +1284,7 @@ class RunnerWebSessionDispatcher:
         envelope = self._envelope(stream_id=stream_id, offer=stream.offer)
         envelope.frame_sequence = sequence
         envelope.data.direction = (
-            runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_RESPONSE
+            runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_DIRECTION_RESPONSE
         )
         envelope.data.data = data
         await self._send(envelope, client=stream.client)
@@ -1362,9 +1368,9 @@ class RunnerWebSessionDispatcher:
 
     async def _send(
         self,
-        envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+        envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
         *,
-        client: GrpcRunnerWebSessionClient,
+        client: GrpcRunnerStreamSessionClient,
     ) -> None:
         await client.send(envelope)
 
@@ -1373,10 +1379,10 @@ class RunnerWebSessionDispatcher:
         *,
         offer: RunnerSessionOffer,
         stream_id: int = 0,
-    ) -> runtime_web_session_pb2.RuntimeWebSessionEnvelope:
+    ) -> runtime_stream_session_pb2.RuntimeStreamSessionEnvelope:
         owner = offer.owner
-        return runtime_web_session_pb2.RuntimeWebSessionEnvelope(
-            protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+        return runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(
+            protocol_fingerprint=RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
             session_id=owner.session_lease_id,
             peer_boot_id=self.manager.runner_boot_id,
             owner_boot_id=owner.owner_boot_id,
@@ -1387,12 +1393,12 @@ class RunnerWebSessionDispatcher:
 
 
 def _matches_offer(
-    envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+    envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
     offer: RunnerSessionOffer,
 ) -> bool:
     owner = offer.owner
     return (
-        envelope.protocol_fingerprint == RUNTIME_WEB_PROTOCOL_FINGERPRINT
+        envelope.protocol_fingerprint == RUNTIME_STREAM_PROTOCOL_FINGERPRINT
         and envelope.session_id == owner.session_lease_id
         and envelope.owner_boot_id == owner.owner_boot_id
         and envelope.session_lease_id == owner.session_lease_id
@@ -1401,7 +1407,7 @@ def _matches_offer(
 
 
 def _authority(
-    message: runtime_web_session_pb2.RuntimeWebSessionAuthority,
+    message: runtime_stream_session_pb2.RuntimeStreamSessionAuthority,
 ) -> StreamAuthority:
     return StreamAuthority(
         correlation_id=message.correlation_id,
@@ -1421,12 +1427,17 @@ def _authority(
     )
 
 
-def _head(message: runtime_web_session_pb2.RuntimeWebSessionRequestHead) -> RequestHead:
-    if message.protocol == runtime_web_session_pb2.RUNTIME_WEB_SESSION_PROTOCOL_HTTP:
+def _head(
+    message: runtime_stream_session_pb2.RuntimeStreamSessionRequestHead,
+) -> RequestHead:
+    if (
+        message.protocol
+        == runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_PROTOCOL_HTTP
+    ):
         protocol = StreamProtocol.HTTP
     elif (
         message.protocol
-        == runtime_web_session_pb2.RUNTIME_WEB_SESSION_PROTOCOL_WEBSOCKET
+        == runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_PROTOCOL_WEBSOCKET
     ):
         protocol = StreamProtocol.WEBSOCKET
     else:
@@ -1457,12 +1468,12 @@ def _remaining(deadline: datetime) -> float:
 
 def _opcode(value: int) -> WebSocketOpcode:
     mapping = {
-        runtime_web_session_pb2.RUNTIME_WEB_SESSION_WEBSOCKET_OPCODE_TEXT: WebSocketOpcode.TEXT,
-        runtime_web_session_pb2.RUNTIME_WEB_SESSION_WEBSOCKET_OPCODE_BINARY: WebSocketOpcode.BINARY,
-        runtime_web_session_pb2.RUNTIME_WEB_SESSION_WEBSOCKET_OPCODE_CONTINUATION: WebSocketOpcode.CONTINUATION,
-        runtime_web_session_pb2.RUNTIME_WEB_SESSION_WEBSOCKET_OPCODE_PING: WebSocketOpcode.PING,
-        runtime_web_session_pb2.RUNTIME_WEB_SESSION_WEBSOCKET_OPCODE_PONG: WebSocketOpcode.PONG,
-        runtime_web_session_pb2.RUNTIME_WEB_SESSION_WEBSOCKET_OPCODE_CLOSE: WebSocketOpcode.CLOSE,
+        runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_WEBSOCKET_OPCODE_TEXT: WebSocketOpcode.TEXT,
+        runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_WEBSOCKET_OPCODE_BINARY: WebSocketOpcode.BINARY,
+        runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_WEBSOCKET_OPCODE_CONTINUATION: WebSocketOpcode.CONTINUATION,
+        runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_WEBSOCKET_OPCODE_PING: WebSocketOpcode.PING,
+        runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_WEBSOCKET_OPCODE_PONG: WebSocketOpcode.PONG,
+        runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_WEBSOCKET_OPCODE_CLOSE: WebSocketOpcode.CLOSE,
     }
     try:
         return mapping[value]
@@ -1472,33 +1483,33 @@ def _opcode(value: int) -> WebSocketOpcode:
 
 def _opcode_proto(opcode: WebSocketOpcode) -> int:
     return {
-        WebSocketOpcode.TEXT: runtime_web_session_pb2.RUNTIME_WEB_SESSION_WEBSOCKET_OPCODE_TEXT,
-        WebSocketOpcode.BINARY: runtime_web_session_pb2.RUNTIME_WEB_SESSION_WEBSOCKET_OPCODE_BINARY,
-        WebSocketOpcode.CONTINUATION: runtime_web_session_pb2.RUNTIME_WEB_SESSION_WEBSOCKET_OPCODE_CONTINUATION,
-        WebSocketOpcode.PING: runtime_web_session_pb2.RUNTIME_WEB_SESSION_WEBSOCKET_OPCODE_PING,
-        WebSocketOpcode.PONG: runtime_web_session_pb2.RUNTIME_WEB_SESSION_WEBSOCKET_OPCODE_PONG,
-        WebSocketOpcode.CLOSE: runtime_web_session_pb2.RUNTIME_WEB_SESSION_WEBSOCKET_OPCODE_CLOSE,
+        WebSocketOpcode.TEXT: runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_WEBSOCKET_OPCODE_TEXT,
+        WebSocketOpcode.BINARY: runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_WEBSOCKET_OPCODE_BINARY,
+        WebSocketOpcode.CONTINUATION: runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_WEBSOCKET_OPCODE_CONTINUATION,
+        WebSocketOpcode.PING: runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_WEBSOCKET_OPCODE_PING,
+        WebSocketOpcode.PONG: runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_WEBSOCKET_OPCODE_PONG,
+        WebSocketOpcode.CLOSE: runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_WEBSOCKET_OPCODE_CLOSE,
     }[opcode]
 
 
 def _reason_proto(reason: CloseReason) -> int:
     return {
-        CloseReason.CALLER: runtime_web_session_pb2.RUNTIME_WEB_SESSION_CLOSE_REASON_CALLER,
-        CloseReason.SERVICE_EXPIRED: runtime_web_session_pb2.RUNTIME_WEB_SESSION_CLOSE_REASON_SERVICE_EXPIRED,
-        CloseReason.AUTHORITY_REVOKED: runtime_web_session_pb2.RUNTIME_WEB_SESSION_CLOSE_REASON_AUTHORITY_REVOKED,
-        CloseReason.GENERATION_REPLACED: runtime_web_session_pb2.RUNTIME_WEB_SESSION_CLOSE_REASON_GENERATION_REPLACED,
-        CloseReason.DEADLINE: runtime_web_session_pb2.RUNTIME_WEB_SESSION_CLOSE_REASON_DEADLINE,
-        CloseReason.SERVICE_DRAIN: runtime_web_session_pb2.RUNTIME_WEB_SESSION_CLOSE_REASON_SERVICE_DRAIN,
-        CloseReason.OWNER_LOST: runtime_web_session_pb2.RUNTIME_WEB_SESSION_CLOSE_REASON_OWNER_LOST,
-        CloseReason.PROTOCOL_VIOLATION: runtime_web_session_pb2.RUNTIME_WEB_SESSION_CLOSE_REASON_PROTOCOL_VIOLATION,
-        CloseReason.RESOURCE_EXHAUSTED: runtime_web_session_pb2.RUNTIME_WEB_SESSION_CLOSE_REASON_RESOURCE_EXHAUSTED,
-        CloseReason.APPLICATION_UNAVAILABLE: runtime_web_session_pb2.RUNTIME_WEB_SESSION_CLOSE_REASON_APPLICATION_UNAVAILABLE,
-        CloseReason.TRANSPORT_UNAVAILABLE: runtime_web_session_pb2.RUNTIME_WEB_SESSION_CLOSE_REASON_TRANSPORT_UNAVAILABLE,
+        CloseReason.CALLER: runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_CLOSE_REASON_CALLER,
+        CloseReason.SERVICE_EXPIRED: runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_CLOSE_REASON_SERVICE_EXPIRED,
+        CloseReason.AUTHORITY_REVOKED: runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_CLOSE_REASON_AUTHORITY_REVOKED,
+        CloseReason.GENERATION_REPLACED: runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_CLOSE_REASON_GENERATION_REPLACED,
+        CloseReason.DEADLINE: runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_CLOSE_REASON_DEADLINE,
+        CloseReason.SERVICE_DRAIN: runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_CLOSE_REASON_SERVICE_DRAIN,
+        CloseReason.OWNER_LOST: runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_CLOSE_REASON_OWNER_LOST,
+        CloseReason.PROTOCOL_VIOLATION: runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_CLOSE_REASON_PROTOCOL_VIOLATION,
+        CloseReason.RESOURCE_EXHAUSTED: runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_CLOSE_REASON_RESOURCE_EXHAUSTED,
+        CloseReason.APPLICATION_UNAVAILABLE: runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_CLOSE_REASON_APPLICATION_UNAVAILABLE,
+        CloseReason.TRANSPORT_UNAVAILABLE: runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_CLOSE_REASON_TRANSPORT_UNAVAILABLE,
     }[reason]
 
 
 def _application_payload_size(
-    envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+    envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
 ) -> int:
     payload = envelope.WhichOneof("payload")
     if payload == "data":

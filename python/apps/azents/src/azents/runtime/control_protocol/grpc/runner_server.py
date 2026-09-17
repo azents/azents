@@ -40,7 +40,7 @@ from azents_runtime_control.runner_transfer import RunnerTransferDirection
 from azents_runtime_control.runtime_configuration import (
     RuntimeConfigurationEvidence,
 )
-from azents_runtime_control.runtime_web_session import RunnerSessionOffer
+from azents_runtime_control.runtime_stream_session import RunnerSessionOffer
 from azents_runtime_control.system_metrics import (
     RUNNER_SYSTEM_METRICS_MAX_MESSAGE_BYTES,
 )
@@ -85,7 +85,7 @@ from azents.services.runtime_connection_registration.service import (
 _DEFAULT_OPERATION_BLOCK_MS = 500
 _BODY_CHUNK_READ_LIMIT = 100
 _MAX_TRANSFER_DISPATCH_TOMBSTONES = 4096
-_WEB_SESSION_OFFER_RETRY_SECONDS = 1.0
+_STREAM_SESSION_OFFER_RETRY_SECONDS = 1.0
 _TERMINAL_OPEN_OPERATION_TYPE = "terminal.open.v1"
 _TERMINAL_TERMINATE_OPERATION_TYPE = "terminal.terminate.v1"
 _LOGGER = logging.getLogger(__name__)
@@ -130,7 +130,7 @@ class RuntimeRunnerStateSink(Protocol):
         ...
 
 
-class RuntimeWebSessionOfferProvider(Protocol):
+class RuntimeStreamSessionOfferProvider(Protocol):
     """Acquire one exact Owner-session offer for a registered Runner."""
 
     async def offer_for_runner(
@@ -157,7 +157,7 @@ class RuntimeRunnerControlGrpcServicer(
         runner_authenticator: RuntimeRunnerCredentialAuthenticator,
         connection_registrar: RuntimeRunnerConnectionRegistrar,
         transfer_result_sink: RuntimeRunnerTransferResultSink,
-        web_session_offer_provider: RuntimeWebSessionOfferProvider,
+        stream_session_offer_provider: RuntimeStreamSessionOfferProvider,
         operation_block_ms: int = _DEFAULT_OPERATION_BLOCK_MS,
     ) -> None:
         """Initialize the Runner Control gRPC servicer."""
@@ -170,7 +170,7 @@ class RuntimeRunnerControlGrpcServicer(
         self._connection_registrar = connection_registrar
         self._auth = RuntimeRunnerCredentialGrpcAuth(runner_authenticator)
         self._transfer_result_sink = transfer_result_sink
-        self._web_session_offer_provider = web_session_offer_provider
+        self._stream_session_offer_provider = stream_session_offer_provider
         self._operation_block_ms = operation_block_ms
 
     async def ConnectRunner(
@@ -261,7 +261,7 @@ class RuntimeRunnerControlGrpcServicer(
             )
         )
         offer_task = asyncio.create_task(
-            self._relay_web_session_offers(
+            self._relay_stream_session_offers(
                 outbound,
                 runtime_id=accepted.runtime_id,
                 generation=accepted.generation,
@@ -320,7 +320,7 @@ class RuntimeRunnerControlGrpcServicer(
                     },
                 )
 
-    async def _relay_web_session_offers(
+    async def _relay_stream_session_offers(
         self,
         outbound: asyncio.Queue[_RunnerOutbound],
         *,
@@ -329,17 +329,17 @@ class RuntimeRunnerControlGrpcServicer(
     ) -> None:
         """Reissue exact Web session offers while Runner control remains current."""
         while True:
-            offer = await self._web_session_offer_provider.offer_for_runner(
+            offer = await self._stream_session_offer_provider.offer_for_runner(
                 runtime_id=runtime_id,
                 runner_generation=generation,
             )
             if offer is not None:
                 await outbound.put(
                     runtime_runner_control_pb2.RunnerControlMessage(
-                        web_session_offer=runner_session_offer_to_message(offer)
+                        stream_session_offer=runner_session_offer_to_message(offer)
                     )
                 )
-            await asyncio.sleep(_WEB_SESSION_OFFER_RETRY_SECONDS)
+            await asyncio.sleep(_STREAM_SESSION_OFFER_RETRY_SECONDS)
 
     async def _record_runner_stream_closed(
         self,
@@ -1014,7 +1014,7 @@ def add_runtime_runner_control_servicer(
     runner_authenticator: RuntimeRunnerCredentialAuthenticator,
     connection_registrar: RuntimeRunnerConnectionRegistrar,
     transfer_result_sink: RuntimeRunnerTransferResultSink,
-    web_session_offer_provider: RuntimeWebSessionOfferProvider,
+    stream_session_offer_provider: RuntimeStreamSessionOfferProvider,
     operation_block_ms: int = _DEFAULT_OPERATION_BLOCK_MS,
 ) -> None:
     """Add the Agent Runtime Runner Control servicer to a gRPC server."""
@@ -1028,7 +1028,7 @@ def add_runtime_runner_control_servicer(
             runner_authenticator=runner_authenticator,
             connection_registrar=connection_registrar,
             transfer_result_sink=transfer_result_sink,
-            web_session_offer_provider=web_session_offer_provider,
+            stream_session_offer_provider=stream_session_offer_provider,
             operation_block_ms=operation_block_ms,
         ),
         server,

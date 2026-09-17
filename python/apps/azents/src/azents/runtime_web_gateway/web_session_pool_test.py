@@ -7,9 +7,9 @@ import dataclasses
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from azents_runtime_control.proto import runtime_web_session_pb2
-from azents_runtime_control.runtime_web_flow import AbsoluteCreditWindow
-from azents_runtime_control.runtime_web_session import (
+from azents_runtime_control.proto import runtime_stream_session_pb2
+from azents_runtime_control.runtime_stream_flow import AbsoluteCreditWindow
+from azents_runtime_control.runtime_stream_session import (
     APPROVED_SESSION_PROFILE,
     SESSION_WINDOW_BYTES,
     CloseReason,
@@ -68,7 +68,7 @@ class _Transport:
         pass
 
     async def send(
-        self, envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope
+        self, envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope
     ) -> None:
         pass
 

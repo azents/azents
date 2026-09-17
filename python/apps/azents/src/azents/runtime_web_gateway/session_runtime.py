@@ -12,10 +12,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import grpc
-from azents_runtime_control.proto import runtime_web_session_pb2
-from azents_runtime_control.runtime_web_session import (
+from azents_runtime_control.proto import runtime_stream_session_pb2
+from azents_runtime_control.runtime_stream_session import (
     APPROVED_SESSION_PROFILE,
-    RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+    RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
     CloseReason,
     SessionIdentity,
     SessionPeerRole,
@@ -32,12 +32,12 @@ from azents.runtime_web_gateway.web_session_pool import (
 )
 
 if TYPE_CHECKING:
-    from azents_runtime_control.proto.runtime_web_session_pb2_grpc import (
-        RuntimeWebGatewaySessionAsyncStub as _RuntimeWebGatewaySessionStub,
+    from azents_runtime_control.proto.runtime_stream_session_pb2_grpc import (
+        RuntimeStreamGatewaySessionAsyncStub as _RuntimeStreamGatewaySessionStub,
     )
 else:
-    from azents_runtime_control.proto.runtime_web_session_pb2_grpc import (
-        RuntimeWebGatewaySessionStub as _RuntimeWebGatewaySessionStub,
+    from azents_runtime_control.proto.runtime_stream_session_pb2_grpc import (
+        RuntimeStreamGatewaySessionStub as _RuntimeStreamGatewaySessionStub,
     )
 
 _HANDSHAKE_SECONDS = 10.0
@@ -48,7 +48,7 @@ _LOGGER = logging.getLogger(__name__)
 @dataclasses.dataclass(frozen=True)
 class _GatewayHello:
     identity: SessionIdentity
-    envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope
+    envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope
 
 
 class RuntimeWebGatewayControlSessions:
@@ -153,14 +153,14 @@ class RuntimeWebGatewayControlSessions:
         self.stop.set()
         deadline = datetime.datetime.now(datetime.UTC) + datetime.timedelta(seconds=120)
         for transport, registration in tuple(self.registrations.items()):
-            envelope = runtime_web_session_pb2.RuntimeWebSessionEnvelope(
-                protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+            envelope = runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(
+                protocol_fingerprint=RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
                 session_id=registration.session_id,
                 peer_boot_id=registration.peer_boot_id,
-                go_away=runtime_web_session_pb2.RuntimeWebSessionGoAway(
+                go_away=runtime_stream_session_pb2.RuntimeStreamSessionGoAway(
                     last_accepted_stream_id=(2**64 - 1),
                     reason=(
-                        runtime_web_session_pb2.RUNTIME_WEB_SESSION_CLOSE_REASON_SERVICE_DRAIN
+                        runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_CLOSE_REASON_SERVICE_DRAIN
                     ),
                 ),
             )
@@ -171,11 +171,11 @@ class RuntimeWebGatewayControlSessions:
         """Return exact fingerprints represented by active accepted sessions."""
         if await self.pool.active_session_count() == 0:
             return frozenset()
-        return frozenset({RUNTIME_WEB_PROTOCOL_FINGERPRINT})
+        return frozenset({RUNTIME_STREAM_PROTOCOL_FINGERPRINT})
 
     async def _run_slot(self, slot: int) -> None:
         attempt = 0
-        stream = _RuntimeWebGatewaySessionStub(self.channel).Connect
+        stream = _RuntimeStreamGatewaySessionStub(self.channel).Connect
         while not self.stop.is_set():
             registration: GatewaySessionRegistration | None = None
             transport = PersistentGatewaySessionTransport(
@@ -260,8 +260,8 @@ def _gateway_hello(
         session_nonce=nonce,
         deadline_at=deadline,
     )
-    hello = runtime_web_session_pb2.RuntimeWebSessionHello(
-        role=runtime_web_session_pb2.RUNTIME_WEB_SESSION_PEER_ROLE_GATEWAY,
+    hello = runtime_stream_session_pb2.RuntimeStreamSessionHello(
+        role=runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_PEER_ROLE_GATEWAY,
         session_nonce=nonce,
         maximum_data_frame_bytes=APPROVED_SESSION_PROFILE.data_frame_bytes,
         request_stream_window_bytes=(
@@ -280,8 +280,8 @@ def _gateway_hello(
     hello.deadline_at.FromDatetime(deadline)
     return _GatewayHello(
         identity=identity,
-        envelope=runtime_web_session_pb2.RuntimeWebSessionEnvelope(
-            protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+        envelope=runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(
+            protocol_fingerprint=RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
             session_id=session_id,
             peer_boot_id=gateway_boot_id,
             hello=hello,
@@ -290,10 +290,10 @@ def _gateway_hello(
 
 
 def _accepted_profile(
-    envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+    envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
 ) -> SessionProfile:
     if (
-        envelope.protocol_fingerprint != RUNTIME_WEB_PROTOCOL_FINGERPRINT
+        envelope.protocol_fingerprint != RUNTIME_STREAM_PROTOCOL_FINGERPRINT
         or envelope.WhichOneof("payload") != "session_accepted"
     ):
         raise ValueError("Runtime Web Control session acceptance is incompatible")

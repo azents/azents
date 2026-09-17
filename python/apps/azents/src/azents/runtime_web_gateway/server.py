@@ -20,7 +20,7 @@ from typing import Protocol
 import boto3
 from aiohttp import WSMessage, WSMsgType, web
 from azcommon.logging import configure_logging_for_runtime
-from azents_runtime_control.runtime_web_session import (
+from azents_runtime_control.runtime_stream_session import (
     MANDATORY_DATA_FRAME_BYTES,
     MAX_WEBSOCKET_MESSAGE_BYTES,
     CloseReason,

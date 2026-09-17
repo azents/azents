@@ -14,8 +14,21 @@ from typing import NoReturn, Protocol, TypeVar
 import grpc
 from aiohttp import web
 from azents_runtime_control.proto import (
-    runtime_web_session_pb2,
-    runtime_web_session_pb2_grpc,
+    runtime_stream_session_pb2,
+    runtime_stream_session_pb2_grpc,
+)
+from azents_runtime_control.runtime_stream_session import (
+    APPROVED_SESSION_PROFILE,
+    MAX_ENVELOPE_BYTES,
+    MAX_STREAM_TOMBSTONES,
+    RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
+    CloseReason,
+    Header,
+    OwnerSessionEpoch,
+    RequestHead,
+    StreamAuthority,
+    StreamDirection,
+    StreamProtocol,
 )
 from azents_runtime_control.runtime_web_capacity import (
     BufferGrant,
@@ -27,19 +40,6 @@ from azents_runtime_control.runtime_web_capacity import (
     InMemoryRuntimeWebCapacityCoordinator,
     RedisRuntimeWebCapacityCoordinator,
     RuntimeWebCapacityCoordinator,
-)
-from azents_runtime_control.runtime_web_session import (
-    APPROVED_SESSION_PROFILE,
-    MAX_ENVELOPE_BYTES,
-    MAX_STREAM_TOMBSTONES,
-    RUNTIME_WEB_PROTOCOL_FINGERPRINT,
-    CloseReason,
-    Header,
-    OwnerSessionEpoch,
-    RequestHead,
-    StreamAuthority,
-    StreamDirection,
-    StreamProtocol,
 )
 from azents_runtime_control.system_metrics import RunnerRuntimeWebMetrics
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -55,21 +55,21 @@ from azents.runtime.control_protocol.grpc.auth import (
     RuntimeRunnerCredentialGrpcAuth,
 )
 from azents.runtime.coordination.data import RuntimeSystemMetricsSample
-from azents.runtime.web_session_broker import (
+from azents.runtime.stream_session_broker import (
     BrokerStreamKey,
     BrokerTarget,
-    RuntimeWebSessionBroker,
+    RuntimeStreamSessionBroker,
 )
-from azents.runtime.web_session_owner import (
-    RuntimeWebAcceptedRunnerSession,
-    RuntimeWebAuthenticatedRunnerConnection,
-    RuntimeWebOwnedSession,
-    RuntimeWebOwnerSessionRegistry,
+from azents.runtime.stream_session_owner import (
+    RuntimeStreamAcceptedRunnerSession,
+    RuntimeStreamAuthenticatedRunnerConnection,
+    RuntimeStreamOwnedSession,
+    RuntimeStreamOwnerSessionRegistry,
 )
-from azents.runtime.web_session_relay import (
+from azents.runtime.stream_session_relay import (
     RelaySessionKey,
     RelayStreamBinding,
-    RuntimeWebRelayPool,
+    RuntimeStreamRelayPool,
 )
 
 _MAX_QUEUED_ENVELOPES = 32
@@ -78,6 +78,9 @@ _HEARTBEAT_INTERVAL_SECONDS = 5.0
 _MAX_MISSED_HEARTBEATS = 2
 _LOGGER = logging.getLogger(__name__)
 _TaskResult = TypeVar("_TaskResult")
+_OWNER_LOST_REASON = (
+    runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_CLOSE_REASON_OWNER_LOST
+)
 
 
 class RuntimeWebCapacityBackend(enum.StrEnum):
@@ -102,7 +105,7 @@ class RuntimeWebCapacityConfig:
 
 
 @dataclasses.dataclass(frozen=True)
-class RuntimeWebControlHardLimits:
+class RuntimeStreamControlHardLimits:
     """Independent process ceilings for the Runtime Web Control data plane."""
 
     maximum_sessions: int
@@ -121,7 +124,7 @@ class RuntimeWebControlHardLimits:
 
 
 @dataclasses.dataclass(frozen=True)
-class RuntimeWebControlResourceSnapshot:
+class RuntimeStreamControlResourceSnapshot:
     """Current content-free Control hard-limit usage."""
 
     active_sessions: int
@@ -134,13 +137,13 @@ class RuntimeWebControlResourceSnapshot:
     resident_memory_bytes: int
 
 
-class RuntimeWebControlResourceTracker:
+class RuntimeStreamControlResourceTracker:
     """Reserve exact process resources independently from Runtime soft capacity."""
 
     def __init__(
         self,
         *,
-        limits: RuntimeWebControlHardLimits,
+        limits: RuntimeStreamControlHardLimits,
         resident_memory_bytes: Callable[[], int],
     ) -> None:
         self.limits = limits
@@ -263,9 +266,9 @@ class RuntimeWebControlResourceTracker:
         self.application_buffer_bytes -= application_bytes
         self.control_buffer_bytes -= control_bytes
 
-    def snapshot(self) -> RuntimeWebControlResourceSnapshot:
+    def snapshot(self) -> RuntimeStreamControlResourceSnapshot:
         """Return exact process usage for metrics and readiness."""
-        return RuntimeWebControlResourceSnapshot(
+        return RuntimeStreamControlResourceSnapshot(
             active_sessions=self.active_sessions,
             active_streams=self.active_streams,
             application_buffer_bytes=self.application_buffer_bytes,
@@ -347,7 +350,7 @@ class RuntimeWebCapacityRegistry:
             self.coordinators.pop(owner, None)
 
 
-class RuntimeWebOwnedSessionProvider(Protocol):
+class RuntimeStreamOwnedSessionProvider(Protocol):
     """Resolve the exact one-time Owner offer issued on the operation channel."""
 
     async def owned_for_runner(
@@ -355,7 +358,7 @@ class RuntimeWebOwnedSessionProvider(Protocol):
         *,
         runtime_id: str,
         runner_generation: int,
-    ) -> RuntimeWebOwnedSession | None: ...
+    ) -> RuntimeStreamOwnedSession | None: ...
 
     async def renew_owner(self, owner: OwnerSessionEpoch) -> bool: ...
 
@@ -660,7 +663,7 @@ def _runner_runtime_web_metrics_lines(
     return lines
 
 
-class RuntimeWebTrustedPeerContext(Protocol):
+class RuntimeStreamTrustedPeerContext(Protocol):
     """Transport identity methods required from a trusted gRPC context."""
 
     def auth_context(self) -> Mapping[str, Iterable[bytes]]: ...
@@ -668,7 +671,7 @@ class RuntimeWebTrustedPeerContext(Protocol):
     async def abort(self, code: grpc.StatusCode, details: str) -> NoReturn: ...
 
 
-class RuntimeWebTrustedPeerAuthenticator:
+class RuntimeStreamTrustedPeerAuthenticator:
     """Require one configured role-specific mTLS identity outside local mode."""
 
     def __init__(
@@ -684,7 +687,7 @@ class RuntimeWebTrustedPeerAuthenticator:
         self.gateway_identities = gateway_identities
         self.control_identities = control_identities
 
-    async def gateway(self, context: RuntimeWebTrustedPeerContext) -> str:
+    async def gateway(self, context: RuntimeStreamTrustedPeerContext) -> str:
         """Authenticate one Gateway-only peer identity."""
         return await self._authenticate(
             context,
@@ -692,7 +695,7 @@ class RuntimeWebTrustedPeerAuthenticator:
             role="Gateway",
         )
 
-    async def control(self, context: RuntimeWebTrustedPeerContext) -> str:
+    async def control(self, context: RuntimeStreamTrustedPeerContext) -> str:
         """Authenticate one Control-only peer identity."""
         return await self._authenticate(
             context,
@@ -702,7 +705,7 @@ class RuntimeWebTrustedPeerAuthenticator:
 
     async def _authenticate(
         self,
-        context: RuntimeWebTrustedPeerContext,
+        context: RuntimeStreamTrustedPeerContext,
         *,
         allowed: frozenset[str],
         role: str,
@@ -727,7 +730,7 @@ class RuntimeWebTrustedPeerAuthenticator:
 class _BoundedEnvelopeQueue:
     def __init__(
         self,
-        resources: RuntimeWebControlResourceTracker | None = None,
+        resources: RuntimeStreamControlResourceTracker | None = None,
     ) -> None:
         self.items: deque[_QueuedEnvelope] = deque()
         self.bytes = 0
@@ -738,7 +741,7 @@ class _BoundedEnvelopeQueue:
 
     async def put(
         self,
-        envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+        envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
         *,
         on_dequeued: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
@@ -750,7 +753,7 @@ class _BoundedEnvelopeQueue:
         resources = self.resources
         if resources is not None:
             if not resources.try_begin_task():
-                raise _RuntimeWebControlResourceExhausted
+                raise _RuntimeStreamControlResourceExhausted
         reserved = False
         try:
             async with self.condition:
@@ -775,9 +778,9 @@ class _BoundedEnvelopeQueue:
                         application_bytes=application_bytes,
                         control_bytes=control_bytes,
                     ):
-                        raise _RuntimeWebControlResourceExhausted
+                        raise _RuntimeStreamControlResourceExhausted
                     reserved = True
-                copied = runtime_web_session_pb2.RuntimeWebSessionEnvelope()
+                copied = runtime_stream_session_pb2.RuntimeStreamSessionEnvelope()
                 copied.CopyFrom(envelope)
                 self.items.append(
                     _QueuedEnvelope(
@@ -802,7 +805,7 @@ class _BoundedEnvelopeQueue:
 
     async def __aiter__(
         self,
-    ) -> AsyncIterator[runtime_web_session_pb2.RuntimeWebSessionEnvelope]:
+    ) -> AsyncIterator[runtime_stream_session_pb2.RuntimeStreamSessionEnvelope]:
         while True:
             async with self.condition:
                 await self.condition.wait_for(lambda: bool(self.items) or self.closed)
@@ -856,7 +859,7 @@ class _SourceSession:
 
 @dataclasses.dataclass(frozen=True)
 class _QueuedEnvelope:
-    envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope
+    envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope
     on_dequeued: Callable[[], Awaitable[None]] | None
     application_bytes: int
     control_bytes: int
@@ -867,7 +870,7 @@ class _StreamBinding:
     source: _SourceSession
     key: BrokerStreamKey
     target: BrokerTarget
-    broker: RuntimeWebSessionBroker | None
+    broker: RuntimeStreamSessionBroker | None
     capacity_stream_id: int | None
     runner_stream_id: int | None
     protocol: CapacityProtocol
@@ -879,27 +882,27 @@ class _RunnerSourceBinding:
     source_stream_id: int
 
 
-class _RuntimeWebCapacityRejected(RuntimeError):
+class _RuntimeStreamCapacityRejected(RuntimeError):
     """One exact Owner-capacity rejection before queue admission."""
 
 
-class _RuntimeWebControlResourceExhausted(RuntimeError):
+class _RuntimeStreamControlResourceExhausted(RuntimeError):
     """One process-local Control hard-limit rejection."""
 
 
-class _RuntimeWebControlDraining(RuntimeError):
+class _RuntimeStreamControlDraining(RuntimeError):
     """Reject one session registered after Control drain begins."""
 
 
 def _create_control_task(
-    resources: RuntimeWebControlResourceTracker | None,
+    resources: RuntimeStreamControlResourceTracker | None,
     task: Callable[[], Awaitable[_TaskResult]],
     *,
     name: str | None = None,
 ) -> asyncio.Task[_TaskResult]:
     """Create one task with an exactly paired process-budget reservation."""
     if resources is not None and not resources.try_begin_task():
-        raise _RuntimeWebControlResourceExhausted
+        raise _RuntimeStreamControlResourceExhausted
     released = False
 
     def release() -> None:
@@ -947,9 +950,9 @@ class _RunnerConnection:
     def __init__(
         self,
         *,
-        accepted: RuntimeWebAcceptedRunnerSession,
+        accepted: RuntimeStreamAcceptedRunnerSession,
         control_boot_id: str,
-        resources: RuntimeWebControlResourceTracker | None = None,
+        resources: RuntimeStreamControlResourceTracker | None = None,
     ) -> None:
         self.accepted = accepted
         self.control_boot_id = control_boot_id
@@ -1015,8 +1018,8 @@ class _RunnerConnection:
                 await self.queue.close()
                 return
             owner = self.accepted.owner
-            heartbeat = runtime_web_session_pb2.RuntimeWebSessionEnvelope(
-                protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+            heartbeat = runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(
+                protocol_fingerprint=RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
                 session_id=owner.session_lease_id,
                 peer_boot_id=self.control_boot_id,
                 owner_boot_id=owner.owner_boot_id,
@@ -1032,7 +1035,7 @@ class _RunnerConnection:
     async def send(
         self,
         source: _SourceSession,
-        envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+        envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
         *,
         on_dequeued: Callable[[], Awaitable[None]] | None = None,
     ) -> int:
@@ -1057,9 +1060,8 @@ class _RunnerConnection:
                 stream_id=runner_stream_id,
             )
             if envelope.WhichOneof("payload") == "window_update":
-                if (
-                    envelope.window_update.direction
-                    != runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_RESPONSE
+                if envelope.window_update.direction != (
+                    runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_DIRECTION_RESPONSE
                 ):
                     raise ValueError(
                         "Runtime Web source response credit direction is invalid"
@@ -1094,7 +1096,7 @@ class _RunnerConnection:
 
     async def receive(
         self,
-        envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+        envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
         *,
         on_dequeued: Callable[[], Awaitable[None]] | None = None,
     ) -> BrokerStreamKey:
@@ -1108,7 +1110,7 @@ class _RunnerConnection:
             if binding is None:
                 raise ValueError("Runtime Web Runner response stream is unknown")
             source = binding.source
-            translated = runtime_web_session_pb2.RuntimeWebSessionEnvelope()
+            translated = runtime_stream_session_pb2.RuntimeStreamSessionEnvelope()
             translated.CopyFrom(envelope)
             translated.session_id = source.session_id
             translated.peer_boot_id = (
@@ -1120,12 +1122,11 @@ class _RunnerConnection:
             payload = envelope.WhichOneof("payload")
             if payload == "open_accepted":
                 translated.open_accepted.route_path = (
-                    runtime_web_session_pb2.RUNTIME_WEB_SESSION_ROUTE_PATH_LOCAL
+                    runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_ROUTE_PATH_LOCAL
                 )
             elif payload == "window_update":
-                if (
-                    envelope.window_update.direction
-                    != runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_REQUEST
+                if envelope.window_update.direction != (
+                    runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_DIRECTION_REQUEST
                 ):
                     raise ValueError(
                         "Runtime Web Runner request credit direction is invalid"
@@ -1205,14 +1206,12 @@ class _RunnerConnection:
             source = binding.source
             reset = _base_response(source, self.control_boot_id)
             reset.stream_id = binding.source_stream_id
-            reset.reset.reason = (
-                runtime_web_session_pb2.RUNTIME_WEB_SESSION_CLOSE_REASON_OWNER_LOST
-            )
+            reset.reset.reason = _OWNER_LOST_REASON
             await source.queue.put(reset)
         await self.queue.close()
 
 
-class RuntimeWebControlDataPlane:
+class RuntimeStreamControlDataPlane:
     """Route Gateway and one-hop relay streams to exact Owner Runner sessions."""
 
     def __init__(
@@ -1223,14 +1222,14 @@ class RuntimeWebControlDataPlane:
         owner_replica_id: str,
         control_boot_id: str,
         capacity_registry: RuntimeWebCapacityRegistry,
-        relay_pool: RuntimeWebRelayPool,
+        relay_pool: RuntimeStreamRelayPool,
         runner_metrics: RuntimeWebRunnerMetricsReader,
         clock: Callable[[], datetime.datetime],
         metrics_recoverable_errors: tuple[type[Exception], ...],
-        owner_lifecycle: RuntimeWebOwnedSessionProvider,
+        owner_lifecycle: RuntimeStreamOwnedSessionProvider,
         long_lived_grace_seconds: float,
         finite_grace_seconds: float,
-        hard_limits: RuntimeWebControlHardLimits,
+        hard_limits: RuntimeStreamControlHardLimits,
         resident_memory_bytes: Callable[[], int],
     ) -> None:
         if (
@@ -1251,14 +1250,14 @@ class RuntimeWebControlDataPlane:
         self.owner_lifecycle = owner_lifecycle
         self.long_lived_grace_seconds = long_lived_grace_seconds
         self.finite_grace_seconds = finite_grace_seconds
-        self.resources = RuntimeWebControlResourceTracker(
+        self.resources = RuntimeStreamControlResourceTracker(
             limits=hard_limits,
             resident_memory_bytes=resident_memory_bytes,
         )
         self.relay_pool.bind_resources(self.resources)
         self.relay_pool.bind_retirement_handler(self.relay_disconnected)
         self.runners: dict[OwnerSessionEpoch, _RunnerConnection] = {}
-        self.brokers: dict[OwnerSessionEpoch, RuntimeWebSessionBroker] = {}
+        self.brokers: dict[OwnerSessionEpoch, RuntimeStreamSessionBroker] = {}
         self.bindings: dict[BrokerStreamKey, _StreamBinding] = {}
         self.source_tombstones: deque[BrokerStreamKey] = deque(
             maxlen=MAX_STREAM_TOMBSTONES
@@ -1309,9 +1308,9 @@ class RuntimeWebControlDataPlane:
         )
         async with self.lock:
             if self.draining:
-                raise _RuntimeWebControlDraining("Runtime Web Control is draining")
+                raise _RuntimeStreamControlDraining("Runtime Web Control is draining")
             if not self.resources.try_open_session():
-                raise _RuntimeWebControlResourceExhausted
+                raise _RuntimeStreamControlResourceExhausted
             if source.source_key in self.sources:
                 self.resources.close_session()
                 raise ValueError("Runtime Web source session ID is already active")
@@ -1389,7 +1388,7 @@ class RuntimeWebControlDataPlane:
                         CloseReason.TRANSPORT_UNAVAILABLE,
                     )
                 )
-            except _RuntimeWebControlResourceExhausted:
+            except _RuntimeStreamControlResourceExhausted:
                 await source.queue.close()
             except RuntimeError:
                 if not source.queue.closed:
@@ -1399,7 +1398,7 @@ class RuntimeWebControlDataPlane:
 
     async def register_runner(
         self,
-        accepted: RuntimeWebAcceptedRunnerSession,
+        accepted: RuntimeStreamAcceptedRunnerSession,
     ) -> _RunnerConnection:
         connection = _RunnerConnection(
             accepted=accepted,
@@ -1408,7 +1407,7 @@ class RuntimeWebControlDataPlane:
         )
         async with self.lock:
             if not self.resources.try_open_session():
-                raise _RuntimeWebControlResourceExhausted
+                raise _RuntimeStreamControlResourceExhausted
             if accepted.owner in self.runners:
                 self.resources.close_session()
                 raise ValueError("Runtime Web Owner Runner session is already active")
@@ -1418,7 +1417,7 @@ class RuntimeWebControlDataPlane:
 
     async def unregister_runner(
         self,
-        accepted: RuntimeWebAcceptedRunnerSession,
+        accepted: RuntimeStreamAcceptedRunnerSession,
     ) -> None:
         async with self.lock:
             connection = self.runners.pop(accepted.owner, None)
@@ -1442,11 +1441,11 @@ class RuntimeWebControlDataPlane:
     async def handle(
         self,
         source: _SourceSession,
-        envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+        envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
     ) -> None:
         """Route one exact source envelope without retry or replay."""
         if (
-            envelope.protocol_fingerprint != RUNTIME_WEB_PROTOCOL_FINGERPRINT
+            envelope.protocol_fingerprint != RUNTIME_STREAM_PROTOCOL_FINGERPRINT
             or envelope.session_id != source.session_id
             or envelope.peer_boot_id != source.peer_boot_id
             or not 1 <= envelope.ByteSize() <= MAX_ENVELOPE_BYTES
@@ -1514,7 +1513,7 @@ class RuntimeWebControlDataPlane:
 
     async def runner_response(
         self,
-        envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+        envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
     ) -> None:
         """Dispatch one Runner response through its exact active connection."""
         async with self.lock:
@@ -1585,7 +1584,7 @@ class RuntimeWebControlDataPlane:
                 envelope,
                 direction=CapacityDirection.OUTBOUND,
             )
-        except _RuntimeWebCapacityRejected:
+        except _RuntimeStreamCapacityRejected:
             await self._send_runner_reset(
                 binding,
                 CloseReason.RESOURCE_EXHAUSTED,
@@ -1623,7 +1622,7 @@ class RuntimeWebControlDataPlane:
     async def relay_response(
         self,
         key: RelaySessionKey,
-        envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+        envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
     ) -> None:
         """Translate one remote Owner response to its source Gateway session."""
         translated = await self.relay_pool.route_response(key=key, envelope=envelope)
@@ -2009,7 +2008,7 @@ class RuntimeWebControlDataPlane:
         self,
         source: _SourceSession,
         key: BrokerStreamKey,
-        envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+        envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
     ) -> None:
         authority = _authority(envelope.open.authority)
         head = _request_head(envelope.open.request_head)
@@ -2041,14 +2040,14 @@ class RuntimeWebControlDataPlane:
             if head.protocol is StreamProtocol.WEBSOCKET
             else CapacityProtocol.HTTP
         )
-        broker: RuntimeWebSessionBroker | None = None
+        broker: RuntimeStreamSessionBroker | None = None
         capacity_stream_id: int | None = None
         if target.local:
             capacity = await self.capacity_registry.get(target.owner)
             async with self.lock:
                 broker = self.brokers.get(target.owner)
                 if broker is None:
-                    broker = RuntimeWebSessionBroker(
+                    broker = RuntimeStreamSessionBroker(
                         router=_FixedRouter(target),
                         capacity=capacity,
                     )
@@ -2110,7 +2109,7 @@ class RuntimeWebControlDataPlane:
     async def _forward(
         self,
         binding: _StreamBinding,
-        envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+        envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
     ) -> None:
         target = binding.target
         if target.local:
@@ -2133,7 +2132,7 @@ class RuntimeWebControlDataPlane:
                     envelope,
                     direction=CapacityDirection.INBOUND,
                 )
-            except _RuntimeWebCapacityRejected:
+            except _RuntimeStreamCapacityRejected:
                 await self._send_runner_reset(
                     binding,
                     CloseReason.RESOURCE_EXHAUSTED,
@@ -2180,8 +2179,8 @@ class RuntimeWebControlDataPlane:
             runner = self.runners.get(binding.target.owner)
         if runner is None:
             return
-        reset = runtime_web_session_pb2.RuntimeWebSessionEnvelope(
-            protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+        reset = runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(
+            protocol_fingerprint=RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
             session_id=binding.target.owner.session_lease_id,
             peer_boot_id=self.control_boot_id,
             owner_boot_id=binding.target.owner.owner_boot_id,
@@ -2195,7 +2194,7 @@ class RuntimeWebControlDataPlane:
     async def _capacity_release_on_dequeue(
         self,
         binding: _StreamBinding,
-        envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+        envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
         *,
         direction: CapacityDirection,
     ) -> Callable[[], Awaitable[None]] | None:
@@ -2210,10 +2209,10 @@ class RuntimeWebControlDataPlane:
         )
         grant = BufferGrant(grant_id=grant_id, size_bytes=size)
         if not await capacity.reserve_buffer(grant):
-            raise _RuntimeWebCapacityRejected
+            raise _RuntimeStreamCapacityRejected
         if not await capacity.acquire_bandwidth(direction, size):
             await capacity.release_buffer(grant_id)
-            raise _RuntimeWebCapacityRejected
+            raise _RuntimeStreamCapacityRejected
         released = False
 
         async def release() -> None:
@@ -2263,7 +2262,7 @@ class RuntimeWebControlDataPlane:
                 runtime_id=runtime_id,
                 desired_generation=desired_generation,
                 runner_generation=runner_generation,
-                protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+                protocol_fingerprint=RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
             )
         if route is not None:
             async with self.lock:
@@ -2271,16 +2270,16 @@ class RuntimeWebControlDataPlane:
         return route
 
 
-class RuntimeWebGatewaySessionGrpcServicer(
-    runtime_web_session_pb2_grpc.RuntimeWebGatewaySessionServicer
+class RuntimeStreamGatewaySessionGrpcServicer(
+    runtime_stream_session_pb2_grpc.RuntimeStreamGatewaySessionServicer
 ):
     """Authenticate and serve one persistent Gateway session."""
 
     def __init__(
         self,
         *,
-        data_plane: RuntimeWebControlDataPlane,
-        peers: RuntimeWebTrustedPeerAuthenticator,
+        data_plane: RuntimeStreamControlDataPlane,
+        peers: RuntimeStreamTrustedPeerAuthenticator,
         clock: Callable[[], datetime.datetime],
     ) -> None:
         self.data_plane = data_plane
@@ -2290,15 +2289,15 @@ class RuntimeWebGatewaySessionGrpcServicer(
     async def Connect(
         self,
         request_iterator: AsyncIterator[
-            runtime_web_session_pb2.RuntimeWebSessionEnvelope
+            runtime_stream_session_pb2.RuntimeStreamSessionEnvelope
         ],
         context: grpc.aio.ServicerContext,
-    ) -> AsyncIterator[runtime_web_session_pb2.RuntimeWebSessionEnvelope]:
+    ) -> AsyncIterator[runtime_stream_session_pb2.RuntimeStreamSessionEnvelope]:
         await self.peers.gateway(context)
         first = await _first(request_iterator, context)
         _validate_hello(
             first,
-            role=runtime_web_session_pb2.RUNTIME_WEB_SESSION_PEER_ROLE_GATEWAY,
+            role=runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_PEER_ROLE_GATEWAY,
             clock=self.clock,
             owner=None,
         )
@@ -2308,13 +2307,13 @@ class RuntimeWebGatewaySessionGrpcServicer(
                 peer_boot_id=first.peer_boot_id,
                 owner=None,
             )
-        except _RuntimeWebControlDraining:
+        except _RuntimeStreamControlDraining:
             await context.abort(
                 grpc.StatusCode.UNAVAILABLE,
                 "Runtime Web Control is draining",
             )
             raise AssertionError("unreachable") from None
-        except _RuntimeWebControlResourceExhausted:
+        except _RuntimeStreamControlResourceExhausted:
             await context.abort(
                 grpc.StatusCode.RESOURCE_EXHAUSTED,
                 "Runtime Web Control hard session limit is exhausted",
@@ -2324,7 +2323,7 @@ class RuntimeWebGatewaySessionGrpcServicer(
             await source.queue.put(
                 _acceptance(first, self.data_plane.control_boot_id, self.clock)
             )
-        except _RuntimeWebControlResourceExhausted:
+        except _RuntimeStreamControlResourceExhausted:
             await self.data_plane.unregister_source(source)
             await context.abort(
                 grpc.StatusCode.RESOURCE_EXHAUSTED,
@@ -2337,7 +2336,7 @@ class RuntimeWebGatewaySessionGrpcServicer(
                 lambda: _read_source(self.data_plane, source, request_iterator),
                 name=f"runtime-web-gateway-reader:{source.session_id}",
             )
-        except _RuntimeWebControlResourceExhausted:
+        except _RuntimeStreamControlResourceExhausted:
             await self.data_plane.unregister_source(source)
             await context.abort(
                 grpc.StatusCode.RESOURCE_EXHAUSTED,
@@ -2356,16 +2355,16 @@ class RuntimeWebGatewaySessionGrpcServicer(
             await self.data_plane.unregister_source(source)
 
 
-class RuntimeWebControlSessionGrpcServicer(
-    runtime_web_session_pb2_grpc.RuntimeWebControlSessionServicer
+class RuntimeStreamControlSessionGrpcServicer(
+    runtime_stream_session_pb2_grpc.RuntimeStreamControlSessionServicer
 ):
     """Authenticate and serve one exact incoming Owner relay."""
 
     def __init__(
         self,
         *,
-        data_plane: RuntimeWebControlDataPlane,
-        peers: RuntimeWebTrustedPeerAuthenticator,
+        data_plane: RuntimeStreamControlDataPlane,
+        peers: RuntimeStreamTrustedPeerAuthenticator,
         clock: Callable[[], datetime.datetime],
     ) -> None:
         self.data_plane = data_plane
@@ -2375,16 +2374,16 @@ class RuntimeWebControlSessionGrpcServicer(
     async def Relay(
         self,
         request_iterator: AsyncIterator[
-            runtime_web_session_pb2.RuntimeWebSessionEnvelope
+            runtime_stream_session_pb2.RuntimeStreamSessionEnvelope
         ],
         context: grpc.aio.ServicerContext,
-    ) -> AsyncIterator[runtime_web_session_pb2.RuntimeWebSessionEnvelope]:
+    ) -> AsyncIterator[runtime_stream_session_pb2.RuntimeStreamSessionEnvelope]:
         await self.peers.control(context)
         first = await _first(request_iterator, context)
         owner = _owner_from_envelope(first)
         _validate_hello(
             first,
-            role=runtime_web_session_pb2.RUNTIME_WEB_SESSION_PEER_ROLE_CONTROL,
+            role=runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_PEER_ROLE_CONTROL,
             clock=self.clock,
             owner=owner,
         )
@@ -2400,13 +2399,13 @@ class RuntimeWebControlSessionGrpcServicer(
                 peer_boot_id=first.peer_boot_id,
                 owner=owner,
             )
-        except _RuntimeWebControlDraining:
+        except _RuntimeStreamControlDraining:
             await context.abort(
                 grpc.StatusCode.UNAVAILABLE,
                 "Runtime Web Control is draining",
             )
             raise AssertionError("unreachable") from None
-        except _RuntimeWebControlResourceExhausted:
+        except _RuntimeStreamControlResourceExhausted:
             await context.abort(
                 grpc.StatusCode.RESOURCE_EXHAUSTED,
                 "Runtime Web Control hard session limit is exhausted",
@@ -2414,7 +2413,7 @@ class RuntimeWebControlSessionGrpcServicer(
             raise AssertionError("unreachable") from None
         try:
             await source.queue.put(_acceptance(first, owner.owner_boot_id, self.clock))
-        except _RuntimeWebControlResourceExhausted:
+        except _RuntimeStreamControlResourceExhausted:
             await self.data_plane.unregister_source(source)
             await context.abort(
                 grpc.StatusCode.RESOURCE_EXHAUSTED,
@@ -2427,7 +2426,7 @@ class RuntimeWebControlSessionGrpcServicer(
                 lambda: _read_source(self.data_plane, source, request_iterator),
                 name=f"runtime-web-relay-reader:{source.session_id}",
             )
-        except _RuntimeWebControlResourceExhausted:
+        except _RuntimeStreamControlResourceExhausted:
             await self.data_plane.unregister_source(source)
             await context.abort(
                 grpc.StatusCode.RESOURCE_EXHAUSTED,
@@ -2446,17 +2445,17 @@ class RuntimeWebControlSessionGrpcServicer(
             await self.data_plane.unregister_source(source)
 
 
-class RuntimeRunnerWebSessionGrpcServicer(
-    runtime_web_session_pb2_grpc.RuntimeRunnerWebSessionServicer
+class RuntimeRunnerStreamSessionGrpcServicer(
+    runtime_stream_session_pb2_grpc.RuntimeRunnerStreamSessionServicer
 ):
     """Authenticate and attach one Runner to its exact Owner epoch."""
 
     def __init__(
         self,
         *,
-        data_plane: RuntimeWebControlDataPlane,
-        offer_provider: RuntimeWebOwnedSessionProvider,
-        registry: RuntimeWebOwnerSessionRegistry,
+        data_plane: RuntimeStreamControlDataPlane,
+        offer_provider: RuntimeStreamOwnedSessionProvider,
+        registry: RuntimeStreamOwnerSessionRegistry,
         runner_authenticator: RuntimeRunnerCredentialAuthenticator,
         clock: Callable[[], datetime.datetime],
         renew_interval_seconds: float,
@@ -2473,10 +2472,10 @@ class RuntimeRunnerWebSessionGrpcServicer(
     async def Connect(
         self,
         request_iterator: AsyncIterator[
-            runtime_web_session_pb2.RuntimeWebSessionEnvelope
+            runtime_stream_session_pb2.RuntimeStreamSessionEnvelope
         ],
         context: grpc.aio.ServicerContext,
-    ) -> AsyncIterator[runtime_web_session_pb2.RuntimeWebSessionEnvelope]:
+    ) -> AsyncIterator[runtime_stream_session_pb2.RuntimeStreamSessionEnvelope]:
         credential = await self.auth.authenticate(context)
         first = await _first(request_iterator, context)
         owner = _owner_from_envelope(first)
@@ -2496,7 +2495,7 @@ class RuntimeRunnerWebSessionGrpcServicer(
         accepted = await self.registry.accept(
             owned,
             first,
-            RuntimeWebAuthenticatedRunnerConnection(
+            RuntimeStreamAuthenticatedRunnerConnection(
                 runtime_id=credential.runtime_id,
                 runner_boot_id=first.peer_boot_id,
                 desired_generation=credential.desired_generation,
@@ -2517,7 +2516,7 @@ class RuntimeRunnerWebSessionGrpcServicer(
                 registry=self.registry,
                 accepted=accepted,
             )
-        except _RuntimeWebControlResourceExhausted:
+        except _RuntimeStreamControlResourceExhausted:
             await context.abort(
                 grpc.StatusCode.RESOURCE_EXHAUSTED,
                 "Runtime Web Control hard session limit is exhausted",
@@ -2527,7 +2526,7 @@ class RuntimeRunnerWebSessionGrpcServicer(
             await connection.queue.put(
                 _acceptance(first, owner.owner_boot_id, self.clock)
             )
-        except _RuntimeWebControlResourceExhausted:
+        except _RuntimeStreamControlResourceExhausted:
             await self.data_plane.unregister_runner(accepted)
             await self.registry.release(accepted)
             await self.offer_provider.release_owner(owner)
@@ -2572,7 +2571,7 @@ class RuntimeRunnerWebSessionGrpcServicer(
                 ),
                 name=f"runtime-web-runner-reader:{owner.session_lease_id}",
             )
-        except _RuntimeWebControlResourceExhausted:
+        except _RuntimeStreamControlResourceExhausted:
             await cleanup()
             await context.abort(
                 grpc.StatusCode.RESOURCE_EXHAUSTED,
@@ -2594,10 +2593,10 @@ class RuntimeRunnerWebSessionGrpcServicer(
 
 async def _register_joined_runner(
     *,
-    data_plane: RuntimeWebControlDataPlane,
-    offer_provider: RuntimeWebOwnedSessionProvider,
-    registry: RuntimeWebOwnerSessionRegistry,
-    accepted: RuntimeWebAcceptedRunnerSession,
+    data_plane: RuntimeStreamControlDataPlane,
+    offer_provider: RuntimeStreamOwnedSessionProvider,
+    registry: RuntimeStreamOwnerSessionRegistry,
+    accepted: RuntimeStreamAcceptedRunnerSession,
 ) -> _RunnerConnection:
     """Rollback the joined offer if data-plane registration does not complete."""
     try:
@@ -2612,37 +2611,37 @@ async def _register_joined_runner(
         raise
 
 
-def add_runtime_web_session_servicers(
+def add_runtime_stream_session_servicers(
     *,
     trusted_server: grpc.aio.Server,
     runner_server: grpc.aio.Server,
-    data_plane: RuntimeWebControlDataPlane,
-    offer_provider: RuntimeWebOwnedSessionProvider,
-    owner_registry: RuntimeWebOwnerSessionRegistry,
+    data_plane: RuntimeStreamControlDataPlane,
+    offer_provider: RuntimeStreamOwnedSessionProvider,
+    owner_registry: RuntimeStreamOwnerSessionRegistry,
     runner_authenticator: RuntimeRunnerCredentialAuthenticator,
-    peer_authenticator: RuntimeWebTrustedPeerAuthenticator,
+    peer_authenticator: RuntimeStreamTrustedPeerAuthenticator,
     clock: Callable[[], datetime.datetime],
     owner_renew_interval_seconds: float,
 ) -> None:
     """Register the three replacement persistent session services."""
-    runtime_web_session_pb2_grpc.add_RuntimeWebGatewaySessionServicer_to_server(
-        RuntimeWebGatewaySessionGrpcServicer(
+    runtime_stream_session_pb2_grpc.add_RuntimeStreamGatewaySessionServicer_to_server(
+        RuntimeStreamGatewaySessionGrpcServicer(
             data_plane=data_plane,
             peers=peer_authenticator,
             clock=clock,
         ),
         trusted_server,
     )
-    runtime_web_session_pb2_grpc.add_RuntimeWebControlSessionServicer_to_server(
-        RuntimeWebControlSessionGrpcServicer(
+    runtime_stream_session_pb2_grpc.add_RuntimeStreamControlSessionServicer_to_server(
+        RuntimeStreamControlSessionGrpcServicer(
             data_plane=data_plane,
             peers=peer_authenticator,
             clock=clock,
         ),
         trusted_server,
     )
-    runtime_web_session_pb2_grpc.add_RuntimeRunnerWebSessionServicer_to_server(
-        RuntimeRunnerWebSessionGrpcServicer(
+    runtime_stream_session_pb2_grpc.add_RuntimeRunnerStreamSessionServicer_to_server(
+        RuntimeRunnerStreamSessionGrpcServicer(
             data_plane=data_plane,
             offer_provider=offer_provider,
             registry=owner_registry,
@@ -2656,12 +2655,12 @@ def add_runtime_web_session_servicers(
 
 _OPERATIONS_DATA_PLANE = web.AppKey(
     "runtime-web-control-data-plane",
-    RuntimeWebControlDataPlane,
+    RuntimeStreamControlDataPlane,
 )
 
 
 def create_runtime_web_control_operations_application(
-    data_plane: RuntimeWebControlDataPlane,
+    data_plane: RuntimeStreamControlDataPlane,
 ) -> web.Application:
     """Create an internal-only Runtime Web Control operations application."""
     application = web.Application(client_max_size=1024)
@@ -2702,9 +2701,9 @@ async def _operations_drain(request: web.Request) -> web.Response:
 
 
 async def _read_source(
-    data_plane: RuntimeWebControlDataPlane,
+    data_plane: RuntimeStreamControlDataPlane,
     source: _SourceSession,
-    messages: AsyncIterator[runtime_web_session_pb2.RuntimeWebSessionEnvelope],
+    messages: AsyncIterator[runtime_stream_session_pb2.RuntimeStreamSessionEnvelope],
 ) -> None:
     try:
         async for envelope in messages:
@@ -2714,9 +2713,9 @@ async def _read_source(
 
 
 async def _read_runner(
-    data_plane: RuntimeWebControlDataPlane,
+    data_plane: RuntimeStreamControlDataPlane,
     connection: _RunnerConnection,
-    messages: AsyncIterator[runtime_web_session_pb2.RuntimeWebSessionEnvelope],
+    messages: AsyncIterator[runtime_stream_session_pb2.RuntimeStreamSessionEnvelope],
 ) -> None:
     try:
         async for envelope in messages:
@@ -2732,7 +2731,7 @@ async def _read_runner(
 
 async def _renew_owner_session(
     *,
-    provider: RuntimeWebOwnedSessionProvider,
+    provider: RuntimeStreamOwnedSessionProvider,
     owner: OwnerSessionEpoch,
     connection: _RunnerConnection,
     interval_seconds: float,
@@ -2754,9 +2753,9 @@ async def _renew_owner_session(
 
 
 async def _first(
-    messages: AsyncIterator[runtime_web_session_pb2.RuntimeWebSessionEnvelope],
+    messages: AsyncIterator[runtime_stream_session_pb2.RuntimeStreamSessionEnvelope],
     context: grpc.aio.ServicerContext,
-) -> runtime_web_session_pb2.RuntimeWebSessionEnvelope:
+) -> runtime_stream_session_pb2.RuntimeStreamSessionEnvelope:
     try:
         return await anext(messages)
     except StopAsyncIteration:
@@ -2768,7 +2767,7 @@ async def _first(
 
 
 def _validate_hello(
-    envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+    envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
     *,
     role: int,
     clock: Callable[[], datetime.datetime],
@@ -2778,7 +2777,7 @@ def _validate_hello(
     deadline = hello.deadline_at.ToDatetime(tzinfo=datetime.UTC)
     if (
         envelope.WhichOneof("payload") != "hello"
-        or envelope.protocol_fingerprint != RUNTIME_WEB_PROTOCOL_FINGERPRINT
+        or envelope.protocol_fingerprint != RUNTIME_STREAM_PROTOCOL_FINGERPRINT
         or not envelope.session_id
         or not envelope.peer_boot_id
         or hello.role != role
@@ -2798,7 +2797,7 @@ def _validate_hello(
 
 
 def _validate_runner_hello(
-    envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+    envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
     *,
     owner: OwnerSessionEpoch,
     credential: RuntimeRunnerCredential,
@@ -2806,7 +2805,7 @@ def _validate_runner_hello(
 ) -> None:
     _validate_hello(
         envelope,
-        role=runtime_web_session_pb2.RUNTIME_WEB_SESSION_PEER_ROLE_RUNNER,
+        role=runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_PEER_ROLE_RUNNER,
         clock=clock,
         owner=owner,
     )
@@ -2818,11 +2817,11 @@ def _validate_runner_hello(
 
 
 def _acceptance(
-    request: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+    request: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
     peer_boot_id: str,
     clock: Callable[[], datetime.datetime],
-) -> runtime_web_session_pb2.RuntimeWebSessionEnvelope:
-    accepted = runtime_web_session_pb2.RuntimeWebSessionAccepted(
+) -> runtime_stream_session_pb2.RuntimeStreamSessionEnvelope:
+    accepted = runtime_stream_session_pb2.RuntimeStreamSessionAccepted(
         data_frame_bytes=APPROVED_SESSION_PROFILE.data_frame_bytes,
         request_stream_window_bytes=(
             APPROVED_SESSION_PROFILE.request_stream_window_bytes
@@ -2838,8 +2837,8 @@ def _acceptance(
         ),
     )
     accepted.accepted_at.FromDatetime(clock())
-    response = runtime_web_session_pb2.RuntimeWebSessionEnvelope(
-        protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+    response = runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(
+        protocol_fingerprint=RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
         session_id=request.session_id,
         peer_boot_id=peer_boot_id,
         stream_id=0,
@@ -2857,9 +2856,9 @@ def _acceptance(
 def _base_response(
     source: _SourceSession,
     control_boot_id: str,
-) -> runtime_web_session_pb2.RuntimeWebSessionEnvelope:
-    response = runtime_web_session_pb2.RuntimeWebSessionEnvelope(
-        protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+) -> runtime_stream_session_pb2.RuntimeStreamSessionEnvelope:
+    response = runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(
+        protocol_fingerprint=RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
         session_id=source.session_id,
         peer_boot_id=(
             source.owner.owner_boot_id if source.owner is not None else control_boot_id
@@ -2877,7 +2876,7 @@ def _rejection(
     control_boot_id: str,
     stream_id: int,
     reason: CloseReason,
-) -> runtime_web_session_pb2.RuntimeWebSessionEnvelope:
+) -> runtime_stream_session_pb2.RuntimeStreamSessionEnvelope:
     response = _base_response(source, control_boot_id)
     response.stream_id = stream_id
     response.open_rejected.reason = _close_reason(reason)
@@ -2889,7 +2888,7 @@ def _reset(
     control_boot_id: str,
     stream_id: int,
     reason: CloseReason,
-) -> runtime_web_session_pb2.RuntimeWebSessionEnvelope:
+) -> runtime_stream_session_pb2.RuntimeStreamSessionEnvelope:
     response = _base_response(source, control_boot_id)
     response.stream_id = stream_id
     response.reset.reason = _close_reason(reason)
@@ -2901,11 +2900,11 @@ def _go_away(
     control_boot_id: str,
     *,
     deadline: datetime.datetime,
-) -> runtime_web_session_pb2.RuntimeWebSessionEnvelope:
+) -> runtime_stream_session_pb2.RuntimeStreamSessionEnvelope:
     response = _base_response(source, control_boot_id)
     response.go_away.last_accepted_stream_id = 2**64 - 1
     response.go_away.reason = (
-        runtime_web_session_pb2.RUNTIME_WEB_SESSION_CLOSE_REASON_SERVICE_DRAIN
+        runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_CLOSE_REASON_SERVICE_DRAIN
     )
     response.go_away.drain_deadline_at.FromDatetime(deadline)
     return response
@@ -2916,9 +2915,9 @@ def _runner_go_away(
     control_boot_id: str,
     *,
     deadline: datetime.datetime,
-) -> runtime_web_session_pb2.RuntimeWebSessionEnvelope:
-    response = runtime_web_session_pb2.RuntimeWebSessionEnvelope(
-        protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+) -> runtime_stream_session_pb2.RuntimeStreamSessionEnvelope:
+    response = runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(
+        protocol_fingerprint=RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
         session_id=owner.session_lease_id,
         peer_boot_id=control_boot_id,
         owner_boot_id=owner.owner_boot_id,
@@ -2927,14 +2926,14 @@ def _runner_go_away(
     )
     response.go_away.last_accepted_stream_id = 2**64 - 1
     response.go_away.reason = (
-        runtime_web_session_pb2.RUNTIME_WEB_SESSION_CLOSE_REASON_SERVICE_DRAIN
+        runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_CLOSE_REASON_SERVICE_DRAIN
     )
     response.go_away.drain_deadline_at.FromDatetime(deadline)
     return response
 
 
 def _application_payload_size(
-    envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+    envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
 ) -> int:
     payload = envelope.WhichOneof("payload")
     if payload == "data":
@@ -2945,7 +2944,7 @@ def _application_payload_size(
 
 
 def _is_sse(
-    response: runtime_web_session_pb2.RuntimeWebSessionResponseHead,
+    response: runtime_stream_session_pb2.RuntimeStreamSessionResponseHead,
 ) -> bool:
     return any(
         header.name.lower() == b"content-type"
@@ -2956,15 +2955,15 @@ def _is_sse(
 
 
 def _owner_envelope(
-    source: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+    source: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
     *,
     owner: OwnerSessionEpoch,
     peer_boot_id: str,
     stream_id: int,
-) -> runtime_web_session_pb2.RuntimeWebSessionEnvelope:
-    envelope = runtime_web_session_pb2.RuntimeWebSessionEnvelope()
+) -> runtime_stream_session_pb2.RuntimeStreamSessionEnvelope:
+    envelope = runtime_stream_session_pb2.RuntimeStreamSessionEnvelope()
     envelope.CopyFrom(source)
-    envelope.protocol_fingerprint = RUNTIME_WEB_PROTOCOL_FINGERPRINT
+    envelope.protocol_fingerprint = RUNTIME_STREAM_PROTOCOL_FINGERPRINT
     envelope.session_id = owner.session_lease_id
     envelope.peer_boot_id = peer_boot_id
     envelope.owner_boot_id = owner.owner_boot_id
@@ -2975,7 +2974,7 @@ def _owner_envelope(
 
 
 def _authority(
-    message: runtime_web_session_pb2.RuntimeWebSessionAuthority,
+    message: runtime_stream_session_pb2.RuntimeStreamSessionAuthority,
 ) -> StreamAuthority:
     return StreamAuthority(
         correlation_id=message.correlation_id,
@@ -3000,13 +2999,16 @@ def _authority(
 
 
 def _request_head(
-    message: runtime_web_session_pb2.RuntimeWebSessionRequestHead,
+    message: runtime_stream_session_pb2.RuntimeStreamSessionRequestHead,
 ) -> RequestHead:
-    if message.protocol == runtime_web_session_pb2.RUNTIME_WEB_SESSION_PROTOCOL_HTTP:
+    if (
+        message.protocol
+        == runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_PROTOCOL_HTTP
+    ):
         protocol = StreamProtocol.HTTP
     elif (
         message.protocol
-        == runtime_web_session_pb2.RUNTIME_WEB_SESSION_PROTOCOL_WEBSOCKET
+        == runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_PROTOCOL_WEBSOCKET
     ):
         protocol = StreamProtocol.WEBSOCKET
     else:
@@ -3046,7 +3048,7 @@ def _route_owner(route: RuntimeWebSessionRoute) -> OwnerSessionEpoch:
 
 
 def _owner_from_envelope(
-    envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+    envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
 ) -> OwnerSessionEpoch:
     if (
         not envelope.HasField("owner_boot_id")
@@ -3072,11 +3074,11 @@ def _owner_from_envelope(
 
 
 def _matches_owner(
-    envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+    envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
     owner: OwnerSessionEpoch,
 ) -> bool:
     return (
-        envelope.protocol_fingerprint == RUNTIME_WEB_PROTOCOL_FINGERPRINT
+        envelope.protocol_fingerprint == RUNTIME_STREAM_PROTOCOL_FINGERPRINT
         and envelope.session_id == owner.session_lease_id
         and envelope.HasField("owner_boot_id")
         and envelope.owner_boot_id == owner.owner_boot_id
@@ -3089,39 +3091,39 @@ def _matches_owner(
 
 def _close_reason(
     reason: CloseReason,
-) -> runtime_web_session_pb2.RuntimeWebSessionCloseReason.ValueType:
+) -> runtime_stream_session_pb2.RuntimeStreamSessionCloseReason.ValueType:
     return {
         CloseReason.CALLER: (
-            runtime_web_session_pb2.RUNTIME_WEB_SESSION_CLOSE_REASON_CALLER
+            runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_CLOSE_REASON_CALLER
         ),
         CloseReason.SERVICE_EXPIRED: (
-            runtime_web_session_pb2.RUNTIME_WEB_SESSION_CLOSE_REASON_SERVICE_EXPIRED
+            runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_CLOSE_REASON_SERVICE_EXPIRED
         ),
         CloseReason.AUTHORITY_REVOKED: (
-            runtime_web_session_pb2.RUNTIME_WEB_SESSION_CLOSE_REASON_AUTHORITY_REVOKED
+            runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_CLOSE_REASON_AUTHORITY_REVOKED
         ),
         CloseReason.GENERATION_REPLACED: (
-            runtime_web_session_pb2.RUNTIME_WEB_SESSION_CLOSE_REASON_GENERATION_REPLACED
+            runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_CLOSE_REASON_GENERATION_REPLACED
         ),
         CloseReason.DEADLINE: (
-            runtime_web_session_pb2.RUNTIME_WEB_SESSION_CLOSE_REASON_DEADLINE
+            runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_CLOSE_REASON_DEADLINE
         ),
         CloseReason.SERVICE_DRAIN: (
-            runtime_web_session_pb2.RUNTIME_WEB_SESSION_CLOSE_REASON_SERVICE_DRAIN
+            runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_CLOSE_REASON_SERVICE_DRAIN
         ),
         CloseReason.OWNER_LOST: (
-            runtime_web_session_pb2.RUNTIME_WEB_SESSION_CLOSE_REASON_OWNER_LOST
+            runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_CLOSE_REASON_OWNER_LOST
         ),
         CloseReason.PROTOCOL_VIOLATION: (
-            runtime_web_session_pb2.RUNTIME_WEB_SESSION_CLOSE_REASON_PROTOCOL_VIOLATION
+            runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_CLOSE_REASON_PROTOCOL_VIOLATION
         ),
         CloseReason.RESOURCE_EXHAUSTED: (
-            runtime_web_session_pb2.RUNTIME_WEB_SESSION_CLOSE_REASON_RESOURCE_EXHAUSTED
+            runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_CLOSE_REASON_RESOURCE_EXHAUSTED
         ),
         CloseReason.APPLICATION_UNAVAILABLE: (
-            runtime_web_session_pb2.RUNTIME_WEB_SESSION_CLOSE_REASON_APPLICATION_UNAVAILABLE
+            runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_CLOSE_REASON_APPLICATION_UNAVAILABLE
         ),
         CloseReason.TRANSPORT_UNAVAILABLE: (
-            runtime_web_session_pb2.RUNTIME_WEB_SESSION_CLOSE_REASON_TRANSPORT_UNAVAILABLE
+            runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_CLOSE_REASON_TRANSPORT_UNAVAILABLE
         ),
     }[reason]

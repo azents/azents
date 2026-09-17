@@ -10,20 +10,20 @@ from collections.abc import AsyncIterable, AsyncIterator, Awaitable, Callable, S
 from datetime import UTC, datetime
 from typing import Protocol
 
-from azents_runtime_control.proto import runtime_web_session_pb2
-from azents_runtime_control.runtime_web_flow import (
+from azents_runtime_control.proto import runtime_stream_session_pb2
+from azents_runtime_control.runtime_stream_flow import (
     AbsoluteCreditWindow,
     FairFrameScheduler,
     HierarchicalCredit,
     QueueLane,
     ScheduledItem,
 )
-from azents_runtime_control.runtime_web_session import (
+from azents_runtime_control.runtime_stream_session import (
     CONTROL_RESERVE_BYTES,
     MANDATORY_DATA_FRAME_BYTES,
     MAX_ENVELOPE_BYTES,
     MAX_STREAM_TOMBSTONES,
-    RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+    RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
     SESSION_WINDOW_BYTES,
     CloseReason,
     Header,
@@ -57,7 +57,7 @@ _LOGGER = logging.getLogger(__name__)
 
 @dataclasses.dataclass(frozen=True)
 class _BufferedEnvelope:
-    envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope
+    envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope
     application_bytes: int
     control_bytes: int
 
@@ -80,12 +80,12 @@ class GatewaySessionStream(Protocol):
     def __call__(
         self,
         request_iterator: AsyncIterator[
-            runtime_web_session_pb2.RuntimeWebSessionEnvelope
+            runtime_stream_session_pb2.RuntimeStreamSessionEnvelope
         ],
         /,
         *,
         metadata: Sequence[tuple[str, str]] | None = None,
-    ) -> AsyncIterable[runtime_web_session_pb2.RuntimeWebSessionEnvelope]: ...
+    ) -> AsyncIterable[runtime_stream_session_pb2.RuntimeStreamSessionEnvelope]: ...
 
 
 class PersistentGatewaySessionTransport:
@@ -109,7 +109,7 @@ class PersistentGatewaySessionTransport:
         self.receiver: asyncio.Task[None] | None = None
         self.heartbeat_task: asyncio.Task[None] | None = None
         self.heartbeat_identity: (
-            runtime_web_session_pb2.RuntimeWebSessionEnvelope | None
+            runtime_stream_session_pb2.RuntimeStreamSessionEnvelope | None
         ) = None
         self.heartbeat_sequence = 0
         self.heartbeat_acknowledged_sequence = 0
@@ -140,16 +140,16 @@ class PersistentGatewaySessionTransport:
 
     async def start(
         self,
-        hello: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+        hello: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
         *,
         timeout_seconds: float,
-    ) -> runtime_web_session_pb2.RuntimeWebSessionEnvelope:
+    ) -> runtime_stream_session_pb2.RuntimeStreamSessionEnvelope:
         """Start the persistent RPC and require acceptance as its first response."""
         if timeout_seconds <= 0:
             raise ValueError("Runtime Web Gateway handshake timeout must be positive")
         if (
             hello.WhichOneof("payload") != "hello"
-            or hello.protocol_fingerprint != RUNTIME_WEB_PROTOCOL_FINGERPRINT
+            or hello.protocol_fingerprint != RUNTIME_STREAM_PROTOCOL_FINGERPRINT
             or not hello.session_id
             or not hello.peer_boot_id
             or not 1 <= hello.ByteSize() <= MAX_ENVELOPE_BYTES
@@ -189,10 +189,12 @@ class PersistentGatewaySessionTransport:
                 raise
         try:
             accepted_envelope = await asyncio.wait_for(accepted, timeout_seconds)
-            self.heartbeat_identity = runtime_web_session_pb2.RuntimeWebSessionEnvelope(
-                protocol_fingerprint=hello.protocol_fingerprint,
-                session_id=hello.session_id,
-                peer_boot_id=hello.peer_boot_id,
+            self.heartbeat_identity = (
+                runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(
+                    protocol_fingerprint=hello.protocol_fingerprint,
+                    session_id=hello.session_id,
+                    peer_boot_id=hello.peer_boot_id,
+                )
             )
             self.resources.transport_epoch_transitions += 1
             self.heartbeat_task = asyncio.create_task(
@@ -242,7 +244,7 @@ class PersistentGatewaySessionTransport:
             self._add_tombstone(stream_id)
 
     async def send(
-        self, envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope
+        self, envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope
     ) -> None:
         """Queue one byte-bounded envelope without replay."""
         size_bytes = envelope.ByteSize()
@@ -305,7 +307,7 @@ class PersistentGatewaySessionTransport:
                     raise RuntimeError(
                         "Runtime Web Gateway session is not active"
                     ) from self.failure
-                queued = runtime_web_session_pb2.RuntimeWebSessionEnvelope()
+                queued = runtime_stream_session_pb2.RuntimeStreamSessionEnvelope()
                 queued.CopyFrom(envelope)
                 if not self.resources.try_reserve_control_buffer(control_bytes):
                     raise RuntimeWebGatewayResourceExhausted(
@@ -385,8 +387,8 @@ class PersistentGatewaySessionTransport:
         await receiver
 
     async def _outbound_messages(
-        self, hello: runtime_web_session_pb2.RuntimeWebSessionEnvelope
-    ) -> AsyncIterator[runtime_web_session_pb2.RuntimeWebSessionEnvelope]:
+        self, hello: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope
+    ) -> AsyncIterator[runtime_stream_session_pb2.RuntimeStreamSessionEnvelope]:
         yield hello
         while True:
             async with self.condition:
@@ -409,8 +411,12 @@ class PersistentGatewaySessionTransport:
 
     async def _receive(
         self,
-        responses: AsyncIterable[runtime_web_session_pb2.RuntimeWebSessionEnvelope],
-        accepted: asyncio.Future[runtime_web_session_pb2.RuntimeWebSessionEnvelope],
+        responses: AsyncIterable[
+            runtime_stream_session_pb2.RuntimeStreamSessionEnvelope
+        ],
+        accepted: asyncio.Future[
+            runtime_stream_session_pb2.RuntimeStreamSessionEnvelope
+        ],
         *,
         expected_fingerprint: str,
         expected_session_id: str,
@@ -466,10 +472,12 @@ class PersistentGatewaySessionTransport:
                         raise RuntimeError(
                             "Runtime Web Gateway heartbeat must be session-scoped"
                         )
-                    acknowledgement = runtime_web_session_pb2.RuntimeWebSessionEnvelope(
-                        protocol_fingerprint=expected_fingerprint,
-                        session_id=expected_session_id,
-                        peer_boot_id=expected_peer_boot_id,
+                    acknowledgement = (
+                        runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(
+                            protocol_fingerprint=expected_fingerprint,
+                            session_id=expected_session_id,
+                            peer_boot_id=expected_peer_boot_id,
+                        )
                     )
                     acknowledgement.heartbeat_ack.monotonic_sequence = (
                         envelope.heartbeat.monotonic_sequence
@@ -547,7 +555,9 @@ class PersistentGatewaySessionTransport:
                             "Runtime Web Gateway heartbeat identity is absent"
                         )
                     self.heartbeat_sequence += 1
-                    heartbeat = runtime_web_session_pb2.RuntimeWebSessionEnvelope()
+                    heartbeat = (
+                        runtime_stream_session_pb2.RuntimeStreamSessionEnvelope()
+                    )
                     heartbeat.CopyFrom(identity)
                     heartbeat.heartbeat.monotonic_sequence = self.heartbeat_sequence
                     self.resources.transport_heartbeats_sent += 1
@@ -558,7 +568,7 @@ class PersistentGatewaySessionTransport:
 
     async def _receive_go_away(
         self,
-        envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+        envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
     ) -> None:
         if envelope.stream_id != 0:
             raise RuntimeError("Runtime Web Gateway GOAWAY must be session-scoped")
@@ -693,7 +703,7 @@ class RuntimeWebBrowserStreamBridge:
         )
 
     async def __call__(
-        self, envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope
+        self, envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope
     ) -> None:
         """Dispatch one stream envelope from the persistent transport."""
         await self.receive(envelope)
@@ -905,11 +915,11 @@ class RuntimeWebBrowserStreamBridge:
         self.accepted.set()
 
     async def receive(
-        self, envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope
+        self, envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope
     ) -> None:
         """Validate and enqueue one bounded response envelope."""
         if (
-            envelope.protocol_fingerprint != RUNTIME_WEB_PROTOCOL_FINGERPRINT
+            envelope.protocol_fingerprint != RUNTIME_STREAM_PROTOCOL_FINGERPRINT
             or envelope.session_id != self.binding.session_id
             or envelope.stream_id != self.binding.stream_id
         ):
@@ -930,12 +940,12 @@ class RuntimeWebBrowserStreamBridge:
                 raise ValueError("Runtime Web Gateway open profile is invalid")
             if (
                 envelope.open_accepted.route_path
-                == runtime_web_session_pb2.RUNTIME_WEB_SESSION_ROUTE_PATH_LOCAL
+                == runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_ROUTE_PATH_LOCAL
             ):
                 self.route = "local"
             elif (
                 envelope.open_accepted.route_path
-                == runtime_web_session_pb2.RUNTIME_WEB_SESSION_ROUTE_PATH_RELAY
+                == runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_ROUTE_PATH_RELAY
             ):
                 self.route = "relay"
             else:
@@ -1212,7 +1222,7 @@ class RuntimeWebBrowserStreamBridge:
             self.event_condition.notify_all()
 
     async def _send_or_fail(
-        self, envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope
+        self, envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope
     ) -> None:
         try:
             await self.transport.send(envelope)
@@ -1354,9 +1364,9 @@ class RuntimeWebBrowserStreamBridge:
 
 def _base_envelope(
     binding: GatewayStreamBinding,
-) -> runtime_web_session_pb2.RuntimeWebSessionEnvelope:
-    return runtime_web_session_pb2.RuntimeWebSessionEnvelope(
-        protocol_fingerprint=RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+) -> runtime_stream_session_pb2.RuntimeStreamSessionEnvelope:
+    return runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(
+        protocol_fingerprint=RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
         session_id=binding.registration.session_id,
         peer_boot_id=binding.registration.peer_boot_id,
         stream_id=binding.stream_id,
@@ -1411,7 +1421,7 @@ def _drain_outbound_scheduler(
 
 
 def _outbound_lane(
-    envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+    envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
 ) -> QueueLane:
     payload = envelope.WhichOneof("payload")
     if payload in {"data", "direction_end", "stream_end", "websocket"}:
@@ -1422,15 +1432,15 @@ def _outbound_lane(
 
 
 def _application_bytes(
-    envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+    envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
 ) -> int:
     payload = envelope.WhichOneof("payload")
     if payload == "data":
         return len(envelope.data.data)
     if payload == "websocket" and envelope.websocket.opcode in {
-        runtime_web_session_pb2.RUNTIME_WEB_SESSION_WEBSOCKET_OPCODE_TEXT,
-        runtime_web_session_pb2.RUNTIME_WEB_SESSION_WEBSOCKET_OPCODE_BINARY,
-        runtime_web_session_pb2.RUNTIME_WEB_SESSION_WEBSOCKET_OPCODE_CONTINUATION,
+        runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_WEBSOCKET_OPCODE_TEXT,
+        runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_WEBSOCKET_OPCODE_BINARY,
+        runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_WEBSOCKET_OPCODE_CONTINUATION,
     }:
         return len(envelope.websocket.data)
     return 0
@@ -1456,12 +1466,12 @@ def _browser_event_application_bytes(event: BrowserStreamEvent) -> int:
 
 def _open_envelope(
     binding: GatewayStreamBinding,
-) -> runtime_web_session_pb2.RuntimeWebSessionEnvelope:
+) -> runtime_stream_session_pb2.RuntimeStreamSessionEnvelope:
     authority = binding.state.authority
     head = binding.state.request_head
     envelope = _base_envelope(binding)
     envelope.open.authority.CopyFrom(
-        runtime_web_session_pb2.RuntimeWebSessionAuthority(
+        runtime_stream_session_pb2.RuntimeStreamSessionAuthority(
             correlation_id=authority.correlation_id,
             service_id=authority.service_id,
             service_revision=authority.service_revision,
@@ -1483,14 +1493,14 @@ def _open_envelope(
         authority.exposure_deadline_at
     )
     envelope.open.request_head.protocol = (
-        runtime_web_session_pb2.RUNTIME_WEB_SESSION_PROTOCOL_WEBSOCKET
+        runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_PROTOCOL_WEBSOCKET
         if head.protocol is StreamProtocol.WEBSOCKET
-        else runtime_web_session_pb2.RUNTIME_WEB_SESSION_PROTOCOL_HTTP
+        else runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_PROTOCOL_HTTP
     )
     envelope.open.request_head.method = head.method
     envelope.open.request_head.target = head.target
     envelope.open.request_head.headers.extend(
-        runtime_web_session_pb2.RuntimeWebSessionHeader(
+        runtime_stream_session_pb2.RuntimeStreamSessionHeader(
             name=header.name, value=header.value
         )
         for header in head.headers
@@ -1504,7 +1514,7 @@ def _data_envelope(
     direction: StreamDirection,
     sequence: int,
     data: bytes,
-) -> runtime_web_session_pb2.RuntimeWebSessionEnvelope:
+) -> runtime_stream_session_pb2.RuntimeStreamSessionEnvelope:
     envelope = _base_envelope(binding)
     envelope.frame_sequence = sequence
     envelope.data.direction = _direction_proto(direction)
@@ -1517,7 +1527,7 @@ def _direction_end_envelope(
     *,
     direction: StreamDirection,
     final_sequence: int,
-) -> runtime_web_session_pb2.RuntimeWebSessionEnvelope:
+) -> runtime_stream_session_pb2.RuntimeStreamSessionEnvelope:
     envelope = _base_envelope(binding)
     envelope.direction_end.direction = _direction_proto(direction)
     envelope.direction_end.final_sequence = final_sequence
@@ -1530,7 +1540,7 @@ def _window_update_envelope(
     direction: StreamDirection,
     stream_consumed_total: int,
     session_consumed_total: int,
-) -> runtime_web_session_pb2.RuntimeWebSessionEnvelope:
+) -> runtime_stream_session_pb2.RuntimeStreamSessionEnvelope:
     envelope = _base_envelope(binding)
     envelope.window_update.direction = _direction_proto(direction)
     envelope.window_update.stream_consumed_total = stream_consumed_total
@@ -1540,7 +1550,7 @@ def _window_update_envelope(
 
 def _cancel_envelope(
     binding: GatewayStreamBinding, reason: CloseReason
-) -> runtime_web_session_pb2.RuntimeWebSessionEnvelope:
+) -> runtime_stream_session_pb2.RuntimeStreamSessionEnvelope:
     envelope = _base_envelope(binding)
     envelope.cancel.reason = _close_reason_proto(reason)
     return envelope
@@ -1554,7 +1564,7 @@ def _websocket_envelope(
     opcode: WebSocketOpcode,
     final: bool,
     data: bytes,
-) -> runtime_web_session_pb2.RuntimeWebSessionEnvelope:
+) -> runtime_stream_session_pb2.RuntimeStreamSessionEnvelope:
     envelope = _base_envelope(binding)
     envelope.frame_sequence = sequence
     envelope.websocket.direction = _direction_proto(direction)
@@ -1566,43 +1576,43 @@ def _websocket_envelope(
 
 def _direction_proto(
     direction: StreamDirection,
-) -> runtime_web_session_pb2.RuntimeWebSessionDirection.ValueType:
+) -> runtime_stream_session_pb2.RuntimeStreamSessionDirection.ValueType:
     if direction is StreamDirection.REQUEST:
-        return runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_REQUEST
-    return runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_RESPONSE
+        return runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_DIRECTION_REQUEST
+    return runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_DIRECTION_RESPONSE
 
 
 def _direction(
-    value: runtime_web_session_pb2.RuntimeWebSessionDirection.ValueType,
+    value: runtime_stream_session_pb2.RuntimeStreamSessionDirection.ValueType,
 ) -> StreamDirection:
-    if value == runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_REQUEST:
+    if value == runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_DIRECTION_REQUEST:
         return StreamDirection.REQUEST
-    if value == runtime_web_session_pb2.RUNTIME_WEB_SESSION_DIRECTION_RESPONSE:
+    if value == runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_DIRECTION_RESPONSE:
         return StreamDirection.RESPONSE
     raise ValueError("Runtime Web direction is invalid")
 
 
 _WEBSOCKET_OPCODE_TO_PROTO: dict[
     WebSocketOpcode,
-    runtime_web_session_pb2.RuntimeWebSessionWebSocketOpcode.ValueType,
+    runtime_stream_session_pb2.RuntimeStreamSessionWebSocketOpcode.ValueType,
 ] = {
     WebSocketOpcode.TEXT: (
-        runtime_web_session_pb2.RUNTIME_WEB_SESSION_WEBSOCKET_OPCODE_TEXT
+        runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_WEBSOCKET_OPCODE_TEXT
     ),
     WebSocketOpcode.BINARY: (
-        runtime_web_session_pb2.RUNTIME_WEB_SESSION_WEBSOCKET_OPCODE_BINARY
+        runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_WEBSOCKET_OPCODE_BINARY
     ),
     WebSocketOpcode.CONTINUATION: (
-        runtime_web_session_pb2.RUNTIME_WEB_SESSION_WEBSOCKET_OPCODE_CONTINUATION
+        runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_WEBSOCKET_OPCODE_CONTINUATION
     ),
     WebSocketOpcode.PING: (
-        runtime_web_session_pb2.RUNTIME_WEB_SESSION_WEBSOCKET_OPCODE_PING
+        runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_WEBSOCKET_OPCODE_PING
     ),
     WebSocketOpcode.PONG: (
-        runtime_web_session_pb2.RUNTIME_WEB_SESSION_WEBSOCKET_OPCODE_PONG
+        runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_WEBSOCKET_OPCODE_PONG
     ),
     WebSocketOpcode.CLOSE: (
-        runtime_web_session_pb2.RUNTIME_WEB_SESSION_WEBSOCKET_OPCODE_CLOSE
+        runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_WEBSOCKET_OPCODE_CLOSE
     ),
 }
 _PROTO_TO_WEBSOCKET_OPCODE = {
@@ -1612,12 +1622,12 @@ _PROTO_TO_WEBSOCKET_OPCODE = {
 
 def _websocket_opcode_proto(
     opcode: WebSocketOpcode,
-) -> runtime_web_session_pb2.RuntimeWebSessionWebSocketOpcode.ValueType:
+) -> runtime_stream_session_pb2.RuntimeStreamSessionWebSocketOpcode.ValueType:
     return _WEBSOCKET_OPCODE_TO_PROTO[opcode]
 
 
 def _websocket_opcode(
-    value: runtime_web_session_pb2.RuntimeWebSessionWebSocketOpcode.ValueType,
+    value: runtime_stream_session_pb2.RuntimeStreamSessionWebSocketOpcode.ValueType,
 ) -> WebSocketOpcode:
     try:
         return _PROTO_TO_WEBSOCKET_OPCODE[value]
@@ -1627,38 +1637,40 @@ def _websocket_opcode(
 
 _CLOSE_REASON_TO_PROTO: dict[
     CloseReason,
-    runtime_web_session_pb2.RuntimeWebSessionCloseReason.ValueType,
+    runtime_stream_session_pb2.RuntimeStreamSessionCloseReason.ValueType,
 ] = {
-    CloseReason.CALLER: runtime_web_session_pb2.RUNTIME_WEB_SESSION_CLOSE_REASON_CALLER,
+    CloseReason.CALLER: (
+        runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_CLOSE_REASON_CALLER
+    ),
     CloseReason.SERVICE_EXPIRED: (
-        runtime_web_session_pb2.RUNTIME_WEB_SESSION_CLOSE_REASON_SERVICE_EXPIRED
+        runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_CLOSE_REASON_SERVICE_EXPIRED
     ),
     CloseReason.AUTHORITY_REVOKED: (
-        runtime_web_session_pb2.RUNTIME_WEB_SESSION_CLOSE_REASON_AUTHORITY_REVOKED
+        runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_CLOSE_REASON_AUTHORITY_REVOKED
     ),
     CloseReason.GENERATION_REPLACED: (
-        runtime_web_session_pb2.RUNTIME_WEB_SESSION_CLOSE_REASON_GENERATION_REPLACED
+        runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_CLOSE_REASON_GENERATION_REPLACED
     ),
     CloseReason.DEADLINE: (
-        runtime_web_session_pb2.RUNTIME_WEB_SESSION_CLOSE_REASON_DEADLINE
+        runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_CLOSE_REASON_DEADLINE
     ),
     CloseReason.SERVICE_DRAIN: (
-        runtime_web_session_pb2.RUNTIME_WEB_SESSION_CLOSE_REASON_SERVICE_DRAIN
+        runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_CLOSE_REASON_SERVICE_DRAIN
     ),
     CloseReason.OWNER_LOST: (
-        runtime_web_session_pb2.RUNTIME_WEB_SESSION_CLOSE_REASON_OWNER_LOST
+        runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_CLOSE_REASON_OWNER_LOST
     ),
     CloseReason.PROTOCOL_VIOLATION: (
-        runtime_web_session_pb2.RUNTIME_WEB_SESSION_CLOSE_REASON_PROTOCOL_VIOLATION
+        runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_CLOSE_REASON_PROTOCOL_VIOLATION
     ),
     CloseReason.RESOURCE_EXHAUSTED: (
-        runtime_web_session_pb2.RUNTIME_WEB_SESSION_CLOSE_REASON_RESOURCE_EXHAUSTED
+        runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_CLOSE_REASON_RESOURCE_EXHAUSTED
     ),
     CloseReason.APPLICATION_UNAVAILABLE: (
-        runtime_web_session_pb2.RUNTIME_WEB_SESSION_CLOSE_REASON_APPLICATION_UNAVAILABLE
+        runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_CLOSE_REASON_APPLICATION_UNAVAILABLE
     ),
     CloseReason.TRANSPORT_UNAVAILABLE: (
-        runtime_web_session_pb2.RUNTIME_WEB_SESSION_CLOSE_REASON_TRANSPORT_UNAVAILABLE
+        runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_CLOSE_REASON_TRANSPORT_UNAVAILABLE
     ),
 }
 _PROTO_TO_CLOSE_REASON = {
@@ -1668,12 +1680,12 @@ _PROTO_TO_CLOSE_REASON = {
 
 def _close_reason_proto(
     reason: CloseReason,
-) -> runtime_web_session_pb2.RuntimeWebSessionCloseReason.ValueType:
+) -> runtime_stream_session_pb2.RuntimeStreamSessionCloseReason.ValueType:
     return _CLOSE_REASON_TO_PROTO[reason]
 
 
 def _close_reason(
-    value: runtime_web_session_pb2.RuntimeWebSessionCloseReason.ValueType,
+    value: runtime_stream_session_pb2.RuntimeStreamSessionCloseReason.ValueType,
 ) -> CloseReason:
     try:
         return _PROTO_TO_CLOSE_REASON[value]

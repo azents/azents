@@ -9,13 +9,13 @@ from typing import Protocol
 
 import grpc
 
-from azents_runtime_control.proto import runtime_web_session_pb2
+from azents_runtime_control.proto import runtime_stream_session_pb2
 
 _MAX_PENDING_ENVELOPES = 8
 _LOGGER = logging.getLogger(__name__)
 
 
-class RunnerWebResourceExhausted(RuntimeError):
+class RunnerStreamResourceExhausted(RuntimeError):
     """One process-local Runner Web hard-limit rejection."""
 
 
@@ -27,44 +27,44 @@ class _ClientState(enum.StrEnum):
     CLOSED = "closed"
 
 
-class RunnerWebSessionStream(Protocol):
+class RunnerStreamSessionStream(Protocol):
     """Generated persistent Runner session call surface."""
 
     def __call__(
         self,
         request_iterator: AsyncIterator[
-            runtime_web_session_pb2.RuntimeWebSessionEnvelope
+            runtime_stream_session_pb2.RuntimeStreamSessionEnvelope
         ],
         /,
         *,
         metadata: Sequence[tuple[str, str]] | None = None,
-    ) -> AsyncIterable[runtime_web_session_pb2.RuntimeWebSessionEnvelope]: ...
+    ) -> AsyncIterable[runtime_stream_session_pb2.RuntimeStreamSessionEnvelope]: ...
 
 
-class RunnerWebEnvelopeResources(Protocol):
+class RunnerStreamEnvelopeResources(Protocol):
     """Process-local resource accounting for the Runner outbound queue."""
 
     def try_reserve_envelope(
         self,
-        envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+        envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
     ) -> bool: ...
 
     def release_envelope(
         self,
-        envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+        envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
     ) -> None: ...
 
 
-class GrpcRunnerWebSessionClient:
+class GrpcRunnerStreamSessionClient:
     """Own one bounded persistent Runner-to-Owner gRPC session."""
 
     def __init__(
         self,
-        stream: RunnerWebSessionStream,
+        stream: RunnerStreamSessionStream,
         *,
         runner_auth_token: str,
         channel: grpc.aio.Channel | None,
-        outbound_resources: RunnerWebEnvelopeResources | None,
+        outbound_resources: RunnerStreamEnvelopeResources | None,
     ) -> None:
         if not runner_auth_token:
             raise ValueError("Runner authentication token must not be empty")
@@ -72,26 +72,27 @@ class GrpcRunnerWebSessionClient:
         self.channel = channel
         self.outbound_resources = outbound_resources
         self.metadata = (("authorization", f"Bearer {runner_auth_token}"),)
-        self.outbound: deque[runtime_web_session_pb2.RuntimeWebSessionEnvelope] = (
-            deque()
-        )
+        self.outbound: deque[
+            runtime_stream_session_pb2.RuntimeStreamSessionEnvelope
+        ] = deque()
         self.condition = asyncio.Condition()
         self.shutdown_lock = asyncio.Lock()
         self.activated = asyncio.Event()
         self.state = _ClientState.NEW
         self.receiver_task: asyncio.Task[None] | None = None
         self.accepted: (
-            asyncio.Future[runtime_web_session_pb2.RuntimeWebSessionEnvelope] | None
+            asyncio.Future[runtime_stream_session_pb2.RuntimeStreamSessionEnvelope]
+            | None
         ) = None
 
     async def start(
         self,
-        hello: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+        hello: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
         handler: "EnvelopeHandler",
         failure_handler: "FailureHandler",
         *,
         timeout_seconds: float,
-    ) -> runtime_web_session_pb2.RuntimeWebSessionEnvelope:
+    ) -> runtime_stream_session_pb2.RuntimeStreamSessionEnvelope:
         """Start and await the exact first session-accepted envelope."""
         if timeout_seconds <= 0:
             raise ValueError("Runner Web session timeout must be positive")
@@ -138,7 +139,7 @@ class GrpcRunnerWebSessionClient:
 
     async def send(
         self,
-        envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+        envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
     ) -> None:
         """Queue one bounded session envelope."""
         async with self.condition:
@@ -160,7 +161,7 @@ class GrpcRunnerWebSessionClient:
                 self.outbound_resources is not None
                 and not self.outbound_resources.try_reserve_envelope(envelope)
             ):
-                raise RunnerWebResourceExhausted(
+                raise RunnerStreamResourceExhausted(
                     "Runner Web outbound hard limit is exhausted"
                 )
             self.outbound.append(envelope)
@@ -172,8 +173,8 @@ class GrpcRunnerWebSessionClient:
 
     async def _outbound_messages(
         self,
-        hello: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
-    ) -> AsyncIterator[runtime_web_session_pb2.RuntimeWebSessionEnvelope]:
+        hello: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
+    ) -> AsyncIterator[runtime_stream_session_pb2.RuntimeStreamSessionEnvelope]:
         yield hello
         while True:
             async with self.condition:
@@ -190,7 +191,9 @@ class GrpcRunnerWebSessionClient:
 
     async def _receive(
         self,
-        responses: AsyncIterable[runtime_web_session_pb2.RuntimeWebSessionEnvelope],
+        responses: AsyncIterable[
+            runtime_stream_session_pb2.RuntimeStreamSessionEnvelope
+        ],
         handler: "EnvelopeHandler",
         failure_handler: "FailureHandler",
     ) -> None:
@@ -281,7 +284,7 @@ class EnvelopeHandler(Protocol):
 
     def __call__(
         self,
-        envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+        envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
         /,
     ) -> Awaitable[None]: ...
 

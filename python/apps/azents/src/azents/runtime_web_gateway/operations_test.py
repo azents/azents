@@ -3,8 +3,8 @@
 import asyncio
 
 import pytest
-from azents_runtime_control.runtime_web_session import (
-    RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+from azents_runtime_control.runtime_stream_session import (
+    RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
     CloseReason,
     StreamProtocol,
 )
@@ -96,7 +96,7 @@ def test_readiness_requires_authority_query_and_exact_replacement_fingerprint() 
     state.update_dependencies(
         evidence=RuntimeWebGatewayDependencyEvidence.from_observation(
             authority_query_succeeded=False,
-            control_protocol_fingerprints={RUNTIME_WEB_PROTOCOL_FINGERPRINT},
+            control_protocol_fingerprints={RUNTIME_STREAM_PROTOCOL_FINGERPRINT},
         ),
         redis_available=True,
     )
@@ -105,7 +105,7 @@ def test_readiness_requires_authority_query_and_exact_replacement_fingerprint() 
     state.update_dependencies(
         evidence=RuntimeWebGatewayDependencyEvidence.from_observation(
             authority_query_succeeded=True,
-            control_protocol_fingerprints={RUNTIME_WEB_PROTOCOL_FINGERPRINT},
+            control_protocol_fingerprints={RUNTIME_STREAM_PROTOCOL_FINGERPRINT},
         ),
         redis_available=False,
     )

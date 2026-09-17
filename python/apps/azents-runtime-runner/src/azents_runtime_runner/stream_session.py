@@ -9,13 +9,13 @@ from datetime import UTC, datetime
 
 import h11
 import httpcore
-from azents_runtime_control.grpc_runner_web_session_client import (
-    GrpcRunnerWebSessionClient,
+from azents_runtime_control.grpc_runner_stream_session_client import (
+    GrpcRunnerStreamSessionClient,
 )
-from azents_runtime_control.proto import runtime_web_session_pb2
-from azents_runtime_control.runtime_web_session import (
+from azents_runtime_control.proto import runtime_stream_session_pb2
+from azents_runtime_control.runtime_stream_session import (
     APPROVED_SESSION_PROFILE,
-    RUNTIME_WEB_PROTOCOL_FINGERPRINT,
+    RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
     OwnerSessionEpoch,
     RunnerSessionOffer,
     SessionPeerRole,
@@ -356,7 +356,7 @@ def _websocket_subprotocols(
     return protocols
 
 
-class RunnerWebSessionManager:
+class RunnerStreamSessionManager:
     """Own one inactive persistent Web session for the current Runner generation."""
 
     def __init__(
@@ -367,7 +367,7 @@ class RunnerWebSessionManager:
         accepted_desired_generation: Callable[[], int | None],
         accepted_generation: Callable[[], int | None],
         loopback: RunnerWebLoopbackPool,
-        client_factory: Callable[[], GrpcRunnerWebSessionClient],
+        client_factory: Callable[[], GrpcRunnerStreamSessionClient],
     ) -> None:
         if not runtime_id or not runner_boot_id:
             raise ValueError("Runtime and Runner identity are required")
@@ -377,7 +377,7 @@ class RunnerWebSessionManager:
         self.accepted_generation = accepted_generation
         self.loopback = loopback
         self.client_factory = client_factory
-        self.client: GrpcRunnerWebSessionClient | None = None
+        self.client: GrpcRunnerStreamSessionClient | None = None
         self.offer: RunnerSessionOffer | None = None
         self.consumed_offers: deque[tuple[OwnerSessionEpoch, str]] = deque(maxlen=64)
         self.consumed_offer_set: set[tuple[OwnerSessionEpoch, str]] = set()
@@ -387,7 +387,7 @@ class RunnerWebSessionManager:
         self,
         offer: RunnerSessionOffer,
         handler: Callable[
-            [runtime_web_session_pb2.RuntimeWebSessionEnvelope], Awaitable[None]
+            [runtime_stream_session_pb2.RuntimeStreamSessionEnvelope], Awaitable[None]
         ],
         failure_handler: Callable[[], Awaitable[None]],
     ) -> bool:
@@ -463,7 +463,7 @@ class RunnerWebSessionManager:
 
     async def _detach_failed_client(
         self,
-        client: GrpcRunnerWebSessionClient,
+        client: GrpcRunnerStreamSessionClient,
     ) -> None:
         """Drop only the exact failed session and its loopback generation."""
         async with self.lock:
@@ -510,7 +510,7 @@ class RunnerWebSessionManager:
             and generation is not None
             and offer.owner.runner_generation == generation
             and offer.deadline_at > datetime.now(UTC)
-            and offer.protocol_fingerprint == RUNTIME_WEB_PROTOCOL_FINGERPRINT
+            and offer.protocol_fingerprint == RUNTIME_STREAM_PROTOCOL_FINGERPRINT
         )
 
     def _remember_consumed(
@@ -527,10 +527,10 @@ class RunnerWebSessionManager:
 def _hello(
     offer: RunnerSessionOffer,
     runner_boot_id: str,
-) -> runtime_web_session_pb2.RuntimeWebSessionEnvelope:
+) -> runtime_stream_session_pb2.RuntimeStreamSessionEnvelope:
     owner = offer.owner
-    hello = runtime_web_session_pb2.RuntimeWebSessionHello(
-        role=runtime_web_session_pb2.RUNTIME_WEB_SESSION_PEER_ROLE_RUNNER,
+    hello = runtime_stream_session_pb2.RuntimeStreamSessionHello(
+        role=runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_PEER_ROLE_RUNNER,
         runtime_id=owner.runtime_id,
         desired_generation=owner.desired_generation,
         runner_generation=owner.runner_generation,
@@ -550,7 +550,7 @@ def _hello(
         ),
     )
     hello.deadline_at.FromDatetime(offer.deadline_at)
-    return runtime_web_session_pb2.RuntimeWebSessionEnvelope(
+    return runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(
         protocol_fingerprint=offer.protocol_fingerprint,
         session_id=owner.session_lease_id,
         peer_boot_id=runner_boot_id,
@@ -562,7 +562,7 @@ def _hello(
 
 
 def _accepted_profile(
-    envelope: runtime_web_session_pb2.RuntimeWebSessionEnvelope,
+    envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
     *,
     maximum_data_frame_bytes: int,
 ) -> SessionProfile:

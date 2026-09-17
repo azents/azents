@@ -34,7 +34,7 @@ from azents_runtime_control.runner import (
     RuntimeRunnerEventType,
 )
 from azents_runtime_control.runtime_configuration import RuntimeConfigurationEvidence
-from azents_runtime_control.runtime_web_session import (
+from azents_runtime_control.runtime_stream_session import (
     CloseReason,
     StreamDirection,
     StreamProtocol,

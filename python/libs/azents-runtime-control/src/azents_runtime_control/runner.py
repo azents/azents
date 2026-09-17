@@ -24,7 +24,7 @@ from azents_runtime_control.runtime_configuration import (
     RuntimeConfigurationEvidence,
     validate_runtime_configuration_evidence,
 )
-from azents_runtime_control.runtime_web_session import RunnerSessionOfferHandler
+from azents_runtime_control.runtime_stream_session import RunnerSessionOfferHandler
 from azents_runtime_control.system_metrics import (
     CollectedRunnerSystemMetrics,
     RunnerSystemMetricsReport,
@@ -218,7 +218,7 @@ class RunnerControlClient(Protocol):
         """Set the direct metadata-only Terminal termination handler."""
         ...
 
-    def set_web_session_offer_handler(
+    def set_stream_session_offer_handler(
         self,
         handler: RunnerSessionOfferHandler,
     ) -> None:
