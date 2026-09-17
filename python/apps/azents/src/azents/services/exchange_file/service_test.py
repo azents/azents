@@ -6,7 +6,7 @@ from collections.abc import AsyncGenerator, Sequence
 from contextlib import asynccontextmanager
 from io import BytesIO
 from types import SimpleNamespace
-from typing import Any, NamedTuple, cast
+from typing import Any, NamedTuple
 from unittest.mock import AsyncMock
 
 import pytest
@@ -36,6 +36,7 @@ from azents.core.enums import (
 )
 from azents.repos.agent.data import Agent
 from azents.repos.agent_session.data import AgentSession, SessionAgent
+from azents.repos.exchange_file import ExchangeFileRepository
 from azents.repos.exchange_file.data import (
     ExchangeFile,
     ExchangeFileClaimError,
@@ -72,7 +73,7 @@ from . import (
 _NOW = datetime.datetime.now(datetime.timezone.utc)
 
 
-class _FakeExchangeFileRepository:
+class _FakeExchangeFileRepository(ExchangeFileRepository):
     """ExchangeFile repository for tests."""
 
     def __init__(self) -> None:
@@ -457,6 +458,7 @@ class _AuthorityExchangeFileService(ExchangeFileService):
     """Exchange service with explicit authority outcomes for publication tests."""
 
     authority_results: list[bool]
+    recovery_read: AsyncMock
 
     async def _has_valid_resource_authority(
         self,
@@ -587,7 +589,7 @@ def _make_service(
     session_boundary = _SessionBoundary()
     s3_service = _FakeS3Service(session_boundary)
     operation_repository = ExchangeFileOperationRepository(
-        exchange_file_repository=cast(Any, exchange_file_repository),
+        exchange_file_repository=exchange_file_repository,
         agent_repository=agent_repository,
         agent_session_repository=agent_session_repository,
         agent_run_repository=AsyncMock(),
@@ -624,6 +626,9 @@ def _make_authority_service(
         workspace_user=_make_workspace_user()
     )
     operations = AsyncMock(spec=ExchangeFileOperationRepository)
+    recovery_read = AsyncMock(
+        side_effect=lambda *, file_id: repository.files.get(file_id)
+    )
 
     async def load_verified_publication(
         *,
@@ -648,9 +653,7 @@ def _make_authority_service(
         return Success(created)
 
     operations.load_verified_publication.side_effect = load_verified_publication
-    operations.load_publication_for_recovery.side_effect = lambda *, file_id: (
-        repository.files.get(file_id)
-    )
+    operations.load_publication_for_recovery = recovery_read
     operations.finalize_authority_create.side_effect = finalize_authority_create
     authority_service = _AuthorityExchangeFileService(
         operation_repository=operations,
@@ -661,6 +664,7 @@ def _make_authority_service(
         config=service.config,
     )
     authority_service.authority_results = authority_results
+    authority_service.recovery_read = recovery_read
     return _AuthorityExchangeFileServiceFixture(
         service=authority_service, repository=repository, s3_service=s3_service
     )
@@ -941,10 +945,7 @@ async def test_uncertain_recovery_read_retains_verified_preview() -> None:
     service, repository, s3_service = _make_authority_service(
         authority_results=[True, False]
     )
-    cast(
-        AsyncMock,
-        service.operation_repository.load_publication_for_recovery,
-    ).side_effect = SQLAlchemyError("recovery read failed")
+    service.recovery_read.side_effect = SQLAlchemyError("recovery read failed")
     source = S3ObjectIdentity(bucket="transfer-bucket", key="verified-image")
     body = _jpeg_bytes()
     s3_service.objects[source.key] = body
