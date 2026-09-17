@@ -45,7 +45,14 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-export const Desktop = {} satisfies Story;
+export const Desktop = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByText("Session panel").parentElement).toHaveStyle({
+      height: rem(59),
+    });
+  },
+} satisfies Story;
 export const ServicesDesktop = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
@@ -61,6 +68,9 @@ export const Mobile = {
   args: { mobile: true },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
+    await expect(canvas.getByText("Session panel").parentElement).toHaveStyle({
+      height: rem(40),
+    });
     const files = canvas.getByRole("tab", { name: "files" });
     await userEvent.click(files);
     await userEvent.keyboard("{End}");

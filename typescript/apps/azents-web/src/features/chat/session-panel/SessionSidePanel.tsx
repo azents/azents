@@ -55,8 +55,9 @@ export function SessionSidePanelPresentation({
   return (
     <Box className={classes.panel} aria-label={title}>
       <Group
+        data-session-panel-header
         px="sm"
-        h={rem(40)}
+        h={mobile ? rem(40) : rem(59)}
         justify="space-between"
         wrap="nowrap"
         style={{
