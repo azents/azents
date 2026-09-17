@@ -165,6 +165,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Introduce system Docker Sandbox Provider Historical Requirements Reconstruction](requirements/docker-260523-docker-sandbox.md) | docker-260523 | 2026-05-23 | 2026-05-23 |
 | [Complete Runtime Docker Access Requirements](requirements/docker-260728-runtime-docker-access.md) | docker-260728 | 2026-07-28 | 2026-07-28 |
 | [Use Documented OpenAI Responses Terminal Discriminators Historical Requirements Reconstruction](requirements/documented-260716-documented-openai-responses-terminal-discriminators.md) | documented-260716 | 2026-07-16 | - |
+| [Runtime HTTP File Download Streaming Requirements](requirements/download-260917-runtime-http-file-download-streaming.md) | download-260917 | 2026-09-17 | - |
 | [Draft Agent Session First Message Creation Historical Requirements Reconstruction](requirements/draft-260628-draft-message.md) | draft-260628 | 2026-06-28 | - |
 | [Drain Input Buffers Sequentially Before Turn Start Historical Requirements Reconstruction](requirements/drain-260712-drain-input-buffers-before-turn-start.md) | drain-260712 | 2026-07-12 | - |
 | [Remove Dormant stdio MCP Sidecar Historical Requirements Reconstruction](requirements/drop-260512-drop-dormant-stdio-mcp-sidecar.md) | drop-260512 | 2026-05-12 | - |
@@ -605,6 +606,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Introduce system Docker Sandbox Provider](adr/docker-260523-docker-sandbox.md)
 - [Complete Runtime Docker Access](adr/docker-260728-runtime-docker-access.md)
 - [Use Documented OpenAI Responses Terminal Discriminators](adr/documented-260716-documented-openai-responses-terminal-discriminators.md)
+- [Runtime HTTP File Download Streaming Decisions](adr/download-260917-runtime-http-file-download-streaming.md)
 - [Draft Agent Session First Message Creation Historical Decision Reconstruction](adr/draft-260628-draft-message.md)
 - [Drain Input Buffers Sequentially Before Turn Start](adr/drain-260712-drain-input-buffers-before-turn-start.md)
 - [Remove Dormant stdio MCP Sidecar](adr/drop-260512-drop-dormant-stdio-mcp-sidecar.md)
