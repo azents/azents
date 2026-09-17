@@ -12,7 +12,8 @@ from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from contextlib import AsyncExitStack, asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, Literal, Protocol
+from typing import Any, Literal, Protocol, cast
+from urllib.parse import urlsplit
 
 import aioboto3
 import boto3
@@ -115,6 +116,9 @@ from azents.runtime.control_protocol.grpc.state_sinks import (
 from azents.runtime.control_protocol.grpc.transfer_coordinator_server import (
     add_runtime_transfer_coordinator_servicer,
 )
+from azents.runtime.control_protocol.grpc.workspace_upload_server import (
+    add_runtime_workspace_upload_coordinator_servicer,
+)
 from azents.runtime.control_protocol.reconciler import (
     RuntimeLifecycleDispatchConfig,
     RuntimeLifecycleReconciler,
@@ -167,6 +171,27 @@ from azents.runtime.transfer.object_store import (
 )
 from azents.runtime.transfer.result_coordinator import (
     RuntimeRunnerTransferResultCoordinator,
+)
+from azents.runtime.transfer.workspace_upload import (
+    WORKSPACE_UPLOAD_MAXIMUM_AGE,
+    WorkspaceUploadConfig,
+)
+from azents.runtime.transfer.workspace_upload_coordinator import (
+    WorkspaceUploadCoordinator,
+)
+from azents.runtime.transfer.workspace_upload_memory import (
+    InMemoryWorkspaceUploadStore,
+)
+from azents.runtime.transfer.workspace_upload_object import (
+    WorkspaceUploadObjectOrphanRepair,
+    WorkspaceUploadObjectStore,
+)
+from azents.runtime.transfer.workspace_upload_reconciliation import (
+    WorkspaceUploadRuntimeReconciliationHandler,
+)
+from azents.runtime.transfer.workspace_upload_redis import (
+    RedisWorkspaceUploadStore,
+    _RedisClient,
 )
 from azents.services.runtime_connection_registration.service import (
     RuntimeProviderConnectionRegistrationService,
@@ -603,7 +628,28 @@ class RuntimeControlSettings(BaseSettings):
     runtime_control_transfer_coordinator_credential_lifetime_seconds: float = 30.0
     runtime_control_workspace_s3_bucket: str = ""
     runtime_control_workspace_s3_prefix: str = "v1"
+    runtime_control_workspace_upload_backend: Literal["memory", "redis"] = "redis"
+    runtime_control_workspace_upload_redis_namespace: str = (
+        "azents:runtime:workspace-upload:v1"
+    )
+    runtime_control_workspace_upload_maximum_file_size: int = 128 * 1024 * 1024
+    runtime_control_workspace_upload_maximum_active_uploads_per_requester_agent: int = 4
+    runtime_control_workspace_upload_maximum_active_bytes_per_requester_agent: int = (
+        256 * 1024 * 1024
+    )
+    runtime_control_workspace_upload_maximum_active_uploads: int = 32
+    runtime_control_workspace_upload_maximum_active_bytes: int = 2 * 1024 * 1024 * 1024
+    runtime_control_workspace_upload_ingress_lease_seconds: float = 60.0
+    runtime_control_workspace_upload_reconciliation_lease_seconds: float = 60.0
+    runtime_control_workspace_upload_cleanup_lease_seconds: float = 60.0
+    runtime_control_workspace_upload_ttl_seconds: float = 3600.0
+    runtime_control_workspace_upload_terminal_ttl_seconds: float = 300.0
+    runtime_control_workspace_upload_list_page_size: int = 100
+    runtime_control_workspace_upload_status_poll_interval_seconds: float = 1.0
+    runtime_control_workspace_upload_repair_interval_seconds: float = 5.0
     runtime_control_workspace_s3_endpoint_url: str | None = None
+    runtime_control_workspace_s3_public_endpoint_url: str | None = None
+    runtime_control_workspace_s3_cors_origins: str | None = None
     runtime_control_workspace_s3_access_key_id: str | None = None
     runtime_control_workspace_s3_secret_access_key: str | None = None
     runtime_control_allow_insecure: bool
@@ -690,6 +736,7 @@ async def runtime_control_server_lifespan(
 ) -> AsyncGenerator[grpc.aio.Server]:
     """Manage runtime-control gRPC server resources."""
     validate_runtime_control_transfer_settings(settings)
+    validate_runtime_control_workspace_upload_settings(settings)
     validate_runtime_control_web_settings(settings)
     redis = create_redis_client(settings.redis_url)
     coordination_store = RedisRuntimeCoordinationStore(redis)
@@ -713,6 +760,64 @@ async def runtime_control_server_lifespan(
         coordination_store=coordination_store,
         cleanup=transfer_cleanup,
         clock=clock,
+    )
+    workspace_upload_config = _workspace_upload_config(settings)
+    workspace_upload_store = (
+        RedisWorkspaceUploadStore(
+            redis=cast(_RedisClient, redis),
+            config=workspace_upload_config,
+            clock=clock,
+            namespace=settings.runtime_control_workspace_upload_redis_namespace,
+        )
+        if settings.runtime_control_workspace_upload_backend == "redis"
+        else InMemoryWorkspaceUploadStore(
+            config=workspace_upload_config,
+            clock=clock,
+        )
+    )
+    workspace_upload_object_store = WorkspaceUploadObjectStore(
+        s3_service=transfer_s3,
+        bucket=settings.runtime_control_workspace_s3_bucket,
+        ingress_object_prefix=_workspace_upload_object_prefix(
+            settings,
+            "workspace-upload-ingress",
+        ),
+        source_object_prefix=_workspace_upload_object_prefix(
+            settings,
+            "workspace-upload-sources",
+        ),
+        ticket_ttl=min(
+            workspace_upload_config.upload_ttl,
+            timedelta(minutes=15),
+        ),
+        multipart_copy_threshold=settings.runtime_control_transfer_multipart_part_bytes,
+        multipart_part_size=settings.runtime_control_transfer_multipart_part_bytes,
+        clock=clock,
+    )
+    workspace_upload_handler = WorkspaceUploadRuntimeReconciliationHandler(
+        store=workspace_upload_store,
+        object_store=workspace_upload_object_store,
+        transfer_coordinator=transfer_coordinator,
+        product_maximum_size=workspace_upload_config.maximum_file_size,
+        provider_maximum_size=workspace_upload_config.maximum_file_size,
+        status_poll_interval=timedelta(
+            seconds=settings.runtime_control_workspace_upload_status_poll_interval_seconds
+        ),
+        clock=clock,
+    )
+    workspace_upload_coordinator = WorkspaceUploadCoordinator(
+        store=workspace_upload_store,
+        object_store=workspace_upload_object_store,
+        reconciliation_handler=workspace_upload_handler,
+        ingress_handle_factory=lambda: uuid.uuid4().hex,
+        source_handle_factory=lambda: uuid.uuid4().hex,
+        claim_id_factory=lambda: uuid.uuid4().hex,
+        clock=clock,
+        terminal_ttl=workspace_upload_config.terminal_ttl,
+    )
+    workspace_upload_object_orphan_repair = WorkspaceUploadObjectOrphanRepair(
+        object_store=workspace_upload_object_store,
+        live_object_handles=workspace_upload_store.list_object_handles,
     )
     terminal_coordination = RedisRuntimeTerminalCoordinationStore(redis)
     runner_generation_observer = CompositeRuntimeRunnerGenerationObserver(
@@ -1002,6 +1107,20 @@ async def runtime_control_server_lifespan(
         ),
         name="runtime-transfer-repair",
     )
+    stop_workspace_upload_repair = asyncio.Event()
+    workspace_upload_repair_task = asyncio.create_task(
+        _run_workspace_upload_repair(
+            workspace_upload_coordinator,
+            object_orphan_repair=workspace_upload_object_orphan_repair,
+            clock=clock,
+            stop=stop_workspace_upload_repair,
+            interval_seconds=(
+                settings.runtime_control_workspace_upload_repair_interval_seconds
+            ),
+            page_size=settings.runtime_control_workspace_upload_list_page_size,
+        ),
+        name="runtime-workspace-upload-repair",
+    )
     stop_terminal_repair = asyncio.Event()
     terminal_repair_task = asyncio.create_task(
         _run_terminal_repair(
@@ -1094,6 +1213,7 @@ async def runtime_control_server_lifespan(
         state_store=transfer_state,
         coordination_store=coordination_store,
         object_store=transfer_s3,
+        direct_object_store=workspace_upload_object_store,
         terminal_sink=transfer_coordinator,
         bucket=settings.runtime_control_workspace_s3_bucket,
         object_prefix=_transfer_object_prefix(settings),
@@ -1110,6 +1230,13 @@ async def runtime_control_server_lifespan(
     add_runtime_transfer_coordinator_servicer(
         server,
         coordinator=transfer_coordinator,
+        credential_auth=RuntimeTransferCoordinatorCredentialGrpcAuth(
+            coordinator_credential_verifier
+        ),
+    )
+    add_runtime_workspace_upload_coordinator_servicer(
+        server,
+        coordinator=workspace_upload_coordinator,
         credential_auth=RuntimeTransferCoordinatorCredentialGrpcAuth(
             coordinator_credential_verifier
         ),
@@ -1185,9 +1312,11 @@ async def runtime_control_server_lifespan(
     finally:
         stop_reconciler.set()
         stop_transfer_repair.set()
+        stop_workspace_upload_repair.set()
         stop_terminal_repair.set()
         reconciler_task.cancel()
         transfer_repair_task.cancel()
+        workspace_upload_repair_task.cancel()
         terminal_repair_task.cancel()
         try:
             await reconciler_task
@@ -1195,6 +1324,10 @@ async def runtime_control_server_lifespan(
             pass
         try:
             await transfer_repair_task
+        except asyncio.CancelledError:
+            pass
+        try:
+            await workspace_upload_repair_task
         except asyncio.CancelledError:
             pass
         try:
@@ -1309,6 +1442,69 @@ async def _run_transfer_repair(
             continue
 
 
+async def _run_workspace_upload_repair(
+    coordinator: WorkspaceUploadCoordinator,
+    *,
+    object_orphan_repair: WorkspaceUploadObjectOrphanRepair,
+    clock: Callable[[], datetime],
+    stop: asyncio.Event,
+    interval_seconds: float,
+    page_size: int,
+) -> None:
+    """Run bounded Workspace upload delivery, cleanup, and orphan repair."""
+    if interval_seconds <= 0:
+        raise ValueError("Workspace upload repair interval must be positive")
+    if page_size <= 0:
+        raise ValueError("Workspace upload repair page size must be positive")
+    reconciliation_cursor: str | None = None
+    cleanup_cursor: str | None = None
+    while not stop.is_set():
+        try:
+            result = await coordinator.reconcile(
+                reconciliation_cursor=reconciliation_cursor,
+                cleanup_cursor=cleanup_cursor,
+                limit=page_size,
+            )
+            reconciliation_cursor = result.reconciliation_page.cursor
+            cleanup_cursor = result.cleanup_page.cursor
+            orphans = await object_orphan_repair.repair_orphans(
+                now=clock(),
+                maximum_age=WORKSPACE_UPLOAD_MAXIMUM_AGE,
+                page_size=page_size,
+            )
+            if (
+                result.reconciled
+                or result.cleaned
+                or result.cleanup_failures
+                or result.purged_terminal
+                or orphans.observed
+            ):
+                _LOGGER.info(
+                    "Workspace upload repair observed records",
+                    extra={
+                        "reconciled": result.reconciled,
+                        "cleaned": result.cleaned,
+                        "cleanup_failures": result.cleanup_failures,
+                        "purged_terminal": result.purged_terminal,
+                        "source_listed_objects": orphans.listed_objects,
+                        "source_deleted_objects": orphans.deleted_objects,
+                        "source_listed_multipart_uploads": (
+                            orphans.listed_multipart_uploads
+                        ),
+                        "source_aborted_multipart_uploads": (
+                            orphans.aborted_multipart_uploads
+                        ),
+                        "source_failed_cleanups": orphans.failed_cleanups,
+                    },
+                )
+        except Exception:
+            _LOGGER.exception("Workspace upload repair iteration failed")
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=interval_seconds)
+        except TimeoutError:
+            continue
+
+
 async def _run_terminal_repair(
     coordination: RuntimeTerminalCoordinationStore,
     *,
@@ -1406,21 +1602,42 @@ async def _runtime_transfer_s3_service(
     bucket = settings.runtime_control_workspace_s3_bucket
     if not bucket:
         raise ValueError("Runtime Control workspace S3 bucket is required")
-    client_kwargs: dict[str, Any] = {}
-    if settings.runtime_control_workspace_s3_endpoint_url is not None:
-        client_kwargs["endpoint_url"] = (
-            settings.runtime_control_workspace_s3_endpoint_url
-        )
     access_key_id = settings.runtime_control_workspace_s3_access_key_id
     secret_access_key = settings.runtime_control_workspace_s3_secret_access_key
     if (access_key_id is None) != (secret_access_key is None):
         raise ValueError("Runtime Control S3 credentials must be configured together")
+    base_client_kwargs: dict[str, Any] = {}
     if access_key_id is not None and secret_access_key is not None:
-        client_kwargs["aws_access_key_id"] = access_key_id
-        client_kwargs["aws_secret_access_key"] = secret_access_key
+        base_client_kwargs["aws_access_key_id"] = access_key_id
+        base_client_kwargs["aws_secret_access_key"] = secret_access_key
     session = aioboto3.Session()
-    async with session.client("s3", **client_kwargs) as client:
-        yield S3Service(s3_client=client)
+    async with AsyncExitStack() as stack:
+        internal_endpoint = settings.runtime_control_workspace_s3_endpoint_url
+        internal_kwargs = dict(base_client_kwargs)
+        if internal_endpoint is not None:
+            internal_kwargs["endpoint_url"] = internal_endpoint
+        client = await stack.enter_async_context(
+            session.client("s3", **internal_kwargs)
+        )
+
+        public_endpoint = settings.runtime_control_workspace_s3_public_endpoint_url
+        public_client = client
+        if public_endpoint is not None and public_endpoint != internal_endpoint:
+            public_kwargs = dict(base_client_kwargs)
+            public_kwargs["endpoint_url"] = public_endpoint
+            public_client = await stack.enter_async_context(
+                session.client("s3", **public_kwargs)
+            )
+        service = S3Service(s3_client=client, public_s3_client=public_client)
+        await service.validate_workspace_upload_readiness(
+            bucket=bucket,
+            cors_origins=_workspace_s3_cors_origins(settings),
+            probe_prefix=_workspace_upload_object_prefix(
+                settings,
+                "workspace-upload-readiness",
+            ),
+        )
+        yield service
 
 
 def _transfer_object_prefix(settings: RuntimeControlSettings) -> str:
@@ -1435,6 +1652,24 @@ def _transfer_object_prefix(settings: RuntimeControlSettings) -> str:
     )
     if not prefix:
         raise ValueError("Runtime transfer object prefix is required")
+    return prefix
+
+
+def _workspace_upload_object_prefix(
+    settings: RuntimeControlSettings,
+    suffix: str,
+) -> str:
+    """Return one internal namespace for opaque Workspace upload objects."""
+    prefix = "/".join(
+        value.strip("/")
+        for value in (
+            settings.runtime_control_workspace_s3_prefix,
+            suffix,
+        )
+        if value.strip("/")
+    )
+    if not prefix:
+        raise ValueError("Workspace upload object prefix is required")
     return prefix
 
 
@@ -1498,6 +1733,139 @@ def validate_runtime_control_transfer_settings(
     ) * settings.runtime_control_transfer_chunk_bytes
     if concurrent_buffers > _MAX_TRANSFER_PROCESS_BUFFER_BYTES:
         raise ValueError("Runtime transfer process buffers exceed the configured bound")
+
+
+def _workspace_upload_config(
+    settings: RuntimeControlSettings,
+) -> WorkspaceUploadConfig:
+    """Build the bounded Workspace upload metadata configuration."""
+    return WorkspaceUploadConfig(
+        maximum_file_size=settings.runtime_control_workspace_upload_maximum_file_size,
+        maximum_active_uploads_per_requester_agent=(
+            settings.runtime_control_workspace_upload_maximum_active_uploads_per_requester_agent
+        ),
+        maximum_active_bytes_per_requester_agent=(
+            settings.runtime_control_workspace_upload_maximum_active_bytes_per_requester_agent
+        ),
+        maximum_active_uploads=(
+            settings.runtime_control_workspace_upload_maximum_active_uploads
+        ),
+        maximum_active_bytes=(
+            settings.runtime_control_workspace_upload_maximum_active_bytes
+        ),
+        ingress_lease=timedelta(
+            seconds=settings.runtime_control_workspace_upload_ingress_lease_seconds
+        ),
+        reconciliation_lease=timedelta(
+            seconds=settings.runtime_control_workspace_upload_reconciliation_lease_seconds
+        ),
+        cleanup_lease=timedelta(
+            seconds=settings.runtime_control_workspace_upload_cleanup_lease_seconds
+        ),
+        upload_ttl=timedelta(
+            seconds=settings.runtime_control_workspace_upload_ttl_seconds
+        ),
+        terminal_ttl=timedelta(
+            seconds=settings.runtime_control_workspace_upload_terminal_ttl_seconds
+        ),
+        list_page_size=settings.runtime_control_workspace_upload_list_page_size,
+    )
+
+
+def validate_runtime_control_workspace_upload_settings(
+    settings: RuntimeControlSettings,
+) -> None:
+    """Reject unsafe or ambiguous Workspace upload deployment settings."""
+    _workspace_upload_config(settings)
+    if not settings.runtime_control_workspace_s3_bucket.strip():
+        raise ValueError("Runtime Control workspace S3 bucket is required")
+    _validate_workspace_s3_public_endpoint(settings)
+    _workspace_s3_cors_origins(settings)
+    if not settings.runtime_control_workspace_upload_redis_namespace.strip():
+        raise ValueError("Workspace upload Redis namespace is required")
+    if settings.runtime_control_workspace_upload_status_poll_interval_seconds <= 0:
+        raise ValueError("Workspace upload status poll interval must be positive")
+    if settings.runtime_control_workspace_upload_repair_interval_seconds <= 0:
+        raise ValueError("Workspace upload repair interval must be positive")
+
+
+def _workspace_s3_cors_origins(
+    settings: RuntimeControlSettings,
+) -> tuple[str, ...]:
+    """Parse exact browser origins required by the bucket CORS contract."""
+    raw = settings.runtime_control_workspace_s3_cors_origins
+    origins = tuple(
+        value.strip()
+        for value in (raw.split(",") if raw is not None else ())
+        if value.strip()
+    )
+    if not origins:
+        raise ValueError(
+            "Runtime Control workspace S3 CORS origins are required when "
+            "Workspace Upload storage is configured"
+        )
+    if len(set(origins)) != len(origins):
+        raise ValueError("Runtime Control workspace S3 CORS origins must be unique")
+    for origin in origins:
+        parsed = urlsplit(origin)
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.path not in {"", "/"}
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ValueError(
+                "Runtime Control workspace S3 CORS origins must be exact "
+                "HTTP(S) origins"
+            )
+        try:
+            if parsed.port is not None and not 1 <= parsed.port <= 65_535:
+                raise ValueError
+        except ValueError as exc:
+            raise ValueError(
+                "Runtime Control workspace S3 CORS origin port is invalid"
+            ) from exc
+    return origins
+
+
+def _validate_workspace_s3_public_endpoint(
+    settings: RuntimeControlSettings,
+) -> None:
+    """Require one reachable, non-ambiguous public presigning endpoint."""
+    value = settings.runtime_control_workspace_s3_public_endpoint_url
+    if value is None or not value.strip():
+        raise ValueError(
+            "Runtime Control workspace S3 public endpoint is required when "
+            "Workspace Upload storage is configured"
+        )
+    parsed = urlsplit(value)
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.netloc
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ValueError(
+            "Runtime Control workspace S3 public endpoint must be an absolute "
+            "HTTP(S) URL without credentials, query, or fragment"
+        )
+    try:
+        if parsed.port is not None and not 1 <= parsed.port <= 65_535:
+            raise ValueError
+    except ValueError as exc:
+        raise ValueError(
+            "Runtime Control workspace S3 public endpoint port is invalid"
+        ) from exc
+    if settings.runtime_env is RuntimeEnvironment.DEPLOYED and parsed.scheme != "https":
+        raise ValueError(
+            "Runtime Control workspace S3 public endpoint must use HTTPS when deployed"
+        )
 
 
 def validate_runtime_control_web_settings(

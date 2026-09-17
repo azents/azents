@@ -858,6 +858,21 @@ def s3_bucket_name(
         aws_secret_access_key=rustfs_secret_key,
     )
     s3_client.create_bucket(Bucket=bucket_name)
+    s3_client.put_bucket_cors(
+        Bucket=bucket_name,
+        CORSConfiguration={
+            "CORSRules": [
+                {
+                    "AllowedOrigins": [
+                        "https://azents-web-gateway:8443",
+                        "https://web.runtime-e2e.test",
+                    ],
+                    "AllowedMethods": ["PUT"],
+                    "AllowedHeaders": ["content-type", "x-amz-checksum-sha256"],
+                }
+            ]
+        },
+    )
 
     yield bucket_name
 
@@ -1859,7 +1874,8 @@ def azents_runtime_control_container(
         system_bootstrap_setup_token,
     )
     container = (
-        container.with_env("AZ_RUNTIME_CONTROL_PORT", "8030")
+        container.with_env("AZ_RUNTIME_ENV", "local")
+        .with_env("AZ_RUNTIME_CONTROL_PORT", "8030")
         .with_env("AZ_RUNTIME_CONTROL_ALLOW_INSECURE", "true")
         .with_env("AZ_RUNTIME_CONTROL_WEB_TRANSPORT_ENABLED", "true")
         .with_env("AZ_RUNTIME_CONTROL_TRUSTED_PORT", "8032")
@@ -1922,6 +1938,14 @@ def azents_runtime_control_container(
         .with_env("AZ_RUNTIME_CONTROL_WORKSPACE_S3_BUCKET", s3_bucket_name)
         .with_env("AZ_RUNTIME_CONTROL_WORKSPACE_S3_PREFIX", "v1")
         .with_env("AZ_RUNTIME_CONTROL_WORKSPACE_S3_ENDPOINT_URL", "http://rustfs:9000")
+        .with_env(
+            "AZ_RUNTIME_CONTROL_WORKSPACE_S3_PUBLIC_ENDPOINT_URL",
+            "http://rustfs:9000",
+        )
+        .with_env(
+            "AZ_RUNTIME_CONTROL_WORKSPACE_S3_CORS_ORIGINS",
+            _MAIN_WEB_BROWSER_URL,
+        )
         .with_env("AZ_RUNTIME_CONTROL_WORKSPACE_S3_ACCESS_KEY_ID", rustfs_access_key)
         .with_env(
             "AZ_RUNTIME_CONTROL_WORKSPACE_S3_SECRET_ACCESS_KEY",

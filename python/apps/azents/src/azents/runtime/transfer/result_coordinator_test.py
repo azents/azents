@@ -642,6 +642,7 @@ def _admission(direction: RuntimeTransferDirection) -> RuntimeTransferAdmission:
         agent_id=None,
         runtime_path="/workspace/file",
         overwrite=False,
+        conflict_precondition=None,
         expected_size=3,
         expected_sha256=_DIGEST,
         product_maximum_size=10,
@@ -676,6 +677,8 @@ def _result(
         sha256=sha256,
         destination_committed=committed,
         failure=failure,
+        conflict_precondition=None,
+        destination_conflict=None,
     )
 
 

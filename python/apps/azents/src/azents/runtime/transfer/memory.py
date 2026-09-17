@@ -16,6 +16,7 @@ from azents.runtime.transfer.data import (
     RuntimeTransferCleanupFailureEvidence,
     RuntimeTransferCleanupStatus,
     RuntimeTransferConfig,
+    RuntimeTransferDestinationConflictEvidence,
     RuntimeTransferDirection,
     RuntimeTransferDispatchStatus,
     RuntimeTransferFailure,
@@ -26,6 +27,7 @@ from azents.runtime.transfer.data import (
     RuntimeTransferPreparationCleanupState,
     RuntimeTransferProgress,
     RuntimeTransferRecord,
+    RuntimeTransferSourceTransport,
     cancellation_settlement,
     logical_expiry,
     terminal_expiry,
@@ -112,6 +114,7 @@ class InMemoryRuntimeTransferStateStore:
                 cleanup_status=RuntimeTransferCleanupStatus.NOT_REQUIRED,
                 cleanup_failure=None,
                 failure=None,
+                destination_conflict=None,
             )
             self.records[key] = record
             self.current_attempts[admission.transfer_id] = admission.attempt_id
@@ -142,6 +145,31 @@ class InMemoryRuntimeTransferStateStore:
             runtime_id=runtime_id,
             generation=desired_generation,
             object=object,
+        )
+
+    async def mark_ready_direct(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        runtime_id: str,
+        desired_generation: int,
+        expected_revision: int,
+        source_handle: str,
+        size: int,
+        sha256: str,
+    ) -> RuntimeTransferRecord | None:
+        """Move a direct-object download attempt to READY without copying bytes."""
+        return await self._move(
+            transfer_id,
+            attempt_id,
+            expected_revision,
+            RuntimeTransferPhase.PREPARING,
+            RuntimeTransferPhase.READY,
+            runtime_id=runtime_id,
+            generation=desired_generation,
+            object=None,
+            direct_source=(source_handle, size, sha256),
         )
 
     async def register_preparation_cleanup(
@@ -351,6 +379,73 @@ class InMemoryRuntimeTransferStateStore:
                     revision=record.revision + 1,
                     updated_at=now,
                     dispatch_status=RuntimeTransferDispatchStatus.ENQUEUED,
+                    stream_claim_id=claim_id,
+                    stream_owner_replica_id=owner_replica_id,
+                    stream_lease_expires_at=now + self.config.stream_lease,
+                )
+            )
+
+    async def claim_direct_object(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        runtime_id: str,
+        desired_generation: int,
+        accepted_runner_generation: int,
+        claim_id: str,
+        owner_replica_id: str,
+    ) -> RuntimeTransferRecord | None:
+        """Claim or reuse one exact direct-object download claim."""
+        now = self._now()
+        async with self.lock:
+            self._expire(now)
+            record = self._exact(transfer_id, attempt_id)
+            if (
+                record is None
+                or self.current_attempts.get(transfer_id) != attempt_id
+                or record.admission.source_transport
+                is not RuntimeTransferSourceTransport.DIRECT_OBJECT
+                or record.admission.direction is not RuntimeTransferDirection.DOWNLOAD
+                or record.admission.runtime_id != runtime_id
+                or record.admission.desired_generation != desired_generation
+                or record.accepted_runner_generation != accepted_runner_generation
+                or record.dispatch_status
+                not in {
+                    RuntimeTransferDispatchStatus.DELIVERABLE,
+                    RuntimeTransferDispatchStatus.ENQUEUED,
+                }
+                or record.lease_expires_at <= now
+                or record.admission.deadline_at <= now
+                or record.logical_expires_at <= now
+                or record.cancellation_requested_at is not None
+                or (transfer_id, attempt_id) in self.released
+            ):
+                return None
+            if record.phase is RuntimeTransferPhase.STREAMING:
+                if (
+                    record.stream_claim_id == claim_id
+                    and record.stream_owner_replica_id == owner_replica_id
+                    and record.stream_lease_expires_at is not None
+                    and record.stream_lease_expires_at > now
+                ):
+                    return self._put(
+                        dataclasses.replace(
+                            record,
+                            revision=record.revision + 1,
+                            updated_at=now,
+                            stream_lease_expires_at=now + self.config.stream_lease,
+                        )
+                    )
+                return None
+            if record.phase is not RuntimeTransferPhase.READY:
+                return None
+            return self._put(
+                dataclasses.replace(
+                    record,
+                    phase=RuntimeTransferPhase.STREAMING,
+                    revision=record.revision + 1,
+                    updated_at=now,
                     stream_claim_id=claim_id,
                     stream_owner_replica_id=owner_replica_id,
                     stream_lease_expires_at=now + self.config.stream_lease,
@@ -979,9 +1074,20 @@ class InMemoryRuntimeTransferStateStore:
                 or record.stream_claim_id != claim_id
                 or record.runner_commit_expires_at is None
                 or now >= record.runner_commit_expires_at
-                or record.object is None
-                or record.object.size != actual_size
-                or record.object.sha256 != actual_sha256
+                or (
+                    record.admission.source_transport
+                    is RuntimeTransferSourceTransport.DIRECT_OBJECT
+                    and record.object is not None
+                )
+                or (
+                    record.admission.source_transport
+                    is not RuntimeTransferSourceTransport.DIRECT_OBJECT
+                    and (
+                        record.object is None
+                        or record.object.size != actual_size
+                        or record.object.sha256 != actual_sha256
+                    )
+                )
                 or record.admission.expected_size != actual_size
                 or (
                     record.admission.expected_sha256 is not None
@@ -1168,6 +1274,7 @@ class InMemoryRuntimeTransferStateStore:
         expected_revision: int,
         outcome: RuntimeTransferOutcome,
         failure: RuntimeTransferFailure | None,
+        destination_conflict: RuntimeTransferDestinationConflictEvidence | None,
     ) -> RuntimeTransferRecord | None:
         now = self._now()
         async with self.lock:
@@ -1187,7 +1294,12 @@ class InMemoryRuntimeTransferStateStore:
             ):
                 outcome = RuntimeTransferOutcome.EXPIRED
                 failure = RuntimeTransferFailure.EXPIRED
+                destination_conflict = None
             elif not valid_settlement(outcome, failure):
+                return None
+            if (failure is RuntimeTransferFailure.DESTINATION_CONFLICT) != (
+                destination_conflict is not None
+            ):
                 return None
             if record.phase is RuntimeTransferPhase.TERMINAL:
                 return (
@@ -1195,6 +1307,7 @@ class InMemoryRuntimeTransferStateStore:
                     if expected_revision <= record.revision
                     and record.terminal_outcome is outcome
                     and record.failure is failure
+                    and record.destination_conflict == destination_conflict
                     else None
                 )
             if record.revision != expected_revision:
@@ -1222,6 +1335,7 @@ class InMemoryRuntimeTransferStateStore:
                     updated_at=now,
                     terminal_outcome=outcome,
                     failure=failure,
+                    destination_conflict=destination_conflict,
                     terminal_expires_at=terminal_expiry(now, self.config.terminal_ttl),
                 )
             )
@@ -1396,6 +1510,11 @@ class InMemoryRuntimeTransferStateStore:
                 if (
                     record.terminal_expires_at is not None
                     and record.terminal_expires_at <= now
+                    and record.cleanup_status
+                    in {
+                        RuntimeTransferCleanupStatus.COMPLETE,
+                        RuntimeTransferCleanupStatus.NOT_REQUIRED,
+                    }
                 ):
                     del self.records[key]
                     self.released.discard(key)
@@ -1467,6 +1586,7 @@ class InMemoryRuntimeTransferStateStore:
         runtime_id: str | None = None,
         generation: int | None = None,
         object: RuntimeTransferObject | None = None,
+        direct_source: tuple[str, int, str] | None = None,
         claim_id: str | None = None,
         accepted_runner_generation: int | None = None,
         required_runner_generation: int | None = None,
@@ -1490,26 +1610,50 @@ class InMemoryRuntimeTransferStateStore:
                 or (
                     target is RuntimeTransferPhase.READY
                     and (
-                        object is None
-                        or not (
-                            record.preparation_cleanup_state
-                            is RuntimeTransferPreparationCleanupState.NOT_REQUIRED
-                            or (
-                                record.preparation_cleanup_state
-                                is (
-                                    RuntimeTransferPreparationCleanupState.COMPLETED_OBJECT_PENDING
+                        (
+                            direct_source is None
+                            and (
+                                object is None
+                                or not (
+                                    record.preparation_cleanup_state
+                                    is (
+                                        RuntimeTransferPreparationCleanupState.NOT_REQUIRED
+                                    )
+                                    or (
+                                        record.preparation_cleanup_state
+                                        is (
+                                            RuntimeTransferPreparationCleanupState.COMPLETED_OBJECT_PENDING
+                                        )
+                                        and object.key
+                                        in {
+                                            record.preparation_object_handle,
+                                            record.pre_ready_object_handle,
+                                        }
+                                    )
                                 )
-                                and object.key
-                                in {
-                                    record.preparation_object_handle,
-                                    record.pre_ready_object_handle,
-                                }
+                                or object.size != record.admission.expected_size
+                                or (
+                                    record.admission.expected_sha256 is not None
+                                    and (
+                                        object.sha256
+                                        != record.admission.expected_sha256
+                                    )
+                                )
                             )
                         )
-                        or object.size != record.admission.expected_size
                         or (
-                            record.admission.expected_sha256 is not None
-                            and object.sha256 != record.admission.expected_sha256
+                            direct_source is not None
+                            and (
+                                record.admission.source_transport
+                                is not RuntimeTransferSourceTransport.DIRECT_OBJECT
+                                or record.admission.source_handle != direct_source[0]
+                                or direct_source[1] != record.admission.expected_size
+                                or direct_source[2] != record.admission.expected_sha256
+                                or record.preparation_cleanup_state
+                                is not (
+                                    RuntimeTransferPreparationCleanupState.NOT_REQUIRED
+                                )
+                            )
                         )
                     )
                 )
@@ -1659,6 +1803,11 @@ class InMemoryRuntimeTransferStateStore:
                 record.phase is RuntimeTransferPhase.TERMINAL
                 and record.terminal_expires_at is not None
                 and record.terminal_expires_at <= now
+                and record.cleanup_status
+                in {
+                    RuntimeTransferCleanupStatus.COMPLETE,
+                    RuntimeTransferCleanupStatus.NOT_REQUIRED,
+                }
             ):
                 del self.records[key]
                 self.released.discard(key)

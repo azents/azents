@@ -7,6 +7,7 @@ from azents.runtime.transfer.data import (
     RuntimeTransferCancellationReason,
     RuntimeTransferCleanupArtifact,
     RuntimeTransferCleanupStatus,
+    RuntimeTransferDestinationConflictEvidence,
     RuntimeTransferFailure,
     RuntimeTransferObject,
     RuntimeTransferOutcome,
@@ -41,6 +42,19 @@ class RuntimeTransferStateStore(Protocol):
         object: RuntimeTransferObject,
     ) -> RuntimeTransferRecord | None: ...
 
+    async def mark_ready_direct(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        runtime_id: str,
+        desired_generation: int,
+        expected_revision: int,
+        source_handle: str,
+        size: int,
+        sha256: str,
+    ) -> RuntimeTransferRecord | None: ...
+
     async def claim_stream(
         self,
         transfer_id: str,
@@ -50,6 +64,18 @@ class RuntimeTransferStateStore(Protocol):
         desired_generation: int,
         accepted_runner_generation: int,
         expected_revision: int,
+        claim_id: str,
+        owner_replica_id: str,
+    ) -> RuntimeTransferRecord | None: ...
+
+    async def claim_direct_object(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        runtime_id: str,
+        desired_generation: int,
+        accepted_runner_generation: int,
         claim_id: str,
         owner_replica_id: str,
     ) -> RuntimeTransferRecord | None: ...
@@ -320,6 +346,7 @@ class RuntimeTransferStateStore(Protocol):
         expected_revision: int,
         outcome: RuntimeTransferOutcome,
         failure: RuntimeTransferFailure | None,
+        destination_conflict: RuntimeTransferDestinationConflictEvidence | None,
     ) -> RuntimeTransferRecord | None: ...
 
     async def record_cleanup(

@@ -107,6 +107,36 @@ class RuntimeEndpoint:
 
 
 @dataclasses.dataclass(frozen=True)
+class PlatformTransferEgress:
+    """One deployment-owned object-storage endpoint route."""
+
+    endpoint_hostnames: tuple[str, ...]
+    cidrs: tuple[str, ...]
+    ports: tuple[int, ...]
+
+    def __post_init__(self) -> None:
+        """Reject routes that are not exact, host-mappable endpoint authority."""
+        if not self.endpoint_hostnames or any(
+            not _canonical_hostname(item) for item in self.endpoint_hostnames
+        ):
+            raise ValueError("platform transfer endpoint hostnames are invalid")
+        if len(set(self.endpoint_hostnames)) != len(self.endpoint_hostnames):
+            raise ValueError("platform transfer endpoint hostnames must be unique")
+        if not self.cidrs:
+            raise ValueError("platform transfer endpoint CIDRs are required")
+        for cidr in self.cidrs:
+            network = _network(cidr)
+            if network.prefixlen != network.max_prefixlen:
+                raise ValueError("platform transfer endpoint CIDRs must be host routes")
+        if len(set(self.cidrs)) != len(self.cidrs):
+            raise ValueError("platform transfer endpoint CIDRs must be unique")
+        if not self.ports or any(not 1 <= port <= 65_535 for port in self.ports):
+            raise ValueError("platform transfer endpoint ports are invalid")
+        if len(set(self.ports)) != len(self.ports):
+            raise ValueError("platform transfer endpoint ports must be unique")
+
+
+@dataclasses.dataclass(frozen=True)
 class NetworkEnforcementInputs:
     """Pure inputs for complete Runtime and proxy NetworkPolicies."""
 
@@ -123,6 +153,7 @@ class NetworkEnforcementInputs:
     network_hard_cap_denied_cidrs: tuple[str, ...]
     network_hard_cap_extra_egress: tuple[NetworkPolicyEgressRule, ...]
     proxy_port: int
+    platform_transfer_egress: tuple[PlatformTransferEgress, ...] = ()
 
 
 @dataclasses.dataclass(frozen=True)
@@ -261,6 +292,7 @@ def build_runtime_network_inputs(
         egress = (
             _dns_egress_rule(),
             *_mandatory_service_rules(value.mandatory_services),
+            *_platform_transfer_egress_rules(value.platform_transfer_egress),
             *_permitted_cidr_rules(value),
             *value.network_hard_cap_extra_egress,
         )
@@ -273,6 +305,7 @@ def build_runtime_network_inputs(
             value.mandatory_services,
             proxy_service_ip=proxy_service_ip,
             proxy_hostname=proxy_hostname,
+            platform_transfer_egress=value.platform_transfer_egress,
         )
         egress = (
             *_mandatory_service_rules(value.mandatory_services),
@@ -283,8 +316,14 @@ def build_runtime_network_inputs(
             raise ValueError("no-network mode cannot include proxy host inputs")
         dns_policy = STRICT_DNS_POLICY
         dns_config = STRICT_DNS_CONFIG
-        host_aliases = _host_aliases(value.mandatory_services)
-        egress = _mandatory_service_rules(value.mandatory_services)
+        host_aliases = _host_aliases(
+            value.mandatory_services,
+            platform_transfer_egress=value.platform_transfer_egress,
+        )
+        egress = (
+            *_mandatory_service_rules(value.mandatory_services),
+            *_platform_transfer_egress_rules(value.platform_transfer_egress),
+        )
     else:
         raise AssertionError(f"unsupported Runtime network mode: {mode}")
     return RuntimeNetworkInputs(
@@ -329,6 +368,7 @@ def build_proxy_network_inputs(value: NetworkEnforcementInputs) -> ProxyNetworkI
     egress = (
         _dns_egress_rule(),
         *_permitted_cidr_rules(value),
+        *_platform_transfer_egress_rules(value.platform_transfer_egress),
     )
     return ProxyNetworkInputs(
         ingress_policy=_network_policy(
@@ -429,6 +469,35 @@ def _mandatory_service_rules(
                 item.reference.name,
             ),
         )
+    )
+
+
+def _platform_transfer_egress_rules(
+    routes: Sequence[PlatformTransferEgress],
+) -> tuple[NetworkPolicyEgressRule, ...]:
+    """Build exact TCP IPBlock rules for deployment-owned transfer routes."""
+    return tuple(
+        NetworkPolicyEgressRule(
+            peers=(
+                NetworkPolicyPeer(
+                    namespace_selector=None,
+                    pod_selector=None,
+                    ip_block=IpBlock(cidr=cidr, except_cidrs=()),
+                ),
+            ),
+            ports=tuple(
+                NetworkPolicyPort(protocol="TCP", port=port) for port in route.ports
+            ),
+        )
+        for route in sorted(
+            routes,
+            key=lambda item: (
+                item.endpoint_hostnames,
+                item.cidrs,
+                item.ports,
+            ),
+        )
+        for cidr in route.cidrs
     )
 
 
@@ -555,6 +624,7 @@ def _host_aliases(
     *,
     proxy_service_ip: str | None = None,
     proxy_hostname: str | None = None,
+    platform_transfer_egress: Sequence[PlatformTransferEgress] = (),
 ) -> tuple[HostAlias, ...]:
     by_ip: dict[str, set[str]] = {}
     for item in observed:
@@ -566,6 +636,10 @@ def _host_aliases(
             ipaddress.ip_address(proxy_service_ip).compressed,
             set(),
         ).add(proxy_hostname)
+    for route in platform_transfer_egress:
+        for cidr in route.cidrs:
+            address = _network(cidr).network_address.compressed
+            by_ip.setdefault(address, set()).update(route.endpoint_hostnames)
     return tuple(
         HostAlias(ip=address, hostnames=tuple(sorted(hostnames)))
         for address, hostnames in sorted(

@@ -4,9 +4,11 @@
 isort:skip_file
 """
 
+from collections import abc as _abc
 from google.protobuf import descriptor as _descriptor
 from google.protobuf import message as _message
 from google.protobuf import timestamp_pb2 as _timestamp_pb2
+from google.protobuf.internal import containers as _containers
 from google.protobuf.internal import enum_type_wrapper as _enum_type_wrapper
 import builtins as _builtins
 import sys
@@ -127,6 +129,9 @@ class _CoordinatorTransferFailureEnumTypeWrapper(
     COORDINATOR_TRANSFER_FAILURE_INTEGRITY: _CoordinatorTransferFailure.ValueType  # 5
     COORDINATOR_TRANSFER_FAILURE_STREAM: _CoordinatorTransferFailure.ValueType  # 6
     COORDINATOR_TRANSFER_FAILURE_CONSUMER: _CoordinatorTransferFailure.ValueType  # 7
+    COORDINATOR_TRANSFER_FAILURE_DESTINATION_CONFLICT: (
+        _CoordinatorTransferFailure.ValueType
+    )  # 8
 
 class CoordinatorTransferFailure(
     _CoordinatorTransferFailure, metaclass=_CoordinatorTransferFailureEnumTypeWrapper
@@ -140,6 +145,9 @@ COORDINATOR_TRANSFER_FAILURE_FENCED: CoordinatorTransferFailure.ValueType  # 4
 COORDINATOR_TRANSFER_FAILURE_INTEGRITY: CoordinatorTransferFailure.ValueType  # 5
 COORDINATOR_TRANSFER_FAILURE_STREAM: CoordinatorTransferFailure.ValueType  # 6
 COORDINATOR_TRANSFER_FAILURE_CONSUMER: CoordinatorTransferFailure.ValueType  # 7
+COORDINATOR_TRANSFER_FAILURE_DESTINATION_CONFLICT: (
+    CoordinatorTransferFailure.ValueType
+)  # 8
 Global___CoordinatorTransferFailure: _TypeAlias = CoordinatorTransferFailure
 
 class _CoordinatorCleanupStatus:
@@ -277,6 +285,83 @@ COORDINATOR_DISPATCH_STATUS_BOUND: CoordinatorDispatchStatus.ValueType  # 2
 COORDINATOR_DISPATCH_STATUS_DELIVERABLE: CoordinatorDispatchStatus.ValueType  # 3
 COORDINATOR_DISPATCH_STATUS_ENQUEUED: CoordinatorDispatchStatus.ValueType  # 4
 Global___CoordinatorDispatchStatus: _TypeAlias = CoordinatorDispatchStatus
+
+class _WorkspaceUploadPhase:
+    ValueType = _typing.NewType("ValueType", _builtins.int)
+    V: _TypeAlias = ValueType
+
+class _WorkspaceUploadPhaseEnumTypeWrapper(
+    _enum_type_wrapper._EnumTypeWrapper[_WorkspaceUploadPhase.ValueType], _builtins.type
+):
+    DESCRIPTOR: _descriptor.EnumDescriptor
+    WORKSPACE_UPLOAD_PHASE_UNSPECIFIED: _WorkspaceUploadPhase.ValueType  # 0
+    WORKSPACE_UPLOAD_PHASE_QUEUED: _WorkspaceUploadPhase.ValueType  # 1
+    WORKSPACE_UPLOAD_PHASE_UPLOADING: _WorkspaceUploadPhase.ValueType  # 2
+    WORKSPACE_UPLOAD_PHASE_MOVING_TO_RUNTIME: _WorkspaceUploadPhase.ValueType  # 3
+    WORKSPACE_UPLOAD_PHASE_CONFLICTED: _WorkspaceUploadPhase.ValueType  # 4
+    WORKSPACE_UPLOAD_PHASE_RETRYABLE_FAILURE: _WorkspaceUploadPhase.ValueType  # 5
+    WORKSPACE_UPLOAD_PHASE_SUCCEEDED: _WorkspaceUploadPhase.ValueType  # 6
+    WORKSPACE_UPLOAD_PHASE_CANCELLED: _WorkspaceUploadPhase.ValueType  # 7
+    WORKSPACE_UPLOAD_PHASE_FAILED: _WorkspaceUploadPhase.ValueType  # 8
+    WORKSPACE_UPLOAD_PHASE_EXPIRED: _WorkspaceUploadPhase.ValueType  # 9
+
+class WorkspaceUploadPhase(
+    _WorkspaceUploadPhase, metaclass=_WorkspaceUploadPhaseEnumTypeWrapper
+): ...
+
+WORKSPACE_UPLOAD_PHASE_UNSPECIFIED: WorkspaceUploadPhase.ValueType  # 0
+WORKSPACE_UPLOAD_PHASE_QUEUED: WorkspaceUploadPhase.ValueType  # 1
+WORKSPACE_UPLOAD_PHASE_UPLOADING: WorkspaceUploadPhase.ValueType  # 2
+WORKSPACE_UPLOAD_PHASE_MOVING_TO_RUNTIME: WorkspaceUploadPhase.ValueType  # 3
+WORKSPACE_UPLOAD_PHASE_CONFLICTED: WorkspaceUploadPhase.ValueType  # 4
+WORKSPACE_UPLOAD_PHASE_RETRYABLE_FAILURE: WorkspaceUploadPhase.ValueType  # 5
+WORKSPACE_UPLOAD_PHASE_SUCCEEDED: WorkspaceUploadPhase.ValueType  # 6
+WORKSPACE_UPLOAD_PHASE_CANCELLED: WorkspaceUploadPhase.ValueType  # 7
+WORKSPACE_UPLOAD_PHASE_FAILED: WorkspaceUploadPhase.ValueType  # 8
+WORKSPACE_UPLOAD_PHASE_EXPIRED: WorkspaceUploadPhase.ValueType  # 9
+Global___WorkspaceUploadPhase: _TypeAlias = WorkspaceUploadPhase
+
+class _WorkspaceUploadFailure:
+    ValueType = _typing.NewType("ValueType", _builtins.int)
+    V: _TypeAlias = ValueType
+
+class _WorkspaceUploadFailureEnumTypeWrapper(
+    _enum_type_wrapper._EnumTypeWrapper[_WorkspaceUploadFailure.ValueType],
+    _builtins.type,
+):
+    DESCRIPTOR: _descriptor.EnumDescriptor
+    WORKSPACE_UPLOAD_FAILURE_UNSPECIFIED: _WorkspaceUploadFailure.ValueType  # 0
+    WORKSPACE_UPLOAD_FAILURE_INVALID_REQUEST: _WorkspaceUploadFailure.ValueType  # 1
+    WORKSPACE_UPLOAD_FAILURE_AUTHORIZATION: _WorkspaceUploadFailure.ValueType  # 2
+    WORKSPACE_UPLOAD_FAILURE_TOO_LARGE: _WorkspaceUploadFailure.ValueType  # 3
+    WORKSPACE_UPLOAD_FAILURE_REVISION_CONFLICT: _WorkspaceUploadFailure.ValueType  # 4
+    WORKSPACE_UPLOAD_FAILURE_DESTINATION_CONFLICT: (
+        _WorkspaceUploadFailure.ValueType
+    )  # 5
+    WORKSPACE_UPLOAD_FAILURE_RUNTIME_UNAVAILABLE: _WorkspaceUploadFailure.ValueType  # 6
+    WORKSPACE_UPLOAD_FAILURE_FENCED: _WorkspaceUploadFailure.ValueType  # 7
+    WORKSPACE_UPLOAD_FAILURE_INTEGRITY: _WorkspaceUploadFailure.ValueType  # 8
+    WORKSPACE_UPLOAD_FAILURE_TRANSFER: _WorkspaceUploadFailure.ValueType  # 9
+    WORKSPACE_UPLOAD_FAILURE_CANCELLED: _WorkspaceUploadFailure.ValueType  # 10
+    WORKSPACE_UPLOAD_FAILURE_EXPIRED: _WorkspaceUploadFailure.ValueType  # 11
+
+class WorkspaceUploadFailure(
+    _WorkspaceUploadFailure, metaclass=_WorkspaceUploadFailureEnumTypeWrapper
+): ...
+
+WORKSPACE_UPLOAD_FAILURE_UNSPECIFIED: WorkspaceUploadFailure.ValueType  # 0
+WORKSPACE_UPLOAD_FAILURE_INVALID_REQUEST: WorkspaceUploadFailure.ValueType  # 1
+WORKSPACE_UPLOAD_FAILURE_AUTHORIZATION: WorkspaceUploadFailure.ValueType  # 2
+WORKSPACE_UPLOAD_FAILURE_TOO_LARGE: WorkspaceUploadFailure.ValueType  # 3
+WORKSPACE_UPLOAD_FAILURE_REVISION_CONFLICT: WorkspaceUploadFailure.ValueType  # 4
+WORKSPACE_UPLOAD_FAILURE_DESTINATION_CONFLICT: WorkspaceUploadFailure.ValueType  # 5
+WORKSPACE_UPLOAD_FAILURE_RUNTIME_UNAVAILABLE: WorkspaceUploadFailure.ValueType  # 6
+WORKSPACE_UPLOAD_FAILURE_FENCED: WorkspaceUploadFailure.ValueType  # 7
+WORKSPACE_UPLOAD_FAILURE_INTEGRITY: WorkspaceUploadFailure.ValueType  # 8
+WORKSPACE_UPLOAD_FAILURE_TRANSFER: WorkspaceUploadFailure.ValueType  # 9
+WORKSPACE_UPLOAD_FAILURE_CANCELLED: WorkspaceUploadFailure.ValueType  # 10
+WORKSPACE_UPLOAD_FAILURE_EXPIRED: WorkspaceUploadFailure.ValueType  # 11
+Global___WorkspaceUploadFailure: _TypeAlias = WorkspaceUploadFailure
 
 @_typing.final
 class CoordinatorTransferIdentity(_message.Message):
@@ -475,6 +560,7 @@ class CoordinatorTransferStatus(_message.Message):
     CLEANUP_STATUS_FIELD_NUMBER: _builtins.int
     CANCELLATION_REQUESTED_FIELD_NUMBER: _builtins.int
     PREPARATION_CLEANUP_STATE_FIELD_NUMBER: _builtins.int
+    DESTINATION_CONFLICT_FIELD_NUMBER: _builtins.int
     phase: Global___CoordinatorTransferPhase.ValueType
     revision: _builtins.int
     accepted_runner_generation: _builtins.int
@@ -495,6 +581,8 @@ class CoordinatorTransferStatus(_message.Message):
     def deadline_at(self) -> _timestamp_pb2.Timestamp: ...
     @_builtins.property
     def logical_expires_at(self) -> _timestamp_pb2.Timestamp: ...
+    @_builtins.property
+    def destination_conflict(self) -> Global___DestinationEvidence: ...
     def __init__(
         self,
         *,
@@ -513,10 +601,13 @@ class CoordinatorTransferStatus(_message.Message):
         cleanup_status: Global___CoordinatorCleanupStatus.ValueType = ...,
         cancellation_requested: _builtins.bool = ...,
         preparation_cleanup_state: Global___CoordinatorPreparationCleanupState.ValueType = ...,
+        destination_conflict: Global___DestinationEvidence | None = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _typing.Literal[
         "_accepted_runner_generation",
         b"_accepted_runner_generation",
+        "_destination_conflict",
+        b"_destination_conflict",
         "_dispatch_id",
         b"_dispatch_id",
         "accepted_runner_generation",
@@ -525,6 +616,8 @@ class CoordinatorTransferStatus(_message.Message):
         b"actual_manifest",
         "deadline_at",
         b"deadline_at",
+        "destination_conflict",
+        b"destination_conflict",
         "dispatch_id",
         b"dispatch_id",
         "expected_manifest",
@@ -538,6 +631,8 @@ class CoordinatorTransferStatus(_message.Message):
     _ClearFieldArgType: _TypeAlias = _typing.Literal[
         "_accepted_runner_generation",
         b"_accepted_runner_generation",
+        "_destination_conflict",
+        b"_destination_conflict",
         "_dispatch_id",
         b"_dispatch_id",
         "accepted_runner_generation",
@@ -550,6 +645,8 @@ class CoordinatorTransferStatus(_message.Message):
         b"cleanup_status",
         "deadline_at",
         b"deadline_at",
+        "destination_conflict",
+        b"destination_conflict",
         "dispatch_id",
         b"dispatch_id",
         "dispatch_status",
@@ -578,6 +675,12 @@ class CoordinatorTransferStatus(_message.Message):
     _WhichOneofArgType__accepted_runner_generation: _TypeAlias = _typing.Literal[
         "_accepted_runner_generation", b"_accepted_runner_generation"
     ]
+    _WhichOneofReturnType__destination_conflict: _TypeAlias = _typing.Literal[
+        "destination_conflict"
+    ]
+    _WhichOneofArgType__destination_conflict: _TypeAlias = _typing.Literal[
+        "_destination_conflict", b"_destination_conflict"
+    ]
     _WhichOneofReturnType__dispatch_id: _TypeAlias = _typing.Literal["dispatch_id"]
     _WhichOneofArgType__dispatch_id: _TypeAlias = _typing.Literal[
         "_dispatch_id", b"_dispatch_id"
@@ -586,6 +689,10 @@ class CoordinatorTransferStatus(_message.Message):
     def WhichOneof(
         self, oneof_group: _WhichOneofArgType__accepted_runner_generation
     ) -> _WhichOneofReturnType__accepted_runner_generation | None: ...
+    @_typing.overload
+    def WhichOneof(
+        self, oneof_group: _WhichOneofArgType__destination_conflict
+    ) -> _WhichOneofReturnType__destination_conflict | None: ...
     @_typing.overload
     def WhichOneof(
         self, oneof_group: _WhichOneofArgType__dispatch_id
@@ -607,12 +714,14 @@ class AdmitTransferRequest(_message.Message):
     DEADLINE_AT_FIELD_NUMBER: _builtins.int
     SOURCE_EXPIRES_AT_FIELD_NUMBER: _builtins.int
     RESOURCE_CLASS_FIELD_NUMBER: _builtins.int
+    CONFLICT_PRECONDITION_FIELD_NUMBER: _builtins.int
     lease_id: _builtins.str
     runtime_path: _builtins.str
     overwrite: _builtins.bool
     product_maximum_size: _builtins.int
     provider_maximum_size: _builtins.int
     resource_class: _builtins.str
+    conflict_precondition: _builtins.bytes
     @_builtins.property
     def identity(self) -> Global___CoordinatorTransferIdentity: ...
     @_builtins.property
@@ -634,14 +743,19 @@ class AdmitTransferRequest(_message.Message):
         deadline_at: _timestamp_pb2.Timestamp | None = ...,
         source_expires_at: _timestamp_pb2.Timestamp | None = ...,
         resource_class: _builtins.str = ...,
+        conflict_precondition: _builtins.bytes | None = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _typing.Literal[
+        "_conflict_precondition",
+        b"_conflict_precondition",
         "_overwrite",
         b"_overwrite",
         "_product_maximum_size",
         b"_product_maximum_size",
         "_provider_maximum_size",
         b"_provider_maximum_size",
+        "conflict_precondition",
+        b"conflict_precondition",
         "deadline_at",
         b"deadline_at",
         "expected_manifest",
@@ -659,12 +773,16 @@ class AdmitTransferRequest(_message.Message):
     ]
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
     _ClearFieldArgType: _TypeAlias = _typing.Literal[
+        "_conflict_precondition",
+        b"_conflict_precondition",
         "_overwrite",
         b"_overwrite",
         "_product_maximum_size",
         b"_product_maximum_size",
         "_provider_maximum_size",
         b"_provider_maximum_size",
+        "conflict_precondition",
+        b"conflict_precondition",
         "deadline_at",
         b"deadline_at",
         "expected_manifest",
@@ -687,6 +805,12 @@ class AdmitTransferRequest(_message.Message):
         b"source_expires_at",
     ]
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    _WhichOneofReturnType__conflict_precondition: _TypeAlias = _typing.Literal[
+        "conflict_precondition"
+    ]
+    _WhichOneofArgType__conflict_precondition: _TypeAlias = _typing.Literal[
+        "_conflict_precondition", b"_conflict_precondition"
+    ]
     _WhichOneofReturnType__overwrite: _TypeAlias = _typing.Literal["overwrite"]
     _WhichOneofArgType__overwrite: _TypeAlias = _typing.Literal[
         "_overwrite", b"_overwrite"
@@ -703,6 +827,10 @@ class AdmitTransferRequest(_message.Message):
     _WhichOneofArgType__provider_maximum_size: _TypeAlias = _typing.Literal[
         "_provider_maximum_size", b"_provider_maximum_size"
     ]
+    @_typing.overload
+    def WhichOneof(
+        self, oneof_group: _WhichOneofArgType__conflict_precondition
+    ) -> _WhichOneofReturnType__conflict_precondition | None: ...
     @_typing.overload
     def WhichOneof(
         self, oneof_group: _WhichOneofArgType__overwrite
@@ -1313,3 +1441,678 @@ class TransferStatusResponse(_message.Message):
     def WhichOneof(self, oneof_group: _Never) -> None: ...
 
 Global___TransferStatusResponse: _TypeAlias = TransferStatusResponse
+
+@_typing.final
+class WorkspaceUploadIdentity(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    UPLOAD_ID_FIELD_NUMBER: _builtins.int
+    REQUESTER_USER_ID_FIELD_NUMBER: _builtins.int
+    WORKSPACE_ID_FIELD_NUMBER: _builtins.int
+    AGENT_ID_FIELD_NUMBER: _builtins.int
+    RUNTIME_ID_FIELD_NUMBER: _builtins.int
+    DESIRED_GENERATION_FIELD_NUMBER: _builtins.int
+    SESSION_ID_FIELD_NUMBER: _builtins.int
+    upload_id: _builtins.str
+    requester_user_id: _builtins.str
+    workspace_id: _builtins.str
+    agent_id: _builtins.str
+    runtime_id: _builtins.str
+    desired_generation: _builtins.int
+    session_id: _builtins.str
+    def __init__(
+        self,
+        *,
+        upload_id: _builtins.str = ...,
+        requester_user_id: _builtins.str = ...,
+        workspace_id: _builtins.str = ...,
+        agent_id: _builtins.str = ...,
+        runtime_id: _builtins.str = ...,
+        desired_generation: _builtins.int = ...,
+        session_id: _builtins.str | None = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _typing.Literal[
+        "_session_id", b"_session_id", "session_id", b"session_id"
+    ]
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal[
+        "_session_id",
+        b"_session_id",
+        "agent_id",
+        b"agent_id",
+        "desired_generation",
+        b"desired_generation",
+        "requester_user_id",
+        b"requester_user_id",
+        "runtime_id",
+        b"runtime_id",
+        "session_id",
+        b"session_id",
+        "upload_id",
+        b"upload_id",
+        "workspace_id",
+        b"workspace_id",
+    ]
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    _WhichOneofReturnType__session_id: _TypeAlias = _typing.Literal["session_id"]
+    _WhichOneofArgType__session_id: _TypeAlias = _typing.Literal[
+        "_session_id", b"_session_id"
+    ]
+    def WhichOneof(
+        self, oneof_group: _WhichOneofArgType__session_id
+    ) -> _WhichOneofReturnType__session_id | None: ...
+
+Global___WorkspaceUploadIdentity: _TypeAlias = WorkspaceUploadIdentity
+
+@_typing.final
+class DestinationEvidence(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    KIND_FIELD_NUMBER: _builtins.int
+    SIZE_FIELD_NUMBER: _builtins.int
+    MODIFIED_AT_FIELD_NUMBER: _builtins.int
+    CONFLICT_PRECONDITION_FIELD_NUMBER: _builtins.int
+    kind: _builtins.str
+    size: _builtins.int
+    conflict_precondition: _builtins.bytes
+    @_builtins.property
+    def modified_at(self) -> _timestamp_pb2.Timestamp: ...
+    def __init__(
+        self,
+        *,
+        kind: _builtins.str = ...,
+        size: _builtins.int | None = ...,
+        modified_at: _timestamp_pb2.Timestamp | None = ...,
+        conflict_precondition: _builtins.bytes | None = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _typing.Literal[
+        "_conflict_precondition",
+        b"_conflict_precondition",
+        "_size",
+        b"_size",
+        "conflict_precondition",
+        b"conflict_precondition",
+        "modified_at",
+        b"modified_at",
+        "size",
+        b"size",
+    ]
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal[
+        "_conflict_precondition",
+        b"_conflict_precondition",
+        "_size",
+        b"_size",
+        "conflict_precondition",
+        b"conflict_precondition",
+        "kind",
+        b"kind",
+        "modified_at",
+        b"modified_at",
+        "size",
+        b"size",
+    ]
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    _WhichOneofReturnType__conflict_precondition: _TypeAlias = _typing.Literal[
+        "conflict_precondition"
+    ]
+    _WhichOneofArgType__conflict_precondition: _TypeAlias = _typing.Literal[
+        "_conflict_precondition", b"_conflict_precondition"
+    ]
+    _WhichOneofReturnType__size: _TypeAlias = _typing.Literal["size"]
+    _WhichOneofArgType__size: _TypeAlias = _typing.Literal["_size", b"_size"]
+    @_typing.overload
+    def WhichOneof(
+        self, oneof_group: _WhichOneofArgType__conflict_precondition
+    ) -> _WhichOneofReturnType__conflict_precondition | None: ...
+    @_typing.overload
+    def WhichOneof(
+        self, oneof_group: _WhichOneofArgType__size
+    ) -> _WhichOneofReturnType__size | None: ...
+
+Global___DestinationEvidence: _TypeAlias = DestinationEvidence
+
+@_typing.final
+class WorkspaceUploadStatus(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    IDENTITY_FIELD_NUMBER: _builtins.int
+    REVISION_FIELD_NUMBER: _builtins.int
+    DESTINATION_DIRECTORY_FIELD_NUMBER: _builtins.int
+    FILENAME_FIELD_NUMBER: _builtins.int
+    DESTINATION_PATH_FIELD_NUMBER: _builtins.int
+    EXPECTED_SIZE_FIELD_NUMBER: _builtins.int
+    RECEIVED_SIZE_FIELD_NUMBER: _builtins.int
+    ACTUAL_SIZE_FIELD_NUMBER: _builtins.int
+    SHA256_FIELD_NUMBER: _builtins.int
+    MEDIA_TYPE_FIELD_NUMBER: _builtins.int
+    PHASE_FIELD_NUMBER: _builtins.int
+    CURRENT_DELIVERY_NUMBER_FIELD_NUMBER: _builtins.int
+    OUTCOME_FIELD_NUMBER: _builtins.int
+    FAILURE_FIELD_NUMBER: _builtins.int
+    RETRY_AVAILABLE_FIELD_NUMBER: _builtins.int
+    CANCEL_AVAILABLE_FIELD_NUMBER: _builtins.int
+    OVERWRITE_AVAILABLE_FIELD_NUMBER: _builtins.int
+    DESTINATION_EVIDENCE_FIELD_NUMBER: _builtins.int
+    revision: _builtins.int
+    destination_directory: _builtins.str
+    filename: _builtins.str
+    destination_path: _builtins.str
+    expected_size: _builtins.int
+    received_size: _builtins.int
+    actual_size: _builtins.int
+    sha256: _builtins.str
+    media_type: _builtins.str
+    phase: Global___WorkspaceUploadPhase.ValueType
+    current_delivery_number: _builtins.int
+    outcome: Global___CoordinatorTransferOutcome.ValueType
+    failure: Global___WorkspaceUploadFailure.ValueType
+    retry_available: _builtins.bool
+    cancel_available: _builtins.bool
+    overwrite_available: _builtins.bool
+    @_builtins.property
+    def identity(self) -> Global___WorkspaceUploadIdentity: ...
+    @_builtins.property
+    def destination_evidence(self) -> Global___DestinationEvidence: ...
+    def __init__(
+        self,
+        *,
+        identity: Global___WorkspaceUploadIdentity | None = ...,
+        revision: _builtins.int = ...,
+        destination_directory: _builtins.str = ...,
+        filename: _builtins.str = ...,
+        destination_path: _builtins.str = ...,
+        expected_size: _builtins.int = ...,
+        received_size: _builtins.int = ...,
+        actual_size: _builtins.int | None = ...,
+        sha256: _builtins.str | None = ...,
+        media_type: _builtins.str | None = ...,
+        phase: Global___WorkspaceUploadPhase.ValueType = ...,
+        current_delivery_number: _builtins.int = ...,
+        outcome: Global___CoordinatorTransferOutcome.ValueType | None = ...,
+        failure: Global___WorkspaceUploadFailure.ValueType | None = ...,
+        retry_available: _builtins.bool = ...,
+        cancel_available: _builtins.bool = ...,
+        overwrite_available: _builtins.bool = ...,
+        destination_evidence: Global___DestinationEvidence | None = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _typing.Literal[
+        "_actual_size",
+        b"_actual_size",
+        "_destination_evidence",
+        b"_destination_evidence",
+        "_failure",
+        b"_failure",
+        "_media_type",
+        b"_media_type",
+        "_outcome",
+        b"_outcome",
+        "_sha256",
+        b"_sha256",
+        "actual_size",
+        b"actual_size",
+        "destination_evidence",
+        b"destination_evidence",
+        "failure",
+        b"failure",
+        "identity",
+        b"identity",
+        "media_type",
+        b"media_type",
+        "outcome",
+        b"outcome",
+        "sha256",
+        b"sha256",
+    ]
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal[
+        "_actual_size",
+        b"_actual_size",
+        "_destination_evidence",
+        b"_destination_evidence",
+        "_failure",
+        b"_failure",
+        "_media_type",
+        b"_media_type",
+        "_outcome",
+        b"_outcome",
+        "_sha256",
+        b"_sha256",
+        "actual_size",
+        b"actual_size",
+        "cancel_available",
+        b"cancel_available",
+        "current_delivery_number",
+        b"current_delivery_number",
+        "destination_directory",
+        b"destination_directory",
+        "destination_evidence",
+        b"destination_evidence",
+        "destination_path",
+        b"destination_path",
+        "expected_size",
+        b"expected_size",
+        "failure",
+        b"failure",
+        "filename",
+        b"filename",
+        "identity",
+        b"identity",
+        "media_type",
+        b"media_type",
+        "outcome",
+        b"outcome",
+        "overwrite_available",
+        b"overwrite_available",
+        "phase",
+        b"phase",
+        "received_size",
+        b"received_size",
+        "retry_available",
+        b"retry_available",
+        "revision",
+        b"revision",
+        "sha256",
+        b"sha256",
+    ]
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    _WhichOneofReturnType__actual_size: _TypeAlias = _typing.Literal["actual_size"]
+    _WhichOneofArgType__actual_size: _TypeAlias = _typing.Literal[
+        "_actual_size", b"_actual_size"
+    ]
+    _WhichOneofReturnType__destination_evidence: _TypeAlias = _typing.Literal[
+        "destination_evidence"
+    ]
+    _WhichOneofArgType__destination_evidence: _TypeAlias = _typing.Literal[
+        "_destination_evidence", b"_destination_evidence"
+    ]
+    _WhichOneofReturnType__failure: _TypeAlias = _typing.Literal["failure"]
+    _WhichOneofArgType__failure: _TypeAlias = _typing.Literal["_failure", b"_failure"]
+    _WhichOneofReturnType__media_type: _TypeAlias = _typing.Literal["media_type"]
+    _WhichOneofArgType__media_type: _TypeAlias = _typing.Literal[
+        "_media_type", b"_media_type"
+    ]
+    _WhichOneofReturnType__outcome: _TypeAlias = _typing.Literal["outcome"]
+    _WhichOneofArgType__outcome: _TypeAlias = _typing.Literal["_outcome", b"_outcome"]
+    _WhichOneofReturnType__sha256: _TypeAlias = _typing.Literal["sha256"]
+    _WhichOneofArgType__sha256: _TypeAlias = _typing.Literal["_sha256", b"_sha256"]
+    @_typing.overload
+    def WhichOneof(
+        self, oneof_group: _WhichOneofArgType__actual_size
+    ) -> _WhichOneofReturnType__actual_size | None: ...
+    @_typing.overload
+    def WhichOneof(
+        self, oneof_group: _WhichOneofArgType__destination_evidence
+    ) -> _WhichOneofReturnType__destination_evidence | None: ...
+    @_typing.overload
+    def WhichOneof(
+        self, oneof_group: _WhichOneofArgType__failure
+    ) -> _WhichOneofReturnType__failure | None: ...
+    @_typing.overload
+    def WhichOneof(
+        self, oneof_group: _WhichOneofArgType__media_type
+    ) -> _WhichOneofReturnType__media_type | None: ...
+    @_typing.overload
+    def WhichOneof(
+        self, oneof_group: _WhichOneofArgType__outcome
+    ) -> _WhichOneofReturnType__outcome | None: ...
+    @_typing.overload
+    def WhichOneof(
+        self, oneof_group: _WhichOneofArgType__sha256
+    ) -> _WhichOneofReturnType__sha256 | None: ...
+
+Global___WorkspaceUploadStatus: _TypeAlias = WorkspaceUploadStatus
+
+@_typing.final
+class CreateWorkspaceUploadRequest(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    IDENTITY_FIELD_NUMBER: _builtins.int
+    DESTINATION_DIRECTORY_FIELD_NUMBER: _builtins.int
+    FILENAME_FIELD_NUMBER: _builtins.int
+    DESTINATION_PATH_FIELD_NUMBER: _builtins.int
+    EXPECTED_SIZE_FIELD_NUMBER: _builtins.int
+    MEDIA_TYPE_FIELD_NUMBER: _builtins.int
+    DEADLINE_AT_FIELD_NUMBER: _builtins.int
+    EXPECTED_SHA256_FIELD_NUMBER: _builtins.int
+    destination_directory: _builtins.str
+    filename: _builtins.str
+    destination_path: _builtins.str
+    expected_size: _builtins.int
+    media_type: _builtins.str
+    expected_sha256: _builtins.str
+    @_builtins.property
+    def identity(self) -> Global___WorkspaceUploadIdentity: ...
+    @_builtins.property
+    def deadline_at(self) -> _timestamp_pb2.Timestamp: ...
+    def __init__(
+        self,
+        *,
+        identity: Global___WorkspaceUploadIdentity | None = ...,
+        destination_directory: _builtins.str = ...,
+        filename: _builtins.str = ...,
+        destination_path: _builtins.str = ...,
+        expected_size: _builtins.int = ...,
+        media_type: _builtins.str | None = ...,
+        deadline_at: _timestamp_pb2.Timestamp | None = ...,
+        expected_sha256: _builtins.str = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _typing.Literal[
+        "_media_type",
+        b"_media_type",
+        "deadline_at",
+        b"deadline_at",
+        "identity",
+        b"identity",
+        "media_type",
+        b"media_type",
+    ]
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal[
+        "_media_type",
+        b"_media_type",
+        "deadline_at",
+        b"deadline_at",
+        "destination_directory",
+        b"destination_directory",
+        "destination_path",
+        b"destination_path",
+        "expected_sha256",
+        b"expected_sha256",
+        "expected_size",
+        b"expected_size",
+        "filename",
+        b"filename",
+        "identity",
+        b"identity",
+        "media_type",
+        b"media_type",
+    ]
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    _WhichOneofReturnType__media_type: _TypeAlias = _typing.Literal["media_type"]
+    _WhichOneofArgType__media_type: _TypeAlias = _typing.Literal[
+        "_media_type", b"_media_type"
+    ]
+    def WhichOneof(
+        self, oneof_group: _WhichOneofArgType__media_type
+    ) -> _WhichOneofReturnType__media_type | None: ...
+
+Global___CreateWorkspaceUploadRequest: _TypeAlias = CreateWorkspaceUploadRequest
+
+@_typing.final
+class WorkspaceUploadHeader(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    NAME_FIELD_NUMBER: _builtins.int
+    VALUE_FIELD_NUMBER: _builtins.int
+    name: _builtins.str
+    value: _builtins.str
+    def __init__(
+        self,
+        *,
+        name: _builtins.str = ...,
+        value: _builtins.str = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["name", b"name", "value", b"value"]
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___WorkspaceUploadHeader: _TypeAlias = WorkspaceUploadHeader
+
+@_typing.final
+class WorkspaceUploadTicket(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    METHOD_FIELD_NUMBER: _builtins.int
+    URL_FIELD_NUMBER: _builtins.int
+    EXPIRES_AT_FIELD_NUMBER: _builtins.int
+    HEADERS_FIELD_NUMBER: _builtins.int
+    method: _builtins.str
+    url: _builtins.str
+    @_builtins.property
+    def expires_at(self) -> _timestamp_pb2.Timestamp: ...
+    @_builtins.property
+    def headers(
+        self,
+    ) -> _containers.RepeatedCompositeFieldContainer[
+        Global___WorkspaceUploadHeader
+    ]: ...
+    def __init__(
+        self,
+        *,
+        method: _builtins.str = ...,
+        url: _builtins.str = ...,
+        expires_at: _timestamp_pb2.Timestamp | None = ...,
+        headers: _abc.Iterable[Global___WorkspaceUploadHeader] | None = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _typing.Literal["expires_at", b"expires_at"]
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal[
+        "expires_at",
+        b"expires_at",
+        "headers",
+        b"headers",
+        "method",
+        b"method",
+        "url",
+        b"url",
+    ]
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___WorkspaceUploadTicket: _TypeAlias = WorkspaceUploadTicket
+
+@_typing.final
+class IssueWorkspaceUploadTicketRequest(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    IDENTITY_FIELD_NUMBER: _builtins.int
+    EXPECTED_REVISION_FIELD_NUMBER: _builtins.int
+    expected_revision: _builtins.int
+    @_builtins.property
+    def identity(self) -> Global___WorkspaceUploadIdentity: ...
+    def __init__(
+        self,
+        *,
+        identity: Global___WorkspaceUploadIdentity | None = ...,
+        expected_revision: _builtins.int = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _typing.Literal["identity", b"identity"]
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal[
+        "expected_revision", b"expected_revision", "identity", b"identity"
+    ]
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___IssueWorkspaceUploadTicketRequest: _TypeAlias = (
+    IssueWorkspaceUploadTicketRequest
+)
+
+@_typing.final
+class WorkspaceUploadTicketResponse(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    STATUS_FIELD_NUMBER: _builtins.int
+    TICKET_FIELD_NUMBER: _builtins.int
+    @_builtins.property
+    def status(self) -> Global___WorkspaceUploadStatus: ...
+    @_builtins.property
+    def ticket(self) -> Global___WorkspaceUploadTicket: ...
+    def __init__(
+        self,
+        *,
+        status: Global___WorkspaceUploadStatus | None = ...,
+        ticket: Global___WorkspaceUploadTicket | None = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _typing.Literal[
+        "status", b"status", "ticket", b"ticket"
+    ]
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal[
+        "status", b"status", "ticket", b"ticket"
+    ]
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___WorkspaceUploadTicketResponse: _TypeAlias = WorkspaceUploadTicketResponse
+
+@_typing.final
+class FinalizeWorkspaceUploadRequest(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    IDENTITY_FIELD_NUMBER: _builtins.int
+    EXPECTED_REVISION_FIELD_NUMBER: _builtins.int
+    expected_revision: _builtins.int
+    @_builtins.property
+    def identity(self) -> Global___WorkspaceUploadIdentity: ...
+    def __init__(
+        self,
+        *,
+        identity: Global___WorkspaceUploadIdentity | None = ...,
+        expected_revision: _builtins.int = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _typing.Literal["identity", b"identity"]
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal[
+        "expected_revision", b"expected_revision", "identity", b"identity"
+    ]
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___FinalizeWorkspaceUploadRequest: _TypeAlias = FinalizeWorkspaceUploadRequest
+
+@_typing.final
+class GetWorkspaceUploadRequest(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    IDENTITY_FIELD_NUMBER: _builtins.int
+    @_builtins.property
+    def identity(self) -> Global___WorkspaceUploadIdentity: ...
+    def __init__(
+        self,
+        *,
+        identity: Global___WorkspaceUploadIdentity | None = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _typing.Literal["identity", b"identity"]
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["identity", b"identity"]
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___GetWorkspaceUploadRequest: _TypeAlias = GetWorkspaceUploadRequest
+
+@_typing.final
+class CancelWorkspaceUploadRequest(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    IDENTITY_FIELD_NUMBER: _builtins.int
+    EXPECTED_REVISION_FIELD_NUMBER: _builtins.int
+    CURRENT_DELIVERY_NUMBER_FIELD_NUMBER: _builtins.int
+    expected_revision: _builtins.int
+    current_delivery_number: _builtins.int
+    @_builtins.property
+    def identity(self) -> Global___WorkspaceUploadIdentity: ...
+    def __init__(
+        self,
+        *,
+        identity: Global___WorkspaceUploadIdentity | None = ...,
+        expected_revision: _builtins.int = ...,
+        current_delivery_number: _builtins.int = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _typing.Literal["identity", b"identity"]
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal[
+        "current_delivery_number",
+        b"current_delivery_number",
+        "expected_revision",
+        b"expected_revision",
+        "identity",
+        b"identity",
+    ]
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___CancelWorkspaceUploadRequest: _TypeAlias = CancelWorkspaceUploadRequest
+
+@_typing.final
+class RetryWorkspaceUploadRequest(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    IDENTITY_FIELD_NUMBER: _builtins.int
+    EXPECTED_REVISION_FIELD_NUMBER: _builtins.int
+    CURRENT_DELIVERY_NUMBER_FIELD_NUMBER: _builtins.int
+    OVERWRITE_FIELD_NUMBER: _builtins.int
+    CONFLICT_PRECONDITION_FIELD_NUMBER: _builtins.int
+    expected_revision: _builtins.int
+    current_delivery_number: _builtins.int
+    overwrite: _builtins.bool
+    conflict_precondition: _builtins.bytes
+    @_builtins.property
+    def identity(self) -> Global___WorkspaceUploadIdentity: ...
+    def __init__(
+        self,
+        *,
+        identity: Global___WorkspaceUploadIdentity | None = ...,
+        expected_revision: _builtins.int = ...,
+        current_delivery_number: _builtins.int = ...,
+        overwrite: _builtins.bool = ...,
+        conflict_precondition: _builtins.bytes | None = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _typing.Literal[
+        "_conflict_precondition",
+        b"_conflict_precondition",
+        "conflict_precondition",
+        b"conflict_precondition",
+        "identity",
+        b"identity",
+    ]
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal[
+        "_conflict_precondition",
+        b"_conflict_precondition",
+        "conflict_precondition",
+        b"conflict_precondition",
+        "current_delivery_number",
+        b"current_delivery_number",
+        "expected_revision",
+        b"expected_revision",
+        "identity",
+        b"identity",
+        "overwrite",
+        b"overwrite",
+    ]
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    _WhichOneofReturnType__conflict_precondition: _TypeAlias = _typing.Literal[
+        "conflict_precondition"
+    ]
+    _WhichOneofArgType__conflict_precondition: _TypeAlias = _typing.Literal[
+        "_conflict_precondition", b"_conflict_precondition"
+    ]
+    def WhichOneof(
+        self, oneof_group: _WhichOneofArgType__conflict_precondition
+    ) -> _WhichOneofReturnType__conflict_precondition | None: ...
+
+Global___RetryWorkspaceUploadRequest: _TypeAlias = RetryWorkspaceUploadRequest
+
+@_typing.final
+class WorkspaceUploadStatusResponse(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    STATUS_FIELD_NUMBER: _builtins.int
+    @_builtins.property
+    def status(self) -> Global___WorkspaceUploadStatus: ...
+    def __init__(
+        self,
+        *,
+        status: Global___WorkspaceUploadStatus | None = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _typing.Literal["status", b"status"]
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["status", b"status"]
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___WorkspaceUploadStatusResponse: _TypeAlias = WorkspaceUploadStatusResponse

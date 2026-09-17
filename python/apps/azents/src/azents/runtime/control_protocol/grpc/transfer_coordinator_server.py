@@ -354,6 +354,7 @@ class RuntimeTransferCoordinatorGrpcServicer(
                 outcome=outcome,
                 failure=failure,
                 cleanup_completed=False,
+                destination_conflict=None,
             )
         return await _status_response_or_abort(context, updated)
 
@@ -597,6 +598,11 @@ def _admission_from_request(
         agent_id=identity.agent_id,
         runtime_path=request.runtime_path,
         overwrite=request.overwrite,
+        conflict_precondition=(
+            request.conflict_precondition
+            if request.HasField("conflict_precondition")
+            else None
+        ),
         expected_size=request.expected_manifest.size,
         expected_sha256=(
             request.expected_manifest.sha256
@@ -670,6 +676,18 @@ def _status_message(
         message.outcome = _outcome_to_proto(record.terminal_outcome)
     if record.failure is not None:
         message.failure = _failure_to_proto(record.failure)
+    if record.destination_conflict is not None:
+        message.destination_conflict.CopyFrom(
+            pb.DestinationEvidence(
+                kind=record.destination_conflict.kind,
+                modified_at=_timestamp(record.destination_conflict.modified_at),
+                conflict_precondition=(
+                    record.destination_conflict.conflict_precondition
+                ),
+            )
+        )
+        if record.destination_conflict.size is not None:
+            message.destination_conflict.size = record.destination_conflict.size
     return message
 
 
@@ -771,6 +789,7 @@ def _settlement_failure(
             RuntimeTransferFailure.INTEGRITY,
             RuntimeTransferFailure.STREAM,
             RuntimeTransferFailure.CONSUMER,
+            RuntimeTransferFailure.DESTINATION_CONFLICT,
         },
         RuntimeTransferOutcome.CANCELLED: {RuntimeTransferFailure.CANCELLED},
         RuntimeTransferOutcome.EXPIRED: {RuntimeTransferFailure.EXPIRED},
@@ -793,6 +812,9 @@ def _failure(
             pb.COORDINATOR_TRANSFER_FAILURE_INTEGRITY: CoordinatorTransferFailure.INTEGRITY,
             pb.COORDINATOR_TRANSFER_FAILURE_STREAM: CoordinatorTransferFailure.STREAM,
             pb.COORDINATOR_TRANSFER_FAILURE_CONSUMER: CoordinatorTransferFailure.CONSUMER,
+            pb.COORDINATOR_TRANSFER_FAILURE_DESTINATION_CONFLICT: (
+                CoordinatorTransferFailure.DESTINATION_CONFLICT
+            ),
         }[value].value
     )
 
@@ -808,6 +830,9 @@ def _failure_to_proto(
         RuntimeTransferFailure.INTEGRITY: pb.COORDINATOR_TRANSFER_FAILURE_INTEGRITY,
         RuntimeTransferFailure.STREAM: pb.COORDINATOR_TRANSFER_FAILURE_STREAM,
         RuntimeTransferFailure.CONSUMER: pb.COORDINATOR_TRANSFER_FAILURE_CONSUMER,
+        RuntimeTransferFailure.DESTINATION_CONFLICT: (
+            pb.COORDINATOR_TRANSFER_FAILURE_DESTINATION_CONFLICT
+        ),
     }[value]
 
 

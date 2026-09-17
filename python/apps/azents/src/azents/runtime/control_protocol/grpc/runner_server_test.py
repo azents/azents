@@ -3,6 +3,7 @@
 # protobuf generated modules expose dynamic message attributes.
 
 import asyncio
+import base64
 import dataclasses
 import inspect
 from collections.abc import AsyncGenerator, AsyncIterator
@@ -20,7 +21,10 @@ from azents_runtime_control.proto import (
 )
 from azents_runtime_control.runner import RunnerStateReport
 from azents_runtime_control.runner import RuntimeRunnerState as SharedRunnerState
-from azents_runtime_control.runner_transfer import RunnerTransferResult
+from azents_runtime_control.runner_transfer import (
+    RunnerTransferResult,
+    RunnerTransferSourceTransport,
+)
 from azents_runtime_control.runtime_configuration import (
     RuntimeConfigurationEvidence,
 )
@@ -271,6 +275,47 @@ def test_transfer_cancel_envelope_maps_to_typed_runner_message() -> None:
         cancellation.reason
         == runtime_runner_control_pb2.RUNNER_TRANSFER_CANCEL_REASON_CALLER
     )
+
+
+@pytest.mark.parametrize(
+    ("source_transport", "direction", "proto_transport"),
+    [
+        (
+            RunnerTransferSourceTransport.TRANSFER_OBJECT,
+            "upload",
+            runtime_runner_control_pb2.RUNNER_TRANSFER_SOURCE_TRANSPORT_TRANSFER_OBJECT,
+        ),
+        (
+            RunnerTransferSourceTransport.DIRECT_OBJECT,
+            "download",
+            runtime_runner_control_pb2.RUNNER_TRANSFER_SOURCE_TRANSPORT_DIRECT_OBJECT,
+        ),
+    ],
+)
+def test_transfer_intent_envelope_preserves_source_transport(
+    source_transport: RunnerTransferSourceTransport,
+    direction: str,
+    proto_transport: runtime_runner_control_pb2.RunnerTransferSourceTransport.ValueType,
+) -> None:
+    """Encode the selected physical source transport into Runner Control."""
+    envelope = _transfer_envelope()
+    payload = dict(envelope.payload)
+    payload["direction"] = direction
+    payload["source_transport"] = source_transport.value
+
+    message = _runner_transfer_intent(dataclasses.replace(envelope, payload=payload))
+
+    assert message.source_transport == proto_transport
+
+
+def test_transfer_intent_envelope_rejects_unknown_source_transport() -> None:
+    """Reject malformed source transport values before Runner delivery."""
+    envelope = _transfer_envelope()
+    payload = dict(envelope.payload)
+    payload["source_transport"] = "unknown"
+
+    with pytest.raises(ValueError, match="source transport"):
+        _runner_transfer_intent(dataclasses.replace(envelope, payload=payload))
 
 
 @pytest.mark.asyncio
@@ -1322,6 +1367,34 @@ async def test_runner_operation_relay_checks_authority_before_claim() -> None:
     )
 
     assert control.claim_count == 0
+
+
+def test_runner_transfer_intent_decodes_canonical_conflict_precondition() -> None:
+    """Decode one bounded opaque conflict token without accepting aliases."""
+    envelope = _transfer_envelope()
+    payload = dict(envelope.payload)
+    payload["direction"] = "download"
+    payload["conflict_precondition"] = base64.urlsafe_b64encode(
+        b"opaque-precondition"
+    ).decode("ascii")
+
+    intent = _runner_transfer_intent(dataclasses.replace(envelope, payload=payload))
+
+    assert intent.conflict_precondition == b"opaque-precondition"
+
+
+@pytest.mark.parametrize("precondition", ["not base64!", "b3BhcXVl="])
+def test_runner_transfer_intent_rejects_noncanonical_conflict_precondition(
+    precondition: str,
+) -> None:
+    """Require canonical URL-safe base64 for opaque transfer authority."""
+    envelope = _transfer_envelope()
+    payload = dict(envelope.payload)
+    payload["direction"] = "download"
+    payload["conflict_precondition"] = precondition
+
+    with pytest.raises(ValueError, match="conflict precondition"):
+        _runner_transfer_intent(dataclasses.replace(envelope, payload=payload))
 
 
 @pytest.mark.asyncio

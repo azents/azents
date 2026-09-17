@@ -12,6 +12,13 @@ class RunnerTransferDirection(StrEnum):
     UPLOAD = "upload"
 
 
+class RunnerTransferSourceTransport(StrEnum):
+    """Physical source transport selected for a Runner transfer."""
+
+    TRANSFER_OBJECT = "transfer_object"
+    DIRECT_OBJECT = "direct_object"
+
+
 class RunnerTransferCancelReason(StrEnum):
     """Reason a Runner transfer task must stop."""
 
@@ -41,6 +48,7 @@ class RunnerTransferFailure(StrEnum):
     PROTOCOL_VIOLATION = "protocol_violation"
     STREAM_FAILED = "stream_failed"
     DESTINATION_FAILED = "destination_failed"
+    DESTINATION_CONFLICT = "destination_conflict"
 
 
 @dataclass(frozen=True)
@@ -51,6 +59,23 @@ class RunnerTransferIdentity:
     attempt_id: str
     runtime_id: str
     runner_generation: int
+
+
+@dataclass(frozen=True)
+class RunnerTransferDestinationConflictEvidence:
+    """Bounded safe metadata observed for one conflicting destination."""
+
+    kind: str
+    size: int | None
+    modified_at: datetime
+
+    def __post_init__(self) -> None:
+        """Validate bounded, public-safe destination metadata."""
+        _validate_bounded(self.kind, "destination conflict kind", maximum=64)
+        if self.size is not None and self.size < 0:
+            raise ValueError("destination conflict size must not be negative")
+        if self.modified_at.tzinfo is None or self.modified_at.utcoffset() is None:
+            raise ValueError("destination conflict modified_at must be timezone-aware")
 
 
 @dataclass(frozen=True)
@@ -69,6 +94,22 @@ class RunnerTransferIntent:
     protocol_version: str
     capability: str
     dispatch_id: str
+    conflict_precondition: bytes | None
+    source_transport: RunnerTransferSourceTransport = (
+        RunnerTransferSourceTransport.TRANSFER_OBJECT
+    )
+
+    def __post_init__(self) -> None:
+        """Validate bounded opaque overwrite-precondition transport."""
+        if not isinstance(self.source_transport, RunnerTransferSourceTransport):
+            raise ValueError("source_transport is invalid")
+        if (
+            self.source_transport is RunnerTransferSourceTransport.DIRECT_OBJECT
+            and self.direction is not RunnerTransferDirection.DOWNLOAD
+        ):
+            raise ValueError("direct object source is download-only")
+        if self.conflict_precondition is not None:
+            _validate_conflict_precondition(self.conflict_precondition)
 
 
 @dataclass(frozen=True)
@@ -94,6 +135,8 @@ class RunnerTransferResult:
     sha256: str | None
     destination_committed: bool | None
     failure: RunnerTransferFailure | None
+    conflict_precondition: bytes | None
+    destination_conflict: RunnerTransferDestinationConflictEvidence | None
 
     def __post_init__(self) -> None:
         """Reject contradictory optional-field and outcome combinations."""
@@ -115,11 +158,15 @@ class RunnerTransferResult:
         paired_manifest = (self.actual_size is None) == (self.sha256 is None)
         if not paired_manifest:
             raise ValueError("Runner transfer result manifest fields must be paired")
+        if self.conflict_precondition is not None:
+            _validate_conflict_precondition(self.conflict_precondition)
         if self.outcome is RunnerTransferOutcome.SUCCEEDED:
             if (
                 self.actual_size is None
                 or self.destination_committed is None
                 or self.failure is not None
+                or self.conflict_precondition is not None
+                or self.destination_conflict is not None
                 or (
                     self.direction is RunnerTransferDirection.DOWNLOAD
                     and not self.destination_committed
@@ -134,21 +181,49 @@ class RunnerTransferResult:
         if self.destination_committed is not False or self.failure is None:
             raise ValueError("Failed Runner transfer result requires failure evidence")
         if self.outcome is RunnerTransferOutcome.CANCELLED:
-            if self.failure is not RunnerTransferFailure.CANCELLED:
+            if (
+                self.failure is not RunnerTransferFailure.CANCELLED
+                or self.conflict_precondition is not None
+                or self.destination_conflict is not None
+            ):
                 raise ValueError(
                     "Cancelled Runner transfer result requires cancellation"
                 )
             return
         if self.failure is RunnerTransferFailure.CANCELLED:
             raise ValueError("Failed Runner transfer result cannot use cancellation")
+        if self.failure is RunnerTransferFailure.DESTINATION_CONFLICT:
+            if (
+                self.direction is not RunnerTransferDirection.DOWNLOAD
+                or self.conflict_precondition is None
+                or self.destination_conflict is None
+            ):
+                raise ValueError(
+                    "Destination conflict requires download conflict evidence"
+                )
+            return
         if (
-            self.failure is RunnerTransferFailure.DESTINATION_FAILED
-            and self.direction is not RunnerTransferDirection.DOWNLOAD
+            self.conflict_precondition is not None
+            or self.destination_conflict is not None
         ):
-            raise ValueError("Destination failure is download-only")
+            raise ValueError(
+                "Only destination conflict results carry conflict evidence"
+            )
+        if self.failure is RunnerTransferFailure.DESTINATION_FAILED:
+            if self.direction is not RunnerTransferDirection.DOWNLOAD:
+                raise ValueError("Destination failure is download-only")
 
 
 def _validate_id(value: str, name: str) -> None:
+    _validate_bounded(value, name, maximum=128)
+
+
+def _validate_bounded(value: str, name: str, *, maximum: int) -> None:
     size = len(value.encode())
-    if size < 1 or size > 128:
-        raise ValueError(f"{name} must be between 1 and 128 UTF-8 bytes")
+    if size < 1 or size > maximum:
+        raise ValueError(f"{name} must be between 1 and {maximum} UTF-8 bytes")
+
+
+def _validate_conflict_precondition(value: bytes) -> None:
+    if not 1 <= len(value) <= 512:
+        raise ValueError("conflict_precondition must be between 1 and 512 bytes")

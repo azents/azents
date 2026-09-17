@@ -103,6 +103,7 @@ class CoordinatorTransferFailure(StrEnum):
     INTEGRITY = "integrity"
     STREAM = "stream"
     CONSUMER = "consumer"
+    DESTINATION_CONFLICT = "destination_conflict"
 
 
 class CoordinatorCleanupStatus(StrEnum):
@@ -182,6 +183,26 @@ class CoordinatorOpaqueObjectHandle:
 
 
 @dataclass(frozen=True)
+class CoordinatorDestinationConflictEvidence:
+    """Bounded safe destination conflict evidence from one Runner commit."""
+
+    kind: str
+    size: int | None
+    modified_at: datetime
+    conflict_precondition: bytes
+
+    def __post_init__(self) -> None:
+        """Validate opaque conflict evidence without interpreting its identity."""
+        _bounded(self.kind, "destination_conflict.kind", 64)
+        _optional_size(self.size)
+        _aware(self.modified_at, "destination_conflict.modified_at")
+        if not 1 <= len(self.conflict_precondition) <= 512:
+            raise ValueError(
+                "destination conflict precondition must be between 1 and 512 bytes"
+            )
+
+
+@dataclass(frozen=True)
 class CoordinatorTransferStatus:
     """Metadata-only projection of one trusted transfer attempt."""
 
@@ -200,6 +221,7 @@ class CoordinatorTransferStatus:
     cleanup_status: CoordinatorCleanupStatus
     cancellation_requested: bool
     preparation_cleanup_state: CoordinatorPreparationCleanupState
+    destination_conflict: CoordinatorDestinationConflictEvidence | None
 
 
 @dataclass(frozen=True)
@@ -210,6 +232,7 @@ class CoordinatorAdmitTransferRequest:
     lease_id: str
     runtime_path: str
     overwrite: bool | None
+    conflict_precondition: bytes | None
     expected_manifest: CoordinatorExpectedManifest
     product_maximum_size: int | None
     provider_maximum_size: int | None
@@ -224,6 +247,10 @@ class CoordinatorAdmitTransferRequest:
         _bounded(self.resource_class, "resource_class", 64)
         if self.overwrite is None:
             raise ValueError("overwrite presence is required")
+        if self.conflict_precondition is not None and not (
+            1 <= len(self.conflict_precondition) <= 512
+        ):
+            raise ValueError("conflict_precondition must be between 1 and 512 bytes")
         if self.expected_manifest.size is None:
             raise ValueError("expected manifest size is required")
         if self.product_maximum_size is None or self.provider_maximum_size is None:
@@ -341,6 +368,7 @@ class CoordinatorSettleTransferRequest:
                 CoordinatorTransferFailure.INTEGRITY,
                 CoordinatorTransferFailure.STREAM,
                 CoordinatorTransferFailure.CONSUMER,
+                CoordinatorTransferFailure.DESTINATION_CONFLICT,
             },
             CoordinatorTransferOutcome.CANCELLED: {
                 CoordinatorTransferFailure.CANCELLED
@@ -1147,6 +1175,24 @@ def transfer_status_from_message(
         preparation_cleanup_state=_PREPARATION_CLEANUP_STATE_FROM_PROTO[
             message.preparation_cleanup_state
         ],
+        destination_conflict=(
+            CoordinatorDestinationConflictEvidence(
+                kind=message.destination_conflict.kind,
+                size=(
+                    message.destination_conflict.size
+                    if message.destination_conflict.HasField("size")
+                    else None
+                ),
+                modified_at=_datetime_from_message(
+                    message.destination_conflict.modified_at
+                ),
+                conflict_precondition=(
+                    message.destination_conflict.conflict_precondition
+                ),
+            )
+            if message.HasField("destination_conflict")
+            else None
+        ),
     )
 
 
@@ -1168,6 +1214,8 @@ def admit_transfer_request_to_message(
     message.identity.CopyFrom(coordinator_identity_to_message(value.identity))
     if value.overwrite is not None:
         message.overwrite = value.overwrite
+    if value.conflict_precondition is not None:
+        message.conflict_precondition = value.conflict_precondition
     if value.product_maximum_size is not None:
         message.product_maximum_size = value.product_maximum_size
     if value.provider_maximum_size is not None:
@@ -1521,6 +1569,9 @@ _FAILURE_TO_PROTO = {
     ),
     CoordinatorTransferFailure.CONSUMER: (
         runtime_transfer_coordinator_pb2.COORDINATOR_TRANSFER_FAILURE_CONSUMER
+    ),
+    CoordinatorTransferFailure.DESTINATION_CONFLICT: (
+        runtime_transfer_coordinator_pb2.COORDINATOR_TRANSFER_FAILURE_DESTINATION_CONFLICT
     ),
 }
 _FAILURE_FROM_PROTO = {value: key for key, value in _FAILURE_TO_PROTO.items()}

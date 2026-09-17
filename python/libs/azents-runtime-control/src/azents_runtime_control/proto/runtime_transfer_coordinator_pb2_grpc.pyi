@@ -299,3 +299,124 @@ def add_RuntimeTransferCoordinatorServicer_to_server(
     servicer: RuntimeTransferCoordinatorServicer,
     server: _typing.Union[_grpc.Server, _aio.Server],
 ) -> None: ...
+
+class RuntimeWorkspaceUploadCoordinatorStub:
+    @_typing.overload
+    def __new__(cls, channel: _grpc.Channel) -> _Self: ...
+    @_typing.overload
+    def __new__(
+        cls, channel: _aio.Channel
+    ) -> RuntimeWorkspaceUploadCoordinatorAsyncStub: ...
+    CreateWorkspaceUpload: _grpc.UnaryUnaryMultiCallable[
+        _runtime_transfer_coordinator_pb2.CreateWorkspaceUploadRequest,
+        _runtime_transfer_coordinator_pb2.WorkspaceUploadStatusResponse,
+    ]
+    IssueWorkspaceUploadTicket: _grpc.UnaryUnaryMultiCallable[
+        _runtime_transfer_coordinator_pb2.IssueWorkspaceUploadTicketRequest,
+        _runtime_transfer_coordinator_pb2.WorkspaceUploadTicketResponse,
+    ]
+    FinalizeWorkspaceUpload: _grpc.UnaryUnaryMultiCallable[
+        _runtime_transfer_coordinator_pb2.FinalizeWorkspaceUploadRequest,
+        _runtime_transfer_coordinator_pb2.WorkspaceUploadStatusResponse,
+    ]
+    GetWorkspaceUpload: _grpc.UnaryUnaryMultiCallable[
+        _runtime_transfer_coordinator_pb2.GetWorkspaceUploadRequest,
+        _runtime_transfer_coordinator_pb2.WorkspaceUploadStatusResponse,
+    ]
+    CancelWorkspaceUpload: _grpc.UnaryUnaryMultiCallable[
+        _runtime_transfer_coordinator_pb2.CancelWorkspaceUploadRequest,
+        _runtime_transfer_coordinator_pb2.WorkspaceUploadStatusResponse,
+    ]
+    RetryWorkspaceUpload: _grpc.UnaryUnaryMultiCallable[
+        _runtime_transfer_coordinator_pb2.RetryWorkspaceUploadRequest,
+        _runtime_transfer_coordinator_pb2.WorkspaceUploadStatusResponse,
+    ]
+
+@_typing.type_check_only
+class RuntimeWorkspaceUploadCoordinatorAsyncStub(RuntimeWorkspaceUploadCoordinatorStub):
+    def __init__(self, channel: _aio.Channel) -> None: ...
+    CreateWorkspaceUpload: _aio.UnaryUnaryMultiCallable[
+        _runtime_transfer_coordinator_pb2.CreateWorkspaceUploadRequest,
+        _runtime_transfer_coordinator_pb2.WorkspaceUploadStatusResponse,
+    ]  # type: ignore[assignment]
+    IssueWorkspaceUploadTicket: _aio.UnaryUnaryMultiCallable[
+        _runtime_transfer_coordinator_pb2.IssueWorkspaceUploadTicketRequest,
+        _runtime_transfer_coordinator_pb2.WorkspaceUploadTicketResponse,
+    ]  # type: ignore[assignment]
+    FinalizeWorkspaceUpload: _aio.UnaryUnaryMultiCallable[
+        _runtime_transfer_coordinator_pb2.FinalizeWorkspaceUploadRequest,
+        _runtime_transfer_coordinator_pb2.WorkspaceUploadStatusResponse,
+    ]  # type: ignore[assignment]
+    GetWorkspaceUpload: _aio.UnaryUnaryMultiCallable[
+        _runtime_transfer_coordinator_pb2.GetWorkspaceUploadRequest,
+        _runtime_transfer_coordinator_pb2.WorkspaceUploadStatusResponse,
+    ]  # type: ignore[assignment]
+    CancelWorkspaceUpload: _aio.UnaryUnaryMultiCallable[
+        _runtime_transfer_coordinator_pb2.CancelWorkspaceUploadRequest,
+        _runtime_transfer_coordinator_pb2.WorkspaceUploadStatusResponse,
+    ]  # type: ignore[assignment]
+    RetryWorkspaceUpload: _aio.UnaryUnaryMultiCallable[
+        _runtime_transfer_coordinator_pb2.RetryWorkspaceUploadRequest,
+        _runtime_transfer_coordinator_pb2.WorkspaceUploadStatusResponse,
+    ]  # type: ignore[assignment]
+
+class RuntimeWorkspaceUploadCoordinatorServicer(metaclass=_abc_1.ABCMeta):
+    @_abc_1.abstractmethod
+    def CreateWorkspaceUpload(
+        self,
+        request: _runtime_transfer_coordinator_pb2.CreateWorkspaceUploadRequest,
+        context: _ServicerContext,
+    ) -> _typing.Union[
+        _runtime_transfer_coordinator_pb2.WorkspaceUploadStatusResponse,
+        _abc.Awaitable[_runtime_transfer_coordinator_pb2.WorkspaceUploadStatusResponse],
+    ]: ...
+    @_abc_1.abstractmethod
+    def IssueWorkspaceUploadTicket(
+        self,
+        request: _runtime_transfer_coordinator_pb2.IssueWorkspaceUploadTicketRequest,
+        context: _ServicerContext,
+    ) -> _typing.Union[
+        _runtime_transfer_coordinator_pb2.WorkspaceUploadTicketResponse,
+        _abc.Awaitable[_runtime_transfer_coordinator_pb2.WorkspaceUploadTicketResponse],
+    ]: ...
+    @_abc_1.abstractmethod
+    def FinalizeWorkspaceUpload(
+        self,
+        request: _runtime_transfer_coordinator_pb2.FinalizeWorkspaceUploadRequest,
+        context: _ServicerContext,
+    ) -> _typing.Union[
+        _runtime_transfer_coordinator_pb2.WorkspaceUploadStatusResponse,
+        _abc.Awaitable[_runtime_transfer_coordinator_pb2.WorkspaceUploadStatusResponse],
+    ]: ...
+    @_abc_1.abstractmethod
+    def GetWorkspaceUpload(
+        self,
+        request: _runtime_transfer_coordinator_pb2.GetWorkspaceUploadRequest,
+        context: _ServicerContext,
+    ) -> _typing.Union[
+        _runtime_transfer_coordinator_pb2.WorkspaceUploadStatusResponse,
+        _abc.Awaitable[_runtime_transfer_coordinator_pb2.WorkspaceUploadStatusResponse],
+    ]: ...
+    @_abc_1.abstractmethod
+    def CancelWorkspaceUpload(
+        self,
+        request: _runtime_transfer_coordinator_pb2.CancelWorkspaceUploadRequest,
+        context: _ServicerContext,
+    ) -> _typing.Union[
+        _runtime_transfer_coordinator_pb2.WorkspaceUploadStatusResponse,
+        _abc.Awaitable[_runtime_transfer_coordinator_pb2.WorkspaceUploadStatusResponse],
+    ]: ...
+    @_abc_1.abstractmethod
+    def RetryWorkspaceUpload(
+        self,
+        request: _runtime_transfer_coordinator_pb2.RetryWorkspaceUploadRequest,
+        context: _ServicerContext,
+    ) -> _typing.Union[
+        _runtime_transfer_coordinator_pb2.WorkspaceUploadStatusResponse,
+        _abc.Awaitable[_runtime_transfer_coordinator_pb2.WorkspaceUploadStatusResponse],
+    ]: ...
+
+def add_RuntimeWorkspaceUploadCoordinatorServicer_to_server(
+    servicer: RuntimeWorkspaceUploadCoordinatorServicer,
+    server: _typing.Union[_grpc.Server, _aio.Server],
+) -> None: ...

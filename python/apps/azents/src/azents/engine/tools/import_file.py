@@ -184,6 +184,7 @@ def make_import_file_tool(
                         datetime.datetime.now(datetime.UTC)
                         + staging_configuration.deadline_after
                     ),
+                    conflict_precondition=None,
                 )
             )
         except PermissionError:

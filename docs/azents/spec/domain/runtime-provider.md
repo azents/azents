@@ -51,8 +51,8 @@ code_paths:
   - typescript/apps/azents-admin-web/src/trpc/routers/runtimeProvider.ts
   - typescript/apps/azents-web/src/features/runtime-profiles/**
   - typescript/apps/azents-web/src/features/chat/workspace/components/RuntimeConfigurationStatus.tsx
-last_verified_at: 2026-08-26
-spec_version: 28
+last_verified_at: 2026-09-17
+spec_version: 29
 ---
 
 # Runtime Provider
@@ -226,8 +226,13 @@ and may add only the Workspace policy supported by that contract. Workspace Poli
 direct-only CIDR restriction. Policy v2 composes the hierarchy `direct` → `proxy_required` →
 `no_network`, intersects inherited CIDR authority, and narrows proxy domain authority without
 restoring a parent denial. Required Runtime Control and transfer communication remains Platform
-protected. Strict Runtimes have no DNS egress and receive only observed mandatory Service
-host mappings. Docker rejects Workspace network policy.
+protected. Workspace Upload's public S3-compatible endpoint is an additional deployment-owned
+Platform transfer route: its exact hostname, effective port, and stable host CIDRs are projected
+into Runtime network enforcement. `direct` permits that route alongside the customer hard cap;
+`proxy_required` permits it only through the dedicated proxy; and `no_network` permits only the
+mandatory Service and Platform transfer host routes without DNS or general customer egress.
+Strict Runtimes receive host mappings for every Platform transfer endpoint, and all Platform
+transfer CIDRs are `/32` or `/128` host routes. Docker rejects Workspace network policy.
 
 The complete resolved configuration travels through the canonical Runtime configuration envelope.
 The Provider reports exact configuration evidence for the current desired generation. Applied state
@@ -307,6 +312,14 @@ Runtime Control uses its server ServiceAccount to create Kubernetes TokenReview 
 
 The active chart has no Provider credential or shared Runtime Control authentication values, credential bootstrap Job, staging/final Provider credential Secret, credential volume, or authentication-bootstrap Secret RBAC. The logical-Runtime CA Secret is execution-policy material owned by strict proxy enforcement, not Provider or Runtime Control authentication state. Runtime Control TLS remains mandatory and separate from Provider authentication. Admin Provider policy cannot mutate cluster RBAC, chart-level NetworkPolicy, RuntimeClass, arbitrary Secret contents, or other deployment-owned security controls.
 
+When Workspace Upload is enabled, Helm requires the configured public S3 endpoint and a
+matching `platformTransferEgress` route. The route must contain the endpoint hostname and
+effective port and may contain only host CIDRs. Missing, mismatched, or broad routes fail chart
+rendering rather than widening Runtime network authority. Runtime Control readiness separately
+proves bucket access, exact browser CORS, checksum-aware metadata, presigned PUT/GET signing,
+public endpoint reachability, and immutable native-copy support; failed prerequisites keep the
+feature unavailable without a byte-relay fallback.
+
 Authentication rollout does not render, own, select, delete, rename, or recreate Runtime PersistentVolumeClaims or PersistentVolumes. Credential-driven Runtime Pod replacement reuses the existing PVC; only the established explicit Runtime reset or terminal-delete operations may invoke PVC deletion.
 
 Runtime workload security is deployment-owned. Providers retain ordinary non-root workload
@@ -316,6 +329,9 @@ Admin Profile editing cannot mutate those deployment boundaries.
 
 ## Version history
 
+- **29 (2026-09-17):** Added Workspace Upload's deployment-owned public S3 endpoint
+  prerequisite, exact Platform transfer egress projection across Kubernetes Runtime modes,
+  host-route restrictions, and fail-closed object-storage readiness validation.
 - **28 (2026-08-26):** Separated Provider host-management authority from existing
   ready-Runner data-plane operations while retaining Provider connection requirements
   for lifecycle dispatch and compute creation or replacement.

@@ -23,6 +23,7 @@ from azents.runtime.transfer.data import (
     RuntimeTransferPhase,
     RuntimeTransferPreparationCleanupState,
     RuntimeTransferRecord,
+    RuntimeTransferSourceTransport,
 )
 from azents.runtime.transfer.memory import InMemoryRuntimeTransferStateStore
 from azents.runtime.transfer.redis import RedisRuntimeTransferStateStore
@@ -156,6 +157,7 @@ def _admission() -> RuntimeTransferAdmission:
         agent_id=None,
         runtime_path="/workspace/file",
         overwrite=False,
+        conflict_precondition=None,
         expected_size=1,
         expected_sha256="a" * 64,
         product_maximum_size=10,
@@ -252,6 +254,122 @@ async def test_rejects_invalid_size_and_expired_source_without_record(
     )
     assert await store_harness.store.admit(expired_deadline, lease_id="lease") is None
     assert await store_harness.store.get("expired-deadline") is None
+
+
+@pytest.mark.asyncio
+async def test_direct_claim_replay_renews_lease_and_fences_owner(
+    store_harness: _StoreHarness,
+) -> None:
+    """Repeated exact direct claims renew only the active owner lease."""
+    store = store_harness.store
+    admitted = await store.admit(
+        replace(
+            _admission(),
+            transfer_id="direct",
+            attempt_id="direct-attempt",
+            direction=RuntimeTransferDirection.DOWNLOAD,
+            source_transport=RuntimeTransferSourceTransport.DIRECT_OBJECT,
+            source_handle="source-handle",
+        ),
+        lease_id="direct-lease",
+    )
+    assert admitted is not None
+    ready = await store.mark_ready_direct(
+        "direct",
+        attempt_id="direct-attempt",
+        runtime_id="runtime",
+        desired_generation=1,
+        expected_revision=admitted.revision,
+        source_handle="source-handle",
+        size=1,
+        sha256="a" * 64,
+    )
+    assert ready is not None
+    bound = await store.bind_dispatch(
+        "direct",
+        attempt_id="direct-attempt",
+        runtime_id="runtime",
+        desired_generation=1,
+        accepted_runner_generation=2,
+        expected_revision=ready.revision,
+        dispatch_id="direct-dispatch",
+        dispatch_request_id="direct-request",
+    )
+    assert bound is not None
+    deliverable = await store.mark_dispatch_deliverable(
+        "direct",
+        attempt_id="direct-attempt",
+        expected_revision=bound.revision,
+        dispatch_id="direct-dispatch",
+        dispatch_request_id="direct-request",
+    )
+    assert deliverable is not None
+    claimed = await store.claim_direct_object(
+        "direct",
+        attempt_id="direct-attempt",
+        runtime_id="runtime",
+        desired_generation=1,
+        accepted_runner_generation=2,
+        claim_id="direct-claim",
+        owner_replica_id="owner",
+    )
+    assert claimed is not None
+    assert claimed.stream_lease_expires_at is not None
+    first_expiry = claimed.stream_lease_expires_at
+
+    store_harness.clock.now += store_harness.config.stream_lease / 2
+    renewed = await store.claim_direct_object(
+        "direct",
+        attempt_id="direct-attempt",
+        runtime_id="runtime",
+        desired_generation=1,
+        accepted_runner_generation=2,
+        claim_id="direct-claim",
+        owner_replica_id="owner",
+    )
+    assert renewed is not None
+    assert renewed.revision == claimed.revision + 1
+    assert renewed.stream_lease_expires_at is not None
+    assert renewed.stream_lease_expires_at > first_expiry
+    assert (
+        await store.claim_direct_object(
+            "direct",
+            attempt_id="direct-attempt",
+            runtime_id="runtime",
+            desired_generation=1,
+            accepted_runner_generation=2,
+            claim_id="direct-claim",
+            owner_replica_id="other-owner",
+        )
+        is None
+    )
+
+    store_harness.clock.now = renewed.stream_lease_expires_at
+    assert (
+        await store.claim_direct_object(
+            "direct",
+            attempt_id="direct-attempt",
+            runtime_id="runtime",
+            desired_generation=1,
+            accepted_runner_generation=2,
+            claim_id="direct-claim",
+            owner_replica_id="owner",
+        )
+        is None
+    )
+    store_harness.clock.now = renewed.admission.deadline_at
+    assert (
+        await store.claim_direct_object(
+            "direct",
+            attempt_id="direct-attempt",
+            runtime_id="runtime",
+            desired_generation=1,
+            accepted_runner_generation=2,
+            claim_id="direct-claim",
+            owner_replica_id="owner",
+        )
+        is None
+    )
 
 
 @pytest.mark.asyncio
@@ -917,16 +1035,22 @@ async def test_duplicate_capacity_expiry_retry_pagination_and_purge(
     retry = replace(_admission(), attempt_id="retry")
     current = await store_harness.store.admit(retry, lease_id="retry")
     assert current is not None and current.admission.attempt_id == "retry"
-    assert (
-        await store_harness.store.record_cleanup(
-            "transfer",
-            attempt_id="attempt",
-            expected_revision=expired.revision,
-            status=RuntimeTransferCleanupStatus.PENDING,
-            cleanup_failure=None,
-        )
-        is not None
+    pending_cleanup = await store_harness.store.record_cleanup(
+        "transfer",
+        attempt_id="attempt",
+        expected_revision=expired.revision,
+        status=RuntimeTransferCleanupStatus.PENDING,
+        cleanup_failure=None,
     )
+    assert pending_cleanup is not None
+    completed_cleanup = await store_harness.store.record_cleanup(
+        "transfer",
+        attempt_id="attempt",
+        expected_revision=pending_cleanup.revision,
+        status=RuntimeTransferCleanupStatus.COMPLETE,
+        cleanup_failure=None,
+    )
+    assert completed_cleanup is not None
     store_harness.clock.now += timedelta(minutes=6)
     assert await store_harness.store.purge_terminal(limit=10) >= 1
     assert (await store_harness.store.get("transfer")) is not None
@@ -1195,6 +1319,7 @@ async def test_download_lifecycle_fences_stream_claim_and_progress(
         expected_revision=committed.revision,
         outcome=RuntimeTransferOutcome.SUCCEEDED,
         failure=None,
+        destination_conflict=None,
     )
     assert terminal is not None
     assert terminal.terminal_outcome is RuntimeTransferOutcome.SUCCEEDED
@@ -1419,6 +1544,7 @@ async def test_upload_lifecycle_consumer_claim_abandon_expiry_and_acknowledgemen
         expected_revision=retained.revision,
         outcome=RuntimeTransferOutcome.SUCCEEDED,
         failure=None,
+        destination_conflict=None,
     )
     assert terminal is not None
     assert terminal.runner_result_confirmed_at is not None
@@ -1779,6 +1905,7 @@ async def test_cancellation_fences_concurrent_verification_and_terminal_settleme
             expected_revision=cancelled.revision,
             outcome=RuntimeTransferOutcome.SUCCEEDED,
             failure=None,
+            destination_conflict=None,
         )
         is None
     )
@@ -1788,6 +1915,7 @@ async def test_cancellation_fences_concurrent_verification_and_terminal_settleme
         expected_revision=cancelled.revision,
         outcome=RuntimeTransferOutcome.CANCELLED,
         failure=RuntimeTransferFailure.CANCELLED,
+        destination_conflict=None,
     )
     assert terminal is not None
     assert (
@@ -1797,6 +1925,7 @@ async def test_cancellation_fences_concurrent_verification_and_terminal_settleme
             expected_revision=cancelled.revision,
             outcome=RuntimeTransferOutcome.CANCELLED,
             failure=RuntimeTransferFailure.CANCELLED,
+            destination_conflict=None,
         )
         == terminal
     )
@@ -1816,6 +1945,7 @@ async def test_cancellation_fences_concurrent_verification_and_terminal_settleme
             expected_revision=cancelled.revision,
             outcome=RuntimeTransferOutcome.FAILED,
             failure=None,
+            destination_conflict=None,
         )
         is None
     )
@@ -1874,6 +2004,7 @@ async def test_cancellation_reason_has_canonical_terminal_precedence(
             expected_revision=cancelled.revision,
             outcome=RuntimeTransferOutcome.FAILED,
             failure=RuntimeTransferFailure.STREAM,
+            destination_conflict=None,
         )
         is None
     )
@@ -1883,6 +2014,7 @@ async def test_cancellation_reason_has_canonical_terminal_precedence(
         expected_revision=cancelled.revision,
         outcome=outcome,
         failure=failure,
+        destination_conflict=None,
     )
     assert terminal is not None
     assert terminal.terminal_outcome is outcome
@@ -1907,6 +2039,7 @@ async def test_elapsed_deadline_has_atomic_terminal_precedence(
         expected_revision=admitted.revision,
         outcome=RuntimeTransferOutcome.FAILED,
         failure=RuntimeTransferFailure.STREAM,
+        destination_conflict=None,
     )
 
     assert terminal is not None
@@ -1920,6 +2053,7 @@ async def test_elapsed_deadline_has_atomic_terminal_precedence(
             expected_revision=admitted.revision,
             outcome=RuntimeTransferOutcome.FAILED,
             failure=RuntimeTransferFailure.STREAM,
+            destination_conflict=None,
         )
         == terminal
     )
@@ -1942,6 +2076,7 @@ async def test_stale_pagination_remains_stable_when_prior_page_mutates(
             expected_revision=admitted.revision,
             outcome=RuntimeTransferOutcome.FAILED,
             failure=RuntimeTransferFailure.STREAM,
+            destination_conflict=None,
         )
         assert terminal is not None
 
@@ -1985,6 +2120,7 @@ async def test_stale_pagination_continues_after_prior_member_expires(
             expected_revision=admitted.revision,
             outcome=RuntimeTransferOutcome.FAILED,
             failure=RuntimeTransferFailure.STREAM,
+            destination_conflict=None,
         )
         assert terminal is not None
         terminals.append(terminal)
@@ -2095,6 +2231,7 @@ async def test_success_requires_direction_final_phase(
             expected_revision=admitted.revision,
             outcome=RuntimeTransferOutcome.SUCCEEDED,
             failure=None,
+            destination_conflict=None,
         )
         is None
     )
@@ -2140,6 +2277,7 @@ async def test_redis_terminal_keys_expire_together(
             expected_revision=admitted.revision,
             outcome=RuntimeTransferOutcome.FAILED,
             failure=RuntimeTransferFailure.STREAM,
+            destination_conflict=None,
         )
         assert terminal is not None
         assert terminal.terminal_expires_at is not None
@@ -2171,6 +2309,81 @@ async def test_redis_terminal_keys_expire_together(
         assert await inspector.get(record_key) is None
         assert await inspector.get(pointer_key) is None
         assert await inspector.get(bucket_key) is None
+    finally:
+        await _delete_transfer_namespace(
+            cast(_RedisNamespaceCleaner, client),
+            namespace,
+        )
+        await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_redis_pending_terminal_cleanup_outlives_terminal_ttl(
+    redis_url: str,
+) -> None:
+    """Pending cleanup persists terminal metadata beyond its nominal TTL."""
+    client = create_redis_client(redis_url)
+    namespace = f"azents:runtime:transfer:pending-ttl-test:{uuid4().hex}"
+    clock = _Clock(datetime(2035, 1, 1, tzinfo=timezone.utc))
+    config = RuntimeTransferConfig(
+        per_runtime_attempts=1,
+        per_runtime_bytes=10,
+        deployment_attempts=1,
+        deployment_bytes=10,
+        admission_lease=timedelta(minutes=1),
+        consumer_lease=timedelta(minutes=1),
+        stream_lease=timedelta(seconds=30),
+        terminal_ttl=timedelta(seconds=1),
+        list_page_size=1,
+    )
+    store = RedisRuntimeTransferStateStore(
+        redis=client,
+        config=config,
+        clock=clock,
+        namespace=namespace,
+    )
+    inspector = cast(_RedisRetentionInspector, client)
+    try:
+        admission = replace(
+            _admission(),
+            transfer_id="pending-terminal-ttl",
+            deadline_at=clock.now + timedelta(minutes=1),
+        )
+        admitted = await store.admit(admission, lease_id="lease")
+        assert admitted is not None
+        terminal = await store.settle(
+            "pending-terminal-ttl",
+            attempt_id="attempt",
+            expected_revision=admitted.revision,
+            outcome=RuntimeTransferOutcome.FAILED,
+            failure=RuntimeTransferFailure.STREAM,
+            destination_conflict=None,
+        )
+        assert terminal is not None
+        assert terminal.terminal_expires_at is not None
+        pending = await store.record_cleanup(
+            "pending-terminal-ttl",
+            attempt_id="attempt",
+            expected_revision=terminal.revision,
+            status=RuntimeTransferCleanupStatus.PENDING,
+            cleanup_failure=None,
+        )
+        assert pending is not None
+
+        record_key = store.keys.record("pending-terminal-ttl", "attempt")
+        pointer_key = store.keys.current("pending-terminal-ttl")
+        bucket_key = store.keys.terminal_bucket(terminal.terminal_expires_at)
+        assert await inspector.pttl(record_key) == -1
+        assert await inspector.pttl(pointer_key) == -1
+        assert await inspector.pttl(bucket_key) == -1
+
+        await asyncio.sleep(1.2)
+        clock.now = terminal.terminal_expires_at
+
+        assert await inspector.get(record_key) is not None
+        assert await inspector.get(pointer_key) is not None
+        assert await inspector.zscore(bucket_key, record_key) == 0.0
+        assert await store.get("pending-terminal-ttl") == pending
     finally:
         await _delete_transfer_namespace(
             cast(_RedisNamespaceCleaner, client),
@@ -2219,6 +2432,7 @@ async def test_redis_new_current_pointer_outlives_old_terminal_ttl(
             expected_revision=admitted.revision,
             outcome=RuntimeTransferOutcome.FAILED,
             failure=RuntimeTransferFailure.STREAM,
+            destination_conflict=None,
         )
         assert terminal is not None
         retry = await store.admit(
@@ -2313,10 +2527,10 @@ async def test_redis_stale_pagination_continues_after_dangling_members(
 
 
 @pytest.mark.asyncio
-async def test_terminal_metadata_expires_on_access(
+async def test_terminal_metadata_retention_waits_for_cleanup(
     store_harness: _StoreHarness,
 ) -> None:
-    """Terminal metadata is no longer observable at the configured boundary."""
+    """Expired terminal metadata remains available until cleanup completes."""
     admitted = await store_harness.store.admit(
         replace(_admission(), transfer_id="terminal-expiry"),
         lease_id="lease",
@@ -2328,31 +2542,46 @@ async def test_terminal_metadata_expires_on_access(
         expected_revision=admitted.revision,
         outcome=RuntimeTransferOutcome.FAILED,
         failure=RuntimeTransferFailure.STREAM,
+        destination_conflict=None,
     )
     assert terminal is not None
     assert terminal.terminal_expires_at is not None
 
+    pending = await store_harness.store.record_cleanup(
+        "terminal-expiry",
+        attempt_id="attempt",
+        expected_revision=terminal.revision,
+        status=RuntimeTransferCleanupStatus.PENDING,
+        cleanup_failure=None,
+    )
+    assert pending is not None
     store_harness.clock.now = terminal.terminal_expires_at
 
-    assert (
-        await store_harness.store.request_cancellation(
-            "terminal-expiry",
-            attempt_id="attempt",
-            expected_revision=terminal.revision,
-            reason=RuntimeTransferCancellationReason.CALLER,
-        )
-        is None
+    assert await store_harness.store.purge_terminal(limit=10) == 0
+    assert await store_harness.store.get("terminal-expiry") == pending
+
+    retryable = await store_harness.store.record_cleanup(
+        "terminal-expiry",
+        attempt_id="attempt",
+        expected_revision=pending.revision,
+        status=RuntimeTransferCleanupStatus.RETRYABLE_FAILURE,
+        cleanup_failure=RuntimeTransferCleanupArtifact.MULTIPART_ABORT,
     )
-    assert (
-        await store_harness.store.record_cleanup(
-            "terminal-expiry",
-            attempt_id="attempt",
-            expected_revision=terminal.revision,
-            status=RuntimeTransferCleanupStatus.PENDING,
-            cleanup_failure=None,
-        )
-        is None
+    assert retryable is not None
+    assert await store_harness.store.purge_terminal(limit=10) == 0
+
+    store_harness.clock.now = terminal.terminal_expires_at - timedelta(minutes=1)
+    completed = await store_harness.store.record_cleanup(
+        "terminal-expiry",
+        attempt_id="attempt",
+        expected_revision=retryable.revision,
+        status=RuntimeTransferCleanupStatus.COMPLETE,
+        cleanup_failure=None,
     )
+    assert completed is not None
+
+    store_harness.clock.now = terminal.terminal_expires_at
+    assert await store_harness.store.purge_terminal(limit=10) == 1
     assert await store_harness.store.get("terminal-expiry") is None
 
 
@@ -2404,6 +2633,7 @@ async def test_terminal_release_cleanup_and_historical_attempt_authority(
         expected_revision=pending_cleanup.revision,
         outcome=RuntimeTransferOutcome.FAILED,
         failure=RuntimeTransferFailure.STREAM,
+        destination_conflict=None,
     )
     assert terminal is not None
     assert (
@@ -2413,6 +2643,7 @@ async def test_terminal_release_cleanup_and_historical_attempt_authority(
             expected_revision=terminal.revision,
             outcome=RuntimeTransferOutcome.FAILED,
             failure=RuntimeTransferFailure.STREAM,
+            destination_conflict=None,
         )
         == terminal
     )
@@ -2465,6 +2696,7 @@ async def test_terminal_release_cleanup_and_historical_attempt_authority(
             expected_revision=old_cleanup.revision,
             outcome=RuntimeTransferOutcome.FAILED,
             failure=RuntimeTransferFailure.STREAM,
+            destination_conflict=None,
         )
         == old_cleanup
     )

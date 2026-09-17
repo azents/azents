@@ -8,6 +8,10 @@ from azents_runtime_control.grpc_transfer_coordinator_client import (
     CoordinatorRequestMessage,
     coordinator_credential_request,
 )
+from azents_runtime_control.grpc_workspace_upload_client import (
+    WorkspaceUploadCredentialRequestMessage,
+    workspace_upload_credential_request,
+)
 
 from azents.core.enums import RuntimeProviderAuthMethod
 from azents.core.runtime_runner_credential import (
@@ -122,6 +126,40 @@ class RuntimeTransferCoordinatorCredentialGrpcAuth:
             raise AssertionError("unreachable")
         try:
             expected = coordinator_credential_request(operation, request)
+            return self._verifier.verify(
+                credential,
+                expected_operation=expected.operation,
+                expected_request_sha256=expected.request_sha256,
+                expected_identity=expected.identity,
+            )
+        except (
+            KeyError,
+            RuntimeTransferCoordinatorCredentialInvalid,
+            ValueError,
+        ):
+            await context.abort(
+                grpc.StatusCode.UNAUTHENTICATED,
+                "Trusted-service credential is invalid or unavailable",
+            )
+            raise AssertionError("unreachable") from None
+
+    async def authenticate_workspace(
+        self,
+        context: GrpcAbortContext,
+        *,
+        operation: str,
+        request: WorkspaceUploadCredentialRequestMessage,
+    ) -> RuntimeTransferCoordinatorCredentialClaims:
+        """Verify one Workspace upload request against exact metadata."""
+        credential = _single_bearer_credential(context.invocation_metadata())
+        if credential is None:
+            await context.abort(
+                grpc.StatusCode.UNAUTHENTICATED,
+                "Trusted-service credential is missing",
+            )
+            raise AssertionError("unreachable")
+        try:
+            expected = workspace_upload_credential_request(operation, request)
             return self._verifier.verify(
                 credential,
                 expected_operation=expected.operation,

@@ -1232,6 +1232,7 @@ def _admission(
         agent_id=None,
         runtime_path="/workspace/file",
         overwrite=False,
+        conflict_precondition=None,
         expected_size=size,
         expected_sha256=sha256,
         product_maximum_size=max(10, size),

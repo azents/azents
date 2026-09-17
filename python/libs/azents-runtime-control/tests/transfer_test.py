@@ -28,13 +28,14 @@ def test_transfer_protocol_constants_are_exact() -> None:
 
 
 def test_runner_transfer_schema_is_directional_and_bounded() -> None:
-    """Ensure byte data exists only in the dedicated TransferChunk message."""
+    """Limit data-plane Runner Transfer bytes to bounded chunks."""
     service = runtime_runner_transfer_pb2.DESCRIPTOR.services_by_name[
         "RuntimeRunnerTransfer"
     ]
     assert tuple(method.name for method in service.methods) == (
         "DownloadTransfer",
         "UploadTransfer",
+        "ClaimDirectObjectDownload",
     )
     bytes_fields = [
         field.full_name
@@ -49,27 +50,66 @@ def test_runner_transfer_schema_is_directional_and_bounded() -> None:
     ]
 
 
-def test_coordinator_schema_carries_no_file_or_storage_authority() -> None:
-    """Prevent coordinator drift into a file-body or S3 authority plane."""
-    forbidden = ("body", "chunk", "bucket", "key", "url", "credential", "bytes")
+def test_workspace_upload_schema_is_metadata_only() -> None:
+    """Keep Workspace upload coordination metadata-only."""
+    service = runtime_transfer_coordinator_pb2.DESCRIPTOR.services_by_name[
+        "RuntimeWorkspaceUploadCoordinator"
+    ]
+    assert tuple(method.name for method in service.methods) == (
+        "CreateWorkspaceUpload",
+        "IssueWorkspaceUploadTicket",
+        "FinalizeWorkspaceUpload",
+        "GetWorkspaceUpload",
+        "CancelWorkspaceUpload",
+        "RetryWorkspaceUpload",
+    )
+
+    messages = runtime_transfer_coordinator_pb2.DESCRIPTOR.message_types_by_name
+    assert (
+        messages["WorkspaceUploadStatus"].fields_by_name["destination_evidence"].number
+        == 19
+    )
+
+
+def test_workspace_upload_coordinator_only_carries_opaque_bytes() -> None:
+    """Prevent Workspace upload metadata from becoming a storage authority plane."""
+    byte_fields = [
+        field.full_name
+        for message in (
+            runtime_transfer_coordinator_pb2.DESCRIPTOR.message_types_by_name.values()
+        )
+        for field in message.fields
+        if field.type is FieldDescriptor.TYPE_BYTES
+    ]
+    assert byte_fields == [
+        "azents.runtime_control.v1.AdmitTransferRequest.conflict_precondition",
+        "azents.runtime_control.v1.DestinationEvidence.conflict_precondition",
+        "azents.runtime_control.v1.RetryWorkspaceUploadRequest.conflict_precondition",
+    ]
+
+    forbidden = ("body", "bucket", "key", "credential")
     for (
         message
     ) in runtime_transfer_coordinator_pb2.DESCRIPTOR.message_types_by_name.values():
         for field in message.fields:
-            assert field.type is not FieldDescriptor.TYPE_BYTES
             assert not any(token in field.name.lower() for token in forbidden)
 
 
 def test_runner_control_transfer_messages_carry_only_metadata() -> None:
-    """Prevent transfer correlation from reintroducing inline file data."""
+    """Allow bounded opaque conflict tokens but reject inline file data."""
     messages = runtime_runner_control_pb2.DESCRIPTOR.message_types_by_name
+    opaque_bytes = {
+        "azents.runtime_control.v1.RunnerTransferIntent.conflict_precondition",
+        "azents.runtime_control.v1.RunnerTransferResult.conflict_precondition",
+    }
     for name in (
         "RunnerTransferIntent",
         "RunnerTransferCancel",
         "RunnerTransferResult",
     ):
         for field in messages[name].fields:
-            assert field.type is not FieldDescriptor.TYPE_BYTES
+            if field.type is FieldDescriptor.TYPE_BYTES:
+                assert field.full_name in opaque_bytes
             assert all(
                 token not in field.name.lower()
                 for token in ("body", "chunk", "bucket", "key", "url", "credential")

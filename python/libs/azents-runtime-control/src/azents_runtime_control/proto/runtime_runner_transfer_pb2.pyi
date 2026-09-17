@@ -4,8 +4,11 @@
 isort:skip_file
 """
 
+from collections import abc as _abc
 from google.protobuf import descriptor as _descriptor
 from google.protobuf import message as _message
+from google.protobuf import timestamp_pb2 as _timestamp_pb2
+from google.protobuf.internal import containers as _containers
 from google.protobuf.internal import enum_type_wrapper as _enum_type_wrapper
 import builtins as _builtins
 import sys
@@ -138,6 +141,111 @@ class DownloadTransferRequest(_message.Message):
     def WhichOneof(self, oneof_group: _Never) -> None: ...
 
 Global___DownloadTransferRequest: _TypeAlias = DownloadTransferRequest
+
+@_typing.final
+class DirectObjectDownloadClaimRequest(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    IDENTITY_FIELD_NUMBER: _builtins.int
+    DISPATCH_ID_FIELD_NUMBER: _builtins.int
+    CLAIM_ID_FIELD_NUMBER: _builtins.int
+    dispatch_id: _builtins.str
+    claim_id: _builtins.str
+    @_builtins.property
+    def identity(self) -> Global___TransferIdentity: ...
+    def __init__(
+        self,
+        *,
+        identity: Global___TransferIdentity | None = ...,
+        dispatch_id: _builtins.str = ...,
+        claim_id: _builtins.str = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _typing.Literal["identity", b"identity"]
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal[
+        "claim_id", b"claim_id", "dispatch_id", b"dispatch_id", "identity", b"identity"
+    ]
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___DirectObjectDownloadClaimRequest: _TypeAlias = DirectObjectDownloadClaimRequest
+
+@_typing.final
+class DirectObjectDownloadHeader(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    NAME_FIELD_NUMBER: _builtins.int
+    VALUE_FIELD_NUMBER: _builtins.int
+    name: _builtins.str
+    value: _builtins.str
+    def __init__(
+        self,
+        *,
+        name: _builtins.str = ...,
+        value: _builtins.str = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["name", b"name", "value", b"value"]
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___DirectObjectDownloadHeader: _TypeAlias = DirectObjectDownloadHeader
+
+@_typing.final
+class DirectObjectDownloadClaimResponse(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    METHOD_FIELD_NUMBER: _builtins.int
+    URL_FIELD_NUMBER: _builtins.int
+    EXPIRES_AT_FIELD_NUMBER: _builtins.int
+    HEADERS_FIELD_NUMBER: _builtins.int
+    EXPECTED_SIZE_FIELD_NUMBER: _builtins.int
+    EXPECTED_SHA256_FIELD_NUMBER: _builtins.int
+    method: _builtins.str
+    url: _builtins.str
+    expected_size: _builtins.int
+    expected_sha256: _builtins.str
+    @_builtins.property
+    def expires_at(self) -> _timestamp_pb2.Timestamp: ...
+    @_builtins.property
+    def headers(
+        self,
+    ) -> _containers.RepeatedCompositeFieldContainer[
+        Global___DirectObjectDownloadHeader
+    ]: ...
+    def __init__(
+        self,
+        *,
+        method: _builtins.str = ...,
+        url: _builtins.str = ...,
+        expires_at: _timestamp_pb2.Timestamp | None = ...,
+        headers: _abc.Iterable[Global___DirectObjectDownloadHeader] | None = ...,
+        expected_size: _builtins.int = ...,
+        expected_sha256: _builtins.str = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _typing.Literal["expires_at", b"expires_at"]
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal[
+        "expected_sha256",
+        b"expected_sha256",
+        "expected_size",
+        b"expected_size",
+        "expires_at",
+        b"expires_at",
+        "headers",
+        b"headers",
+        "method",
+        b"method",
+        "url",
+        b"url",
+    ]
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___DirectObjectDownloadClaimResponse: _TypeAlias = (
+    DirectObjectDownloadClaimResponse
+)
 
 @_typing.final
 class DownloadTransferComplete(_message.Message):

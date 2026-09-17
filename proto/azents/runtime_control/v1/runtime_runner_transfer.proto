@@ -2,11 +2,15 @@ syntax = "proto3";
 
 package azents.runtime_control.v1;
 
+import "google/protobuf/timestamp.proto";
+
 service RuntimeRunnerTransfer {
   rpc DownloadTransfer(DownloadTransferRequest)
       returns (stream DownloadTransferFrame);
   rpc UploadTransfer(stream UploadTransferFrame)
       returns (UploadTransferResult);
+  rpc ClaimDirectObjectDownload(DirectObjectDownloadClaimRequest)
+      returns (DirectObjectDownloadClaimResponse);
 }
 
 enum TransferDirection {
@@ -34,6 +38,26 @@ message TransferChunk {
 
 message DownloadTransferRequest {
   TransferIdentity identity = 1;
+}
+
+message DirectObjectDownloadClaimRequest {
+  TransferIdentity identity = 1;
+  string dispatch_id = 2;
+  string claim_id = 3;
+}
+
+message DirectObjectDownloadHeader {
+  string name = 1;
+  string value = 2;
+}
+
+message DirectObjectDownloadClaimResponse {
+  string method = 1;
+  string url = 2;
+  google.protobuf.Timestamp expires_at = 3;
+  repeated DirectObjectDownloadHeader headers = 4;
+  uint64 expected_size = 5;
+  string expected_sha256 = 6;
 }
 
 message DownloadTransferComplete {

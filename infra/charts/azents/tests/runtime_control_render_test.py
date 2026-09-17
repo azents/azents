@@ -33,6 +33,38 @@ def _helm_template(*values: str, json_values: tuple[str, ...] = ()) -> str:
         "secrets.existingSecrets.redis=azents-redis",
         "server.runtimeControl.tls.existingSecret=azents-runtime-control-tls",
     )
+    if "server.runtimeControl.enabled=true" in values:
+        object_storage_defaults = {
+            "endpoint": "objectStorage.external.endpoint=https://s3.internal",
+            "publicEndpoint": (
+                "objectStorage.external.publicEndpoint=https://s3.example.com"
+            ),
+            "bucket": "objectStorage.external.bucket=workspace-bucket",
+            "corsOrigins": (
+                "objectStorage.external.corsOrigins[0]=http://localhost:3000"
+            ),
+        }
+        configured_keys = {
+            value.removeprefix("objectStorage.external.").split("=", 1)[0]
+            for value in values
+            if value.startswith("objectStorage.external.")
+        }
+        configured_keys.update(
+            value.removeprefix("objectStorage.external.").split("=", 1)[0]
+            for value in json_values
+            if value.startswith("objectStorage.external.")
+        )
+        base_values += tuple(
+            value
+            for key, value in object_storage_defaults.items()
+            if key not in configured_keys
+        )
+        if "runtimeProviderKubernetes.enabled=true" in values:
+            base_values += (
+                "runtimeProviderKubernetes.networkPolicy.platformTransferEgress[0].endpointHostnames[0]=s3.example.com",
+                "runtimeProviderKubernetes.networkPolicy.platformTransferEgress[0].cidrs[0]=198.51.100.10/32",
+                "runtimeProviderKubernetes.networkPolicy.platformTransferEgress[0].ports[0]=443",
+            )
     for value in (*base_values, *values):
         command.extend(["--set", value])
     for value in json_values:
@@ -300,6 +332,7 @@ def test_runtime_control_renders_dedicated_workspace_s3_credential_aliases() -> 
         "server.runtimeControl.runnerImage.tag=sha",
         f"server.runtimeControl.runnerImage.digest={_RUNNER_DIGEST}",
         "objectStorage.external.endpoint=https://s3.internal",
+        "objectStorage.external.publicEndpoint=https://s3.example.com",
         "objectStorage.external.bucket=workspace-bucket",
         "secrets.existingSecrets.objectStorage=workspace-s3-credentials",
     )
@@ -315,7 +348,10 @@ def test_runtime_control_renders_dedicated_workspace_s3_credential_aliases() -> 
     assert 'name: "workspace-s3-credentials"' in runtime_control
     assert rendered.count("AZ_RUNTIME_CONTROL_WORKSPACE_S3_ACCESS_KEY_ID") == 1
     assert rendered.count("AZ_RUNTIME_CONTROL_WORKSPACE_S3_SECRET_ACCESS_KEY") == 1
-    assert "AZ_WORKSPACE_S3_PUBLIC_ENDPOINT_URL" not in rendered
+    assert (
+        "name: AZ_RUNTIME_CONTROL_WORKSPACE_S3_PUBLIC_ENDPOINT_URL\n"
+        '              value: "https://s3.example.com"'
+    ) in runtime_control
 
 
 def test_server_renders_distinct_public_s3_endpoint() -> None:
@@ -329,6 +365,27 @@ def test_server_renders_distinct_public_s3_endpoint() -> None:
     assert 'AZ_WORKSPACE_S3_ENDPOINT_URL: "http://s3.internal"' in rendered
     assert 'AZ_WORKSPACE_S3_PUBLIC_ENDPOINT_URL: "https://s3.example.com"' in rendered
     assert rendered.count("AZ_WORKSPACE_S3_PUBLIC_ENDPOINT_URL") == 1
+
+
+def test_runtime_control_renders_distinct_public_s3_endpoint() -> None:
+    """Runtime Control receives the public endpoint used by presigned URLs."""
+    rendered = _helm_template(
+        "server.runtimeControl.enabled=true",
+        "server.runtimeControl.runnerImage.repository=repo/runner",
+        "server.runtimeControl.runnerImage.tag=sha",
+        f"server.runtimeControl.runnerImage.digest={_RUNNER_DIGEST}",
+        "objectStorage.external.endpoint=http://s3.internal",
+        "objectStorage.external.publicEndpoint=https://s3.example.com",
+        "objectStorage.external.bucket=workspace-bucket",
+    )
+    start = rendered.index("kind: Deployment\nmetadata:\n  name: runtime-control")
+    runtime_control = rendered[start : rendered.index("\n---\n", start)]
+
+    assert (
+        "name: AZ_RUNTIME_CONTROL_WORKSPACE_S3_PUBLIC_ENDPOINT_URL\n"
+        '              value: "https://s3.example.com"'
+    ) in runtime_control
+    assert rendered.count("AZ_RUNTIME_CONTROL_WORKSPACE_S3_PUBLIC_ENDPOINT_URL") == 1
 
 
 def test_runtime_control_enables_token_review_for_kubernetes_provider() -> None:
@@ -479,3 +536,49 @@ def test_runtime_control_rejects_removed_shared_auth_values() -> None:
     assert "schema" in error
     assert "auth" in error
     assert "not allowed" in error
+
+
+def test_runtime_control_requires_workspace_s3_bucket() -> None:
+    """Runtime Control cannot render without a Workspace Upload bucket."""
+    with pytest.raises(subprocess.CalledProcessError) as raised:
+        _helm_template(
+            "server.runtimeControl.enabled=true",
+            "objectStorage.external.bucket=",
+            "server.runtimeControl.runnerImage.repository=repo/runner",
+            "server.runtimeControl.runnerImage.tag=sha",
+            f"server.runtimeControl.runnerImage.digest={_RUNNER_DIGEST}",
+        )
+
+    error = raised.value.stderr.lower()
+    assert "objectstorage/external/bucket" in error
+    assert "minlength" in error
+
+
+def test_runtime_control_requires_workspace_s3_public_endpoint() -> None:
+    """Runtime Control cannot render without the browser signing endpoint."""
+    with pytest.raises(subprocess.CalledProcessError) as raised:
+        _helm_template(
+            "server.runtimeControl.enabled=true",
+            "objectStorage.external.publicEndpoint=",
+            "server.runtimeControl.runnerImage.repository=repo/runner",
+            "server.runtimeControl.runnerImage.tag=sha",
+            f"server.runtimeControl.runnerImage.digest={_RUNNER_DIGEST}",
+        )
+
+    assert "objectstorage.external.publicendpoint is required" in (
+        raised.value.stderr.lower()
+    )
+
+
+def test_runtime_control_requires_workspace_s3_cors_origins() -> None:
+    """Runtime Control cannot render without an exact browser CORS origin."""
+    with pytest.raises(subprocess.CalledProcessError) as raised:
+        _helm_template(
+            "server.runtimeControl.enabled=true",
+            "server.runtimeControl.runnerImage.repository=repo/runner",
+            "server.runtimeControl.runnerImage.tag=sha",
+            f"server.runtimeControl.runnerImage.digest={_RUNNER_DIGEST}",
+            json_values=("objectStorage.external.corsOrigins=[]",),
+        )
+
+    assert "objectstorage.external.corsorigins" in raised.value.stderr.lower()

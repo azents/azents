@@ -33,6 +33,7 @@ from azents.runtime.transfer.data import (
     RuntimeTransferCleanupFailureEvidence,
     RuntimeTransferCleanupStatus,
     RuntimeTransferConfig,
+    RuntimeTransferDestinationConflictEvidence,
     RuntimeTransferDirection,
     RuntimeTransferDispatchStatus,
     RuntimeTransferFailure,
@@ -43,6 +44,7 @@ from azents.runtime.transfer.data import (
     RuntimeTransferPreparationCleanupState,
     RuntimeTransferProgress,
     RuntimeTransferRecord,
+    RuntimeTransferSourceTransport,
     cancellation_settlement,
     logical_expiry,
     terminal_expiry,
@@ -52,11 +54,17 @@ from azents.runtime.transfer.data import (
 from azents.runtime.transfer.policy import phase_transition_allowed
 
 _DEFAULT_NAMESPACE = "azents:runtime:transfer:v2"
-_RECORD_SCHEMA_VERSION = 9
+_RECORD_SCHEMA_VERSION = 11
 _MAX_SERIALIZED_RECORD_BYTES = 16 * 1024
 _LOCK_TTL_MILLISECONDS = 5_000
 _LOCK_ACQUIRE_TIMEOUT_SECONDS = 5.0
 _LOCK_RETRY_SECONDS = 0.01
+_TERMINAL_PURGE_CLEANUP_STATUSES = frozenset(
+    {
+        RuntimeTransferCleanupStatus.COMPLETE,
+        RuntimeTransferCleanupStatus.NOT_REQUIRED,
+    }
+)
 _RELEASE_LOCK_SCRIPT = """
 if redis.call("GET", KEYS[1]) == ARGV[1] then
   return redis.call("DEL", KEYS[1])
@@ -93,6 +101,8 @@ class _RedisTransferPipeline(Protocol):
     ) -> object: ...
 
     def pexpire(self, name: str, time: int, *, lt: bool) -> object: ...
+
+    def persist(self, name: str) -> object: ...
 
     def delete(self, *names: str) -> object: ...
 
@@ -200,6 +210,7 @@ _RECORD_FIELDS = frozenset(
         "cleanup_status",
         "cleanup_failure",
         "failure",
+        "destination_conflict",
         "preparation_object_handle",
         "preparation_multipart_cleanup_handle",
         "preparation_cleanup_state",
@@ -218,6 +229,7 @@ _ADMISSION_FIELDS = frozenset(
         "agent_id",
         "runtime_path",
         "overwrite",
+        "conflict_precondition",
         "expected_size",
         "expected_sha256",
         "product_maximum_size",
@@ -225,11 +237,16 @@ _ADMISSION_FIELDS = frozenset(
         "deadline_at",
         "source_expires_at",
         "resource_class",
+        "source_transport",
+        "source_handle",
     }
 )
 _OBJECT_FIELDS = frozenset({"key", "size", "sha256"})
 _PROGRESS_FIELDS = frozenset({"bytes_transferred", "observed_at"})
 _CLEANUP_FAILURE_FIELDS = frozenset({"artifact", "observed_at", "attempts"})
+_DESTINATION_CONFLICT_FIELDS = frozenset(
+    {"kind", "size", "modified_at", "conflict_precondition"}
+)
 
 
 @dataclass(frozen=True)
@@ -477,6 +494,11 @@ def _record_to_value(record: RuntimeTransferRecord) -> dict[str, object]:
             else _cleanup_failure_to_value(record.cleanup_failure)
         ),
         "failure": None if record.failure is None else record.failure.value,
+        "destination_conflict": (
+            None
+            if record.destination_conflict is None
+            else _destination_conflict_to_value(record.destination_conflict)
+        ),
         "preparation_object_handle": record.preparation_object_handle,
         "preparation_multipart_cleanup_handle": (
             record.preparation_multipart_cleanup_handle
@@ -593,6 +615,9 @@ def _record_from_value(value: object) -> RuntimeTransferRecord:
         failure=None
         if failure is None
         else RuntimeTransferFailure(_require_string(failure, "failure")),
+        destination_conflict=_optional_destination_conflict_from_value(
+            record["destination_conflict"]
+        ),
         preparation_object_handle=_optional_string(
             record["preparation_object_handle"],
             "preparation_object_handle",
@@ -623,6 +648,58 @@ def _cleanup_failure_to_value(
         "observed_at": _datetime_to_value(value.observed_at),
         "attempts": value.attempts,
     }
+
+
+def _destination_conflict_to_value(
+    value: RuntimeTransferDestinationConflictEvidence,
+) -> dict[str, object]:
+    """Return one bounded destination conflict JSON object."""
+    return {
+        "kind": value.kind,
+        "size": value.size,
+        "modified_at": _datetime_to_value(value.modified_at),
+        "conflict_precondition": base64.urlsafe_b64encode(
+            value.conflict_precondition
+        ).decode("ascii"),
+    }
+
+
+def _optional_destination_conflict_from_value(
+    value: object,
+) -> RuntimeTransferDestinationConflictEvidence | None:
+    """Decode optional safe conflict metadata and its opaque precondition."""
+    if value is None:
+        return None
+    evidence = _require_object(
+        value,
+        "destination_conflict",
+        _DESTINATION_CONFLICT_FIELDS,
+    )
+    encoded = _require_string(
+        evidence["conflict_precondition"],
+        "destination_conflict.conflict_precondition",
+    )
+    try:
+        decoded = base64.b64decode(
+            encoded.encode("ascii"),
+            altchars=b"-_",
+            validate=True,
+        )
+    except (UnicodeEncodeError, ValueError) as error:
+        raise ValueError(
+            "destination_conflict.conflict_precondition is invalid"
+        ) from error
+    if base64.urlsafe_b64encode(decoded).decode("ascii") != encoded:
+        raise ValueError("destination_conflict.conflict_precondition is not canonical")
+    return RuntimeTransferDestinationConflictEvidence(
+        kind=_require_string(evidence["kind"], "destination_conflict.kind"),
+        size=_optional_int(evidence["size"], "destination_conflict.size"),
+        modified_at=_datetime_from_value(
+            evidence["modified_at"],
+            "destination_conflict.modified_at",
+        ),
+        conflict_precondition=decoded,
+    )
 
 
 def _optional_cleanup_failure_from_value(
@@ -657,6 +734,13 @@ def _admission_to_value(admission: RuntimeTransferAdmission) -> dict[str, object
         "agent_id": admission.agent_id,
         "runtime_path": admission.runtime_path,
         "overwrite": admission.overwrite,
+        "conflict_precondition": (
+            None
+            if admission.conflict_precondition is None
+            else base64.urlsafe_b64encode(admission.conflict_precondition).decode(
+                "ascii"
+            )
+        ),
         "expected_size": admission.expected_size,
         "expected_sha256": admission.expected_sha256,
         "product_maximum_size": admission.product_maximum_size,
@@ -664,6 +748,8 @@ def _admission_to_value(admission: RuntimeTransferAdmission) -> dict[str, object
         "deadline_at": _datetime_to_value(admission.deadline_at),
         "source_expires_at": _optional_datetime_to_value(admission.source_expires_at),
         "resource_class": admission.resource_class,
+        "source_transport": admission.source_transport.value,
+        "source_handle": admission.source_handle,
     }
 
 
@@ -686,6 +772,10 @@ def _admission_from_value(value: object) -> RuntimeTransferAdmission:
         agent_id=_optional_string(admission["agent_id"], "agent_id"),
         runtime_path=_require_string(admission["runtime_path"], "runtime_path"),
         overwrite=_require_bool(admission["overwrite"], "overwrite"),
+        conflict_precondition=_optional_base64_bytes(
+            admission["conflict_precondition"],
+            "conflict_precondition",
+        ),
         expected_size=_require_int(admission["expected_size"], "expected_size"),
         expected_sha256=_optional_string(
             admission["expected_sha256"],
@@ -705,6 +795,10 @@ def _admission_from_value(value: object) -> RuntimeTransferAdmission:
             "source_expires_at",
         ),
         resource_class=_require_string(admission["resource_class"], "resource_class"),
+        source_transport=RuntimeTransferSourceTransport(
+            _require_string(admission["source_transport"], "source_transport")
+        ),
+        source_handle=_optional_string(admission["source_handle"], "source_handle"),
     )
 
 
@@ -810,6 +904,24 @@ def _require_string(value: object, name: str) -> str:
 def _optional_string(value: object, name: str) -> str | None:
     """Require an optional string value."""
     return None if value is None else _require_string(value, name)
+
+
+def _optional_base64_bytes(value: object, name: str) -> bytes | None:
+    """Decode optional canonical URL-safe base64 bytes."""
+    if value is None:
+        return None
+    encoded = _require_string(value, name)
+    try:
+        decoded = base64.b64decode(
+            encoded.encode("ascii"),
+            altchars=b"-_",
+            validate=True,
+        )
+    except (UnicodeEncodeError, ValueError) as error:
+        raise ValueError(f"{name} must be URL-safe base64") from error
+    if base64.urlsafe_b64encode(decoded).decode("ascii") != encoded:
+        raise ValueError(f"{name} must use canonical URL-safe base64")
+    return decoded
 
 
 def _require_int(value: object, name: str) -> int:
@@ -932,6 +1044,7 @@ class RedisRuntimeTransferStateStore:
                 cleanup_status=RuntimeTransferCleanupStatus.NOT_REQUIRED,
                 cleanup_failure=None,
                 failure=None,
+                destination_conflict=None,
             )
             entries[record_key] = _RedisTransferRecordEnvelope(
                 record=record,
@@ -956,7 +1069,11 @@ class RedisRuntimeTransferStateStore:
                 return None
             stored = await self._load_record(current_key)
             expired_bucket_removals: dict[str, set[str]] = {}
-            if stored is not None and _terminal_expired(stored.record, now):
+            if (
+                stored is not None
+                and _terminal_expired(stored.record, now)
+                and stored.record.cleanup_status in _TERMINAL_PURGE_CLEANUP_STATUSES
+            ):
                 terminal_expiry_at = stored.record.terminal_expires_at
                 assert terminal_expiry_at is not None
                 expired_bucket_removals[
@@ -996,6 +1113,33 @@ class RedisRuntimeTransferStateStore:
             runtime_id=runtime_id,
             desired_generation=desired_generation,
             object=object,
+            claim_id=None,
+            accepted_runner_generation=None,
+        )
+
+    async def mark_ready_direct(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        runtime_id: str,
+        desired_generation: int,
+        expected_revision: int,
+        source_handle: str,
+        size: int,
+        sha256: str,
+    ) -> RuntimeTransferRecord | None:
+        """Move a direct-object download attempt to READY without copying bytes."""
+        return await self._move(
+            transfer_id,
+            attempt_id=attempt_id,
+            expected_revision=expected_revision,
+            current=RuntimeTransferPhase.PREPARING,
+            target=RuntimeTransferPhase.READY,
+            runtime_id=runtime_id,
+            desired_generation=desired_generation,
+            object=None,
+            direct_source=(source_handle, size, sha256),
             claim_id=None,
             accepted_runner_generation=None,
         )
@@ -1256,6 +1400,103 @@ class RedisRuntimeTransferStateStore:
             entries[key] = dataclasses.replace(envelope, record=record)
             await self._commit(token, entries, now)
             return record
+
+    async def claim_direct_object(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        runtime_id: str,
+        desired_generation: int,
+        accepted_runner_generation: int,
+        claim_id: str,
+        owner_replica_id: str,
+    ) -> RuntimeTransferRecord | None:
+        """Claim or reuse one exact direct-object download claim."""
+        now = self._now()
+        async with self._locked() as token:
+            entries = await self._load_reclaimed_entries(now)
+            key, envelope = await self._load_exact_entry(
+                entries,
+                transfer_id,
+                attempt_id,
+                now,
+            )
+            record = None if envelope is None else envelope.record
+            if (
+                record is None
+                or record.admission.source_transport
+                is not RuntimeTransferSourceTransport.DIRECT_OBJECT
+                or record.admission.direction is not RuntimeTransferDirection.DOWNLOAD
+                or record.dispatch_status
+                not in {
+                    RuntimeTransferDispatchStatus.DELIVERABLE,
+                    RuntimeTransferDispatchStatus.ENQUEUED,
+                }
+                or record.accepted_runner_generation != accepted_runner_generation
+            ):
+                await self._commit(token, entries, now)
+                return None
+            if record.phase is RuntimeTransferPhase.STREAMING:
+                if (
+                    await self._active_matches(
+                        transfer_id,
+                        key,
+                        envelope,
+                        record.revision,
+                        RuntimeTransferPhase.STREAMING,
+                        now,
+                        runtime_id=runtime_id,
+                        desired_generation=desired_generation,
+                        accepted_runner_generation=accepted_runner_generation,
+                        claim_id=claim_id,
+                    )
+                    and record.stream_owner_replica_id == owner_replica_id
+                    and record.stream_lease_expires_at is not None
+                    and record.stream_lease_expires_at > now
+                ):
+                    assert key is not None and envelope is not None
+                    renewed = dataclasses.replace(
+                        record,
+                        revision=record.revision + 1,
+                        updated_at=now,
+                        stream_lease_expires_at=now + self.config.stream_lease,
+                    )
+                    entries[key] = dataclasses.replace(envelope, record=renewed)
+                    await self._commit(token, entries, now)
+                    return renewed
+                await self._commit(token, entries, now)
+                return None
+            if not await self._active_matches(
+                transfer_id,
+                key,
+                envelope,
+                record.revision,
+                RuntimeTransferPhase.READY,
+                now,
+                runtime_id=runtime_id,
+                desired_generation=desired_generation,
+                accepted_runner_generation=accepted_runner_generation,
+            ) or not phase_transition_allowed(
+                record.admission.direction,
+                record.phase,
+                RuntimeTransferPhase.STREAMING,
+            ):
+                await self._commit(token, entries, now)
+                return None
+            assert key is not None and envelope is not None
+            claimed = dataclasses.replace(
+                record,
+                phase=RuntimeTransferPhase.STREAMING,
+                revision=record.revision + 1,
+                updated_at=now,
+                stream_claim_id=claim_id,
+                stream_owner_replica_id=owner_replica_id,
+                stream_lease_expires_at=now + self.config.stream_lease,
+            )
+            entries[key] = dataclasses.replace(envelope, record=claimed)
+            await self._commit(token, entries, now)
+            return claimed
 
     async def bind_dispatch(
         self,
@@ -1997,9 +2238,20 @@ class RedisRuntimeTransferStateStore:
                 or record.stream_claim_id != claim_id
                 or record.runner_commit_expires_at is None
                 or now >= record.runner_commit_expires_at
-                or record.object is None
-                or record.object.size != actual_size
-                or record.object.sha256 != actual_sha256
+                or (
+                    record.admission.source_transport
+                    is RuntimeTransferSourceTransport.DIRECT_OBJECT
+                    and record.object is not None
+                )
+                or (
+                    record.admission.source_transport
+                    is not RuntimeTransferSourceTransport.DIRECT_OBJECT
+                    and (
+                        record.object is None
+                        or record.object.size != actual_size
+                        or record.object.sha256 != actual_sha256
+                    )
+                )
                 or record.admission.expected_size != actual_size
                 or (
                     record.admission.expected_sha256 is not None
@@ -2193,6 +2445,7 @@ class RedisRuntimeTransferStateStore:
         expected_revision: int,
         outcome: RuntimeTransferOutcome,
         failure: RuntimeTransferFailure | None,
+        destination_conflict: RuntimeTransferDestinationConflictEvidence | None,
     ) -> RuntimeTransferRecord | None:
         """Settle one exact attempt without touching a newer current attempt."""
         now = self._now()
@@ -2221,7 +2474,13 @@ class RedisRuntimeTransferStateStore:
             ):
                 outcome = RuntimeTransferOutcome.EXPIRED
                 failure = RuntimeTransferFailure.EXPIRED
+                destination_conflict = None
             elif not valid_settlement(outcome, failure):
+                await self._commit(token, entries, now)
+                return None
+            if (failure is RuntimeTransferFailure.DESTINATION_CONFLICT) != (
+                destination_conflict is not None
+            ):
                 await self._commit(token, entries, now)
                 return None
             if record.phase is RuntimeTransferPhase.TERMINAL:
@@ -2231,6 +2490,7 @@ class RedisRuntimeTransferStateStore:
                     if expected_revision <= record.revision
                     and record.terminal_outcome is outcome
                     and record.failure is failure
+                    and record.destination_conflict == destination_conflict
                     else None
                 )
             if record.revision != expected_revision:
@@ -2261,6 +2521,7 @@ class RedisRuntimeTransferStateStore:
                 updated_at=now,
                 terminal_outcome=outcome,
                 failure=failure,
+                destination_conflict=destination_conflict,
                 terminal_expires_at=terminal_expiry(now, self.config.terminal_ttl),
             )
             entries[key] = dataclasses.replace(envelope, record=settled)
@@ -2472,6 +2733,11 @@ class RedisRuntimeTransferStateStore:
                         deleted.add(member)
                         continue
                     if envelope.record.phase is RuntimeTransferPhase.TERMINAL:
+                        if (
+                            envelope.record.cleanup_status
+                            not in _TERMINAL_PURGE_CLEANUP_STATUSES
+                        ):
+                            records.append(envelope.record)
                         continue
                     records.append(envelope.record)
                 if last_member is not None and (
@@ -2591,14 +2857,17 @@ class RedisRuntimeTransferStateStore:
                         num=remaining,
                     )
                 )
+                retained_member = False
                 for member in members:
                     envelope = await self._load_record(member)
-                    bucket_removals.setdefault(bucket, set()).add(member)
-                    if envelope is not None and not _terminal_expired(
-                        envelope.record,
-                        now,
+                    if envelope is not None and (
+                        not _terminal_expired(envelope.record, now)
+                        or envelope.record.cleanup_status
+                        not in _TERMINAL_PURGE_CLEANUP_STATUSES
                     ):
+                        retained_member = True
                         continue
+                    bucket_removals.setdefault(bucket, set()).add(member)
                     transfer_id = (
                         self._record_transfer_id(member)
                         if envelope is None
@@ -2608,7 +2877,7 @@ class RedisRuntimeTransferStateStore:
                         pointer_deletes.add(self.keys.current(transfer_id))
                     entries.pop(member, None)
                     deleted.add(member)
-                if len(members) < remaining:
+                if len(members) < remaining and not retained_member:
                     bucket_deletes.add(bucket)
             await self._commit(
                 token,
@@ -2634,6 +2903,7 @@ class RedisRuntimeTransferStateStore:
         object: RuntimeTransferObject | None,
         claim_id: str | None,
         accepted_runner_generation: int | None,
+        direct_source: tuple[str, int, str] | None = None,
         required_runtime_id: str | None = None,
         required_desired_generation: int | None = None,
         required_runner_generation: int | None = None,
@@ -2681,27 +2951,59 @@ class RedisRuntimeTransferStateStore:
                     envelope is not None
                     and target is RuntimeTransferPhase.READY
                     and (
-                        object is None
-                        or not (
-                            envelope.record.preparation_cleanup_state
-                            is RuntimeTransferPreparationCleanupState.NOT_REQUIRED
-                            or (
-                                envelope.record.preparation_cleanup_state
-                                is (
-                                    RuntimeTransferPreparationCleanupState.COMPLETED_OBJECT_PENDING
+                        (
+                            direct_source is None
+                            and (
+                                object is None
+                                or not (
+                                    envelope.record.preparation_cleanup_state
+                                    is (
+                                        RuntimeTransferPreparationCleanupState.NOT_REQUIRED
+                                    )
+                                    or (
+                                        envelope.record.preparation_cleanup_state
+                                        is (
+                                            RuntimeTransferPreparationCleanupState.COMPLETED_OBJECT_PENDING
+                                        )
+                                        and object.key
+                                        in {
+                                            envelope.record.preparation_object_handle,
+                                            envelope.record.pre_ready_object_handle,
+                                        }
+                                    )
                                 )
-                                and object.key
-                                in {
-                                    envelope.record.preparation_object_handle,
-                                    envelope.record.pre_ready_object_handle,
-                                }
+                                or (
+                                    object.size
+                                    != envelope.record.admission.expected_size
+                                )
+                                or (
+                                    (
+                                        envelope.record.admission.expected_sha256
+                                        is not None
+                                    )
+                                    and (
+                                        object.sha256
+                                        != envelope.record.admission.expected_sha256
+                                    )
+                                )
                             )
                         )
-                        or object.size != envelope.record.admission.expected_size
                         or (
-                            envelope.record.admission.expected_sha256 is not None
-                            and object.sha256
-                            != envelope.record.admission.expected_sha256
+                            direct_source is not None
+                            and (
+                                envelope.record.admission.source_transport
+                                is not RuntimeTransferSourceTransport.DIRECT_OBJECT
+                                or envelope.record.admission.source_handle
+                                != direct_source[0]
+                                or direct_source[1]
+                                != envelope.record.admission.expected_size
+                                or direct_source[2]
+                                != envelope.record.admission.expected_sha256
+                                or envelope.record.preparation_cleanup_state
+                                is not (
+                                    RuntimeTransferPreparationCleanupState.NOT_REQUIRED
+                                )
+                            )
                         )
                     )
                 )
@@ -3015,7 +3317,10 @@ class RedisRuntimeTransferStateStore:
         envelope = await self._load_record(key)
         if envelope is None:
             return None
-        if _terminal_expired(envelope.record, now):
+        if (
+            _terminal_expired(envelope.record, now)
+            and envelope.record.cleanup_status in _TERMINAL_PURGE_CLEANUP_STATUSES
+        ):
             return None
         reclaimed = self._reclaim(envelope, now)
         entries[key] = reclaimed
@@ -3267,6 +3572,7 @@ class RedisRuntimeTransferStateStore:
             ).append(envelope.record)
         pending_pointer_sets = pointer_sets or {}
         pointer_expiries: dict[str, int] = {}
+        pointer_persists: set[str] = set()
         for key, envelope in entries.items():
             record = envelope.record
             pointer = self.keys.current(record.admission.transfer_id)
@@ -3276,10 +3582,16 @@ class RedisRuntimeTransferStateStore:
                 and pointer not in pending_pointer_sets
                 and await self._current_key(record.admission.transfer_id) == key
             ):
-                pointer_expiries[pointer] = _terminal_retention_milliseconds(
-                    record,
-                    now,
-                )
+                if record.cleanup_status in _TERMINAL_PURGE_CLEANUP_STATUSES:
+                    pointer_expiries[pointer] = _terminal_retention_milliseconds(
+                        record,
+                        now,
+                    )
+                else:
+                    pointer_persists.add(pointer)
+        pending_terminal_buckets = await self._terminal_buckets_with_pending_cleanup(
+            entries
+        )
         await self._owned_transaction(
             token,
             lambda pipeline: self._queue_commit(
@@ -3293,10 +3605,61 @@ class RedisRuntimeTransferStateStore:
                 pointer_deletes or set(),
                 record_deletes or set(),
                 pointer_expiries,
+                pointer_persists,
+                pending_terminal_buckets,
                 terminal_bucket_removals or {},
                 terminal_bucket_deletes or set(),
             ),
         )
+
+    async def _terminal_buckets_with_pending_cleanup(
+        self,
+        entries: dict[str, _RedisTransferRecordEnvelope],
+    ) -> set[str]:
+        """Find terminal buckets that must outlive their nominal metadata TTL."""
+        buckets = {
+            self.keys.terminal_bucket(envelope.record.terminal_expires_at)
+            for envelope in entries.values()
+            if (
+                envelope.record.phase is RuntimeTransferPhase.TERMINAL
+                and envelope.record.terminal_expires_at is not None
+            )
+        }
+        pending = {
+            self.keys.terminal_bucket(envelope.record.terminal_expires_at)
+            for envelope in entries.values()
+            if (
+                envelope.record.phase is RuntimeTransferPhase.TERMINAL
+                and envelope.record.terminal_expires_at is not None
+                and envelope.record.cleanup_status
+                not in _TERMINAL_PURGE_CLEANUP_STATUSES
+            )
+        }
+        for bucket in buckets:
+            if bucket in pending:
+                continue
+            members = _decode_redis_texts(await self.redis.zrange(bucket, 0, -1))
+            if not members:
+                continue
+            raw_records = await self.redis.mget(members)
+            if len(raw_records) != len(members):
+                raise RuntimeError(
+                    "Redis returned an incomplete Runtime transfer terminal bucket"
+                )
+            for member, raw in zip(members, raw_records, strict=True):
+                envelope = entries.get(member)
+                if envelope is None:
+                    if raw is None:
+                        continue
+                    envelope = _decode_record_envelope(_redis_bytes(raw))
+                if (
+                    envelope.record.phase is RuntimeTransferPhase.TERMINAL
+                    and envelope.record.cleanup_status
+                    not in _TERMINAL_PURGE_CLEANUP_STATUSES
+                ):
+                    pending.add(bucket)
+                    break
+        return pending
 
     async def _owned_transaction(
         self,
@@ -3332,6 +3695,8 @@ class RedisRuntimeTransferStateStore:
         pointer_deletes: set[str],
         record_deletes: set[str],
         pointer_expiries: dict[str, int],
+        pointer_persists: set[str],
+        pending_terminal_buckets: set[str],
         terminal_bucket_removals: dict[str, set[str]],
         terminal_bucket_deletes: set[str],
     ) -> None:
@@ -3339,12 +3704,22 @@ class RedisRuntimeTransferStateStore:
         for key, envelope in entries.items():
             pipeline.set(key, _encode_record_envelope(envelope), keepttl=True)
             if envelope.record.terminal_expires_at is not None:
-                pipeline.pexpire(
-                    key,
-                    _terminal_retention_milliseconds(envelope.record, now),
-                    lt=True,
-                )
-            self._queue_indexes(pipeline, key, envelope, key in active, now)
+                if envelope.record.cleanup_status in _TERMINAL_PURGE_CLEANUP_STATUSES:
+                    pipeline.pexpire(
+                        key,
+                        _terminal_retention_milliseconds(envelope.record, now),
+                        lt=True,
+                    )
+                else:
+                    pipeline.persist(key)
+            self._queue_indexes(
+                pipeline,
+                key,
+                envelope,
+                key in active,
+                now,
+                pending_terminal_buckets,
+            )
         for key in record_deletes:
             pipeline.delete(key)
             pipeline.zrem(self.keys.active_index(), key)
@@ -3387,6 +3762,8 @@ class RedisRuntimeTransferStateStore:
             pipeline.set(pointer, record_key)
         for pointer, retention_milliseconds in pointer_expiries.items():
             pipeline.pexpire(pointer, retention_milliseconds, lt=True)
+        for pointer in pointer_persists:
+            pipeline.persist(pointer)
         for pointer in pointer_deletes:
             pipeline.delete(pointer)
 
@@ -3397,6 +3774,7 @@ class RedisRuntimeTransferStateStore:
         envelope: _RedisTransferRecordEnvelope,
         active: bool,
         now: datetime,
+        pending_terminal_buckets: set[str],
     ) -> None:
         """Queue all exact index membership for one record envelope."""
         record = envelope.record
@@ -3415,14 +3793,20 @@ class RedisRuntimeTransferStateStore:
             record.phase is RuntimeTransferPhase.TERMINAL
             and record.terminal_expires_at is not None
         ):
-            pipeline.zrem(self.keys.stale_index(), key)
+            if record.cleanup_status in _TERMINAL_PURGE_CLEANUP_STATUSES:
+                pipeline.zrem(self.keys.stale_index(), key)
+            else:
+                pipeline.zadd(self.keys.stale_index(), {key: 0.0})
             terminal_bucket = self.keys.terminal_bucket(record.terminal_expires_at)
             pipeline.zadd(terminal_bucket, {key: 0.0})
-            pipeline.pexpire(
-                terminal_bucket,
-                _terminal_retention_milliseconds(record, now),
-                lt=True,
-            )
+            if terminal_bucket in pending_terminal_buckets:
+                pipeline.persist(terminal_bucket)
+            else:
+                pipeline.pexpire(
+                    terminal_bucket,
+                    _terminal_retention_milliseconds(record, now),
+                    lt=True,
+                )
         else:
             if (
                 envelope.admission_released

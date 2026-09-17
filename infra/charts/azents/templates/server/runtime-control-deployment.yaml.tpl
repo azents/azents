@@ -4,7 +4,18 @@
 {{- $webCapacity := .Values.server.runtimeControl.webCapacity }}
 {{- $webHardLimits := .Values.server.runtimeControl.webHardLimits }}
 {{- $objectStorageEndpoint := include "azents.objectStorageEndpoint" . }}
+{{- $objectStoragePublicEndpoint := include "azents.objectStoragePublicEndpoint" . }}
 {{- $objectStorageBucket := include "azents.objectStorageBucket" . }}
+{{- $objectStorageCorsOrigins := .Values.objectStorage.external.corsOrigins | default (list) }}
+{{- if not $objectStorageBucket }}
+{{- fail "objectStorage.external.bucket is required when Runtime Control is enabled" }}
+{{- end }}
+{{- if not $objectStoragePublicEndpoint }}
+{{- fail "objectStorage.external.publicEndpoint is required when Runtime Control is enabled" }}
+{{- end }}
+{{- if not $objectStorageCorsOrigins }}
+{{- fail "objectStorage.external.corsOrigins must include the Main Web origin when Runtime Control is enabled" }}
+{{- end }}
 {{- if and (eq $transfer.stateBackend "memory") (or (ne (int .Values.server.runtimeControl.replicas) 1) .Values.server.runtimeControl.autoscaling.enabled) }}
 {{- fail "memory Runtime Transfer state requires exactly one runtime-control replica and disabled autoscaling" }}
 {{- end }}
@@ -176,6 +187,12 @@ spec:
             - name: AZ_RUNTIME_CONTROL_WORKSPACE_S3_ENDPOINT_URL
               value: {{ $objectStorageEndpoint | quote }}
             {{- end }}
+            {{- if $objectStoragePublicEndpoint }}
+            - name: AZ_RUNTIME_CONTROL_WORKSPACE_S3_PUBLIC_ENDPOINT_URL
+              value: {{ $objectStoragePublicEndpoint | quote }}
+            {{- end }}
+            - name: AZ_RUNTIME_CONTROL_WORKSPACE_S3_CORS_ORIGINS
+              value: {{ join "," $objectStorageCorsOrigins | quote }}
             {{- if $objectStorageBucket }}
             - name: AZ_RUNTIME_CONTROL_WORKSPACE_S3_BUCKET
               value: {{ $objectStorageBucket | quote }}
