@@ -2,6 +2,7 @@
 
 import contextlib
 import datetime
+import hashlib
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
@@ -56,6 +57,7 @@ from azents.services.chat.workspace import (
     AgentWorkspaceFileService,
     get_runner_file_operation_timeout,
 )
+from azents.services.file_download_stream import BoundedDownloadStream
 from azents.services.runtime_storage_error import RuntimeStorageError
 
 AGENT_WORKSPACE_ROOT = PurePosixPath("/runtime/home")
@@ -453,12 +455,38 @@ class _FakeRuntimeWorkspaceDownloadService(RuntimeWorkspaceDownloadService):
     """Record authorized Workspace download transfer requests."""
 
     body: bytes = b"workspace download"
+    stream_body: bytes | None = None
     calls: list[WorkspaceDownloadRequest] = field(default_factory=list)
 
     async def download(self, request: WorkspaceDownloadRequest) -> bytes:
         """Return configured verified transfer bytes."""
         self.calls.append(request)
         return self.body
+
+    async def open_download(
+        self,
+        request: WorkspaceDownloadRequest,
+    ) -> BoundedDownloadStream:
+        """Return a bounded stream for configured verified transfer bytes."""
+        self.calls.append(request)
+        body = self.body if self.stream_body is None else self.stream_body
+
+        @contextlib.asynccontextmanager
+        async def source() -> AsyncGenerator[AsyncGenerator[bytes, None], None]:
+            async def chunks() -> AsyncGenerator[bytes, None]:
+                yield body
+
+            yield chunks()
+
+        source_context = source()
+        source_iterator = await source_context.__aenter__()
+        return BoundedDownloadStream(
+            source_context=source_context,
+            source_iterator=source_iterator,
+            expected_size=len(body),
+            expected_sha256=hashlib.sha256(body).hexdigest(),
+            maximum_chunk_size=max(1, len(body)),
+        )
 
 
 @contextlib.asynccontextmanager
@@ -855,6 +883,46 @@ async def test_download_uses_verified_transfer_not_runner_file_read() -> None:
         b"workspace download",
         "text/plain",
     )
+    assert runner_operations.read_calls == []
+    assert transfer.calls == [
+        WorkspaceDownloadRequest(
+            agent_id="agent-1",
+            runtime_path=file_path,
+            expected_size=5,
+            target=ServerToRuntimeTarget(
+                runtime_id="runtime-1",
+                desired_generation=7,
+            ),
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_open_download_streams_verified_transfer_without_runner_file_read() -> (
+    None
+):
+    """Open Workspace downloads preserve authorization and stream metadata."""
+    runtime = _make_agent_runtime()
+    runner_operations = _FakeRunnerOperations()
+    transfer = _FakeRuntimeWorkspaceDownloadService(stream_body=b"hello")
+    service = AgentWorkspaceFileService(
+        agent_repository=_FakeAgentRepository(),
+        workspace_user_repository=_FakeWorkspaceUserRepository(),
+        runner_operations=runner_operations,
+        runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
+        session_manager=_session_manager,
+        runner_file_operation_timeout=_RUNNER_FILE_OPERATION_TIMEOUT,
+        runtime_workspace_download_service=transfer,
+    )
+    file_path = (AGENT_WORKSPACE_ROOT / "test-file.txt").as_posix()
+
+    result = await service.open_download_file("agent-1", "user-1", file_path)
+
+    assert isinstance(result, Success)
+    assert result.value.path == PurePosixPath(file_path)
+    assert result.value.media_type == "text/plain"
+    assert [chunk async for chunk in result.value.stream] == [b"hello"]
+    await result.value.stream.complete()
     assert runner_operations.read_calls == []
     assert transfer.calls == [
         WorkspaceDownloadRequest(

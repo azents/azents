@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock
 import pytest
 from azcommon.infra.s3.service import (
     S3ObjectIdentity,
+    S3ObjectMetadata,
     S3ProductPublicationMetadata,
 )
 from azcommon.result import Failure, Result, Success
@@ -309,6 +310,7 @@ class _FakeS3Service:
         self.product_cleanup_calls: list[
             tuple[S3ObjectIdentity, int, S3ProductPublicationMetadata]
         ] = []
+        self.head_calls: list[S3ObjectIdentity] = []
         self.chunk_sizes: list[int] = []
         self.session_boundary = session_boundary
 
@@ -342,6 +344,23 @@ class _FakeS3Service:
             msg = "delete failed"
             raise RuntimeError(msg)
         self.objects.pop(key, None)
+
+    async def head(self, identity: S3ObjectIdentity) -> S3ObjectMetadata | None:
+        """Return metadata for one stored object without reading its body."""
+        assert self.session_boundary.active == 0
+        self.head_calls.append(identity)
+        body = self.objects.get(identity.key)
+        if body is None:
+            return None
+        return S3ObjectMetadata(
+            identity=identity,
+            content_length=len(body),
+            content_type=None,
+            etag=None,
+            checksum_sha256=None,
+            user_metadata={},
+            last_modified_at=None,
+        )
 
     async def copy_verified_transfer_object_to_product(
         self,
@@ -1544,6 +1563,58 @@ async def test_download_returns_unavailable_when_object_missing() -> None:
     s3_service.objects.clear()
 
     result = await service.download(file_id=created.value.id, user_id="user-1")
+
+    assert isinstance(result, Failure)
+    assert isinstance(result.error, FileUnavailable)
+
+
+@pytest.mark.asyncio
+async def test_open_download_streams_object_after_metadata_check() -> None:
+    """Open Exchange downloads verify object length before yielding bytes."""
+    service, _repository, s3_service = _make_service(
+        workspace_user=_make_workspace_user()
+    )
+    created = await service.create_agent_upload(
+        agent_id="agent-1",
+        user_id="user-1",
+        filename="report.csv",
+        media_type="text/csv",
+        body=b"a,b\n1,2\n",
+    )
+    assert isinstance(created, Success)
+
+    result = await service.open_download(file_id=created.value.id, user_id="user-1")
+
+    assert isinstance(result, Success)
+    assert result.value.file == created.value
+    assert [chunk async for chunk in result.value.stream] == [b"a,b\n1,2\n"]
+    await result.value.stream.complete()
+    assert s3_service.head_calls == [
+        S3ObjectIdentity(
+            bucket="test-bucket",
+            key=created.value.object_key,
+        )
+    ]
+    assert s3_service.chunk_sizes == [256 * 1024]
+
+
+@pytest.mark.asyncio
+async def test_open_download_returns_unavailable_when_object_missing() -> None:
+    """Open Exchange downloads reject missing objects before opening a stream."""
+    service, _repository, s3_service = _make_service(
+        workspace_user=_make_workspace_user()
+    )
+    created = await service.create_agent_upload(
+        agent_id="agent-1",
+        user_id="user-1",
+        filename="report.csv",
+        media_type="text/csv",
+        body=b"a,b\n1,2\n",
+    )
+    assert isinstance(created, Success)
+    s3_service.objects.clear()
+
+    result = await service.open_download(file_id=created.value.id, user_id="user-1")
 
     assert isinstance(result, Failure)
     assert isinstance(result.error, FileUnavailable)

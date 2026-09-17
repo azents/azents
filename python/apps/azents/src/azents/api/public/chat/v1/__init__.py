@@ -5,7 +5,6 @@ WebSocket chat and REST message lookup endpoints.
 
 import asyncio
 import dataclasses
-import io
 import logging
 import re
 from collections.abc import AsyncIterator
@@ -177,6 +176,7 @@ from azents.transport.chat import (
 from azents.utils.appctx import AppContext
 from azents.utils.fastapi.route import RouteMounter
 
+from ...file_download import FileDownloadResponse
 from .data import (
     ActionExecutionProjectionResponse,
     AgentProjectPresetListResponse,
@@ -3078,19 +3078,19 @@ async def download_agent_workspace_file(
 ) -> StreamingResponse:
     """Download an Agent Workspace file."""
     _validate_uuid7_hex(agent_id, label="agent ID")
-    result = await workspace_service.download_file(
+    result = await workspace_service.open_download_file(
         agent_id=agent_id,
         user_id=current_user.user_id,
         raw_path=path,
     )
     match result:
-        case Success((resolved_path, data, media_type)):
-            return StreamingResponse(
-                io.BytesIO(data),
-                media_type=media_type,
+        case Success(value):
+            return FileDownloadResponse(
+                value.stream,
+                media_type=value.media_type,
                 headers={
                     "Content-Disposition": (
-                        f"attachment; filename*=UTF-8''{quote(resolved_path.name)}"
+                        f"attachment; filename*=UTF-8''{quote(value.path.name)}"
                     ),
                 },
             )
@@ -3280,14 +3280,14 @@ async def download_exchange_file(
     exchange_file_service: Annotated[ExchangeFileService, Depends()],
 ) -> StreamingResponse:
     """Download an Exchange file."""
-    result = await exchange_file_service.download(
+    result = await exchange_file_service.open_download(
         file_id=file_id,
         user_id=current_user.user_id,
     )
     match result:
         case Success(value):
-            return StreamingResponse(
-                io.BytesIO(value.body),
+            return FileDownloadResponse(
+                value.stream,
                 media_type=value.file.media_type,
                 headers={
                     "Content-Disposition": (

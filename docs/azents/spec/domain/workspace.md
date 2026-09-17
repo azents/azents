@@ -16,6 +16,8 @@ code_paths:
   - python/apps/azents/src/azents/core/auth/permissions.py
   - python/apps/azents/src/azents/core/auth/roles.py
   - python/apps/azents/src/azents/services/chat/workspace.py
+  - python/apps/azents/src/azents/services/file_download_stream.py
+  - python/apps/azents/src/azents/api/public/file_download.py
   - python/apps/azents/src/azents/services/session_workspace_project/**
   - python/apps/azents/src/azents/repos/session_workspace_project/**
   - python/apps/azents/src/azents/repos/session_workspace_project_operations/**
@@ -120,8 +122,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/agents
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/channel-defaults
-last_verified_at: 2026-09-16
-spec_version: 84
+last_verified_at: 2026-09-17
+spec_version: 85
 ---
 
 # Workspace & Membership
@@ -308,7 +310,7 @@ target-generation, digest, raw reason code, missing-capability identifiers, and 
 details from the normal product surface. It renders the status supplied by the server and does not
 reconstruct physical security claims from raw Provider/Runner states.
 
-Agent Workspace path preview first uses Runner `file.stat` to classify the path. Text-preview candidates use bounded `file.read_text` with UTF-8 strict decoding and character-count truncation metadata; their byte size does not reject an otherwise bounded character preview. Binary preview candidates remain byte-size bounded, return no text body, and do not use Control file chunks. Complete Workspace downloads authorize the requester before Runtime access, stat the regular file, and consume one verified Runtime transfer object in the API response adapter. Neither surface reconstructs a complete file body from Runner Control Base64 events. Directory paths return `DIRECTORY` listing data for tree navigation; azents-web opens directories in the file tree instead of rendering a separate directory preview page.
+Agent Workspace path preview first uses Runner `file.stat` to classify the path. Text-preview candidates use bounded `file.read_text` with UTF-8 strict decoding and character-count truncation metadata; their byte size does not reject an otherwise bounded character preview. Binary preview candidates remain byte-size bounded, return no text body, and do not use Control file chunks. Complete Workspace downloads authorize the requester before Runtime access, resolve and normalize the Runner-reported root, stat a regular file, and open a response-scoped verified Runtime transfer consumer. The consumer exposes only its opaque verified object through a bounded S3 iterator; the stream verifies exact size and SHA-256, keeps its lease renewed while the body is consumed, and acknowledges and settles only after exact EOF plus successful final ASGI body-send return. Source failure, lease/deadline loss, disconnect, or cancellation before that boundary abandons and cancels the attempt. Neither surface reconstructs a complete file body from Runner Control Base64 events. Directory paths return `DIRECTORY` listing data for tree navigation; azents-web opens directories in the file tree instead of rendering a separate directory preview page.
 
 Lifecycle API is desired-state declaration. `start`/`stop`/`restart`/`recover`/reconcile and ordinary
 recreation do not delete Agent Workspace data. Only explicit `reset` and terminal delete may delete
@@ -863,6 +865,11 @@ stateDiagram-v2
 
 ## Changelog
 
+- **2026-09-17 (spec_version=85)** — Changed complete Agent Workspace downloads to
+  response-scoped verified Runtime consumers and bounded object-storage streaming.
+  Exact size/hash EOF and successful final ASGI send now precede acknowledgement and
+  settlement; early source failure, lease loss, disconnect, and cancellation use the
+  existing bounded abandonment path while preserving filename and media-type behavior.
 - **2026-09-16 (spec_version=84)** — Added system-administrator Workspace
   membership creation, non-Owner role updates, Owner-safe deletion, serialized
   initial Owner creation and ownership transfer, generated Admin clients, and the

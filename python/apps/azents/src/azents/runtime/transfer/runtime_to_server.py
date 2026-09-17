@@ -7,7 +7,7 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Protocol
+from typing import Literal, Protocol
 
 from azcommon.uuid import uuid7
 from azents_runtime_control.grpc_transfer_coordinator_client import (
@@ -110,8 +110,8 @@ class RuntimeToServerCoordinator(Protocol):
 
 
 @dataclass(frozen=True)
-class RuntimeToServerTransferRequest:
-    """Metadata-only Runtime upload publication request."""
+class RuntimeToServerConsumerRequest:
+    """Metadata-only request for one Runtime upload consumer."""
 
     target: ServerToRuntimeTarget
     agent_id: str
@@ -125,6 +125,12 @@ class RuntimeToServerTransferRequest:
     deadline_at: datetime
     resource_class: str
     publication_id: str
+
+
+@dataclass(frozen=True)
+class RuntimeToServerTransferRequest(RuntimeToServerConsumerRequest):
+    """Metadata-only Runtime upload publication request."""
+
     callback: RuntimeToServerPublicationCallback
 
 
@@ -134,6 +140,213 @@ class _ConsumerLease:
 
     revision: int
     failure: RuntimeToServerTransferError | None = None
+
+
+class RuntimeToServerConsumer:
+    """Own one verified Runtime upload consumer claim."""
+
+    def __init__(
+        self,
+        *,
+        service: RuntimeToServerTransferService,
+        upload: VerifiedRuntimeUpload,
+        claim_id: str,
+        revision: int,
+        deadline_at: datetime,
+    ) -> None:
+        self.service = service
+        self.upload = upload
+        self.claim_id = claim_id
+        self.revision = revision
+        self.deadline_at = deadline_at
+        self._state: Literal[
+            "active", "committing", "completed", "abandoning", "abandoned"
+        ] = "active"
+        self._renewal_failure: RuntimeToServerTransferError | None = None
+        self._renewal_task: asyncio.Task[None] | None = None
+        self._renewal_in_flight = False
+        self._terminal_lock = asyncio.Lock()
+        self._completion_task: asyncio.Task[None] | None = None
+        self._abandon_task: asyncio.Task[None] | None = None
+
+    @property
+    def committed(self) -> bool:
+        """Return whether successful consumption crossed its terminal commit point."""
+        return self._state in {"committing", "completed"}
+
+    async def start_lease_renewal(self) -> None:
+        """Keep the consumer claim alive while a response body is consumed."""
+        async with self._terminal_lock:
+            if self._state != "active":
+                raise RuntimeToServerTransferError(
+                    "Runtime upload consumer is no longer active"
+                )
+            if self._renewal_task is None:
+                self._renewal_task = asyncio.create_task(self._renew_consumer_lease())
+
+    async def ensure_active(self) -> None:
+        """Raise when the consumer lease can no longer expose source bytes."""
+        if self._renewal_failure is not None:
+            raise self._renewal_failure
+        if self.service.clock() >= self.deadline_at:
+            raise RuntimeToServerTransferError(
+                "Runtime upload deadline expired during download"
+            )
+        if self._state != "active":
+            raise RuntimeToServerTransferError(
+                "Runtime upload consumer is no longer active"
+            )
+
+    async def publish(self, callback: RuntimeToServerPublicationCallback) -> None:
+        """Run the existing product publication callback before completion."""
+        async with self._terminal_lock:
+            if self._state != "active":
+                raise RuntimeToServerTransferError(
+                    "Runtime upload consumer is no longer active"
+                )
+        self.revision = await self.service._publish_with_consumer_lease(
+            callback=callback,
+            upload=self.upload,
+            identity=self.upload.identity,
+            claim_id=self.claim_id,
+            revision=self.revision,
+            deadline_at=self.deadline_at,
+        )
+        async with self._terminal_lock:
+            if self._state != "active":
+                raise RuntimeToServerTransferError(
+                    "Runtime upload consumer changed during publication"
+                )
+            self._state = "committing"
+
+    async def complete(self) -> None:
+        """Acknowledge and settle after exact response completion."""
+        async with self._terminal_lock:
+            if self._state == "completed":
+                return
+            if self._state in {"abandoning", "abandoned"}:
+                raise RuntimeToServerTransferError(
+                    "Runtime upload consumer was abandoned"
+                )
+            if self._completion_task is None:
+                self._state = "committing"
+                self._completion_task = asyncio.create_task(self._complete_impl())
+            task = self._completion_task
+        await asyncio.shield(task)
+
+    async def abandon(self) -> None:
+        """Abandon the claim and cancel the exact transfer attempt."""
+        async with self._terminal_lock:
+            if self._state in {"committing", "completed", "abandoned"}:
+                return
+            if self._abandon_task is None:
+                self._state = "abandoning"
+                self._abandon_task = asyncio.create_task(self._abandon_impl())
+            task = self._abandon_task
+        await asyncio.shield(task)
+
+    async def close(self) -> None:
+        """Stop renewal and abandon unfinished consumption."""
+        if self._state == "active":
+            await self.abandon()
+            return
+        await self._stop_lease_renewal(refresh_revision=False)
+
+    async def _complete_impl(self) -> None:
+        """Run the bounded successful acknowledgement and settlement path."""
+        await self._stop_lease_renewal(refresh_revision=True)
+        if self._renewal_failure is not None:
+            raise self._renewal_failure
+        acknowledged = await self.service._recover_acknowledgement(
+            self.upload.identity,
+            self.claim_id,
+            self.revision,
+            self.deadline_at,
+        )
+        self.revision = acknowledged.revision
+        await self.service._recover_settlement(
+            self.upload.identity,
+            self.revision,
+            self.deadline_at,
+        )
+        async with self._terminal_lock:
+            self._state = "completed"
+
+    async def _abandon_impl(self) -> None:
+        """Stop renewal and run the bounded unsuccessful cleanup path."""
+        await self._stop_lease_renewal(refresh_revision=False)
+        await self.service._abandon_and_cancel(
+            self.upload.identity,
+            self.claim_id,
+            self.revision,
+            self.deadline_at,
+        )
+        async with self._terminal_lock:
+            self._state = "abandoned"
+
+    async def _stop_lease_renewal(self, *, refresh_revision: bool) -> None:
+        """Cancel and join renewal, refreshing a possibly ambiguous revision."""
+        task = self._renewal_task
+        self._renewal_task = None
+        renewal_was_in_flight = self._renewal_in_flight
+        if task is not None:
+            if not task.done():
+                task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        if not refresh_revision or not renewal_was_in_flight:
+            return
+        try:
+            status = await self.service._observe_status(
+                identity=self.upload.identity,
+                deadline_at=self.deadline_at,
+            )
+        except RuntimeToServerTransferError as error:
+            self._renewal_failure = error
+            return
+        if status.phase is not CoordinatorTransferPhase.CONSUMING:
+            self._renewal_failure = RuntimeToServerTransferError(
+                "Runtime upload consumer lease was lost"
+            )
+            return
+        self.revision = status.revision
+
+    async def _renew_consumer_lease(self) -> None:
+        """Renew the response consumer claim until terminal action begins."""
+        while True:
+            await asyncio.sleep(
+                self.service.consumer_lease_renew_interval.total_seconds()
+            )
+            if self._state != "active":
+                return
+            if self.service.clock() >= self.deadline_at:
+                self._renewal_failure = RuntimeToServerTransferError(
+                    "Runtime upload deadline expired during download"
+                )
+                return
+            self._renewal_in_flight = True
+            try:
+                status = await self.service.coordinator.renew_consumer_lease(
+                    CoordinatorConsumerRequest(
+                        identity=self.upload.identity,
+                        expected_revision=self.revision,
+                        consumer_claim_id=self.claim_id,
+                    )
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                self._renewal_failure = RuntimeToServerTransferError(
+                    "Runtime upload consumer lease renewal failed"
+                )
+                return
+            finally:
+                self._renewal_in_flight = False
+            if status.phase is not CoordinatorTransferPhase.CONSUMING:
+                self._renewal_failure = RuntimeToServerTransferError(
+                    "Runtime upload consumer lease was lost"
+                )
+                return
+            self.revision = status.revision
 
 
 class RuntimeToServerTransferService:
@@ -154,6 +367,40 @@ class RuntimeToServerTransferService:
 
     async def transfer(self, request: RuntimeToServerTransferRequest) -> None:
         """Return only after product commit and authoritative transfer success."""
+        consumer: RuntimeToServerConsumer | None = None
+        try:
+            consumer = await self.prepare_consumer(
+                RuntimeToServerConsumerRequest(
+                    target=request.target,
+                    agent_id=request.agent_id,
+                    session_id=request.session_id,
+                    operation_id=request.operation_id,
+                    runtime_path=request.runtime_path,
+                    expected_size=request.expected_size,
+                    expected_sha256=request.expected_sha256,
+                    product_maximum_size=request.product_maximum_size,
+                    provider_maximum_size=request.provider_maximum_size,
+                    deadline_at=request.deadline_at,
+                    resource_class=request.resource_class,
+                    publication_id=request.publication_id,
+                )
+            )
+            await consumer.publish(request.callback)
+            await consumer.complete()
+        except asyncio.CancelledError:
+            if consumer is not None:
+                await consumer.abandon()
+            raise
+        except Exception:
+            if consumer is not None:
+                await consumer.abandon()
+            raise
+
+    async def prepare_consumer(
+        self,
+        request: RuntimeToServerConsumerRequest,
+    ) -> RuntimeToServerConsumer:
+        """Prepare one verified, claimed Runtime upload for a later consumer."""
         self._validate(request)
         identity = CoordinatorTransferIdentity(
             transfer_id=uuid7().hex,
@@ -167,7 +414,6 @@ class RuntimeToServerTransferService:
         )
         revision: int | None = None
         claim_id: str | None = None
-        committed = False
         try:
             admitted = await self.coordinator.admit_transfer(
                 CoordinatorAdmitTransferRequest(
@@ -239,8 +485,8 @@ class RuntimeToServerTransferService:
                 raise RuntimeToServerTransferError(
                     "Verified upload manifest is missing"
                 )
-            revision = await self._publish_with_consumer_lease(
-                callback=request.callback,
+            return RuntimeToServerConsumer(
+                service=self,
                 upload=VerifiedRuntimeUpload(
                     identity=identity,
                     publication_id=request.publication_id,
@@ -248,40 +494,25 @@ class RuntimeToServerTransferService:
                     size=manifest.size,
                     sha256=manifest.sha256,
                 ),
-                identity=identity,
                 claim_id=claim_id,
                 revision=revision,
                 deadline_at=request.deadline_at,
             )
-            committed = True
-            acknowledged = await self._recover_acknowledgement(
+        except asyncio.CancelledError:
+            await self._abandon_and_cancel(
                 identity,
                 claim_id,
                 revision,
                 request.deadline_at,
             )
-            await self._recover_settlement(
-                identity,
-                acknowledged.revision,
-                request.deadline_at,
-            )
-        except asyncio.CancelledError:
-            if not committed:
-                await self._abandon_and_cancel(
-                    identity,
-                    claim_id,
-                    revision,
-                    request.deadline_at,
-                )
             raise
         except Exception:
-            if not committed:
-                await self._abandon_and_cancel(
-                    identity,
-                    claim_id,
-                    revision,
-                    request.deadline_at,
-                )
+            await self._abandon_and_cancel(
+                identity,
+                claim_id,
+                revision,
+                request.deadline_at,
+            )
             raise
 
     async def _wait_available(
@@ -576,7 +807,7 @@ class RuntimeToServerTransferService:
                 },
             )
 
-    def _validate(self, request: RuntimeToServerTransferRequest) -> None:
+    def _validate(self, request: RuntimeToServerConsumerRequest) -> None:
         if not request.runtime_path.startswith("/"):
             raise ValueError("Runtime upload path must be absolute")
         if request.expected_size < 0:

@@ -13,11 +13,14 @@ from azents.runtime.transfer.present_file_publication import (
     OpaqueTransferObjectResolver,
 )
 from azents.runtime.transfer.runtime_to_server import (
+    RuntimeToServerConsumer,
+    RuntimeToServerConsumerRequest,
     RuntimeToServerPublicationCallback,
     RuntimeToServerTransferRequest,
     VerifiedRuntimeUpload,
 )
 from azents.runtime.transfer.server_to_runtime import ServerToRuntimeTarget
+from azents.services.file_download_stream import BoundedDownloadStream
 
 
 class WorkspaceDownloadError(RuntimeError):
@@ -29,6 +32,13 @@ class RuntimeToServerTransferExecutor(Protocol):
 
     async def transfer(self, request: RuntimeToServerTransferRequest) -> None:
         """Complete one Runtime upload consumer."""
+        ...
+
+    async def prepare_consumer(
+        self,
+        request: RuntimeToServerConsumerRequest,
+    ) -> RuntimeToServerConsumer:
+        """Prepare one verified Runtime upload consumer claim."""
         ...
 
 
@@ -66,8 +76,11 @@ class _BytesCallback(RuntimeToServerPublicationCallback):
         self.body = body
 
 
+_WORKSPACE_DOWNLOAD_STREAM_CHUNK_SIZE = 256 * 1024
+
+
 class RuntimeWorkspaceDownloadService:
-    """Materialize one authorized Workspace file through verified transfer."""
+    """Consume one authorized Workspace file through verified transfer."""
 
     def __init__(
         self,
@@ -83,6 +96,58 @@ class RuntimeWorkspaceDownloadService:
         self.s3_service = s3_service
         self.product_maximum_size = product_maximum_size
         self.deadline = deadline
+
+    async def open_download(
+        self,
+        request: WorkspaceDownloadRequest,
+    ) -> BoundedDownloadStream:
+        """Open one verified Workspace object as a response-scoped stream."""
+        operation_id = f"workspace-download-{uuid7().hex}"
+        consumer: RuntimeToServerConsumer | None = None
+        source_context = None
+        source_opened = False
+        try:
+            consumer = await self.transfer_service.prepare_consumer(
+                RuntimeToServerConsumerRequest(
+                    target=request.target,
+                    agent_id=request.agent_id,
+                    session_id=None,
+                    operation_id=operation_id,
+                    runtime_path=request.runtime_path,
+                    expected_size=request.expected_size,
+                    expected_sha256=None,
+                    product_maximum_size=self.product_maximum_size,
+                    provider_maximum_size=self.product_maximum_size,
+                    deadline_at=datetime.datetime.now(datetime.UTC) + self.deadline,
+                    resource_class="workspace_download",
+                    publication_id=operation_id,
+                )
+            )
+            source = self.resolver.resolve(consumer.upload.object_handle.value)
+            source_context = self.s3_service.iter_chunks(
+                source,
+                maximum_chunk_size=_WORKSPACE_DOWNLOAD_STREAM_CHUNK_SIZE,
+            )
+            source_iterator = await source_context.__aenter__()
+            source_opened = True
+            stream = BoundedDownloadStream(
+                source_context=source_context,
+                source_iterator=source_iterator,
+                expected_size=consumer.upload.size,
+                expected_sha256=consumer.upload.sha256,
+                maximum_chunk_size=_WORKSPACE_DOWNLOAD_STREAM_CHUNK_SIZE,
+                before_read=consumer.ensure_active,
+                on_complete=consumer.complete,
+                on_abandon=consumer.abandon,
+            )
+            await consumer.start_lease_renewal()
+            return stream
+        except BaseException:
+            if source_context is not None and source_opened:
+                await source_context.__aexit__(None, None, None)
+            if consumer is not None:
+                await consumer.abandon()
+            raise
 
     async def download(self, request: WorkspaceDownloadRequest) -> bytes:
         """Return verified Runtime bytes after transfer lifecycle settlement."""

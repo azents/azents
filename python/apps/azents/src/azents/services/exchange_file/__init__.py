@@ -51,6 +51,7 @@ from azents.repos.exchange_file.operations import (
 )
 from azents.repos.file_metadata_authority import FileResourceAuthority
 from azents.repos.workspace_user import WorkspaceUserRepository
+from azents.services.file_download_stream import BoundedDownloadStream
 from azents.services.file_lifecycle_policy import exchange_file_expires_at
 from azents.services.session_resource_authority import SessionResourceAuthority
 
@@ -105,6 +106,14 @@ class ExchangeFileDownload:
 
 
 @dataclasses.dataclass(frozen=True)
+class ExchangeFileDownloadStream:
+    """Response-scoped Exchange file stream and its metadata."""
+
+    file: ExchangeFile
+    stream: BoundedDownloadStream
+
+
+@dataclasses.dataclass(frozen=True)
 class ExchangeFileTransferSource:
     """Authorized Exchange metadata for a trusted Runtime transfer."""
 
@@ -125,6 +134,7 @@ ExchangeFileError = (
 _PREVIEW_THUMBNAIL_MAX_SIZE = 512
 _PREVIEW_THUMBNAIL_MEDIA_TYPE = "image/jpeg"
 _MAX_TEXT_PREVIEW_CHARS = 2000
+_EXCHANGE_DOWNLOAD_STREAM_CHUNK_SIZE = 256 * 1024
 
 
 class _PreviewProgress(NamedTuple):
@@ -1363,6 +1373,56 @@ class ExchangeFileService:
         if body is None:
             return Failure(FileUnavailable())
         return Success(ExchangeFileDownload(file=file.value, body=body))
+
+    async def open_download(
+        self,
+        *,
+        file_id: str,
+        user_id: str,
+    ) -> Result[ExchangeFileDownloadStream, ExchangeFileError]:
+        """Open one authorized Exchange object as a bounded response stream."""
+        file = await self._get_accessible_file(file_id=file_id, user_id=user_id)
+        if isinstance(file, Failure):
+            return Failure(file.error)
+        if file.value.status == ExchangeFileStatus.EXPIRED:
+            return Failure(FileExpired())
+
+        identity = S3ObjectIdentity(
+            bucket=self.config.workspace_s3.bucket,
+            key=file.value.object_key,
+        )
+        metadata = await self.s3_service.head(identity)
+        if metadata is None or metadata.content_length != file.value.size_bytes:
+            return Failure(FileUnavailable())
+        source_context = self.s3_service.iter_chunks(
+            identity,
+            maximum_chunk_size=_EXCHANGE_DOWNLOAD_STREAM_CHUNK_SIZE,
+        )
+        source_opened = False
+        try:
+            source_iterator = await source_context.__aenter__()
+            source_opened = True
+            stream = BoundedDownloadStream(
+                source_context=source_context,
+                source_iterator=source_iterator,
+                expected_size=file.value.size_bytes,
+                expected_sha256=file.value.sha256,
+                maximum_chunk_size=_EXCHANGE_DOWNLOAD_STREAM_CHUNK_SIZE,
+            )
+        except FileNotFoundError:
+            if source_opened:
+                await source_context.__aexit__(None, None, None)
+            return Failure(FileUnavailable())
+        except BaseException:
+            if source_opened:
+                await source_context.__aexit__(None, None, None)
+            raise
+        return Success(
+            ExchangeFileDownloadStream(
+                file=file.value,
+                stream=stream,
+            )
+        )
 
     async def delete(
         self,

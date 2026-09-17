@@ -33,6 +33,8 @@ code_paths:
   - python/apps/azents/src/azents/services/archived_session_purge.py
   - python/apps/azents/src/azents/services/uploads/**
   - python/apps/azents/src/azents/services/chat/workspace.py
+  - python/apps/azents/src/azents/services/file_download_stream.py
+  - python/apps/azents/src/azents/api/public/file_download.py
   - python/apps/azents/src/azents/engine/events/file_parts.py
   - python/apps/azents/src/azents/engine/events/fork_context.py
   - python/apps/azents/src/azents/engine/events/model_file_parts.py
@@ -58,8 +60,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ToolActivityGroup.tsx
   - typescript/apps/azents-web/src/features/chat/components/ToolCallCard.tsx
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
-last_verified_at: 2026-09-15
-spec_version: 49
+last_verified_at: 2026-09-17
+spec_version: 50
 ---
 
 # File Exchange Storage
@@ -280,6 +282,16 @@ that copy succeeds; a failed, cancelled, changed, oversized, or unverified Runti
 source never becomes an ExchangeFile. The published attachment appears in the chat UI
 attachment list and can be retrieved through the download endpoint.
 
+Public Exchange downloads keep the existing requester authorization and expiration
+checks, then verify the stored object length with an S3 HEAD before opening a
+response-scoped bounded iterator. The HTTP response stream counts and hashes each
+chunk, accepts an empty object only when its stored size and SHA-256 match, and
+closes the object body on EOF, source error, disconnect, cancellation, or response
+cleanup. The existing byte-returning `download()` method remains the boundary for
+internal Agent and External Channel consumers; only the public HTTP route uses the
+stream handle. Missing, expired, unauthorized, and unavailable files retain their
+existing status mapping and filename/media-type headers.
+
 Runtime Transfer state is optional volatile coordination. If its in-memory or Redis
 implementation restarts empty, an earlier upload handle cannot be revived from an S3
 object, while a new `present_file` operation can start normally. Runtime Control
@@ -365,6 +377,9 @@ later `import_file` must explicitly copy them into the new Runtime.
 
 ## Changelog
 
+- **2026-09-17** — v50. Added response-scoped bounded Exchange HTTP downloads with
+  HEAD size validation, exact size/hash verification, explicit source cleanup, and
+  unchanged byte-returning internal consumers and public error/header behavior.
 - **2026-09-12** — v49. Isolated generated-file preparation and compensation
   by owner generation while keeping object I/O outside metadata transactions.
 - **2026-09-08** — v48. Moved Artifact, ExchangeFile, and ModelFile metadata,

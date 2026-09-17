@@ -67,6 +67,7 @@ from azents.services.agent_runtime.lifecycle_data import (
     RuntimeOperationTargetResolver,
 )
 from azents.services.agent_runtime.service import AgentRuntimeService
+from azents.services.file_download_stream import BoundedDownloadStream
 from azents.services.runtime_storage_error import RuntimeStorageError
 
 from .data import (
@@ -354,6 +355,14 @@ class _WorkspaceFileDownload(NamedTuple):
 
     path: PurePosixPath
     data: bytes
+    media_type: str
+
+
+class WorkspaceFileDownloadStream(NamedTuple):
+    """Response-scoped Workspace stream and its metadata."""
+
+    path: PurePosixPath
+    stream: BoundedDownloadStream
     media_type: str
 
 
@@ -1358,6 +1367,85 @@ class AgentWorkspaceFileService:
             _WorkspaceFileDownload(
                 path=path,
                 data=data,
+                media_type=_guess_media_type(path),
+            )
+        )
+
+    async def open_download_file(
+        self,
+        agent_id: str,
+        user_id: str,
+        raw_path: str,
+    ) -> Result[WorkspaceFileDownloadStream, AgentWorkspaceError]:
+        """Open an authorized Agent Workspace file response stream."""
+        access = await self._ensure_active_runtime(agent_id, user_id)
+        match access:
+            case Success(runtime):
+                try:
+                    workspace_root = agent_workspace_root(runtime.workspace_path)
+                except AgentWorkspacePathUnavailable as error:
+                    return Failure(error)
+            case Failure(error):
+                return Failure(error)
+            case _:
+                assert_never(access)
+
+        try:
+            path = normalize_agent_workspace_path(
+                raw_path,
+                workspace_root=workspace_root,
+            )
+        except AgentWorkspacePathDenied as error:
+            return Failure(error)
+
+        stat_result = await self._stat_path(runtime, path)
+        match stat_result:
+            case Success(stat):
+                pass
+            case Failure(error):
+                return Failure(error)
+            case _:
+                assert_never(stat_result)
+        target_kind = stat.resolved_kind if stat.kind == "symlink" else stat.kind
+        if target_kind == "missing":
+            return Failure(AgentWorkspaceFileNotFound())
+        if target_kind != "file" or stat.size_bytes is None:
+            return Failure(
+                AgentWorkspaceInvalidOperation(
+                    detail="Agent Workspace download requires a regular file."
+                )
+            )
+        service = self._runtime_workspace_download_service
+        if service is None:
+            return Failure(
+                AgentWorkspaceFileReadError(
+                    detail="Runtime Workspace transfer is unavailable."
+                )
+            )
+        try:
+            stream = await service.open_download(
+                WorkspaceDownloadRequest(
+                    agent_id=agent_id,
+                    runtime_path=path.as_posix(),
+                    expected_size=stat.size_bytes,
+                    target=ServerToRuntimeTarget(
+                        runtime_id=runtime.id,
+                        desired_generation=runtime.desired_generation,
+                    ),
+                )
+            )
+        except (RuntimeToServerTransferError, WorkspaceDownloadError) as error:
+            return Failure(AgentWorkspaceFileReadError(detail=str(error)))
+        except FileNotFoundError:
+            return Failure(
+                AgentWorkspaceFileReadError(
+                    detail="Verified Runtime file object is unavailable."
+                )
+            )
+        return Success(
+            WorkspaceFileDownloadStream(
+                path=path,
+                stream=stream,
                 media_type=_guess_media_type(path),
             )
         )
