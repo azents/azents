@@ -122,8 +122,10 @@ Class | Method | HTTP request | Description
 *ChatV1Api* | [**chat_v1_bulk_delete_agent_workspace_paths**](azentspublicclient/docs/ChatV1Api.md#chat_v1_bulk_delete_agent_workspace_paths) | **DELETE** /chat/v1/agents/{agent_id}/workspace/files/bulk | Bulk Delete Agent Workspace Paths
 *ChatV1Api* | [**chat_v1_bulk_move_agent_workspace_paths**](azentspublicclient/docs/ChatV1Api.md#chat_v1_bulk_move_agent_workspace_paths) | **POST** /chat/v1/agents/{agent_id}/workspace/move/bulk | Bulk Move Agent Workspace Paths
 *ChatV1Api* | [**chat_v1_cancel_agent_session_primary_model_reservation**](azentspublicclient/docs/ChatV1Api.md#chat_v1_cancel_agent_session_primary_model_reservation) | **POST** /chat/v1/agents/{agent_id}/sessions/{session_id}/model-reservation/cancel | Cancel Agent Session Primary Model Reservation
+*ChatV1Api* | [**chat_v1_cancel_agent_workspace_upload**](azentspublicclient/docs/ChatV1Api.md#chat_v1_cancel_agent_workspace_upload) | **POST** /chat/v1/agents/{agent_id}/workspace/uploads/{upload_id}/cancel | Cancel Agent Workspace Upload
 *ChatV1Api* | [**chat_v1_cleanup_session_git_worktree**](azentspublicclient/docs/ChatV1Api.md#chat_v1_cleanup_session_git_worktree) | **POST** /chat/v1/agents/{agent_id}/sessions/{session_id}/git-worktree/cleanup | Cleanup Session Git Worktree
 *ChatV1Api* | [**chat_v1_create_agent_workspace_directory**](azentspublicclient/docs/ChatV1Api.md#chat_v1_create_agent_workspace_directory) | **POST** /chat/v1/agents/{agent_id}/workspace/directories | Create Agent Workspace Directory
+*ChatV1Api* | [**chat_v1_create_agent_workspace_upload**](azentspublicclient/docs/ChatV1Api.md#chat_v1_create_agent_workspace_upload) | **POST** /chat/v1/agents/{agent_id}/workspace/uploads | Create Agent Workspace Upload
 *ChatV1Api* | [**chat_v1_create_input**](azentspublicclient/docs/ChatV1Api.md#chat_v1_create_input) | **POST** /chat/v1/sessions/{session_id}/inputs | Create Input
 *ChatV1Api* | [**chat_v1_create_team_agent_session**](azentspublicclient/docs/ChatV1Api.md#chat_v1_create_team_agent_session) | **POST** /chat/v1/agents/{agent_id}/sessions | Create Team Agent Session
 *ChatV1Api* | [**chat_v1_create_team_agent_session_message**](azentspublicclient/docs/ChatV1Api.md#chat_v1_create_team_agent_session_message) | **POST** /chat/v1/agents/{agent_id}/sessions/messages | Create Team Agent Session Message
@@ -135,6 +137,7 @@ Class | Method | HTTP request | Description
 *ChatV1Api* | [**chat_v1_download_agent_workspace_file**](azentspublicclient/docs/ChatV1Api.md#chat_v1_download_agent_workspace_file) | **GET** /chat/v1/agents/{agent_id}/workspace/download | Download Agent Workspace File
 *ChatV1Api* | [**chat_v1_download_exchange_file**](azentspublicclient/docs/ChatV1Api.md#chat_v1_download_exchange_file) | **GET** /chat/v1/exchange-files/{file_id}/download | Download Exchange File
 *ChatV1Api* | [**chat_v1_edit_message**](azentspublicclient/docs/ChatV1Api.md#chat_v1_edit_message) | **POST** /chat/v1/sessions/{session_id}/edit-message | Edit Message
+*ChatV1Api* | [**chat_v1_finalize_agent_workspace_upload**](azentspublicclient/docs/ChatV1Api.md#chat_v1_finalize_agent_workspace_upload) | **POST** /chat/v1/agents/{agent_id}/workspace/uploads/{upload_id}/finalize | Finalize Agent Workspace Upload
 *ChatV1Api* | [**chat_v1_get_agent_session**](azentspublicclient/docs/ChatV1Api.md#chat_v1_get_agent_session) | **GET** /chat/v1/agents/{agent_id}/sessions/{session_id} | Get Agent Session
 *ChatV1Api* | [**chat_v1_get_agent_session_context**](azentspublicclient/docs/ChatV1Api.md#chat_v1_get_agent_session_context) | **GET** /chat/v1/agents/{agent_id}/sessions/{session_id}/context | Get Agent Session Context
 *ChatV1Api* | [**chat_v1_get_agent_session_model_availability**](azentspublicclient/docs/ChatV1Api.md#chat_v1_get_agent_session_model_availability) | **GET** /chat/v1/agents/{agent_id}/sessions/{session_id}/model-availability | Get Agent Session Model Availability
@@ -142,6 +145,7 @@ Class | Method | HTTP request | Description
 *ChatV1Api* | [**chat_v1_get_agent_session_sidebar**](azentspublicclient/docs/ChatV1Api.md#chat_v1_get_agent_session_sidebar) | **GET** /chat/v1/agents/{agent_id}/sessions/sidebar | Get Agent Session Sidebar
 *ChatV1Api* | [**chat_v1_get_agent_workspace**](azentspublicclient/docs/ChatV1Api.md#chat_v1_get_agent_workspace) | **GET** /chat/v1/agents/{agent_id}/workspace | Get Agent Workspace
 *ChatV1Api* | [**chat_v1_get_agent_workspace_repository_type**](azentspublicclient/docs/ChatV1Api.md#chat_v1_get_agent_workspace_repository_type) | **GET** /chat/v1/agents/{agent_id}/workspace/repository-type | Get Agent Workspace Repository Type
+*ChatV1Api* | [**chat_v1_get_agent_workspace_upload**](azentspublicclient/docs/ChatV1Api.md#chat_v1_get_agent_workspace_upload) | **GET** /chat/v1/agents/{agent_id}/workspace/uploads/{upload_id} | Get Agent Workspace Upload
 *ChatV1Api* | [**chat_v1_get_session_project_browser_manifest**](azentspublicclient/docs/ChatV1Api.md#chat_v1_get_session_project_browser_manifest) | **GET** /chat/v1/agents/{agent_id}/sessions/{session_id}/workspace/project-browser-manifest | Get Session Project Browser Manifest
 *ChatV1Api* | [**chat_v1_get_subagent_tree**](azentspublicclient/docs/ChatV1Api.md#chat_v1_get_subagent_tree) | **GET** /chat/v1/agents/{agent_id}/sessions/{session_id}/subagents/tree | Get Subagent Tree
 *ChatV1Api* | [**chat_v1_get_team_primary_agent_session**](azentspublicclient/docs/ChatV1Api.md#chat_v1_get_team_primary_agent_session) | **GET** /chat/v1/agents/{agent_id}/team-primary-session | Get Team Primary Agent Session
@@ -163,6 +167,7 @@ Class | Method | HTTP request | Description
 *ChatV1Api* | [**chat_v1_replace_session_model_profile**](azentspublicclient/docs/ChatV1Api.md#chat_v1_replace_session_model_profile) | **PUT** /chat/v1/sessions/{session_id}/model-profile | Replace Session Model Profile
 *ChatV1Api* | [**chat_v1_reserve_agent_session_primary_model**](azentspublicclient/docs/ChatV1Api.md#chat_v1_reserve_agent_session_primary_model) | **POST** /chat/v1/agents/{agent_id}/sessions/{session_id}/model-reservation | Reserve Agent Session Primary Model
 *ChatV1Api* | [**chat_v1_restore_agent_session**](azentspublicclient/docs/ChatV1Api.md#chat_v1_restore_agent_session) | **POST** /chat/v1/agents/{agent_id}/sessions/{session_id}/restore | Restore Agent Session
+*ChatV1Api* | [**chat_v1_retry_agent_workspace_upload**](azentspublicclient/docs/ChatV1Api.md#chat_v1_retry_agent_workspace_upload) | **POST** /chat/v1/agents/{agent_id}/workspace/uploads/{upload_id}/retry | Retry Agent Workspace Upload
 *ChatV1Api* | [**chat_v1_retry_failed_run**](azentspublicclient/docs/ChatV1Api.md#chat_v1_retry_failed_run) | **POST** /chat/v1/sessions/{session_id}/retry-failed-run | Retry Failed Run
 *ChatV1Api* | [**chat_v1_stat_agent_workspace_path**](azentspublicclient/docs/ChatV1Api.md#chat_v1_stat_agent_workspace_path) | **GET** /chat/v1/agents/{agent_id}/workspace/stat | Stat Agent Workspace Path
 *ChatV1Api* | [**chat_v1_stop_session_run**](azentspublicclient/docs/ChatV1Api.md#chat_v1_stop_session_run) | **POST** /chat/v1/sessions/{session_id}/stop | Stop Session Run
@@ -867,6 +872,18 @@ Class | Method | HTTP request | Description
  - [WorkspaceRuntimeProfilePolicyV2](azentspublicclient/docs/WorkspaceRuntimeProfilePolicyV2.md)
  - [WorkspaceRuntimeProfileReplaceRequest](azentspublicclient/docs/WorkspaceRuntimeProfileReplaceRequest.md)
  - [WorkspaceRuntimeProfileResponse](azentspublicclient/docs/WorkspaceRuntimeProfileResponse.md)
+ - [WorkspaceUploadCancelRequest](azentspublicclient/docs/WorkspaceUploadCancelRequest.md)
+ - [WorkspaceUploadCreateRequest](azentspublicclient/docs/WorkspaceUploadCreateRequest.md)
+ - [WorkspaceUploadCreateResponse](azentspublicclient/docs/WorkspaceUploadCreateResponse.md)
+ - [WorkspaceUploadDestinationEvidenceResponse](azentspublicclient/docs/WorkspaceUploadDestinationEvidenceResponse.md)
+ - [WorkspaceUploadFailure](azentspublicclient/docs/WorkspaceUploadFailure.md)
+ - [WorkspaceUploadFinalizeRequest](azentspublicclient/docs/WorkspaceUploadFinalizeRequest.md)
+ - [WorkspaceUploadIdentityResponse](azentspublicclient/docs/WorkspaceUploadIdentityResponse.md)
+ - [WorkspaceUploadOutcome](azentspublicclient/docs/WorkspaceUploadOutcome.md)
+ - [WorkspaceUploadPhase](azentspublicclient/docs/WorkspaceUploadPhase.md)
+ - [WorkspaceUploadRetryRequest](azentspublicclient/docs/WorkspaceUploadRetryRequest.md)
+ - [WorkspaceUploadStatusResponse](azentspublicclient/docs/WorkspaceUploadStatusResponse.md)
+ - [WorkspaceUploadTicketResponse](azentspublicclient/docs/WorkspaceUploadTicketResponse.md)
  - [WorkspaceUserListResponse](azentspublicclient/docs/WorkspaceUserListResponse.md)
  - [WorkspaceUserResponse](azentspublicclient/docs/WorkspaceUserResponse.md)
  - [WorkspaceUserRole](azentspublicclient/docs/WorkspaceUserRole.md)

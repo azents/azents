@@ -61,6 +61,13 @@ class TestChatV1Api(unittest.TestCase):
         """
         pass
 
+    def test_chat_v1_cancel_agent_workspace_upload(self) -> None:
+        """Test case for chat_v1_cancel_agent_workspace_upload
+
+        Cancel Agent Workspace Upload
+        """
+        pass
+
     def test_chat_v1_cleanup_session_git_worktree(self) -> None:
         """Test case for chat_v1_cleanup_session_git_worktree
 
@@ -72,6 +79,13 @@ class TestChatV1Api(unittest.TestCase):
         """Test case for chat_v1_create_agent_workspace_directory
 
         Create Agent Workspace Directory
+        """
+        pass
+
+    def test_chat_v1_create_agent_workspace_upload(self) -> None:
+        """Test case for chat_v1_create_agent_workspace_upload
+
+        Create Agent Workspace Upload
         """
         pass
 
@@ -152,6 +166,13 @@ class TestChatV1Api(unittest.TestCase):
         """
         pass
 
+    def test_chat_v1_finalize_agent_workspace_upload(self) -> None:
+        """Test case for chat_v1_finalize_agent_workspace_upload
+
+        Finalize Agent Workspace Upload
+        """
+        pass
+
     def test_chat_v1_get_agent_session(self) -> None:
         """Test case for chat_v1_get_agent_session
 
@@ -198,6 +219,13 @@ class TestChatV1Api(unittest.TestCase):
         """Test case for chat_v1_get_agent_workspace_repository_type
 
         Get Agent Workspace Repository Type
+        """
+        pass
+
+    def test_chat_v1_get_agent_workspace_upload(self) -> None:
+        """Test case for chat_v1_get_agent_workspace_upload
+
+        Get Agent Workspace Upload
         """
         pass
 
@@ -345,6 +373,13 @@ class TestChatV1Api(unittest.TestCase):
         """Test case for chat_v1_restore_agent_session
 
         Restore Agent Session
+        """
+        pass
+
+    def test_chat_v1_retry_agent_workspace_upload(self) -> None:
+        """Test case for chat_v1_retry_agent_workspace_upload
+
+        Retry Agent Workspace Upload
         """
         pass
 

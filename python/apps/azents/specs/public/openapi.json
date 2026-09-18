@@ -5462,6 +5462,322 @@
         }
       }
     },
+    "/chat/v1/agents/{agent_id}/workspace/uploads": {
+      "post": {
+        "tags": [
+          "Chat v1"
+        ],
+        "summary": "Create Agent Workspace Upload",
+        "description": "Create one direct Agent Workspace upload and issue its PUT ticket.",
+        "operationId": "chat_v1_create_agent_workspace_upload",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkspaceUploadCreateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceUploadCreateResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/chat/v1/agents/{agent_id}/workspace/uploads/{upload_id}": {
+      "get": {
+        "tags": [
+          "Chat v1"
+        ],
+        "summary": "Get Agent Workspace Upload",
+        "description": "Get one requester-scoped Agent Workspace upload status.",
+        "operationId": "chat_v1_get_agent_workspace_upload",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "upload_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Upload Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceUploadStatusResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/chat/v1/agents/{agent_id}/workspace/uploads/{upload_id}/finalize": {
+      "post": {
+        "tags": [
+          "Chat v1"
+        ],
+        "summary": "Finalize Agent Workspace Upload",
+        "description": "Finalize one direct PUT after Runtime Control verifies its object.",
+        "operationId": "chat_v1_finalize_agent_workspace_upload",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "upload_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Upload Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkspaceUploadFinalizeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceUploadStatusResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/chat/v1/agents/{agent_id}/workspace/uploads/{upload_id}/cancel": {
+      "post": {
+        "tags": [
+          "Chat v1"
+        ],
+        "summary": "Cancel Agent Workspace Upload",
+        "description": "Cancel one direct Agent Workspace upload.",
+        "operationId": "chat_v1_cancel_agent_workspace_upload",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "upload_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Upload Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkspaceUploadCancelRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceUploadStatusResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/chat/v1/agents/{agent_id}/workspace/uploads/{upload_id}/retry": {
+      "post": {
+        "tags": [
+          "Chat v1"
+        ],
+        "summary": "Retry Agent Workspace Upload",
+        "description": "Retry Runtime delivery with optional explicit overwrite fencing.",
+        "operationId": "chat_v1_retry_agent_workspace_upload",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "upload_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Upload Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkspaceUploadRetryRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceUploadStatusResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/chat/v1/agents/{agent_id}/upload": {
       "post": {
         "tags": [
@@ -35688,6 +36004,526 @@
         ],
         "title": "WorkspaceRuntimeProfileResponse",
         "description": "One complete Workspace-owned Runtime choice."
+      },
+      "WorkspaceUploadCancelRequest": {
+        "properties": {
+          "expected_revision": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Expected Revision",
+            "description": "Exact upload revision observed by the caller"
+          },
+          "current_delivery_number": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Delivery Number",
+            "description": "Current delivery attempt number, when one exists"
+          }
+        },
+        "type": "object",
+        "required": [
+          "expected_revision"
+        ],
+        "title": "WorkspaceUploadCancelRequest",
+        "description": "Cancellation request for one exact upload revision."
+      },
+      "WorkspaceUploadCreateRequest": {
+        "properties": {
+          "destination_directory": {
+            "type": "string",
+            "maxLength": 4096,
+            "minLength": 1,
+            "title": "Destination Directory",
+            "description": "Existing Agent Workspace directory for the destination file"
+          },
+          "filename": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Filename",
+            "description": "Destination basename"
+          },
+          "expected_size": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Expected Size",
+            "description": "Expected file size in bytes"
+          },
+          "expected_sha256": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 64,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Expected Sha256",
+            "description": "Lower-case SHA-256 digest of the browser file"
+          },
+          "media_type": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Media Type",
+            "description": "Optional file MIME type"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id",
+            "description": "Optional AgentSession correlation ID"
+          }
+        },
+        "type": "object",
+        "required": [
+          "destination_directory",
+          "filename",
+          "expected_size",
+          "expected_sha256"
+        ],
+        "title": "WorkspaceUploadCreateRequest",
+        "description": "Direct Agent Workspace upload admission request."
+      },
+      "WorkspaceUploadCreateResponse": {
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/WorkspaceUploadStatusResponse",
+            "description": "Upload status"
+          },
+          "ticket": {
+            "$ref": "#/components/schemas/WorkspaceUploadTicketResponse",
+            "description": "Direct PUT ticket"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "ticket"
+        ],
+        "title": "WorkspaceUploadCreateResponse",
+        "description": "Upload status and one transient browser PUT ticket."
+      },
+      "WorkspaceUploadDestinationEvidenceResponse": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "title": "Kind",
+            "description": "Observed destination kind"
+          },
+          "size": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size",
+            "description": "Observed destination size in bytes"
+          },
+          "modified_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Modified At",
+            "description": "Observed modification time"
+          },
+          "conflict_precondition": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conflict Precondition",
+            "description": "Opaque Runner precondition for an overwrite retry"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "modified_at"
+        ],
+        "title": "WorkspaceUploadDestinationEvidenceResponse",
+        "description": "Safe destination evidence for an explicit conflict retry."
+      },
+      "WorkspaceUploadFailure": {
+        "type": "string",
+        "enum": [
+          "invalid_request",
+          "authorization",
+          "too_large",
+          "revision_conflict",
+          "destination_conflict",
+          "runtime_unavailable",
+          "fenced",
+          "integrity",
+          "transfer",
+          "cancelled",
+          "expired"
+        ],
+        "title": "WorkspaceUploadFailure",
+        "description": "Workspace upload failure classification."
+      },
+      "WorkspaceUploadFinalizeRequest": {
+        "properties": {
+          "expected_revision": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Expected Revision",
+            "description": "Exact upload revision observed by the caller"
+          }
+        },
+        "type": "object",
+        "required": [
+          "expected_revision"
+        ],
+        "title": "WorkspaceUploadFinalizeRequest",
+        "description": "Finalize request after the browser direct PUT completes."
+      },
+      "WorkspaceUploadIdentityResponse": {
+        "properties": {
+          "upload_id": {
+            "type": "string",
+            "title": "Upload Id",
+            "description": "Workspace upload ID"
+          },
+          "requester_user_id": {
+            "type": "string",
+            "title": "Requester User Id",
+            "description": "Authenticated requester User ID"
+          },
+          "workspace_id": {
+            "type": "string",
+            "title": "Workspace Id",
+            "description": "Workspace ID"
+          },
+          "agent_id": {
+            "type": "string",
+            "title": "Agent Id",
+            "description": "Agent ID"
+          },
+          "runtime_id": {
+            "type": "string",
+            "title": "Runtime Id",
+            "description": "Admitted Agent Runtime ID"
+          },
+          "desired_generation": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Desired Generation",
+            "description": "Admitted Runtime desired generation"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id",
+            "description": "Optional correlated AgentSession ID"
+          }
+        },
+        "type": "object",
+        "required": [
+          "upload_id",
+          "requester_user_id",
+          "workspace_id",
+          "agent_id",
+          "runtime_id",
+          "desired_generation"
+        ],
+        "title": "WorkspaceUploadIdentityResponse",
+        "description": "Requester and Runtime identity for one Workspace upload."
+      },
+      "WorkspaceUploadOutcome": {
+        "type": "string",
+        "enum": [
+          "succeeded",
+          "cancelled",
+          "failed",
+          "expired"
+        ],
+        "title": "WorkspaceUploadOutcome",
+        "description": "Workspace upload terminal outcome."
+      },
+      "WorkspaceUploadPhase": {
+        "type": "string",
+        "enum": [
+          "queued",
+          "uploading",
+          "moving_to_runtime",
+          "conflicted",
+          "retryable_failure",
+          "succeeded",
+          "cancelled",
+          "failed",
+          "expired"
+        ],
+        "title": "WorkspaceUploadPhase",
+        "description": "Workspace upload lifecycle phase."
+      },
+      "WorkspaceUploadRetryRequest": {
+        "properties": {
+          "expected_revision": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Expected Revision",
+            "description": "Exact upload revision observed by the caller"
+          },
+          "current_delivery_number": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Current Delivery Number",
+            "description": "Exact current delivery attempt number"
+          },
+          "overwrite": {
+            "type": "boolean",
+            "title": "Overwrite",
+            "description": "Whether to explicitly replace the conflicted destination"
+          },
+          "conflict_precondition": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 684
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conflict Precondition",
+            "description": "Opaque Runner conflict precondition for overwrite"
+          }
+        },
+        "type": "object",
+        "required": [
+          "expected_revision",
+          "current_delivery_number",
+          "overwrite"
+        ],
+        "title": "WorkspaceUploadRetryRequest",
+        "description": "Runtime delivery retry request."
+      },
+      "WorkspaceUploadStatusResponse": {
+        "properties": {
+          "identity": {
+            "$ref": "#/components/schemas/WorkspaceUploadIdentityResponse",
+            "description": "Requester and Runtime upload identity"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Revision",
+            "description": "Monotonic upload revision"
+          },
+          "destination_directory": {
+            "type": "string",
+            "title": "Destination Directory",
+            "description": "Normalized destination directory"
+          },
+          "filename": {
+            "type": "string",
+            "title": "Filename",
+            "description": "Destination basename"
+          },
+          "destination_path": {
+            "type": "string",
+            "title": "Destination Path",
+            "description": "Normalized destination path"
+          },
+          "expected_size": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Expected Size",
+            "description": "Expected file size in bytes"
+          },
+          "received_size": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Received Size",
+            "description": "Authoritatively received bytes"
+          },
+          "actual_size": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actual Size",
+            "description": "Verified source size in bytes"
+          },
+          "sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sha256",
+            "description": "Verified source SHA-256 digest"
+          },
+          "media_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Media Type",
+            "description": "File MIME type"
+          },
+          "phase": {
+            "$ref": "#/components/schemas/WorkspaceUploadPhase",
+            "description": "Current upload phase"
+          },
+          "current_delivery_number": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Delivery Number",
+            "description": "Current Runtime delivery attempt number"
+          },
+          "outcome": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkspaceUploadOutcome"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Terminal upload outcome"
+          },
+          "failure": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkspaceUploadFailure"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Bounded failure classification"
+          },
+          "retry_available": {
+            "type": "boolean",
+            "title": "Retry Available",
+            "description": "Whether Runtime delivery retry is valid"
+          },
+          "cancel_available": {
+            "type": "boolean",
+            "title": "Cancel Available",
+            "description": "Whether cancellation is valid"
+          },
+          "overwrite_available": {
+            "type": "boolean",
+            "title": "Overwrite Available",
+            "description": "Whether explicit overwrite retry is valid"
+          },
+          "destination_evidence": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkspaceUploadDestinationEvidenceResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Safe destination conflict evidence"
+          }
+        },
+        "type": "object",
+        "required": [
+          "identity",
+          "revision",
+          "destination_directory",
+          "filename",
+          "destination_path",
+          "expected_size",
+          "received_size",
+          "phase",
+          "retry_available",
+          "cancel_available",
+          "overwrite_available"
+        ],
+        "title": "WorkspaceUploadStatusResponse",
+        "description": "Public-safe Workspace upload status projection."
+      },
+      "WorkspaceUploadTicketResponse": {
+        "properties": {
+          "method": {
+            "type": "string",
+            "const": "PUT",
+            "title": "Method",
+            "description": "Signed HTTP method"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url",
+            "description": "Short-lived presigned PUT URL"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At",
+            "description": "Ticket expiration time"
+          },
+          "headers": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Headers",
+            "description": "Required signed request headers"
+          }
+        },
+        "type": "object",
+        "required": [
+          "method",
+          "url",
+          "expires_at",
+          "headers"
+        ],
+        "title": "WorkspaceUploadTicketResponse",
+        "description": "Short-lived direct browser PUT capability."
       },
       "WorkspaceUserListResponse": {
         "properties": {

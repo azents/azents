@@ -9,6 +9,9 @@ from azents_runtime_control.grpc_tls import GrpcClientTlsConfig
 from azents_runtime_control.grpc_transfer_coordinator_client import (
     GrpcRuntimeTransferCoordinatorClient,
 )
+from azents_runtime_control.grpc_workspace_upload_client import (
+    GrpcRuntimeWorkspaceUploadCoordinatorClient,
+)
 from fastapi import Depends
 
 from azents.core.config import Config
@@ -191,6 +194,18 @@ async def get_api_runtime_transfer_coordinator_client(
     )
 
 
+async def get_api_runtime_workspace_upload_coordinator_client(
+    appctx: Annotated[AppContext[Config], Depends(get_appctx)],
+    config: Annotated[Config, Depends(get_config)],
+) -> GrpcRuntimeWorkspaceUploadCoordinatorClient | None:
+    """Return the API process Workspace upload Coordinator client."""
+    return await _get_runtime_workspace_upload_coordinator_client(
+        appctx=appctx,
+        config=config,
+        service_identity=_API_SERVICE_IDENTITY,
+    )
+
+
 async def get_worker_runtime_transfer_coordinator_client(
     appctx: Annotated[AppContext[Config], Depends(get_appctx)],
     config: Annotated[Config, Depends(get_config)],
@@ -247,6 +262,54 @@ async def _get_runtime_transfer_coordinator_client(
 
     return await appctx.get_variable(
         f"{__name__}.runtime_transfer_coordinator_client.{service_identity}",
+        create,
+    )
+
+
+async def _get_runtime_workspace_upload_coordinator_client(
+    *,
+    appctx: AppContext[Config],
+    config: Config,
+    service_identity: str,
+) -> GrpcRuntimeWorkspaceUploadCoordinatorClient | None:
+    """Create one process-owned Workspace upload Coordinator client."""
+    coordinator_config = config.runtime_transfer_coordinator
+    if not coordinator_config.enabled:
+        return None
+    endpoint = coordinator_config.endpoint
+    if endpoint is None or not endpoint.strip():
+        raise ValueError("Runtime Transfer Coordinator endpoint is required")
+
+    async def create() -> AsyncIterator[GrpcRuntimeWorkspaceUploadCoordinatorClient]:
+        tls = _coordinator_tls_config(coordinator_config.tls_ca_file)
+        if tls is None and not coordinator_config.allow_insecure:
+            raise ValueError(
+                "Runtime Transfer Coordinator TLS trust is required unless "
+                "insecure transport is explicitly allowed"
+            )
+        verifier = RuntimeTransferCoordinatorCredentialVerifier(
+            config.credential_encryption.key,
+            clock=_utc_now,
+        )
+        supplier = RuntimeTransferCoordinatorCredentialSupplier(
+            verifier=verifier,
+            service_identity=service_identity,
+            clock=_utc_now,
+            lifetime=timedelta(seconds=coordinator_config.credential_lifetime_seconds),
+        )
+        client = GrpcRuntimeWorkspaceUploadCoordinatorClient.from_endpoint(
+            endpoint,
+            credential_supplier=supplier,
+            tls=tls,
+            allow_insecure=coordinator_config.allow_insecure,
+        )
+        try:
+            yield client
+        finally:
+            await client.close()
+
+    return await appctx.get_variable(
+        f"{__name__}.runtime_workspace_upload_coordinator_client.{service_identity}",
         create,
     )
 

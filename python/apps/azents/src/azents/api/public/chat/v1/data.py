@@ -2,9 +2,25 @@
 
 from __future__ import annotations
 
+import base64
 import datetime
 from typing import Literal, Self, assert_never
 
+from azents_runtime_control.grpc_workspace_upload_client import (
+    WorkspaceUploadDestinationEvidence as RuntimeWorkspaceUploadDestinationEvidence,
+)
+from azents_runtime_control.grpc_workspace_upload_client import (
+    WorkspaceUploadFailure,
+    WorkspaceUploadOutcome,
+    WorkspaceUploadPhase,
+    WorkspaceUploadTicket,
+)
+from azents_runtime_control.grpc_workspace_upload_client import (
+    WorkspaceUploadIdentity as RuntimeWorkspaceUploadIdentity,
+)
+from azents_runtime_control.grpc_workspace_upload_client import (
+    WorkspaceUploadStatus as RuntimeWorkspaceUploadStatus,
+)
 from pydantic import BaseModel, Field, TypeAdapter, model_validator
 
 from azents.api.public.agent_runtime.v1.data import (
@@ -123,6 +139,268 @@ class UploadResponse(BaseModel):
     media_type: str = Field(description="File MIME type")
     size: int = Field(description="File size in bytes")
     name: str = Field(description="Display filename")
+
+
+class WorkspaceUploadCreateRequest(BaseModel):
+    """Direct Agent Workspace upload admission request."""
+
+    destination_directory: str = Field(
+        min_length=1,
+        max_length=4096,
+        description="Existing Agent Workspace directory for the destination file",
+    )
+    filename: str = Field(
+        min_length=1,
+        max_length=255,
+        description="Destination basename",
+    )
+    expected_size: int = Field(
+        ge=0,
+        description="Expected file size in bytes",
+    )
+    expected_sha256: str = Field(
+        min_length=64,
+        max_length=64,
+        pattern=r"^[0-9a-f]{64}$",
+        description="Lower-case SHA-256 digest of the browser file",
+    )
+    media_type: str | None = Field(
+        default=None,
+        max_length=255,
+        description="Optional file MIME type",
+    )
+    session_id: str | None = Field(
+        default=None,
+        max_length=128,
+        description="Optional AgentSession correlation ID",
+    )
+
+
+class WorkspaceUploadFinalizeRequest(BaseModel):
+    """Finalize request after the browser direct PUT completes."""
+
+    expected_revision: int = Field(
+        gt=0,
+        description="Exact upload revision observed by the caller",
+    )
+
+
+class WorkspaceUploadCancelRequest(BaseModel):
+    """Cancellation request for one exact upload revision."""
+
+    expected_revision: int = Field(
+        gt=0,
+        description="Exact upload revision observed by the caller",
+    )
+    current_delivery_number: int | None = Field(
+        default=None,
+        gt=0,
+        description="Current delivery attempt number, when one exists",
+    )
+
+
+class WorkspaceUploadRetryRequest(BaseModel):
+    """Runtime delivery retry request."""
+
+    expected_revision: int = Field(
+        gt=0,
+        description="Exact upload revision observed by the caller",
+    )
+    current_delivery_number: int = Field(
+        gt=0,
+        description="Exact current delivery attempt number",
+    )
+    overwrite: bool = Field(
+        description="Whether to explicitly replace the conflicted destination",
+    )
+    conflict_precondition: str | None = Field(
+        default=None,
+        max_length=684,
+        description="Opaque Runner conflict precondition for overwrite",
+    )
+
+
+class WorkspaceUploadIdentityResponse(BaseModel):
+    """Requester and Runtime identity for one Workspace upload."""
+
+    upload_id: str = Field(description="Workspace upload ID")
+    requester_user_id: str = Field(description="Authenticated requester User ID")
+    workspace_id: str = Field(description="Workspace ID")
+    agent_id: str = Field(description="Agent ID")
+    runtime_id: str = Field(description="Admitted Agent Runtime ID")
+    desired_generation: int = Field(
+        ge=1,
+        description="Admitted Runtime desired generation",
+    )
+    session_id: str | None = Field(
+        default=None,
+        description="Optional correlated AgentSession ID",
+    )
+
+    @classmethod
+    def from_domain(
+        cls,
+        identity: RuntimeWorkspaceUploadIdentity,
+    ) -> Self:
+        """Convert the internal immutable identity projection."""
+        return cls(
+            upload_id=identity.upload_id,
+            requester_user_id=identity.requester_user_id,
+            workspace_id=identity.workspace_id,
+            agent_id=identity.agent_id,
+            runtime_id=identity.runtime_id,
+            desired_generation=identity.desired_generation,
+            session_id=identity.session_id,
+        )
+
+
+class WorkspaceUploadDestinationEvidenceResponse(BaseModel):
+    """Safe destination evidence for an explicit conflict retry."""
+
+    kind: str = Field(description="Observed destination kind")
+    size: int | None = Field(
+        default=None,
+        ge=0,
+        description="Observed destination size in bytes",
+    )
+    modified_at: datetime.datetime = Field(description="Observed modification time")
+    conflict_precondition: str | None = Field(
+        default=None,
+        description="Opaque Runner precondition for an overwrite retry",
+    )
+
+    @classmethod
+    def from_domain(
+        cls,
+        evidence: RuntimeWorkspaceUploadDestinationEvidence,
+    ) -> Self:
+        """Convert bounded conflict evidence without exposing storage metadata."""
+        token = (
+            base64.urlsafe_b64encode(evidence.conflict_precondition)
+            .decode("ascii")
+            .rstrip("=")
+            if evidence.conflict_precondition
+            else None
+        )
+        return cls(
+            kind=evidence.kind,
+            size=evidence.size,
+            modified_at=evidence.modified_at,
+            conflict_precondition=token,
+        )
+
+
+class WorkspaceUploadStatusResponse(BaseModel):
+    """Public-safe Workspace upload status projection."""
+
+    identity: WorkspaceUploadIdentityResponse = Field(
+        description="Requester and Runtime upload identity",
+    )
+    revision: int = Field(ge=1, description="Monotonic upload revision")
+    destination_directory: str = Field(description="Normalized destination directory")
+    filename: str = Field(description="Destination basename")
+    destination_path: str = Field(description="Normalized destination path")
+    expected_size: int = Field(ge=0, description="Expected file size in bytes")
+    received_size: int = Field(ge=0, description="Authoritatively received bytes")
+    actual_size: int | None = Field(
+        default=None,
+        ge=0,
+        description="Verified source size in bytes",
+    )
+    sha256: str | None = Field(
+        default=None,
+        description="Verified source SHA-256 digest",
+    )
+    media_type: str | None = Field(default=None, description="File MIME type")
+    phase: WorkspaceUploadPhase = Field(description="Current upload phase")
+    current_delivery_number: int | None = Field(
+        default=None,
+        ge=1,
+        description="Current Runtime delivery attempt number",
+    )
+    outcome: WorkspaceUploadOutcome | None = Field(
+        default=None,
+        description="Terminal upload outcome",
+    )
+    failure: WorkspaceUploadFailure | None = Field(
+        default=None,
+        description="Bounded failure classification",
+    )
+    retry_available: bool = Field(
+        description="Whether Runtime delivery retry is valid",
+    )
+    cancel_available: bool = Field(
+        description="Whether cancellation is valid",
+    )
+    overwrite_available: bool = Field(
+        description="Whether explicit overwrite retry is valid",
+    )
+    destination_evidence: WorkspaceUploadDestinationEvidenceResponse | None = Field(
+        default=None,
+        description="Safe destination conflict evidence",
+    )
+
+    @classmethod
+    def from_domain(cls, status: RuntimeWorkspaceUploadStatus) -> Self:
+        """Convert an internal status while excluding object-storage authority."""
+        return cls(
+            identity=WorkspaceUploadIdentityResponse.from_domain(status.identity),
+            revision=status.revision,
+            destination_directory=status.destination_directory,
+            filename=status.filename,
+            destination_path=status.destination_path,
+            expected_size=status.expected_size,
+            received_size=status.received_size,
+            actual_size=status.actual_size,
+            sha256=status.sha256,
+            media_type=status.media_type,
+            phase=status.phase,
+            current_delivery_number=(
+                status.current_delivery_number
+                if status.current_delivery_number > 0
+                else None
+            ),
+            outcome=status.outcome,
+            failure=status.failure,
+            retry_available=status.retry_available,
+            cancel_available=status.cancel_available,
+            overwrite_available=status.overwrite_available,
+            destination_evidence=(
+                WorkspaceUploadDestinationEvidenceResponse.from_domain(
+                    status.destination_evidence
+                )
+                if status.destination_evidence is not None
+                else None
+            ),
+        )
+
+
+class WorkspaceUploadTicketResponse(BaseModel):
+    """Short-lived direct browser PUT capability."""
+
+    method: Literal["PUT"] = Field(description="Signed HTTP method")
+    url: str = Field(description="Short-lived presigned PUT URL")
+    expires_at: datetime.datetime = Field(description="Ticket expiration time")
+    headers: dict[str, str] = Field(description="Required signed request headers")
+
+    @classmethod
+    def from_domain(cls, ticket: WorkspaceUploadTicket) -> Self:
+        """Convert a transient ticket without retaining it in durable state."""
+        if ticket.method != "PUT":
+            raise ValueError("Workspace upload ticket method must be PUT")
+        return cls(
+            method="PUT",
+            url=ticket.url,
+            expires_at=ticket.expires_at,
+            headers=dict(ticket.headers),
+        )
+
+
+class WorkspaceUploadCreateResponse(BaseModel):
+    """Upload status and one transient browser PUT ticket."""
+
+    status: WorkspaceUploadStatusResponse = Field(description="Upload status")
+    ticket: WorkspaceUploadTicketResponse = Field(description="Direct PUT ticket")
 
 
 class ChatInputWriteRequest(BaseModel):

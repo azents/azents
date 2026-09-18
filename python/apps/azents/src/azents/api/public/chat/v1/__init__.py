@@ -113,6 +113,20 @@ from azents.services.chat.workspace import (
     AgentWorkspaceRuntimeInactive,
     AgentWorkspaceState,
 )
+from azents.services.chat.workspace_upload import (
+    WorkspaceUploadAccessDenied,
+    WorkspaceUploadAdmissionRejected,
+    WorkspaceUploadAgentNotFound,
+    WorkspaceUploadCoordinatorUnavailable,
+    WorkspaceUploadDestinationInvalid,
+    WorkspaceUploadError,
+    WorkspaceUploadInvalidRequest,
+    WorkspaceUploadNotFound,
+    WorkspaceUploadPathUnavailable,
+    WorkspaceUploadRevisionConflict,
+    WorkspaceUploadRuntimeUnavailable,
+    WorkspaceUploadService,
+)
 from azents.services.chat_write import ChatWriteService
 from azents.services.exchange_file import (
     ExchangeFileError,
@@ -247,6 +261,13 @@ from .data import (
     SubagentTreeResponse,
     TodoStateResponse,
     UploadResponse,
+    WorkspaceUploadCancelRequest,
+    WorkspaceUploadCreateRequest,
+    WorkspaceUploadCreateResponse,
+    WorkspaceUploadFinalizeRequest,
+    WorkspaceUploadRetryRequest,
+    WorkspaceUploadStatusResponse,
+    WorkspaceUploadTicketResponse,
     WsTicketResponse,
 )
 
@@ -3213,6 +3234,145 @@ async def _read_upload_file(file: UploadFile) -> _UploadFileData:
     )
 
 
+@router.post("/agents/{agent_id}/workspace/uploads")
+async def create_agent_workspace_upload(
+    agent_id: str,
+    request: WorkspaceUploadCreateRequest,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    workspace_upload_service: Annotated[WorkspaceUploadService, Depends()],
+) -> WorkspaceUploadCreateResponse:
+    """Create one direct Agent Workspace upload and issue its PUT ticket."""
+    _validate_uuid7_hex(agent_id, label="agent ID")
+    if request.session_id is not None:
+        _validate_uuid7_hex(request.session_id, label="session ID")
+    result = await workspace_upload_service.create(
+        agent_id=agent_id,
+        user_id=current_user.user_id,
+        destination_directory=request.destination_directory,
+        filename=request.filename,
+        expected_size=request.expected_size,
+        expected_sha256=request.expected_sha256,
+        media_type=request.media_type,
+        session_id=request.session_id,
+    )
+    match result:
+        case Success(value):
+            return WorkspaceUploadCreateResponse(
+                status=WorkspaceUploadStatusResponse.from_domain(value.status),
+                ticket=WorkspaceUploadTicketResponse.from_domain(value.ticket),
+            )
+        case Failure(error):
+            _raise_workspace_upload_error(error)
+        case _:
+            assert_never(result)
+
+
+@router.get("/agents/{agent_id}/workspace/uploads/{upload_id}")
+async def get_agent_workspace_upload(
+    agent_id: str,
+    upload_id: str,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    workspace_upload_service: Annotated[WorkspaceUploadService, Depends()],
+) -> WorkspaceUploadStatusResponse:
+    """Get one requester-scoped Agent Workspace upload status."""
+    _validate_uuid7_hex(agent_id, label="agent ID")
+    _validate_uuid7_hex(upload_id, label="upload ID")
+    result = await workspace_upload_service.get(
+        agent_id=agent_id,
+        user_id=current_user.user_id,
+        upload_id=upload_id,
+    )
+    match result:
+        case Success(value):
+            return WorkspaceUploadStatusResponse.from_domain(value)
+        case Failure(error):
+            _raise_workspace_upload_error(error)
+        case _:
+            assert_never(result)
+
+
+@router.post("/agents/{agent_id}/workspace/uploads/{upload_id}/finalize")
+async def finalize_agent_workspace_upload(
+    agent_id: str,
+    upload_id: str,
+    request: WorkspaceUploadFinalizeRequest,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    workspace_upload_service: Annotated[WorkspaceUploadService, Depends()],
+) -> WorkspaceUploadStatusResponse:
+    """Finalize one direct PUT after Runtime Control verifies its object."""
+    _validate_uuid7_hex(agent_id, label="agent ID")
+    _validate_uuid7_hex(upload_id, label="upload ID")
+    result = await workspace_upload_service.finalize(
+        agent_id=agent_id,
+        user_id=current_user.user_id,
+        upload_id=upload_id,
+        expected_revision=request.expected_revision,
+    )
+    match result:
+        case Success(value):
+            return WorkspaceUploadStatusResponse.from_domain(value)
+        case Failure(error):
+            _raise_workspace_upload_error(error)
+        case _:
+            assert_never(result)
+
+
+@router.post("/agents/{agent_id}/workspace/uploads/{upload_id}/cancel")
+async def cancel_agent_workspace_upload(
+    agent_id: str,
+    upload_id: str,
+    request: WorkspaceUploadCancelRequest,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    workspace_upload_service: Annotated[WorkspaceUploadService, Depends()],
+) -> WorkspaceUploadStatusResponse:
+    """Cancel one direct Agent Workspace upload."""
+    _validate_uuid7_hex(agent_id, label="agent ID")
+    _validate_uuid7_hex(upload_id, label="upload ID")
+    result = await workspace_upload_service.cancel(
+        agent_id=agent_id,
+        user_id=current_user.user_id,
+        upload_id=upload_id,
+        expected_revision=request.expected_revision,
+        current_delivery_number=request.current_delivery_number,
+    )
+    match result:
+        case Success(value):
+            return WorkspaceUploadStatusResponse.from_domain(value)
+        case Failure(error):
+            _raise_workspace_upload_error(error)
+        case _:
+            assert_never(result)
+
+
+@router.post("/agents/{agent_id}/workspace/uploads/{upload_id}/retry")
+async def retry_agent_workspace_upload(
+    agent_id: str,
+    upload_id: str,
+    request: WorkspaceUploadRetryRequest,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    workspace_upload_service: Annotated[WorkspaceUploadService, Depends()],
+) -> WorkspaceUploadStatusResponse:
+    """Retry Runtime delivery with optional explicit overwrite fencing."""
+    _validate_uuid7_hex(agent_id, label="agent ID")
+    _validate_uuid7_hex(upload_id, label="upload ID")
+    result = await workspace_upload_service.retry(
+        agent_id=agent_id,
+        user_id=current_user.user_id,
+        upload_id=upload_id,
+        expected_revision=request.expected_revision,
+        current_delivery_number=request.current_delivery_number,
+        overwrite=request.overwrite,
+        conflict_precondition=request.conflict_precondition,
+    )
+    match result:
+        case Success(value):
+            return WorkspaceUploadStatusResponse.from_domain(value)
+        case Failure(error):
+            _raise_workspace_upload_error(error)
+        case _:
+            assert_never(result)
+
+
 @router.post("/agents/{agent_id}/upload")
 async def upload_file_for_agent(
     agent_id: str,
@@ -3319,6 +3479,42 @@ async def delete_exchange_file(
             _raise_exchange_file_error(error)
         case _:
             assert_never(result)
+
+
+def _raise_workspace_upload_error(error: WorkspaceUploadError) -> NoReturn:
+    """Convert Workspace upload service errors to stable HTTP errors."""
+    match error:
+        case WorkspaceUploadAgentNotFound():
+            raise HTTPException(status_code=404, detail="Agent not found.")
+        case WorkspaceUploadAccessDenied():
+            raise HTTPException(
+                status_code=403,
+                detail="Workspace membership required.",
+            )
+        case WorkspaceUploadRuntimeUnavailable(detail=detail):
+            raise HTTPException(status_code=409, detail=detail)
+        case WorkspaceUploadPathUnavailable():
+            raise HTTPException(
+                status_code=409,
+                detail="Runner has not reported Agent Workspace path yet.",
+            )
+        case WorkspaceUploadInvalidRequest(detail=detail):
+            raise HTTPException(status_code=400, detail=detail)
+        case WorkspaceUploadDestinationInvalid(detail=detail):
+            raise HTTPException(status_code=400, detail=detail)
+        case WorkspaceUploadCoordinatorUnavailable():
+            raise HTTPException(
+                status_code=409,
+                detail="Workspace upload is unavailable.",
+            )
+        case WorkspaceUploadNotFound():
+            raise HTTPException(status_code=404, detail="Workspace upload not found.")
+        case WorkspaceUploadRevisionConflict(detail=detail):
+            raise HTTPException(status_code=409, detail=detail)
+        case WorkspaceUploadAdmissionRejected(detail=detail):
+            raise HTTPException(status_code=429, detail=detail)
+        case _:
+            assert_never(error)
 
 
 def _raise_exchange_file_error(error: ExchangeFileError) -> NoReturn:
