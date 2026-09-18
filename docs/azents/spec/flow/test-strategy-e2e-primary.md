@@ -28,8 +28,8 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
-last_verified_at: 2026-09-17
-spec_version: 64
+last_verified_at: 2026-09-18
+spec_version: 65
 ---
 
 # E2E Primary Test Strategy
@@ -409,6 +409,16 @@ Always-on required CI does not depend on external credentials.
   independent full-stack journeys.
 - Web Surface E2E runs from `src/tests/web/` in its own suite lane.
 - Web Surface journeys use a pinned remote Chromium container. Web images are built from the tested worktree, and TLS gateways reproduce production secure-cookie and path-routing behavior without external credentials.
+- Workspace Upload API E2E collects three public-API journeys against the real
+  Docker Runtime Provider, Runtime Control, and HTTPS S3-compatible gateway:
+  direct PUT followed by exact-byte download, destination conflict with explicit
+  overwrite/retry without a second PUT for the retained source, and cancellation
+  with no published destination. The fixture keeps trusted Runtime Control S3
+  operations on the internal RustFS endpoint while exposing presigned PUT tickets
+  through the HTTPS gateway. The gateway preserves method, path, query, signed
+  headers, Host, and body. Browser-facing lifecycle states and actions are tested
+  by colocated Storybook component interactions and deterministic frontend polling
+  tests; browser E2E is not used to duplicate this API lifecycle.
 - Optional Managed Runtime Web Surface E2E creates all product state through public/admin APIs,
   then uses the real Main Web and server projections to prove the Runtime-free new-Session guidance,
   Profile-backed Add Runtime confirmation, managed controls, aggregate-only destructive removal
@@ -515,6 +525,12 @@ Local/PR environment without live substrate does not fake live PASS. Instead, se
 
 ## Changelog
 
+- **2026-09-18 (spec_version 65)** — Added the public-API Workspace Upload
+  matrix and its HTTPS S3 gateway trust boundary: exact PUT/commit bytes,
+  conflict-overwrite retry, cancellation without publication, Runtime Control
+  internal storage access, and Docker Provider/Runner CA propagation. Browser
+  lifecycle states are covered by component interactions and deterministic polling
+  tests rather than duplicate browser E2E journeys.
 - **2026-09-15** (spec_version 64) — Replaced Runtime Web approval-cycle E2E with
   Off-service URL activation, Agent-scoped service projection, reset revision
   fencing, and direct Off control.

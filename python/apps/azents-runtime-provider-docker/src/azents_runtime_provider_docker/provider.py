@@ -1,6 +1,7 @@
 """Docker implementation of the Agent Runtime Provider lifecycle."""
 
 import dataclasses
+import hashlib
 import logging
 import os
 import re
@@ -44,6 +45,9 @@ _RUNNER_GID = 1000
 _RUNNER_USER = f"{_RUNNER_UID}:{_RUNNER_GID}"
 _WORKSPACE_DIR_MODE = 0o755
 _NON_ROOT_WORKSPACE_DIR_MODE = 0o777
+_RUNTIME_NETWORK_CA_MOUNT_PATH = "/var/run/secrets/azents/runtime-network"
+_RUNTIME_NETWORK_CA_CONTAINER_PATH = f"{_RUNTIME_NETWORK_CA_MOUNT_PATH}/ca.crt"
+_RUNTIME_TRUST_MOUNT_PATH = "/var/run/azents-runtime"
 _CONTROL_HOST_ALIAS = "host.docker.internal:host-gateway"
 _SECURITY_OPTIONS = ("no-new-privileges",)
 _CAP_DROP = ("ALL",)
@@ -59,6 +63,7 @@ _LABEL_PROVIDER_GENERATION = "azents/provider-generation"
 _LABEL_IMAGE_GENERATION = "azents/image-generation"
 _LABEL_CONFIGURATION_SEQUENCE = "azents/runtime-configuration-sequence"
 _LABEL_CONFIGURATION_DIGEST = "azents/runtime-configuration-digest"
+_LABEL_RUNTIME_NETWORK_CA_DIGEST = "azents/runtime-network-ca-digest"
 
 _ENV_CONTROL_ENDPOINT = "AZ_RUNTIME_CONTROL_ENDPOINT"
 _ENV_TRANSFER_ENDPOINT = "AZ_RUNTIME_TRANSFER_ENDPOINT"
@@ -76,6 +81,7 @@ _ENV_HOME = "HOME"
 _ENV_CONFIGURATION_SEQUENCE = "AZ_RUNTIME_CONFIGURATION_SEQUENCE"
 _ENV_CONFIGURATION_DIGEST = "AZ_RUNTIME_CONFIGURATION_DIGEST"
 _ENV_CONFIGURATION_DESIRED_GENERATION = "AZ_RUNTIME_CONFIGURATION_DESIRED_GENERATION"
+_ENV_RUNTIME_NETWORK_CA_DIGEST = "AZ_RUNTIME_NETWORK_CA_DIGEST"
 RUNNER_LIMIT_ENV_NAMES = (
     "AZ_RUNTIME_RUNNER_MAX_CONCURRENT_OPERATIONS_PER_SESSION",
     "AZ_RUNTIME_RUNNER_MAX_CONCURRENT_SYSTEM_OPERATIONS",
@@ -102,6 +108,10 @@ class InvalidWorkspacePath(ValueError):
     """Provider workspace mount path is missing or not absolute."""
 
 
+class InvalidRuntimeNetworkCaPath(ValueError):
+    """Provider Runtime network CA path is missing or not a regular file."""
+
+
 class InvalidRunnerEnvironment(ValueError):
     """Runner environment contains a variable not managed by the Provider."""
 
@@ -123,6 +133,7 @@ class DockerRuntimeProviderConfig:
     runner_env: Mapping[str, str]
     workspace_mount_path: str
     tmp_mount_path: str
+    runtime_network_ca_path: Path | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -153,6 +164,12 @@ class DockerRuntimeProvider:
         self._runner_env = dict(config.runner_env)
         self._workspace_mount_path = _absolute_posix_path(config.workspace_mount_path)
         self._tmp_mount_path = _absolute_posix_path(config.tmp_mount_path)
+        self._runtime_network_ca_path = _runtime_network_ca_path(
+            config.runtime_network_ca_path
+        )
+        self._runtime_network_ca_digest = _runtime_network_ca_digest(
+            self._runtime_network_ca_path
+        )
 
     async def start(
         self,
@@ -329,6 +346,9 @@ class DockerRuntimeProvider:
         *,
         replace: bool,
     ) -> None:
+        self._runtime_network_ca_digest = _runtime_network_ca_digest(
+            self._runtime_network_ca_path
+        )
         profile = self._validate_command(command)
         runtime_id = command.identity.runtime_id
         container_name = _container_name(runtime_id)
@@ -421,6 +441,9 @@ class DockerRuntimeProvider:
                 return False
         if labels.get(_LABEL_IMAGE_GENERATION) != _IMAGE_GENERATION:
             return False
+        for key, value in self._runtime_network_ca_labels().items():
+            if labels.get(key) != value:
+                return False
         env = dict(container.env)
         for key, value in self._stable_env(command).items():
             if env.get(key) != value:
@@ -464,6 +487,7 @@ class DockerRuntimeProvider:
             _LABEL_DESIRED_GENERATION: str(command.desired_generation),
             _LABEL_PROVIDER_GENERATION: str(command.provider_generation),
             _LABEL_IMAGE_GENERATION: _IMAGE_GENERATION,
+            **self._runtime_network_ca_labels(),
             **self._configuration_labels(command),
         }
 
@@ -504,6 +528,8 @@ class DockerRuntimeProvider:
             _ENV_PROVIDER_ID: self._config.provider_id,
             _ENV_HOME: self._workspace_mount_path,
         }
+        if self._runtime_network_ca_digest is not None:
+            env[_ENV_RUNTIME_NETWORK_CA_DIGEST] = self._runtime_network_ca_digest
         if command.auth.control_tls_ca_pem is not None:
             env[_ENV_CONTROL_TLS_CA_PEM] = command.auth.control_tls_ca_pem
         env[_ENV_CONTROL_ALLOW_INSECURE] = str(
@@ -536,8 +562,13 @@ class DockerRuntimeProvider:
             _ENV_CONFIGURATION_DESIRED_GENERATION: str(evidence.desired_generation),
         }
 
+    def _runtime_network_ca_labels(self) -> dict[str, str]:
+        if self._runtime_network_ca_digest is None:
+            return {}
+        return {_LABEL_RUNTIME_NETWORK_CA_DIGEST: self._runtime_network_ca_digest}
+
     def _binds(self, runtime_id: str) -> tuple[DockerBindMount, ...]:
-        return (
+        binds: list[DockerBindMount] = [
             DockerBindMount(
                 host_path=str(self._workspace_host_dir(runtime_id)),
                 container_path=self._workspace_mount_path,
@@ -548,7 +579,23 @@ class DockerRuntimeProvider:
                 container_path=self._tmp_mount_path,
                 read_only=False,
             ),
-        )
+        ]
+        if self._runtime_network_ca_path is not None:
+            binds.extend(
+                (
+                    DockerBindMount(
+                        host_path=str(self._runtime_network_ca_path),
+                        container_path=_RUNTIME_NETWORK_CA_CONTAINER_PATH,
+                        read_only=True,
+                    ),
+                    DockerBindMount(
+                        host_path=str(self._runtime_trust_host_dir(runtime_id)),
+                        container_path=_RUNTIME_TRUST_MOUNT_PATH,
+                        read_only=False,
+                    ),
+                )
+            )
+        return tuple(binds)
 
     def _report(
         self,
@@ -650,10 +697,15 @@ class DockerRuntimeProvider:
     def _tmp_host_dir(self, runtime_id: str) -> Path:
         return self._runtime_root(runtime_id) / "tmp-agent"
 
+    def _runtime_trust_host_dir(self, runtime_id: str) -> Path:
+        return self._runtime_root(runtime_id) / "trust"
+
     def _ensure_workspace_dirs(self, runtime_id: str) -> None:
         mode = _provider_directory_mode()
         _ensure_writable_dir(self._workspace_host_dir(runtime_id), mode=mode)
         _ensure_writable_dir(self._tmp_host_dir(runtime_id), mode=mode)
+        if self._runtime_network_ca_path is not None:
+            _ensure_writable_dir(self._runtime_trust_host_dir(runtime_id), mode=mode)
 
     def _delete_runtime_root(self, runtime_id: str) -> None:
         runtime_root = self._runtime_root(runtime_id)
@@ -666,6 +718,23 @@ def _absolute_posix_path(raw_path: str) -> str:
     if not raw_path.strip() or not path.is_absolute():
         raise InvalidWorkspacePath(raw_path)
     return str(path)
+
+
+def _runtime_network_ca_path(path: Path | None) -> Path | None:
+    if path is None:
+        return None
+    if not path.is_absolute() or not path.is_file():
+        raise InvalidRuntimeNetworkCaPath(str(path))
+    return path
+
+
+def _runtime_network_ca_digest(path: Path | None) -> str | None:
+    if path is None:
+        return None
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError as error:
+        raise InvalidRuntimeNetworkCaPath(str(path)) from error
 
 
 def _container_name(runtime_id: str) -> str:

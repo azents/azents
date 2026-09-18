@@ -139,7 +139,7 @@ async def _create_and_seed(
 
 @pytest.mark.asyncio
 async def test_cancelled_ingress_is_cleaned_after_operation_expiry() -> None:
-    """Cancelled direct ingress is deleted before terminal metadata is purged."""
+    """Cancelled direct ingress is terminalized and cleaned before metadata purge."""
     clock = _Clock()
     store = InMemoryWorkspaceUploadStore(config=_config(), clock=clock)
     s3 = _S3(now=clock.now)
@@ -156,9 +156,10 @@ async def test_cancelled_ingress_is_cleaned_after_operation_expiry() -> None:
         expected_revision=created.revision,
     )
     assert cancelled is not None
-    assert cancelled.cancellation_requested_at is not None
+    assert cancelled.phase is WorkspaceUploadPhase.CANCELLED
+    assert cancelled.cancellation_requested_at is None
+    assert cancelled.cleanup_status is WorkspaceUploadCleanupStatus.PENDING
 
-    clock.now = created.expires_at
     result = await coordinator.reconcile(
         reconciliation_cursor=None,
         cleanup_cursor=None,

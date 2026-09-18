@@ -6,12 +6,18 @@ import { WorkspacePanel } from "../components/WorkspacePanel";
 import { useWorkspacePanelTranslations } from "./useWorkspacePanelTranslations";
 import type { WorkspacePanelProps } from "../components/WorkspacePanel";
 import type { WorkspaceEntry } from "../types";
+import type { WorkspaceUploadContainerOutput } from "../workspaceUploadTypes";
+
+export type WorkspacePanelContainerProps = WorkspacePanelProps & {
+  workspaceUploads?: WorkspaceUploadContainerOutput;
+};
 
 export function WorkspacePanelContainer(
-  props: WorkspacePanelProps,
+  props: WorkspacePanelContainerProps,
 ): React.ReactElement {
   const t = useWorkspacePanelTranslations();
   const modals = useModals();
+  const { workspaceUploads, ...workspacePanelProps } = props;
 
   const openDeleteConfirm = (entry: WorkspaceEntry): void => {
     modals.openConfirmModal({
@@ -98,8 +104,13 @@ export function WorkspacePanelContainer(
 
   return (
     <WorkspacePanel
-      {...props}
+      {...workspacePanelProps}
       t={t}
+      uploadRows={workspaceUploads?.rows}
+      onUploadFiles={workspaceUploads?.uploadFiles}
+      onCancelUpload={workspaceUploads?.cancelUpload}
+      onRetryUpload={workspaceUploads?.retryUpload}
+      onDismissUpload={workspaceUploads?.dismissUpload}
       onRequestBulkDelete={openBulkDeleteConfirm}
       onRequestBulkMove={requestBulkMove}
       onRequestCreateDirectory={requestCreateDirectory}

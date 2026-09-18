@@ -38,6 +38,7 @@ code_paths:
   - python/apps/azents/src/azents/services/agent_runtime/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-provider-docker/**
+  - python/apps/azents-runtime-runner/**
   - python/libs/azents-runtime-control/src/azents_runtime_control/**
   - proto/azents/runtime_control/v1/runtime_provider_control.proto
   - infra/charts/azents/templates/runtime-provider-kubernetes/**
@@ -51,8 +52,10 @@ code_paths:
   - typescript/apps/azents-admin-web/src/trpc/routers/runtimeProvider.ts
   - typescript/apps/azents-web/src/features/runtime-profiles/**
   - typescript/apps/azents-web/src/features/chat/workspace/components/RuntimeConfigurationStatus.tsx
-last_verified_at: 2026-09-17
-spec_version: 29
+  - testenv/azents/e2e/src/tests/conftest.py
+  - testenv/azents/e2e/src/tests/required/public/test_workspace_upload.py
+last_verified_at: 2026-09-18
+spec_version: 30
 ---
 
 # Runtime Provider
@@ -147,6 +150,19 @@ Provider infrastructure chooses and mounts durable storage for Runner workloads.
 set Runner `HOME` and working directory to the configured mount path, but Provider registration and
 lifecycle reports do not advertise an Agent Workspace path. The Runner's current-generation report
 is the metadata authority for the effective absolute path.
+
+Docker Provider Runtime network trust is deployment-owned and explicit. When
+`AZ_RUNTIME_PROVIDER_RUNTIME_NETWORK_CA_PATH` is configured, the Provider requires an
+absolute regular CA file, mounts it read-only at
+`/var/run/secrets/azents/runtime-network/ca.crt` in each managed Runner, and
+creates a writable Provider-owned trust directory at `/var/run/azents-runtime`.
+The Runner validates the public certificate, atomically combines it with the image's
+system roots, and uses that bundle both for child-process trust variables and for
+direct HTTPS object downloads. TLS verification and hostname checking remain enabled;
+the absence of the Provider CA leaves the normal image trust path unchanged.
+The CA SHA-256 digest is recorded in the container label and Runner environment.
+Provider start refreshes the digest and replaces a stale managed container instead
+of reusing it, while preserving the Runtime Workspace and temporary directories.
 
 When the exact selection is missing or unavailable, Public Runtime creation/start/restart/reset/
 recreate returns a bounded `409` conflict instead of persisting a substitute target. Stop and
@@ -318,7 +334,9 @@ effective port and may contain only host CIDRs. Missing, mismatched, or broad ro
 rendering rather than widening Runtime network authority. Runtime Control readiness separately
 proves bucket access, exact browser CORS, checksum-aware metadata, presigned PUT/GET signing,
 public endpoint reachability, and immutable native-copy support; failed prerequisites keep the
-feature unavailable without a byte-relay fallback.
+feature unavailable without a byte-relay fallback. The Docker Provider's public gateway CA is
+mounted into the Provider process by the deployment/test fixture so the managed Runner can
+verify the same HTTPS endpoint used by browser-direct Workspace Upload.
 
 Authentication rollout does not render, own, select, delete, rename, or recreate Runtime PersistentVolumeClaims or PersistentVolumes. Credential-driven Runtime Pod replacement reuses the existing PVC; only the established explicit Runtime reset or terminal-delete operations may invoke PVC deletion.
 
@@ -329,6 +347,10 @@ Admin Profile editing cannot mutate those deployment boundaries.
 
 ## Version history
 
+- **30 (2026-09-18):** Added Docker Provider and Runner Runtime network CA
+  propagation for browser-direct Workspace Upload: read-only public CA mount,
+  writable combined trust bundle, verified direct HTTPS downloads, digest-fenced
+  managed-container reuse, and preservation of Workspace storage during replacement.
 - **29 (2026-09-17):** Added Workspace Upload's deployment-owned public S3 endpoint
   prerequisite, exact Platform transfer egress projection across Kubernetes Runtime modes,
   host-route restrictions, and fail-closed object-storage readiness validation.

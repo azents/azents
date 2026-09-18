@@ -36,6 +36,19 @@ def prepare_runner_trust_environment() -> Mapping[str, str]:
     )
 
 
+def runner_http_ssl_context(
+    trust_environment: Mapping[str, str],
+) -> ssl.SSLContext | None:
+    """Build the verified HTTP client context from Provider-owned trust."""
+    bundle_path = trust_environment.get("SSL_CERT_FILE")
+    if bundle_path is None:
+        return None
+    try:
+        return ssl.create_default_context(cafile=bundle_path)
+    except (OSError, ssl.SSLError) as error:
+        raise RuntimeError("Runner HTTP trust bundle is invalid") from error
+
+
 def prepare_trust_bundle(
     *,
     public_ca_path: Path,

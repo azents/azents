@@ -6,6 +6,7 @@ import dataclasses
 import errno
 import hashlib
 import os
+import ssl
 import threading
 from collections.abc import AsyncIterator, Callable, Mapping
 from datetime import UTC, datetime, timedelta
@@ -44,6 +45,7 @@ from azents_runtime_runner.transfer import (
     RunnerTransferManager,
     _OpenedFile,
     _TransferKey,
+    _validate_direct_ticket,
 )
 from azents_runtime_runner.workspace import Workspace
 
@@ -175,6 +177,8 @@ def _intent(
     deadline_at: datetime | None = None,
     transfer_id: str = "transfer-1",
     attempt_id: str = "attempt-1",
+    operation_id: str = "operation-1",
+    dispatch_id: str = "dispatch-1",
     overwrite: bool = False,
     conflict_precondition: bytes | None = None,
     source_transport: RunnerTransferSourceTransport = (
@@ -189,7 +193,7 @@ def _intent(
             runner_generation=1,
         ),
         direction=direction,
-        operation_id="operation-1",
+        operation_id=operation_id,
         owner_session_id="session-1",
         runtime_path=str(path),
         overwrite=overwrite,
@@ -202,7 +206,7 @@ def _intent(
         deadline_at=deadline_at or datetime.now(UTC) + timedelta(minutes=1),
         protocol_version=RUNNER_TRANSFER_PROTOCOL_VERSION,
         capability=RUNNER_TRANSFER_CAPABILITY,
-        dispatch_id="dispatch-1",
+        dispatch_id=dispatch_id,
         conflict_precondition=conflict_precondition,
         source_transport=source_transport,
     )
@@ -377,6 +381,26 @@ async def test_direct_download_claims_http_source_and_publishes_atomically(
         await server.close()
 
 
+def test_direct_ticket_accepts_exact_authoritative_deadline() -> None:
+    """A presigned ticket may end exactly at the transfer deadline."""
+    deadline_at = datetime.now(UTC) + timedelta(minutes=1)
+    data = b"direct object bytes"
+    digest = hashlib.sha256(data).hexdigest()
+    _validate_direct_ticket(
+        RunnerDirectObjectTicket(
+            method="GET",
+            url="https://objects.test/source",
+            expires_at=deadline_at,
+            headers={},
+            expected_size=len(data),
+            expected_sha256=digest,
+        ),
+        expected_size=len(data),
+        expected_sha256=digest,
+        deadline_at=deadline_at,
+    )
+
+
 @pytest.mark.asyncio
 async def test_direct_download_passes_provider_proxy_explicitly(
     tmpfs_path: Path,
@@ -453,6 +477,125 @@ async def test_direct_download_passes_provider_proxy_explicitly(
         assert result.outcome is RunnerTransferOutcome.SUCCEEDED
         assert observed_proxies == ["http://runtime-proxy.azents-runtime.svc:8080"]
         assert (tmpfs_path / "destination.bin").read_bytes() == data
+        await manager.close()
+    finally:
+        await server.close()
+
+
+@pytest.mark.asyncio
+async def test_direct_download_uses_provider_tls_context(
+    tmpfs_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Direct HTTPS downloads use the explicit Provider-owned TLS context."""
+    data = b"direct object bytes"
+    app = web.Application()
+
+    async def source(request: web.Request) -> web.Response:
+        del request
+        return web.Response(body=data)
+
+    app.router.add_get("/source", source)
+    server = TestServer(app)
+    await server.start_server()
+    try:
+        observed_contexts: list[ssl.SSLContext | None] = []
+        original_connector = transfer_module.aiohttp.TCPConnector
+
+        def observing_connector(**kwargs: object) -> object:
+            context = cast(ssl.SSLContext | None, kwargs.get("ssl"))
+            observed_contexts.append(context)
+            assert context is not None
+            return original_connector(ssl=context)
+
+        monkeypatch.setattr(
+            transfer_module.aiohttp,
+            "TCPConnector",
+            observing_connector,
+        )
+        context = ssl.create_default_context()
+        ticket = RunnerDirectObjectTicket(
+            method="GET",
+            url=str(server.make_url("/source")),
+            expires_at=datetime.now(UTC) + timedelta(minutes=1),
+            headers={},
+            expected_size=len(data),
+            expected_sha256=hashlib.sha256(data).hexdigest(),
+        )
+        control = _Control()
+        manager = RunnerTransferManager(
+            control=control,
+            transfer=_DirectTransfer(ticket),
+            accepted_generation=lambda: 1,
+            workspace=_UNRESTRICTED_WORKSPACE,
+            http_proxy=None,
+            http_ssl_context=context,
+        )
+
+        await manager.handle_intent(
+            _intent(
+                tmpfs_path / "destination.bin",
+                data=data,
+                source_transport=RunnerTransferSourceTransport.DIRECT_OBJECT,
+            )
+        )
+
+        result = await _result(control)
+        assert result.outcome is RunnerTransferOutcome.SUCCEEDED
+        assert observed_contexts == [context]
+        await manager.close()
+    finally:
+        await server.close()
+
+
+@pytest.mark.asyncio
+async def test_direct_download_tls_failure_is_stream_failure_with_bounded_reacquisition(
+    tmpfs_path: Path,
+) -> None:
+    """TLS failures never become expiry failures or unbounded claim retries."""
+    data = b"direct object bytes"
+    app = web.Application()
+
+    async def source(request: web.Request) -> web.Response:
+        del request
+        return web.Response(body=data)
+
+    app.router.add_get("/source", source)
+    server = TestServer(app)
+    await server.start_server()
+    try:
+        http_url = str(server.make_url("/source"))
+        ticket = RunnerDirectObjectTicket(
+            method="GET",
+            url=http_url.replace("http://", "https://", 1),
+            expires_at=datetime.now(UTC) + timedelta(minutes=1),
+            headers={},
+            expected_size=len(data),
+            expected_sha256=hashlib.sha256(data).hexdigest(),
+        )
+        transfer = _DirectTransfer(ticket)
+        control = _Control()
+        manager = RunnerTransferManager(
+            control=control,
+            transfer=transfer,
+            accepted_generation=lambda: 1,
+            workspace=_UNRESTRICTED_WORKSPACE,
+            http_proxy=None,
+        )
+
+        await manager.handle_intent(
+            _intent(
+                tmpfs_path / "destination.bin",
+                data=data,
+                source_transport=RunnerTransferSourceTransport.DIRECT_OBJECT,
+            )
+        )
+
+        result = await _result(control)
+        assert result.outcome is RunnerTransferOutcome.FAILED
+        assert result.failure is RunnerTransferFailure.STREAM_FAILED
+        assert transfer.claim_calls == 2
+        assert not (tmpfs_path / "destination.bin").exists()
         await manager.close()
     finally:
         await server.close()
@@ -1122,6 +1265,8 @@ async def test_download_atomically_replaces_existing_destination(
         data=data,
         transfer_id="transfer-2",
         attempt_id="attempt-2",
+        operation_id="operation-2",
+        dispatch_id="dispatch-2",
         overwrite=True,
         conflict_precondition=conflict.conflict_precondition,
     )

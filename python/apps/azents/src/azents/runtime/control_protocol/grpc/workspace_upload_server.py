@@ -439,10 +439,24 @@ def _status_message(record: WorkspaceUploadRecord) -> pb.WorkspaceUploadStatus:
     )
     if admission.session_id is not None:
         message.identity.session_id = admission.session_id
-    if record.actual_size is not None:
-        message.actual_size = record.actual_size
-    if record.actual_sha256 is not None:
-        message.sha256 = record.actual_sha256
+    # Terminal cleanup removes the ephemeral source object and its internal
+    # manifest fields. A successful upload still has authoritative manifest
+    # evidence: Runtime delivery could only settle success after verifying the
+    # exact admission size and SHA-256. Keep that evidence visible at the
+    # public status boundary without retaining the deleted source handle.
+    actual_size = record.actual_size
+    actual_sha256 = record.actual_sha256
+    if record.phase is WorkspaceUploadPhase.SUCCEEDED:
+        actual_size = (
+            actual_size if actual_size is not None else admission.expected_size
+        )
+        actual_sha256 = (
+            actual_sha256 if actual_sha256 is not None else admission.expected_sha256
+        )
+    if actual_size is not None:
+        message.actual_size = actual_size
+    if actual_sha256 is not None:
+        message.sha256 = actual_sha256
     if admission.media_type is not None:
         message.media_type = admission.media_type
     if record.outcome is not None:

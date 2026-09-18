@@ -16,8 +16,10 @@ code_paths:
   - python/apps/azents/src/azents/core/auth/permissions.py
   - python/apps/azents/src/azents/core/auth/roles.py
   - python/apps/azents/src/azents/services/chat/workspace.py
+  - python/apps/azents/src/azents/services/chat/workspace_upload.py
   - python/apps/azents/src/azents/services/file_download_stream.py
   - python/apps/azents/src/azents/api/public/file_download.py
+  - python/apps/azents/src/azents/runtime/transfer/**
   - python/apps/azents/src/azents/services/session_workspace_project/**
   - python/apps/azents/src/azents/repos/session_workspace_project/**
   - python/apps/azents/src/azents/repos/session_workspace_project_operations/**
@@ -101,6 +103,11 @@ api_routes:
   - /chat/v1/agents/{agent_id}/sessions/{session_id}/workspace/project-browser-manifest
   - /chat/v1/agents/{agent_id}/workspace/project-browser-manifest/preview
   - /chat/v1/agents/{agent_id}/workspace/repository-type
+  - /chat/v1/agents/{agent_id}/workspace/uploads
+  - /chat/v1/agents/{agent_id}/workspace/uploads/{upload_id}
+  - /chat/v1/agents/{agent_id}/workspace/uploads/{upload_id}/finalize
+  - /chat/v1/agents/{agent_id}/workspace/uploads/{upload_id}/cancel
+  - /chat/v1/agents/{agent_id}/workspace/uploads/{upload_id}/retry
   - /chat/v1/agents/{agent_id}/git-refs
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/automatic-session-projects
   - /runtime-profile/v1/workspaces/{handle}/infrastructure-profiles
@@ -123,7 +130,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/agents
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/channel-defaults
 last_verified_at: 2026-09-18
-spec_version: 86
+spec_version: 87
 ---
 
 # Workspace & Membership
@@ -477,6 +484,32 @@ In an existing concrete session, Register Project opens a runtime-backed Agent W
 
 Git-backed Project root rows separate registry removal from destructive cleanup. `Remove from session` removes only the session Project row. `Delete worktree` is shown only when the backend manifest exposes `delete_worktree` for an Azents-owned non-cleaned allocation and routes to the Git worktree cleanup API. Source upload/list/delete, bootstrap source type selection, and agent-initiated Project approval workflow are not currently implemented.
 
+### Agent Workspace Upload
+
+Agent Workspace Upload is a separate direct-object transfer and is not Project Source
+provisioning. The public JSON lifecycle is exposed through
+`POST /chat/v1/agents/{agent_id}/workspace/uploads`,
+`GET /chat/v1/agents/{agent_id}/workspace/uploads/{upload_id}`, and the
+`/finalize`, `/cancel`, and `/retry` subroutes. Create returns requester-scoped
+status plus a transient PUT ticket; the browser uploads bytes directly to the
+HTTPS S3-compatible public endpoint and the Main Web/API never relays the file body.
+Signed URLs, signatures, object keys, and signed headers are not returned in durable
+status or logs.
+
+Runtime Control owns source verification and admission. It verifies the expected size
+and SHA-256 of the retained object, then admits a `DIRECT_OBJECT` download to the
+current generation Runner, which streams and verifies the object before atomically
+publishing the destination path under the Agent Workspace. Requests remain fenced by
+requester, Workspace, Agent, Session, revision, Runtime generation, and transfer
+deadline. Finalize, cancellation, expiry, conflict, and retry settle through the
+same durable upload record; retry reuses the retained object and requires explicit
+overwrite authority after a destination conflict.
+
+The concrete-session Workspace UI computes SHA-256 in a worker, shows bounded
+uploading/uploaded/conflict/cancelled/failed states, and refreshes the FileBrowser
+only after authoritative commit. A conflict does not overwrite the existing file
+implicitly, and cancellation does not publish a partial destination.
+
 ### Session working-folder lifecycle
 
 Each root `SessionAgentContext` stores a nullable historical path, optional logical Runtime ID, and
@@ -828,6 +861,11 @@ stateDiagram-v2
 | `chat_v1_register_agent_project` | POST `/chat/v1/agents/{agent_id}/sessions/{session_id}/projects/register` | `[project-existing-directory]` |
 | `chat_v1_delete_agent_project` | DELETE `/chat/v1/agents/{agent_id}/sessions/{session_id}/projects/{project_id}` | `[project-registry-only-delete]` |
 | `chat_v1_cleanup_session_git_worktree` | POST `/chat/v1/agents/{agent_id}/sessions/{session_id}/git-worktree/cleanup` | `[worktree-cleanup-authority]`, `[worktree-cleanup-non-force]` |
+| `chat_v1_create_agent_workspace_upload` | POST `/chat/v1/agents/{agent_id}/workspace/uploads` | requester-scoped direct-object admission |
+| `chat_v1_get_agent_workspace_upload` | GET `/chat/v1/agents/{agent_id}/workspace/uploads/{upload_id}` | requester-scoped status |
+| `chat_v1_finalize_agent_workspace_upload` | POST `/chat/v1/agents/{agent_id}/workspace/uploads/{upload_id}/finalize` | revision-fenced source verification and Runtime commit |
+| `chat_v1_cancel_agent_workspace_upload` | POST `/chat/v1/agents/{agent_id}/workspace/uploads/{upload_id}/cancel` | revision/delivery-fenced cancellation |
+| `chat_v1_retry_agent_workspace_upload` | POST `/chat/v1/agents/{agent_id}/workspace/uploads/{upload_id}/retry` | explicit overwrite/conflict precondition |
 | `agent_runtime_v1_get_agent_runtime_system_metrics` | GET `/agent-runtime/v1/workspaces/{handle}/agents/{agent_id}/runtime/system-metrics` | Existing Workspace membership and Agent access boundary; privacy-safe informational projection |
 | `external_channel_v1_list_multi_slack_connections` | GET `/external-channel/v1/workspaces/{handle}/external-channels/slack/multi` | Workspace External Channel read permission |
 | `external_channel_v1_setup_multi_slack_connection` | POST `/external-channel/v1/workspaces/{handle}/external-channels/slack/multi` | Workspace External Channel write permission; rollout gate |
@@ -872,11 +910,18 @@ stateDiagram-v2
 - **Ownership Transfer** — 2-step operation transitioning OWNER → MANAGER / new OWNER → OWNER in single transaction.
 - **Mute** — state that stops JoinRequest notification. Returns to PENDING automatically on re-request.
 - **Agent Workspace Project** — Project boundary explicitly registered for an existing directory under AgentRuntime's current Runner-reported Agent Workspace.
+- **Agent Workspace Upload** — Requester-scoped direct-object upload whose HTTPS S3 object is verified by Runtime Control and committed by the current Runner into Agent Workspace.
 - **Project browser manifest** — backend-owned read model for Project-first browser entries, status projection, repository metadata, and action capabilities.
 - **Agent Project Catalog** — Agent-scoped path candidate/status projection table used by Project browser and new-session preview UI. It is not the canonical session Project binding.
 
 ## Changelog
 
+- **2026-09-18 (spec_version=87)** — Added the current Agent Workspace Upload
+  lifecycle: JSON-only create/status/finalize/cancel/retry routes, browser-direct
+  HTTPS S3 PUT, Runtime Control object verification, Runner `DIRECT_OBJECT`
+  streaming and hash/size commit, explicit conflict overwrite, cancellation
+  semantics, and worker-backed Workspace UI states. Project Source provisioning
+  remains unimplemented and separate from this transfer path.
 - **2026-09-18 (spec_version=86)** — Clarified ordinary versus system-admin
   membership removal, self-protection, Owner protection, and post-removal lifecycle
   effects while preserving the response-scoped Workspace download contract.

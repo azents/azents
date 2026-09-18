@@ -199,7 +199,8 @@ class WorkspaceUploadObjectStore:
             raise WorkspaceUploadObjectError(
                 "Workspace upload ingress authority is unavailable"
             )
-        expires_in = min(self.ticket_ttl, record.expires_at - self.clock())
+        now = self.clock()
+        expires_in = min(self.ticket_ttl, record.expires_at - now)
         if expires_in <= timedelta():
             raise WorkspaceUploadObjectError("Workspace upload ticket has expired")
         request = await self.s3_service.get_upload_request(
@@ -207,7 +208,7 @@ class WorkspaceUploadObjectStore:
             content_type=record.admission.media_type,
             checksum_sha256=expected_sha256,
             expires_in=expires_in,
-            now=self.clock(),
+            now=now,
         )
         return WorkspaceUploadUploadTicket(
             method=request.method,
@@ -223,13 +224,14 @@ class WorkspaceUploadObjectStore:
         deadline_at: datetime,
     ) -> WorkspaceUploadDownloadTicket:
         """Issue one short-lived GET ticket for a verified immutable source."""
-        expires_in = deadline_at - self.clock()
+        now = self.clock()
+        expires_in = deadline_at - now
         if expires_in <= timedelta():
             raise WorkspaceUploadObjectError("Workspace download deadline has expired")
         request = await self.s3_service.get_download_request(
             identity=self.source_identity(source_handle),
             expires_in=expires_in,
-            now=self.clock(),
+            now=now,
         )
         return WorkspaceUploadDownloadTicket(
             method=request.method,

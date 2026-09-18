@@ -1,6 +1,7 @@
 """Docker Runtime Provider lifecycle tests."""
 
 import dataclasses
+import hashlib
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
@@ -22,6 +23,7 @@ from azents_runtime_control.runtime_configuration import (
 
 from azents_runtime_provider_docker.docker_api import (
     DockerApi,
+    DockerBindMount,
     DockerContainerInfo,
     DockerContainerSpec,
     DockerContainerState,
@@ -31,6 +33,7 @@ from azents_runtime_provider_docker.provider import (
     DockerRuntimeProvider,
     DockerRuntimeProviderConfig,
     InvalidResetFinalDesiredState,
+    InvalidRuntimeNetworkCaPath,
     InvalidWorkspacePath,
     UnsupportedRuntimeConfiguration,
 )
@@ -208,6 +211,76 @@ async def test_start_creates_container_with_workspace_bind(tmp_path: Path) -> No
     assert workspace_path.exists()
     workspace_stat = workspace_path.stat()
     assert workspace_stat.st_mode & 0o777 in {0o755, 0o777}
+
+
+@pytest.mark.asyncio
+async def test_start_propagates_runtime_network_ca_and_trust_workspace(
+    tmp_path: Path,
+) -> None:
+    docker = FakeDockerApi()
+    ca_path = tmp_path / "gateway-ca.crt"
+    ca_bytes = b"test gateway certificate\n"
+    ca_path.write_bytes(ca_bytes)
+    provider = DockerRuntimeProvider(
+        docker,
+        DockerRuntimeProviderConfig(
+            provider_id="provider-docker",
+            workspace_mount_path="/runtime/home",
+            host_data_root=tmp_path / "provider-data",
+            runner_env={},
+            tmp_mount_path="/tmp/agent",
+            runtime_network_ca_path=ca_path,
+        ),
+    )
+
+    await provider.start(_command(RuntimeLifecycleCommandType.START))
+
+    spec = docker.containers["azents-runtime-runtime-1"].spec
+    binds = {bind.container_path: bind for bind in spec.binds}
+    assert binds["/var/run/secrets/azents/runtime-network/ca.crt"] == (
+        DockerBindMount(
+            host_path=str(ca_path),
+            container_path="/var/run/secrets/azents/runtime-network/ca.crt",
+            read_only=True,
+        )
+    )
+    assert binds["/var/run/azents-runtime"].read_only is False
+    assert binds["/var/run/azents-runtime"].host_path == str(
+        tmp_path / "provider-data" / "agent-runtimes" / "runtime-1" / "trust"
+    )
+    digest = hashlib.sha256(ca_bytes).hexdigest()
+    assert spec.labels["azents/runtime-network-ca-digest"] == digest
+    assert spec.env["AZ_RUNTIME_NETWORK_CA_DIGEST"] == digest
+    assert Path(binds["/var/run/azents-runtime"].host_path).is_dir()
+
+
+@pytest.mark.asyncio
+async def test_start_replaces_container_when_runtime_network_ca_changes(
+    tmp_path: Path,
+) -> None:
+    docker = FakeDockerApi()
+    ca_path = tmp_path / "gateway-ca.crt"
+    ca_path.write_bytes(b"first certificate\n")
+    provider = DockerRuntimeProvider(
+        docker,
+        DockerRuntimeProviderConfig(
+            provider_id="provider-docker",
+            workspace_mount_path="/runtime/home",
+            host_data_root=tmp_path / "provider-data",
+            runner_env={},
+            tmp_mount_path="/tmp/agent",
+            runtime_network_ca_path=ca_path,
+        ),
+    )
+    await provider.start(_command(RuntimeLifecycleCommandType.START))
+    ca_path.write_bytes(b"rotated certificate\n")
+
+    await provider.start(_command(RuntimeLifecycleCommandType.START))
+
+    assert docker.removed == ["azents-runtime-runtime-1"]
+    digest = hashlib.sha256(b"rotated certificate\n").hexdigest()
+    container = docker.containers["azents-runtime-runtime-1"]
+    assert container.spec.labels["azents/runtime-network-ca-digest"] == digest
 
 
 @pytest.mark.asyncio
@@ -678,6 +751,23 @@ def test_invalid_workspace_path_is_rejected(tmp_path: Path) -> None:
                 runner_env={},
                 workspace_mount_path="relative/path",
                 tmp_mount_path="/tmp/agent",
+            ),
+        )
+
+
+def test_invalid_runtime_network_ca_path_is_rejected(tmp_path: Path) -> None:
+    docker = FakeDockerApi()
+
+    with pytest.raises(InvalidRuntimeNetworkCaPath):
+        DockerRuntimeProvider(
+            docker,
+            DockerRuntimeProviderConfig(
+                provider_id="provider-docker",
+                host_data_root=tmp_path,
+                runner_env={},
+                workspace_mount_path="/runtime/home",
+                tmp_mount_path="/tmp/agent",
+                runtime_network_ca_path=tmp_path / "missing-ca.crt",
             ),
         )
 

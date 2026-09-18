@@ -60,7 +60,10 @@ from azents_runtime_runner.terminal import (
 )
 from azents_runtime_runner.terminal_stream import RunnerTerminalStreamManager
 from azents_runtime_runner.transfer import RunnerTransferManager
-from azents_runtime_runner.trust import prepare_runner_trust_environment
+from azents_runtime_runner.trust import (
+    prepare_runner_trust_environment,
+    runner_http_ssl_context,
+)
 from azents_runtime_runner.web_session_dispatcher import (
     RunnerWebHardLimits,
     RunnerWebResourceTracker,
@@ -285,9 +288,10 @@ async def run_runtime_runner(*, workspace_path: str | None = None) -> None:
         resident_memory_bytes=resident_memory_sampler.current_bytes,
     )
     runner_network_environment = prepare_runner_network_environment()
+    runner_trust_environment = prepare_runner_trust_environment()
     inherited_environment = {
         **runner_network_environment,
-        **prepare_runner_trust_environment(),
+        **runner_trust_environment,
         **prepare_pixi_environment(
             workspace_path=workspace_path,
             machine=platform.machine(),
@@ -464,6 +468,7 @@ async def run_runtime_runner(*, workspace_path: str | None = None) -> None:
                 accepted_generation=accepted_generation,
                 workspace=workspace,
                 http_proxy=runner_network_environment.get("HTTP_PROXY"),
+                http_ssl_context=runner_http_ssl_context(runner_trust_environment),
             )
             shutting_down = False
             try:

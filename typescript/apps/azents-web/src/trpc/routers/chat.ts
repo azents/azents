@@ -16,8 +16,10 @@ import {
   chatV1ArchiveAgentSession,
   chatV1BulkDeleteAgentWorkspacePaths,
   chatV1BulkMoveAgentWorkspacePaths,
+  chatV1CancelAgentWorkspaceUpload,
   chatV1CleanupSessionGitWorktree,
   chatV1CreateAgentWorkspaceDirectory,
+  chatV1CreateAgentWorkspaceUpload,
   chatV1CreateInput,
   chatV1CreateTeamAgentSession,
   chatV1CreateTeamAgentSessionMessage,
@@ -26,12 +28,14 @@ import {
   chatV1DeleteAgentWorkspacePath,
   chatV1DeleteMailboxItem,
   chatV1EditMessage,
+  chatV1FinalizeAgentWorkspaceUpload,
   chatV1GetAgentSession,
   chatV1GetAgentSessionContext,
   chatV1GetAgentSessionProjectDefaults,
   chatV1GetAgentSessionSidebar,
   chatV1GetAgentWorkspace,
   chatV1GetAgentWorkspaceRepositoryType,
+  chatV1GetAgentWorkspaceUpload,
   chatV1GetSessionProjectBrowserManifest,
   chatV1GetSubagentTree,
   chatV1IssueWsTicket,
@@ -49,6 +53,7 @@ import {
   chatV1RegisterAgentProject,
   chatV1ReplaceSessionModelProfile,
   chatV1RestoreAgentSession,
+  chatV1RetryAgentWorkspaceUpload,
   chatV1RetryFailedRun,
   chatV1StatAgentWorkspacePath,
   chatV1StopSessionRun,
@@ -1325,6 +1330,183 @@ export const chatRouter = router({
           client: ctx.apiClient,
           path: { agent_id: input.agentId },
           query: { path: input.path },
+          throwOnError: true,
+        });
+        return data;
+      } catch (e) {
+        throw mapExpectedError(e, {
+          400: "BAD_REQUEST",
+          401: "UNAUTHORIZED",
+          403: "FORBIDDEN",
+          404: "NOT_FOUND",
+          409: "CONFLICT",
+        });
+      }
+    }),
+
+  createAgentWorkspaceUpload: publicProcedure
+    .input(
+      z.object({
+        agentId: z.string().min(1),
+        destinationDirectory: z.string().min(1),
+        filename: z.string().min(1),
+        expectedSize: z.number().int().nonnegative(),
+        expectedSha256: z
+          .string()
+          .length(64)
+          .regex(/^[0-9a-f]{64}$/),
+        mediaType: z.string().max(255).nullable().optional(),
+        sessionId: z.string().min(1).nullable().optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const { data } = await chatV1CreateAgentWorkspaceUpload({
+          client: ctx.apiClient,
+          path: { agent_id: input.agentId },
+          body: {
+            destination_directory: input.destinationDirectory,
+            filename: input.filename,
+            expected_size: input.expectedSize,
+            expected_sha256: input.expectedSha256,
+            media_type: input.mediaType,
+            session_id: input.sessionId,
+          },
+          throwOnError: true,
+        });
+        return data;
+      } catch (e) {
+        throw mapExpectedError(e, {
+          400: "BAD_REQUEST",
+          401: "UNAUTHORIZED",
+          403: "FORBIDDEN",
+          404: "NOT_FOUND",
+          409: "CONFLICT",
+          429: "TOO_MANY_REQUESTS",
+        });
+      }
+    }),
+
+  getAgentWorkspaceUpload: publicProcedure
+    .input(
+      z.object({
+        agentId: z.string().min(1),
+        uploadId: z.string().min(1),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      try {
+        const { data } = await chatV1GetAgentWorkspaceUpload({
+          client: ctx.apiClient,
+          path: {
+            agent_id: input.agentId,
+            upload_id: input.uploadId,
+          },
+          throwOnError: true,
+        });
+        return data;
+      } catch (e) {
+        throw mapExpectedError(e, {
+          400: "BAD_REQUEST",
+          401: "UNAUTHORIZED",
+          403: "FORBIDDEN",
+          404: "NOT_FOUND",
+          409: "CONFLICT",
+        });
+      }
+    }),
+
+  finalizeAgentWorkspaceUpload: publicProcedure
+    .input(
+      z.object({
+        agentId: z.string().min(1),
+        uploadId: z.string().min(1),
+        expectedRevision: z.number().int().positive(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const { data } = await chatV1FinalizeAgentWorkspaceUpload({
+          client: ctx.apiClient,
+          path: {
+            agent_id: input.agentId,
+            upload_id: input.uploadId,
+          },
+          body: { expected_revision: input.expectedRevision },
+          throwOnError: true,
+        });
+        return data;
+      } catch (e) {
+        throw mapExpectedError(e, {
+          400: "BAD_REQUEST",
+          401: "UNAUTHORIZED",
+          403: "FORBIDDEN",
+          404: "NOT_FOUND",
+          409: "CONFLICT",
+        });
+      }
+    }),
+
+  cancelAgentWorkspaceUpload: publicProcedure
+    .input(
+      z.object({
+        agentId: z.string().min(1),
+        uploadId: z.string().min(1),
+        expectedRevision: z.number().int().positive(),
+        currentDeliveryNumber: z.number().int().positive().nullable(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const { data } = await chatV1CancelAgentWorkspaceUpload({
+          client: ctx.apiClient,
+          path: {
+            agent_id: input.agentId,
+            upload_id: input.uploadId,
+          },
+          body: {
+            expected_revision: input.expectedRevision,
+            current_delivery_number: input.currentDeliveryNumber,
+          },
+          throwOnError: true,
+        });
+        return data;
+      } catch (e) {
+        throw mapExpectedError(e, {
+          400: "BAD_REQUEST",
+          401: "UNAUTHORIZED",
+          403: "FORBIDDEN",
+          404: "NOT_FOUND",
+          409: "CONFLICT",
+        });
+      }
+    }),
+
+  retryAgentWorkspaceUpload: publicProcedure
+    .input(
+      z.object({
+        agentId: z.string().min(1),
+        uploadId: z.string().min(1),
+        expectedRevision: z.number().int().positive(),
+        currentDeliveryNumber: z.number().int().positive(),
+        overwrite: z.boolean(),
+        conflictPrecondition: z.string().max(684).nullable(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const { data } = await chatV1RetryAgentWorkspaceUpload({
+          client: ctx.apiClient,
+          path: {
+            agent_id: input.agentId,
+            upload_id: input.uploadId,
+          },
+          body: {
+            expected_revision: input.expectedRevision,
+            current_delivery_number: input.currentDeliveryNumber,
+            overwrite: input.overwrite,
+            conflict_precondition: input.conflictPrecondition,
+          },
           throwOnError: true,
         });
         return data;
