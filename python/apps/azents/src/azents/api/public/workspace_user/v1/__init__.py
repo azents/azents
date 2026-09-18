@@ -10,12 +10,12 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from azents.core.auth.deps import WorkspaceMember, get_workspace_member
 from azents.core.auth.permissions import Permissions
-from azents.repos.workspace_user.data import NotFound
 from azents.services.workspace_user import WorkspaceUserService
 from azents.services.workspace_user.data import (
     CannotModifyOwner,
     CannotModifySelf,
     InvalidRole,
+    NotFound,
     WorkspaceUserUpdateInput,
 )
 from azents.utils.fastapi.route import RouteMounter
