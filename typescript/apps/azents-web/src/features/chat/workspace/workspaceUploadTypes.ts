@@ -35,7 +35,7 @@ export type WorkspaceUploadRow = {
 export type WorkspaceUploadContainerOutput = {
   rows: WorkspaceUploadRow[];
   hasActiveUploads: boolean;
-  uploadFiles: (files: FileList | File[]) => void;
+  uploadFiles: (files: FileList | File[], destinationDirectory: string) => void;
   cancelUpload: (id: string) => void;
   retryUpload: (id: string, overwrite: boolean) => void;
   dismissUpload: (id: string) => void;

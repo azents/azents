@@ -21,7 +21,6 @@ const STATUS_POLL_INTERVAL_MS = 750;
 interface UseWorkspaceUploadContainerInput {
   agentId: string;
   sessionId: string;
-  destinationDirectory: string;
   onDestinationChanged: (destinationDirectory: string) => Promise<void> | void;
 }
 
@@ -118,7 +117,6 @@ function progressForStatus(status: WorkspaceUploadStatusResponse): number {
 export function useWorkspaceUploadContainer({
   agentId,
   sessionId,
-  destinationDirectory,
   onDestinationChanged,
 }: UseWorkspaceUploadContainerInput): WorkspaceUploadContainerOutput {
   const [rows, setRows] = useState<WorkspaceUploadRow[]>([]);
@@ -501,7 +499,7 @@ export function useWorkspaceUploadContainer({
   );
 
   const uploadFiles = useCallback(
-    (files: FileList | File[]): void => {
+    (files: FileList | File[], destinationDirectory: string): void => {
       const selectedFiles = Array.from(files);
       if (selectedFiles.length === 0) {
         return;
@@ -554,7 +552,7 @@ export function useWorkspaceUploadContainer({
         void runUpload(operation);
       });
     },
-    [agentId, destinationDirectory, runUpload, sessionId],
+    [agentId, runUpload, sessionId],
   );
 
   const cancelUpload = useCallback(

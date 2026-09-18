@@ -40,7 +40,6 @@ import { FileViewer } from "./FileViewer";
 import { RuntimeActivationView } from "./RuntimeActivationView";
 import { RuntimeConfigurationStatus } from "./RuntimeConfigurationStatus";
 import { WorkspaceDirectoryPickerModal } from "./WorkspaceDirectoryPickerModal";
-import { WorkspaceUploadDestinationPickerModal } from "./WorkspaceUploadDestinationPickerModal";
 import type { WorkspacePanelTranslator } from "../containers/useWorkspacePanelTranslations";
 import type {
   ProjectRegistrationDialogState,
@@ -57,7 +56,6 @@ import type {
   ProjectDirectoryPickerState,
 } from "./WorkspaceDirectoryPickerModal";
 import type { RuntimeWebServicesContainerOutput } from "@/features/runtime-web/containers/useRuntimeWebServicesContainer";
-import type { AgentWorkspaceDirectoryPickerContainerOutput } from "@/shared/agent-workspace/containers/useAgentWorkspaceDirectoryPickerContainer";
 import type { RuntimeSystemMetricsOverviewState } from "@/shared/runtime-metrics/types";
 
 const closedProjectRegistrationDialog: ProjectRegistrationDialogState = {
@@ -98,7 +96,10 @@ export interface WorkspacePanelProps {
   onClearSelection: () => void;
   onRefresh: () => void;
   uploadRows?: WorkspaceUploadRow[];
-  onUploadFiles?: (files: FileList | File[]) => void;
+  onUploadFiles?: (
+    files: FileList | File[],
+    destinationDirectory: string,
+  ) => void;
   onCancelUpload?: (id: string) => void;
   onRetryUpload?: (id: string, overwrite: boolean) => void;
   onDismissUpload?: (id: string) => void;
@@ -125,8 +126,6 @@ export interface WorkspacePanelProps {
   onRemoveProjectEntry: (entry: WorkspaceEntry) => void;
   onDeleteWorktreeProjectEntry: (entry: WorkspaceEntry) => void;
   onSetBrowserMode: (mode: WorkspaceBrowserMode) => void;
-  uploadDestinationDirectory?: string;
-  uploadDestinationPicker?: AgentWorkspaceDirectoryPickerContainerOutput;
 }
 
 interface WorkspacePanelViewProps extends WorkspacePanelProps {
@@ -193,8 +192,6 @@ export function WorkspacePanel({
   onSetProjectRegistrationStartingRef,
   onSubmitProjectRegistration,
   onSetBrowserMode,
-  uploadDestinationDirectory,
-  uploadDestinationPicker,
   onRequestBulkDelete,
   onRequestBulkMove,
   onRequestCreateDirectory,
@@ -721,12 +718,6 @@ export function WorkspacePanel({
                       ]
                     }
                     projectEmptyState={state.projectEmptyState ?? null}
-                    uploadDestinationDirectory={
-                      uploadDestinationDirectory ?? state.directory.path
-                    }
-                    onOpenUploadDestinationPicker={
-                      uploadDestinationPicker?.open
-                    }
                     query={fileBrowserQuery}
                     expanded={expandedFileNodeIds}
                     onQueryChange={onSetFileBrowserQuery}
@@ -877,12 +868,6 @@ export function WorkspacePanel({
         onRestartRuntime={onRestartRuntimeForProjectPicker}
         runtimeSettingsHref={runtimeSettingsHref}
       />
-      {uploadDestinationPicker ? (
-        <WorkspaceUploadDestinationPickerModal
-          picker={uploadDestinationPicker}
-          t={t}
-        />
-      ) : null}
       <Modal
         centered
         opened={restartConfirmOpen}

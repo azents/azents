@@ -83,10 +83,11 @@ export interface FileBrowserProps {
   onRefresh: () => void;
   onSetBrowserMode: (mode: WorkspaceBrowserMode) => void;
   onAddProject: () => void;
-  uploadDestinationDirectory?: string;
-  onOpenUploadDestinationPicker?: () => void;
   uploadRows?: WorkspaceUploadRow[];
-  onUploadFiles?: (files: FileList | File[]) => void;
+  onUploadFiles?: (
+    files: FileList | File[],
+    destinationDirectory: string,
+  ) => void;
   onCancelUpload?: (id: string) => void;
   onRetryUpload?: (id: string, overwrite: boolean) => void;
   onDismissUpload?: (id: string) => void;
@@ -276,6 +277,7 @@ interface TreeNodeProps {
   onShowInfo: (path: string) => void;
   onToggleSelectedPath: (path: string) => void;
   onCreateDirectory: (basePath: string) => void;
+  onOpenUploadPicker: (directoryPath: string) => void;
   onRenamePath: (entry: WorkspaceEntry) => void;
   onMovePath: (entry: WorkspaceEntry) => void;
   onDeletePath: (entry: WorkspaceEntry) => void;
@@ -300,6 +302,7 @@ function TreeNode({
   onShowInfo,
   onToggleSelectedPath,
   onCreateDirectory,
+  onOpenUploadPicker,
   onRenamePath,
   onMovePath,
   onDeletePath,
@@ -488,6 +491,7 @@ function TreeNode({
         <Menu withinPortal position="bottom-end">
           <Menu.Target>
             <ActionIcon
+              aria-label={`${t("actions")} (${displayName})`}
               size="sm"
               variant="subtle"
               ml="auto"
@@ -514,12 +518,20 @@ function TreeNode({
               </Menu.Item>
             )}
             {node.kind === "directory" && (
-              <Menu.Item
-                leftSection={<IconFolderPlus size="0.875rem" />}
-                onClick={() => onCreateDirectory(node.path)}
-              >
-                {t("newFolder")}
-              </Menu.Item>
+              <>
+                <Menu.Item
+                  leftSection={<IconUpload size="0.875rem" />}
+                  onClick={() => onOpenUploadPicker(node.path)}
+                >
+                  {t("upload.openPicker")}
+                </Menu.Item>
+                <Menu.Item
+                  leftSection={<IconFolderPlus size="0.875rem" />}
+                  onClick={() => onCreateDirectory(node.path)}
+                >
+                  {t("newFolder")}
+                </Menu.Item>
+              </>
             )}
             {canRename(node) ? (
               <Menu.Item
@@ -591,6 +603,7 @@ function TreeNode({
               onShowInfo={onShowInfo}
               onToggleSelectedPath={onToggleSelectedPath}
               onCreateDirectory={onCreateDirectory}
+              onOpenUploadPicker={onOpenUploadPicker}
               onRenamePath={onRenamePath}
               onMovePath={onMovePath}
               onDeletePath={onDeletePath}
@@ -665,8 +678,6 @@ export function FileBrowser({
   onRefresh,
   onSetBrowserMode,
   onAddProject,
-  uploadDestinationDirectory = cwd,
-  onOpenUploadDestinationPicker = (): void => {},
   uploadRows = [],
   onUploadFiles = (): void => {},
   onCancelUpload = (): void => {},
@@ -678,6 +689,7 @@ export function FileBrowser({
   onExpandedChange = (): void => {},
 }: FileBrowserViewProps): React.ReactElement {
   const uploadInputRef = useRef<HTMLInputElement>(null);
+  const pendingUploadDirectoryRef = useRef<string | null>(null);
   const handleUploadInputChange = useCallback(
     (event: React.ChangeEvent<HTMLInputElement>): void => {
       const files = event.currentTarget.files;
@@ -685,12 +697,15 @@ export function FileBrowser({
         return;
       }
       const selectedFiles = Array.from(files);
+      const destinationDirectory = pendingUploadDirectoryRef.current ?? cwd;
+      pendingUploadDirectoryRef.current = null;
       event.currentTarget.value = "";
-      onUploadFiles(selectedFiles);
+      onUploadFiles(selectedFiles, destinationDirectory);
     },
-    [onUploadFiles],
+    [cwd, onUploadFiles],
   );
-  const handleOpenUploadPicker = useCallback((): void => {
+  const handleOpenUploadPicker = useCallback((directoryPath: string): void => {
+    pendingUploadDirectoryRef.current = directoryPath;
     uploadInputRef.current?.click();
   }, []);
   const tree = useMemo(
@@ -754,47 +769,40 @@ export function FileBrowser({
           borderBottom: `${rem(1)} solid var(--mantine-color-default-border)`,
         }}
       >
-        <Stack gap={0} flex="1 1 auto" miw={0}>
-          <Text c="dimmed" size="xs">
-            {t("upload.destinationLabel")}
-          </Text>
-          <Group gap={rem(4)} miw={0} wrap="nowrap">
-            <IconFolder size="0.75rem" color="var(--mantine-color-blue-6)" />
-            <Text
-              size="xs"
-              ff="monospace"
-              truncate
-              title={uploadDestinationDirectory}
-            >
-              {uploadDestinationDirectory}
-            </Text>
-          </Group>
-        </Stack>
+        <SegmentedControl
+          size="xs"
+          value={browserMode}
+          data={modes.map((mode) => ({ label: mode.label, value: mode.id }))}
+          onChange={handleModeChange}
+        />
+        <TextInput
+          flex={`1 1 ${rem(120)}`}
+          miw={0}
+          size="xs"
+          value={query}
+          onChange={(event) => onQueryChange(event.currentTarget.value)}
+          placeholder={t("searchFiles")}
+          leftSection={<IconSearch size="0.8125rem" />}
+          rightSection={
+            query ? (
+              <ActionIcon
+                size="xs"
+                variant="subtle"
+                onClick={() => onQueryChange("")}
+              >
+                <IconX size="0.6875rem" />
+              </ActionIcon>
+            ) : null
+          }
+          styles={{ input: { border: 0, background: "transparent" } }}
+        />
         <Menu withinPortal position="bottom-end">
           <Menu.Target>
-            <ActionIcon
-              aria-label={t("actions")}
-              data-testid="workspace-upload-actions"
-              size="sm"
-              variant="subtle"
-            >
+            <ActionIcon aria-label={t("actions")} size="sm" variant="subtle">
               <IconDotsVertical size="0.75rem" />
             </ActionIcon>
           </Menu.Target>
           <Menu.Dropdown>
-            <Menu.Item
-              leftSection={<IconUpload size="0.875rem" />}
-              onClick={handleOpenUploadPicker}
-            >
-              {t("upload.openPicker")}
-            </Menu.Item>
-            <Menu.Item
-              leftSection={<IconFolder size="0.875rem" />}
-              onClick={onOpenUploadDestinationPicker}
-            >
-              {t("upload.changeDestination")}
-            </Menu.Item>
-            <Menu.Divider />
             <Menu.Label>
               {t("selectedCount", { count: selectedPaths.length })}
             </Menu.Label>
@@ -842,44 +850,6 @@ export function FileBrowser({
           hidden
           data-testid="workspace-upload-input"
           onChange={handleUploadInputChange}
-        />
-      </Group>
-      <Group
-        gap="xs"
-        wrap="nowrap"
-        px="xs"
-        py={rem(7)}
-        style={{
-          background: "var(--mantine-color-default)",
-          borderBottom: `${rem(1)} solid var(--mantine-color-default-border)`,
-        }}
-      >
-        <SegmentedControl
-          size="xs"
-          value={browserMode}
-          data={modes.map((mode) => ({ label: mode.label, value: mode.id }))}
-          onChange={handleModeChange}
-        />
-        <TextInput
-          flex={`1 1 ${rem(120)}`}
-          miw={0}
-          size="xs"
-          value={query}
-          onChange={(event) => onQueryChange(event.currentTarget.value)}
-          placeholder={t("searchFiles")}
-          leftSection={<IconSearch size="0.8125rem" />}
-          rightSection={
-            query ? (
-              <ActionIcon
-                size="xs"
-                variant="subtle"
-                onClick={() => onQueryChange("")}
-              >
-                <IconX size="0.6875rem" />
-              </ActionIcon>
-            ) : null
-          }
-          styles={{ input: { border: 0, background: "transparent" } }}
         />
         <ActionIcon
           size="sm"
@@ -993,6 +963,7 @@ export function FileBrowser({
                   onShowInfo={onShowInfo}
                   onToggleSelectedPath={onToggleSelectedPath}
                   onCreateDirectory={onCreateDirectory}
+                  onOpenUploadPicker={handleOpenUploadPicker}
                   onRenamePath={onRenamePath}
                   onMovePath={onMovePath}
                   onDeletePath={onDeletePath}
