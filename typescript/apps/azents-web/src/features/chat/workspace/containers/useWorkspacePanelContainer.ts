@@ -37,6 +37,7 @@ import type {
 } from "../components/WorkspaceDirectoryPickerModal";
 import type { WorkspaceUploadContainerOutput } from "../workspaceUploadTypes";
 import type { RuntimeWebServicesContainerOutput } from "@/features/runtime-web/containers/useRuntimeWebServicesContainer";
+import type { AgentWorkspaceDirectoryPickerContainerOutput } from "@/shared/agent-workspace/containers/useAgentWorkspaceDirectoryPickerContainer";
 import type { RuntimeSystemMetricsOverviewState } from "@/shared/runtime-metrics/types";
 import type { GitRefEntryResponse } from "@azents/public-client";
 
@@ -56,6 +57,8 @@ export interface WorkspacePanelContainerOutput {
   projectState: WorkspaceProjectPanelState;
   metricsState: RuntimeSystemMetricsOverviewState;
   workspaceUploads: WorkspaceUploadContainerOutput;
+  uploadDestinationDirectory?: string;
+  uploadDestinationPicker?: AgentWorkspaceDirectoryPickerContainerOutput;
   runtimeWebServices: RuntimeWebServicesContainerOutput;
   fileBrowserQuery?: string;
   expandedFileNodeIds?: Set<string>;
@@ -157,6 +160,9 @@ export function useWorkspacePanelContainer({
   autoRefreshVisible,
 }: UseWorkspacePanelContainerInput): WorkspacePanelContainerOutput {
   const [currentDirectoryPath, setCurrentDirectoryPath] = useState<
+    string | null
+  >(null);
+  const [uploadDestinationPath, setUploadDestinationPath] = useState<
     string | null
   >(null);
   const [browserMode, setBrowserMode] =
@@ -334,6 +340,8 @@ export function useWorkspacePanelContainer({
     (browserMode === "projects" ? projectBrowserRoot : (manifest?.cwd ?? ""));
   const activeDirectoryPathRef = useRef(activeDirectoryPath);
   activeDirectoryPathRef.current = activeDirectoryPath;
+  const resolvedUploadDestinationPath =
+    uploadDestinationPath ?? activeDirectoryPath;
   const selectedFilePathRef = useRef(selectedFilePath);
   selectedFilePathRef.current = selectedFilePath;
 
@@ -442,8 +450,25 @@ export function useWorkspacePanelContainer({
   const workspaceUploads = useWorkspaceUploadContainer({
     agentId,
     sessionId,
-    destinationDirectory: activeDirectoryPath,
+    destinationDirectory: resolvedUploadDestinationPath,
     onDestinationChanged: invalidateWorkspaceFiles,
+  });
+
+  const onSelectUploadDestination = useCallback(
+    (entry: ProjectDirectoryPickerEntry): void => {
+      if (entry.kind !== "directory") {
+        return;
+      }
+      setUploadDestinationPath(entry.path);
+    },
+    [],
+  );
+  const uploadDestinationPicker = useAgentWorkspaceDirectoryPickerContainer({
+    handle,
+    agentId,
+    sessionId,
+    onSelectDirectory: onSelectUploadDestination,
+    refreshQueries: invalidateWorkspaceFiles,
   });
 
   const createDirectoryMutation =
@@ -1445,6 +1470,8 @@ export function useWorkspacePanelContainer({
     projectState,
     metricsState: metrics.state,
     workspaceUploads,
+    uploadDestinationDirectory: resolvedUploadDestinationPath,
+    uploadDestinationPicker,
     runtimeWebServices,
     fileBrowserQuery,
     expandedFileNodeIds,

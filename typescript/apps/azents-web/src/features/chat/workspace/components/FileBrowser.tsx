@@ -83,6 +83,8 @@ export interface FileBrowserProps {
   onRefresh: () => void;
   onSetBrowserMode: (mode: WorkspaceBrowserMode) => void;
   onAddProject: () => void;
+  uploadDestinationDirectory?: string;
+  onOpenUploadDestinationPicker?: () => void;
   uploadRows?: WorkspaceUploadRow[];
   onUploadFiles?: (files: FileList | File[]) => void;
   onCancelUpload?: (id: string) => void;
@@ -663,6 +665,8 @@ export function FileBrowser({
   onRefresh,
   onSetBrowserMode,
   onAddProject,
+  uploadDestinationDirectory = cwd,
+  onOpenUploadDestinationPicker = (): void => {},
   uploadRows = [],
   onUploadFiles = (): void => {},
   onCancelUpload = (): void => {},
@@ -686,6 +690,9 @@ export function FileBrowser({
     },
     [onUploadFiles],
   );
+  const handleOpenUploadPicker = useCallback((): void => {
+    uploadInputRef.current?.click();
+  }, []);
   const tree = useMemo(
     () => buildFileTree(cwd, manifestEntries, directoryEntriesByPath),
     [cwd, directoryEntriesByPath, manifestEntries],
@@ -747,57 +754,47 @@ export function FileBrowser({
           borderBottom: `${rem(1)} solid var(--mantine-color-default-border)`,
         }}
       >
-        <SegmentedControl
-          size="xs"
-          value={browserMode}
-          data={modes.map((mode) => ({ label: mode.label, value: mode.id }))}
-          onChange={handleModeChange}
-        />
-        <TextInput
-          flex={`1 1 ${rem(120)}`}
-          miw={0}
-          size="xs"
-          value={query}
-          onChange={(event) => onQueryChange(event.currentTarget.value)}
-          placeholder={t("searchFiles")}
-          leftSection={<IconSearch size="0.8125rem" />}
-          rightSection={
-            query ? (
-              <ActionIcon
-                size="xs"
-                variant="subtle"
-                onClick={() => onQueryChange("")}
-              >
-                <IconX size="0.6875rem" />
-              </ActionIcon>
-            ) : null
-          }
-          styles={{ input: { border: 0, background: "transparent" } }}
-        />
-        <ActionIcon
-          size="sm"
-          variant="subtle"
-          aria-label={t("upload.openPicker")}
-          data-testid="workspace-upload-open"
-          onClick={() => uploadInputRef.current?.click()}
-        >
-          <IconUpload size="0.8125rem" />
-        </ActionIcon>
-        <input
-          ref={uploadInputRef}
-          type="file"
-          multiple
-          hidden
-          data-testid="workspace-upload-input"
-          onChange={handleUploadInputChange}
-        />
+        <Stack gap={0} flex="1 1 auto" miw={0}>
+          <Text c="dimmed" size="xs">
+            {t("upload.destinationLabel")}
+          </Text>
+          <Group gap={rem(4)} miw={0} wrap="nowrap">
+            <IconFolder size="0.75rem" color="var(--mantine-color-blue-6)" />
+            <Text
+              size="xs"
+              ff="monospace"
+              truncate
+              title={uploadDestinationDirectory}
+            >
+              {uploadDestinationDirectory}
+            </Text>
+          </Group>
+        </Stack>
         <Menu withinPortal position="bottom-end">
           <Menu.Target>
-            <ActionIcon aria-label={t("actions")} size="sm" variant="subtle">
+            <ActionIcon
+              aria-label={t("actions")}
+              data-testid="workspace-upload-actions"
+              size="sm"
+              variant="subtle"
+            >
               <IconDotsVertical size="0.75rem" />
             </ActionIcon>
           </Menu.Target>
           <Menu.Dropdown>
+            <Menu.Item
+              leftSection={<IconUpload size="0.875rem" />}
+              onClick={handleOpenUploadPicker}
+            >
+              {t("upload.openPicker")}
+            </Menu.Item>
+            <Menu.Item
+              leftSection={<IconFolder size="0.875rem" />}
+              onClick={onOpenUploadDestinationPicker}
+            >
+              {t("upload.changeDestination")}
+            </Menu.Item>
+            <Menu.Divider />
             <Menu.Label>
               {t("selectedCount", { count: selectedPaths.length })}
             </Menu.Label>
@@ -838,6 +835,52 @@ export function FileBrowser({
             </Menu.Item>
           </Menu.Dropdown>
         </Menu>
+        <input
+          ref={uploadInputRef}
+          type="file"
+          multiple
+          hidden
+          data-testid="workspace-upload-input"
+          onChange={handleUploadInputChange}
+        />
+      </Group>
+      <Group
+        gap="xs"
+        wrap="nowrap"
+        px="xs"
+        py={rem(7)}
+        style={{
+          background: "var(--mantine-color-default)",
+          borderBottom: `${rem(1)} solid var(--mantine-color-default-border)`,
+        }}
+      >
+        <SegmentedControl
+          size="xs"
+          value={browserMode}
+          data={modes.map((mode) => ({ label: mode.label, value: mode.id }))}
+          onChange={handleModeChange}
+        />
+        <TextInput
+          flex={`1 1 ${rem(120)}`}
+          miw={0}
+          size="xs"
+          value={query}
+          onChange={(event) => onQueryChange(event.currentTarget.value)}
+          placeholder={t("searchFiles")}
+          leftSection={<IconSearch size="0.8125rem" />}
+          rightSection={
+            query ? (
+              <ActionIcon
+                size="xs"
+                variant="subtle"
+                onClick={() => onQueryChange("")}
+              >
+                <IconX size="0.6875rem" />
+              </ActionIcon>
+            ) : null
+          }
+          styles={{ input: { border: 0, background: "transparent" } }}
+        />
         <ActionIcon
           size="sm"
           variant="subtle"

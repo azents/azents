@@ -216,6 +216,13 @@
     "cancel": "キャンセル",
     "upload": {
       "openPicker": "ファイルをアップロード",
+      "destinationLabel": "アップロード先",
+      "destinationTitle": "アップロード先",
+      "destinationDescription": "次回以降のアップロードに使用するフォルダーを選択してください。",
+      "destinationCurrentPath": "開いているフォルダー",
+      "useOpenDirectory": "開いているフォルダーを使用 ({path})",
+      "changeDestination": "アップロード先を変更",
+      "noDirectories": "利用できるフォルダーがありません。",
       "title": "Workspace アップロード",
       "activeCount": "進行中 {count} 件",
       "fileCount": "{count} ファイル",

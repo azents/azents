@@ -216,6 +216,13 @@
     "cancel": "Cancel",
     "upload": {
       "openPicker": "Upload files",
+      "destinationLabel": "Upload destination",
+      "destinationTitle": "Upload destination",
+      "destinationDescription": "Select a directory for the next and subsequent uploads.",
+      "destinationCurrentPath": "Open directory",
+      "useOpenDirectory": "Use open directory ({path})",
+      "changeDestination": "Change destination",
+      "noDirectories": "No directories available.",
       "title": "Workspace uploads",
       "activeCount": "{count} active",
       "fileCount": "{count} files",

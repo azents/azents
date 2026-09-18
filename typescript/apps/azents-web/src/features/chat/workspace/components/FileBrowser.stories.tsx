@@ -28,12 +28,14 @@ interface DirectoryBrowserProps {
   initialLoadState: WorkspaceDirectoryLoadState;
   resolveChildren: boolean;
   onUploadFiles?: (files: FileList | File[]) => void;
+  onOpenUploadDestinationPicker?: () => void;
 }
 
 function DirectoryBrowser({
   initialLoadState,
   resolveChildren,
   onUploadFiles = (): void => {},
+  onOpenUploadDestinationPicker = (): void => {},
 }: DirectoryBrowserProps): React.ReactElement {
   const [entriesByPath, setEntriesByPath] = useState<
     Record<string, WorkspaceEntry[]>
@@ -88,6 +90,8 @@ function DirectoryBrowser({
         onRefresh={fn()}
         onSetBrowserMode={fn()}
         onAddProject={fn()}
+        uploadDestinationDirectory={root}
+        onOpenUploadDestinationPicker={onOpenUploadDestinationPicker}
         onUploadFiles={onUploadFiles}
         query={query}
         expanded={expanded}
@@ -179,15 +183,43 @@ export const AsyncDirectoryChildren = {
 } satisfies Story;
 
 const uploadFiles = fn<(files: FileList | File[]) => void>();
+const openUploadDestinationPicker = fn<() => void>();
 
 export const UploadPickerAcceptsMultipleFiles = {
   args: {
     initialLoadState: { type: "IDLE" },
     resolveChildren: false,
     onUploadFiles: uploadFiles,
+    onOpenUploadDestinationPicker: openUploadDestinationPicker,
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
+    const body = within(canvasElement.ownerDocument.body);
+    const inputClick = fn();
+    const originalInputClick = Object.getOwnPropertyDescriptor(
+      HTMLInputElement.prototype,
+      "click",
+    );
+    HTMLInputElement.prototype.click = inputClick;
+    try {
+      await userEvent.click(canvas.getByRole("button", { name: "Actions" }));
+      await expect(body.getByText("Upload files")).toBeVisible();
+      await expect(body.getByText("Change destination")).toBeVisible();
+      await expect(canvas.queryByTestId("workspace-upload-open")).toBeNull();
+      await userEvent.click(body.getByText("Change destination"));
+      await expect(openUploadDestinationPicker).toHaveBeenCalledTimes(1);
+      await userEvent.click(canvas.getByRole("button", { name: "Actions" }));
+      await userEvent.click(body.getByText("Upload files"));
+      await expect(inputClick).toHaveBeenCalledTimes(1);
+    } finally {
+      if (originalInputClick) {
+        Object.defineProperty(
+          HTMLInputElement.prototype,
+          "click",
+          originalInputClick,
+        );
+      }
+    }
     const input = canvas.getByTestId("workspace-upload-input");
     const first = new File(["first"], "first.txt", { type: "text/plain" });
     const second = new File(["second"], "second.csv", { type: "text/csv" });

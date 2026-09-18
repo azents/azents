@@ -216,6 +216,13 @@
     "cancel": "취소",
     "upload": {
       "openPicker": "파일 업로드",
+      "destinationLabel": "업로드 대상",
+      "destinationTitle": "업로드 대상",
+      "destinationDescription": "다음 업로드와 이후 업로드에 사용할 폴더를 선택하세요.",
+      "destinationCurrentPath": "현재 열려 있는 폴더",
+      "useOpenDirectory": "열린 폴더 사용 ({path})",
+      "changeDestination": "업로드 대상 변경",
+      "noDirectories": "사용 가능한 폴더가 없습니다.",
       "title": "Workspace 업로드",
       "activeCount": "진행 중 {count}개",
       "fileCount": "파일 {count}개",
