@@ -4,13 +4,11 @@ from __future__ import annotations
 
 import dataclasses
 import datetime
-from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 
 import pytest
-from azcommon.result import Failure, Success
+from azcommon.result import Failure, Result, Success
 from azents_runtime_control.grpc_workspace_upload_client import (
     WorkspaceUploadCancelRequest,
     WorkspaceUploadCreateRequest,
@@ -20,17 +18,21 @@ from azents_runtime_control.grpc_workspace_upload_client import (
     WorkspaceUploadStatus,
     WorkspaceUploadTicket,
 )
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     AgentLifecycleStatus,
     AgentType,
     WorkspaceUserRole,
 )
-from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
-from azents.repos.agent_admin import AgentAdminRepository
-from azents.repos.workspace_user import WorkspaceUserRepository
+from azents.repos.workspace_upload_authority.data import (
+    WorkspaceUploadRequesterAccessDenied,
+    WorkspaceUploadRequesterAgentUnavailable,
+    WorkspaceUploadRequesterAuthority,
+)
+from azents.repos.workspace_upload_authority.operations import (
+    WorkspaceUploadAuthorizationRepository,
+)
 from azents.repos.workspace_user.data import WorkspaceUser
 from azents.runtime.control_protocol.runner_operations import (
     RuntimeFileStatResult,
@@ -64,73 +66,57 @@ _DIGEST = "a" * 64
 _ROOT = PurePosixPath("/runtime/home")
 
 
-class _SessionManager:
-    """Provide a fresh unbound SQLAlchemy session for repository doubles."""
+class _AuthorizationRepository(WorkspaceUploadAuthorizationRepository):
+    """Return one configurable upload authorization result."""
 
-    @asynccontextmanager
-    async def __call__(self) -> AsyncGenerator[AsyncSession]:
-        """Yield one session-shaped value for an authorization transaction."""
-        yield AsyncSession()
-
-
-class _AgentRepository(AgentRepository):
-    """Return one configurable Agent."""
-
-    def __init__(self, agent: Agent | None) -> None:
+    def __init__(
+        self,
+        *,
+        agent: Agent | None,
+        membership: WorkspaceUser | None,
+        admin: bool,
+    ) -> None:
         self.agent = agent
-
-    async def get_by_id(
-        self,
-        session: AsyncSession,
-        agent_id: str,
-    ) -> Agent | None:
-        """Return the configured Agent for the requested ID."""
-        del session
-        if self.agent is None or self.agent.id != agent_id:
-            return None
-        return self.agent
-
-
-class _WorkspaceUserRepository(WorkspaceUserRepository):
-    """Return one configurable Workspace membership."""
-
-    def __init__(self, membership: WorkspaceUser | None) -> None:
         self.membership = membership
+        self.admin = admin
 
-    async def get_by_workspace_and_user(
+    async def authorize(
         self,
-        session: AsyncSession,
-        workspace_id: str,
-        user_id: str,
-    ) -> WorkspaceUser | None:
-        """Return membership only for its exact Workspace and user."""
-        del session
-        if (
-            self.membership is not None
-            and self.membership.workspace_id == workspace_id
-            and self.membership.user_id == user_id
-        ):
-            return self.membership
-        return None
-
-
-class _AgentAdminRepository(AgentAdminRepository):
-    """Return one configurable private-Agent admin decision."""
-
-    def __init__(self, is_admin: bool = False) -> None:
-        self.admin = is_admin
-        self.calls: list[tuple[str, str]] = []
-
-    async def is_admin(
-        self,
-        session: AsyncSession,
+        *,
         agent_id: str,
-        workspace_user_id: str,
-    ) -> bool:
-        """Record and return the configured admin decision."""
-        del session
-        self.calls.append((agent_id, workspace_user_id))
-        return self.admin
+        user_id: str,
+    ) -> Result[
+        WorkspaceUploadRequesterAuthority,
+        WorkspaceUploadRequesterAgentUnavailable | WorkspaceUploadRequesterAccessDenied,
+    ]:
+        """Return the authorization result represented by the fixture."""
+        agent = self.agent
+        if (
+            agent is None
+            or agent.id != agent_id
+            or agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE
+        ):
+            return Failure(WorkspaceUploadRequesterAgentUnavailable())
+        membership = self.membership
+        if (
+            membership is None
+            or membership.workspace_id != agent.workspace_id
+            or membership.user_id != user_id
+        ):
+            return Failure(WorkspaceUploadRequesterAccessDenied())
+        if (
+            agent.type is AgentType.PRIVATE
+            and membership.role is not WorkspaceUserRole.OWNER
+            and not self.admin
+        ):
+            return Failure(WorkspaceUploadRequesterAccessDenied())
+        return Success(
+            WorkspaceUploadRequesterAuthority(
+                agent=agent,
+                workspace_user_id=membership.id,
+                role=membership.role,
+            )
+        )
 
 
 class _RuntimeResolver(RuntimeOperationTargetResolver):
@@ -416,10 +402,11 @@ def _service(
     )
     return (
         WorkspaceUploadService(
-            agent_repository=_AgentRepository(agent),
-            agent_admin_repository=_AgentAdminRepository(admin),
-            workspace_user_repository=_WorkspaceUserRepository(membership),
-            session_manager=_SessionManager(),
+            authorization_repository=_AuthorizationRepository(
+                agent=agent,
+                membership=membership,
+                admin=admin,
+            ),
             runtime_target_resolver=resolver,
             runner_operations=resolved_runner,
             coordinator=resolved_coordinator,
