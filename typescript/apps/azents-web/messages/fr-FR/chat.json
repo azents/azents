@@ -216,6 +216,13 @@
     "cancel": "Annuler",
     "upload": {
       "openPicker": "Importer des fichiers",
+      "destinationLabel": "Destination d’importation",
+      "destinationTitle": "Destination d’importation",
+      "destinationDescription": "Sélectionnez un dossier pour les prochains envois.",
+      "destinationCurrentPath": "Dossier ouvert",
+      "useOpenDirectory": "Utiliser le dossier ouvert ({path})",
+      "changeDestination": "Modifier la destination",
+      "noDirectories": "Aucun dossier disponible.",
       "title": "Envois du workspace",
       "activeCount": "{count} actifs",
       "fileCount": "{count} fichiers",
