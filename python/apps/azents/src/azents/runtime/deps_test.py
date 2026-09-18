@@ -2,8 +2,6 @@
 
 import base64
 from pathlib import Path
-from types import SimpleNamespace
-from typing import cast
 
 import pytest
 from azents_runtime_control.grpc_tls import GrpcClientTlsConfig
@@ -47,20 +45,38 @@ def _config(
     tls_ca_file: Path | None,
     allow_insecure: bool = False,
 ) -> Config:
-    return cast(
-        Config,
-        SimpleNamespace(
-            credential_encryption=CredentialEncryptionConfig(
-                key=base64.urlsafe_b64encode(b"x" * 32).decode("ascii")
-            ),
-            runtime_transfer_coordinator=RuntimeTransferCoordinatorConfig(
-                endpoint=endpoint,
-                tls_ca_file=tls_ca_file,
-                allow_insecure=allow_insecure,
-                credential_lifetime_seconds=30,
-            ),
+    return Config.model_construct(
+        credential_encryption=CredentialEncryptionConfig(
+            key=base64.urlsafe_b64encode(b"x" * 32).decode("ascii")
+        ),
+        runtime_transfer_coordinator=RuntimeTransferCoordinatorConfig(
+            endpoint=endpoint,
+            tls_ca_file=tls_ca_file,
+            allow_insecure=allow_insecure,
+            credential_lifetime_seconds=30,
         ),
     )
+
+
+def _captured_args(captured: dict[str, object]) -> tuple[object, ...]:
+    """Return captured positional arguments with runtime validation."""
+    value = captured["args"]
+    if not isinstance(value, tuple):
+        raise AssertionError("captured args must be a tuple")
+    return tuple(value)
+
+
+def _captured_kwargs(captured: dict[str, object]) -> dict[str, object]:
+    """Return captured keyword arguments with runtime validation."""
+    value = captured["kwargs"]
+    if not isinstance(value, dict):
+        raise AssertionError("captured kwargs must be a mapping")
+    result: dict[str, object] = {}
+    for key, item in value.items():
+        if not isinstance(key, str):
+            raise AssertionError("captured kwargs keys must be strings")
+        result[key] = item
+    return result
 
 
 async def test_worker_coordinator_client_uses_tls_and_worker_identity(
@@ -91,8 +107,8 @@ async def test_worker_coordinator_client_uses_tls_and_worker_identity(
 
     assert first is client
     assert second is client
-    args = cast(tuple[object, ...], captured["args"])
-    kwargs = cast(dict[str, object], captured["kwargs"])
+    args = _captured_args(captured)
+    kwargs = _captured_kwargs(captured)
     assert args == ("runtime-control:8030",)
     assert kwargs["allow_insecure"] is False
     tls = kwargs["tls"]
@@ -178,8 +194,8 @@ async def test_api_workspace_upload_coordinator_uses_explicit_api_identity(
 
     assert first is client
     assert second is client
-    args = cast(tuple[object, ...], captured["args"])
-    kwargs = cast(dict[str, object], captured["kwargs"])
+    args = _captured_args(captured)
+    kwargs = _captured_kwargs(captured)
     assert args == ("runtime-control:8030",)
     assert kwargs["tls"] is None
     assert kwargs["allow_insecure"] is True

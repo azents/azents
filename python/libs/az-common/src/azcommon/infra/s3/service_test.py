@@ -4,7 +4,6 @@ import asyncio
 import base64
 import hashlib
 from dataclasses import dataclass
-from typing import cast
 
 import pytest
 from botocore.exceptions import ClientError
@@ -26,6 +25,17 @@ class _StoredObject:
     metadata: dict[str, str]
     content_type: str | None
     checksum_sha256: str | None = None
+
+
+@dataclass
+class _MultipartUpload:
+    """Mutable fake multipart upload state."""
+
+    bucket: str
+    key: str
+    metadata: dict[str, str]
+    content_type: str | None
+    parts: dict[int, bytes]
 
 
 class _Body:
@@ -92,7 +102,7 @@ class _FakeS3Client:
     def __init__(self) -> None:
         """Initialize empty object and multipart state."""
         self.objects: dict[tuple[str, str], _StoredObject] = {}
-        self.uploads: dict[str, dict[str, object]] = {}
+        self.uploads: dict[str, _MultipartUpload] = {}
         self.bodies: list[_Body] = []
         self.next_body: _Body | None = None
         self.copy_requests: list[dict[str, object]] = []
@@ -138,8 +148,9 @@ class _FakeS3Client:
         params = arguments.get("Params")
         if not isinstance(params, dict):
             raise AssertionError("presigned request parameters are required")
-        bucket = _string_argument(cast(dict[str, object], params), "Bucket")
-        key = _string_argument(cast(dict[str, object], params), "Key")
+        typed_params = _string_keyed_mapping(params, "presigned request parameters")
+        bucket = _string_argument(typed_params, "Bucket")
+        key = _string_argument(typed_params, "Key")
         return f"https://objects.example.test/{bucket}/{key}"
 
     async def head_object(self, **arguments: object) -> dict[str, object]:
@@ -221,28 +232,27 @@ class _FakeS3Client:
         """Create one fake multipart upload."""
         upload_id = f"upload-{self.next_upload_id}"
         self.next_upload_id += 1
-        self.uploads[upload_id] = {
-            "bucket": _string_argument(arguments, "Bucket"),
-            "key": _string_argument(arguments, "Key"),
-            "metadata": (
+        self.uploads[upload_id] = _MultipartUpload(
+            bucket=_string_argument(arguments, "Bucket"),
+            key=_string_argument(arguments, "Key"),
+            metadata=(
                 _string_mapping_argument(arguments, "Metadata")
                 if "Metadata" in arguments
                 else {}
             ),
-            "content_type": _optional_string_argument(arguments, "ContentType"),
-            "parts": {},
-        }
+            content_type=_optional_string_argument(arguments, "ContentType"),
+            parts={},
+        )
         return {"UploadId": upload_id}
 
     async def upload_part(self, **arguments: object) -> dict[str, object]:
         """Save one fake multipart body part."""
         upload = self.uploads[_string_argument(arguments, "UploadId")]
-        parts = _parts(upload)
         part_number = _integer_argument(arguments, "PartNumber")
         if part_number == self.fail_upload_part_number:
             raise RuntimeError("part failed")
         body = _bytes_argument(arguments, "Body")
-        parts[part_number] = body
+        upload.parts[part_number] = body
         if self.missing_upload_part_etag:
             return {}
         return {"ETag": f"etag-{part_number}"}
@@ -280,7 +290,7 @@ class _FakeS3Client:
         byte_range = _string_argument(arguments, "CopySourceRange")
         start_text, end_text = byte_range.removeprefix("bytes=").split("-", 1)
         part_number = _integer_argument(arguments, "PartNumber")
-        _parts(upload)[part_number] = source_object.body[
+        upload.parts[part_number] = source_object.body[
             int(start_text) : int(end_text) + 1
         ]
         return {"CopyPartResult": {"ETag": f"copy-etag-{part_number}"}}
@@ -295,8 +305,8 @@ class _FakeS3Client:
             raise RuntimeError("complete failed")
         upload_id = _string_argument(arguments, "UploadId")
         upload = self.uploads[upload_id]
-        bucket = _string_value(upload, "bucket")
-        key = _string_value(upload, "key")
+        bucket = upload.bucket
+        key = upload.key
         if self.insert_destination_before_complete is not None:
             self.objects[(bucket, key)] = self.insert_destination_before_complete
             self.insert_destination_before_complete = None
@@ -304,9 +314,9 @@ class _FakeS3Client:
             raise _client_error("PreconditionFailed")
         self.uploads.pop(upload_id)
         self.objects[(bucket, key)] = _StoredObject(
-            body=b"".join(_parts(upload)[number] for number in sorted(_parts(upload))),
-            metadata=_string_mapping_value(upload, "metadata"),
-            content_type=_optional_string_value(upload, "content_type"),
+            body=b"".join(upload.parts[number] for number in sorted(upload.parts)),
+            metadata=dict(upload.metadata),
+            content_type=upload.content_type,
         )
         if self.complete_then_raise:
             if self.block_ambiguous_completion:
@@ -395,13 +405,15 @@ class _FakeS3Client:
         objects = delete.get("Objects")
         if not isinstance(objects, list):
             raise AssertionError("Delete Objects must be a list")
-        object_entries = cast(list[object], objects)
         deleted: list[dict[str, str]] = []
         errors: list[dict[str, str]] = []
-        for item in object_entries:
+        for item in objects:
             if not isinstance(item, dict):
                 raise AssertionError("Delete object must be a mapping")
-            key = _string_argument(cast(dict[str, object], item), "Key")
+            key = _string_argument(
+                _string_keyed_mapping(item, "Delete object"),
+                "Key",
+            )
             if key in self.failed_delete_keys:
                 errors.append({"Key": key})
             else:
@@ -432,7 +444,20 @@ def _object_argument(arguments: dict[str, object], name: str) -> dict[str, objec
     value = arguments[name]
     if not isinstance(value, dict):
         raise AssertionError(f"{name} must be a mapping")
-    return cast(dict[str, object], value)
+    return _string_keyed_mapping(value, name)
+
+
+def _string_keyed_mapping(
+    value: dict[object, object],
+    name: str,
+) -> dict[str, object]:
+    """Return a mapping whose keys are validated strings."""
+    result: dict[str, object] = {}
+    for key, item in value.items():
+        if not isinstance(key, str):
+            raise AssertionError(f"{name} keys must be strings")
+        result[key] = item
+    return result
 
 
 def _string_argument(arguments: dict[str, object], name: str) -> str:
@@ -477,9 +502,8 @@ def _string_mapping_value(values: dict[str, object], name: str) -> dict[str, str
     raw = values[name]
     if not isinstance(raw, dict):
         raise AssertionError(f"{name} must be a mapping")
-    raw_mapping = cast(dict[object, object], raw)
     result: dict[str, str] = {}
-    for key, value in raw_mapping.items():
+    for key, value in raw.items():
         if not isinstance(key, str) or not isinstance(value, str):
             raise AssertionError(f"{name} must contain string entries")
         result[key] = value
@@ -500,22 +524,6 @@ def _optional_string_value(values: dict[str, object], name: str) -> str | None:
     if value is not None and not isinstance(value, str):
         raise AssertionError(f"{name} must be a string when present")
     return value
-
-
-def _parts(upload: dict[str, object]) -> dict[int, bytes]:
-    """Return multipart part state."""
-    value = upload["parts"]
-    if not isinstance(value, dict):
-        raise AssertionError("parts must be a mapping")
-    raw_parts = cast(dict[object, object], value)
-    for key, item in raw_parts.items():
-        if not (
-            isinstance(key, int)
-            and not isinstance(key, bool)
-            and isinstance(item, bytes)
-        ):
-            raise AssertionError("parts must contain integer byte entries")
-    return cast(dict[int, bytes], value)
 
 
 def _sha256(value: bytes) -> str:

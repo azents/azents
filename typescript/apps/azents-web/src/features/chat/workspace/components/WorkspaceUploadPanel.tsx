@@ -8,6 +8,7 @@ import {
   Group,
   Paper,
   Progress,
+  rem,
   ScrollArea,
   Stack,
   Text,
@@ -155,7 +156,7 @@ export function WorkspaceUploadPanel({
       py="xs"
       style={{
         background: "var(--mantine-color-default-hover)",
-        borderBottom: "1px solid var(--mantine-color-default-border)",
+        borderBottom: `${rem(1)} solid var(--mantine-color-default-border)`,
         minWidth: 0,
         overflowX: "hidden",
       }}

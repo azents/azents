@@ -19,6 +19,21 @@ from azents.runtime.control_server import (
 from azents.runtime.transfer.object_store import RuntimeTransferOrphanRepairResult
 
 
+class _RedisPipeline:
+    """Reject unexpected pipeline use in the composition-only test."""
+
+    async def __aenter__(self) -> "_RedisPipeline":
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: object,
+        exc_value: object,
+        traceback: object,
+    ) -> None:
+        del exc_type, exc_value, traceback
+
+
 class _Redis:
     def __init__(self) -> None:
         self.closed = False
@@ -27,9 +42,39 @@ class _Redis:
         del name
         return None
 
-    async def set(self, name: str, value: str, *, ex: int) -> object:
-        del name, value, ex
+    async def set(
+        self,
+        name: str,
+        value: str | bytes,
+        *,
+        ex: int | None = None,
+        nx: bool = False,
+        px: int | None = None,
+    ) -> object:
+        del name, value, ex, nx, px
         return True
+
+    async def zrange(
+        self,
+        name: str,
+        start: int,
+        end: int,
+    ) -> list[bytes | str]:
+        del name, start, end
+        raise AssertionError("composition test must not read Workspace upload state")
+
+    async def eval(
+        self,
+        script: str,
+        numkeys: int,
+        *keys_and_args: str,
+    ) -> object:
+        del script, numkeys, keys_and_args
+        raise AssertionError("composition test must not mutate Workspace upload state")
+
+    def pipeline(self, *, transaction: bool) -> _RedisPipeline:
+        del transaction
+        return _RedisPipeline()
 
     async def aclose(self) -> None:
         self.closed = True
