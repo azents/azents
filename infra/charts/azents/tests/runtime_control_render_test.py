@@ -40,9 +40,6 @@ def _helm_template(*values: str, json_values: tuple[str, ...] = ()) -> str:
                 "objectStorage.external.publicEndpoint=https://s3.example.com"
             ),
             "bucket": "objectStorage.external.bucket=workspace-bucket",
-            "corsOrigins": (
-                "objectStorage.external.corsOrigins[0]=http://localhost:3000"
-            ),
         }
         configured_keys = {
             value.removeprefix("objectStorage.external.").split("=", 1)[0]
@@ -568,17 +565,3 @@ def test_runtime_control_requires_workspace_s3_public_endpoint() -> None:
     assert "objectstorage.external.publicendpoint is required" in (
         raised.value.stderr.lower()
     )
-
-
-def test_runtime_control_requires_workspace_s3_cors_origins() -> None:
-    """Runtime Control cannot render without an exact browser CORS origin."""
-    with pytest.raises(subprocess.CalledProcessError) as raised:
-        _helm_template(
-            "server.runtimeControl.enabled=true",
-            "server.runtimeControl.runnerImage.repository=repo/runner",
-            "server.runtimeControl.runnerImage.tag=sha",
-            f"server.runtimeControl.runnerImage.digest={_RUNNER_DIGEST}",
-            json_values=("objectStorage.external.corsOrigins=[]",),
-        )
-
-    assert "objectstorage.external.corsorigins" in raised.value.stderr.lower()

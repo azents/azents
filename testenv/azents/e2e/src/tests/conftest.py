@@ -1959,10 +1959,6 @@ def azents_runtime_control_container(
             "AZ_RUNTIME_CONTROL_WORKSPACE_S3_PUBLIC_ENDPOINT_URL",
             "https://azents-web-gateway:8446",
         )
-        .with_env(
-            "AZ_RUNTIME_CONTROL_WORKSPACE_S3_CORS_ORIGINS",
-            _MAIN_WEB_BROWSER_URL,
-        )
         .with_volume_mapping(
             str(azents_web_gateway_tls_material.certificate_path),
             "/etc/ssl/certs/azents-web-gateway-ca.crt",

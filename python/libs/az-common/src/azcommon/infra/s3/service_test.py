@@ -125,24 +125,12 @@ class _FakeS3Client:
         self.insert_destination_before_complete: _StoredObject | None = None
         self.next_upload_id = 1
         self.head_bucket_calls: list[dict[str, object]] = []
-        self.cors_rules: list[dict[str, object]] = [
-            {
-                "AllowedOrigins": ["http://localhost:3000"],
-                "AllowedMethods": ["PUT"],
-                "AllowedHeaders": ["content-type", "x-amz-checksum-sha256"],
-            }
-        ]
         self.presigned_requests: list[dict[str, object]] = []
 
     async def head_bucket(self, **arguments: object) -> dict[str, object]:
         """Record one bucket reachability check."""
         self.head_bucket_calls.append(dict(arguments))
         return {}
-
-    async def get_bucket_cors(self, **arguments: object) -> dict[str, object]:
-        """Return the configured bucket CORS rules."""
-        del arguments
-        return {"CORSRules": list(self.cors_rules)}
 
     async def generate_presigned_url(self, **arguments: object) -> str:
         """Return one deterministic fake presigned URL."""
@@ -536,14 +524,13 @@ def _sha256(value: bytes) -> str:
 
 
 @pytest.mark.asyncio
-async def test_workspace_upload_readiness_proves_public_endpoint_and_cors() -> None:
+async def test_workspace_upload_readiness_proves_public_endpoint() -> None:
     """Readiness checks signing, public reachability, checksum HEAD, and copy."""
     client = _FakeS3Client()
     service = _service(client)
 
     await service.validate_workspace_upload_readiness(
         bucket="bucket",
-        cors_origins=("http://localhost:3000",),
         probe_prefix="v1/workspace-upload-readiness",
     )
 
@@ -569,32 +556,10 @@ async def test_workspace_upload_readiness_fails_on_public_endpoint() -> None:
     with pytest.raises(RuntimeError, match="reachable public S3 endpoint"):
         await service.validate_workspace_upload_readiness(
             bucket="bucket",
-            cors_origins=("http://localhost:3000",),
             probe_prefix="v1/workspace-upload-readiness",
         )
 
     assert internal.objects == {}
-
-
-@pytest.mark.asyncio
-async def test_workspace_upload_readiness_rejects_wildcard_cors() -> None:
-    """Wildcard CORS cannot authorize the exact signed browser headers."""
-    client = _FakeS3Client()
-    client.cors_rules = [
-        {
-            "AllowedOrigins": ["*"],
-            "AllowedMethods": ["PUT"],
-            "AllowedHeaders": ["*"],
-        }
-    ]
-    service = _service(client)
-
-    with pytest.raises(RuntimeError, match="exact bucket CORS"):
-        await service.validate_workspace_upload_readiness(
-            bucket="bucket",
-            cors_origins=("http://localhost:3000",),
-            probe_prefix="v1/workspace-upload-readiness",
-        )
 
 
 @pytest.mark.asyncio

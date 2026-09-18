@@ -217,7 +217,6 @@ required enforcing substrate.
 - `objectStorage.external.credentialMode=ambientAws`: do not inject explicit S3 credential env vars. EKS Pod Identity, IAM Roles, or another ambient credential provider must be configured outside this chart.
 - `objectStorage.external.endpoint`: trusted server-side S3 endpoint used for object operations.
 - `objectStorage.external.publicEndpoint`: browser- and Runner-reachable S3 endpoint used to sign Workspace Upload PUT/GET requests. It is required when Runtime Control is enabled; Workspace Upload has no byte-relay fallback when this endpoint is absent or unreachable.
-- `objectStorage.external.corsOrigins`: exact Main Web origins allowed by the private bucket CORS policy. Runtime Control requires at least one configured origin and rejects wildcard origins or headers during readiness.
 
 External secret-store delivery remains outside this chart. External Secrets Operator, Infisical, SOPS, Sealed Secrets, cloud secret managers, and manual Secrets must be wired by the consumer-owned deployment layer.
 

@@ -31,7 +31,6 @@ def _helm_template(*values: str) -> str:
         "objectStorage.external.endpoint=https://s3.internal",
         "objectStorage.external.publicEndpoint=https://objects.example.com",
         "objectStorage.external.bucket=workspace-bucket",
-        "objectStorage.external.corsOrigins[0]=https://app.example.com",
     )
     for value in (*base_values, *values):
         command.extend(["--set", value])

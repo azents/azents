@@ -649,7 +649,6 @@ class RuntimeControlSettings(BaseSettings):
     runtime_control_workspace_upload_repair_interval_seconds: float = 5.0
     runtime_control_workspace_s3_endpoint_url: str | None = None
     runtime_control_workspace_s3_public_endpoint_url: str | None = None
-    runtime_control_workspace_s3_cors_origins: str | None = None
     runtime_control_workspace_s3_access_key_id: str | None = None
     runtime_control_workspace_s3_secret_access_key: str | None = None
     runtime_control_allow_insecure: bool
@@ -1631,7 +1630,6 @@ async def _runtime_transfer_s3_service(
         service = S3Service(s3_client=client, public_s3_client=public_client)
         await service.validate_workspace_upload_readiness(
             bucket=bucket,
-            cors_origins=_workspace_s3_cors_origins(settings),
             probe_prefix=_workspace_upload_object_prefix(
                 settings,
                 "workspace-upload-readiness",
@@ -1780,55 +1778,12 @@ def validate_runtime_control_workspace_upload_settings(
     if not settings.runtime_control_workspace_s3_bucket.strip():
         raise ValueError("Runtime Control workspace S3 bucket is required")
     _validate_workspace_s3_public_endpoint(settings)
-    _workspace_s3_cors_origins(settings)
     if not settings.runtime_control_workspace_upload_redis_namespace.strip():
         raise ValueError("Workspace upload Redis namespace is required")
     if settings.runtime_control_workspace_upload_status_poll_interval_seconds <= 0:
         raise ValueError("Workspace upload status poll interval must be positive")
     if settings.runtime_control_workspace_upload_repair_interval_seconds <= 0:
         raise ValueError("Workspace upload repair interval must be positive")
-
-
-def _workspace_s3_cors_origins(
-    settings: RuntimeControlSettings,
-) -> tuple[str, ...]:
-    """Parse exact browser origins required by the bucket CORS contract."""
-    raw = settings.runtime_control_workspace_s3_cors_origins
-    origins = tuple(
-        value.strip()
-        for value in (raw.split(",") if raw is not None else ())
-        if value.strip()
-    )
-    if not origins:
-        raise ValueError(
-            "Runtime Control workspace S3 CORS origins are required when "
-            "Workspace Upload storage is configured"
-        )
-    if len(set(origins)) != len(origins):
-        raise ValueError("Runtime Control workspace S3 CORS origins must be unique")
-    for origin in origins:
-        parsed = urlsplit(origin)
-        if (
-            parsed.scheme not in {"http", "https"}
-            or not parsed.hostname
-            or parsed.username is not None
-            or parsed.password is not None
-            or parsed.path not in {"", "/"}
-            or parsed.query
-            or parsed.fragment
-        ):
-            raise ValueError(
-                "Runtime Control workspace S3 CORS origins must be exact "
-                "HTTP(S) origins"
-            )
-        try:
-            if parsed.port is not None and not 1 <= parsed.port <= 65_535:
-                raise ValueError
-        except ValueError as exc:
-            raise ValueError(
-                "Runtime Control workspace S3 CORS origin port is invalid"
-            ) from exc
-    return origins
 
 
 def _validate_workspace_s3_public_endpoint(

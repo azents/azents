@@ -581,12 +581,6 @@
         "publicEndpoint": {
           "type": "string"
         },
-        "corsOrigins": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
         "bucket": {
           "type": "string"
         },

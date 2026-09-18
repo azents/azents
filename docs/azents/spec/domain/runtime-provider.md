@@ -332,11 +332,13 @@ When Workspace Upload is enabled, Helm requires the configured public S3 endpoin
 matching `platformTransferEgress` route. The route must contain the endpoint hostname and
 effective port and may contain only host CIDRs. Missing, mismatched, or broad routes fail chart
 rendering rather than widening Runtime network authority. Runtime Control readiness separately
-proves bucket access, exact browser CORS, checksum-aware metadata, presigned PUT/GET signing,
-public endpoint reachability, and immutable native-copy support; failed prerequisites keep the
-feature unavailable without a byte-relay fallback. The Docker Provider's public gateway CA is
-mounted into the Provider process by the deployment/test fixture so the managed Runner can
-verify the same HTTPS endpoint used by browser-direct Workspace Upload.
+proves bucket access, checksum-aware metadata, presigned PUT/GET signing, public endpoint
+reachability, and immutable native-copy support; the operator-owned object-storage CORS policy
+is not duplicated in the Azents chart or used as a Runtime Control render/readiness gate.
+Failed prerequisites keep the feature unavailable without a byte-relay fallback. The Docker
+Provider's public gateway CA is mounted into the Provider process by the deployment/test
+fixture so the managed Runner can verify the same HTTPS endpoint used by browser-direct
+Workspace Upload.
 
 Authentication rollout does not render, own, select, delete, rename, or recreate Runtime PersistentVolumeClaims or PersistentVolumes. Credential-driven Runtime Pod replacement reuses the existing PVC; only the established explicit Runtime reset or terminal-delete operations may invoke PVC deletion.
 
@@ -347,6 +349,8 @@ Admin Profile editing cannot mutate those deployment boundaries.
 
 ## Version history
 
+- **31 (2026-09-18):** Removed the duplicated Azents chart and Runtime Control CORS
+  contract; object-storage CORS remains an operator-owned prerequisite.
 - **30 (2026-09-18):** Added Docker Provider and Runner Runtime network CA
   propagation for browser-direct Workspace Upload: read-only public CA mount,
   writable combined trust bundle, verified direct HTTPS downloads, digest-fenced
