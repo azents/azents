@@ -97,6 +97,7 @@ class _RedisPipelineContext(Protocol):
     ) -> bool | None: ...
 
 
+@runtime_checkable
 class _RedisClient(Protocol):
     """Redis commands used by the Workspace upload adapter."""
 

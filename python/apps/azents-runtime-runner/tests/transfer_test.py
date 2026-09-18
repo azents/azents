@@ -11,7 +11,6 @@ import threading
 from collections.abc import AsyncIterator, Callable, Mapping
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import cast
 
 import grpc
 import pytest
@@ -419,9 +418,8 @@ async def test_direct_download_passes_provider_proxy_explicitly(
     await server.start_server()
     try:
         observed_proxies: list[str | None] = []
-        original_request = cast(
-            Callable[..., object],
-            transfer_module.aiohttp.ClientSession.request,
+        original_request: Callable[..., object] = (
+            transfer_module.aiohttp.ClientSession.request
         )
 
         def request(
@@ -503,7 +501,8 @@ async def test_direct_download_uses_provider_tls_context(
         original_connector = transfer_module.aiohttp.TCPConnector
 
         def observing_connector(**kwargs: object) -> object:
-            context = cast(ssl.SSLContext | None, kwargs.get("ssl"))
+            context = kwargs.get("ssl")
+            assert context is None or isinstance(context, ssl.SSLContext)
             observed_contexts.append(context)
             assert context is not None
             return original_connector(ssl=context)
@@ -1904,10 +1903,10 @@ async def test_direct_claim_lease_closes_after_result_delivery(
         intent: RunnerTransferIntent,
         cancelled: asyncio.Event,
         *,
-        direct_claim_lease: list[object | None],
+        direct_claim_lease: list[_Lease | None],
     ) -> RunnerTransferResult:
         del cancelled
-        direct_claim_lease[0] = _Lease()  # type: ignore[assignment]
+        direct_claim_lease[0] = _Lease()
         return transfer_module._failed(
             intent,
             RunnerTransferFailure.STREAM_FAILED,

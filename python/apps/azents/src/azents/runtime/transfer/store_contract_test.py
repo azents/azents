@@ -4,7 +4,7 @@ import asyncio
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
-from typing import Protocol, cast
+from typing import Protocol, runtime_checkable
 from uuid import uuid4
 
 import pytest
@@ -47,6 +47,7 @@ class _Clock:
         return self.now
 
 
+@runtime_checkable
 class _RedisNamespaceCleaner(Protocol):
     """Redis namespace commands used only by the test fixture."""
 
@@ -61,6 +62,7 @@ class _RedisNamespaceCleaner(Protocol):
     async def delete(self, *keys: bytes) -> int: ...
 
 
+@runtime_checkable
 class _RedisRetentionInspector(Protocol):
     """Redis commands used only for physical retention assertions."""
 
@@ -119,10 +121,8 @@ async def store_harness(
     try:
         yield _StoreHarness(store=store, clock=clock, config=config)
     finally:
-        await _delete_transfer_namespace(
-            cast(_RedisNamespaceCleaner, client),
-            namespace,
-        )
+        assert isinstance(client, _RedisNamespaceCleaner)
+        await _delete_transfer_namespace(client, namespace)
         await client.aclose()
 
 
@@ -2262,7 +2262,8 @@ async def test_redis_terminal_keys_expire_together(
         clock=clock,
         namespace=namespace,
     )
-    inspector = cast(_RedisRetentionInspector, client)
+    assert isinstance(client, _RedisRetentionInspector)
+    inspector = client
     try:
         admission = replace(
             _admission(),
@@ -2310,10 +2311,8 @@ async def test_redis_terminal_keys_expire_together(
         assert await inspector.get(pointer_key) is None
         assert await inspector.get(bucket_key) is None
     finally:
-        await _delete_transfer_namespace(
-            cast(_RedisNamespaceCleaner, client),
-            namespace,
-        )
+        assert isinstance(client, _RedisNamespaceCleaner)
+        await _delete_transfer_namespace(client, namespace)
         await client.aclose()
 
 
@@ -2342,7 +2341,8 @@ async def test_redis_pending_terminal_cleanup_outlives_terminal_ttl(
         clock=clock,
         namespace=namespace,
     )
-    inspector = cast(_RedisRetentionInspector, client)
+    assert isinstance(client, _RedisRetentionInspector)
+    inspector = client
     try:
         admission = replace(
             _admission(),
@@ -2385,10 +2385,8 @@ async def test_redis_pending_terminal_cleanup_outlives_terminal_ttl(
         assert await inspector.zscore(bucket_key, record_key) == 0.0
         assert await store.get("pending-terminal-ttl") == pending
     finally:
-        await _delete_transfer_namespace(
-            cast(_RedisNamespaceCleaner, client),
-            namespace,
-        )
+        assert isinstance(client, _RedisNamespaceCleaner)
+        await _delete_transfer_namespace(client, namespace)
         await client.aclose()
 
 
@@ -2417,7 +2415,8 @@ async def test_redis_new_current_pointer_outlives_old_terminal_ttl(
         clock=clock,
         namespace=namespace,
     )
-    inspector = cast(_RedisRetentionInspector, client)
+    assert isinstance(client, _RedisRetentionInspector)
+    inspector = client
     try:
         admission = replace(
             _admission(),
@@ -2451,10 +2450,8 @@ async def test_redis_new_current_pointer_outlives_old_terminal_ttl(
         assert await inspector.get(pointer_key) in {retry_key, retry_key.encode()}
         assert await store.get("retry-pointer") == retry
     finally:
-        await _delete_transfer_namespace(
-            cast(_RedisNamespaceCleaner, client),
-            namespace,
-        )
+        assert isinstance(client, _RedisNamespaceCleaner)
+        await _delete_transfer_namespace(client, namespace)
         await client.aclose()
 
 
@@ -2483,7 +2480,8 @@ async def test_redis_stale_pagination_continues_after_dangling_members(
         clock=clock,
         namespace=namespace,
     )
-    inspector = cast(_RedisRetentionInspector, client)
+    assert isinstance(client, _RedisRetentionInspector)
+    inspector = client
     try:
         transfer_ids_by_key: dict[str, str] = {}
         for transfer_id in ("dangling-a", "dangling-b", "dangling-c"):
@@ -2519,10 +2517,8 @@ async def test_redis_stale_pagination_continues_after_dangling_members(
             record.admission.transfer_id for record in second_page.records
         ) == (transfer_ids_by_key[ordered_keys[2]],)
     finally:
-        await _delete_transfer_namespace(
-            cast(_RedisNamespaceCleaner, client),
-            namespace,
-        )
+        assert isinstance(client, _RedisNamespaceCleaner)
+        await _delete_transfer_namespace(client, namespace)
         await client.aclose()
 
 

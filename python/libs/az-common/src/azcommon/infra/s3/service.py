@@ -9,7 +9,7 @@ from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import IO, Any, cast
+from typing import IO, Any
 
 from botocore.exceptions import ClientError as BotoClientError
 from types_aiobotocore_s3.client import S3Client
@@ -1691,7 +1691,11 @@ def _metadata_from_response(
     raw_metadata: object = response.get("Metadata", {})
     if not isinstance(raw_metadata, dict):
         raise RuntimeError("S3 HEAD response metadata was not a mapping")
-    metadata = cast(dict[str, object], raw_metadata)
+    metadata: dict[str, object] = {}
+    for key, value in raw_metadata.items():
+        if not isinstance(key, str):
+            raise RuntimeError("S3 HEAD response metadata keys were not strings")
+        metadata[key] = value
     user_metadata = MappingProxyType(
         {key: value for key, value in metadata.items() if isinstance(value, str)}
     )
@@ -1758,7 +1762,10 @@ def _datetime_is_aware(value: datetime.datetime) -> bool:
 def _mapping_value(value: object, key: str) -> object | None:
     if not isinstance(value, dict):
         return None
-    return _known_mapping_value(cast(dict[object, object], value), key)
+    for item_key, item_value in value.items():
+        if item_key == key:
+            return item_value
+    return None
 
 
 def _known_mapping_value(

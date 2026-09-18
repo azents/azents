@@ -12,7 +12,7 @@ from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from contextlib import AsyncExitStack, asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, Literal, Protocol, cast
+from typing import Any, Literal, Protocol
 
 import aioboto3
 import boto3
@@ -760,9 +760,11 @@ async def runtime_control_server_lifespan(
         clock=clock,
     )
     workspace_upload_config = _workspace_upload_config(settings)
+    if not isinstance(redis, _RedisClient):
+        raise TypeError("Redis client does not support Workspace upload commands")
     workspace_upload_store = (
         RedisWorkspaceUploadStore(
-            redis=cast(_RedisClient, redis),
+            redis=redis,
             config=workspace_upload_config,
             clock=clock,
             namespace=settings.runtime_control_workspace_upload_redis_namespace,

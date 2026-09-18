@@ -5,7 +5,7 @@ import hashlib
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
-from typing import Protocol, cast
+from typing import Protocol, runtime_checkable
 from uuid import uuid4
 
 import pytest
@@ -43,6 +43,7 @@ class _Clock:
         return self.now
 
 
+@runtime_checkable
 class _RedisNamespaceCleaner(Protocol):
     """Redis commands used to remove one isolated test namespace."""
 
@@ -129,9 +130,11 @@ async def store_harness(
 
     redis_url = request.getfixturevalue("redis_url")
     client = create_redis_client(redis_url)
+    assert isinstance(client, _RedisClient)
+    assert isinstance(client, _RedisNamespaceCleaner)
     namespace = f"azents:runtime:workspace-upload:test:{uuid4().hex}"
     store = RedisWorkspaceUploadStore(
-        redis=cast(_RedisClient, client),
+        redis=client,
         config=config,
         clock=clock,
         namespace=namespace,
@@ -139,10 +142,7 @@ async def store_harness(
     try:
         yield _StoreHarness(store=store, clock=clock, config=config)
     finally:
-        await _delete_namespace(
-            cast(_RedisNamespaceCleaner, client),
-            namespace,
-        )
+        await _delete_namespace(client, namespace)
         await client.aclose()
 
 
