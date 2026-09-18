@@ -39,6 +39,35 @@ class WorkspaceUserListOutput(BaseModel):
 
 
 @dataclasses.dataclass(frozen=True)
+class NotFound:
+    """WorkspaceUser not found."""
+
+    workspace_user_id: str
+
+
+@dataclasses.dataclass(frozen=True)
+class WorkspaceNotFound:
+    """Workspace not found."""
+
+    workspace_id: str
+
+
+@dataclasses.dataclass(frozen=True)
+class UserNotFound:
+    """User not found."""
+
+    user_id: str
+
+
+@dataclasses.dataclass(frozen=True)
+class WorkspaceUserAlreadyExists:
+    """User already belongs to the Workspace."""
+
+    workspace_id: str
+    user_id: str
+
+
+@dataclasses.dataclass(frozen=True)
 class CannotModifySelf:
     """Cannot change or delete own role."""
 

@@ -5,20 +5,22 @@ from typing import Annotated, assert_never
 
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import WorkspaceUserRole
-from azents.rdb.deps import get_session_manager
-from azents.rdb.session import SessionManager
-from azents.repos.owner_lifecycle import OwnerLifecycleRepository
-from azents.repos.workspace import WorkspaceRepository
-from azents.repos.workspace_user import WorkspaceUserRepository
+from azents.repos.workspace_user.data import NotFound as RepositoryNotFound
+from azents.repos.workspace_user.data import UserNotFound as RepositoryUserNotFound
 from azents.repos.workspace_user.data import (
-    NotFound,
-    UserNotFound,
-    WorkspaceNotFound,
-    WorkspaceUserAlreadyExists,
-    WorkspaceUserCreate,
+    WorkspaceNotFound as RepositoryWorkspaceNotFound,
+)
+from azents.repos.workspace_user.data import (
+    WorkspaceUserAlreadyExists as RepositoryWorkspaceUserAlreadyExists,
+)
+from azents.repos.workspace_user.operations import (
+    WorkspaceOwnershipTransfer,
+    WorkspaceUserOperationRepository,
+    WorkspaceUserOutsideWorkspace,
+    WorkspaceUserOwnerAlreadyExists,
+    WorkspaceUserOwnerLocked,
 )
 from azents.services.runtime_terminal.invalidation import (
     RuntimeTerminalInvalidationPublisherDependency,
@@ -28,8 +30,12 @@ from .data import (
     CannotModifyOwner,
     CannotModifySelf,
     InvalidRole,
+    NotFound,
     NotMemberOfWorkspace,
     OwnerAlreadyExists,
+    UserNotFound,
+    WorkspaceNotFound,
+    WorkspaceUserAlreadyExists,
     WorkspaceUserCreateInput,
     WorkspaceUserListOutput,
     WorkspaceUserOutput,
@@ -41,11 +47,8 @@ from .data import (
 class WorkspaceUserService:
     """WorkspaceUser CRUD service."""
 
-    user_repository: Annotated[WorkspaceUserRepository, Depends()]
-    workspace_repository: Annotated[WorkspaceRepository, Depends()]
-    owner_lifecycle_repository: Annotated[OwnerLifecycleRepository, Depends()]
-    session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+    operations: Annotated[
+        WorkspaceUserOperationRepository, Depends(WorkspaceUserOperationRepository)
     ]
     terminal_invalidation_publisher: RuntimeTerminalInvalidationPublisherDependency
 
@@ -60,73 +63,55 @@ class WorkspaceUserService:
             | OwnerAlreadyExists
         ),
     ]:
-        """Create WorkspaceUser.
-
-        :param create: Create data
-        :return: Created WorkspaceUser or error
-        """
-        async with self.session_manager() as session:
-            workspace_id = await self.workspace_repository.resolve_id(
-                session, create.workspace_handle
-            )
-            if workspace_id is None:
-                return Failure(WorkspaceNotFound(workspace_id=create.workspace_handle))
-            if create.role == WorkspaceUserRole.OWNER:
-                locked_workspace = await self.workspace_repository.get_by_id_for_update(
-                    session, workspace_id
-                )
-                if locked_workspace is None:
-                    return Failure(WorkspaceNotFound(workspace_id=workspace_id))
-                current_owner = await self.user_repository.get_owner_by_workspace(
-                    session, workspace_id
-                )
-                if current_owner is not None:
-                    return Failure(
-                        OwnerAlreadyExists(workspace_user_id=current_owner.id)
-                    )
-            result = await self.user_repository.create_with_conflict(
-                session,
-                WorkspaceUserCreate(
-                    workspace_id=workspace_id,
-                    user_id=create.user_id,
-                    name=create.name,
-                    role=create.role,
-                ),
-            )
-
+        """Create WorkspaceUser."""
+        result = await self.operations.create_by_handle(
+            workspace_handle=create.workspace_handle,
+            user_id=create.user_id,
+            name=create.name,
+            role=create.role,
+        )
         match result:
             case Success(value):
                 return Success(WorkspaceUserOutput.convert_from(value))
             case Failure(error):
-                return Failure(error)
+                match error:
+                    case RepositoryWorkspaceNotFound(workspace_id):
+                        return Failure(WorkspaceNotFound(workspace_id=workspace_id))
+                    case RepositoryUserNotFound(user_id):
+                        return Failure(UserNotFound(user_id=user_id))
+                    case RepositoryWorkspaceUserAlreadyExists(
+                        workspace_id=workspace_id,
+                        user_id=user_id,
+                    ):
+                        return Failure(
+                            WorkspaceUserAlreadyExists(
+                                workspace_id=workspace_id,
+                                user_id=user_id,
+                            )
+                        )
+                    case WorkspaceUserOwnerAlreadyExists(
+                        workspace_user_id=workspace_user_id
+                    ):
+                        return Failure(
+                            OwnerAlreadyExists(workspace_user_id=workspace_user_id)
+                        )
+                    case _:
+                        assert_never(error)
             case _:
                 assert_never(result)
 
     async def get(self, workspace_user_id: str) -> WorkspaceUserOutput | None:
-        """Fetch WorkspaceUser by ID.
-
-        :param workspace_user_id: WorkspaceUser ID
-        :return: WorkspaceUser or None
-        """
-        async with self.session_manager() as session:
-            workspace_user = await self.user_repository.get(session, workspace_user_id)
+        """Fetch WorkspaceUser by ID."""
+        workspace_user = await self.operations.get(workspace_user_id=workspace_user_id)
         if workspace_user is None:
             return None
         return WorkspaceUserOutput.convert_from(workspace_user)
 
     async def list_by_workspace(self, handle: str) -> WorkspaceUserListOutput:
-        """Fetch WorkspaceUsers in Workspace.
-
-        :param handle: Workspace handle
-        :return: WorkspaceUser list
-        """
-        async with self.session_manager() as session:
-            workspace_id = await self.workspace_repository.resolve_id(session, handle)
-            if workspace_id is None:
-                return WorkspaceUserListOutput(items=[])
-            workspace_users = await self.user_repository.list_by_workspace(
-                session, workspace_id
-            )
+        """Fetch WorkspaceUsers in Workspace."""
+        workspace_users = await self.operations.list_by_workspace_handle(
+            workspace_handle=handle
+        )
         return WorkspaceUserListOutput(
             items=[WorkspaceUserOutput.convert_from(u) for u in workspace_users.items]
         )
@@ -134,22 +119,16 @@ class WorkspaceUserService:
     async def update(
         self, workspace_user_id: str, update: WorkspaceUserUpdateInput
     ) -> Result[WorkspaceUserOutput, NotFound]:
-        """Update WorkspaceUser.
-
-        :param workspace_user_id: WorkspaceUser ID
-        :param update: Update data
-        :return: Updated WorkspaceUser or error
-        """
-        async with self.session_manager() as session:
-            result = await self.user_repository.update(
-                session, workspace_user_id, update
-            )
-
+        """Update WorkspaceUser."""
+        result = await self.operations.update(
+            workspace_user_id=workspace_user_id,
+            update=update,
+        )
         match result:
             case Success(value):
                 return Success(WorkspaceUserOutput.convert_from(value))
-            case Failure(error):
-                return Failure(error)
+            case Failure(RepositoryNotFound(missing_id)):
+                return Failure(NotFound(workspace_user_id=missing_id))
             case _:
                 assert_never(result)
 
@@ -162,46 +141,23 @@ class WorkspaceUserService:
         WorkspaceUserOutput,
         NotFound | CannotModifySelf | CannotModifyOwner | InvalidRole,
     ]:
-        """Change role of WorkspaceUser.
-
-        :param actor_workspace_user_id: WorkspaceUser ID performing change
-        :param workspace_user_id: Target WorkspaceUser ID
-        :param role: Role to change
-        :return: Updated WorkspaceUser or error
-        """
+        """Change role of WorkspaceUser."""
         if actor_workspace_user_id == workspace_user_id:
             return Failure(CannotModifySelf())
-        if role == WorkspaceUserRole.OWNER:
-            return Failure(InvalidRole())
-
-        async with self.session_manager() as session:
-            target = await self.user_repository.get(session, workspace_user_id)
-            if target is None:
-                return Failure(NotFound(workspace_user_id=workspace_user_id))
-
-            locked_workspace = await self.workspace_repository.get_by_id_for_update(
-                session, target.workspace_id
-            )
-            if locked_workspace is None:
-                return Failure(NotFound(workspace_user_id=workspace_user_id))
-
-            target = await self.user_repository.get(session, workspace_user_id)
-            if target is None:
-                return Failure(NotFound(workspace_user_id=workspace_user_id))
-            if target.role == WorkspaceUserRole.OWNER:
-                return Failure(CannotModifyOwner())
-
-            result = await self.user_repository.update_role(
-                session, workspace_user_id, role
-            )
-
+        result = await self._update_non_owner_role(workspace_user_id, role)
         match result:
             case Success(value):
-                publisher = self.terminal_invalidation_publisher
-                await publisher.publish_user_terminal_invalidation(value.user_id)
-                return Success(WorkspaceUserOutput.convert_from(value))
+                return Success(value)
             case Failure(error):
-                return Failure(error)
+                match error:
+                    case NotFound():
+                        return Failure(error)
+                    case CannotModifyOwner():
+                        return Failure(error)
+                    case InvalidRole():
+                        return Failure(error)
+                    case _:
+                        assert_never(error)
             case _:
                 assert_never(result)
 
@@ -210,42 +166,23 @@ class WorkspaceUserService:
         actor_workspace_user_id: str,
         workspace_user_id: str,
     ) -> Result[None, CannotModifySelf | CannotModifyOwner | NotFound]:
-        """Delete WorkspaceUser.
-
-        :param actor_workspace_user_id: WorkspaceUser ID performing deletion
-        :param workspace_user_id: Target WorkspaceUser ID
-        :return: Success or error
-        """
+        """Delete WorkspaceUser."""
         if actor_workspace_user_id == workspace_user_id:
             return Failure(CannotModifySelf())
-
-        async with self.session_manager() as session:
-            target = await self.user_repository.get(session, workspace_user_id)
-            if target is None:
-                return Failure(NotFound(workspace_user_id=workspace_user_id))
-
-            locked_workspace = await self.workspace_repository.get_by_id_for_update(
-                session, target.workspace_id
-            )
-            if locked_workspace is None:
-                return Failure(NotFound(workspace_user_id=workspace_user_id))
-
-            target = await self.user_repository.get(session, workspace_user_id)
-            if target is None:
-                return Failure(NotFound(workspace_user_id=workspace_user_id))
-            if target.role == WorkspaceUserRole.OWNER:
-                return Failure(CannotModifyOwner())
-
-            await self.user_repository.delete(session, workspace_user_id)
-            await self.owner_lifecycle_repository.create_or_get_membership_archive(
-                session,
-                workspace_id=target.workspace_id,
-                user_id=target.user_id,
-            )
-        await self.terminal_invalidation_publisher.publish_user_terminal_invalidation(
-            target.user_id
-        )
-        return Success(None)
+        result = await self._delete_non_owner(workspace_user_id)
+        match result:
+            case Success():
+                return Success(None)
+            case Failure(error):
+                match error:
+                    case NotFound():
+                        return Failure(error)
+                    case CannotModifyOwner():
+                        return Failure(error)
+                    case _:
+                        assert_never(error)
+            case _:
+                assert_never(result)
 
     async def update_role_admin(
         self,
@@ -255,83 +192,14 @@ class WorkspaceUserService:
         WorkspaceUserOutput,
         NotFound | CannotModifyOwner | InvalidRole,
     ]:
-        """Change a non-Owner WorkspaceUser role from the Admin API.
-
-        :param workspace_user_id: Target WorkspaceUser ID
-        :param role: Role to change
-        :return: Updated WorkspaceUser or error
-        """
-        if role == WorkspaceUserRole.OWNER:
-            return Failure(InvalidRole())
-
-        async with self.session_manager() as session:
-            target = await self.user_repository.get(session, workspace_user_id)
-            if target is None:
-                return Failure(NotFound(workspace_user_id=workspace_user_id))
-
-            locked_workspace = await self.workspace_repository.get_by_id_for_update(
-                session, target.workspace_id
-            )
-            if locked_workspace is None:
-                return Failure(NotFound(workspace_user_id=workspace_user_id))
-
-            target = await self.user_repository.get(session, workspace_user_id)
-            if target is None:
-                return Failure(NotFound(workspace_user_id=workspace_user_id))
-            if target.role == WorkspaceUserRole.OWNER:
-                return Failure(CannotModifyOwner())
-
-            result = await self.user_repository.update_role(
-                session, workspace_user_id, role
-            )
-
-        match result:
-            case Success(value):
-                publisher = self.terminal_invalidation_publisher
-                await publisher.publish_user_terminal_invalidation(value.user_id)
-                return Success(WorkspaceUserOutput.convert_from(value))
-            case Failure(error):
-                return Failure(error)
-            case _:
-                assert_never(result)
+        """Change a non-Owner WorkspaceUser role from the Admin API."""
+        return await self._update_non_owner_role(workspace_user_id, role)
 
     async def delete_force(
         self, workspace_user_id: str
     ) -> Result[None, NotFound | CannotModifyOwner]:
-        """Force delete WorkspaceUser (Admin only).
-
-        Blocks only Owner deletion without self-deletion validation.
-
-        :param workspace_user_id: Target WorkspaceUser ID
-        :return: Success or error
-        """
-        async with self.session_manager() as session:
-            target = await self.user_repository.get(session, workspace_user_id)
-            if target is None:
-                return Failure(NotFound(workspace_user_id=workspace_user_id))
-
-            locked_workspace = await self.workspace_repository.get_by_id_for_update(
-                session, target.workspace_id
-            )
-            if locked_workspace is None:
-                return Failure(NotFound(workspace_user_id=workspace_user_id))
-
-            target = await self.user_repository.get(session, workspace_user_id)
-            if target is None:
-                return Failure(NotFound(workspace_user_id=workspace_user_id))
-            if target.role == WorkspaceUserRole.OWNER:
-                return Failure(CannotModifyOwner())
-
-            await self.user_repository.delete(session, workspace_user_id)
-            await self.owner_lifecycle_repository.create_or_get_membership_archive(
-                session,
-                workspace_id=target.workspace_id,
-                user_id=target.user_id,
-            )
-        await self.terminal_invalidation_publisher.publish_user_terminal_invalidation(
-            target.user_id
-        )
-        return Success(None)
+        """Delete a non-Owner WorkspaceUser from the Admin API."""
+        return await self._delete_non_owner(workspace_user_id)
 
     async def transfer_ownership(
         self,
@@ -341,72 +209,12 @@ class WorkspaceUserService:
         WorkspaceUserOutput,
         WorkspaceNotFound | NotFound | NotMemberOfWorkspace,
     ]:
-        """Change workspace Owner.
-
-        Change existing Owner to Manager and new Owner to Owner.
-
-        :param workspace_id: Workspace ID
-        :param new_owner_workspace_user_id: WorkspaceUser ID of new Owner
-        :return: New Owner WorkspaceUser or error
-        """
-        async with self.session_manager() as session:
-            locked_workspace = await self.workspace_repository.get_by_id_for_update(
-                session, workspace_id
-            )
-            if locked_workspace is None:
-                return Failure(WorkspaceNotFound(workspace_id=workspace_id))
-
-            new_owner = await self.user_repository.get_for_update(
-                session, new_owner_workspace_user_id
-            )
-            if new_owner is None:
-                return Failure(NotFound(workspace_user_id=new_owner_workspace_user_id))
-
-            # Check whether same workspace member
-            if new_owner.workspace_id != workspace_id:
-                return Failure(
-                    NotMemberOfWorkspace(workspace_user_id=new_owner_workspace_user_id)
-                )
-
-            current_owner = (
-                await self.user_repository.get_owner_by_workspace_for_update(
-                    session, workspace_id
-                )
-            )
-            if (
-                current_owner is not None
-                and current_owner.id == new_owner_workspace_user_id
-            ):
-                return Success(WorkspaceUserOutput.convert_from(current_owner))
-            if current_owner is not None:
-                demotion_result = await self.user_repository.update_role(
-                    session, current_owner.id, WorkspaceUserRole.MANAGER
-                )
-                if isinstance(demotion_result, Failure):
-                    await session.rollback()
-                    return Failure(demotion_result.error)
-
-            result = await self.user_repository.update_role(
-                session, new_owner_workspace_user_id, WorkspaceUserRole.OWNER
-            )
-            if isinstance(result, Failure):
-                await session.rollback()
-                return Failure(result.error)
-
-        match result:
-            case Success(value):
-                if current_owner is not None:
-                    publisher = self.terminal_invalidation_publisher
-                    await publisher.publish_user_terminal_invalidation(
-                        current_owner.user_id,
-                    )
-                publisher = self.terminal_invalidation_publisher
-                await publisher.publish_user_terminal_invalidation(value.user_id)
-                return Success(WorkspaceUserOutput.convert_from(value))
-            case Failure(error):
-                return Failure(error)
-            case _:
-                assert_never(result)
+        """Change Workspace Owner."""
+        result = await self.operations.transfer_ownership(
+            workspace_id=workspace_id,
+            new_owner_workspace_user_id=new_owner_workspace_user_id,
+        )
+        return await self._finish_ownership_transfer(result)
 
     async def transfer_ownership_by_handle(
         self,
@@ -415,24 +223,100 @@ class WorkspaceUserService:
     ) -> Result[
         WorkspaceUserOutput, WorkspaceNotFound | NotFound | NotMemberOfWorkspace
     ]:
-        """Fetch workspace by handle, then change Owner.
+        """Change Workspace Owner after resolving its handle."""
+        result = await self.operations.transfer_ownership_by_handle(
+            workspace_handle=handle,
+            new_owner_workspace_user_id=new_owner_workspace_user_id,
+        )
+        return await self._finish_ownership_transfer(result)
 
-        :param handle: Workspace handle
-        :param new_owner_workspace_user_id: WorkspaceUser ID of new Owner
-        :return: New Owner WorkspaceUser or error
-        """
-        async with self.session_manager() as session:
-            workspace_id = await self.workspace_repository.resolve_id(session, handle)
-        if workspace_id is None:
-            return Failure(WorkspaceNotFound(workspace_id=handle))
-
-        result = await self.transfer_ownership(
-            workspace_id, new_owner_workspace_user_id
+    async def _update_non_owner_role(
+        self,
+        workspace_user_id: str,
+        role: WorkspaceUserRole,
+    ) -> Result[WorkspaceUserOutput, NotFound | CannotModifyOwner | InvalidRole]:
+        """Validate a role request and publish its committed invalidation."""
+        if role == WorkspaceUserRole.OWNER:
+            return Failure(InvalidRole())
+        result = await self.operations.update_non_owner_role(
+            workspace_user_id=workspace_user_id,
+            role=role,
         )
         match result:
             case Success(value):
-                return Success(value)
+                publisher = self.terminal_invalidation_publisher
+                await publisher.publish_user_terminal_invalidation(value.user_id)
+                return Success(WorkspaceUserOutput.convert_from(value))
             case Failure(error):
-                return Failure(error)
+                match error:
+                    case RepositoryNotFound(missing_id):
+                        return Failure(NotFound(workspace_user_id=missing_id))
+                    case WorkspaceUserOwnerLocked():
+                        return Failure(CannotModifyOwner())
+                    case _:
+                        assert_never(error)
+            case _:
+                assert_never(result)
+
+    async def _delete_non_owner(
+        self,
+        workspace_user_id: str,
+    ) -> Result[None, NotFound | CannotModifyOwner]:
+        """Delete one membership and publish its committed invalidation."""
+        result = await self.operations.delete_non_owner(
+            workspace_user_id=workspace_user_id
+        )
+        match result:
+            case Success(deleted):
+                publisher = self.terminal_invalidation_publisher
+                await publisher.publish_user_terminal_invalidation(deleted.user_id)
+                return Success(None)
+            case Failure(error):
+                match error:
+                    case RepositoryNotFound(missing_id):
+                        return Failure(NotFound(workspace_user_id=missing_id))
+                    case WorkspaceUserOwnerLocked():
+                        return Failure(CannotModifyOwner())
+                    case _:
+                        assert_never(error)
+            case _:
+                assert_never(result)
+
+    async def _finish_ownership_transfer(
+        self,
+        result: Result[
+            WorkspaceOwnershipTransfer,
+            RepositoryWorkspaceNotFound
+            | RepositoryNotFound
+            | WorkspaceUserOutsideWorkspace,
+        ],
+    ) -> Result[
+        WorkspaceUserOutput, WorkspaceNotFound | NotFound | NotMemberOfWorkspace
+    ]:
+        """Map a committed ownership transfer and publish invalidations."""
+        match result:
+            case Success(transfer):
+                publisher = self.terminal_invalidation_publisher
+                if transfer.changed:
+                    if transfer.previous_owner_user_id is not None:
+                        await publisher.publish_user_terminal_invalidation(
+                            transfer.previous_owner_user_id
+                        )
+                    await publisher.publish_user_terminal_invalidation(
+                        transfer.owner.user_id
+                    )
+                return Success(WorkspaceUserOutput.convert_from(transfer.owner))
+            case Failure(error):
+                match error:
+                    case RepositoryWorkspaceNotFound(workspace_id):
+                        return Failure(WorkspaceNotFound(workspace_id=workspace_id))
+                    case RepositoryNotFound(workspace_user_id):
+                        return Failure(NotFound(workspace_user_id=workspace_user_id))
+                    case WorkspaceUserOutsideWorkspace(workspace_user_id):
+                        return Failure(
+                            NotMemberOfWorkspace(workspace_user_id=workspace_user_id)
+                        )
+                    case _:
+                        assert_never(error)
             case _:
                 assert_never(result)

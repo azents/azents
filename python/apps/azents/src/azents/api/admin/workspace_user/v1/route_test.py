@@ -7,12 +7,13 @@ from azcommon.result import Failure
 from fastapi import HTTPException, status
 
 from azents.core.enums import WorkspaceUserRole
-from azents.repos.workspace_user.data import UserNotFound, WorkspaceUserAlreadyExists
 from azents.services.workspace_user import WorkspaceUserService
 from azents.services.workspace_user.data import (
     CannotModifyOwner,
     InvalidRole,
     OwnerAlreadyExists,
+    UserNotFound,
+    WorkspaceUserAlreadyExists,
 )
 from azents.testing.types import is_string_object_dict
 
