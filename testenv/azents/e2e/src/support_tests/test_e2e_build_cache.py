@@ -1,6 +1,7 @@
 """Unit coverage for E2E image cache configuration."""
 
 import importlib.util
+import inspect
 import sys
 import threading
 from pathlib import Path
@@ -193,6 +194,26 @@ def test_required_profile_builds_independent_images_concurrently(
     }
     assert {repository for repository, _ in calls} == set(images)
     assert len({thread_id for _, thread_id in calls}) == 3
+
+
+def test_required_upload_gateway_does_not_require_web_images() -> None:
+    """Workspace upload TLS support stays outside the Web image profile."""
+    gateway_dependencies = set(
+        inspect.signature(
+            _CONFTEST_MODULE.azents_workspace_upload_gateway_container
+        ).parameters
+    )
+    runtime_control_dependencies = set(
+        inspect.signature(_CONFTEST_MODULE.azents_runtime_control_container).parameters
+    )
+
+    assert gateway_dependencies == {
+        "container_network",
+        "rustfs_container",
+        "azents_web_gateway_tls_material",
+    }
+    assert "azents_workspace_upload_gateway_container" in runtime_control_dependencies
+    assert "azents_admin_gateway_container" not in runtime_control_dependencies
 
 
 def test_parallel_profile_reuses_preconfigured_images(
