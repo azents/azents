@@ -5,7 +5,7 @@ import base64
 import datetime
 import hashlib
 import secrets
-from collections.abc import AsyncIterator, Mapping, Sequence
+from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from types import MappingProxyType
@@ -212,7 +212,6 @@ class S3Service:
         self,
         *,
         bucket: str,
-        cors_origins: Sequence[str],
         probe_prefix: str,
     ) -> None:
         """Validate the object-storage contract required by Workspace Upload.
@@ -220,20 +219,15 @@ class S3Service:
         The probe performs bounded metadata operations and a zero-byte
         source/copy round trip under a random key. It proves that the trusted
         client can reach the bucket, the public client can sign both required
-        methods and reach the probe object, checksum-aware HEAD works, the
-        bucket CORS policy admits the configured origins and signed headers, and
+        methods and reach the probe object, checksum-aware HEAD works, and
         immutable native-copy preconditions are accepted.
 
         :param bucket: Private bucket used for Workspace Upload.
-        :param cors_origins: Exact browser origins that must be allowed by CORS.
         :param probe_prefix: Private key prefix for temporary probe objects.
         :raises RuntimeError: If any required capability is unavailable.
         """
         if not bucket.strip():
             raise ValueError("Workspace Upload readiness requires a bucket")
-        origins = tuple(origin.strip() for origin in cors_origins if origin.strip())
-        if not origins:
-            raise ValueError("Workspace Upload readiness requires CORS origins")
         prefix = probe_prefix.strip("/")
         if not prefix:
             raise ValueError("Workspace Upload readiness requires a probe prefix")
@@ -242,8 +236,6 @@ class S3Service:
         destination: S3ObjectIdentity | None = None
         try:
             await self.s3_client.head_bucket(Bucket=bucket)
-            cors_response = await self.s3_client.get_bucket_cors(Bucket=bucket)
-            _validate_workspace_upload_cors(cors_response, origins)
             probe_checksum = hashlib.sha256(b"").hexdigest()
             probe_key = f"{prefix}/readiness-{secrets.token_hex(16)}"
             source = S3ObjectIdentity(bucket=bucket, key=probe_key)
@@ -1716,50 +1708,6 @@ def _metadata_from_response(
             else None
         ),
     )
-
-
-def _validate_workspace_upload_cors(
-    response: Mapping[str, Any],
-    required_origins: Sequence[str],
-) -> None:
-    """Require exact origins and the signed headers used by browser PUT."""
-    raw_rules = response.get("CORSRules")
-    if not isinstance(raw_rules, list):
-        raise RuntimeError("Workspace Upload readiness requires bucket CORS")
-    required_headers = {"content-type", "x-amz-checksum-sha256"}
-    for origin in required_origins:
-        matched = False
-        for raw_rule in raw_rules:
-            if not isinstance(raw_rule, dict):
-                continue
-            rule = cast(dict[str, Any], raw_rule)
-            raw_origins = rule.get("AllowedOrigins")
-            raw_methods = rule.get("AllowedMethods")
-            raw_headers = rule.get("AllowedHeaders")
-            if not (
-                isinstance(raw_origins, list)
-                and isinstance(raw_methods, list)
-                and isinstance(raw_headers, list)
-            ):
-                continue
-            origins = {value for value in raw_origins if isinstance(value, str)}
-            methods = {value.upper() for value in raw_methods if isinstance(value, str)}
-            headers = {value.lower() for value in raw_headers if isinstance(value, str)}
-            if (
-                origin in origins
-                and "*" not in origins
-                and "PUT" in methods
-                and "*" not in methods
-                and required_headers <= headers
-                and "*" not in headers
-            ):
-                matched = True
-                break
-        if not matched:
-            raise RuntimeError(
-                "Workspace Upload readiness requires exact bucket CORS for "
-                f"origin {origin}"
-            )
 
 
 def _content_type_args(content_type: str | None) -> dict[str, str]:

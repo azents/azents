@@ -64,7 +64,6 @@ async def test_rustfs_workspace_upload_readiness(
     ) as service:
         await service.validate_workspace_upload_readiness(
             bucket=s3_bucket_name,
-            cors_origins=("https://web.runtime-e2e.test",),
             probe_prefix=_key("workspace-upload-readiness"),
         )
 

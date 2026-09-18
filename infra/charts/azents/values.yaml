@@ -409,8 +409,6 @@ objectStorage:
     endpoint: ""
     # Browser- and Runner-reachable endpoint required when Runtime Control is enabled.
     publicEndpoint: ""
-    # Exact Main Web origins allowed by the private bucket CORS policy.
-    corsOrigins: []
     bucket: REPLACE_ME
     credentialMode: existingSecret
     accessKeyIdKey: access-key-id
