@@ -55,7 +55,7 @@ code_paths:
   - testenv/azents/e2e/src/tests/conftest.py
   - testenv/azents/e2e/src/tests/required/public/test_workspace_upload.py
 last_verified_at: 2026-09-18
-spec_version: 30
+spec_version: 33
 ---
 
 # Runtime Provider
@@ -242,13 +242,13 @@ and may add only the Workspace policy supported by that contract. Workspace Poli
 direct-only CIDR restriction. Policy v2 composes the hierarchy `direct` → `proxy_required` →
 `no_network`, intersects inherited CIDR authority, and narrows proxy domain authority without
 restoring a parent denial. Required Runtime Control and transfer communication remains Platform
-protected. Workspace Upload's public S3-compatible endpoint is an additional deployment-owned
-Platform transfer route: its exact hostname, effective port, and stable host CIDRs are projected
-into Runtime network enforcement. `direct` permits that route alongside the customer hard cap;
-`proxy_required` permits it only through the dedicated proxy; and `no_network` permits only the
-mandatory Service and Platform transfer host routes without DNS or general customer egress.
-Strict Runtimes receive host mappings for every Platform transfer endpoint, and all Platform
-transfer CIDRs are `/32` or `/128` host routes. Docker rejects Workspace network policy.
+protected. Workspace Upload object-storage endpoints are deployment/operator configuration rather
+than Workspace Runtime Profile network authority. Trusted operations use the primary object-storage
+endpoint; an optional public endpoint overrides presigned browser- and Runner-reachable URLs, and
+the primary endpoint is reused when no override is supplied. Kubernetes Runtime network enforcement
+applies the selected network mode, mandatory Runtime Service routes, inherited CIDR limits, and
+configured egress rules without projecting object-storage-specific routes or host aliases. Docker
+rejects Workspace network policy.
 
 The complete resolved configuration travels through the canonical Runtime configuration envelope.
 The Provider reports exact configuration evidence for the current desired generation. Applied state
@@ -346,6 +346,9 @@ Admin Profile editing cannot mutate those deployment boundaries.
 
 ## Version history
 
+- **33 (2026-09-18):** Clarified that Workspace Upload object-storage endpoints
+  are deployment/operator configuration outside Kubernetes Runtime network authority,
+  and that the optional public endpoint falls back to the primary endpoint.
 - **32 (2026-09-18):** Restored optional public-endpoint fallback and removed the
   unapproved Workspace Upload chart and Runtime network gates.
 - **31 (2026-09-18):** Removed the duplicated Azents chart and Runtime Control CORS
