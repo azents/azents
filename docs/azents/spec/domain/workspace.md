@@ -492,9 +492,11 @@ provisioning. The public JSON lifecycle is exposed through
 `GET /chat/v1/agents/{agent_id}/workspace/uploads/{upload_id}`, and the
 `/finalize`, `/cancel`, and `/retry` subroutes. Create returns requester-scoped
 status plus a transient PUT ticket; the browser uploads bytes directly to the
-HTTPS S3-compatible public endpoint and the Main Web/API never relays the file body.
-Signed URLs, signatures, object keys, and signed headers are not returned in durable
-status or logs.
+primary object-storage endpoint. When an optional public endpoint is configured, it
+overrides the endpoint used for browser- and Runner-reachable presigned URLs; when it
+is omitted, the primary endpoint is reused. The Main Web/API never relays the file
+body. Signed URLs, signatures, object keys, and signed headers are not returned in
+durable status or logs.
 
 Runtime Control owns source verification and admission. It verifies the expected size
 and SHA-256 of the retained object, then admits a `DIRECT_OBJECT` download to the
@@ -916,6 +918,9 @@ stateDiagram-v2
 
 ## Changelog
 
+- **2026-09-18 (spec_version=88)** — Clarified that Workspace Upload uses an
+  optional public object-storage endpoint override and reuses the primary endpoint
+  when the override is omitted.
 - **2026-09-18 (spec_version=87)** — Added the current Agent Workspace Upload
   lifecycle: JSON-only create/status/finalize/cancel/retry routes, browser-direct
   HTTPS S3 PUT, Runtime Control object verification, Runner `DIRECT_OBJECT`
