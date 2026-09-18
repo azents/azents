@@ -104,6 +104,15 @@ const failedRow: WorkspaceUploadRow = {
   retryAvailable: true,
 };
 
+const longNamesRow: WorkspaceUploadRow = {
+  ...activeRow,
+  id: "upload-long-name",
+  filename:
+    "quarterly-financial-report-with-all-regional-adjustments-and-appendices.csv",
+  destinationPath:
+    "/workspace/agent/project/archives/2026/quarterly/finance/quarterly-financial-report-with-all-regional-adjustments-and-appendices.csv",
+};
+
 const onCancel = fn();
 const onRetry = fn();
 const onDismiss = fn();
@@ -127,6 +136,20 @@ export const Empty = {} satisfies Story;
 export const LifecycleStates = {
   args: {
     rows: [activeRow, succeededRow, cancelledRow, conflictRow, failedRow],
+  },
+} satisfies Story;
+
+export const LongNames = {
+  args: {
+    rows: [longNamesRow],
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByTitle(longNamesRow.filename)).toBeVisible();
+    await expect(canvas.getByTitle(longNamesRow.destinationPath)).toBeVisible();
+    await expect(
+      canvas.getByRole("status", { name: "Uploading" }),
+    ).toBeVisible();
   },
 } satisfies Story;
 
