@@ -144,7 +144,6 @@ def _settings() -> RuntimeControlSettings:
         runtime_control_transfer_backend="memory",
         runtime_control_workspace_s3_bucket="transfer-bucket",
         runtime_control_workspace_s3_endpoint_url="http://s3.internal",
-        runtime_control_workspace_s3_public_endpoint_url="http://s3.public",
         runtime_control_workspace_s3_access_key_id="access-key",
         runtime_control_workspace_s3_secret_access_key="secret-key",
         runtime_runner_image="runner:test",

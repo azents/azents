@@ -86,7 +86,6 @@ from azents_runtime_provider_kubernetes.network_enforcement import (
     MandatoryServiceReference,
     NetworkEnforcementInputs,
     ObservedMandatoryService,
-    PlatformTransferEgress,
     RuntimeNetworkInputs,
     build_proxy_network_inputs,
     build_runtime_network_inputs,
@@ -269,7 +268,6 @@ class KubernetesRuntimeProviderConfig:
     network_hard_cap_allowed_cidrs: tuple[str, ...] = ()
     network_hard_cap_denied_cidrs: tuple[str, ...] = ()
     network_hard_cap_extra_egress: tuple[NetworkPolicyEgressRule, ...] = ()
-    platform_transfer_egress: tuple[PlatformTransferEgress, ...] = ()
     image_pull_secrets: tuple[LocalObjectReference, ...] = ()
     pod_annotations: Mapping[str, str] = dataclasses.field(default_factory=dict)
 
@@ -310,11 +308,6 @@ class KubernetesRuntimeProvider:
         ):
             _ip_network(cidr)
         _validate_extra_egress_ip_blocks(config.network_hard_cap_extra_egress)
-        for route in config.platform_transfer_egress:
-            if not isinstance(route, PlatformTransferEgress):
-                raise ValueError(
-                    "platform transfer egress entries must be PlatformTransferEgress"
-                )
         _immutable_image_reference(config.engine_image, "engine image")
         self._api = api
         self._config = config
@@ -984,7 +977,6 @@ class KubernetesRuntimeProvider:
             network_hard_cap_denied_cidrs=(self._config.network_hard_cap_denied_cidrs),
             network_hard_cap_extra_egress=(self._config.network_hard_cap_extra_egress),
             proxy_port=self._config.proxy_port,
-            platform_transfer_egress=self._config.platform_transfer_egress,
         )
 
     async def _runtime_ca(

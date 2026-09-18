@@ -141,7 +141,6 @@ def provider_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
         "AZ_RUNTIME_PROVIDER_NETWORK_HARD_CAP_EXTRA_EGRESS",
         "[]",
     )
-    monkeypatch.setenv("AZ_RUNTIME_PROVIDER_PLATFORM_TRANSFER_EGRESS", "[]")
     monkeypatch.setenv("AZ_RUNTIME_PROVIDER_POD_ANNOTATIONS", "{}")
     token_file = tmp_path / "service-account-token"
     token_file.write_text("test-provider-credential\n")
@@ -184,7 +183,6 @@ def test_provider_settings_loads_provider_global_runtime_controls(
     assert settings.network_hard_cap_allowed_cidrs == ()
     assert settings.network_hard_cap_denied_cidrs == ()
     assert settings.network_hard_cap_extra_egress == ()
-    assert settings.platform_transfer_egress == ()
     assert settings.service_account_token_file == provider_env
     assert read_service_account_token(provider_env) == "test-provider-credential"
 
@@ -206,50 +204,6 @@ def test_provider_rejects_removed_containment_environment(
     monkeypatch.setenv(name, "")
 
     with pytest.raises(RuntimeError, match=name):
-        ProviderSettings()
-
-
-def test_provider_settings_parse_platform_transfer_egress(
-    monkeypatch: pytest.MonkeyPatch,
-    provider_env: Path,
-) -> None:
-    monkeypatch.setenv(
-        "AZ_RUNTIME_PROVIDER_PLATFORM_TRANSFER_EGRESS",
-        (
-            '[{"endpoint_hostnames":["objects.example.com"],'
-            '"cidrs":["198.51.100.10/32"],"ports":[443]}]'
-        ),
-    )
-
-    settings = ProviderSettings()
-
-    assert settings.platform_transfer_egress[0].endpoint_hostnames == (
-        "objects.example.com",
-    )
-    assert settings.platform_transfer_egress[0].cidrs == ("198.51.100.10/32",)
-    assert settings.platform_transfer_egress[0].ports == (443,)
-
-
-@pytest.mark.parametrize(
-    "value",
-    (
-        '[{"endpoint_hostnames":["objects.example.com"],'
-        '"cidrs":["198.51.100.0/24"],"ports":[443]}]',
-        '[{"endpoint_hostnames":["objects.example.com"],'
-        '"cidrs":["0.0.0.0/0"],"ports":[443]}]',
-        '[{"endpoint_hostnames":["objects.example.com"],'
-        '"cidrs":["198.51.100.10/32"],"ports":[443],'
-        '"to":[{"ipBlock":{"cidr":"0.0.0.0/0"}}]}]',
-    ),
-)
-def test_provider_settings_rejects_unbounded_platform_transfer_egress(
-    monkeypatch: pytest.MonkeyPatch,
-    provider_env: Path,
-    value: str,
-) -> None:
-    monkeypatch.setenv("AZ_RUNTIME_PROVIDER_PLATFORM_TRANSFER_EGRESS", value)
-
-    with pytest.raises(RuntimeError, match="PLATFORM_TRANSFER_EGRESS"):
         ProviderSettings()
 
 
