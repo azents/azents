@@ -16,6 +16,7 @@ from azents_runtime_control.proto import (
 )
 from azents_runtime_control.runner_transfer import (
     RunnerTransferCancelReason,
+    RunnerTransferDestinationConflictEvidence,
     RunnerTransferDirection,
     RunnerTransferFailure,
     RunnerTransferIdentity,
@@ -45,6 +46,8 @@ def test_successful_result_accepts_exact_directional_commit_evidence(
         sha256="a" * 64,
         destination_committed=committed,
         failure=None,
+        conflict_precondition=None,
+        destination_conflict=None,
     )
 
     assert result.actual_size == 3
@@ -67,6 +70,7 @@ def test_transfer_intent_maps_all_optional_field_presence() -> None:
     message.overwrite = False
     message.expected_size = 0
     message.expected_sha256 = ""
+    message.conflict_precondition = b"precondition"
 
     intent = runner_transfer_intent_from_message(message)
 
@@ -76,7 +80,29 @@ def test_transfer_intent_maps_all_optional_field_presence() -> None:
     assert intent.overwrite is False
     assert intent.expected_size == 0
     assert intent.expected_sha256 == ""
+    assert intent.conflict_precondition == b"precondition"
     assert intent.deadline_at == deadline_at
+
+
+def test_transfer_intent_maps_direct_object_source_transport() -> None:
+    """Preserve the direct-object transport selected by Runtime Control."""
+    message = runtime_runner_control_pb2.RunnerTransferIntent(
+        identity=_identity_message(),
+        direction=runtime_runner_transfer_pb2.TRANSFER_DIRECTION_DOWNLOAD,
+        operation_id="operation-1",
+        runtime_path="/workspace/output.txt",
+        deadline_at=_timestamp(datetime(2026, 7, 25, tzinfo=UTC)),
+        protocol_version="2026-07-25",
+        capability="file.transfer.v1",
+        dispatch_id="dispatch-1",
+        source_transport=(
+            runtime_runner_control_pb2.RUNNER_TRANSFER_SOURCE_TRANSPORT_DIRECT_OBJECT
+        ),
+    )
+
+    intent = runner_transfer_intent_from_message(message)
+
+    assert intent.source_transport.value == "direct_object"
 
 
 def test_transfer_intent_maps_absent_optional_fields_to_none() -> None:
@@ -99,6 +125,41 @@ def test_transfer_intent_maps_absent_optional_fields_to_none() -> None:
     assert intent.overwrite is None
     assert intent.expected_size is None
     assert intent.expected_sha256 is None
+    assert intent.conflict_precondition is None
+    assert intent.source_transport.value == "transfer_object"
+
+
+def test_transfer_result_maps_destination_conflict_evidence() -> None:
+    """Preserve opaque conflict authority and safe destination metadata."""
+    message = runtime_runner_control_pb2.RunnerTransferResult(
+        identity=_identity_message(),
+        operation_id="operation-1",
+        dispatch_id="dispatch-1",
+        outcome=runtime_runner_control_pb2.RUNNER_TRANSFER_OUTCOME_FAILED,
+        destination_committed=False,
+        failure=(
+            runtime_runner_control_pb2.RUNNER_TRANSFER_FAILURE_DESTINATION_CONFLICT
+        ),
+        conflict_precondition=b"precondition",
+        destination_conflict=runtime_runner_control_pb2.DestinationConflictEvidence(
+            kind="file",
+            size=3,
+            modified_at=_timestamp(datetime(2026, 7, 25, tzinfo=UTC)),
+        ),
+    )
+
+    result = runner_transfer_result_from_message(
+        message,
+        direction=RunnerTransferDirection.DOWNLOAD,
+    )
+
+    assert result.failure is RunnerTransferFailure.DESTINATION_CONFLICT
+    assert result.conflict_precondition == b"precondition"
+    assert result.destination_conflict == RunnerTransferDestinationConflictEvidence(
+        kind="file",
+        size=3,
+        modified_at=datetime(2026, 7, 25, tzinfo=UTC),
+    )
 
 
 @pytest.mark.parametrize(
@@ -201,6 +262,8 @@ def test_result_rejects_unbounded_lookup_identity(
             sha256=None,
             destination_committed=False,
             failure=RunnerTransferFailure.STREAM_FAILED,
+            conflict_precondition=None,
+            destination_conflict=None,
         )
 
 
@@ -244,6 +307,8 @@ def test_result_rejects_contradictory_optional_field_matrix(
             sha256=sha,
             destination_committed=committed,
             failure=failure,
+            conflict_precondition=None,
+            destination_conflict=None,
         )
 
 

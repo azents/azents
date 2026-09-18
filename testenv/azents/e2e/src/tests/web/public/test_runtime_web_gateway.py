@@ -476,6 +476,14 @@ def _runtime_control_relay_container(
         .with_env("AZ_RUNTIME_CONTROL_WORKSPACE_S3_BUCKET", s3_bucket_name)
         .with_env("AZ_RUNTIME_CONTROL_WORKSPACE_S3_PREFIX", "v1")
         .with_env("AZ_RUNTIME_CONTROL_WORKSPACE_S3_ENDPOINT_URL", "http://rustfs:9000")
+        .with_env(
+            "AZ_RUNTIME_CONTROL_WORKSPACE_S3_PUBLIC_ENDPOINT_URL",
+            "http://rustfs:9000",
+        )
+        .with_env(
+            "AZ_RUNTIME_CONTROL_WORKSPACE_S3_CORS_ORIGINS",
+            _MAIN_ORIGIN,
+        )
         .with_env("AZ_RUNTIME_CONTROL_WORKSPACE_S3_ACCESS_KEY_ID", s3_access_key)
         .with_env("AZ_RUNTIME_CONTROL_WORKSPACE_S3_SECRET_ACCESS_KEY", s3_secret_key)
         .with_env("AZ_RUNTIME_RUNNER_IMAGE", runner_image)

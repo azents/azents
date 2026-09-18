@@ -764,6 +764,7 @@ class RuntimeToProviderBatchService:
                 lease_id=uuid7().hex,
                 runtime_path=source.runtime_path,
                 overwrite=False,
+                conflict_precondition=None,
                 expected_manifest=CoordinatorExpectedManifest(
                     size=source.expected_size,
                     sha256=None,

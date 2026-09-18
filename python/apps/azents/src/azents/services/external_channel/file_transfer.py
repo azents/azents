@@ -480,6 +480,7 @@ class ExternalChannelFileTransferService:
                         datetime.datetime.now(datetime.UTC)
                         + staging_configuration.deadline_after
                     ),
+                    conflict_precondition=None,
                 )
             )
         except asyncio.CancelledError:
@@ -660,6 +661,7 @@ class ExternalChannelFileTransferService:
                         datetime.datetime.now(datetime.UTC)
                         + staging_configuration.deadline_after
                     ),
+                    conflict_precondition=None,
                 )
             )
         except asyncio.CancelledError:

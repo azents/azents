@@ -3,10 +3,12 @@
 import hashlib
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import timedelta
 from uuid import uuid4
 
 import aioboto3
 import pytest
+import requests
 from azcommon.infra.s3.service import (
     S3ObjectIdentity,
     S3Service,
@@ -45,6 +47,89 @@ def _key(name: str) -> str:
 def _sha256(body: bytes) -> str:
     """Return the hexadecimal SHA-256 digest for bytes."""
     return hashlib.sha256(body).hexdigest()
+
+
+@pytest.mark.asyncio
+async def test_rustfs_workspace_upload_readiness(
+    rustfs_container: DockerContainer,
+    rustfs_access_key: str,
+    rustfs_secret_key: str,
+    s3_bucket_name: str,
+) -> None:
+    """Workspace Upload readiness passes against the real RustFS contract."""
+    async with _service(
+        rustfs_container=rustfs_container,
+        access_key=rustfs_access_key,
+        secret_key=rustfs_secret_key,
+    ) as service:
+        await service.validate_workspace_upload_readiness(
+            bucket=s3_bucket_name,
+            cors_origins=("https://web.runtime-e2e.test",),
+            probe_prefix=_key("workspace-upload-readiness"),
+        )
+
+
+@pytest.mark.asyncio
+async def test_rustfs_presigned_put_finalize_and_get_round_trip(
+    rustfs_container: DockerContainer,
+    rustfs_access_key: str,
+    rustfs_secret_key: str,
+    s3_bucket_name: str,
+) -> None:
+    """Direct PUT, immutable finalize, and direct GET preserve exact bytes."""
+    body = b"workspace-upload-presigned-round-trip"
+    digest = _sha256(body)
+    ingress = S3ObjectIdentity(bucket=s3_bucket_name, key=_key("ingress"))
+    source = S3ObjectIdentity(bucket=s3_bucket_name, key=_key("source"))
+    async with _service(
+        rustfs_container=rustfs_container,
+        access_key=rustfs_access_key,
+        secret_key=rustfs_secret_key,
+    ) as service:
+        try:
+            upload_request = await service.get_upload_request(
+                identity=ingress,
+                content_type="application/octet-stream",
+                checksum_sha256=digest,
+                expires_in=timedelta(seconds=60),
+            )
+            upload_response = requests.put(
+                upload_request.url,
+                headers=dict(upload_request.headers),
+                data=body,
+                timeout=10,
+            )
+            assert upload_response.status_code == 200
+
+            ingress_metadata = await service.head_with_checksum(ingress)
+            assert ingress_metadata is not None
+            assert ingress_metadata.content_length == len(body)
+            assert ingress_metadata.checksum_sha256 is not None
+
+            finalized = await service.copy_immutable(
+                source=ingress,
+                destination=source,
+                expected_size=len(body),
+                transfer_metadata=S3TransferObjectMetadata(
+                    sha256=digest,
+                    content_type="application/octet-stream",
+                ),
+                multipart_copy_threshold=len(body) + 1,
+                multipart_part_size=5 * 1024 * 1024,
+            )
+            assert finalized.metadata.content_length == len(body)
+            assert finalized.sha256 == digest
+
+            download_request = await service.get_download_request(
+                identity=source,
+                expires_in=timedelta(seconds=60),
+            )
+            download_response = requests.get(download_request.url, timeout=10)
+            assert download_response.status_code == 200
+            assert download_response.content == body
+        finally:
+            await service.delete(ingress.bucket, ingress.key)
+            await service.delete(source.bucket, source.key)
 
 
 @pytest.mark.asyncio

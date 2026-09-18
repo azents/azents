@@ -1,6 +1,7 @@
 """Trusted Runtime transfer coordination, dispatch, and bounded repair."""
 
 import asyncio
+import base64
 import hashlib
 import logging
 from collections.abc import Callable
@@ -30,12 +31,14 @@ from azents.runtime.transfer.data import (
     RuntimeTransferCancellationReason,
     RuntimeTransferCleanupArtifact,
     RuntimeTransferCleanupStatus,
+    RuntimeTransferDestinationConflictEvidence,
     RuntimeTransferDirection,
     RuntimeTransferFailure,
     RuntimeTransferObject,
     RuntimeTransferOutcome,
     RuntimeTransferPreparationCleanupState,
     RuntimeTransferRecord,
+    RuntimeTransferSourceTransport,
     cancellation_settlement,
 )
 from azents.runtime.transfer.store import RuntimeTransferStateStore
@@ -149,6 +152,36 @@ class RuntimeTransferCoordinator:
             ),
         )
 
+    async def mark_ready_direct(
+        self,
+        record: RuntimeTransferRecord,
+        *,
+        expected_revision: int,
+        source_handle: str,
+        size: int,
+        sha256: str,
+    ) -> RuntimeTransferRecord | None:
+        """Mark a direct-object download ready without allocating a transfer object."""
+        if (
+            record.admission.source_transport
+            is not RuntimeTransferSourceTransport.DIRECT_OBJECT
+            or record.admission.source_handle != source_handle
+            or record.admission.direction is not RuntimeTransferDirection.DOWNLOAD
+            or size != record.admission.expected_size
+            or sha256 != record.admission.expected_sha256
+        ):
+            return None
+        return await self._state_store.mark_ready_direct(
+            record.admission.transfer_id,
+            attempt_id=record.admission.attempt_id,
+            runtime_id=record.admission.runtime_id,
+            desired_generation=record.admission.desired_generation,
+            expected_revision=expected_revision,
+            source_handle=source_handle,
+            size=size,
+            sha256=sha256,
+        )
+
     async def dispatch(
         self,
         record: RuntimeTransferRecord,
@@ -249,6 +282,7 @@ class RuntimeTransferCoordinator:
                 outcome=settlement.outcome,
                 failure=settlement.failure,
                 cleanup_completed=False,
+                destination_conflict=None,
             )
         return cancelled
 
@@ -294,6 +328,7 @@ class RuntimeTransferCoordinator:
                 outcome=settlement.outcome,
                 failure=settlement.failure,
                 cleanup_completed=False,
+                destination_conflict=None,
             )
         return expired
 
@@ -304,6 +339,7 @@ class RuntimeTransferCoordinator:
         outcome: RuntimeTransferOutcome,
         failure: RuntimeTransferFailure | None,
         cleanup_completed: bool,
+        destination_conflict: RuntimeTransferDestinationConflictEvidence | None,
     ) -> RuntimeTransferRecord | None:
         """Clean, settle, and promptly correlate one authoritative terminal.
 
@@ -356,6 +392,7 @@ class RuntimeTransferCoordinator:
             expected_revision=current.revision,
             outcome=outcome,
             failure=failure,
+            destination_conflict=destination_conflict,
         )
         if settled is None:
             return None
@@ -538,6 +575,7 @@ class RuntimeTransferCoordinator:
             outcome=outcome,
             failure=failure,
             cleanup_completed=False,
+            destination_conflict=None,
         )
 
     async def repair_pending(
@@ -732,6 +770,7 @@ class RuntimeTransferCoordinator:
                         outcome=outcome,
                         failure=failure,
                         cleanup_completed=False,
+                        destination_conflict=None,
                     )
             if page.cursor is None:
                 return observed
@@ -915,6 +954,7 @@ class RuntimeTransferCoordinator:
             outcome=outcome,
             failure=failure,
             cleanup_completed=False,
+            destination_conflict=None,
         )
 
     async def _deliver_cancellation(
@@ -1140,6 +1180,14 @@ def _intent_envelope(
             "owner_session_id": record.admission.session_id,
             "runtime_path": record.admission.runtime_path,
             "overwrite": record.admission.overwrite,
+            "conflict_precondition": (
+                None
+                if record.admission.conflict_precondition is None
+                else base64.urlsafe_b64encode(
+                    record.admission.conflict_precondition
+                ).decode("ascii")
+            ),
+            "source_transport": record.admission.source_transport.value,
             "expected_size": record.admission.expected_size,
             "expected_sha256": (
                 (None if record.object is None else record.object.sha256)

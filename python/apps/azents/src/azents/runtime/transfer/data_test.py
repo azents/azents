@@ -40,6 +40,7 @@ def _admission(
         agent_id=None,
         runtime_path="/workspace/agent/file",
         overwrite=False,
+        conflict_precondition=None,
         expected_size=1,
         expected_sha256=_DIGEST,
         product_maximum_size=2,
@@ -77,6 +78,7 @@ def test_admission_rejects_expired_source_and_invalid_hash() -> None:
             agent_id=None,
             runtime_path="/x",
             overwrite=False,
+            conflict_precondition=None,
             expected_size=1,
             expected_sha256="UPPER",
             product_maximum_size=1,
@@ -126,6 +128,7 @@ def test_record_enforces_authoritative_expiry_and_terminal_ceiling() -> None:
             cleanup_status=RuntimeTransferCleanupStatus.NOT_REQUIRED,
             cleanup_failure=None,
             failure=None,
+            destination_conflict=None,
         )
 
 
@@ -173,6 +176,7 @@ def test_progress_is_timezone_aware_and_bounded_by_expected_size() -> None:
             cleanup_status=RuntimeTransferCleanupStatus.NOT_REQUIRED,
             cleanup_failure=None,
             failure=None,
+            destination_conflict=None,
         )
 
 

@@ -30,6 +30,7 @@ from azents_runtime_provider_kubernetes.network_enforcement import (
     InvalidMandatoryService,
     MandatoryServiceReference,
     NetworkEnforcementInputs,
+    PlatformTransferEgress,
     build_proxy_network_inputs,
     build_runtime_network_inputs,
     endpoint_from_url,
@@ -176,6 +177,92 @@ def test_no_network_runtime_is_platform_only_without_dns() -> None:
     assert _cidr_blocks(result.runtime_policy.spec.egress) == set()
 
 
+def test_direct_runtime_adds_platform_transfer_route_outside_customer_hard_cap() -> (
+    None
+):
+    route = _platform_transfer_egress()
+    result = build_runtime_network_inputs(
+        dataclasses.replace(
+            _inputs(
+                RuntimeDirectNetworkAccess(
+                    mode=RuntimeNetworkMode.DIRECT,
+                    allowed_cidrs=("198.51.100.0/24",),
+                    denied_cidrs=(),
+                )
+            ),
+            network_hard_cap_allowed_cidrs=("198.51.100.0/24",),
+            platform_transfer_egress=(route,),
+        ),
+        proxy_service_ip=None,
+        proxy_hostname=None,
+    )
+
+    assert _cidr_blocks(result.runtime_policy.spec.egress) == {
+        ("198.51.100.10/32", ()),
+        ("198.51.100.0/24", ()),
+    }
+
+
+def test_proxy_required_runtime_keeps_platform_transfer_route_on_proxy_only() -> None:
+    route = _platform_transfer_egress()
+    value = dataclasses.replace(
+        _inputs(_proxy_access()),
+        platform_transfer_egress=(route,),
+    )
+
+    runtime = build_runtime_network_inputs(
+        value,
+        proxy_service_ip="10.96.0.20",
+        proxy_hostname="azents-runtime-runtime-1-proxy.azents-runtime.svc",
+    )
+    proxy = build_proxy_network_inputs(value)
+
+    assert _cidr_blocks(runtime.runtime_policy.spec.egress) == set()
+    assert _cidr_blocks(proxy.egress_policy.spec.egress) == {
+        ("203.0.113.0/24", ("203.0.113.128/25",)),
+        ("198.51.100.10/32", ()),
+    }
+
+
+def test_no_network_runtime_adds_only_platform_transfer_route_and_host_mapping() -> (
+    None
+):
+    route = _platform_transfer_egress()
+    result = build_runtime_network_inputs(
+        dataclasses.replace(
+            _inputs(RuntimeNoNetworkAccess(mode=RuntimeNetworkMode.NO_NETWORK)),
+            platform_transfer_egress=(route,),
+        ),
+        proxy_service_ip=None,
+        proxy_hostname=None,
+    )
+
+    assert _cidr_blocks(result.runtime_policy.spec.egress) == {
+        ("198.51.100.10/32", ()),
+    }
+    assert result.host_aliases == (
+        _host_alias("10.96.0.10", "runtime-control.azents.svc"),
+        _host_alias("198.51.100.10", "objects.example.com"),
+    )
+    assert all(
+        all(port.port != 53 for port in rule.ports)
+        for rule in result.runtime_policy.spec.egress
+    )
+
+
+@pytest.mark.parametrize(
+    "cidr",
+    ("198.51.100.0/24", "0.0.0.0/0", "::/0"),
+)
+def test_platform_transfer_route_requires_host_routes(cidr: str) -> None:
+    with pytest.raises(ValueError, match="host routes"):
+        PlatformTransferEgress(
+            endpoint_hostnames=("objects.example.com",),
+            cidrs=(cidr,),
+            ports=(443,),
+        )
+
+
 def test_proxy_policies_select_matching_roles_and_destination_boundary() -> None:
     result = build_proxy_network_inputs(_inputs(_proxy_access()))
 
@@ -302,6 +389,14 @@ def _proxy_access() -> RuntimeProxyRequiredNetworkAccess:
             allowed_domains=("*.example.com",),
             denied_domains=("blocked.example.com",),
         ),
+    )
+
+
+def _platform_transfer_egress() -> PlatformTransferEgress:
+    return PlatformTransferEgress(
+        endpoint_hostnames=("objects.example.com",),
+        cidrs=("198.51.100.10/32",),
+        ports=(443,),
     )
 
 

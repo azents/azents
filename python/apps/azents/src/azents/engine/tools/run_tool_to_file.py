@@ -372,6 +372,7 @@ def make_run_tool_to_file_tool(
                             datetime.datetime.now(datetime.UTC)
                             + runtime.staging_configuration.deadline_after
                         ),
+                        conflict_precondition=None,
                     )
                 )
             except asyncio.CancelledError:
@@ -456,6 +457,7 @@ def make_run_tool_to_file_tool(
                         datetime.datetime.now(datetime.UTC)
                         + runtime.staging_configuration.deadline_after
                     ),
+                    conflict_precondition=None,
                 )
             )
         except asyncio.CancelledError:

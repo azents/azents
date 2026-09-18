@@ -21,7 +21,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-08-23 | 15 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-08-18 | 7 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-09-15 | 25 |
-| [Runtime Provider](spec/domain/runtime-provider.md) | runtime-provider | - | 2026-08-26 | 28 |
+| [Runtime Provider](spec/domain/runtime-provider.md) | runtime-provider | - | 2026-09-17 | 29 |
 | [Scheduled Task Domain Spec](spec/domain/scheduled-task.md) | scheduled-task | - | 2026-09-15 | 12 |
 | [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-09-15 | 6 |
 | [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-09-15 | 118 |
@@ -33,7 +33,7 @@ Design documents are accumulated records and are not listed individually in this
 | Title | Owner | Last Verified At | Spec Version |
 |---|---|---|---|
 | [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-09-15 | 181 |
-| [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-09-17 | 88 |
+| [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-09-17 | 89 |
 | [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-09-16 | 39 |
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-09-15 | 52 |
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-09-12 | 23 |
@@ -203,6 +203,7 @@ Design documents are accumulated records and are not listed individually in this
 | [External Channel File Transfer Requirements](requirements/files-260723-external-channel-transfer.md) | files-260723 | 2026-07-23 | 2026-07-23 |
 | [Verified Large External File Transfer Requirements](requirements/files-260730-verified-large-file-transfer.md) | files-260730 | 2026-07-30 | 2026-07-30 |
 | [Filesystem Skill Projection Revisions Historical Requirements Reconstruction](requirements/filesystem-260701-filesystem-skill-projection-revisions.md) | filesystem-260701 | 2026-07-01 | - |
+| [Runtime File Browser Upload Requirements](requirements/fileupload-260917-runtime-file-browser-upload.md) | fileupload-260917 | 2026-09-17 | - |
 | [Fold Turn Eligibility with Failure Veto Historical Requirements Reconstruction](requirements/fold-260712-fold-turn-eligibility-with-failure-veto.md) | fold-260712 | 2026-07-12 | - |
 | [Agent User Folder Recognition Historical Requirements Reconstruction](requirements/folder-260403-folder-recognition.md) | folder-260403 | 2026-04-03 | 2026-04-03 |
 | [Mark Forked History Boundaries for Subagent Tasks Historical Requirements Reconstruction](requirements/forked-260709-subagent-forked-history-task-boundaries.md) | forked-260709 | 2026-07-09 | - |
@@ -644,6 +645,7 @@ Design documents are accumulated records and are not listed individually in this
 - [External Channel File Transfer](adr/files-260723-external-channel-transfer.md)
 - [Verified Large External File Transfer](adr/files-260730-verified-large-file-transfer.md)
 - [Filesystem Skill Projection Revisions](adr/filesystem-260701-filesystem-skill-projection-revisions.md)
+- [Runtime File Browser Direct Object Transfer Decisions](adr/fileupload-260917-runtime-file-browser-upload.md)
 - [Fold Turn Eligibility with Failure Veto](adr/fold-260712-fold-turn-eligibility-with-failure-veto.md)
 - [Agent User Folder Recognition Historical Decision Reconstruction](adr/folder-260403-folder-recognition.md)
 - [Mark Forked History Boundaries for Subagent Tasks](adr/forked-260709-subagent-forked-history-task-boundaries.md)

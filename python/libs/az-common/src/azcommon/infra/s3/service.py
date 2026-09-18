@@ -4,7 +4,8 @@ import asyncio
 import base64
 import datetime
 import hashlib
-from collections.abc import AsyncIterator, Mapping
+import secrets
+from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from types import MappingProxyType
@@ -16,6 +17,7 @@ from types_aiobotocore_s3.client import S3Client
 _TRANSFER_SHA256_METADATA_KEY = "azents-transfer-sha256"
 _PRODUCT_PUBLICATION_SHA256_METADATA_KEY = "azents-product-publication-sha256"
 _PRODUCT_PUBLICATION_ID_METADATA_KEY = "azents-product-publication-id"
+_PRODUCT_PUBLICATION_MULTIPART_PART_BYTES = 5 * 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -148,6 +150,16 @@ class S3DeleteResult:
     next_continuation_token: str | None
 
 
+@dataclass(frozen=True)
+class S3PresignedRequest:
+    """One short-lived object-storage request capability."""
+
+    method: str
+    url: str
+    expires_at: datetime.datetime
+    headers: Mapping[str, str]
+
+
 class S3TransferCleanupRequired(RuntimeError):
     """Raised when an attempted immutable write needs durable cleanup retry."""
 
@@ -195,6 +207,124 @@ class S3Service:
         """
         self.s3_client: Any = s3_client
         self.public_s3_client: Any = public_s3_client or s3_client
+
+    async def validate_workspace_upload_readiness(
+        self,
+        *,
+        bucket: str,
+        cors_origins: Sequence[str],
+        probe_prefix: str,
+    ) -> None:
+        """Validate the object-storage contract required by Workspace Upload.
+
+        The probe performs bounded metadata operations and a zero-byte
+        source/copy round trip under a random key. It proves that the trusted
+        client can reach the bucket, the public client can sign both required
+        methods and reach the probe object, checksum-aware HEAD works, the
+        bucket CORS policy admits the configured origins and signed headers, and
+        immutable native-copy preconditions are accepted.
+
+        :param bucket: Private bucket used for Workspace Upload.
+        :param cors_origins: Exact browser origins that must be allowed by CORS.
+        :param probe_prefix: Private key prefix for temporary probe objects.
+        :raises RuntimeError: If any required capability is unavailable.
+        """
+        if not bucket.strip():
+            raise ValueError("Workspace Upload readiness requires a bucket")
+        origins = tuple(origin.strip() for origin in cors_origins if origin.strip())
+        if not origins:
+            raise ValueError("Workspace Upload readiness requires CORS origins")
+        prefix = probe_prefix.strip("/")
+        if not prefix:
+            raise ValueError("Workspace Upload readiness requires a probe prefix")
+
+        source: S3ObjectIdentity | None = None
+        destination: S3ObjectIdentity | None = None
+        try:
+            await self.s3_client.head_bucket(Bucket=bucket)
+            cors_response = await self.s3_client.get_bucket_cors(Bucket=bucket)
+            _validate_workspace_upload_cors(cors_response, origins)
+            probe_checksum = hashlib.sha256(b"").hexdigest()
+            probe_key = f"{prefix}/readiness-{secrets.token_hex(16)}"
+            source = S3ObjectIdentity(bucket=bucket, key=probe_key)
+            destination = S3ObjectIdentity(
+                bucket=bucket,
+                key=f"{probe_key}-copy",
+            )
+            await self.get_upload_request(
+                identity=source,
+                content_type="application/octet-stream",
+                checksum_sha256=probe_checksum,
+                expires_in=datetime.timedelta(seconds=60),
+            )
+            await self.get_download_request(
+                identity=source,
+                expires_in=datetime.timedelta(seconds=60),
+            )
+            checksum_header = base64.b64encode(bytes.fromhex(probe_checksum)).decode(
+                "ascii"
+            )
+            await self.s3_client.put_object(
+                Bucket=source.bucket,
+                Key=source.key,
+                Body=b"",
+                ChecksumSHA256=checksum_header,
+                Metadata={"azents-readiness-probe": secrets.token_hex(16)},
+                IfNoneMatch="*",
+            )
+            source_metadata = await self.head_with_checksum(source)
+            if (
+                source_metadata is None
+                or source_metadata.etag is None
+                or source_metadata.checksum_sha256 != checksum_header
+            ):
+                raise RuntimeError(
+                    "Workspace Upload readiness requires checksum-aware S3 HEAD"
+                )
+            public_metadata = await self._head(
+                source,
+                checksum_mode=False,
+                client=self.public_s3_client,
+            )
+            if public_metadata is None or public_metadata.content_length != 0:
+                raise RuntimeError(
+                    "Workspace Upload readiness requires a reachable public S3 endpoint"
+                )
+            await self._ensure_destination_absent(destination)
+            await self.s3_client.copy_object(
+                Bucket=destination.bucket,
+                Key=destination.key,
+                CopySource={
+                    "Bucket": source.bucket,
+                    "Key": source.key,
+                },
+                CopySourceIfMatch=source_metadata.etag,
+            )
+            destination_metadata = await self.head(destination)
+            if destination_metadata is None or destination_metadata.content_length != 0:
+                raise RuntimeError(
+                    "Workspace Upload readiness requires immutable native copy"
+                )
+        except asyncio.CancelledError:
+            raise
+        except RuntimeError:
+            raise
+        except Exception as exc:
+            raise RuntimeError("Workspace Upload S3 readiness probe failed") from exc
+        finally:
+            for identity in (destination, source):
+                if identity is None:
+                    continue
+                try:
+                    await self.s3_client.delete_object(
+                        Bucket=identity.bucket,
+                        Key=identity.key,
+                    )
+                except BotoClientError as exc:
+                    if not _is_not_found_error(exc):
+                        raise RuntimeError(
+                            "Workspace Upload readiness probe cleanup failed"
+                        ) from exc
 
     async def upload(
         self,
@@ -246,11 +376,35 @@ class S3Service:
         :param identity: Object to inspect.
         :returns: Metadata, or ``None`` when the object does not exist.
         """
+        return await self._head(identity, checksum_mode=False)
+
+    async def head_with_checksum(
+        self,
+        identity: S3ObjectIdentity,
+    ) -> S3ObjectMetadata | None:
+        """Read object metadata and request provider checksum evidence.
+
+        :param identity: Object to inspect.
+        :returns: Metadata, or ``None`` when the object does not exist.
+        """
+        return await self._head(identity, checksum_mode=True)
+
+    async def _head(
+        self,
+        identity: S3ObjectIdentity,
+        *,
+        checksum_mode: bool,
+        client: S3Client | None = None,
+    ) -> S3ObjectMetadata | None:
+        """Read object metadata with an explicit checksum-mode choice."""
+        arguments: dict[str, Any] = {
+            "Bucket": identity.bucket,
+            "Key": identity.key,
+        }
+        if checksum_mode:
+            arguments["ChecksumMode"] = "ENABLED"
         try:
-            response = await self.s3_client.head_object(
-                Bucket=identity.bucket,
-                Key=identity.key,
-            )
+            response = await (client or self.s3_client).head_object(**arguments)
         except BotoClientError as exc:
             if _is_not_found_error(exc):
                 return None
@@ -379,21 +533,50 @@ class S3Service:
         source_etag = source_verified.metadata.etag
         if source_etag is None:
             raise ValueError("source copy requires stable ETag evidence")
+        existing = await self.head(destination)
+        if existing is not None:
+            return S3ProductPublicationResult(
+                metadata=await self.verify_product_publication_object(
+                    identity=destination,
+                    expected_size=expected_size,
+                    publication_metadata=publication_metadata,
+                ),
+                created=False,
+            )
+        if expected_size == 0:
+            return await self._create_empty_product_publication(
+                destination=destination,
+                publication_metadata=publication_metadata,
+            )
+        return await self._multipart_copy_to_product(
+            source=source,
+            destination=destination,
+            expected_size=expected_size,
+            publication_metadata=publication_metadata,
+            multipart_part_size=_PRODUCT_PUBLICATION_MULTIPART_PART_BYTES,
+            source_etag=source_etag,
+        )
+
+    async def _create_empty_product_publication(
+        self,
+        *,
+        destination: S3ObjectIdentity,
+        publication_metadata: S3ProductPublicationMetadata,
+    ) -> S3ProductPublicationResult:
+        """Create one zero-byte product object with an atomic absence condition."""
         try:
-            await self.s3_client.copy_object(
+            await self.s3_client.put_object(
                 Bucket=destination.bucket,
                 Key=destination.key,
-                CopySource={"Bucket": source.bucket, "Key": source.key},
-                CopySourceIfMatch=source_etag,
+                Body=b"",
                 IfNoneMatch="*",
-                MetadataDirective="REPLACE",
                 Metadata=_product_publication_user_metadata(publication_metadata),
                 **_content_type_args(publication_metadata.content_type),
             )
             return S3ProductPublicationResult(
                 metadata=await self.verify_product_publication_object(
                     identity=destination,
-                    expected_size=expected_size,
+                    expected_size=0,
                     publication_metadata=publication_metadata,
                 ),
                 created=True,
@@ -406,6 +589,83 @@ class S3Service:
                     return S3ProductPublicationResult(
                         metadata=await self.verify_product_publication_object(
                             identity=destination,
+                            expected_size=0,
+                            publication_metadata=publication_metadata,
+                        ),
+                        created=False,
+                    )
+                except FileNotFoundError:
+                    pass
+            raise
+
+    async def _multipart_copy_to_product(
+        self,
+        *,
+        source: S3ObjectIdentity,
+        destination: S3ObjectIdentity,
+        expected_size: int,
+        publication_metadata: S3ProductPublicationMetadata,
+        multipart_part_size: int,
+        source_etag: str,
+    ) -> S3ProductPublicationResult:
+        """Copy one product object through conditionally completed multipart state."""
+        upload = await self._create_multipart_upload(
+            destination=destination,
+            metadata=_product_publication_user_metadata(publication_metadata),
+            content_type=publication_metadata.content_type,
+        )
+        completed_parts: list[S3CompletedPart] = []
+        try:
+            for part_number, offset in enumerate(
+                range(0, expected_size, multipart_part_size),
+                start=1,
+            ):
+                response = await self.s3_client.upload_part_copy(
+                    Bucket=destination.bucket,
+                    Key=destination.key,
+                    UploadId=upload.upload_id,
+                    PartNumber=part_number,
+                    CopySource={"Bucket": source.bucket, "Key": source.key},
+                    CopySourceRange=(
+                        f"bytes={offset}-"
+                        f"{min(offset + multipart_part_size, expected_size) - 1}"
+                    ),
+                    CopySourceIfMatch=source_etag,
+                )
+                copy_part_result = response.get("CopyPartResult", {})
+                etag = copy_part_result.get("ETag")
+                if not isinstance(etag, str) or not etag:
+                    raise RuntimeError("S3 did not return a product copy part ETag")
+                completed_parts.append(
+                    S3CompletedPart(part_number=part_number, etag=etag)
+                )
+        except BaseException:
+            await self.abort_multipart_upload(upload=upload)
+            raise
+
+        try:
+            await self.s3_client.complete_multipart_upload(
+                Bucket=destination.bucket,
+                Key=destination.key,
+                UploadId=upload.upload_id,
+                MultipartUpload={
+                    "Parts": [
+                        {"PartNumber": part.part_number, "ETag": part.etag}
+                        for part in completed_parts
+                    ]
+                },
+                IfNoneMatch="*",
+            )
+        except asyncio.CancelledError:
+            await self.abort_multipart_upload(upload=upload)
+            raise
+        except BotoClientError as exc:
+            if _is_precondition_failed_error(exc):
+                await self.abort_multipart_upload(upload=upload)
+                try:
+                    return S3ProductPublicationResult(
+                        metadata=await self.verify_product_publication_object(
+                            identity=destination,
                             expected_size=expected_size,
                             publication_metadata=publication_metadata,
                         ),
@@ -414,6 +674,38 @@ class S3Service:
                 except FileNotFoundError:
                     pass
             raise
+        except BaseException:
+            try:
+                await self.abort_multipart_upload(upload=upload)
+            except BaseException as cleanup_error:
+                raise S3TransferCleanupRequired(
+                    "Product publication requires durable multipart cleanup",
+                    multipart_cleanup_required=True,
+                    completed_object_cleanup_required=False,
+                ) from cleanup_error
+            raise
+
+        try:
+            metadata = await self.verify_product_publication_object(
+                identity=destination,
+                expected_size=expected_size,
+                publication_metadata=publication_metadata,
+            )
+        except BaseException:
+            try:
+                await self.delete_uncommitted_product_object(
+                    identity=destination,
+                    expected_size=expected_size,
+                    publication_metadata=publication_metadata,
+                )
+            except BaseException as cleanup_error:
+                raise S3TransferCleanupRequired(
+                    "Product publication requires durable cleanup",
+                    multipart_cleanup_required=False,
+                    completed_object_cleanup_required=True,
+                ) from cleanup_error
+            raise
+        return S3ProductPublicationResult(metadata=metadata, created=True)
 
     async def verify_product_publication_object(
         self,
@@ -507,17 +799,11 @@ class S3Service:
         :raises FileExistsError: If the destination already exists.
         :returns: Opaque upload handle.
         """
-        await self._ensure_destination_absent(destination)
-        response = await self.s3_client.create_multipart_upload(
-            Bucket=destination.bucket,
-            Key=destination.key,
-            Metadata={_TRANSFER_SHA256_METADATA_KEY: transfer_metadata.sha256},
-            **_content_type_args(transfer_metadata.content_type),
+        return await self._create_multipart_upload(
+            destination=destination,
+            metadata={_TRANSFER_SHA256_METADATA_KEY: transfer_metadata.sha256},
+            content_type=transfer_metadata.content_type,
         )
-        upload_id = response.get("UploadId")
-        if not isinstance(upload_id, str) or not upload_id:
-            raise RuntimeError("S3 did not return a multipart upload ID")
-        return S3MultipartUpload(identity=destination, upload_id=upload_id)
 
     async def create_preparation_multipart_upload(
         self,
@@ -532,12 +818,29 @@ class S3Service:
         :raises FileExistsError: If the destination already exists.
         :returns: Opaque upload handle.
         """
-        await self._ensure_destination_absent(destination)
-        response = await self.s3_client.create_multipart_upload(
-            Bucket=destination.bucket,
-            Key=destination.key,
-            **_content_type_args(content_type),
+        return await self._create_multipart_upload(
+            destination=destination,
+            metadata=None,
+            content_type=content_type,
         )
+
+    async def _create_multipart_upload(
+        self,
+        *,
+        destination: S3ObjectIdentity,
+        metadata: Mapping[str, str] | None,
+        content_type: str | None,
+    ) -> S3MultipartUpload:
+        """Create one multipart upload with caller-owned metadata."""
+        await self._ensure_destination_absent(destination)
+        arguments: dict[str, Any] = {
+            "Bucket": destination.bucket,
+            "Key": destination.key,
+            **_content_type_args(content_type),
+        }
+        if metadata is not None:
+            arguments["Metadata"] = dict(metadata)
+        response = await self.s3_client.create_multipart_upload(**arguments)
         upload_id = response.get("UploadId")
         if not isinstance(upload_id, str) or not upload_id:
             raise RuntimeError("S3 did not return a multipart upload ID")
@@ -1151,6 +1454,30 @@ class S3Service:
             ExpiresIn=int(expires_in.total_seconds()),
         )
 
+    async def get_download_request(
+        self,
+        *,
+        identity: S3ObjectIdentity,
+        expires_in: datetime.timedelta,
+        now: datetime.datetime | None = None,
+    ) -> S3PresignedRequest:
+        """Create one short-lived presigned GET request capability."""
+        if expires_in <= datetime.timedelta():
+            raise ValueError("presigned request lifetime must be positive")
+        current = now or datetime.datetime.now(datetime.UTC)
+        if current.tzinfo is None or current.utcoffset() is None:
+            raise ValueError("presigned request clock must be timezone-aware")
+        return S3PresignedRequest(
+            method="GET",
+            url=await self.get_download_url(
+                identity.bucket,
+                identity.key,
+                expires_in,
+            ),
+            expires_at=current + expires_in,
+            headers=MappingProxyType({}),
+        )
+
     async def get_upload_url(
         self,
         bucket: str,
@@ -1174,6 +1501,48 @@ class S3Service:
                 "ContentType": content_type,
             },
             ExpiresIn=int(expires_in.total_seconds()),
+        )
+
+    async def get_upload_request(
+        self,
+        *,
+        identity: S3ObjectIdentity,
+        content_type: str | None,
+        checksum_sha256: str,
+        expires_in: datetime.timedelta,
+        now: datetime.datetime | None = None,
+    ) -> S3PresignedRequest:
+        """Create one checksum-bound presigned PUT request capability."""
+        if expires_in <= datetime.timedelta():
+            raise ValueError("presigned request lifetime must be positive")
+        _validate_sha256(checksum_sha256)
+        current = now or datetime.datetime.now(datetime.UTC)
+        if current.tzinfo is None or current.utcoffset() is None:
+            raise ValueError("presigned request clock must be timezone-aware")
+        checksum_header = base64.b64encode(bytes.fromhex(checksum_sha256)).decode(
+            "ascii"
+        )
+        params: dict[str, str] = {
+            "Bucket": identity.bucket,
+            "Key": identity.key,
+            "ChecksumSHA256": checksum_header,
+        }
+        headers: dict[str, str] = {
+            "x-amz-checksum-sha256": checksum_header,
+        }
+        if content_type is not None:
+            params["ContentType"] = content_type
+            headers["content-type"] = content_type
+        url = await self.public_s3_client.generate_presigned_url(
+            ClientMethod="put_object",
+            Params=params,
+            ExpiresIn=int(expires_in.total_seconds()),
+        )
+        return S3PresignedRequest(
+            method="PUT",
+            url=url,
+            expires_at=current + expires_in,
+            headers=MappingProxyType(headers),
         )
 
     async def exists(self, bucket: str, key: str) -> bool:
@@ -1347,6 +1716,50 @@ def _metadata_from_response(
             else None
         ),
     )
+
+
+def _validate_workspace_upload_cors(
+    response: Mapping[str, Any],
+    required_origins: Sequence[str],
+) -> None:
+    """Require exact origins and the signed headers used by browser PUT."""
+    raw_rules = response.get("CORSRules")
+    if not isinstance(raw_rules, list):
+        raise RuntimeError("Workspace Upload readiness requires bucket CORS")
+    required_headers = {"content-type", "x-amz-checksum-sha256"}
+    for origin in required_origins:
+        matched = False
+        for raw_rule in raw_rules:
+            if not isinstance(raw_rule, dict):
+                continue
+            rule = cast(dict[str, Any], raw_rule)
+            raw_origins = rule.get("AllowedOrigins")
+            raw_methods = rule.get("AllowedMethods")
+            raw_headers = rule.get("AllowedHeaders")
+            if not (
+                isinstance(raw_origins, list)
+                and isinstance(raw_methods, list)
+                and isinstance(raw_headers, list)
+            ):
+                continue
+            origins = {value for value in raw_origins if isinstance(value, str)}
+            methods = {value.upper() for value in raw_methods if isinstance(value, str)}
+            headers = {value.lower() for value in raw_headers if isinstance(value, str)}
+            if (
+                origin in origins
+                and "*" not in origins
+                and "PUT" in methods
+                and "*" not in methods
+                and required_headers <= headers
+                and "*" not in headers
+            ):
+                matched = True
+                break
+        if not matched:
+            raise RuntimeError(
+                "Workspace Upload readiness requires exact bucket CORS for "
+                f"origin {origin}"
+            )
 
 
 def _content_type_args(content_type: str | None) -> dict[str, str]:

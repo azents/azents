@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from typing import Protocol, TypeVar
 
@@ -16,6 +16,7 @@ from azents_runtime_control.grpc_transfer_coordinator_client import (
     CoordinatorCancellationReason,
     CoordinatorCancelTransferRequest,
     CoordinatorClearPreparationCleanupRequest,
+    CoordinatorDestinationConflictEvidence,
     CoordinatorDispatchTransferRequest,
     CoordinatorExpectedManifest,
     CoordinatorGetTransferStatusRequest,
@@ -41,9 +42,11 @@ class ServerToRuntimeTransferError(RuntimeError):
         message: str,
         *,
         failure: CoordinatorTransferFailure | None = None,
+        destination_conflict: CoordinatorDestinationConflictEvidence | None = None,
     ) -> None:
         super().__init__(message)
         self.failure = failure
+        self.destination_conflict = destination_conflict
 
 
 class ServerToRuntimeTransferLimitExceeded(ServerToRuntimeTransferError):
@@ -250,6 +253,20 @@ class ServerToRuntimeSource(Protocol):
         ...
 
 
+class VerifiedTemporaryServerToRuntimeSource(ServerToRuntimeSource, Protocol):
+    """Trusted adapter for an operation-owned verified temporary source.
+
+    Implementations keep the temporary source handle and storage authority internal.
+    The metadata must describe the source's exact verified manifest, and ``prepare``
+    must copy that immutable source into the admitted transfer object.
+    """
+
+    @property
+    def source_handle(self) -> CoordinatorOpaqueObjectHandle:
+        """Return the opaque trusted temporary-source handle."""
+        ...
+
+
 class ServerToRuntimeCoordinator(Protocol):
     """Typed coordinator calls required by backend transfer orchestration."""
 
@@ -304,13 +321,54 @@ class ServerToRuntimeTransferRequest:
     source: ServerToRuntimeSource
     target: ServerToRuntimeTarget
     agent_id: str
-    session_id: str
+    session_id: str | None
     operation_id: str
     destination: str
     overwrite: bool
+    conflict_precondition: bytes | None
     product_maximum_size: int
     provider_maximum_size: int
     deadline_at: datetime
+
+
+@dataclass
+class ServerToRuntimeTransferHandle:
+    """Trusted coordinator identity and current revision for one transfer attempt."""
+
+    identity: CoordinatorTransferIdentity
+    revision: int
+    deadline_at: datetime
+
+
+@dataclass(frozen=True)
+class ServerToRuntimeTransferStatus:
+    """Typed safe lifecycle observation for one transfer attempt."""
+
+    identity: CoordinatorTransferIdentity
+    revision: int
+    phase: CoordinatorTransferPhase
+    outcome: CoordinatorTransferOutcome | None
+    failure: CoordinatorTransferFailure | None
+    cancellation_requested: bool
+    destination_conflict: CoordinatorDestinationConflictEvidence | None
+    deadline_at: datetime
+
+    @classmethod
+    def from_coordinator(
+        cls,
+        status: CoordinatorTransferStatus,
+    ) -> ServerToRuntimeTransferStatus:
+        """Project one coordinator observation into the service lifecycle contract."""
+        return cls(
+            identity=status.identity,
+            revision=status.revision,
+            phase=status.phase,
+            outcome=status.outcome,
+            failure=status.failure,
+            cancellation_requested=status.cancellation_requested,
+            destination_conflict=status.destination_conflict,
+            deadline_at=status.deadline_at,
+        )
 
 
 class ServerToRuntimeTransferService:
@@ -331,8 +389,50 @@ class ServerToRuntimeTransferService:
 
     async def transfer(self, request: ServerToRuntimeTransferRequest) -> None:
         """Perform one admitted transfer and return only on terminal success."""
-        self._validate_request(request)
-        metadata = request.source.metadata
+        if request.overwrite and request.conflict_precondition is None:
+            try:
+                await self._transfer_once(replace(request, overwrite=False))
+            except ServerToRuntimeTransferError as error:
+                conflict = error.destination_conflict
+                if (
+                    error.failure is not CoordinatorTransferFailure.DESTINATION_CONFLICT
+                    or conflict is None
+                ):
+                    raise
+                await self._transfer_once(
+                    replace(
+                        request,
+                        conflict_precondition=conflict.conflict_precondition,
+                    )
+                )
+            return
+        await self._transfer_once(request)
+
+    async def _transfer_once(self, request: ServerToRuntimeTransferRequest) -> None:
+        """Perform one exact transfer attempt, including terminal cancellation."""
+        handle = await self.start(request)
+        try:
+            await self.wait_for_terminal_success(handle)
+        except asyncio.CancelledError:
+            await self.cancel(handle)
+            raise
+        except ServerToRuntimeTransferError as error:
+            try:
+                await self.cancel(handle)
+            except Exception:
+                if error.failure is CoordinatorTransferFailure.EXPIRED:
+                    raise error from None
+                raise
+            raise
+        except Exception:
+            await self.cancel(handle)
+            raise
+
+    async def start(
+        self,
+        request: ServerToRuntimeTransferRequest,
+    ) -> ServerToRuntimeTransferHandle:
+        """Admit, stage, and dispatch one exact Runtime delivery attempt."""
         identity = CoordinatorTransferIdentity(
             transfer_id=uuid7().hex,
             attempt_id=uuid7().hex,
@@ -343,6 +443,23 @@ class ServerToRuntimeTransferService:
             session_id=request.session_id,
             agent_id=request.agent_id,
         )
+        return await self.start_with_identity(request, identity=identity)
+
+    async def start_with_identity(
+        self,
+        request: ServerToRuntimeTransferRequest,
+        *,
+        identity: CoordinatorTransferIdentity,
+    ) -> ServerToRuntimeTransferHandle:
+        """Admit and dispatch one caller-allocated exact transfer identity.
+
+        :param request: complete authorized transfer request
+        :param identity: preallocated identity durably owned by the caller
+        :returns: dispatched transfer handle
+        """
+        self._validate_request(request)
+        self._validate_identity(request, identity)
+        metadata = request.source.metadata
         expected_revision: int | None = None
         preparation: ServerToRuntimePreparation | None = None
         try:
@@ -352,6 +469,7 @@ class ServerToRuntimeTransferService:
                     lease_id=uuid7().hex,
                     runtime_path=request.destination,
                     overwrite=request.overwrite,
+                    conflict_precondition=request.conflict_precondition,
                     expected_manifest=CoordinatorExpectedManifest(
                         size=metadata.size,
                         sha256=metadata.sha256,
@@ -409,10 +527,10 @@ class ServerToRuntimeTransferService:
             )
             expected_revision = status.revision
             preparation.revision = expected_revision
-            await self._wait_for_terminal_success(
-                identity,
-                request.deadline_at,
-                preparation,
+            return ServerToRuntimeTransferHandle(
+                identity=identity,
+                revision=expected_revision,
+                deadline_at=request.deadline_at,
             )
         except asyncio.CancelledError:
             await self._cancel(
@@ -442,6 +560,65 @@ class ServerToRuntimeTransferService:
                 request.deadline_at,
             )
             raise
+
+    async def get_status(
+        self,
+        handle: ServerToRuntimeTransferHandle,
+    ) -> ServerToRuntimeTransferStatus:
+        """Read one exact attempt's authoritative Runtime Transfer status."""
+        status = await _await_coordinator(
+            self.coordinator.get_transfer_status(
+                CoordinatorGetTransferStatusRequest(identity=handle.identity)
+            ),
+            phase="status",
+        )
+        handle.revision = status.revision
+        return ServerToRuntimeTransferStatus.from_coordinator(status)
+
+    async def cancel(
+        self,
+        handle: ServerToRuntimeTransferHandle,
+    ) -> ServerToRuntimeTransferStatus:
+        """Request cancellation and return its confirmed lifecycle observation."""
+        status = await self._cancel(
+            handle.identity,
+            handle.revision,
+            handle.deadline_at,
+        )
+        if status is None:
+            raise ServerToRuntimeTransferError(
+                "Runtime transfer cancellation has no admitted attempt"
+            )
+        handle.revision = status.revision
+        return ServerToRuntimeTransferStatus.from_coordinator(status)
+
+    async def wait_for_terminal_success(
+        self,
+        handle: ServerToRuntimeTransferHandle,
+    ) -> ServerToRuntimeTransferStatus:
+        """Wait until the exact attempt succeeds or reaches a terminal failure."""
+        while True:
+            now = self.clock()
+            if now >= handle.deadline_at:
+                raise ServerToRuntimeTransferError(
+                    "Runtime transfer did not complete before its deadline",
+                    failure=CoordinatorTransferFailure.EXPIRED,
+                )
+            status = await self.get_status(handle)
+            if status.phase is CoordinatorTransferPhase.TERMINAL:
+                if status.outcome is CoordinatorTransferOutcome.SUCCEEDED:
+                    return status
+                raise ServerToRuntimeTransferError(
+                    "Runtime transfer failed before destination commit",
+                    failure=status.failure,
+                    destination_conflict=status.destination_conflict,
+                )
+            await asyncio.sleep(
+                min(
+                    self.status_poll_interval.total_seconds(),
+                    (handle.deadline_at - now).total_seconds(),
+                )
+            )
 
     async def _admit_until_deadline(
         self,
@@ -478,48 +655,14 @@ class ServerToRuntimeTransferService:
                     )
                 )
 
-    async def _wait_for_terminal_success(
-        self,
-        identity: CoordinatorTransferIdentity,
-        deadline_at: datetime,
-        preparation: ServerToRuntimePreparation,
-    ) -> None:
-        while True:
-            now = self.clock()
-            if now >= deadline_at:
-                raise ServerToRuntimeTransferError(
-                    "Runtime transfer did not complete before its deadline",
-                    failure=CoordinatorTransferFailure.EXPIRED,
-                )
-            status = await _await_coordinator(
-                self.coordinator.get_transfer_status(
-                    CoordinatorGetTransferStatusRequest(identity=identity)
-                ),
-                phase="status",
-            )
-            preparation.revision = status.revision
-            if status.phase is CoordinatorTransferPhase.TERMINAL:
-                if status.outcome is CoordinatorTransferOutcome.SUCCEEDED:
-                    return
-                raise ServerToRuntimeTransferError(
-                    "Runtime transfer failed before destination commit",
-                    failure=status.failure,
-                )
-            await asyncio.sleep(
-                min(
-                    self.status_poll_interval.total_seconds(),
-                    (deadline_at - now).total_seconds(),
-                )
-            )
-
     async def _cancel(
         self,
         identity: CoordinatorTransferIdentity,
         expected_revision: int | None,
         deadline_at: datetime,
-    ) -> None:
+    ) -> CoordinatorTransferStatus | None:
         if expected_revision is None:
-            return
+            return None
         revision = expected_revision
         attempted = False
         while not attempted or self.clock() < deadline_at:
@@ -546,7 +689,7 @@ class ServerToRuntimeTransferService:
                 status.phase is CoordinatorTransferPhase.TERMINAL
                 or status.cancellation_requested
             ):
-                return
+                return status
             revision = status.revision
             await asyncio.sleep(0)
         raise ServerToRuntimeTransferError(
@@ -558,6 +701,10 @@ class ServerToRuntimeTransferService:
             raise ValueError("Runtime destination path must be absolute")
         if request.target.desired_generation <= 0:
             raise ValueError("Runtime generation must be positive")
+        if request.overwrite != (request.conflict_precondition is not None):
+            raise ValueError(
+                "Overwrite requires one conflict precondition and vice versa"
+            )
         if request.source.metadata.size > min(
             request.product_maximum_size,
             request.provider_maximum_size,
@@ -572,6 +719,22 @@ class ServerToRuntimeTransferService:
             raise ValueError("Transfer deadline must be timezone-aware")
         if request.deadline_at <= self.clock():
             raise ServerToRuntimeTransferError("Transfer deadline has expired")
+
+    @staticmethod
+    def _validate_identity(
+        request: ServerToRuntimeTransferRequest,
+        identity: CoordinatorTransferIdentity,
+    ) -> None:
+        """Require a caller-allocated identity to match immutable request authority."""
+        if (
+            identity.direction != CoordinatorTransferDirection.DOWNLOAD.value
+            or identity.runtime_id != request.target.runtime_id
+            or identity.desired_generation != request.target.desired_generation
+            or identity.operation_id != request.operation_id
+            or identity.session_id != request.session_id
+            or identity.agent_id != request.agent_id
+        ):
+            raise ValueError("Transfer identity does not match request authority")
 
     def _validate_prepared(
         self,

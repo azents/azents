@@ -3,6 +3,7 @@
 # protobuf generated modules expose dynamic message/RPC attributes.
 
 import asyncio
+import base64
 import contextlib
 import dataclasses
 import logging
@@ -36,7 +37,10 @@ from azents_runtime_control.runner_terminal import (
     RunnerTerminalTerminateIntent,
     RunnerTerminalTerminationReason,
 )
-from azents_runtime_control.runner_transfer import RunnerTransferDirection
+from azents_runtime_control.runner_transfer import (
+    RunnerTransferDirection,
+    RunnerTransferSourceTransport,
+)
 from azents_runtime_control.runtime_configuration import (
     RuntimeConfigurationEvidence,
 )
@@ -85,6 +89,7 @@ from azents.services.runtime_connection_registration.service import (
 _DEFAULT_OPERATION_BLOCK_MS = 500
 _BODY_CHUNK_READ_LIMIT = 100
 _MAX_TRANSFER_DISPATCH_TOMBSTONES = 4096
+_MAX_CONFLICT_PRECONDITION_BYTES = 512
 _STREAM_SESSION_OFFER_RETRY_SECONDS = 1.0
 _TERMINAL_OPEN_OPERATION_TYPE = "terminal.open.v1"
 _TERMINAL_TERMINATE_OPERATION_TYPE = "terminal.terminate.v1"
@@ -1145,6 +1150,24 @@ def _runner_transfer_intent(
     direction = _str_payload(payload, "direction")
     operation_id = _str_payload(payload, "operation_id")
     dispatch_id = _str_payload(payload, "dispatch_id")
+    source_transport_value = payload.get(
+        "source_transport",
+        RunnerTransferSourceTransport.TRANSFER_OBJECT.value,
+    )
+    if not isinstance(source_transport_value, str):
+        raise ValueError("Transfer source transport must be a string")
+    source_transports = {
+        RunnerTransferSourceTransport.TRANSFER_OBJECT.value: (
+            runtime_runner_control_pb2.RUNNER_TRANSFER_SOURCE_TRANSPORT_TRANSFER_OBJECT
+        ),
+        RunnerTransferSourceTransport.DIRECT_OBJECT.value: (
+            runtime_runner_control_pb2.RUNNER_TRANSFER_SOURCE_TRANSPORT_DIRECT_OBJECT
+        ),
+    }
+    try:
+        source_transport = source_transports[source_transport_value]
+    except KeyError:
+        raise ValueError("Transfer source transport is invalid") from None
     deadline_at = envelope.deadline_at
     if deadline_at is None or envelope.body_stream_id is not None:
         raise ValueError("Transfer intent requires metadata-only deadline routing")
@@ -1166,6 +1189,7 @@ def _runner_transfer_intent(
         protocol_version="2026-07-25",
         capability="file.transfer.v1",
         dispatch_id=dispatch_id,
+        source_transport=source_transport,
     )
     owner_session_id = payload.get("owner_session_id")
     if isinstance(owner_session_id, str):
@@ -1179,6 +1203,27 @@ def _runner_transfer_intent(
     expected_sha256 = payload.get("expected_sha256")
     if isinstance(expected_sha256, str):
         message.expected_sha256 = expected_sha256
+    conflict_precondition = payload.get("conflict_precondition")
+    if conflict_precondition is not None:
+        if not isinstance(conflict_precondition, str):
+            raise ValueError("Transfer conflict precondition must be a base64 string")
+        try:
+            decoded = base64.b64decode(
+                conflict_precondition.encode("ascii"),
+                altchars=b"-_",
+                validate=True,
+            )
+        except UnicodeEncodeError, ValueError:
+            raise ValueError(
+                "Transfer conflict precondition must be URL-safe base64"
+            ) from None
+        if not 1 <= len(decoded) <= _MAX_CONFLICT_PRECONDITION_BYTES:
+            raise ValueError("Transfer conflict precondition is outside bounds")
+        if base64.urlsafe_b64encode(decoded).decode("ascii") != conflict_precondition:
+            raise ValueError(
+                "Transfer conflict precondition must use canonical URL-safe base64"
+            )
+        message.conflict_precondition = decoded
     return message
 
 

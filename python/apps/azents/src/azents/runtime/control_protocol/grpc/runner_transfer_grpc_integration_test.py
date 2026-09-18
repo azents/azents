@@ -1025,6 +1025,7 @@ def _transfer_admission(
         agent_id=None,
         runtime_path="/workspace/file",
         overwrite=False,
+        conflict_precondition=None,
         expected_size=len(data),
         expected_sha256=digest,
         product_maximum_size=len(data),

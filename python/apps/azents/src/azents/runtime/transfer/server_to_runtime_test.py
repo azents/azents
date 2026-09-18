@@ -13,6 +13,7 @@ from azents_runtime_control.grpc_transfer_coordinator_client import (
     CoordinatorCancelTransferRequest,
     CoordinatorCleanupStatus,
     CoordinatorClearPreparationCleanupRequest,
+    CoordinatorDestinationConflictEvidence,
     CoordinatorDispatchStatus,
     CoordinatorDispatchTransferRequest,
     CoordinatorExpectedManifest,
@@ -49,9 +50,11 @@ from azents.runtime.transfer.server_to_runtime import (
     ServerToRuntimeTransferAdmissionTimeout,
     ServerToRuntimeTransferConnectionTimeout,
     ServerToRuntimeTransferError,
+    ServerToRuntimeTransferHandle,
     ServerToRuntimeTransferLimitExceeded,
     ServerToRuntimeTransferRequest,
     ServerToRuntimeTransferService,
+    VerifiedTemporaryServerToRuntimeSource,
 )
 
 _NOW = datetime(2026, 7, 26, tzinfo=UTC)
@@ -94,6 +97,7 @@ class Coordinator:
         self.admit_error = admit_error
         self.admit_errors = admit_errors or []
         self.calls: list[tuple[str, object]] = []
+        self.admit_requests: list[CoordinatorAdmitTransferRequest] = []
         self.admit_request: CoordinatorAdmitTransferRequest | None = None
         self.reject_first_cancellation = False
         self.cancellation_rejections = 0
@@ -103,6 +107,7 @@ class Coordinator:
         self, request: CoordinatorAdmitTransferRequest
     ) -> CoordinatorAdmitTransferResult:
         self.calls.append(("admit", request))
+        self.admit_requests.append(request)
         self.admit_request = request
         if self.admit_errors:
             raise self.admit_errors.pop(0)
@@ -260,6 +265,7 @@ class StrictStateCoordinator:
                 agent_id=request.identity.agent_id,
                 runtime_path=request.runtime_path,
                 overwrite=request.overwrite,
+                conflict_precondition=None,
                 expected_size=request.expected_manifest.size or 0,
                 expected_sha256=request.expected_manifest.sha256,
                 product_maximum_size=request.product_maximum_size or 0,
@@ -391,6 +397,7 @@ def _status(
     dispatch_status: CoordinatorDispatchStatus = CoordinatorDispatchStatus.NOT_BOUND,
     outcome: CoordinatorTransferOutcome | None = None,
     failure: CoordinatorTransferFailure | None = None,
+    destination_conflict: CoordinatorDestinationConflictEvidence | None = None,
 ) -> CoordinatorTransferStatus:
     return CoordinatorTransferStatus(
         identity=identity
@@ -418,6 +425,7 @@ def _status(
         cleanup_status=CoordinatorCleanupStatus.NOT_REQUIRED,
         cancellation_requested=False,
         preparation_cleanup_state=CoordinatorPreparationCleanupState.NOT_REQUIRED,
+        destination_conflict=destination_conflict,
     )
 
 
@@ -430,6 +438,7 @@ def _request(source: Source) -> ServerToRuntimeTransferRequest:
         operation_id="operation",
         destination="/workspace/file",
         overwrite=False,
+        conflict_precondition=None,
         product_maximum_size=10,
         provider_maximum_size=10,
         deadline_at=_NOW + timedelta(minutes=1),
@@ -473,6 +482,123 @@ async def test_transfer_admits_before_source_prepare_and_terminal_success() -> N
     assert admit.expected_manifest.size == 3
     assert admit.expected_manifest.sha256 == "a" * 64
     assert "exchange://safe" not in str(admit)
+
+
+@pytest.mark.asyncio
+async def test_lifecycle_primitives_expose_one_dispatched_attempt() -> None:
+    """Start, status, cancellation, and waiting share one revision-fenced handle."""
+    source = Source(
+        ServerToRuntimeSourceMetadata(
+            "exchange://safe", "exchange", "file", "text/plain", 3, "a" * 64, None
+        ),
+        PreparedServerToRuntimeObject(_HANDLE, 3, "a" * 64),
+    )
+    coordinator = Coordinator(
+        [
+            _status(4, phase=CoordinatorTransferPhase.READY),
+            _status(
+                5,
+                phase=CoordinatorTransferPhase.TERMINAL,
+                outcome=CoordinatorTransferOutcome.SUCCEEDED,
+            ),
+        ]
+    )
+    service = ServerToRuntimeTransferService(
+        coordinator=coordinator,
+        clock=lambda: _NOW,
+        status_poll_interval=timedelta(milliseconds=1),
+    )
+
+    handle = await service.start(_request(source))
+    status = await service.get_status(handle)
+    completed = await service.wait_for_terminal_success(handle)
+
+    assert isinstance(handle, ServerToRuntimeTransferHandle)
+    assert handle.revision == 5
+    assert status.phase is CoordinatorTransferPhase.READY
+    assert completed.outcome is CoordinatorTransferOutcome.SUCCEEDED
+    assert [name for name, _ in coordinator.calls] == [
+        "admit",
+        "ready",
+        "dispatch",
+        "status",
+        "status",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_lifecycle_cancel_uses_latest_status_revision() -> None:
+    """Cancellation reuses the handle revision refreshed by a status observation."""
+    source = Source(
+        ServerToRuntimeSourceMetadata(
+            "exchange://safe", "exchange", "file", "text/plain", 3, "a" * 64, None
+        ),
+        PreparedServerToRuntimeObject(_HANDLE, 3, "a" * 64),
+    )
+    coordinator = Coordinator([_status(7, phase=CoordinatorTransferPhase.READY)])
+    service = ServerToRuntimeTransferService(
+        coordinator=coordinator,
+        clock=lambda: _NOW,
+        status_poll_interval=timedelta(milliseconds=1),
+    )
+
+    handle = await service.start(_request(source))
+    await service.get_status(handle)
+    cancelled = await service.cancel(handle)
+
+    cancellation = next(
+        request for name, request in coordinator.calls if name == "cancel"
+    )
+    assert isinstance(cancellation, CoordinatorCancelTransferRequest)
+    assert cancellation.expected_revision == 7
+    assert cancelled.outcome is CoordinatorTransferOutcome.CANCELLED
+
+
+@pytest.mark.asyncio
+async def test_start_allows_agent_scoped_transfer_without_session_correlation() -> None:
+    """Session correlation is optional without weakening concrete caller contracts."""
+    source = Source(
+        ServerToRuntimeSourceMetadata(
+            "exchange://safe", "exchange", "file", "text/plain", 3, "a" * 64, None
+        ),
+        PreparedServerToRuntimeObject(_HANDLE, 3, "a" * 64),
+    )
+    coordinator = Coordinator([])
+    service = ServerToRuntimeTransferService(
+        coordinator=coordinator,
+        clock=lambda: _NOW,
+        status_poll_interval=timedelta(milliseconds=1),
+    )
+    request = dataclasses.replace(_request(source), session_id=None)
+
+    await service.start(request)
+
+    assert coordinator.admit_request is not None
+    assert coordinator.admit_request.identity.session_id is None
+
+
+def test_verified_temporary_source_adapter_contract_is_server_only() -> None:
+    """The future upload source adapter keeps only an opaque source handle."""
+
+    class VerifiedTemporarySource(Source):
+        @property
+        def source_handle(self) -> CoordinatorOpaqueObjectHandle:
+            return CoordinatorOpaqueObjectHandle("workspace-upload-source")
+
+    source: VerifiedTemporaryServerToRuntimeSource = VerifiedTemporarySource(
+        ServerToRuntimeSourceMetadata(
+            "upload://safe",
+            "workspace_upload",
+            "file",
+            "text/plain",
+            3,
+            "a" * 64,
+            None,
+        ),
+        PreparedServerToRuntimeObject(_HANDLE, 3, "a" * 64),
+    )
+
+    assert source.source_handle.value == "workspace-upload-source"
 
 
 @pytest.mark.asyncio
@@ -829,6 +955,110 @@ async def test_transfer_failure_is_not_success_and_cancels_exact_attempt() -> No
 
     assert raised.value.failure is CoordinatorTransferFailure.CONSUMER
     assert coordinator.calls[-1][0] == "cancel"
+
+
+@pytest.mark.asyncio
+async def test_overwrite_retries_with_runner_conflict_precondition() -> None:
+    """Explicit overwrite first captures and then consumes exact conflict evidence."""
+    source = Source(
+        ServerToRuntimeSourceMetadata(
+            "tool-output://safe",
+            "tool_output",
+            "output.txt",
+            "text/plain",
+            3,
+            "a" * 64,
+            None,
+        ),
+        PreparedServerToRuntimeObject(_HANDLE, 3, "a" * 64),
+    )
+    conflict = CoordinatorDestinationConflictEvidence(
+        kind="file",
+        size=3,
+        modified_at=_NOW,
+        conflict_precondition=b"opaque-conflict",
+    )
+    coordinator = Coordinator(
+        [
+            _status(
+                4,
+                phase=CoordinatorTransferPhase.TERMINAL,
+                outcome=CoordinatorTransferOutcome.FAILED,
+                failure=CoordinatorTransferFailure.DESTINATION_CONFLICT,
+                destination_conflict=conflict,
+            ),
+            _status(
+                8,
+                phase=CoordinatorTransferPhase.TERMINAL,
+                outcome=CoordinatorTransferOutcome.SUCCEEDED,
+            ),
+        ]
+    )
+    service = ServerToRuntimeTransferService(
+        coordinator=coordinator,
+        clock=lambda: _NOW,
+        status_poll_interval=timedelta(milliseconds=1),
+    )
+
+    await service.transfer(
+        dataclasses.replace(
+            _request(source),
+            overwrite=True,
+        )
+    )
+
+    assert source.prepare_calls == 2
+    assert len(coordinator.admit_requests) == 2
+    first, second = coordinator.admit_requests
+    assert first.overwrite is False
+    assert first.conflict_precondition is None
+    assert second.overwrite is True
+    assert second.conflict_precondition == b"opaque-conflict"
+
+
+@pytest.mark.asyncio
+async def test_destination_conflict_evidence_is_retained_on_transfer_error() -> None:
+    """Expose Runner conflict evidence to callers that own explicit retry policy."""
+    source = Source(
+        ServerToRuntimeSourceMetadata(
+            "tool-output://safe",
+            "tool_output",
+            "output.txt",
+            "text/plain",
+            3,
+            "a" * 64,
+            None,
+        ),
+        PreparedServerToRuntimeObject(_HANDLE, 3, "a" * 64),
+    )
+    conflict = CoordinatorDestinationConflictEvidence(
+        kind="file",
+        size=3,
+        modified_at=_NOW,
+        conflict_precondition=b"opaque-conflict",
+    )
+    coordinator = Coordinator(
+        [
+            _status(
+                4,
+                phase=CoordinatorTransferPhase.TERMINAL,
+                outcome=CoordinatorTransferOutcome.FAILED,
+                failure=CoordinatorTransferFailure.DESTINATION_CONFLICT,
+                destination_conflict=conflict,
+            )
+        ]
+    )
+    service = ServerToRuntimeTransferService(
+        coordinator=coordinator,
+        clock=lambda: _NOW,
+        status_poll_interval=timedelta(milliseconds=1),
+    )
+
+    with pytest.raises(ServerToRuntimeTransferError) as raised:
+        await service.transfer(_request(source))
+
+    assert raised.value.failure is CoordinatorTransferFailure.DESTINATION_CONFLICT
+    assert raised.value.destination_conflict == conflict
 
 
 @pytest.mark.asyncio

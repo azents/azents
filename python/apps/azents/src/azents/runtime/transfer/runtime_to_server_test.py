@@ -456,6 +456,7 @@ def _status(
         cleanup_status=CoordinatorCleanupStatus.NOT_REQUIRED,
         cancellation_requested=False,
         preparation_cleanup_state=CoordinatorPreparationCleanupState.NOT_REQUIRED,
+        destination_conflict=None,
     )
 
 

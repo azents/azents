@@ -291,6 +291,7 @@ async def test_client_issues_exact_bearer_metadata_per_request() -> None:
         lease_id="lease-1",
         runtime_path="/workspace/input.txt",
         overwrite=False,
+        conflict_precondition=None,
         expected_manifest=CoordinatorExpectedManifest(size=3, sha256="a" * 64),
         product_maximum_size=10,
         provider_maximum_size=12,

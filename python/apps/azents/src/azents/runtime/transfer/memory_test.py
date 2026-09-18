@@ -59,6 +59,7 @@ def _admission(
         None,
         "/workspace/file",
         False,
+        None,
         size,
         _DIGEST,
         10,
@@ -183,6 +184,7 @@ async def test_concurrent_admission_retry_expiry_and_pagination() -> None:
         expected_revision=current.revision,
         outcome=RuntimeTransferOutcome.FAILED,
         failure=RuntimeTransferFailure.STREAM,
+        destination_conflict=None,
     )
     assert settled is not None
     retry = await store.admit(
@@ -255,6 +257,7 @@ async def test_ready_stream_progress_and_download_commit() -> None:
         None,
         "/workspace/file",
         False,
+        None,
         3,
         _DIGEST,
         3,
@@ -469,6 +472,7 @@ async def test_upload_consumer_cancellation_terminal_and_historical_safety() -> 
             expected_revision=cancelled.revision,
             outcome=RuntimeTransferOutcome.SUCCEEDED,
             failure=None,
+            destination_conflict=None,
         )
         is None
     )
@@ -478,6 +482,7 @@ async def test_upload_consumer_cancellation_terminal_and_historical_safety() -> 
         expected_revision=cancelled.revision,
         outcome=RuntimeTransferOutcome.CANCELLED,
         failure=RuntimeTransferFailure.CANCELLED,
+        destination_conflict=None,
     )
     assert terminal is not None
     assert (

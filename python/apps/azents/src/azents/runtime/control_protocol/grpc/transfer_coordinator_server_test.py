@@ -207,6 +207,63 @@ async def test_upload_ready_allows_unknown_expected_digest() -> None:
         await server.stop(None)
 
 
+def test_workspace_upload_protocol_preserves_metadata_and_conflict() -> None:
+    """Preserve upload metadata and opaque conflict fields across protobuf
+    conversion.
+    """
+    identity = pb.WorkspaceUploadIdentity(
+        upload_id="upload-1",
+        requester_user_id="user-1",
+        workspace_id="workspace-1",
+        agent_id="agent-1",
+        runtime_id="runtime-1",
+        desired_generation=1,
+        session_id="session-1",
+    )
+    status = pb.WorkspaceUploadStatus(
+        identity=identity,
+        revision=3,
+        destination_directory="/workspace",
+        filename="report.txt",
+        destination_path="/workspace/report.txt",
+        expected_size=5,
+        received_size=5,
+        actual_size=5,
+        sha256="a" * 64,
+        media_type="text/plain",
+        phase=pb.WORKSPACE_UPLOAD_PHASE_CONFLICTED,
+        current_delivery_number=1,
+        outcome=pb.COORDINATOR_TRANSFER_OUTCOME_FAILED,
+        failure=pb.WORKSPACE_UPLOAD_FAILURE_DESTINATION_CONFLICT,
+        retry_available=True,
+        overwrite_available=True,
+        destination_evidence=pb.DestinationEvidence(
+            kind="file",
+            size=2,
+            modified_at=_timestamp(_NOW),
+            conflict_precondition=b"opaque-conflict-1",
+        ),
+    )
+
+    decoded = pb.WorkspaceUploadStatus()
+    decoded.ParseFromString(status.SerializeToString(deterministic=True))
+
+    assert decoded.identity == identity
+    assert decoded.HasField("actual_size")
+    assert decoded.HasField("destination_evidence")
+    assert decoded.destination_evidence.conflict_precondition == b"opaque-conflict-1"
+
+    retry = pb.RetryWorkspaceUploadRequest(
+        identity=identity,
+        expected_revision=3,
+        current_delivery_number=1,
+        overwrite=True,
+    )
+    assert not retry.HasField("conflict_precondition")
+    retry.conflict_precondition = b"opaque-conflict-1"
+    assert retry.HasField("conflict_precondition")
+
+
 class _TrackingTransferStateStore(InMemoryRuntimeTransferStateStore):
     """In-memory state store that records read attempts."""
 

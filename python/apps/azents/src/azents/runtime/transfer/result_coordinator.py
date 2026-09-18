@@ -23,6 +23,7 @@ from azents.runtime.coordination.data import (
 from azents.runtime.coordination.store import RuntimeCoordinationStore
 from azents.runtime.transfer.data import (
     RuntimeTransferCleanupStatus,
+    RuntimeTransferDestinationConflictEvidence,
     RuntimeTransferDirection,
     RuntimeTransferFailure,
     RuntimeTransferOutcome,
@@ -72,6 +73,7 @@ class RuntimeTransferTerminalCoordinator(Protocol):
         outcome: RuntimeTransferOutcome,
         failure: RuntimeTransferFailure | None,
         cleanup_completed: bool,
+        destination_conflict: RuntimeTransferDestinationConflictEvidence | None,
     ) -> RuntimeTransferRecord | None: ...
 
 
@@ -137,10 +139,34 @@ class RuntimeRunnerTransferResultCoordinator:
         if result.direction is RunnerTransferDirection.DOWNLOAD:
             if (
                 record.stream_claim_id is None
-                or record.object is None
-                or record.phase.value != "verifying"
                 or result.actual_size is None
                 or result.sha256 is None
+            ):
+                return
+            claim_id = record.stream_claim_id
+            if record.admission.source_transport.value == "direct_object":
+                if (
+                    record.object is not None
+                    or record.phase.value != "streaming"
+                    or record.admission.expected_size != result.actual_size
+                    or record.admission.expected_sha256 != result.sha256
+                ):
+                    return
+                verifying = await self._state_store.begin_verification(
+                    record.admission.transfer_id,
+                    attempt_id=record.admission.attempt_id,
+                    runtime_id=record.admission.runtime_id,
+                    desired_generation=record.admission.desired_generation,
+                    accepted_runner_generation=(record.accepted_runner_generation or 0),
+                    claim_id=claim_id,
+                    expected_revision=record.revision,
+                )
+                if verifying is None:
+                    return
+                record = verifying
+            elif (
+                record.object is None
+                or record.phase.value != "verifying"
                 or record.object.size != result.actual_size
                 or record.object.sha256 != result.sha256
             ):
@@ -151,7 +177,7 @@ class RuntimeRunnerTransferResultCoordinator:
                 runtime_id=record.admission.runtime_id,
                 desired_generation=record.admission.desired_generation,
                 accepted_runner_generation=(record.accepted_runner_generation or 0),
-                claim_id=record.stream_claim_id,
+                claim_id=claim_id,
                 expected_revision=record.revision,
                 actual_size=result.actual_size,
                 actual_sha256=result.sha256,
@@ -163,6 +189,7 @@ class RuntimeRunnerTransferResultCoordinator:
                 outcome=RuntimeTransferOutcome.SUCCEEDED,
                 failure=None,
                 cleanup_completed=False,
+                destination_conflict=None,
             )
             if settled is None:
                 return
@@ -237,6 +264,7 @@ class RuntimeRunnerTransferResultCoordinator:
             outcome=outcome,
             failure=failure,
             cleanup_completed=False,
+            destination_conflict=_destination_conflict(result),
         )
         if settled is None:
             return
@@ -313,6 +341,7 @@ class RuntimeRunnerTransferResultCoordinator:
             outcome=RuntimeTransferOutcome.FAILED,
             failure=failure,
             cleanup_completed=False,
+            destination_conflict=None,
         )
         if settled is None:
             return
@@ -420,4 +449,22 @@ def _runtime_failure(
         return RuntimeTransferFailure.EXPIRED
     if failure is RunnerTransferFailure.PROTOCOL_VIOLATION:
         return RuntimeTransferFailure.FENCED
+    if failure is RunnerTransferFailure.DESTINATION_CONFLICT:
+        return RuntimeTransferFailure.DESTINATION_CONFLICT
     return RuntimeTransferFailure.STREAM
+
+
+def _destination_conflict(
+    result: RunnerTransferResult,
+) -> RuntimeTransferDestinationConflictEvidence | None:
+    """Map one validated Runner conflict into trusted bounded transfer evidence."""
+    evidence = result.destination_conflict
+    precondition = result.conflict_precondition
+    if evidence is None or precondition is None:
+        return None
+    return RuntimeTransferDestinationConflictEvidence(
+        kind=evidence.kind,
+        size=evidence.size,
+        modified_at=evidence.modified_at,
+        conflict_precondition=precondition,
+    )

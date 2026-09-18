@@ -514,6 +514,7 @@ async def test_provider_stream_does_not_open_when_admission_rejects() -> None:
                 product_maximum_size=4,
                 provider_maximum_size=4,
                 deadline_at=_NOW + timedelta(minutes=1),
+                conflict_precondition=None,
             )
         )
 
@@ -541,6 +542,7 @@ def _status(
         cleanup_status=CoordinatorCleanupStatus.NOT_REQUIRED,
         cancellation_requested=False,
         preparation_cleanup_state=CoordinatorPreparationCleanupState.NOT_REQUIRED,
+        destination_conflict=None,
     )
 
 

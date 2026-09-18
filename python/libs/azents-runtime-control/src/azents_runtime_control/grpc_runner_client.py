@@ -53,12 +53,14 @@ from azents_runtime_control.runner_terminal import (
 from azents_runtime_control.runner_transfer import (
     RunnerTransferCancel,
     RunnerTransferCancelReason,
+    RunnerTransferDestinationConflictEvidence,
     RunnerTransferDirection,
     RunnerTransferFailure,
     RunnerTransferIdentity,
     RunnerTransferIntent,
     RunnerTransferOutcome,
     RunnerTransferResult,
+    RunnerTransferSourceTransport,
 )
 from azents_runtime_control.runtime_configuration import (
     RuntimeConfigurationEvidence,
@@ -2044,6 +2046,12 @@ def runner_transfer_intent_from_message(
         protocol_version=message.protocol_version,
         capability=message.capability,
         dispatch_id=message.dispatch_id,
+        conflict_precondition=(
+            bytes(message.conflict_precondition)
+            if message.HasField("conflict_precondition")
+            else None
+        ),
+        source_transport=_transfer_source_transport(message.source_transport),
     )
 
 
@@ -2213,6 +2221,16 @@ def runner_transfer_result_from_message(
         failure=(
             _transfer_failure(message.failure) if message.HasField("failure") else None
         ),
+        conflict_precondition=(
+            bytes(message.conflict_precondition)
+            if message.HasField("conflict_precondition")
+            else None
+        ),
+        destination_conflict=(
+            _destination_conflict_from_message(message.destination_conflict)
+            if message.HasField("destination_conflict")
+            else None
+        ),
     )
 
 
@@ -2276,7 +2294,16 @@ def _transfer_result_message(
             RunnerTransferFailure.DESTINATION_FAILED: (
                 runtime_runner_control_pb2.RUNNER_TRANSFER_FAILURE_DESTINATION_FAILED
             ),
+            RunnerTransferFailure.DESTINATION_CONFLICT: (
+                runtime_runner_control_pb2.RUNNER_TRANSFER_FAILURE_DESTINATION_CONFLICT
+            ),
         }[result.failure]
+    if result.conflict_precondition is not None:
+        message.conflict_precondition = result.conflict_precondition
+    if result.destination_conflict is not None:
+        message.destination_conflict.CopyFrom(
+            _destination_conflict_to_message(result.destination_conflict)
+        )
     return message
 
 
@@ -2288,6 +2315,30 @@ def _transfer_identity(
         attempt_id=message.attempt_id,
         runtime_id=message.runtime_id,
         runner_generation=message.runner_generation,
+    )
+
+
+def _destination_conflict_from_message(
+    message: runtime_runner_control_pb2.DestinationConflictEvidence,
+) -> RunnerTransferDestinationConflictEvidence:
+    """Deserialize bounded safe destination-conflict evidence."""
+    if not message.HasField("modified_at"):
+        raise ValueError("destination conflict modified_at is required")
+    return RunnerTransferDestinationConflictEvidence(
+        kind=message.kind,
+        size=message.size if message.HasField("size") else None,
+        modified_at=_datetime(message.modified_at),
+    )
+
+
+def _destination_conflict_to_message(
+    evidence: RunnerTransferDestinationConflictEvidence,
+) -> runtime_runner_control_pb2.DestinationConflictEvidence:
+    """Serialize bounded safe destination-conflict evidence."""
+    return runtime_runner_control_pb2.DestinationConflictEvidence(
+        kind=evidence.kind,
+        size=evidence.size,
+        modified_at=_timestamp(evidence.modified_at),
     )
 
 
@@ -2408,6 +2459,22 @@ def _transfer_direction(
     }[value]
 
 
+def _transfer_source_transport(
+    value: runtime_runner_control_pb2.RunnerTransferSourceTransport.ValueType,
+) -> RunnerTransferSourceTransport:
+    return {
+        runtime_runner_control_pb2.RUNNER_TRANSFER_SOURCE_TRANSPORT_UNSPECIFIED: (
+            RunnerTransferSourceTransport.TRANSFER_OBJECT
+        ),
+        runtime_runner_control_pb2.RUNNER_TRANSFER_SOURCE_TRANSPORT_TRANSFER_OBJECT: (
+            RunnerTransferSourceTransport.TRANSFER_OBJECT
+        ),
+        runtime_runner_control_pb2.RUNNER_TRANSFER_SOURCE_TRANSPORT_DIRECT_OBJECT: (
+            RunnerTransferSourceTransport.DIRECT_OBJECT
+        ),
+    }[value]
+
+
 def _transfer_failure(
     value: runtime_runner_control_pb2.RunnerTransferFailure.ValueType,
 ) -> RunnerTransferFailure:
@@ -2438,6 +2505,9 @@ def _transfer_failure(
         ),
         runtime_runner_control_pb2.RUNNER_TRANSFER_FAILURE_DESTINATION_FAILED: (
             RunnerTransferFailure.DESTINATION_FAILED
+        ),
+        runtime_runner_control_pb2.RUNNER_TRANSFER_FAILURE_DESTINATION_CONFLICT: (
+            RunnerTransferFailure.DESTINATION_CONFLICT
         ),
     }[value]
 

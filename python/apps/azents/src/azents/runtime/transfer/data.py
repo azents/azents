@@ -16,6 +16,13 @@ class RuntimeTransferDirection(enum.StrEnum):
     UPLOAD = "upload"
 
 
+class RuntimeTransferSourceTransport(enum.StrEnum):
+    """Physical source transport selected for one Runtime transfer."""
+
+    TRANSFER_OBJECT = "transfer_object"
+    DIRECT_OBJECT = "direct_object"
+
+
 class RuntimeTransferPhase(enum.StrEnum):
     """Transfer attempt lifecycle phase."""
 
@@ -85,6 +92,7 @@ class RuntimeTransferFailure(enum.StrEnum):
     INTEGRITY = "integrity"
     STREAM = "stream"
     CONSUMER = "consumer"
+    DESTINATION_CONFLICT = "destination_conflict"
 
 
 class RuntimeTransferCancellationReason(enum.StrEnum):
@@ -142,6 +150,27 @@ class RuntimeTransferConfig:
 
 
 @dataclass(frozen=True)
+class RuntimeTransferDestinationConflictEvidence:
+    """Safe destination metadata and opaque replacement precondition."""
+
+    kind: str
+    size: int | None
+    modified_at: datetime
+    conflict_precondition: bytes
+
+    def __post_init__(self) -> None:
+        """Validate bounded evidence without interpreting filesystem identity."""
+        _bounded(self.kind, "destination_conflict.kind", 64)
+        if self.size is not None and self.size < 0:
+            raise ValueError("destination conflict size must not be negative")
+        _aware(self.modified_at, "destination_conflict.modified_at")
+        if not 1 <= len(self.conflict_precondition) <= 512:
+            raise ValueError(
+                "destination conflict precondition must be between 1 and 512 bytes"
+            )
+
+
+@dataclass(frozen=True)
 class RuntimeTransferAdmission:
     """Metadata necessary to atomically admit one attempt."""
 
@@ -155,6 +184,7 @@ class RuntimeTransferAdmission:
     agent_id: str | None
     runtime_path: str
     overwrite: bool
+    conflict_precondition: bytes | None
     expected_size: int
     expected_sha256: str | None
     product_maximum_size: int
@@ -162,6 +192,10 @@ class RuntimeTransferAdmission:
     deadline_at: datetime
     source_expires_at: datetime | None
     resource_class: str
+    source_transport: RuntimeTransferSourceTransport = (
+        RuntimeTransferSourceTransport.TRANSFER_OBJECT
+    )
+    source_handle: str | None = None
 
     def __post_init__(self) -> None:
         """Validate trusted admission metadata."""
@@ -171,10 +205,29 @@ class RuntimeTransferAdmission:
         _bounded(self.operation_id, "operation_id", 128)
         _bounded(self.runtime_path, "runtime_path", 4096)
         _bounded(self.resource_class, "resource_class", 64)
+        if not isinstance(self.source_transport, RuntimeTransferSourceTransport):
+            raise ValueError("source_transport is invalid")
+        if self.source_handle is not None:
+            _opaque_handle(self.source_handle, "source_handle")
+        if self.source_transport is RuntimeTransferSourceTransport.DIRECT_OBJECT:
+            if self.direction is not RuntimeTransferDirection.DOWNLOAD:
+                raise ValueError("direct object source is download-only")
+            if self.source_handle is None:
+                raise ValueError("direct object source requires a source handle")
+            if self.expected_sha256 is None:
+                raise ValueError("direct object source requires a SHA-256")
+        elif self.source_handle is not None:
+            raise ValueError(
+                "transfer-object source must not retain an external source handle"
+            )
         if self.session_id is not None:
             _bounded(self.session_id, "session_id", 128)
         if self.agent_id is not None:
             _bounded(self.agent_id, "agent_id", 128)
+        if self.conflict_precondition is not None and not (
+            1 <= len(self.conflict_precondition) <= 512
+        ):
+            raise ValueError("conflict_precondition must be between 1 and 512 bytes")
         if (
             min(
                 self.desired_generation,
@@ -279,6 +332,7 @@ class RuntimeTransferRecord:
     cleanup_status: RuntimeTransferCleanupStatus
     cleanup_failure: RuntimeTransferCleanupFailureEvidence | None
     failure: RuntimeTransferFailure | None
+    destination_conflict: RuntimeTransferDestinationConflictEvidence | None
     preparation_object_handle: str | None = None
     preparation_multipart_cleanup_handle: str | None = None
     preparation_cleanup_state: RuntimeTransferPreparationCleanupState = (
@@ -390,12 +444,26 @@ class RuntimeTransferRecord:
             raise ValueError(
                 "cleanup failure evidence must exist exactly for retryable cleanup"
             )
+        if self.destination_conflict is not None and (
+            self.phase is not RuntimeTransferPhase.TERMINAL
+            or self.terminal_outcome is not RuntimeTransferOutcome.FAILED
+            or self.failure is not RuntimeTransferFailure.DESTINATION_CONFLICT
+        ):
+            raise ValueError(
+                "destination conflict evidence requires a matching failed terminal"
+            )
         if (
             self.admission.direction is RuntimeTransferDirection.DOWNLOAD
             and self.object is not None
             and self.object.sha256 is None
         ):
             raise ValueError("download transfer objects require a SHA-256")
+        if (
+            self.admission.source_transport
+            is RuntimeTransferSourceTransport.DIRECT_OBJECT
+            and self.object is not None
+        ):
+            raise ValueError("direct object sources must not retain Runtime objects")
         if (
             self.phase
             in {
@@ -538,6 +606,7 @@ def valid_settlement(
         RuntimeTransferFailure.INTEGRITY,
         RuntimeTransferFailure.STREAM,
         RuntimeTransferFailure.CONSUMER,
+        RuntimeTransferFailure.DESTINATION_CONFLICT,
     }
 
 

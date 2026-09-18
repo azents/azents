@@ -8,7 +8,7 @@ import hashlib
 import logging
 import secrets
 from collections import deque
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Mapping
 from contextlib import AbstractAsyncContextManager, suppress
 from datetime import datetime
 from enum import StrEnum
@@ -31,6 +31,7 @@ from azents_runtime_control.transfer import (
     MULTIPART_PART_BYTES,
     STREAM_OWNER_RENEWAL_SECONDS,
 )
+from google.protobuf import timestamp_pb2
 
 from azents.core.runtime_runner_credential import RuntimeRunnerCredential
 from azents.runtime.control_protocol.grpc.auth import (
@@ -44,12 +45,14 @@ from azents.runtime.transfer.data import (
     RuntimeTransferCancellationReason,
     RuntimeTransferCleanupArtifact,
     RuntimeTransferCleanupStatus,
+    RuntimeTransferDestinationConflictEvidence,
     RuntimeTransferDirection,
     RuntimeTransferDispatchStatus,
     RuntimeTransferFailure,
     RuntimeTransferObject,
     RuntimeTransferOutcome,
     RuntimeTransferRecord,
+    RuntimeTransferSourceTransport,
     cancellation_settlement,
 )
 from azents.runtime.transfer.object_store import runtime_transfer_object_identity
@@ -301,6 +304,35 @@ class RuntimeRunnerTransferObjectStore(Protocol):
         ...
 
 
+class RuntimeRunnerDirectObjectTicket(Protocol):
+    """Short-lived read capability returned at the exact claim boundary."""
+
+    @property
+    def method(self) -> str: ...
+
+    @property
+    def url(self) -> str: ...
+
+    @property
+    def expires_at(self) -> datetime: ...
+
+    @property
+    def headers(self) -> Mapping[str, str]: ...
+
+
+class RuntimeRunnerDirectObjectStore(Protocol):
+    """Trusted source-store operations needed for direct-object claims."""
+
+    async def issue_download_ticket(
+        self,
+        *,
+        source_handle: str,
+        deadline_at: datetime,
+    ) -> RuntimeRunnerDirectObjectTicket:
+        """Issue one short-lived GET capability for an opaque source handle."""
+        ...
+
+
 class RuntimeTransferTerminalSink(Protocol):
     """Settle and correlate one Control-authoritative transfer terminal."""
 
@@ -311,6 +343,7 @@ class RuntimeTransferTerminalSink(Protocol):
         outcome: RuntimeTransferOutcome,
         failure: RuntimeTransferFailure,
         cleanup_completed: bool,
+        destination_conflict: RuntimeTransferDestinationConflictEvidence | None,
     ) -> RuntimeTransferRecord | None:
         """Settle one exact attempt and append its initiating operation final."""
         ...
@@ -326,6 +359,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
         coordination_store: RuntimeCoordinationStore,
         object_store: RuntimeRunnerTransferObjectStore,
         terminal_sink: RuntimeTransferTerminalSink,
+        direct_object_store: RuntimeRunnerDirectObjectStore | None = None,
         bucket: str,
         owner_replica_id: str,
         runner_authenticator: RuntimeRunnerCredentialAuthenticator,
@@ -341,6 +375,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
         :param state_store: authoritative transfer state
         :param coordination_store: current Runner generation registry
         :param object_store: trusted object-store service
+        :param direct_object_store: Workspace source presigner, when enabled
         :param terminal_sink: authoritative terminal settlement and correlation
         :param bucket: trusted object bucket selected by Control
         :param object_prefix: internal transfer-object S3 key namespace
@@ -365,6 +400,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
         self._state_store = state_store
         self._coordination_store = coordination_store
         self._object_store = object_store
+        self._direct_object_store = direct_object_store
         self._terminal_sink = terminal_sink
         self._bucket = bucket
         self._object_prefix = object_prefix
@@ -376,6 +412,147 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
         self._uploads = asyncio.Semaphore(max_concurrent_uploads)
         self._maximum_chunk_bytes = maximum_chunk_bytes
         self._multipart_part_bytes = multipart_part_bytes
+
+    async def ClaimDirectObjectDownload(
+        self,
+        request: pb.DirectObjectDownloadClaimRequest,
+        context: grpc.aio.ServicerContext[
+            pb.DirectObjectDownloadClaimRequest,
+            pb.DirectObjectDownloadClaimResponse,
+        ],
+    ) -> pb.DirectObjectDownloadClaimResponse:
+        """Claim one exact direct-object attempt and return a transient GET ticket."""
+        credential = await self._auth.authenticate(context)
+        if not await self._runner_authenticator.authorize_runner(credential):
+            await context.abort(
+                grpc.StatusCode.UNAUTHENTICATED,
+                "Runner credential is no longer authorized",
+            )
+            raise AssertionError("unreachable")
+        if self._direct_object_store is None:
+            await context.abort(
+                grpc.StatusCode.FAILED_PRECONDITION,
+                "Direct object transfer is unavailable",
+            )
+            raise AssertionError("unreachable")
+        if (
+            not request.HasField("identity")
+            or not _valid_identity(request.identity)
+            or not request.dispatch_id
+            or not request.claim_id
+        ):
+            await context.abort(
+                grpc.StatusCode.INVALID_ARGUMENT,
+                "Direct object claim identity is invalid",
+            )
+            raise AssertionError("unreachable")
+        identity = request.identity
+        if identity.runtime_id != credential.runtime_id:
+            await context.abort(
+                grpc.StatusCode.PERMISSION_DENIED,
+                "Transfer identity is not authorized",
+            )
+            raise AssertionError("unreachable")
+        record = await self._state_store.get(identity.transfer_id)
+        if (
+            record is None
+            or record.admission.attempt_id != identity.attempt_id
+            or record.admission.runtime_id != identity.runtime_id
+            or record.admission.desired_generation != credential.desired_generation
+            or record.admission.direction is not RuntimeTransferDirection.DOWNLOAD
+            or record.admission.source_transport
+            is not RuntimeTransferSourceTransport.DIRECT_OBJECT
+            or record.accepted_runner_generation != identity.runner_generation
+            or record.dispatch_id != request.dispatch_id
+            or record.dispatch_status
+            not in {
+                RuntimeTransferDispatchStatus.DELIVERABLE,
+                RuntimeTransferDispatchStatus.ENQUEUED,
+            }
+            or _expired(record, self._now())
+        ):
+            await context.abort(
+                grpc.StatusCode.FAILED_PRECONDITION,
+                "Direct object transfer is unavailable",
+            )
+            raise AssertionError("unreachable")
+        connection = await self._coordination_store.get_connection(
+            kind=RuntimeConnectionKind.RUNNER,
+            subject_id=identity.runtime_id,
+        )
+        if connection is None or connection.generation != identity.runner_generation:
+            await context.abort(
+                grpc.StatusCode.FAILED_PRECONDITION,
+                "Runner generation is unavailable",
+            )
+            raise AssertionError("unreachable")
+        source_handle = record.admission.source_handle
+        if source_handle is None or record.admission.expected_sha256 is None:
+            await context.abort(
+                grpc.StatusCode.FAILED_PRECONDITION,
+                "Direct object manifest is unavailable",
+            )
+            raise AssertionError("unreachable")
+        claimed = await self._state_store.claim_direct_object(
+            identity.transfer_id,
+            attempt_id=identity.attempt_id,
+            runtime_id=identity.runtime_id,
+            desired_generation=credential.desired_generation,
+            accepted_runner_generation=identity.runner_generation,
+            claim_id=request.claim_id,
+            owner_replica_id=self._owner_replica_id,
+        )
+        if claimed is None:
+            await context.abort(
+                grpc.StatusCode.ALREADY_EXISTS,
+                "Direct object transfer claim is unavailable",
+            )
+            raise AssertionError("unreachable")
+        expected_sha256 = claimed.admission.expected_sha256
+        if expected_sha256 is None:
+            await context.abort(
+                grpc.StatusCode.FAILED_PRECONDITION,
+                "Direct object manifest is unavailable",
+            )
+            raise AssertionError("unreachable")
+        deadline_at = min(
+            claimed.admission.deadline_at,
+            claimed.logical_expires_at,
+            claimed.admission.source_expires_at
+            if claimed.admission.source_expires_at is not None
+            else claimed.logical_expires_at,
+        )
+        try:
+            ticket = await self._direct_object_store.issue_download_ticket(
+                source_handle=source_handle,
+                deadline_at=deadline_at,
+            )
+        except asyncio.CancelledError:
+            raise
+        except FileNotFoundError:
+            await context.abort(
+                grpc.StatusCode.NOT_FOUND,
+                "Direct object source is unavailable",
+            )
+            raise AssertionError("unreachable")
+        except Exception:
+            await context.abort(
+                grpc.StatusCode.FAILED_PRECONDITION,
+                "Direct object capability is unavailable",
+            )
+            raise AssertionError("unreachable")
+        response = pb.DirectObjectDownloadClaimResponse(
+            method=ticket.method,
+            url=ticket.url,
+            expires_at=_timestamp(ticket.expires_at),
+            expected_size=claimed.admission.expected_size,
+            expected_sha256=expected_sha256,
+        )
+        response.headers.extend(
+            pb.DirectObjectDownloadHeader(name=name, value=value)
+            for name, value in ticket.headers.items()
+        )
+        return response
 
     async def DownloadTransfer(
         self,
@@ -1756,6 +1933,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
                 and record.multipart_cleanup_handle is None
                 and not record.completed_object_cleanup_required
             ),
+            destination_conflict=None,
         )
 
     async def _abort_for_cancellation(
@@ -1827,6 +2005,7 @@ def add_runtime_runner_transfer_servicer(
     coordination_store: RuntimeCoordinationStore,
     object_store: RuntimeRunnerTransferObjectStore,
     terminal_sink: RuntimeTransferTerminalSink,
+    direct_object_store: RuntimeRunnerDirectObjectStore | None = None,
     bucket: str,
     owner_replica_id: str,
     runner_authenticator: RuntimeRunnerCredentialAuthenticator,
@@ -1843,6 +2022,7 @@ def add_runtime_runner_transfer_servicer(
             state_store=state_store,
             coordination_store=coordination_store,
             object_store=object_store,
+            direct_object_store=direct_object_store,
             terminal_sink=terminal_sink,
             bucket=bucket,
             owner_replica_id=owner_replica_id,
@@ -1860,6 +2040,13 @@ def add_runtime_runner_transfer_servicer(
 
 def _expired(record: RuntimeTransferRecord, now: datetime) -> bool:
     return record.admission.deadline_at <= now or record.logical_expires_at <= now
+
+
+def _timestamp(value: datetime) -> timestamp_pb2.Timestamp:
+    """Convert one timezone-aware datetime to a protobuf timestamp."""
+    message = timestamp_pb2.Timestamp()
+    message.FromDatetime(value)
+    return message
 
 
 def _claim_id() -> str:

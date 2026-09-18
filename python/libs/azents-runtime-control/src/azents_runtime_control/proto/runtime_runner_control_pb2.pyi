@@ -96,6 +96,7 @@ class _RunnerTransferFailureEnumTypeWrapper(
     RUNNER_TRANSFER_FAILURE_PROTOCOL_VIOLATION: _RunnerTransferFailure.ValueType  # 7
     RUNNER_TRANSFER_FAILURE_STREAM_FAILED: _RunnerTransferFailure.ValueType  # 8
     RUNNER_TRANSFER_FAILURE_DESTINATION_FAILED: _RunnerTransferFailure.ValueType  # 9
+    RUNNER_TRANSFER_FAILURE_DESTINATION_CONFLICT: _RunnerTransferFailure.ValueType  # 10
 
 class RunnerTransferFailure(
     _RunnerTransferFailure, metaclass=_RunnerTransferFailureEnumTypeWrapper
@@ -111,7 +112,43 @@ RUNNER_TRANSFER_FAILURE_INTEGRITY_FAILED: RunnerTransferFailure.ValueType  # 6
 RUNNER_TRANSFER_FAILURE_PROTOCOL_VIOLATION: RunnerTransferFailure.ValueType  # 7
 RUNNER_TRANSFER_FAILURE_STREAM_FAILED: RunnerTransferFailure.ValueType  # 8
 RUNNER_TRANSFER_FAILURE_DESTINATION_FAILED: RunnerTransferFailure.ValueType  # 9
+RUNNER_TRANSFER_FAILURE_DESTINATION_CONFLICT: RunnerTransferFailure.ValueType  # 10
 Global___RunnerTransferFailure: _TypeAlias = RunnerTransferFailure
+
+class _RunnerTransferSourceTransport:
+    ValueType = _typing.NewType("ValueType", _builtins.int)
+    V: _TypeAlias = ValueType
+
+class _RunnerTransferSourceTransportEnumTypeWrapper(
+    _enum_type_wrapper._EnumTypeWrapper[_RunnerTransferSourceTransport.ValueType],
+    _builtins.type,
+):
+    DESCRIPTOR: _descriptor.EnumDescriptor
+    RUNNER_TRANSFER_SOURCE_TRANSPORT_UNSPECIFIED: (
+        _RunnerTransferSourceTransport.ValueType
+    )  # 0
+    RUNNER_TRANSFER_SOURCE_TRANSPORT_TRANSFER_OBJECT: (
+        _RunnerTransferSourceTransport.ValueType
+    )  # 1
+    RUNNER_TRANSFER_SOURCE_TRANSPORT_DIRECT_OBJECT: (
+        _RunnerTransferSourceTransport.ValueType
+    )  # 2
+
+class RunnerTransferSourceTransport(
+    _RunnerTransferSourceTransport,
+    metaclass=_RunnerTransferSourceTransportEnumTypeWrapper,
+): ...
+
+RUNNER_TRANSFER_SOURCE_TRANSPORT_UNSPECIFIED: (
+    RunnerTransferSourceTransport.ValueType
+)  # 0
+RUNNER_TRANSFER_SOURCE_TRANSPORT_TRANSFER_OBJECT: (
+    RunnerTransferSourceTransport.ValueType
+)  # 1
+RUNNER_TRANSFER_SOURCE_TRANSPORT_DIRECT_OBJECT: (
+    RunnerTransferSourceTransport.ValueType
+)  # 2
+Global___RunnerTransferSourceTransport: _TypeAlias = RunnerTransferSourceTransport
 
 class _RunnerSystemMetricsScope:
     ValueType = _typing.NewType("ValueType", _builtins.int)
@@ -696,6 +733,8 @@ class RunnerTransferIntent(_message.Message):
     PROTOCOL_VERSION_FIELD_NUMBER: _builtins.int
     CAPABILITY_FIELD_NUMBER: _builtins.int
     DISPATCH_ID_FIELD_NUMBER: _builtins.int
+    CONFLICT_PRECONDITION_FIELD_NUMBER: _builtins.int
+    SOURCE_TRANSPORT_FIELD_NUMBER: _builtins.int
     direction: _runtime_runner_transfer_pb2.TransferDirection.ValueType
     operation_id: _builtins.str
     owner_session_id: _builtins.str
@@ -706,6 +745,8 @@ class RunnerTransferIntent(_message.Message):
     protocol_version: _builtins.str
     capability: _builtins.str
     dispatch_id: _builtins.str
+    conflict_precondition: _builtins.bytes
+    source_transport: Global___RunnerTransferSourceTransport.ValueType
     @_builtins.property
     def identity(self) -> _runtime_runner_transfer_pb2.TransferIdentity: ...
     @_builtins.property
@@ -725,8 +766,12 @@ class RunnerTransferIntent(_message.Message):
         protocol_version: _builtins.str = ...,
         capability: _builtins.str = ...,
         dispatch_id: _builtins.str = ...,
+        conflict_precondition: _builtins.bytes | None = ...,
+        source_transport: Global___RunnerTransferSourceTransport.ValueType = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _typing.Literal[
+        "_conflict_precondition",
+        b"_conflict_precondition",
         "_expected_sha256",
         b"_expected_sha256",
         "_expected_size",
@@ -735,6 +780,8 @@ class RunnerTransferIntent(_message.Message):
         b"_overwrite",
         "_owner_session_id",
         b"_owner_session_id",
+        "conflict_precondition",
+        b"conflict_precondition",
         "deadline_at",
         b"deadline_at",
         "expected_sha256",
@@ -750,6 +797,8 @@ class RunnerTransferIntent(_message.Message):
     ]
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
     _ClearFieldArgType: _TypeAlias = _typing.Literal[
+        "_conflict_precondition",
+        b"_conflict_precondition",
         "_expected_sha256",
         b"_expected_sha256",
         "_expected_size",
@@ -760,6 +809,8 @@ class RunnerTransferIntent(_message.Message):
         b"_owner_session_id",
         "capability",
         b"capability",
+        "conflict_precondition",
+        b"conflict_precondition",
         "deadline_at",
         b"deadline_at",
         "direction",
@@ -782,8 +833,16 @@ class RunnerTransferIntent(_message.Message):
         b"protocol_version",
         "runtime_path",
         b"runtime_path",
+        "source_transport",
+        b"source_transport",
     ]
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    _WhichOneofReturnType__conflict_precondition: _TypeAlias = _typing.Literal[
+        "conflict_precondition"
+    ]
+    _WhichOneofArgType__conflict_precondition: _TypeAlias = _typing.Literal[
+        "_conflict_precondition", b"_conflict_precondition"
+    ]
     _WhichOneofReturnType__expected_sha256: _TypeAlias = _typing.Literal[
         "expected_sha256"
     ]
@@ -804,6 +863,10 @@ class RunnerTransferIntent(_message.Message):
     _WhichOneofArgType__owner_session_id: _TypeAlias = _typing.Literal[
         "_owner_session_id", b"_owner_session_id"
     ]
+    @_typing.overload
+    def WhichOneof(
+        self, oneof_group: _WhichOneofArgType__conflict_precondition
+    ) -> _WhichOneofReturnType__conflict_precondition | None: ...
     @_typing.overload
     def WhichOneof(
         self, oneof_group: _WhichOneofArgType__expected_sha256
@@ -860,6 +923,47 @@ class RunnerTransferCancel(_message.Message):
     def WhichOneof(self, oneof_group: _Never) -> None: ...
 
 Global___RunnerTransferCancel: _TypeAlias = RunnerTransferCancel
+
+@_typing.final
+class DestinationConflictEvidence(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    KIND_FIELD_NUMBER: _builtins.int
+    SIZE_FIELD_NUMBER: _builtins.int
+    MODIFIED_AT_FIELD_NUMBER: _builtins.int
+    kind: _builtins.str
+    size: _builtins.int
+    @_builtins.property
+    def modified_at(self) -> _timestamp_pb2.Timestamp: ...
+    def __init__(
+        self,
+        *,
+        kind: _builtins.str = ...,
+        size: _builtins.int | None = ...,
+        modified_at: _timestamp_pb2.Timestamp | None = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _typing.Literal[
+        "_size", b"_size", "modified_at", b"modified_at", "size", b"size"
+    ]
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal[
+        "_size",
+        b"_size",
+        "kind",
+        b"kind",
+        "modified_at",
+        b"modified_at",
+        "size",
+        b"size",
+    ]
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    _WhichOneofReturnType__size: _TypeAlias = _typing.Literal["size"]
+    _WhichOneofArgType__size: _TypeAlias = _typing.Literal["_size", b"_size"]
+    def WhichOneof(
+        self, oneof_group: _WhichOneofArgType__size
+    ) -> _WhichOneofReturnType__size | None: ...
+
+Global___DestinationConflictEvidence: _TypeAlias = DestinationConflictEvidence
 
 @_typing.final
 class RunnerTerminalOpenIntent(_message.Message):
@@ -1043,6 +1147,8 @@ class RunnerTransferResult(_message.Message):
     SHA256_FIELD_NUMBER: _builtins.int
     DESTINATION_COMMITTED_FIELD_NUMBER: _builtins.int
     FAILURE_FIELD_NUMBER: _builtins.int
+    CONFLICT_PRECONDITION_FIELD_NUMBER: _builtins.int
+    DESTINATION_CONFLICT_FIELD_NUMBER: _builtins.int
     operation_id: _builtins.str
     dispatch_id: _builtins.str
     outcome: Global___RunnerTransferOutcome.ValueType
@@ -1050,8 +1156,11 @@ class RunnerTransferResult(_message.Message):
     sha256: _builtins.str
     destination_committed: _builtins.bool
     failure: Global___RunnerTransferFailure.ValueType
+    conflict_precondition: _builtins.bytes
     @_builtins.property
     def identity(self) -> _runtime_runner_transfer_pb2.TransferIdentity: ...
+    @_builtins.property
+    def destination_conflict(self) -> Global___DestinationConflictEvidence: ...
     def __init__(
         self,
         *,
@@ -1063,20 +1172,30 @@ class RunnerTransferResult(_message.Message):
         sha256: _builtins.str | None = ...,
         destination_committed: _builtins.bool | None = ...,
         failure: Global___RunnerTransferFailure.ValueType | None = ...,
+        conflict_precondition: _builtins.bytes | None = ...,
+        destination_conflict: Global___DestinationConflictEvidence | None = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _typing.Literal[
         "_actual_size",
         b"_actual_size",
+        "_conflict_precondition",
+        b"_conflict_precondition",
         "_destination_committed",
         b"_destination_committed",
+        "_destination_conflict",
+        b"_destination_conflict",
         "_failure",
         b"_failure",
         "_sha256",
         b"_sha256",
         "actual_size",
         b"actual_size",
+        "conflict_precondition",
+        b"conflict_precondition",
         "destination_committed",
         b"destination_committed",
+        "destination_conflict",
+        b"destination_conflict",
         "failure",
         b"failure",
         "identity",
@@ -1088,16 +1207,24 @@ class RunnerTransferResult(_message.Message):
     _ClearFieldArgType: _TypeAlias = _typing.Literal[
         "_actual_size",
         b"_actual_size",
+        "_conflict_precondition",
+        b"_conflict_precondition",
         "_destination_committed",
         b"_destination_committed",
+        "_destination_conflict",
+        b"_destination_conflict",
         "_failure",
         b"_failure",
         "_sha256",
         b"_sha256",
         "actual_size",
         b"actual_size",
+        "conflict_precondition",
+        b"conflict_precondition",
         "destination_committed",
         b"destination_committed",
+        "destination_conflict",
+        b"destination_conflict",
         "dispatch_id",
         b"dispatch_id",
         "failure",
@@ -1116,11 +1243,23 @@ class RunnerTransferResult(_message.Message):
     _WhichOneofArgType__actual_size: _TypeAlias = _typing.Literal[
         "_actual_size", b"_actual_size"
     ]
+    _WhichOneofReturnType__conflict_precondition: _TypeAlias = _typing.Literal[
+        "conflict_precondition"
+    ]
+    _WhichOneofArgType__conflict_precondition: _TypeAlias = _typing.Literal[
+        "_conflict_precondition", b"_conflict_precondition"
+    ]
     _WhichOneofReturnType__destination_committed: _TypeAlias = _typing.Literal[
         "destination_committed"
     ]
     _WhichOneofArgType__destination_committed: _TypeAlias = _typing.Literal[
         "_destination_committed", b"_destination_committed"
+    ]
+    _WhichOneofReturnType__destination_conflict: _TypeAlias = _typing.Literal[
+        "destination_conflict"
+    ]
+    _WhichOneofArgType__destination_conflict: _TypeAlias = _typing.Literal[
+        "_destination_conflict", b"_destination_conflict"
     ]
     _WhichOneofReturnType__failure: _TypeAlias = _typing.Literal["failure"]
     _WhichOneofArgType__failure: _TypeAlias = _typing.Literal["_failure", b"_failure"]
@@ -1132,8 +1271,16 @@ class RunnerTransferResult(_message.Message):
     ) -> _WhichOneofReturnType__actual_size | None: ...
     @_typing.overload
     def WhichOneof(
+        self, oneof_group: _WhichOneofArgType__conflict_precondition
+    ) -> _WhichOneofReturnType__conflict_precondition | None: ...
+    @_typing.overload
+    def WhichOneof(
         self, oneof_group: _WhichOneofArgType__destination_committed
     ) -> _WhichOneofReturnType__destination_committed | None: ...
+    @_typing.overload
+    def WhichOneof(
+        self, oneof_group: _WhichOneofArgType__destination_conflict
+    ) -> _WhichOneofReturnType__destination_conflict | None: ...
     @_typing.overload
     def WhichOneof(
         self, oneof_group: _WhichOneofArgType__failure

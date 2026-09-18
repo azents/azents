@@ -421,6 +421,7 @@ class RuntimeToServerTransferService:
                     lease_id=uuid7().hex,
                     runtime_path=request.runtime_path,
                     overwrite=False,
+                    conflict_precondition=None,
                     expected_manifest=CoordinatorExpectedManifest(
                         size=request.expected_size,
                         sha256=request.expected_sha256,

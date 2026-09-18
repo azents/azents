@@ -32,6 +32,21 @@ service RuntimeTransferCoordinator {
       returns (TransferStatusResponse);
 }
 
+service RuntimeWorkspaceUploadCoordinator {
+  rpc CreateWorkspaceUpload(CreateWorkspaceUploadRequest)
+      returns (WorkspaceUploadStatusResponse);
+  rpc IssueWorkspaceUploadTicket(IssueWorkspaceUploadTicketRequest)
+      returns (WorkspaceUploadTicketResponse);
+  rpc FinalizeWorkspaceUpload(FinalizeWorkspaceUploadRequest)
+      returns (WorkspaceUploadStatusResponse);
+  rpc GetWorkspaceUpload(GetWorkspaceUploadRequest)
+      returns (WorkspaceUploadStatusResponse);
+  rpc CancelWorkspaceUpload(CancelWorkspaceUploadRequest)
+      returns (WorkspaceUploadStatusResponse);
+  rpc RetryWorkspaceUpload(RetryWorkspaceUploadRequest)
+      returns (WorkspaceUploadStatusResponse);
+}
+
 enum CoordinatorTransferDirection {
   COORDINATOR_TRANSFER_DIRECTION_UNSPECIFIED = 0;
   COORDINATOR_TRANSFER_DIRECTION_DOWNLOAD = 1;
@@ -69,6 +84,7 @@ enum CoordinatorTransferFailure {
   COORDINATOR_TRANSFER_FAILURE_INTEGRITY = 5;
   COORDINATOR_TRANSFER_FAILURE_STREAM = 6;
   COORDINATOR_TRANSFER_FAILURE_CONSUMER = 7;
+  COORDINATOR_TRANSFER_FAILURE_DESTINATION_CONFLICT = 8;
 }
 
 enum CoordinatorCleanupStatus {
@@ -100,6 +116,34 @@ enum CoordinatorDispatchStatus {
   COORDINATOR_DISPATCH_STATUS_BOUND = 2;
   COORDINATOR_DISPATCH_STATUS_DELIVERABLE = 3;
   COORDINATOR_DISPATCH_STATUS_ENQUEUED = 4;
+}
+
+enum WorkspaceUploadPhase {
+  WORKSPACE_UPLOAD_PHASE_UNSPECIFIED = 0;
+  WORKSPACE_UPLOAD_PHASE_QUEUED = 1;
+  WORKSPACE_UPLOAD_PHASE_UPLOADING = 2;
+  WORKSPACE_UPLOAD_PHASE_MOVING_TO_RUNTIME = 3;
+  WORKSPACE_UPLOAD_PHASE_CONFLICTED = 4;
+  WORKSPACE_UPLOAD_PHASE_RETRYABLE_FAILURE = 5;
+  WORKSPACE_UPLOAD_PHASE_SUCCEEDED = 6;
+  WORKSPACE_UPLOAD_PHASE_CANCELLED = 7;
+  WORKSPACE_UPLOAD_PHASE_FAILED = 8;
+  WORKSPACE_UPLOAD_PHASE_EXPIRED = 9;
+}
+
+enum WorkspaceUploadFailure {
+  WORKSPACE_UPLOAD_FAILURE_UNSPECIFIED = 0;
+  WORKSPACE_UPLOAD_FAILURE_INVALID_REQUEST = 1;
+  WORKSPACE_UPLOAD_FAILURE_AUTHORIZATION = 2;
+  WORKSPACE_UPLOAD_FAILURE_TOO_LARGE = 3;
+  WORKSPACE_UPLOAD_FAILURE_REVISION_CONFLICT = 4;
+  WORKSPACE_UPLOAD_FAILURE_DESTINATION_CONFLICT = 5;
+  WORKSPACE_UPLOAD_FAILURE_RUNTIME_UNAVAILABLE = 6;
+  WORKSPACE_UPLOAD_FAILURE_FENCED = 7;
+  WORKSPACE_UPLOAD_FAILURE_INTEGRITY = 8;
+  WORKSPACE_UPLOAD_FAILURE_TRANSFER = 9;
+  WORKSPACE_UPLOAD_FAILURE_CANCELLED = 10;
+  WORKSPACE_UPLOAD_FAILURE_EXPIRED = 11;
 }
 
 message CoordinatorTransferIdentity {
@@ -143,6 +187,7 @@ message CoordinatorTransferStatus {
   CoordinatorCleanupStatus cleanup_status = 13;
   bool cancellation_requested = 14;
   CoordinatorPreparationCleanupState preparation_cleanup_state = 15;
+  optional DestinationEvidence destination_conflict = 16;
 }
 
 message AdmitTransferRequest {
@@ -156,6 +201,7 @@ message AdmitTransferRequest {
   google.protobuf.Timestamp deadline_at = 8;
   google.protobuf.Timestamp source_expires_at = 9;
   string resource_class = 10;
+  optional bytes conflict_precondition = 11;
 }
 
 message AdmitTransferResponse {
@@ -258,4 +304,103 @@ message GetTransferStatusRequest {
 
 message TransferStatusResponse {
   CoordinatorTransferStatus status = 1;
+}
+
+message WorkspaceUploadIdentity {
+  string upload_id = 1;
+  string requester_user_id = 2;
+  string workspace_id = 3;
+  string agent_id = 4;
+  string runtime_id = 5;
+  uint64 desired_generation = 6;
+  optional string session_id = 7;
+}
+
+message DestinationEvidence {
+  string kind = 1;
+  optional uint64 size = 2;
+  google.protobuf.Timestamp modified_at = 3;
+  optional bytes conflict_precondition = 4;
+}
+
+message WorkspaceUploadStatus {
+  WorkspaceUploadIdentity identity = 1;
+  uint64 revision = 2;
+  string destination_directory = 3;
+  string filename = 4;
+  string destination_path = 5;
+  uint64 expected_size = 6;
+  uint64 received_size = 7;
+  optional uint64 actual_size = 8;
+  optional string sha256 = 9;
+  optional string media_type = 10;
+  reserved 11;
+  WorkspaceUploadPhase phase = 12;
+  uint64 current_delivery_number = 13;
+  optional CoordinatorTransferOutcome outcome = 14;
+  optional WorkspaceUploadFailure failure = 15;
+  bool retry_available = 16;
+  bool cancel_available = 17;
+  bool overwrite_available = 18;
+  optional DestinationEvidence destination_evidence = 19;
+}
+
+message CreateWorkspaceUploadRequest {
+  WorkspaceUploadIdentity identity = 1;
+  string destination_directory = 2;
+  string filename = 3;
+  string destination_path = 4;
+  uint64 expected_size = 5;
+  optional string media_type = 6;
+  google.protobuf.Timestamp deadline_at = 7;
+  string expected_sha256 = 8;
+}
+
+message WorkspaceUploadHeader {
+  string name = 1;
+  string value = 2;
+}
+
+message WorkspaceUploadTicket {
+  string method = 1;
+  string url = 2;
+  google.protobuf.Timestamp expires_at = 3;
+  repeated WorkspaceUploadHeader headers = 4;
+}
+
+message IssueWorkspaceUploadTicketRequest {
+  WorkspaceUploadIdentity identity = 1;
+  uint64 expected_revision = 2;
+}
+
+message WorkspaceUploadTicketResponse {
+  WorkspaceUploadStatus status = 1;
+  WorkspaceUploadTicket ticket = 2;
+}
+
+message FinalizeWorkspaceUploadRequest {
+  WorkspaceUploadIdentity identity = 1;
+  uint64 expected_revision = 2;
+}
+
+message GetWorkspaceUploadRequest {
+  WorkspaceUploadIdentity identity = 1;
+}
+
+message CancelWorkspaceUploadRequest {
+  WorkspaceUploadIdentity identity = 1;
+  uint64 expected_revision = 2;
+  uint64 current_delivery_number = 3;
+}
+
+message RetryWorkspaceUploadRequest {
+  WorkspaceUploadIdentity identity = 1;
+  uint64 expected_revision = 2;
+  uint64 current_delivery_number = 3;
+  bool overwrite = 4;
+  optional bytes conflict_precondition = 5;
+}
+
+message WorkspaceUploadStatusResponse {
+  WorkspaceUploadStatus status = 1;
 }

@@ -1,6 +1,7 @@
 """Tests for bounded S3 transfer operations."""
 
 import asyncio
+import base64
 import hashlib
 from dataclasses import dataclass
 from typing import cast
@@ -102,12 +103,17 @@ class _FakeS3Client:
         self.delete_calls: list[str] = []
         self.list_calls: list[str | None] = []
         self.list_snapshot: list[str] | None = None
+        self.head_requests: list[dict[str, object]] = []
         self.fail_complete = False
         self.fail_abort = False
         self.complete_then_raise = False
         self.block_complete = False
         self.complete_started = asyncio.Event()
         self.complete_release = asyncio.Event()
+        self.block_ambiguous_completion = False
+        self.ambiguous_completion_started = asyncio.Event()
+        self.ambiguous_completion_release = asyncio.Event()
+        self.complete_requests: list[dict[str, object]] = []
         self.fail_upload_part_number: int | None = None
         self.missing_upload_part_etag = False
         self.head_error_code: str | None = None
@@ -116,10 +122,41 @@ class _FakeS3Client:
         self.failed_delete_keys: set[str] = set()
         self.replace_before_delete: _StoredObject | None = None
         self.replace_destination_before_part_copy: _StoredObject | None = None
+        self.insert_destination_before_complete: _StoredObject | None = None
         self.next_upload_id = 1
+        self.head_bucket_calls: list[dict[str, object]] = []
+        self.cors_rules: list[dict[str, object]] = [
+            {
+                "AllowedOrigins": ["http://localhost:3000"],
+                "AllowedMethods": ["PUT"],
+                "AllowedHeaders": ["content-type", "x-amz-checksum-sha256"],
+            }
+        ]
+        self.presigned_requests: list[dict[str, object]] = []
+
+    async def head_bucket(self, **arguments: object) -> dict[str, object]:
+        """Record one bucket reachability check."""
+        self.head_bucket_calls.append(dict(arguments))
+        return {}
+
+    async def get_bucket_cors(self, **arguments: object) -> dict[str, object]:
+        """Return the configured bucket CORS rules."""
+        del arguments
+        return {"CORSRules": list(self.cors_rules)}
+
+    async def generate_presigned_url(self, **arguments: object) -> str:
+        """Return one deterministic fake presigned URL."""
+        self.presigned_requests.append(dict(arguments))
+        params = arguments.get("Params")
+        if not isinstance(params, dict):
+            raise AssertionError("presigned request parameters are required")
+        bucket = _string_argument(cast(dict[str, object], params), "Bucket")
+        key = _string_argument(cast(dict[str, object], params), "Key")
+        return f"https://objects.example.test/{bucket}/{key}"
 
     async def head_object(self, **arguments: object) -> dict[str, object]:
         """Return one object HEAD response."""
+        self.head_requests.append(dict(arguments))
         if self.head_error_code is not None:
             raise _client_error(self.head_error_code)
         bucket = _string_argument(arguments, "Bucket")
@@ -155,12 +192,9 @@ class _FakeS3Client:
             _string_argument(arguments, "Key"),
         )
         existing = self.objects.get(destination)
-        if arguments.get("IfNoneMatch") == "*" and existing is not None:
-            raise _client_error("PreconditionFailed")
-        if (
-            existing is not None
-            and "azents-transfer-reservation" not in existing.metadata
-        ):
+        if "IfNoneMatch" in arguments:
+            raise AssertionError("CopyObject does not support destination IfNoneMatch")
+        if existing is not None:
             raise _client_error("AlreadyExists")
         copy_source = _object_argument(arguments, "CopySource")
         source = (
@@ -182,7 +216,11 @@ class _FakeS3Client:
         if self.block_copy:
             self.copy_started.set()
             await self.copy_release.wait()
-        metadata = _string_mapping_argument(arguments, "Metadata")
+        metadata = (
+            _string_mapping_argument(arguments, "Metadata")
+            if "Metadata" in arguments
+            else dict(source_object.metadata)
+        )
         content_type = _optional_string_argument(arguments, "ContentType")
         self.objects[destination] = _StoredObject(
             body=source_object.body,
@@ -261,6 +299,7 @@ class _FakeS3Client:
 
     async def complete_multipart_upload(self, **arguments: object) -> dict[str, object]:
         """Complete one fake multipart upload or fail deterministically."""
+        self.complete_requests.append(dict(arguments))
         if self.block_complete:
             self.complete_started.set()
             await self.complete_release.wait()
@@ -270,6 +309,9 @@ class _FakeS3Client:
         upload = self.uploads[upload_id]
         bucket = _string_value(upload, "bucket")
         key = _string_value(upload, "key")
+        if self.insert_destination_before_complete is not None:
+            self.objects[(bucket, key)] = self.insert_destination_before_complete
+            self.insert_destination_before_complete = None
         if arguments.get("IfNoneMatch") == "*" and (bucket, key) in self.objects:
             raise _client_error("PreconditionFailed")
         self.uploads.pop(upload_id)
@@ -279,6 +321,9 @@ class _FakeS3Client:
             content_type=_optional_string_value(upload, "content_type"),
         )
         if self.complete_then_raise:
+            if self.block_ambiguous_completion:
+                self.ambiguous_completion_started.set()
+                await self.ambiguous_completion_release.wait()
             raise RuntimeError("ambiguous completion")
         return {}
 
@@ -299,10 +344,14 @@ class _FakeS3Client:
         )
         if arguments.get("IfNoneMatch") == "*" and identity in self.objects:
             raise _client_error("PreconditionFailed")
+        checksum_sha256 = arguments.get("ChecksumSHA256")
+        if checksum_sha256 is not None and not isinstance(checksum_sha256, str):
+            raise AssertionError("ChecksumSHA256 must be a string")
         self.objects[identity] = _StoredObject(
             body=_bytes_argument(arguments, "Body"),
             metadata=_string_mapping_argument(arguments, "Metadata"),
             content_type=_optional_string_argument(arguments, "ContentType"),
+            checksum_sha256=checksum_sha256,
         )
         return {}
 
@@ -487,6 +536,68 @@ def _sha256(value: bytes) -> str:
 
 
 @pytest.mark.asyncio
+async def test_workspace_upload_readiness_proves_public_endpoint_and_cors() -> None:
+    """Readiness checks signing, public reachability, checksum HEAD, and copy."""
+    client = _FakeS3Client()
+    service = _service(client)
+
+    await service.validate_workspace_upload_readiness(
+        bucket="bucket",
+        cors_origins=("http://localhost:3000",),
+        probe_prefix="v1/workspace-upload-readiness",
+    )
+
+    assert client.head_bucket_calls == [{"Bucket": "bucket"}]
+    assert [request["ClientMethod"] for request in client.presigned_requests] == [
+        "put_object",
+        "get_object",
+    ]
+    assert client.objects == {}
+    assert any(
+        request.get("ChecksumMode") == "ENABLED" for request in client.head_requests
+    )
+
+
+@pytest.mark.asyncio
+async def test_workspace_upload_readiness_fails_on_public_endpoint() -> None:
+    """A signing endpoint that cannot read the probe fails closed."""
+    internal = _FakeS3Client()
+    public = _FakeS3Client()
+    service = _service(internal)
+    service.public_s3_client = public
+
+    with pytest.raises(RuntimeError, match="reachable public S3 endpoint"):
+        await service.validate_workspace_upload_readiness(
+            bucket="bucket",
+            cors_origins=("http://localhost:3000",),
+            probe_prefix="v1/workspace-upload-readiness",
+        )
+
+    assert internal.objects == {}
+
+
+@pytest.mark.asyncio
+async def test_workspace_upload_readiness_rejects_wildcard_cors() -> None:
+    """Wildcard CORS cannot authorize the exact signed browser headers."""
+    client = _FakeS3Client()
+    client.cors_rules = [
+        {
+            "AllowedOrigins": ["*"],
+            "AllowedMethods": ["PUT"],
+            "AllowedHeaders": ["*"],
+        }
+    ]
+    service = _service(client)
+
+    with pytest.raises(RuntimeError, match="exact bucket CORS"):
+        await service.validate_workspace_upload_readiness(
+            bucket="bucket",
+            cors_origins=("http://localhost:3000",),
+            probe_prefix="v1/workspace-upload-readiness",
+        )
+
+
+@pytest.mark.asyncio
 async def test_bounded_iteration_closes_response_after_early_exit() -> None:
     """A bounded iterator closes its body even when the consumer exits early."""
     client = _FakeS3Client()
@@ -565,6 +676,52 @@ async def test_head_propagates_unexpected_storage_error() -> None:
 
 
 @pytest.mark.asyncio
+async def test_head_does_not_request_checksum_mode_by_default() -> None:
+    """Existing HEAD callers keep the provider's default checksum behavior."""
+    client = _FakeS3Client()
+    client.objects[("bucket", "source")] = _StoredObject(
+        b"ordinary metadata",
+        {},
+        "application/octet-stream",
+    )
+    service = _service(client)
+
+    metadata = await service.head(S3ObjectIdentity(bucket="bucket", key="source"))
+
+    assert metadata is not None
+    assert client.head_requests == [{"Bucket": "bucket", "Key": "source"}]
+
+
+@pytest.mark.asyncio
+async def test_head_with_checksum_enables_checksum_mode_and_parses_checksum() -> None:
+    """Checksum-aware HEAD requests provider evidence explicitly."""
+    client = _FakeS3Client()
+    body = b"checksum evidence"
+    checksum = base64.b64encode(hashlib.sha256(body).digest()).decode("ascii")
+    client.objects[("bucket", "source")] = _StoredObject(
+        body,
+        {},
+        "application/octet-stream",
+        checksum,
+    )
+    service = _service(client)
+
+    metadata = await service.head_with_checksum(
+        S3ObjectIdentity(bucket="bucket", key="source")
+    )
+
+    assert metadata is not None
+    assert metadata.checksum_sha256 == checksum
+    assert client.head_requests == [
+        {
+            "Bucket": "bucket",
+            "Key": "source",
+            "ChecksumMode": "ENABLED",
+        }
+    ]
+
+
+@pytest.mark.asyncio
 async def test_product_publication_native_copy_fences_source_and_verifies_final() -> (
     None
 ):
@@ -598,23 +755,19 @@ async def test_product_publication_native_copy_fences_source_and_verifies_final(
     assert final.metadata.content_type == "text/plain"
     assert final.created is True
     assert client.bodies == []
-    assert client.copy_requests == [
+    assert client.copy_requests == []
+    assert client.complete_requests == [
         {
             "Bucket": "workspace-bucket",
             "Key": "final-product",
-            "CopySource": {
-                "Bucket": "transfer-bucket",
-                "Key": "verified-source",
+            "UploadId": "upload-1",
+            "MultipartUpload": {
+                "Parts": [
+                    {"PartNumber": 1, "ETag": "copy-etag-1"},
+                ]
             },
-            "CopySourceIfMatch": f'"{digest}"',
             "IfNoneMatch": "*",
-            "MetadataDirective": "REPLACE",
-            "Metadata": {
-                "azents-product-publication-sha256": digest,
-                "azents-product-publication-id": "exchange-file-id",
-            },
-            "ContentType": "text/plain",
-        }
+        },
     ]
 
 
@@ -690,6 +843,98 @@ async def test_product_publication_adopts_exact_existing_final_key() -> None:
 
 
 @pytest.mark.asyncio
+async def test_product_publication_completion_race_preserves_winner() -> None:
+    """A concurrent product publisher cannot be overwritten after the preflight."""
+    body = b"verified transfer bytes"
+    digest = _sha256(body)
+    source = S3ObjectIdentity(bucket="bucket", key="source")
+    destination = S3ObjectIdentity(bucket="bucket", key="final-product")
+    publication = S3ProductPublicationMetadata(
+        sha256=digest,
+        content_type="text/plain",
+        publication_id="artifact-id",
+    )
+    winner = _StoredObject(b"winner", {"owner": "other"}, "text/plain")
+    client = _FakeS3Client()
+    client.objects[(source.bucket, source.key)] = _StoredObject(
+        body,
+        {"azents-transfer-sha256": digest},
+        None,
+    )
+    client.insert_destination_before_complete = winner
+
+    with pytest.raises(ValueError, match="product object"):
+        await _service(client).copy_verified_transfer_object_to_product(
+            source=source,
+            destination=destination,
+            expected_size=len(body),
+            publication_metadata=publication,
+        )
+
+    assert client.objects[(destination.bucket, destination.key)] == winner
+    assert client.abort_calls == ["upload-1"]
+    assert client.complete_requests[0]["IfNoneMatch"] == "*"
+    assert client.delete_calls == []
+
+
+@pytest.mark.asyncio
+async def test_product_publication_ambiguous_completion_preserves_adopted_winner() -> (
+    None
+):
+    """An adopted product object survives an ambiguous completion failure."""
+    body = b"verified transfer bytes"
+    digest = _sha256(body)
+    source = S3ObjectIdentity(bucket="bucket", key="source")
+    destination = S3ObjectIdentity(bucket="bucket", key="final-product")
+    publication = S3ProductPublicationMetadata(
+        sha256=digest,
+        content_type="text/plain",
+        publication_id="artifact-id",
+    )
+    client = _FakeS3Client()
+    client.objects[(source.bucket, source.key)] = _StoredObject(
+        body,
+        {"azents-transfer-sha256": digest},
+        None,
+    )
+    client.complete_then_raise = True
+    client.block_ambiguous_completion = True
+    service = _service(client)
+
+    publication_task = asyncio.create_task(
+        service.copy_verified_transfer_object_to_product(
+            source=source,
+            destination=destination,
+            expected_size=len(body),
+            publication_metadata=publication,
+        )
+    )
+    await client.ambiguous_completion_started.wait()
+
+    adopted = await service.copy_verified_transfer_object_to_product(
+        source=source,
+        destination=destination,
+        expected_size=len(body),
+        publication_metadata=publication,
+    )
+    assert adopted.created is False
+
+    client.ambiguous_completion_release.set()
+    with pytest.raises(RuntimeError, match="ambiguous completion"):
+        await publication_task
+
+    assert client.objects[(destination.bucket, destination.key)] == _StoredObject(
+        body,
+        {
+            "azents-product-publication-sha256": digest,
+            "azents-product-publication-id": "artifact-id",
+        },
+        "text/plain",
+    )
+    assert client.delete_calls == []
+
+
+@pytest.mark.asyncio
 async def test_product_publication_fails_closed_when_verified_source_changes() -> None:
     """The final copy cannot use a source changed after transfer verification."""
     original = b"verified transfer bytes"
@@ -702,7 +947,7 @@ async def test_product_publication_fails_closed_when_verified_source_changes() -
         {"azents-transfer-sha256": digest},
         None,
     )
-    client.mutate_source_before_copy = b"changed transfer bytes!"
+    client.mutate_source_before_part_copy = b"changed transfer bytes!"
 
     with pytest.raises(ClientError):
         await _service(client).copy_verified_transfer_object_to_product(

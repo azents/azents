@@ -893,6 +893,7 @@ async def test_terminal_authority_canonicalizes_elapsed_deadline() -> None:
         outcome=RuntimeTransferOutcome.FAILED,
         failure=RuntimeTransferFailure.STREAM,
         cleanup_completed=False,
+        destination_conflict=None,
     )
 
     assert terminal is not None
@@ -912,6 +913,7 @@ def _admission() -> RuntimeTransferAdmission:
         agent_id="agent-1",
         runtime_path="/workspace/file.txt",
         overwrite=False,
+        conflict_precondition=None,
         expected_size=3,
         expected_sha256="a" * 64,
         product_maximum_size=10,

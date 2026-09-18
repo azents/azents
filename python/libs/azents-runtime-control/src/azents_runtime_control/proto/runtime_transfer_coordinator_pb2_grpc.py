@@ -765,3 +765,319 @@ class RuntimeTransferCoordinator:
             metadata,
             _registered_method=True,
         )
+
+
+class RuntimeWorkspaceUploadCoordinatorStub:
+    """Missing associated documentation comment in .proto file."""
+
+    def __init__(self, channel):
+        """Constructor.
+
+        Args:
+            channel: A grpc.Channel.
+        """
+        self.CreateWorkspaceUpload = channel.unary_unary(
+            "/azents.runtime_control.v1.RuntimeWorkspaceUploadCoordinator/CreateWorkspaceUpload",
+            request_serializer=runtime__transfer__coordinator__pb2.CreateWorkspaceUploadRequest.SerializeToString,
+            response_deserializer=runtime__transfer__coordinator__pb2.WorkspaceUploadStatusResponse.FromString,
+            _registered_method=True,
+        )
+        self.IssueWorkspaceUploadTicket = channel.unary_unary(
+            "/azents.runtime_control.v1.RuntimeWorkspaceUploadCoordinator/IssueWorkspaceUploadTicket",
+            request_serializer=runtime__transfer__coordinator__pb2.IssueWorkspaceUploadTicketRequest.SerializeToString,
+            response_deserializer=runtime__transfer__coordinator__pb2.WorkspaceUploadTicketResponse.FromString,
+            _registered_method=True,
+        )
+        self.FinalizeWorkspaceUpload = channel.unary_unary(
+            "/azents.runtime_control.v1.RuntimeWorkspaceUploadCoordinator/FinalizeWorkspaceUpload",
+            request_serializer=runtime__transfer__coordinator__pb2.FinalizeWorkspaceUploadRequest.SerializeToString,
+            response_deserializer=runtime__transfer__coordinator__pb2.WorkspaceUploadStatusResponse.FromString,
+            _registered_method=True,
+        )
+        self.GetWorkspaceUpload = channel.unary_unary(
+            "/azents.runtime_control.v1.RuntimeWorkspaceUploadCoordinator/GetWorkspaceUpload",
+            request_serializer=runtime__transfer__coordinator__pb2.GetWorkspaceUploadRequest.SerializeToString,
+            response_deserializer=runtime__transfer__coordinator__pb2.WorkspaceUploadStatusResponse.FromString,
+            _registered_method=True,
+        )
+        self.CancelWorkspaceUpload = channel.unary_unary(
+            "/azents.runtime_control.v1.RuntimeWorkspaceUploadCoordinator/CancelWorkspaceUpload",
+            request_serializer=runtime__transfer__coordinator__pb2.CancelWorkspaceUploadRequest.SerializeToString,
+            response_deserializer=runtime__transfer__coordinator__pb2.WorkspaceUploadStatusResponse.FromString,
+            _registered_method=True,
+        )
+        self.RetryWorkspaceUpload = channel.unary_unary(
+            "/azents.runtime_control.v1.RuntimeWorkspaceUploadCoordinator/RetryWorkspaceUpload",
+            request_serializer=runtime__transfer__coordinator__pb2.RetryWorkspaceUploadRequest.SerializeToString,
+            response_deserializer=runtime__transfer__coordinator__pb2.WorkspaceUploadStatusResponse.FromString,
+            _registered_method=True,
+        )
+
+
+class RuntimeWorkspaceUploadCoordinatorServicer:
+    """Missing associated documentation comment in .proto file."""
+
+    def CreateWorkspaceUpload(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details("Method not implemented!")
+        raise NotImplementedError("Method not implemented!")
+
+    def IssueWorkspaceUploadTicket(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details("Method not implemented!")
+        raise NotImplementedError("Method not implemented!")
+
+    def FinalizeWorkspaceUpload(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details("Method not implemented!")
+        raise NotImplementedError("Method not implemented!")
+
+    def GetWorkspaceUpload(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details("Method not implemented!")
+        raise NotImplementedError("Method not implemented!")
+
+    def CancelWorkspaceUpload(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details("Method not implemented!")
+        raise NotImplementedError("Method not implemented!")
+
+    def RetryWorkspaceUpload(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details("Method not implemented!")
+        raise NotImplementedError("Method not implemented!")
+
+
+def add_RuntimeWorkspaceUploadCoordinatorServicer_to_server(servicer, server):
+    rpc_method_handlers = {
+        "CreateWorkspaceUpload": grpc.unary_unary_rpc_method_handler(
+            servicer.CreateWorkspaceUpload,
+            request_deserializer=runtime__transfer__coordinator__pb2.CreateWorkspaceUploadRequest.FromString,
+            response_serializer=runtime__transfer__coordinator__pb2.WorkspaceUploadStatusResponse.SerializeToString,
+        ),
+        "IssueWorkspaceUploadTicket": grpc.unary_unary_rpc_method_handler(
+            servicer.IssueWorkspaceUploadTicket,
+            request_deserializer=runtime__transfer__coordinator__pb2.IssueWorkspaceUploadTicketRequest.FromString,
+            response_serializer=runtime__transfer__coordinator__pb2.WorkspaceUploadTicketResponse.SerializeToString,
+        ),
+        "FinalizeWorkspaceUpload": grpc.unary_unary_rpc_method_handler(
+            servicer.FinalizeWorkspaceUpload,
+            request_deserializer=runtime__transfer__coordinator__pb2.FinalizeWorkspaceUploadRequest.FromString,
+            response_serializer=runtime__transfer__coordinator__pb2.WorkspaceUploadStatusResponse.SerializeToString,
+        ),
+        "GetWorkspaceUpload": grpc.unary_unary_rpc_method_handler(
+            servicer.GetWorkspaceUpload,
+            request_deserializer=runtime__transfer__coordinator__pb2.GetWorkspaceUploadRequest.FromString,
+            response_serializer=runtime__transfer__coordinator__pb2.WorkspaceUploadStatusResponse.SerializeToString,
+        ),
+        "CancelWorkspaceUpload": grpc.unary_unary_rpc_method_handler(
+            servicer.CancelWorkspaceUpload,
+            request_deserializer=runtime__transfer__coordinator__pb2.CancelWorkspaceUploadRequest.FromString,
+            response_serializer=runtime__transfer__coordinator__pb2.WorkspaceUploadStatusResponse.SerializeToString,
+        ),
+        "RetryWorkspaceUpload": grpc.unary_unary_rpc_method_handler(
+            servicer.RetryWorkspaceUpload,
+            request_deserializer=runtime__transfer__coordinator__pb2.RetryWorkspaceUploadRequest.FromString,
+            response_serializer=runtime__transfer__coordinator__pb2.WorkspaceUploadStatusResponse.SerializeToString,
+        ),
+    }
+    generic_handler = grpc.method_handlers_generic_handler(
+        "azents.runtime_control.v1.RuntimeWorkspaceUploadCoordinator",
+        rpc_method_handlers,
+    )
+    server.add_generic_rpc_handlers((generic_handler,))
+    server.add_registered_method_handlers(
+        "azents.runtime_control.v1.RuntimeWorkspaceUploadCoordinator",
+        rpc_method_handlers,
+    )
+
+
+# This class is part of an EXPERIMENTAL API.
+class RuntimeWorkspaceUploadCoordinator:
+    """Missing associated documentation comment in .proto file."""
+
+    @staticmethod
+    def CreateWorkspaceUpload(
+        request,
+        target,
+        options=(),
+        channel_credentials=None,
+        call_credentials=None,
+        insecure=False,
+        compression=None,
+        wait_for_ready=None,
+        timeout=None,
+        metadata=None,
+    ):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            "/azents.runtime_control.v1.RuntimeWorkspaceUploadCoordinator/CreateWorkspaceUpload",
+            runtime__transfer__coordinator__pb2.CreateWorkspaceUploadRequest.SerializeToString,
+            runtime__transfer__coordinator__pb2.WorkspaceUploadStatusResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True,
+        )
+
+    @staticmethod
+    def IssueWorkspaceUploadTicket(
+        request,
+        target,
+        options=(),
+        channel_credentials=None,
+        call_credentials=None,
+        insecure=False,
+        compression=None,
+        wait_for_ready=None,
+        timeout=None,
+        metadata=None,
+    ):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            "/azents.runtime_control.v1.RuntimeWorkspaceUploadCoordinator/IssueWorkspaceUploadTicket",
+            runtime__transfer__coordinator__pb2.IssueWorkspaceUploadTicketRequest.SerializeToString,
+            runtime__transfer__coordinator__pb2.WorkspaceUploadTicketResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True,
+        )
+
+    @staticmethod
+    def FinalizeWorkspaceUpload(
+        request,
+        target,
+        options=(),
+        channel_credentials=None,
+        call_credentials=None,
+        insecure=False,
+        compression=None,
+        wait_for_ready=None,
+        timeout=None,
+        metadata=None,
+    ):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            "/azents.runtime_control.v1.RuntimeWorkspaceUploadCoordinator/FinalizeWorkspaceUpload",
+            runtime__transfer__coordinator__pb2.FinalizeWorkspaceUploadRequest.SerializeToString,
+            runtime__transfer__coordinator__pb2.WorkspaceUploadStatusResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True,
+        )
+
+    @staticmethod
+    def GetWorkspaceUpload(
+        request,
+        target,
+        options=(),
+        channel_credentials=None,
+        call_credentials=None,
+        insecure=False,
+        compression=None,
+        wait_for_ready=None,
+        timeout=None,
+        metadata=None,
+    ):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            "/azents.runtime_control.v1.RuntimeWorkspaceUploadCoordinator/GetWorkspaceUpload",
+            runtime__transfer__coordinator__pb2.GetWorkspaceUploadRequest.SerializeToString,
+            runtime__transfer__coordinator__pb2.WorkspaceUploadStatusResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True,
+        )
+
+    @staticmethod
+    def CancelWorkspaceUpload(
+        request,
+        target,
+        options=(),
+        channel_credentials=None,
+        call_credentials=None,
+        insecure=False,
+        compression=None,
+        wait_for_ready=None,
+        timeout=None,
+        metadata=None,
+    ):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            "/azents.runtime_control.v1.RuntimeWorkspaceUploadCoordinator/CancelWorkspaceUpload",
+            runtime__transfer__coordinator__pb2.CancelWorkspaceUploadRequest.SerializeToString,
+            runtime__transfer__coordinator__pb2.WorkspaceUploadStatusResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True,
+        )
+
+    @staticmethod
+    def RetryWorkspaceUpload(
+        request,
+        target,
+        options=(),
+        channel_credentials=None,
+        call_credentials=None,
+        insecure=False,
+        compression=None,
+        wait_for_ready=None,
+        timeout=None,
+        metadata=None,
+    ):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            "/azents.runtime_control.v1.RuntimeWorkspaceUploadCoordinator/RetryWorkspaceUpload",
+            runtime__transfer__coordinator__pb2.RetryWorkspaceUploadRequest.SerializeToString,
+            runtime__transfer__coordinator__pb2.WorkspaceUploadStatusResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True,
+        )

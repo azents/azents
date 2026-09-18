@@ -80,7 +80,7 @@ code_paths:
   - testenv/azents/e2e/src/tests/web/public/test_runtime_web_gateway.py
   - infra/charts/azents/**
 last_verified_at: 2026-09-17
-spec_version: 88
+spec_version: 89
 ---
 
 # Agent Runtime Control
@@ -349,28 +349,37 @@ Control-owned immutable attempt object to the Runner and ends with the verified 
 count and SHA-256. `UploadTransfer` accepts an open frame, ordered bounded raw frames,
 and one completion frame. Control streams the frames into its attempt object, verifies
 the actual byte count and SHA-256, and only then makes the object available to a trusted
-consumer.
+consumer. Workspace Upload additionally exposes `ClaimDirectObjectDownload`: an exact
+attempt claim returns a transient read capability for the verified Workspace source,
+without placing its URL in the Runner Control intent or durable transfer state.
 
 The Runner receives only transfer/attempt identity, direction, Runtime path, expected
-manifest, deadline, operation correlation, and generation-scoped dispatch authority.
-It never receives object-store credentials, bucket or object identity, presigned URLs,
-provider upload URLs, opaque trusted-service handles, or storage topology. Runtime
-Control is the only component that streams between the Runner data RPC and the object
-store; it uses bounded incremental I/O and does not buffer a complete file.
+manifest, deadline, operation correlation, and generation-scoped dispatch authority in
+the ordinary intent. For the direct Workspace Upload transport, the authenticated claim
+RPC returns a short-lived presigned GET URL and bounded non-secret headers only after
+revalidating the exact attempt and current Runner generation. The URL is retained only
+by the active Runner HTTP client; credentials, bucket listing authority, writable
+object authority, and reusable storage handles are never given to the Runner. Runtime
+Control remains the byte relay only for the existing transfer-object gRPC paths; direct
+Workspace downloads stream from the configured S3-compatible endpoint into the Runner's
+local staging file.
 
 Each attempt is admitted before any bytes move and is fenced by Runtime desired
 generation, accepted Runner generation, dispatch ID, deadline, and state revision.
 Ordered offsets, maximum sizes, expected and actual manifests, cancellation, and
 terminal state are checked at the Control boundary. A malformed, stale, duplicate, or
-cross-attempt frame fails that attempt without exposing another object. Ordinary Runner
-control operations remain independently available while a transfer stream is active.
+cross-attempt frame fails that attempt without exposing another object. A direct
+Workspace claim is idempotent only for the same active attempt, dispatch, Runner
+generation, claim identity, and owner; repeated claims renew the bounded stream lease
+while the HTTP body is active. Ordinary Runner control operations remain independently
+available while a transfer stream is active.
 
-For downloads, the Runner writes to a randomly named temporary file in the destination
-directory and commits the requested destination only after complete verification. An
-admitted overwrite atomically replaces the destination; failed and cancelled attempts
-remove their temporary file and leave the prior destination unchanged. This transfer
-integrity does not require root, fixed Linux identities, Provider-created staging, or
-elevated Runner capabilities. For
+For downloads, including direct Workspace downloads, the Runner writes to a randomly
+named temporary file in the destination directory and commits the requested destination
+only after complete verification. An admitted overwrite atomically replaces the
+destination; failed and cancelled attempts remove their temporary file and leave the
+prior destination unchanged. This transfer integrity does not require root, fixed Linux
+identities, Provider-created staging, or elevated Runner capabilities. For
 uploads, the Runner snapshots one authorized source before opening the transfer and
 reports its independently calculated manifest. A terminal transfer result is accepted
 only for the current dispatch and cannot be replaced by a late result.
@@ -408,8 +417,10 @@ count; successful cleanup clears the evidence and marks cleanup complete. The
 Memory and Redis stores enforce the same invariant. Redis transfer record schema
 changes use the existing coordinated cutover and do not add a compatibility
 reader or relational transfer entity. The current cutover uses the
-`azents:runtime:transfer:v2` namespace and record schema version 9; accepted Runner
-connection generations are canonical fixed-width decimal strings.
+`azents:runtime:transfer:v2` namespace and record schema version 11; accepted Runner
+connection generations are canonical fixed-width decimal strings. Direct-object
+admissions persist their source transport and opaque source handle in the exact Redis
+codec; URLs and provider credentials remain transient.
 
 The handling boundary for each failed cleanup attempt emits one structured
 warning with origin traceback frames, a static replacement exception message,
@@ -1090,6 +1101,10 @@ Live/provider evidence belongs in the testenv prerequisite system and must redac
 
 ## Changelog
 
+- **2026-09-17 (spec_version=89)** — Added Workspace Upload's direct S3-compatible
+  Runner download path: exact authenticated source claims, transient presigned GET
+  capabilities, same-claim lease renewal, and direct HTTP staging while retaining the
+  existing gRPC byte transport for other Runtime Transfer consumers.
 - **2026-09-17 (spec_version=88)** — Added the response-scoped Runtime-to-server
   consumer lifecycle used by Workspace HTTP downloads: bounded verified object
   iteration, lease renewal through response consumption, exact-EOF/final-send

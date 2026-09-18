@@ -368,6 +368,9 @@ runtimeProviderKubernetes:
     enabled: true
     allowedCidrs: []
     extraEgress: []
+    # Exact public object-storage endpoint routes for Workspace Upload.
+    # Each CIDR must be a /32 or /128 host route for strict-mode host mapping.
+    platformTransferEgress: []
     deniedCidrs:
       - 10.0.0.0/8
       - 100.64.0.0/10
@@ -404,7 +407,10 @@ objectStorage:
   mode: external
   external:
     endpoint: ""
+    # Browser- and Runner-reachable endpoint required when Runtime Control is enabled.
     publicEndpoint: ""
+    # Exact Main Web origins allowed by the private bucket CORS policy.
+    corsOrigins: []
     bucket: REPLACE_ME
     credentialMode: existingSecret
     accessKeyIdKey: access-key-id

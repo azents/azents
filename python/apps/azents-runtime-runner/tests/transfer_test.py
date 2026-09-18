@@ -1,18 +1,23 @@
 """Runtime Runner transfer manager and filesystem safety tests."""
 
 import asyncio
+import contextlib
 import dataclasses
 import errno
 import hashlib
 import os
 import threading
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable, Mapping
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import cast
 
 import grpc
 import pytest
+from aiohttp import web
+from aiohttp.test_utils import TestServer
 from azents_runtime_control.grpc_runner_transfer_client import (
+    RunnerDirectObjectTicket,
     RunnerDownloadChunk,
     RunnerDownloadComplete,
     RunnerUploadComplete,
@@ -27,6 +32,7 @@ from azents_runtime_control.runner_transfer import (
     RunnerTransferIntent,
     RunnerTransferOutcome,
     RunnerTransferResult,
+    RunnerTransferSourceTransport,
 )
 from azents_runtime_control.transfer import (
     RUNNER_TRANSFER_CAPABILITY,
@@ -105,6 +111,17 @@ class _Transfer:
         for frame in self.frames:
             yield frame
 
+    async def claim_direct_object(
+        self,
+        identity: RunnerTransferIdentity,
+        *,
+        dispatch_id: str,
+        claim_id: str,
+        timeout: float,
+    ) -> RunnerDirectObjectTicket:
+        del identity, dispatch_id, claim_id, timeout
+        raise AssertionError("direct object claim is not configured")
+
     async def upload(
         self,
         identity: RunnerTransferIdentity,
@@ -123,6 +140,27 @@ class _Transfer:
         return RunnerUploadResult(actual_size=actual_size, sha256=digest.hexdigest())
 
 
+class _DirectTransfer(_Transfer):
+    def __init__(self, ticket: RunnerDirectObjectTicket) -> None:
+        super().__init__()
+        self.ticket = ticket
+        self.claim_calls = 0
+        self.claim_arguments: tuple[str, str] | None = None
+
+    async def claim_direct_object(
+        self,
+        identity: RunnerTransferIdentity,
+        *,
+        dispatch_id: str,
+        claim_id: str,
+        timeout: float,
+    ) -> RunnerDirectObjectTicket:
+        del identity, timeout
+        self.claim_calls += 1
+        self.claim_arguments = (dispatch_id, claim_id)
+        return self.ticket
+
+
 async def _result(control: _Control) -> RunnerTransferResult:
     await asyncio.wait_for(control.result_ready.wait(), timeout=1)
     assert control.results
@@ -136,11 +174,17 @@ def _intent(
     data: bytes = b"transfer bytes",
     deadline_at: datetime | None = None,
     transfer_id: str = "transfer-1",
+    attempt_id: str = "attempt-1",
+    overwrite: bool = False,
+    conflict_precondition: bytes | None = None,
+    source_transport: RunnerTransferSourceTransport = (
+        RunnerTransferSourceTransport.TRANSFER_OBJECT
+    ),
 ) -> RunnerTransferIntent:
     return RunnerTransferIntent(
         identity=RunnerTransferIdentity(
             transfer_id=transfer_id,
-            attempt_id="attempt-1",
+            attempt_id=attempt_id,
             runtime_id="runtime-1",
             runner_generation=1,
         ),
@@ -148,7 +192,7 @@ def _intent(
         operation_id="operation-1",
         owner_session_id="session-1",
         runtime_path=str(path),
-        overwrite=True,
+        overwrite=overwrite,
         expected_size=len(data),
         expected_sha256=(
             hashlib.sha256(data).hexdigest()
@@ -159,6 +203,8 @@ def _intent(
         protocol_version=RUNNER_TRANSFER_PROTOCOL_VERSION,
         capability=RUNNER_TRANSFER_CAPABILITY,
         dispatch_id="dispatch-1",
+        conflict_precondition=conflict_precondition,
+        source_transport=source_transport,
     )
 
 
@@ -172,6 +218,7 @@ async def test_invalid_intent_does_not_block_control_receiver() -> None:
         transfer=transfer,
         accepted_generation=lambda: 1,
         workspace=_UNRESTRICTED_WORKSPACE,
+        http_proxy=None,
     )
     intent = _intent(Path("/tmp/unused"), deadline_at=datetime.now(UTC))
 
@@ -195,6 +242,7 @@ async def test_invalid_intent_logs_bounded_validation_reason(
         transfer=_Transfer(),
         accepted_generation=lambda: 2,
         workspace=_UNRESTRICTED_WORKSPACE,
+        http_proxy=None,
     )
     intent = _intent(Path("/workspace/agent/private-name.txt"))
 
@@ -249,6 +297,7 @@ async def test_upload_logs_server_grpc_rejection_reason(
         transfer=_RejectedTransfer(),
         accepted_generation=lambda: 1,
         workspace=_UNRESTRICTED_WORKSPACE,
+        http_proxy=None,
     )
 
     await manager.handle_intent(
@@ -268,6 +317,706 @@ async def test_upload_logs_server_grpc_rejection_reason(
     assert failure.__dict__["failure_source"] == "grpc"
     assert failure.__dict__["failure_reason"] == grpc_detail
     assert failure.__dict__["grpc_status"] == "FAILED_PRECONDITION"
+    await manager.close()
+
+
+@pytest.mark.asyncio
+async def test_direct_download_claims_http_source_and_publishes_atomically(
+    tmpfs_path: Path,
+) -> None:
+    """Direct-object downloads use the exact claim and never invoke gRPC bytes."""
+    data = b"direct object bytes"
+    app = web.Application()
+
+    async def source(request: web.Request) -> web.Response:
+        del request
+        return web.Response(body=data)
+
+    app.router.add_get("/source", source)
+    server = TestServer(app)
+    await server.start_server()
+    try:
+        ticket = RunnerDirectObjectTicket(
+            method="GET",
+            url=str(server.make_url("/source")),
+            expires_at=datetime.now(UTC) + timedelta(minutes=1),
+            headers={},
+            expected_size=len(data),
+            expected_sha256=hashlib.sha256(data).hexdigest(),
+        )
+        transfer = _DirectTransfer(ticket)
+        control = _Control()
+        manager = RunnerTransferManager(
+            control=control,
+            transfer=transfer,
+            accepted_generation=lambda: 1,
+            workspace=_UNRESTRICTED_WORKSPACE,
+            http_proxy=None,
+        )
+
+        intent = _intent(
+            tmpfs_path / "destination.bin",
+            data=data,
+            source_transport=RunnerTransferSourceTransport.DIRECT_OBJECT,
+        )
+        await manager.handle_intent(intent)
+
+        result = await _result(control)
+        assert result.outcome is RunnerTransferOutcome.SUCCEEDED
+        assert result.destination_committed is True
+        assert result.actual_size == len(data)
+        assert result.sha256 == hashlib.sha256(data).hexdigest()
+        assert (tmpfs_path / "destination.bin").read_bytes() == data
+        assert transfer.claim_calls == 1
+        assert transfer.claim_arguments is not None
+        assert transfer.claim_arguments[0] == intent.dispatch_id
+        assert transfer.download_calls == 0
+        assert not list(tmpfs_path.glob(".azents-transfer-*"))
+        await manager.close()
+    finally:
+        await server.close()
+
+
+@pytest.mark.asyncio
+async def test_direct_download_passes_provider_proxy_explicitly(
+    tmpfs_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Direct HTTP downloads use the canonical Provider proxy explicitly."""
+    data = b"direct object bytes"
+    app = web.Application()
+
+    async def source(request: web.Request) -> web.Response:
+        del request
+        return web.Response(body=data)
+
+    app.router.add_get("/source", source)
+    server = TestServer(app)
+    await server.start_server()
+    try:
+        observed_proxies: list[str | None] = []
+        original_request = cast(
+            Callable[..., object],
+            transfer_module.aiohttp.ClientSession.request,
+        )
+
+        def request(
+            session: transfer_module.aiohttp.ClientSession,
+            method: str,
+            url: str,
+            *,
+            headers: Mapping[str, str] | None = None,
+            allow_redirects: bool = True,
+            proxy: str | None = None,
+        ) -> object:
+            observed_proxies.append(proxy)
+            return original_request(
+                session,
+                method,
+                url,
+                headers=headers,
+                allow_redirects=allow_redirects,
+                proxy=None,
+            )
+
+        monkeypatch.setattr(
+            transfer_module.aiohttp.ClientSession,
+            "request",
+            request,
+        )
+        ticket = RunnerDirectObjectTicket(
+            method="GET",
+            url=str(server.make_url("/source")),
+            expires_at=datetime.now(UTC) + timedelta(minutes=1),
+            headers={},
+            expected_size=len(data),
+            expected_sha256=hashlib.sha256(data).hexdigest(),
+        )
+        control = _Control()
+        manager = RunnerTransferManager(
+            control=control,
+            transfer=_DirectTransfer(ticket),
+            accepted_generation=lambda: 1,
+            workspace=_UNRESTRICTED_WORKSPACE,
+            http_proxy="http://runtime-proxy.azents-runtime.svc:8080",
+        )
+
+        await manager.handle_intent(
+            _intent(
+                tmpfs_path / "destination.bin",
+                data=data,
+                source_transport=RunnerTransferSourceTransport.DIRECT_OBJECT,
+            )
+        )
+
+        result = await _result(control)
+        assert result.outcome is RunnerTransferOutcome.SUCCEEDED
+        assert observed_proxies == ["http://runtime-proxy.azents-runtime.svc:8080"]
+        assert (tmpfs_path / "destination.bin").read_bytes() == data
+        await manager.close()
+    finally:
+        await server.close()
+
+
+@pytest.mark.asyncio
+async def test_direct_download_reacquires_expired_ticket_at_byte_zero(
+    tmpfs_path: Path,
+) -> None:
+    """An expired presigned GET is reacquired once without retaining body bytes."""
+    data = b"direct object bytes"
+    requests = 0
+    app = web.Application()
+
+    async def source(request: web.Request) -> web.Response:
+        del request
+        nonlocal requests
+        requests += 1
+        if requests == 1:
+            return web.Response(status=403)
+        return web.Response(body=data)
+
+    app.router.add_get("/source", source)
+    server = TestServer(app)
+    await server.start_server()
+    try:
+        expires_at = datetime.now(UTC) + timedelta(minutes=1)
+        tickets = (
+            RunnerDirectObjectTicket(
+                method="GET",
+                url=str(server.make_url("/source")),
+                expires_at=expires_at,
+                headers={},
+                expected_size=len(data),
+                expected_sha256=hashlib.sha256(data).hexdigest(),
+            ),
+            RunnerDirectObjectTicket(
+                method="GET",
+                url=str(server.make_url("/source")),
+                expires_at=expires_at,
+                headers={},
+                expected_size=len(data),
+                expected_sha256=hashlib.sha256(data).hexdigest(),
+            ),
+        )
+
+        class _ReacquiringDirectTransfer(_DirectTransfer):
+            def __init__(self) -> None:
+                super().__init__(tickets[0])
+                self._tickets = iter(tickets)
+                self.claim_ids: list[str] = []
+
+            async def claim_direct_object(
+                self,
+                identity: RunnerTransferIdentity,
+                *,
+                dispatch_id: str,
+                claim_id: str,
+                timeout: float,
+            ) -> RunnerDirectObjectTicket:
+                del identity, timeout
+                self.claim_calls += 1
+                self.claim_arguments = (dispatch_id, claim_id)
+                self.claim_ids.append(claim_id)
+                return next(self._tickets, tickets[-1])
+
+        transfer = _ReacquiringDirectTransfer()
+        control = _Control()
+        manager = RunnerTransferManager(
+            control=control,
+            transfer=transfer,
+            accepted_generation=lambda: 1,
+            workspace=_UNRESTRICTED_WORKSPACE,
+            http_proxy=None,
+        )
+        intent = _intent(
+            tmpfs_path / "destination.bin",
+            data=data,
+            source_transport=RunnerTransferSourceTransport.DIRECT_OBJECT,
+        )
+
+        await manager.handle_intent(intent)
+        result = await _result(control)
+
+        assert result.outcome is RunnerTransferOutcome.SUCCEEDED
+        assert result.destination_committed is True
+        assert (tmpfs_path / "destination.bin").read_bytes() == data
+        assert requests == 2
+        assert transfer.claim_calls == 2
+        assert len(set(transfer.claim_ids)) == 1
+        await manager.close()
+    finally:
+        await server.close()
+
+
+@pytest.mark.asyncio
+async def test_direct_download_renews_exact_claim_while_http_body_is_open(
+    tmpfs_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An open direct HTTP body renews the same exact claim before commit."""
+    data = b"direct object bytes"
+    first_chunk_sent = asyncio.Event()
+    release_body = asyncio.Event()
+    app = web.Application()
+
+    async def source(request: web.Request) -> web.StreamResponse:
+        response = web.StreamResponse(status=200)
+        await response.prepare(request)
+        try:
+            await response.write(data)
+            first_chunk_sent.set()
+            await release_body.wait()
+            await response.write_eof()
+        finally:
+            release_body.set()
+        return response
+
+    app.router.add_get("/source", source)
+    server = TestServer(app)
+    await server.start_server()
+    try:
+        ticket = RunnerDirectObjectTicket(
+            method="GET",
+            url=str(server.make_url("/source")),
+            expires_at=datetime.now(UTC) + timedelta(minutes=1),
+            headers={},
+            expected_size=len(data),
+            expected_sha256=hashlib.sha256(data).hexdigest(),
+        )
+
+        class _RenewingDirectTransfer(_DirectTransfer):
+            def __init__(self) -> None:
+                super().__init__(ticket)
+                self.claim_ids: list[str] = []
+                self.renewed = asyncio.Event()
+
+            async def claim_direct_object(
+                self,
+                identity: RunnerTransferIdentity,
+                *,
+                dispatch_id: str,
+                claim_id: str,
+                timeout: float,
+            ) -> RunnerDirectObjectTicket:
+                self.claim_ids.append(claim_id)
+                result = await super().claim_direct_object(
+                    identity,
+                    dispatch_id=dispatch_id,
+                    claim_id=claim_id,
+                    timeout=timeout,
+                )
+                if len(self.claim_ids) == 2:
+                    self.renewed.set()
+                return result
+
+        monkeypatch.setattr(transfer_module, "STREAM_OWNER_RENEWAL_SECONDS", 0.01)
+        transfer = _RenewingDirectTransfer()
+        control = _Control()
+        manager = RunnerTransferManager(
+            control=control,
+            transfer=transfer,
+            accepted_generation=lambda: 1,
+            workspace=_UNRESTRICTED_WORKSPACE,
+            http_proxy=None,
+        )
+        intent = _intent(
+            tmpfs_path / "destination.bin",
+            data=data,
+            source_transport=RunnerTransferSourceTransport.DIRECT_OBJECT,
+        )
+
+        await manager.handle_intent(intent)
+        await asyncio.wait_for(first_chunk_sent.wait(), timeout=1)
+        await asyncio.wait_for(transfer.renewed.wait(), timeout=1)
+
+        assert len(transfer.claim_ids) >= 2
+        assert len(set(transfer.claim_ids)) == 1
+        assert transfer.claim_arguments == (intent.dispatch_id, transfer.claim_ids[0])
+
+        release_body.set()
+        result = await _result(control)
+        assert result.outcome is RunnerTransferOutcome.SUCCEEDED
+        assert result.destination_committed is True
+        assert (tmpfs_path / "destination.bin").read_bytes() == data
+        await manager.close()
+    finally:
+        release_body.set()
+        with contextlib.suppress(Exception):
+            await server.close()
+
+
+@pytest.mark.asyncio
+async def test_direct_download_renews_exact_claim_before_http_response_headers(
+    tmpfs_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A slow HTTP response still renews its claim before headers arrive."""
+    data = b"direct object bytes"
+    request_started = asyncio.Event()
+    release_headers = asyncio.Event()
+    app = web.Application()
+
+    async def source(request: web.Request) -> web.Response:
+        request_started.set()
+        await release_headers.wait()
+        return web.Response(body=data)
+
+    app.router.add_get("/source", source)
+    server = TestServer(app)
+    await server.start_server()
+    try:
+        ticket = RunnerDirectObjectTicket(
+            method="GET",
+            url=str(server.make_url("/source")),
+            expires_at=datetime.now(UTC) + timedelta(minutes=1),
+            headers={},
+            expected_size=len(data),
+            expected_sha256=hashlib.sha256(data).hexdigest(),
+        )
+
+        class _RenewingDirectTransfer(_DirectTransfer):
+            def __init__(self) -> None:
+                super().__init__(ticket)
+                self.renewed = asyncio.Event()
+
+            async def claim_direct_object(
+                self,
+                identity: RunnerTransferIdentity,
+                *,
+                dispatch_id: str,
+                claim_id: str,
+                timeout: float,
+            ) -> RunnerDirectObjectTicket:
+                result = await super().claim_direct_object(
+                    identity,
+                    dispatch_id=dispatch_id,
+                    claim_id=claim_id,
+                    timeout=timeout,
+                )
+                if self.claim_calls >= 2:
+                    self.renewed.set()
+                return result
+
+        monkeypatch.setattr(transfer_module, "STREAM_OWNER_RENEWAL_SECONDS", 0.01)
+        transfer = _RenewingDirectTransfer()
+        control = _Control()
+        manager = RunnerTransferManager(
+            control=control,
+            transfer=transfer,
+            accepted_generation=lambda: 1,
+            workspace=_UNRESTRICTED_WORKSPACE,
+            http_proxy=None,
+        )
+        intent = _intent(
+            tmpfs_path / "destination.bin",
+            data=data,
+            source_transport=RunnerTransferSourceTransport.DIRECT_OBJECT,
+        )
+
+        await manager.handle_intent(intent)
+        await asyncio.wait_for(request_started.wait(), timeout=1)
+        await asyncio.wait_for(transfer.renewed.wait(), timeout=1)
+        assert transfer.claim_calls >= 2
+
+        release_headers.set()
+        result = await _result(control)
+        assert result.outcome is RunnerTransferOutcome.SUCCEEDED
+        assert result.destination_committed is True
+        assert (tmpfs_path / "destination.bin").read_bytes() == data
+        await manager.close()
+    finally:
+        release_headers.set()
+        with contextlib.suppress(Exception):
+            await server.close()
+
+
+@pytest.mark.asyncio
+async def test_direct_download_keeps_claim_renewal_through_staging_fsync(
+    tmpfs_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Claim renewal remains active after EOF while staging is fsynced."""
+    data = b"direct object bytes"
+    fsync_started = threading.Event()
+    release_fsync = threading.Event()
+    app = web.Application()
+
+    async def source(request: web.Request) -> web.Response:
+        del request
+        return web.Response(body=data)
+
+    app.router.add_get("/source", source)
+    server = TestServer(app)
+    await server.start_server()
+    try:
+        ticket = RunnerDirectObjectTicket(
+            method="GET",
+            url=str(server.make_url("/source")),
+            expires_at=datetime.now(UTC) + timedelta(minutes=1),
+            headers={},
+            expected_size=len(data),
+            expected_sha256=hashlib.sha256(data).hexdigest(),
+        )
+
+        class _RenewingDirectTransfer(_DirectTransfer):
+            def __init__(self) -> None:
+                super().__init__(ticket)
+                self.renewed = asyncio.Event()
+
+            async def claim_direct_object(
+                self,
+                identity: RunnerTransferIdentity,
+                *,
+                dispatch_id: str,
+                claim_id: str,
+                timeout: float,
+            ) -> RunnerDirectObjectTicket:
+                result = await super().claim_direct_object(
+                    identity,
+                    dispatch_id=dispatch_id,
+                    claim_id=claim_id,
+                    timeout=timeout,
+                )
+                if self.claim_calls >= 2:
+                    self.renewed.set()
+                return result
+
+        original_fsync = transfer_module.os.fsync
+
+        def blocking_fsync(fd: int) -> None:
+            fsync_started.set()
+            if not release_fsync.wait(timeout=1):
+                raise TimeoutError("test fsync release timed out")
+            original_fsync(fd)
+
+        monkeypatch.setattr(transfer_module.os, "fsync", blocking_fsync)
+        monkeypatch.setattr(transfer_module, "STREAM_OWNER_RENEWAL_SECONDS", 0.01)
+        transfer = _RenewingDirectTransfer()
+        control = _Control()
+        manager = RunnerTransferManager(
+            control=control,
+            transfer=transfer,
+            accepted_generation=lambda: 1,
+            workspace=_UNRESTRICTED_WORKSPACE,
+            http_proxy=None,
+        )
+        intent = _intent(
+            tmpfs_path / "destination.bin",
+            data=data,
+            source_transport=RunnerTransferSourceTransport.DIRECT_OBJECT,
+        )
+
+        await manager.handle_intent(intent)
+        assert await asyncio.to_thread(fsync_started.wait, 1)
+        await asyncio.wait_for(transfer.renewed.wait(), timeout=1)
+        assert transfer.claim_calls >= 2
+
+        release_fsync.set()
+        result = await _result(control)
+        assert result.outcome is RunnerTransferOutcome.SUCCEEDED
+        assert result.destination_committed is True
+        assert (tmpfs_path / "destination.bin").read_bytes() == data
+        await manager.close()
+    finally:
+        release_fsync.set()
+        with contextlib.suppress(Exception):
+            await server.close()
+
+
+@pytest.mark.asyncio
+async def test_direct_download_stops_without_publication_when_claim_renewal_fails(
+    tmpfs_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed direct claim renewal fences the HTTP download and staging file."""
+    data = b"direct object bytes"
+    first_chunk_sent = asyncio.Event()
+    release_body = asyncio.Event()
+    app = web.Application()
+
+    async def source(request: web.Request) -> web.StreamResponse:
+        response = web.StreamResponse(status=200)
+        await response.prepare(request)
+        try:
+            await response.write(data)
+            first_chunk_sent.set()
+            await release_body.wait()
+            await response.write_eof()
+        finally:
+            release_body.set()
+        return response
+
+    app.router.add_get("/source", source)
+    server = TestServer(app)
+    await server.start_server()
+    try:
+        ticket = RunnerDirectObjectTicket(
+            method="GET",
+            url=str(server.make_url("/source")),
+            expires_at=datetime.now(UTC) + timedelta(minutes=1),
+            headers={},
+            expected_size=len(data),
+            expected_sha256=hashlib.sha256(data).hexdigest(),
+        )
+
+        class _FailingRenewalTransfer(_DirectTransfer):
+            async def claim_direct_object(
+                self,
+                identity: RunnerTransferIdentity,
+                *,
+                dispatch_id: str,
+                claim_id: str,
+                timeout: float,
+            ) -> RunnerDirectObjectTicket:
+                if self.claim_calls == 1:
+                    raise RuntimeError("renewal failed")
+                return await super().claim_direct_object(
+                    identity,
+                    dispatch_id=dispatch_id,
+                    claim_id=claim_id,
+                    timeout=timeout,
+                )
+
+        monkeypatch.setattr(transfer_module, "STREAM_OWNER_RENEWAL_SECONDS", 0.01)
+        transfer = _FailingRenewalTransfer(ticket)
+        control = _Control()
+        manager = RunnerTransferManager(
+            control=control,
+            transfer=transfer,
+            accepted_generation=lambda: 1,
+            workspace=_UNRESTRICTED_WORKSPACE,
+            http_proxy=None,
+        )
+        intent = _intent(
+            tmpfs_path / "destination.bin",
+            data=data,
+            source_transport=RunnerTransferSourceTransport.DIRECT_OBJECT,
+        )
+
+        await manager.handle_intent(intent)
+        await asyncio.wait_for(first_chunk_sent.wait(), timeout=1)
+        result = await _result(control)
+
+        assert result.outcome is RunnerTransferOutcome.FAILED
+        assert result.failure is RunnerTransferFailure.STREAM_FAILED
+        assert transfer.claim_calls == 1
+        assert not (tmpfs_path / "destination.bin").exists()
+        assert not list(tmpfs_path.glob(".azents-transfer-*"))
+        release_body.set()
+        await manager.close()
+    finally:
+        release_body.set()
+        with contextlib.suppress(Exception):
+            await server.close()
+
+
+@pytest.mark.asyncio
+async def test_direct_download_cancellation_closes_http_body_without_publication(
+    tmpfs_path: Path,
+) -> None:
+    """Cancellation closes a direct HTTP response and removes local staging."""
+    data = b"direct object bytes"
+    first_chunk_sent = asyncio.Event()
+    release_body = asyncio.Event()
+    app = web.Application()
+
+    async def source(request: web.Request) -> web.StreamResponse:
+        response = web.StreamResponse(status=200)
+        await response.prepare(request)
+        try:
+            await response.write(data)
+            first_chunk_sent.set()
+            await release_body.wait()
+            await response.write_eof()
+        finally:
+            release_body.set()
+        return response
+
+    app.router.add_get("/source", source)
+    server = TestServer(app)
+    await server.start_server()
+    try:
+        ticket = RunnerDirectObjectTicket(
+            method="GET",
+            url=str(server.make_url("/source")),
+            expires_at=datetime.now(UTC) + timedelta(minutes=1),
+            headers={},
+            expected_size=len(data),
+            expected_sha256=hashlib.sha256(data).hexdigest(),
+        )
+        control = _Control()
+        manager = RunnerTransferManager(
+            control=control,
+            transfer=_DirectTransfer(ticket),
+            accepted_generation=lambda: 1,
+            workspace=_UNRESTRICTED_WORKSPACE,
+            http_proxy=None,
+        )
+        intent = _intent(
+            tmpfs_path / "destination.bin",
+            data=data,
+            source_transport=RunnerTransferSourceTransport.DIRECT_OBJECT,
+        )
+
+        await manager.handle_intent(intent)
+        await asyncio.wait_for(first_chunk_sent.wait(), timeout=1)
+        await manager.handle_cancel(
+            RunnerTransferCancel(
+                identity=intent.identity,
+                operation_id=intent.operation_id,
+                dispatch_id=intent.dispatch_id,
+                reason=RunnerTransferCancelReason.CALLER,
+            )
+        )
+
+        result = await _result(control)
+        assert result.outcome is RunnerTransferOutcome.CANCELLED
+        assert result.failure is RunnerTransferFailure.CANCELLED
+        assert not (tmpfs_path / "destination.bin").exists()
+        assert not list(tmpfs_path.glob(".azents-transfer-*"))
+        release_body.set()
+        await manager.close()
+    finally:
+        release_body.set()
+        with contextlib.suppress(Exception):
+            await server.close()
+
+
+@pytest.mark.asyncio
+async def test_direct_download_rejects_ticket_manifest_without_destination(
+    tmpfs_path: Path,
+) -> None:
+    """A direct ticket that changes the manifest cannot publish bytes."""
+    data = b"direct object bytes"
+    ticket = RunnerDirectObjectTicket(
+        method="GET",
+        url="http://127.0.0.1:1/source",
+        expires_at=datetime.now(UTC) + timedelta(minutes=1),
+        headers={},
+        expected_size=len(data) + 1,
+        expected_sha256=hashlib.sha256(data).hexdigest(),
+    )
+    control = _Control()
+    manager = RunnerTransferManager(
+        control=control,
+        transfer=_DirectTransfer(ticket),
+        accepted_generation=lambda: 1,
+        workspace=_UNRESTRICTED_WORKSPACE,
+        http_proxy=None,
+    )
+
+    await manager.handle_intent(
+        _intent(
+            tmpfs_path / "destination.bin",
+            data=data,
+            source_transport=RunnerTransferSourceTransport.DIRECT_OBJECT,
+        )
+    )
+
+    result = await _result(control)
+    assert result.failure is RunnerTransferFailure.PROTOCOL_VIOLATION
+    assert not (tmpfs_path / "destination.bin").exists()
+    assert not list(tmpfs_path.glob(".azents-transfer-*"))
     await manager.close()
 
 
@@ -294,6 +1043,7 @@ async def test_download_rejects_symlink_parent_without_touching_target(
         ),
         accepted_generation=lambda: 1,
         workspace=_UNRESTRICTED_WORKSPACE,
+        http_proxy=None,
     )
 
     await manager.handle_intent(_intent(link / "destination.bin", data=data))
@@ -316,6 +1066,7 @@ async def test_upload_local_io_failure_emits_valid_integrity_result(
         transfer=_Transfer(),
         accepted_generation=lambda: 1,
         workspace=_UNRESTRICTED_WORKSPACE,
+        http_proxy=None,
     )
 
     await manager.handle_intent(
@@ -336,10 +1087,65 @@ async def test_upload_local_io_failure_emits_valid_integrity_result(
 async def test_download_atomically_replaces_existing_destination(
     tmpfs_path: Path,
 ) -> None:
-    """Verified content replaces an existing destination without privileged staging."""
+    """Explicit current conflict evidence permits one atomic replacement."""
     destination = tmpfs_path / "destination.bin"
     destination.write_bytes(b"old")
     data = b"new verified content"
+    control = _Control()
+    transfer = _Transfer(
+        (
+            RunnerDownloadChunk(offset=0, data=data),
+            RunnerDownloadComplete(
+                actual_size=len(data), sha256=hashlib.sha256(data).hexdigest()
+            ),
+        )
+    )
+    manager = RunnerTransferManager(
+        control=control,
+        transfer=transfer,
+        accepted_generation=lambda: 1,
+        workspace=_UNRESTRICTED_WORKSPACE,
+        http_proxy=None,
+    )
+
+    first = _intent(destination, data=data)
+    await manager.handle_intent(first)
+    conflict = await _result(control)
+
+    assert conflict.failure is RunnerTransferFailure.DESTINATION_CONFLICT
+    assert conflict.destination_conflict is not None
+    assert conflict.destination_conflict.kind == "file"
+    assert conflict.destination_conflict.size == len(b"old")
+    assert conflict.conflict_precondition is not None
+    retry = _intent(
+        destination,
+        data=data,
+        transfer_id="transfer-2",
+        attempt_id="attempt-2",
+        overwrite=True,
+        conflict_precondition=conflict.conflict_precondition,
+    )
+    await manager.handle_intent(retry)
+    await asyncio.wait_for(_wait_for_result_count(control, expected=2), timeout=1)
+
+    result = control.results[-1]
+    assert result.outcome is RunnerTransferOutcome.SUCCEEDED
+    assert result.destination_committed is True
+    assert destination.read_bytes() == data
+    assert not list(tmpfs_path.glob(".azents-transfer-*"))
+    await manager.close()
+
+
+@pytest.mark.asyncio
+async def test_overwrite_rejects_changed_destination_and_preserves_newer_file(
+    tmpfs_path: Path,
+) -> None:
+    """A token from one destination identity cannot replace a newer identity."""
+    destination = tmpfs_path / "destination.bin"
+    destination.write_bytes(b"old")
+    newer = tmpfs_path / "newer.bin"
+    newer.write_bytes(b"newer")
+    data = b"replacement"
     control = _Control()
     manager = RunnerTransferManager(
         control=control,
@@ -353,15 +1159,129 @@ async def test_download_atomically_replaces_existing_destination(
         ),
         accepted_generation=lambda: 1,
         workspace=_UNRESTRICTED_WORKSPACE,
+        http_proxy=None,
     )
+    first = _intent(destination, data=data)
+    await manager.handle_intent(first)
+    conflict = await _result(control)
+    assert conflict.conflict_precondition is not None
+    os.replace(newer, destination)
 
+    await manager.handle_intent(
+        _intent(
+            destination,
+            data=data,
+            transfer_id="transfer-2",
+            attempt_id="attempt-2",
+            overwrite=True,
+            conflict_precondition=conflict.conflict_precondition,
+        )
+    )
+    await asyncio.wait_for(_wait_for_result_count(control, expected=2), timeout=1)
+
+    retry = control.results[-1]
+    assert retry.failure is RunnerTransferFailure.DESTINATION_CONFLICT
+    assert retry.destination_conflict is not None
+    assert retry.destination_conflict.kind == "file"
+    assert destination.read_bytes() == b"newer"
+    await manager.close()
+
+
+@pytest.mark.asyncio
+async def test_overwrite_rejects_cross_path_precondition(
+    tmpfs_path: Path,
+) -> None:
+    """A path-bound token never authorizes replacement of another destination."""
+    original = tmpfs_path / "original.bin"
+    original.write_bytes(b"original")
+    other = tmpfs_path / "other.bin"
+    other.write_bytes(b"other")
+    data = b"replacement"
+    control = _Control()
+    manager = RunnerTransferManager(
+        control=control,
+        transfer=_Transfer(
+            (
+                RunnerDownloadChunk(offset=0, data=data),
+                RunnerDownloadComplete(
+                    actual_size=len(data), sha256=hashlib.sha256(data).hexdigest()
+                ),
+            )
+        ),
+        accepted_generation=lambda: 1,
+        workspace=_UNRESTRICTED_WORKSPACE,
+        http_proxy=None,
+    )
+    await manager.handle_intent(_intent(original, data=data))
+    conflict = await _result(control)
+    assert conflict.conflict_precondition is not None
+
+    await manager.handle_intent(
+        _intent(
+            other,
+            data=data,
+            transfer_id="transfer-2",
+            attempt_id="attempt-2",
+            overwrite=True,
+            conflict_precondition=conflict.conflict_precondition,
+        )
+    )
+    await asyncio.wait_for(_wait_for_result_count(control, expected=2), timeout=1)
+
+    retry = control.results[-1]
+    assert retry.failure is RunnerTransferFailure.DESTINATION_CONFLICT
+    assert other.read_bytes() == b"other"
+    await manager.close()
+
+
+@pytest.mark.asyncio
+async def test_overwrite_rejects_symlink_destination(
+    tmpfs_path: Path,
+) -> None:
+    """A symlink substituted after conflict is never atomically replaced."""
+    destination = tmpfs_path / "destination.bin"
+    destination.write_bytes(b"old")
+    outside = tmpfs_path / "outside.bin"
+    outside.write_bytes(b"outside")
+    data = b"replacement"
+    control = _Control()
+    manager = RunnerTransferManager(
+        control=control,
+        transfer=_Transfer(
+            (
+                RunnerDownloadChunk(offset=0, data=data),
+                RunnerDownloadComplete(
+                    actual_size=len(data), sha256=hashlib.sha256(data).hexdigest()
+                ),
+            )
+        ),
+        accepted_generation=lambda: 1,
+        workspace=_UNRESTRICTED_WORKSPACE,
+        http_proxy=None,
+    )
     await manager.handle_intent(_intent(destination, data=data))
+    conflict = await _result(control)
+    assert conflict.conflict_precondition is not None
+    destination.unlink()
+    destination.symlink_to(outside)
 
-    result = await _result(control)
-    assert result.outcome is RunnerTransferOutcome.SUCCEEDED
-    assert result.destination_committed is True
-    assert destination.read_bytes() == data
-    assert not list(tmpfs_path.glob(".azents-transfer-*"))
+    await manager.handle_intent(
+        _intent(
+            destination,
+            data=data,
+            transfer_id="transfer-2",
+            attempt_id="attempt-2",
+            overwrite=True,
+            conflict_precondition=conflict.conflict_precondition,
+        )
+    )
+    await asyncio.wait_for(_wait_for_result_count(control, expected=2), timeout=1)
+
+    retry = control.results[-1]
+    assert retry.failure is RunnerTransferFailure.DESTINATION_CONFLICT
+    assert retry.destination_conflict is not None
+    assert retry.destination_conflict.kind == "symlink"
+    assert outside.read_bytes() == b"outside"
     await manager.close()
 
 
@@ -385,6 +1305,7 @@ async def test_untrusted_transfer_identifiers_cannot_escape_staging_directory(
         ),
         accepted_generation=lambda: 1,
         workspace=_UNRESTRICTED_WORKSPACE,
+        http_proxy=None,
     )
     intent = _intent(
         destination,
@@ -421,6 +1342,7 @@ async def test_exact_duplicate_intent_reuses_one_completed_result(
         ),
         accepted_generation=lambda: 1,
         workspace=_UNRESTRICTED_WORKSPACE,
+        http_proxy=None,
     )
     intent = _intent(destination, data=data)
 
@@ -478,6 +1400,7 @@ async def test_exact_cancel_emits_cancelled_result_without_publication(
         transfer=_BlockingTransfer(),
         accepted_generation=lambda: 1,
         workspace=_UNRESTRICTED_WORKSPACE,
+        http_proxy=None,
     )
     intent = _intent(destination, data=data)
 
@@ -533,6 +1456,7 @@ async def test_conflicting_intent_for_active_identity_is_rejected_without_second
         transfer=transfer,
         accepted_generation=lambda: 1,
         workspace=_UNRESTRICTED_WORKSPACE,
+        http_proxy=None,
     )
     intent = _intent(tmpfs_path / "destination.bin", data=data)
 
@@ -580,6 +1504,7 @@ async def test_upload_snapshot_keeps_control_work_and_cancellation_responsive(
         transfer=_Transfer(),
         accepted_generation=lambda: 1,
         workspace=_UNRESTRICTED_WORKSPACE,
+        http_proxy=None,
     )
     intent = _intent(
         source,
@@ -637,6 +1562,7 @@ async def test_successful_upload_leaves_no_mutable_snapshot_path(
         transfer=_Transfer(),
         accepted_generation=lambda: 1,
         workspace=_UNRESTRICTED_WORKSPACE,
+        http_proxy=None,
     )
 
     await manager.handle_intent(
@@ -664,6 +1590,7 @@ async def test_upload_rejects_fifo_without_blocking_control(tmpfs_path: Path) ->
         transfer=_Transfer(),
         accepted_generation=lambda: 1,
         workspace=_UNRESTRICTED_WORKSPACE,
+        http_proxy=None,
     )
     heartbeat_completed = asyncio.Event()
 
@@ -716,6 +1643,7 @@ async def test_download_cleans_same_directory_stage_after_cancellation(
         transfer=_BlockingTransfer(),
         accepted_generation=lambda: 1,
         workspace=_UNRESTRICTED_WORKSPACE,
+        http_proxy=None,
     )
     intent = _intent(tmpfs_path / "destination.bin", data=data)
 
@@ -768,6 +1696,7 @@ async def test_download_fails_closed_when_staging_file_cannot_be_created(
         transfer=transfer,
         accepted_generation=lambda: 1,
         workspace=_UNRESTRICTED_WORKSPACE,
+        http_proxy=None,
     )
 
     await manager.handle_intent(_intent(destination, data=data))
@@ -797,12 +1726,63 @@ async def test_close_does_not_wait_for_blocked_result_sink(tmpfs_path: Path) -> 
         ),
         accepted_generation=lambda: 1,
         workspace=_UNRESTRICTED_WORKSPACE,
+        http_proxy=None,
     )
 
     await manager.handle_intent(_intent(tmpfs_path / "destination.bin", data=data))
     await asyncio.wait_for(control.entered.wait(), timeout=1)
 
     await asyncio.wait_for(manager.close(), timeout=0.1)
+
+
+@pytest.mark.asyncio
+async def test_direct_claim_lease_closes_after_result_delivery(
+    tmpfs_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A direct-object claim remains owned until Control observes the result."""
+    control = _BlockingControl()
+    manager = RunnerTransferManager(
+        control=control,
+        transfer=_Transfer(),
+        accepted_generation=lambda: 1,
+        workspace=_UNRESTRICTED_WORKSPACE,
+        http_proxy=None,
+    )
+    lease_closed = asyncio.Event()
+
+    class _Lease:
+        async def close(self) -> None:
+            lease_closed.set()
+
+    async def download(
+        intent: RunnerTransferIntent,
+        cancelled: asyncio.Event,
+        *,
+        direct_claim_lease: list[object | None],
+    ) -> RunnerTransferResult:
+        del cancelled
+        direct_claim_lease[0] = _Lease()  # type: ignore[assignment]
+        return transfer_module._failed(
+            intent,
+            RunnerTransferFailure.STREAM_FAILED,
+        )
+
+    monkeypatch.setattr(manager, "_download", download)
+    intent = _intent(
+        tmpfs_path / "destination.bin",
+        source_transport=RunnerTransferSourceTransport.DIRECT_OBJECT,
+    )
+
+    await manager.handle_intent(intent)
+    await asyncio.wait_for(control.entered.wait(), timeout=1)
+    assert not lease_closed.is_set()
+
+    control.release.set()
+    result = await _result(control)
+    assert result.failure is RunnerTransferFailure.STREAM_FAILED
+    await asyncio.wait_for(lease_closed.wait(), timeout=1)
+    await manager.close()
 
 
 @pytest.mark.asyncio
@@ -816,6 +1796,7 @@ async def test_bounded_result_queue_backpressures_without_dropping_terminal_resu
         transfer=_Transfer(),
         accepted_generation=lambda: 1,
         workspace=_UNRESTRICTED_WORKSPACE,
+        http_proxy=None,
         max_tombstones=1,
     )
     expired_at = datetime.now(UTC)
@@ -882,6 +1863,7 @@ async def test_failed_result_sink_unblocks_queue_and_shutdown(
         transfer=_Transfer(),
         accepted_generation=lambda: 1,
         workspace=_UNRESTRICTED_WORKSPACE,
+        http_proxy=None,
         max_tombstones=1,
     )
     expired_at = datetime.now(UTC)
@@ -946,6 +1928,7 @@ async def test_post_publication_cancellation_waits_for_successful_result_enqueue
         ),
         accepted_generation=lambda: 1,
         workspace=_UNRESTRICTED_WORKSPACE,
+        http_proxy=None,
         max_tombstones=1,
     )
     expired_at = datetime.now(UTC)
@@ -962,24 +1945,26 @@ async def test_post_publication_cancellation_waits_for_successful_result_enqueue
     destination = tmpfs_path / "destination.bin"
     committed = _intent(destination, data=data, transfer_id="transfer-3")
     destination_committed = asyncio.Event()
-    original_replace = transfer_module.os.replace
+    original_link = transfer_module.os.link
 
-    def replace(
+    def link(
         src: str,
         dst: str,
         *,
         src_dir_fd: int,
         dst_dir_fd: int,
+        follow_symlinks: bool,
     ) -> None:
-        original_replace(
+        original_link(
             src,
             dst,
             src_dir_fd=src_dir_fd,
             dst_dir_fd=dst_dir_fd,
+            follow_symlinks=follow_symlinks,
         )
         destination_committed.set()
 
-    monkeypatch.setattr(transfer_module.os, "replace", replace)
+    monkeypatch.setattr(transfer_module.os, "link", link)
 
     await manager.handle_intent(first)
     await asyncio.wait_for(control.entered.wait(), timeout=1)

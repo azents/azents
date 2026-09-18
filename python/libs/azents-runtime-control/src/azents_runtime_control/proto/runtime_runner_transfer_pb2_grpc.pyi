@@ -41,6 +41,10 @@ class RuntimeRunnerTransferStub:
         _runtime_runner_transfer_pb2.UploadTransferFrame,
         _runtime_runner_transfer_pb2.UploadTransferResult,
     ]
+    ClaimDirectObjectDownload: _grpc.UnaryUnaryMultiCallable[
+        _runtime_runner_transfer_pb2.DirectObjectDownloadClaimRequest,
+        _runtime_runner_transfer_pb2.DirectObjectDownloadClaimResponse,
+    ]
 
 @_typing.type_check_only
 class RuntimeRunnerTransferAsyncStub(RuntimeRunnerTransferStub):
@@ -52,6 +56,10 @@ class RuntimeRunnerTransferAsyncStub(RuntimeRunnerTransferStub):
     UploadTransfer: _aio.StreamUnaryMultiCallable[
         _runtime_runner_transfer_pb2.UploadTransferFrame,
         _runtime_runner_transfer_pb2.UploadTransferResult,
+    ]  # type: ignore[assignment]
+    ClaimDirectObjectDownload: _aio.UnaryUnaryMultiCallable[
+        _runtime_runner_transfer_pb2.DirectObjectDownloadClaimRequest,
+        _runtime_runner_transfer_pb2.DirectObjectDownloadClaimResponse,
     ]  # type: ignore[assignment]
 
 class RuntimeRunnerTransferServicer(metaclass=_abc_1.ABCMeta):
@@ -74,6 +82,15 @@ class RuntimeRunnerTransferServicer(metaclass=_abc_1.ABCMeta):
     ) -> _typing.Union[
         _runtime_runner_transfer_pb2.UploadTransferResult,
         _abc.Awaitable[_runtime_runner_transfer_pb2.UploadTransferResult],
+    ]: ...
+    @_abc_1.abstractmethod
+    def ClaimDirectObjectDownload(
+        self,
+        request: _runtime_runner_transfer_pb2.DirectObjectDownloadClaimRequest,
+        context: _ServicerContext,
+    ) -> _typing.Union[
+        _runtime_runner_transfer_pb2.DirectObjectDownloadClaimResponse,
+        _abc.Awaitable[_runtime_runner_transfer_pb2.DirectObjectDownloadClaimResponse],
     ]: ...
 
 def add_RuntimeRunnerTransferServicer_to_server(

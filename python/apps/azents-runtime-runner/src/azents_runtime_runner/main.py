@@ -284,8 +284,9 @@ async def run_runtime_runner(*, workspace_path: str | None = None) -> None:
         ),
         resident_memory_bytes=resident_memory_sampler.current_bytes,
     )
+    runner_network_environment = prepare_runner_network_environment()
     inherited_environment = {
-        **prepare_runner_network_environment(),
+        **runner_network_environment,
         **prepare_runner_trust_environment(),
         **prepare_pixi_environment(
             workspace_path=workspace_path,
@@ -462,6 +463,7 @@ async def run_runtime_runner(*, workspace_path: str | None = None) -> None:
                 transfer=transfer_client,
                 accepted_generation=accepted_generation,
                 workspace=workspace,
+                http_proxy=runner_network_environment.get("HTTP_PROXY"),
             )
             shutting_down = False
             try:

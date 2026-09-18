@@ -1,5 +1,7 @@
 """Runner-local bounded transfer execution and filesystem publication."""
 
+from __future__ import annotations
+
 import asyncio
 import contextlib
 import hashlib
@@ -7,14 +9,17 @@ import logging
 import os
 import secrets
 import stat
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import PurePath
-from typing import Protocol
+from typing import Protocol, TypeVar
+from urllib.parse import urlsplit
 
+import aiohttp
 import grpc
 from azents_runtime_control.grpc_runner_transfer_client import (
+    RunnerDirectObjectTicket,
     RunnerDownloadChunk,
     RunnerDownloadComplete,
     RunnerUploadComplete,
@@ -23,17 +28,20 @@ from azents_runtime_control.grpc_runner_transfer_client import (
 )
 from azents_runtime_control.runner_transfer import (
     RunnerTransferCancel,
+    RunnerTransferDestinationConflictEvidence,
     RunnerTransferDirection,
     RunnerTransferFailure,
     RunnerTransferIdentity,
     RunnerTransferIntent,
     RunnerTransferOutcome,
     RunnerTransferResult,
+    RunnerTransferSourceTransport,
 )
 from azents_runtime_control.transfer import (
     MAX_TRANSFER_CHUNK_BYTES,
     RUNNER_TRANSFER_CAPABILITY,
     RUNNER_TRANSFER_PROTOCOL_VERSION,
+    STREAM_OWNER_RENEWAL_SECONDS,
 )
 
 from azents_runtime_runner.workspace import Workspace
@@ -41,7 +49,10 @@ from azents_runtime_runner.workspace import Workspace
 _BUFFER_BYTES = MAX_TRANSFER_CHUNK_BYTES
 _DEFAULT_MAX_ACTIVE_TRANSFERS = 4
 _DEFAULT_MAX_TOMBSTONES = 256
+_MAX_CONFLICT_PRECONDITIONS = 256
+_MAX_DIRECT_TICKET_REACQUISITIONS = 1
 _LOGGER = logging.getLogger(__name__)
+_AwaitableResult = TypeVar("_AwaitableResult")
 
 
 class RunnerTransferResultSink(Protocol):
@@ -65,6 +76,17 @@ class RunnerTransferClient(Protocol):
         timeout: float,
     ) -> AsyncIterator[RunnerDownloadChunk | RunnerDownloadComplete]:
         """Open one bounded server-streaming download."""
+        ...
+
+    async def claim_direct_object(
+        self,
+        identity: RunnerTransferIdentity,
+        *,
+        dispatch_id: str,
+        claim_id: str,
+        timeout: float,
+    ) -> RunnerDirectObjectTicket:
+        """Claim one exact direct-object source and return its transient GET ticket."""
         ...
 
     async def upload(
@@ -95,6 +117,25 @@ class _OpenedFile:
     name: str
 
 
+@dataclass(frozen=True)
+class _DestinationObservation:
+    """Filesystem evidence captured while holding the transfer commit lock."""
+
+    evidence: RunnerTransferDestinationConflictEvidence
+    identity: _FileIdentity | None
+
+
+@dataclass(frozen=True)
+class _ConflictPrecondition:
+    """Runner-local overwrite authority for one observed destination identity."""
+
+    identity: RunnerTransferIdentity
+    operation_id: str
+    runtime_path: str
+    destination_identity: _FileIdentity | None
+    expires_at: datetime
+
+
 @dataclass
 class _ActiveTransfer:
     intent: RunnerTransferIntent
@@ -108,6 +149,14 @@ class _TransferTombstone:
     result: RunnerTransferResult
 
 
+@dataclass
+class _PendingRunnerTransferResult:
+    """One queued result and its optional delivery acknowledgement."""
+
+    result: RunnerTransferResult
+    delivered: asyncio.Future[bool] | None = None
+
+
 class RunnerTransferManager:
     """Isolate bounded transfer tasks from ordinary Runner operation scheduling."""
 
@@ -118,6 +167,7 @@ class RunnerTransferManager:
         transfer: RunnerTransferClient,
         accepted_generation: Callable[[], int | None],
         workspace: Workspace,
+        http_proxy: str | None,
         max_active_transfers: int = _DEFAULT_MAX_ACTIVE_TRANSFERS,
         max_tombstones: int = _DEFAULT_MAX_TOMBSTONES,
     ) -> None:
@@ -128,18 +178,20 @@ class RunnerTransferManager:
         self._transfer = transfer
         self._accepted_generation = accepted_generation
         self._workspace = workspace
+        self._http_proxy = http_proxy
         self._max_active_transfers = max_active_transfers
         self._max_tombstones = max_tombstones
         self._active: dict[_TransferKey, _ActiveTransfer] = {}
         self._active_by_identity: dict[_TransferIdentityKey, _TransferKey] = {}
         self._tombstones: dict[_TransferKey, _TransferTombstone] = {}
         self._completed_by_identity: dict[_TransferIdentityKey, _TransferKey] = {}
-        self._results: asyncio.Queue[RunnerTransferResult] = asyncio.Queue(
+        self._results: asyncio.Queue[_PendingRunnerTransferResult] = asyncio.Queue(
             maxsize=max_tombstones
         )
         self._result_task: asyncio.Task[None] | None = None
         self._lock = asyncio.Lock()
         self._commit_lock = asyncio.Lock()
+        self._conflict_preconditions: dict[bytes, _ConflictPrecondition] = {}
         self._closed = False
 
     async def start(self) -> None:
@@ -242,10 +294,15 @@ class RunnerTransferManager:
         self, intent: RunnerTransferIntent, cancelled: asyncio.Event
     ) -> None:
         result: RunnerTransferResult | None = None
+        direct_claim_lease: list[_DirectClaimLease | None] = [None]
         try:
             try:
                 if intent.direction is RunnerTransferDirection.DOWNLOAD:
-                    result = await self._download(intent, cancelled)
+                    result = await self._download(
+                        intent,
+                        cancelled,
+                        direct_claim_lease=direct_claim_lease,
+                    )
                 else:
                     result = await self._upload(intent, cancelled)
             except grpc.aio.AioRpcError as exc:
@@ -257,8 +314,38 @@ class RunnerTransferManager:
                     reason=exc.details() or "gRPC error without details",
                     grpc_status=exc.code().name,
                 )
+            except aiohttp.ClientError:
+                result = _failed(intent, RunnerTransferFailure.STREAM_FAILED)
+                _log_failure(
+                    intent,
+                    result,
+                    source="direct_http",
+                    reason="http_request_failed",
+                    grpc_status=None,
+                )
+            except TimeoutError:
+                result = _failed(
+                    intent,
+                    (
+                        RunnerTransferFailure.DEADLINE_EXCEEDED
+                        if datetime.now(UTC) >= intent.deadline_at
+                        else RunnerTransferFailure.STREAM_FAILED
+                    ),
+                )
+                _log_failure(
+                    intent,
+                    result,
+                    source="direct_http",
+                    reason="http_request_timeout",
+                    grpc_status=None,
+                )
             except _TransferFailure as exc:
-                result = _failed(intent, exc.failure)
+                result = _failed(
+                    intent,
+                    exc.failure,
+                    conflict_precondition=exc.conflict_precondition,
+                    destination_conflict=exc.destination_conflict,
+                )
                 _log_failure(
                     intent,
                     result,
@@ -285,20 +372,54 @@ class RunnerTransferManager:
                     grpc_status=None,
                 )
             self._remember(intent, result)
-            await self._enqueue_terminal_result(result)
+            if not await self._enqueue_terminal_result(result):
+                _LOGGER.warning(
+                    "Runtime Runner transfer result was not delivered",
+                    extra={
+                        "transfer_id": result.identity.transfer_id,
+                        "attempt_id": result.identity.attempt_id,
+                        "runtime_id": result.identity.runtime_id,
+                        "runner_generation": result.identity.runner_generation,
+                        "operation_id": result.operation_id,
+                        "dispatch_id": result.dispatch_id,
+                    },
+                )
         except asyncio.CancelledError:
             if result is None:
                 result = _cancelled(intent)
                 self._remember(intent, result)
                 if not self._closed:
-                    await self._enqueue_terminal_result(result)
+                    if not await self._enqueue_terminal_result(result):
+                        _LOGGER.warning(
+                            "Runtime Runner cancellation result was not delivered",
+                            extra={
+                                "transfer_id": result.identity.transfer_id,
+                                "attempt_id": result.identity.attempt_id,
+                                "runtime_id": result.identity.runtime_id,
+                                "runner_generation": result.identity.runner_generation,
+                                "operation_id": result.operation_id,
+                                "dispatch_id": result.dispatch_id,
+                            },
+                        )
             raise
+        finally:
+            lease = direct_claim_lease[0]
+            if lease is not None:
+                await lease.close()
 
     async def _download(
         self,
         intent: RunnerTransferIntent,
         cancelled: asyncio.Event,
+        *,
+        direct_claim_lease: list[_DirectClaimLease | None],
     ) -> RunnerTransferResult:
+        if intent.source_transport is RunnerTransferSourceTransport.DIRECT_OBJECT:
+            return await self._download_direct(
+                intent,
+                cancelled,
+                direct_claim_lease=direct_claim_lease,
+            )
         expected_sha256 = intent.expected_sha256
         overwrite = intent.overwrite
         expected_size = intent.expected_size
@@ -372,6 +493,11 @@ class RunnerTransferManager:
             async with self._commit_lock:
                 _check_stop(intent, cancelled)
                 if overwrite:
+                    self._assert_overwrite_precondition(
+                        intent,
+                        parent_fd,
+                        destination_name,
+                    )
                     assert stage_name is not None
                     os.replace(
                         stage_name,
@@ -382,14 +508,20 @@ class RunnerTransferManager:
                     stage_name = None
                 else:
                     assert stage_name is not None
-                    _assert_empty_destination(parent_fd, destination_name)
-                    os.link(
-                        stage_name,
-                        destination_name,
-                        src_dir_fd=parent_fd,
-                        dst_dir_fd=parent_fd,
-                        follow_symlinks=False,
-                    )
+                    try:
+                        os.link(
+                            stage_name,
+                            destination_name,
+                            src_dir_fd=parent_fd,
+                            dst_dir_fd=parent_fd,
+                            follow_symlinks=False,
+                        )
+                    except FileExistsError:
+                        self._raise_destination_conflict(
+                            intent,
+                            parent_fd,
+                            destination_name,
+                        )
                     os.unlink(stage_name, dir_fd=parent_fd)
                     stage_name = None
             return RunnerTransferResult(
@@ -402,6 +534,8 @@ class RunnerTransferManager:
                 sha256=digest.hexdigest(),
                 destination_committed=True,
                 failure=None,
+                conflict_precondition=None,
+                destination_conflict=None,
             )
         finally:
             if stage_name is not None:
@@ -410,6 +544,348 @@ class RunnerTransferManager:
             if stage_fd is not None:
                 os.close(stage_fd)
             os.close(parent_fd)
+
+    async def _download_direct(
+        self,
+        intent: RunnerTransferIntent,
+        cancelled: asyncio.Event,
+        *,
+        direct_claim_lease: list[_DirectClaimLease | None],
+    ) -> RunnerTransferResult:
+        """Claim and stream one verified direct-object source over HTTP."""
+        expected_sha256 = intent.expected_sha256
+        overwrite = intent.overwrite
+        expected_size = intent.expected_size
+        if expected_sha256 is None or overwrite is None or expected_size is None:
+            raise _TransferFailure(
+                RunnerTransferFailure.PROTOCOL_VIOLATION,
+                reason="direct_download_manifest_missing",
+            )
+        destination_path = self._workspace.resolve_lexical(
+            intent.runtime_path,
+            write=True,
+        )
+        parent = _open_parent(
+            str(destination_path),
+            create=True,
+        )
+        parent_fd = parent.descriptor
+        destination_name = parent.name
+        stage_fd: int | None = None
+        stage_name: str | None = None
+        try:
+            stage = _open_temporary_file(parent_fd)
+            stage_fd = stage.descriptor
+            stage_name = stage.name
+            self._check_direct_stop(intent, cancelled)
+            claim_id = _direct_claim_id(intent)
+            reacquisitions = 0
+            while True:
+                ticket = await self._transfer.claim_direct_object(
+                    intent.identity,
+                    dispatch_id=intent.dispatch_id,
+                    claim_id=claim_id,
+                    timeout=_remaining_timeout(intent),
+                )
+                try:
+                    _validate_direct_ticket(
+                        ticket,
+                        expected_size=expected_size,
+                        expected_sha256=expected_sha256,
+                        deadline_at=intent.deadline_at,
+                    )
+                except _TransferFailure as exc:
+                    if (
+                        reacquisitions < _MAX_DIRECT_TICKET_REACQUISITIONS
+                        and _direct_ticket_expired(ticket, intent.deadline_at)
+                        and exc.reason == "direct_ticket_expiry_invalid"
+                    ):
+                        reacquisitions += 1
+                        continue
+                    raise
+                break
+            lease = _DirectClaimLease(
+                manager=self,
+                intent=intent,
+                cancelled=cancelled,
+                claim_id=claim_id,
+            )
+            direct_claim_lease[0] = lease
+            await lease.start()
+            digest = hashlib.sha256()
+            offset = 0
+            body_started = False
+            while True:
+                self._check_direct_stop(intent, cancelled)
+                lease.check()
+                now = datetime.now(UTC)
+                remaining = (intent.deadline_at - now).total_seconds()
+                ticket_remaining = (ticket.expires_at - now).total_seconds()
+                if remaining <= 0:
+                    raise _TransferFailure(
+                        RunnerTransferFailure.DEADLINE_EXCEEDED,
+                        reason="deadline_exceeded",
+                    )
+                if ticket_remaining <= 0:
+                    if (
+                        not body_started
+                        and reacquisitions < _MAX_DIRECT_TICKET_REACQUISITIONS
+                    ):
+                        reacquisitions += 1
+                        ticket = await lease.wait_for(
+                            self._transfer.claim_direct_object(
+                                intent.identity,
+                                dispatch_id=intent.dispatch_id,
+                                claim_id=claim_id,
+                                timeout=remaining,
+                            )
+                        )
+                        _validate_direct_ticket(
+                            ticket,
+                            expected_size=expected_size,
+                            expected_sha256=expected_sha256,
+                            deadline_at=intent.deadline_at,
+                        )
+                        continue
+                    raise _TransferFailure(
+                        RunnerTransferFailure.DEADLINE_EXCEEDED,
+                        reason="direct_ticket_expired",
+                    )
+                retry_ticket = False
+                client_timeout = aiohttp.ClientTimeout(
+                    total=min(remaining, ticket_remaining)
+                )
+                async with aiohttp.ClientSession(
+                    timeout=client_timeout,
+                    trust_env=False,
+                ) as session:
+                    request = session.request(
+                        ticket.method,
+                        ticket.url,
+                        headers=dict(ticket.headers),
+                        allow_redirects=False,
+                        proxy=self._http_proxy,
+                    )
+                    response: aiohttp.ClientResponse | None = None
+                    try:
+                        response = await lease.wait_for(request.__aenter__())
+                        if response.status != 200:
+                            if response.status in {401, 403} and not body_started:
+                                retry_ticket = True
+                            else:
+                                raise _TransferFailure(
+                                    RunnerTransferFailure.STREAM_FAILED,
+                                    reason="direct_http_status_invalid",
+                                )
+                        if not retry_ticket and (
+                            response.content_length is not None
+                            and response.content_length != expected_size
+                        ):
+                            raise _TransferFailure(
+                                RunnerTransferFailure.INTEGRITY_FAILED,
+                                reason="direct_http_content_length_mismatch",
+                            )
+                        while not retry_ticket:
+                            lease.check()
+                            self._check_direct_stop(intent, cancelled)
+                            chunk = await lease.wait_for(
+                                response.content.read(_BUFFER_BYTES)
+                            )
+                            if not chunk:
+                                break
+                            body_started = True
+                            self._check_direct_stop(intent, cancelled)
+                            lease.check()
+                            if len(chunk) > _BUFFER_BYTES:
+                                raise _TransferFailure(
+                                    RunnerTransferFailure.PROTOCOL_VIOLATION,
+                                    reason="direct_http_chunk_invalid",
+                                )
+                            if offset + len(chunk) > expected_size:
+                                raise _TransferFailure(
+                                    RunnerTransferFailure.INTEGRITY_FAILED,
+                                    reason="direct_http_body_exceeds_expected_size",
+                                )
+                            await asyncio.to_thread(_write_all, stage_fd, chunk)
+                            lease.check()
+                            digest.update(chunk)
+                            offset += len(chunk)
+                        lease.check()
+                    except aiohttp.ClientError, TimeoutError:
+                        if not body_started:
+                            retry_ticket = True
+                        else:
+                            raise
+                    finally:
+                        if response is not None:
+                            await request.__aexit__(None, None, None)
+                        else:
+                            request.close()
+                if not retry_ticket:
+                    break
+                if body_started or reacquisitions >= _MAX_DIRECT_TICKET_REACQUISITIONS:
+                    raise _TransferFailure(
+                        RunnerTransferFailure.STREAM_FAILED,
+                        reason="direct_http_request_failed",
+                    )
+                reacquisitions += 1
+                ticket = await lease.wait_for(
+                    self._transfer.claim_direct_object(
+                        intent.identity,
+                        dispatch_id=intent.dispatch_id,
+                        claim_id=claim_id,
+                        timeout=_remaining_timeout(intent),
+                    )
+                )
+                _validate_direct_ticket(
+                    ticket,
+                    expected_size=expected_size,
+                    expected_sha256=expected_sha256,
+                    deadline_at=intent.deadline_at,
+                )
+            self._check_direct_stop(intent, cancelled)
+            lease.check()
+            actual_sha256 = digest.hexdigest()
+            if offset != expected_size or actual_sha256 != expected_sha256:
+                raise _TransferFailure(
+                    RunnerTransferFailure.INTEGRITY_FAILED,
+                    reason="direct_http_manifest_mismatch",
+                )
+            await asyncio.to_thread(os.fsync, stage_fd)
+            lease.check()
+            assert stage_fd is not None
+            await self._commit_lock.acquire()
+            try:
+                self._check_direct_stop(intent, cancelled)
+                lease.check()
+                if overwrite:
+                    self._assert_overwrite_precondition(
+                        intent,
+                        parent_fd,
+                        destination_name,
+                    )
+                    assert stage_name is not None
+                    os.replace(
+                        stage_name,
+                        destination_name,
+                        src_dir_fd=parent_fd,
+                        dst_dir_fd=parent_fd,
+                    )
+                    stage_name = None
+                else:
+                    assert stage_name is not None
+                    try:
+                        os.link(
+                            stage_name,
+                            destination_name,
+                            src_dir_fd=parent_fd,
+                            dst_dir_fd=parent_fd,
+                            follow_symlinks=False,
+                        )
+                    except FileExistsError:
+                        self._raise_destination_conflict(
+                            intent,
+                            parent_fd,
+                            destination_name,
+                        )
+                    os.unlink(stage_name, dir_fd=parent_fd)
+                    stage_name = None
+            finally:
+                self._commit_lock.release()
+            return RunnerTransferResult(
+                identity=intent.identity,
+                operation_id=intent.operation_id,
+                dispatch_id=intent.dispatch_id,
+                direction=intent.direction,
+                outcome=RunnerTransferOutcome.SUCCEEDED,
+                actual_size=offset,
+                sha256=actual_sha256,
+                destination_committed=True,
+                failure=None,
+                conflict_precondition=None,
+                destination_conflict=None,
+            )
+        finally:
+            if stage_name is not None:
+                with contextlib.suppress(FileNotFoundError):
+                    os.unlink(stage_name, dir_fd=parent_fd)
+            if stage_fd is not None:
+                os.close(stage_fd)
+            os.close(parent_fd)
+
+    async def _renew_direct_claim(
+        self,
+        intent: RunnerTransferIntent,
+        cancelled: asyncio.Event,
+        *,
+        claim_id: str,
+        failed: asyncio.Event,
+        error: list[_TransferFailure],
+    ) -> None:
+        """Renew one direct-object claim until the HTTP body finishes."""
+        try:
+            while True:
+                remaining = _remaining_timeout(intent)
+                await asyncio.sleep(min(STREAM_OWNER_RENEWAL_SECONDS, remaining))
+                self._check_direct_stop(intent, cancelled)
+                renewed = await self._transfer.claim_direct_object(
+                    intent.identity,
+                    dispatch_id=intent.dispatch_id,
+                    claim_id=claim_id,
+                    timeout=_remaining_timeout(intent),
+                )
+                _validate_direct_ticket(
+                    renewed,
+                    expected_size=intent.expected_size
+                    if intent.expected_size is not None
+                    else -1,
+                    expected_sha256=intent.expected_sha256 or "",
+                    deadline_at=intent.deadline_at,
+                )
+        except asyncio.CancelledError:
+            raise
+        except _TransferFailure as exc:
+            error.append(exc)
+            failed.set()
+        except grpc.aio.AioRpcError as exc:
+            error.append(
+                _TransferFailure(
+                    runner_transfer_failure_from_grpc(exc),
+                    reason="direct_claim_renewal_grpc_failed",
+                )
+            )
+            failed.set()
+        except ValueError as exc:
+            del exc
+            error.append(
+                _TransferFailure(
+                    RunnerTransferFailure.PROTOCOL_VIOLATION,
+                    reason="direct_claim_renewal_response_invalid",
+                )
+            )
+            failed.set()
+        except Exception as exc:
+            del exc
+            error.append(
+                _TransferFailure(
+                    RunnerTransferFailure.STREAM_FAILED,
+                    reason="direct_claim_renewal_failed",
+                )
+            )
+            failed.set()
+
+    def _check_direct_stop(
+        self,
+        intent: RunnerTransferIntent,
+        cancelled: asyncio.Event,
+    ) -> None:
+        """Check cancellation, deadline, and current Runner generation."""
+        _check_stop(intent, cancelled)
+        if self._accepted_generation() != intent.identity.runner_generation:
+            raise _TransferFailure(
+                RunnerTransferFailure.UNAVAILABLE,
+                reason="runner_generation_fenced",
+            )
 
     async def _upload(
         self,
@@ -531,6 +1007,8 @@ class RunnerTransferManager:
                 sha256=authoritative.sha256,
                 destination_committed=False,
                 failure=None,
+                conflict_precondition=None,
+                destination_conflict=None,
             )
         finally:
             if snapshot_name is not None:
@@ -543,18 +1021,37 @@ class RunnerTransferManager:
             os.close(parent_fd)
 
     async def _enqueue_result(self, result: RunnerTransferResult) -> None:
-        if self._closed:
-            return
-        self._ensure_result_task()
-        await self._results.put(result)
+        await self._enqueue_pending_result(_PendingRunnerTransferResult(result=result))
 
-    async def _enqueue_terminal_result(self, result: RunnerTransferResult) -> None:
-        enqueue = asyncio.create_task(self._enqueue_result(result))
+    async def _enqueue_pending_result(
+        self,
+        pending: _PendingRunnerTransferResult,
+    ) -> bool:
+        if self._closed:
+            return False
+        self._ensure_result_task()
+        await self._results.put(pending)
+        return True
+
+    async def _publish_terminal_result(
+        self,
+        pending: _PendingRunnerTransferResult,
+    ) -> bool:
+        """Queue one terminal result and await Control's delivery outcome."""
+        if not await self._enqueue_pending_result(pending):
+            return False
+        assert pending.delivered is not None
+        return await pending.delivered
+
+    async def _enqueue_terminal_result(self, result: RunnerTransferResult) -> bool:
+        delivered = asyncio.get_running_loop().create_future()
+        pending = _PendingRunnerTransferResult(result=result, delivered=delivered)
+        enqueue = asyncio.create_task(self._publish_terminal_result(pending))
         cancelled = False
         try:
             while True:
                 try:
-                    await asyncio.shield(enqueue)
+                    published = await asyncio.shield(enqueue)
                     break
                 except asyncio.CancelledError:
                     if self._closed:
@@ -570,6 +1067,7 @@ class RunnerTransferManager:
                     await enqueue
         if cancelled:
             raise asyncio.CancelledError
+        return published
 
     def _ensure_result_task(self) -> None:
         if self._result_task is None:
@@ -577,14 +1075,21 @@ class RunnerTransferManager:
 
     async def _emit_results(self) -> None:
         while True:
-            result = await self._results.get()
+            pending = await self._results.get()
             try:
-                await self._control.append_runner_transfer_result(result)
-            except Exception:
-                _LOGGER.warning(
-                    "Runner transfer result delivery became unavailable",
-                    exc_info=True,
-                )
+                try:
+                    await self._control.append_runner_transfer_result(pending.result)
+                except asyncio.CancelledError:
+                    _set_result_delivery(pending, delivered=False)
+                    raise
+                except Exception:
+                    _LOGGER.warning(
+                        "Runner transfer result delivery became unavailable",
+                        exc_info=True,
+                    )
+                    _set_result_delivery(pending, delivered=False)
+                else:
+                    _set_result_delivery(pending, delivered=True)
             finally:
                 self._results.task_done()
 
@@ -603,6 +1108,82 @@ class RunnerTransferManager:
             evicted_identity = _identity_key_from_key(evicted_key)
             if self._completed_by_identity.get(evicted_identity) == evicted_key:
                 self._completed_by_identity.pop(evicted_identity)
+
+    def _assert_overwrite_precondition(
+        self,
+        intent: RunnerTransferIntent,
+        parent_fd: int,
+        destination_name: str,
+    ) -> None:
+        """Require the exact Runner-issued record before replacement."""
+        token = intent.conflict_precondition
+        record = (
+            self._conflict_preconditions.pop(token, None) if token is not None else None
+        )
+        observation = _destination_observation(parent_fd, destination_name)
+        if (
+            record is None
+            or record.expires_at < datetime.now(UTC)
+            or record.identity.runtime_id != intent.identity.runtime_id
+            or record.identity.runner_generation != intent.identity.runner_generation
+            or record.operation_id != intent.operation_id
+            or record.runtime_path != intent.runtime_path
+            or observation.identity is None
+            or observation.identity != record.destination_identity
+        ):
+            self._raise_destination_conflict(
+                intent,
+                parent_fd,
+                destination_name,
+                observation=observation,
+            )
+
+    def _raise_destination_conflict(
+        self,
+        intent: RunnerTransferIntent,
+        parent_fd: int,
+        destination_name: str,
+        *,
+        observation: _DestinationObservation | None = None,
+    ) -> None:
+        """Raise a conflict result with only safe evidence and opaque authority."""
+        captured = observation or _destination_observation(parent_fd, destination_name)
+        token = self._issue_conflict_precondition(intent, captured.identity)
+        raise _TransferFailure(
+            RunnerTransferFailure.DESTINATION_CONFLICT,
+            reason="download_destination_conflict",
+            conflict_precondition=token,
+            destination_conflict=captured.evidence,
+        )
+
+    def _issue_conflict_precondition(
+        self,
+        intent: RunnerTransferIntent,
+        destination_identity: _FileIdentity | None,
+    ) -> bytes:
+        """Create a bounded opaque record tied to the failed delivery attempt."""
+        now = datetime.now(UTC)
+        expired = tuple(
+            token
+            for token, record in self._conflict_preconditions.items()
+            if record.expires_at < now
+        )
+        for token in expired:
+            self._conflict_preconditions.pop(token)
+        while len(self._conflict_preconditions) >= _MAX_CONFLICT_PRECONDITIONS:
+            oldest = next(iter(self._conflict_preconditions))
+            self._conflict_preconditions.pop(oldest)
+        token = secrets.token_bytes(32)
+        while token in self._conflict_preconditions:
+            token = secrets.token_bytes(32)
+        self._conflict_preconditions[token] = _ConflictPrecondition(
+            identity=intent.identity,
+            operation_id=intent.operation_id,
+            runtime_path=intent.runtime_path,
+            destination_identity=destination_identity,
+            expires_at=intent.deadline_at,
+        )
+        return token
 
 
 @dataclass(frozen=True)
@@ -625,9 +1206,112 @@ class _TransferIdentityKey:
 
 
 class _TransferFailure(Exception):
-    def __init__(self, failure: RunnerTransferFailure, *, reason: str) -> None:
+    def __init__(
+        self,
+        failure: RunnerTransferFailure,
+        *,
+        reason: str,
+        conflict_precondition: bytes | None = None,
+        destination_conflict: RunnerTransferDestinationConflictEvidence | None = None,
+    ) -> None:
         self.failure = failure
         self.reason = reason
+        self.conflict_precondition = conflict_precondition
+        self.destination_conflict = destination_conflict
+
+
+class _DirectClaimLease:
+    """Keep one direct-object claim alive for the whole local operation."""
+
+    def __init__(
+        self,
+        *,
+        manager: RunnerTransferManager,
+        intent: RunnerTransferIntent,
+        cancelled: asyncio.Event,
+        claim_id: str,
+    ) -> None:
+        """Initialize one claim renewal task and its failure signal."""
+        self.manager = manager
+        self.intent = intent
+        self.cancelled = cancelled
+        self.claim_id = claim_id
+        self.failed = asyncio.Event()
+        self.error: list[_TransferFailure] = []
+        self.task: asyncio.Task[None] | None = None
+
+    async def start(self) -> None:
+        """Start renewing the claim until the manager closes this lease."""
+        self.task = asyncio.create_task(
+            self.manager._renew_direct_claim(
+                self.intent,
+                self.cancelled,
+                claim_id=self.claim_id,
+                failed=self.failed,
+                error=self.error,
+            )
+        )
+
+    def check(self) -> None:
+        """Raise the exact renewal failure, if claim ownership was lost."""
+        if self.error:
+            raise self.error[0]
+        if self.failed.is_set():
+            raise _TransferFailure(
+                RunnerTransferFailure.STREAM_FAILED,
+                reason="direct_claim_renewal_failed",
+            )
+
+    async def wait_for(
+        self,
+        awaitable: Awaitable[_AwaitableResult],
+    ) -> _AwaitableResult:
+        """Await one operation while fencing promptly on renewal failure."""
+        operation = asyncio.ensure_future(awaitable)
+        failed = asyncio.create_task(self.failed.wait())
+        try:
+            done, _ = await asyncio.wait(
+                {operation, failed},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if failed in done:
+                operation.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await operation
+                self.check()
+                raise _TransferFailure(
+                    RunnerTransferFailure.STREAM_FAILED,
+                    reason="direct_claim_renewal_failed",
+                )
+            return operation.result()
+        except asyncio.CancelledError:
+            operation.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await operation
+            raise
+        finally:
+            if not failed.done():
+                failed.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await failed
+
+    async def close(self) -> None:
+        """Stop renewal only after terminal result enqueue has returned."""
+        if self.task is None or self.task.done():
+            return
+        self.task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await self.task
+
+
+def _set_result_delivery(
+    pending: _PendingRunnerTransferResult,
+    *,
+    delivered: bool,
+) -> None:
+    """Resolve one terminal-result delivery acknowledgement exactly once."""
+    if pending.delivered is not None and not pending.delivered.done():
+        pending.delivered.set_result(delivered)
 
 
 def _key(intent: RunnerTransferIntent) -> _TransferKey:
@@ -696,6 +1380,11 @@ def _validate_intent_reason(
         and intent.expected_sha256 is None
     ):
         return "download_sha256_missing"
+    if (
+        intent.direction is RunnerTransferDirection.UPLOAD
+        and intent.conflict_precondition is not None
+    ):
+        return "upload_conflict_precondition_present"
     return None
 
 
@@ -708,7 +1397,11 @@ def _valid_identifier(value: str) -> bool:
 
 
 def _failed(
-    intent: RunnerTransferIntent, failure: RunnerTransferFailure
+    intent: RunnerTransferIntent,
+    failure: RunnerTransferFailure,
+    *,
+    conflict_precondition: bytes | None = None,
+    destination_conflict: RunnerTransferDestinationConflictEvidence | None = None,
 ) -> RunnerTransferResult:
     if failure is RunnerTransferFailure.CANCELLED:
         return _cancelled(intent)
@@ -722,6 +1415,8 @@ def _failed(
         sha256=None,
         destination_committed=False,
         failure=failure,
+        conflict_precondition=conflict_precondition,
+        destination_conflict=destination_conflict,
     )
 
 
@@ -736,6 +1431,8 @@ def _cancelled(intent: RunnerTransferIntent) -> RunnerTransferResult:
         sha256=None,
         destination_committed=False,
         failure=RunnerTransferFailure.CANCELLED,
+        conflict_precondition=None,
+        destination_conflict=None,
     )
 
 
@@ -760,6 +1457,113 @@ def _remaining_timeout(intent: RunnerTransferIntent) -> float:
             reason="deadline_exceeded",
         )
     return remaining
+
+
+def _direct_claim_id(intent: RunnerTransferIntent) -> str:
+    """Return a stable opaque claim identity for one exact dispatch."""
+    digest = hashlib.sha256(
+        "\0".join(
+            (
+                intent.identity.transfer_id,
+                intent.identity.attempt_id,
+                intent.identity.runtime_id,
+                str(intent.identity.runner_generation),
+                intent.operation_id,
+                intent.dispatch_id,
+            )
+        ).encode()
+    ).hexdigest()
+    return f"runner-direct-claim:{digest}"
+
+
+def _validate_direct_ticket(
+    ticket: RunnerDirectObjectTicket,
+    *,
+    expected_size: int,
+    expected_sha256: str,
+    deadline_at: datetime,
+) -> None:
+    """Validate one transient direct-object GET capability before use."""
+    if ticket.method != "GET":
+        raise _TransferFailure(
+            RunnerTransferFailure.PROTOCOL_VIOLATION,
+            reason="direct_ticket_method_invalid",
+        )
+    if not 1 <= len(ticket.url.encode()) <= 8192:
+        raise _TransferFailure(
+            RunnerTransferFailure.PROTOCOL_VIOLATION,
+            reason="direct_ticket_url_invalid",
+        )
+    try:
+        parsed = urlsplit(ticket.url)
+        port = parsed.port
+    except ValueError:
+        raise _TransferFailure(
+            RunnerTransferFailure.PROTOCOL_VIOLATION,
+            reason="direct_ticket_url_invalid",
+        ) from None
+    if (
+        parsed.scheme not in {"http", "https"}
+        or parsed.hostname is None
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.fragment
+        or (port is not None and not 1 <= port <= 65_535)
+    ):
+        raise _TransferFailure(
+            RunnerTransferFailure.PROTOCOL_VIOLATION,
+            reason="direct_ticket_url_invalid",
+        )
+    if (
+        ticket.expires_at.tzinfo is None
+        or ticket.expires_at.utcoffset() is None
+        or ticket.expires_at <= datetime.now(UTC)
+        or ticket.expires_at > deadline_at
+    ):
+        raise _TransferFailure(
+            RunnerTransferFailure.DEADLINE_EXCEEDED,
+            reason="direct_ticket_expiry_invalid",
+        )
+    if (
+        ticket.expected_size != expected_size
+        or ticket.expected_sha256 != expected_sha256
+    ):
+        raise _TransferFailure(
+            RunnerTransferFailure.PROTOCOL_VIOLATION,
+            reason="direct_ticket_manifest_mismatch",
+        )
+    if len(ticket.headers) > 64:
+        raise _TransferFailure(
+            RunnerTransferFailure.PROTOCOL_VIOLATION,
+            reason="direct_ticket_headers_invalid",
+        )
+    for name, value in ticket.headers.items():
+        if (
+            not isinstance(name, str)
+            or not isinstance(value, str)
+            or not name
+            or len(name.encode()) > 256
+            or len(value.encode()) > 8192
+            or any(character in name for character in "\r\n:")
+            or any(ord(character) < 32 or ord(character) == 127 for character in value)
+        ):
+            raise _TransferFailure(
+                RunnerTransferFailure.PROTOCOL_VIOLATION,
+                reason="direct_ticket_headers_invalid",
+            )
+
+
+def _direct_ticket_expired(
+    ticket: RunnerDirectObjectTicket,
+    deadline_at: datetime,
+) -> bool:
+    """Return whether a ticket is expired and can be safely reacquired."""
+    return (
+        ticket.expires_at.tzinfo is not None
+        and ticket.expires_at.utcoffset() is not None
+        and ticket.expires_at <= datetime.now(UTC)
+        and ticket.expires_at <= deadline_at
+    )
 
 
 def _open_parent(path: str, *, create: bool) -> _OpenedFile:
@@ -808,14 +1612,45 @@ def _open_parent(path: str, *, create: bool) -> _OpenedFile:
         raise
 
 
-def _assert_empty_destination(parent_fd: int, name: str) -> None:
+def _destination_observation(
+    parent_fd: int,
+    name: str,
+) -> _DestinationObservation:
+    """Capture only safe type, size, and timestamp evidence for one entry."""
     try:
-        os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+        value = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
     except FileNotFoundError:
-        return
-    raise _TransferFailure(
-        RunnerTransferFailure.DESTINATION_FAILED,
-        reason="download_destination_exists",
+        return _DestinationObservation(
+            evidence=RunnerTransferDestinationConflictEvidence(
+                kind="missing",
+                size=None,
+                modified_at=datetime.now(UTC),
+            ),
+            identity=None,
+        )
+    if stat.S_ISREG(value.st_mode):
+        kind = "file"
+        size = value.st_size
+        identity = _regular_identity(value)
+    elif stat.S_ISLNK(value.st_mode):
+        kind = "symlink"
+        size = None
+        identity = None
+    elif stat.S_ISDIR(value.st_mode):
+        kind = "directory"
+        size = None
+        identity = None
+    else:
+        kind = "other"
+        size = None
+        identity = None
+    return _DestinationObservation(
+        evidence=RunnerTransferDestinationConflictEvidence(
+            kind=kind,
+            size=size,
+            modified_at=datetime.fromtimestamp(value.st_mtime, tz=UTC),
+        ),
+        identity=identity,
     )
 
 

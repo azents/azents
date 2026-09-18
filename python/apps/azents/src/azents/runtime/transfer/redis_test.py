@@ -52,6 +52,7 @@ def _record() -> RuntimeTransferRecord:
         agent_id="agent",
         runtime_path="/workspace/file",
         overwrite=True,
+        conflict_precondition=None,
         expected_size=3,
         expected_sha256=_DIGEST,
         product_maximum_size=5,
@@ -99,6 +100,7 @@ def _record() -> RuntimeTransferRecord:
             attempts=1,
         ),
         failure=RuntimeTransferFailure.CANCELLED,
+        destination_conflict=None,
     )
 
 
@@ -199,7 +201,7 @@ def test_record_envelope_preserves_maximum_runner_generation_as_string() -> None
 
     payload = _json_payload(record)
 
-    assert payload["version"] == 9
+    assert payload["version"] == 11
     assert _record_value(payload)["accepted_runner_generation"] == "9223372036854775807"
     assert (
         _decode_record_envelope(

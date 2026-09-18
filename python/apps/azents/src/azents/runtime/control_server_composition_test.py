@@ -143,6 +143,9 @@ def _settings() -> RuntimeControlSettings:
         runtime_control_web_hard_maximum_resident_memory_bytes=1024 * 1024 * 1024,
         runtime_control_transfer_backend="memory",
         runtime_control_workspace_s3_bucket="transfer-bucket",
+        runtime_control_workspace_s3_endpoint_url="http://s3.internal",
+        runtime_control_workspace_s3_public_endpoint_url="http://s3.public",
+        runtime_control_workspace_s3_cors_origins="http://localhost:3000",
         runtime_control_workspace_s3_access_key_id="access-key",
         runtime_control_workspace_s3_secret_access_key="secret-key",
         runtime_runner_image="runner:test",
@@ -189,6 +192,11 @@ async def test_lifespan_composes_all_transfer_services_and_closes_resources(
         "add_runtime_transfer_coordinator_servicer",
         lambda _server, **kwargs: registrations.append(("coordinator", kwargs)),
     )
+    monkeypatch.setattr(
+        control_server,
+        "add_runtime_workspace_upload_coordinator_servicer",
+        lambda _server, **kwargs: registrations.append(("workspace-upload", kwargs)),
+    )
 
     @asynccontextmanager
     async def s3_service(_: RuntimeControlSettings) -> AsyncIterator[_S3]:
@@ -222,6 +230,7 @@ async def test_lifespan_composes_all_transfer_services_and_closes_resources(
     monkeypatch.setattr(control_server, "_runtime_transfer_s3_service", s3_service)
     monkeypatch.setattr(control_server, "_run_reconciler", idle)
     monkeypatch.setattr(control_server, "_run_transfer_repair", idle)
+    monkeypatch.setattr(control_server, "_run_workspace_upload_repair", idle)
     monkeypatch.setattr(control_server, "_run_terminal_repair", idle)
     monkeypatch.setattr(control_server.web, "AppRunner", _AppRunner)
     monkeypatch.setattr(control_server.web, "TCPSite", _TCPSite)
@@ -234,11 +243,15 @@ async def test_lifespan_composes_all_transfer_services_and_closes_resources(
             "runner",
             "transfer",
             "coordinator",
+            "workspace-upload",
         ]
         transfer = dict(registrations)["transfer"]
         runner = dict(registrations)["runner"]
+        workspace = dict(registrations)["workspace-upload"]
         sessions = dict(registrations)["runtime-web-sessions"]
         assert transfer["object_store"] is s3
+        assert transfer["direct_object_store"] is not None
+        assert workspace["coordinator"] is not None
         assert transfer["bucket"] == "transfer-bucket"
         assert transfer["object_prefix"] == "v1/runtime-transfer"
         assert runner["transfer_result_sink"] is not None

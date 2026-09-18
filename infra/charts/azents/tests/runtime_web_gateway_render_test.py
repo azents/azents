@@ -28,6 +28,10 @@ def _helm_template(*values: str) -> str:
         f"runtimeProviderKubernetes.engineImage.digest=sha256:{'c' * 64}",
         "secrets.existingSecrets.redis=azents-redis",
         "server.runtimeControl.tls.existingSecret=azents-runtime-control-tls",
+        "objectStorage.external.endpoint=https://s3.internal",
+        "objectStorage.external.publicEndpoint=https://objects.example.com",
+        "objectStorage.external.bucket=workspace-bucket",
+        "objectStorage.external.corsOrigins[0]=https://app.example.com",
     )
     for value in (*base_values, *values):
         command.extend(["--set", value])

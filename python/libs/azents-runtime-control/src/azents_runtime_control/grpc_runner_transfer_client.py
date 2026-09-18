@@ -1,7 +1,8 @@
 """Typed authenticated Runner Transfer gRPC client."""
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import grpc
@@ -45,6 +46,18 @@ class RunnerDownloadComplete:
 
     actual_size: int
     sha256: str
+
+
+@dataclass(frozen=True)
+class RunnerDirectObjectTicket:
+    """Short-lived exact-attempt GET capability for a direct object."""
+
+    method: str
+    url: str
+    expires_at: datetime
+    headers: Mapping[str, str]
+    expected_size: int
+    expected_sha256: str
 
 
 @dataclass(frozen=True)
@@ -138,6 +151,55 @@ class GrpcRunnerTransferClient:
                 )
                 continue
             raise ValueError("Runner Transfer download frame is invalid")
+
+    async def claim_direct_object(
+        self,
+        identity: RunnerTransferIdentity,
+        *,
+        dispatch_id: str,
+        claim_id: str,
+        timeout: float,
+    ) -> RunnerDirectObjectTicket:
+        """Claim one direct-object attempt and return its transient GET ticket."""
+        if timeout <= 0:
+            raise ValueError("Runner Transfer direct claim timeout must be positive")
+        if not dispatch_id or not claim_id:
+            raise ValueError("Runner Transfer direct claim identifiers are required")
+        response = await self._stub.ClaimDirectObjectDownload(
+            runtime_runner_transfer_pb2.DirectObjectDownloadClaimRequest(
+                identity=_identity_message(identity),
+                dispatch_id=dispatch_id,
+                claim_id=claim_id,
+            ),
+            metadata=self._metadata,
+            timeout=timeout,
+        )
+        if (
+            response.method != "GET"
+            or not response.url
+            or not response.HasField("expires_at")
+            or response.expected_size < 0
+            or len(response.expected_sha256) != 64
+            or response.expected_sha256.lower() != response.expected_sha256
+            or any(
+                character not in "0123456789abcdef"
+                for character in response.expected_sha256
+            )
+        ):
+            raise ValueError("Runner Transfer direct claim response is invalid")
+        headers: dict[str, str] = {}
+        for header in response.headers:
+            if not header.name or not header.value or header.name.lower() in headers:
+                raise ValueError("Runner Transfer direct claim headers are invalid")
+            headers[header.name.lower()] = header.value
+        return RunnerDirectObjectTicket(
+            method=response.method,
+            url=response.url,
+            expires_at=response.expires_at.ToDatetime(tzinfo=UTC),
+            headers=headers,
+            expected_size=response.expected_size,
+            expected_sha256=response.expected_sha256,
+        )
 
     async def upload(
         self,
@@ -234,6 +296,7 @@ __all__ = [
     "GrpcRunnerTransferClient",
     "RunnerDownloadChunk",
     "RunnerDownloadComplete",
+    "RunnerDirectObjectTicket",
     "RunnerUploadComplete",
     "RunnerUploadResult",
     "runner_transfer_failure_from_grpc",
