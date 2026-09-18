@@ -8,7 +8,7 @@ import dataclasses
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import PurePosixPath
-from typing import Annotated, Protocol
+from typing import Annotated, Protocol, assert_never
 
 import grpc
 from azcommon.result import Failure, Result, Success
@@ -22,15 +22,15 @@ from azents_runtime_control.grpc_workspace_upload_client import (
     WorkspaceUploadTicket,
 )
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.enums import AgentLifecycleStatus, AgentType, WorkspaceUserRole
-from azents.rdb.deps import get_session_manager
-from azents.rdb.session import SessionManager
-from azents.repos.agent import AgentRepository
-from azents.repos.agent.data import Agent
-from azents.repos.agent_admin import AgentAdminRepository
-from azents.repos.workspace_user import WorkspaceUserRepository
+from azents.repos.workspace_upload_authority.data import (
+    WorkspaceUploadRequesterAccessDenied,
+    WorkspaceUploadRequesterAgentUnavailable,
+    WorkspaceUploadRequesterAuthority,
+)
+from azents.repos.workspace_upload_authority.operations import (
+    WorkspaceUploadAuthorizationRepository,
+)
 from azents.runtime.control_protocol.runner_operations import (
     RuntimeFileStatResult,
     RuntimeRunnerOperationFailedError,
@@ -207,31 +207,13 @@ class WorkspaceUploadCoordinator(Protocol):
         ...
 
 
-@dataclasses.dataclass(frozen=True)
-class _AuthorizedAgent:
-    """Requester-authorized Agent and Workspace membership."""
-
-    agent: Agent
-    workspace_user_id: str
-    role: WorkspaceUserRole
-
-
 @dataclasses.dataclass
 class WorkspaceUploadService:
     """Authorize Workspace uploads and adapt them to Runtime Control."""
 
-    agent_repository: Annotated[AgentRepository, Depends(AgentRepository)]
-    agent_admin_repository: Annotated[
-        AgentAdminRepository,
-        Depends(AgentAdminRepository),
-    ]
-    workspace_user_repository: Annotated[
-        WorkspaceUserRepository,
-        Depends(WorkspaceUserRepository),
-    ]
-    session_manager: Annotated[
-        SessionManager[AsyncSession],
-        Depends(get_session_manager),
+    authorization_repository: Annotated[
+        WorkspaceUploadAuthorizationRepository,
+        Depends(WorkspaceUploadAuthorizationRepository),
     ]
     runtime_target_resolver: Annotated[
         RuntimeOperationTargetResolver,
@@ -570,39 +552,21 @@ class WorkspaceUploadService:
         self,
         agent_id: str,
         user_id: str,
-    ) -> Result[_AuthorizedAgent, WorkspaceUploadError]:
+    ) -> Result[WorkspaceUploadRequesterAuthority, WorkspaceUploadError]:
         """Resolve Agent visibility and Workspace membership."""
-        async with self.session_manager() as session:
-            agent = await self.agent_repository.get_by_id(session, agent_id)
-            if (
-                agent is None
-                or agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE
-            ):
+        result = await self.authorization_repository.authorize(
+            agent_id=agent_id,
+            user_id=user_id,
+        )
+        if isinstance(result, Success):
+            return Success(result.value)
+        match result.error:
+            case WorkspaceUploadRequesterAgentUnavailable():
                 return Failure(WorkspaceUploadAgentNotFound(agent_id=agent_id))
-            membership = await self.workspace_user_repository.get_by_workspace_and_user(
-                session,
-                workspace_id=agent.workspace_id,
-                user_id=user_id,
-            )
-            if membership is None:
+            case WorkspaceUploadRequesterAccessDenied():
                 return Failure(WorkspaceUploadAccessDenied(agent_id=agent_id))
-            if (
-                agent.type is AgentType.PRIVATE
-                and membership.role is not WorkspaceUserRole.OWNER
-            ):
-                if not await self.agent_admin_repository.is_admin(
-                    session,
-                    agent_id,
-                    membership.id,
-                ):
-                    return Failure(WorkspaceUploadAccessDenied(agent_id=agent_id))
-            return Success(
-                _AuthorizedAgent(
-                    agent=agent,
-                    workspace_user_id=membership.id,
-                    role=membership.role,
-                )
-            )
+            case _:
+                assert_never(result.error)
 
     async def _resolve_destination(
         self,
@@ -680,7 +644,7 @@ class WorkspaceUploadService:
 
     async def _get_scoped_status(
         self,
-        authorized: _AuthorizedAgent,
+        authorized: WorkspaceUploadRequesterAuthority,
         *,
         agent_id: str,
         user_id: str,
@@ -712,7 +676,7 @@ class WorkspaceUploadService:
 
     async def _lookup_identity(
         self,
-        authorized: _AuthorizedAgent,
+        authorized: WorkspaceUploadRequesterAuthority,
         *,
         agent_id: str,
         user_id: str,
@@ -841,7 +805,7 @@ def _decode_conflict_precondition(
 
 def _validate_status_scope(
     status: WorkspaceUploadStatus,
-    authorized: _AuthorizedAgent,
+    authorized: WorkspaceUploadRequesterAuthority,
     user_id: str,
     agent_id: str,
     *,
