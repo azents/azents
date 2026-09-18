@@ -13,7 +13,14 @@ import {
   Text,
   Tooltip,
 } from "@mantine/core";
-import { IconCheck, IconRefresh, IconUpload, IconX } from "@tabler/icons-react";
+import {
+  IconAlertCircle,
+  IconCheck,
+  IconLoader2,
+  IconRefresh,
+  IconUpload,
+  IconX,
+} from "@tabler/icons-react";
 import type { WorkspacePanelTranslator } from "../containers/useWorkspacePanelTranslations";
 import type { WorkspaceUploadRow } from "../workspaceUploadTypes";
 import type { WorkspaceUploadFailure } from "@azents/public-client";
@@ -72,6 +79,20 @@ function phaseColor(phase: WorkspaceUploadRow["phase"]): string {
       return "red";
     default:
       return "blue";
+  }
+}
+
+function phaseIcon(phase: WorkspaceUploadRow["phase"]): React.ReactElement {
+  switch (phase) {
+    case "succeeded":
+      return <IconCheck size="0.875rem" aria-hidden="true" />;
+    case "cancelled":
+      return <IconX size="0.875rem" aria-hidden="true" />;
+    case "conflicted":
+    case "failed":
+      return <IconAlertCircle size="0.875rem" aria-hidden="true" />;
+    default:
+      return <IconLoader2 size="0.875rem" aria-hidden="true" />;
   }
 }
 
@@ -135,6 +156,8 @@ export function WorkspaceUploadPanel({
       style={{
         background: "var(--mantine-color-default-hover)",
         borderBottom: "1px solid var(--mantine-color-default-border)",
+        minWidth: 0,
+        overflowX: "hidden",
       }}
       data-testid="workspace-upload-panel"
     >
@@ -154,37 +177,77 @@ export function WorkspaceUploadPanel({
           {t("upload.fileCount", { count: rows.length })}
         </Text>
       </Group>
-      <ScrollArea.Autosize mah="14rem" offsetScrollbars>
-        <Stack gap="xs">
+      <ScrollArea.Autosize
+        mah="14rem"
+        offsetScrollbars
+        style={{ minWidth: 0 }}
+        styles={{ viewport: { overflowX: "hidden" } }}
+      >
+        <Stack gap="xs" style={{ minWidth: 0 }}>
           {rows.map((row) => {
             const failure = failureLabel(row.failure, t);
             const active = isActive(row.phase);
+            const statusLabel = phaseLabel(row.phase, t);
             return (
-              <Paper key={row.id} withBorder p="xs" radius="md">
-                <Stack gap="xs">
-                  <Group justify="space-between" gap="xs" wrap="nowrap">
-                    <Stack gap={0} miw={0} style={{ flex: "1 1 auto" }}>
-                      <Text size="xs" fw={600} truncate title={row.filename}>
-                        {row.filename}
-                      </Text>
+              <Paper
+                key={row.id}
+                withBorder
+                p="xs"
+                radius="md"
+                style={{ minWidth: 0, overflowX: "hidden" }}
+              >
+                <Stack gap="xs" style={{ minWidth: 0 }}>
+                  <Stack gap={0} style={{ minWidth: 0 }}>
+                    <Text
+                      size="xs"
+                      fw={600}
+                      truncate
+                      title={row.filename}
+                      style={{ minWidth: 0 }}
+                    >
+                      {row.filename}
+                    </Text>
+                    <Text
+                      size="xs"
+                      c="dimmed"
+                      ff="monospace"
+                      truncate
+                      title={row.destinationPath}
+                      style={{ minWidth: 0 }}
+                    >
+                      {row.destinationPath}
+                    </Text>
+                    <Group
+                      gap="xs"
+                      align="flex-start"
+                      wrap="wrap"
+                      role="status"
+                      aria-label={statusLabel}
+                      style={{ minWidth: 0 }}
+                    >
+                      <Box
+                        c={phaseColor(row.phase)}
+                        style={{
+                          display: "flex",
+                          flex: "0 0 auto",
+                        }}
+                      >
+                        {phaseIcon(row.phase)}
+                      </Box>
                       <Text
                         size="xs"
-                        c="dimmed"
-                        ff="monospace"
-                        truncate
-                        title={row.destinationPath}
+                        fw={600}
+                        c={phaseColor(row.phase)}
+                        title={statusLabel}
+                        style={{
+                          minWidth: 0,
+                          overflowWrap: "anywhere",
+                        }}
                       >
-                        {row.destinationPath}
+                        {statusLabel}
                       </Text>
-                    </Stack>
-                    <Badge
-                      size="xs"
-                      color={phaseColor(row.phase)}
-                      variant="light"
-                    >
-                      {phaseLabel(row.phase, t)}
-                    </Badge>
-                  </Group>
+                    </Group>
+                  </Stack>
                   <Group justify="space-between" gap="xs">
                     <Text size="xs" c="dimmed">
                       {formatBytes(row.transferredBytes)} /{" "}
