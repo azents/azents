@@ -686,6 +686,9 @@ export function FileBrowser({
     },
     [onUploadFiles],
   );
+  const handleOpenUploadPicker = useCallback((): void => {
+    uploadInputRef.current?.click();
+  }, []);
   const tree = useMemo(
     () => buildFileTree(cwd, manifestEntries, directoryEntriesByPath),
     [cwd, directoryEntriesByPath, manifestEntries],
@@ -779,7 +782,7 @@ export function FileBrowser({
           variant="subtle"
           aria-label={t("upload.openPicker")}
           data-testid="workspace-upload-open"
-          onClick={() => uploadInputRef.current?.click()}
+          onClick={handleOpenUploadPicker}
         >
           <IconUpload size="0.8125rem" />
         </ActionIcon>

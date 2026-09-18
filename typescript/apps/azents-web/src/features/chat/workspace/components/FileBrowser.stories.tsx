@@ -188,6 +188,26 @@ export const UploadPickerAcceptsMultipleFiles = {
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
+    const inputClick = fn();
+    const originalInputClick = Object.getOwnPropertyDescriptor(
+      HTMLInputElement.prototype,
+      "click",
+    );
+    HTMLInputElement.prototype.click = inputClick;
+    try {
+      await userEvent.click(
+        canvas.getByRole("button", { name: "Upload files" }),
+      );
+      await expect(inputClick).toHaveBeenCalledTimes(1);
+    } finally {
+      if (originalInputClick) {
+        Object.defineProperty(
+          HTMLInputElement.prototype,
+          "click",
+          originalInputClick,
+        );
+      }
+    }
     const input = canvas.getByTestId("workspace-upload-input");
     const first = new File(["first"], "first.txt", { type: "text/plain" });
     const second = new File(["second"], "second.csv", { type: "text/csv" });
