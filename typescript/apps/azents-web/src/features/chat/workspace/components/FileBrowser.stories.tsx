@@ -27,15 +27,16 @@ const child: WorkspaceEntry = {
 interface DirectoryBrowserProps {
   initialLoadState: WorkspaceDirectoryLoadState;
   resolveChildren: boolean;
-  onUploadFiles?: (files: FileList | File[]) => void;
-  onOpenUploadDestinationPicker?: () => void;
+  onUploadFiles?: (
+    files: FileList | File[],
+    destinationDirectory: string,
+  ) => void;
 }
 
 function DirectoryBrowser({
   initialLoadState,
   resolveChildren,
   onUploadFiles = (): void => {},
-  onOpenUploadDestinationPicker = (): void => {},
 }: DirectoryBrowserProps): React.ReactElement {
   const [entriesByPath, setEntriesByPath] = useState<
     Record<string, WorkspaceEntry[]>
@@ -90,8 +91,6 @@ function DirectoryBrowser({
         onRefresh={fn()}
         onSetBrowserMode={fn()}
         onAddProject={fn()}
-        uploadDestinationDirectory={root}
-        onOpenUploadDestinationPicker={onOpenUploadDestinationPicker}
         onUploadFiles={onUploadFiles}
         query={query}
         expanded={expanded}
@@ -182,15 +181,14 @@ export const AsyncDirectoryChildren = {
   },
 } satisfies Story;
 
-const uploadFiles = fn<(files: FileList | File[]) => void>();
-const openUploadDestinationPicker = fn<() => void>();
+const uploadFiles =
+  fn<(files: FileList | File[], destinationDirectory: string) => void>();
 
-export const UploadPickerAcceptsMultipleFiles = {
+export const FolderUploadPickerAcceptsMultipleFiles = {
   args: {
     initialLoadState: { type: "IDLE" },
     resolveChildren: false,
     onUploadFiles: uploadFiles,
-    onOpenUploadDestinationPicker: openUploadDestinationPicker,
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
@@ -203,12 +201,13 @@ export const UploadPickerAcceptsMultipleFiles = {
     HTMLInputElement.prototype.click = inputClick;
     try {
       await userEvent.click(canvas.getByRole("button", { name: "Actions" }));
-      await expect(body.getByText("Upload files")).toBeVisible();
-      await expect(body.getByText("Change destination")).toBeVisible();
-      await expect(canvas.queryByTestId("workspace-upload-open")).toBeNull();
-      await userEvent.click(body.getByText("Change destination"));
-      await expect(openUploadDestinationPicker).toHaveBeenCalledTimes(1);
+      await expect(body.queryByText("Upload files")).toBeNull();
+      await expect(body.queryByText("Change destination")).toBeNull();
       await userEvent.click(canvas.getByRole("button", { name: "Actions" }));
+      await userEvent.click(
+        canvas.getByRole("button", { name: "Actions (slow-directory)" }),
+      );
+      await expect(body.getByText("Upload files")).toBeVisible();
       await userEvent.click(body.getByText("Upload files"));
       await expect(inputClick).toHaveBeenCalledTimes(1);
     } finally {
@@ -242,5 +241,6 @@ export const UploadPickerAcceptsMultipleFiles = {
       "first.txt",
       "second.csv",
     ]);
+    await expect(uploadFiles.mock.calls[0]?.[1]).toBe(directoryPath);
   },
 } satisfies Story;
