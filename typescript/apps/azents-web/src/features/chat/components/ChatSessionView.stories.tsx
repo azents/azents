@@ -134,6 +134,7 @@ const subscriptionUsage: ComposerSubscriptionUsagePresentationProps = {
 const workspacePanel: WorkspacePanelContainerOutput = {
   state: workspacePanelStoryFixture.state,
   metricsState: { type: "LOADING" },
+  workspaceUploads: workspacePanelStoryFixture.workspaceUploads,
   runtimeWebServices: {
     state: {
       type: "READY",

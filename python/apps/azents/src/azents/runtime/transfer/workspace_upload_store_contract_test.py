@@ -349,6 +349,40 @@ async def test_ingress_claim_and_progress_fence_exact_scope_revision_and_claim(
 
 
 @pytest.mark.asyncio
+async def test_cancellation_without_ingress_worker_is_terminal_immediately(
+    store_harness: _StoreHarness,
+) -> None:
+    """An admitted upload without an ingress claim can be cancelled immediately."""
+    store = store_harness.store
+    created = await store.create(_admission())
+    assert created is not None
+    uploading = await store.compare_and_set(
+        replace(
+            created,
+            phase=WorkspaceUploadPhase.UPLOADING,
+            ingress_handle="ingress",
+        ),
+        expected_revision=created.revision,
+    )
+    assert uploading is not None
+    assert uploading.ingress_claim_id is None
+    assert uploading.ingress_lease_expires_at is None
+
+    cancelled = await store.request_cancellation(
+        uploading.admission.upload_id,
+        requester_user_id="requester",
+        workspace_id="workspace",
+        agent_id="agent",
+        expected_revision=uploading.revision,
+    )
+
+    assert cancelled is not None
+    assert cancelled.phase is WorkspaceUploadPhase.CANCELLED
+    assert cancelled.outcome is WorkspaceUploadOutcome.CANCELLED
+    assert cancelled.failure is WorkspaceUploadFailure.CANCELLED
+
+
+@pytest.mark.asyncio
 async def test_reconciliation_claim_is_exclusive_until_lease_expires(
     store_harness: _StoreHarness,
 ) -> None:

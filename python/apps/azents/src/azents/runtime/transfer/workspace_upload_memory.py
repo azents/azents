@@ -431,7 +431,12 @@ class InMemoryWorkspaceUploadStore:
                 return None
             if workspace_upload_phase_terminal(record.phase):
                 return record
-            active_worker = record.phase is WorkspaceUploadPhase.UPLOADING or (
+            active_worker = (
+                record.phase is WorkspaceUploadPhase.UPLOADING
+                and record.ingress_claim_id is not None
+                and record.ingress_lease_expires_at is not None
+                and record.ingress_lease_expires_at > now
+            ) or (
                 record.phase is WorkspaceUploadPhase.MOVING_TO_RUNTIME
                 and bool(record.delivery_attempts)
                 and record.delivery_attempts[-1].completed_at is None

@@ -30,10 +30,12 @@ import {
   workspacePanelTabInvalidationPlan,
 } from "../workspacePanelTabs";
 import { shouldQueryProjectBrowserManifest } from "../workspaceQueryPolicy";
+import { useWorkspaceUploadContainer } from "./useWorkspaceUploadContainer";
 import type {
   ProjectDirectoryPickerEntry,
   ProjectDirectoryPickerState,
 } from "../components/WorkspaceDirectoryPickerModal";
+import type { WorkspaceUploadContainerOutput } from "../workspaceUploadTypes";
 import type { RuntimeWebServicesContainerOutput } from "@/features/runtime-web/containers/useRuntimeWebServicesContainer";
 import type { RuntimeSystemMetricsOverviewState } from "@/shared/runtime-metrics/types";
 import type { GitRefEntryResponse } from "@azents/public-client";
@@ -53,6 +55,7 @@ export interface WorkspacePanelContainerOutput {
   state: WorkspacePanelState;
   projectState: WorkspaceProjectPanelState;
   metricsState: RuntimeSystemMetricsOverviewState;
+  workspaceUploads: WorkspaceUploadContainerOutput;
   runtimeWebServices: RuntimeWebServicesContainerOutput;
   fileBrowserQuery?: string;
   expandedFileNodeIds?: Set<string>;
@@ -435,6 +438,13 @@ export function useWorkspacePanelContainer({
       utils.chat.statAgentWorkspacePath,
     ],
   );
+
+  const workspaceUploads = useWorkspaceUploadContainer({
+    agentId,
+    sessionId,
+    destinationDirectory: activeDirectoryPath,
+    onDestinationChanged: invalidateWorkspaceFiles,
+  });
 
   const createDirectoryMutation =
     trpc.chat.createAgentWorkspaceDirectory.useMutation({
@@ -1434,6 +1444,7 @@ export function useWorkspacePanelContainer({
     state,
     projectState,
     metricsState: metrics.state,
+    workspaceUploads,
     runtimeWebServices,
     fileBrowserQuery,
     expandedFileNodeIds,

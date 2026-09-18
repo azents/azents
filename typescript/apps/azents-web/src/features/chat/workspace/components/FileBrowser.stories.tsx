@@ -1,6 +1,6 @@
 import { Box } from "@mantine/core";
 import { useCallback, useState } from "react";
-import { expect, fn, userEvent, within } from "storybook/test";
+import { expect, fireEvent, fn, userEvent, within } from "storybook/test";
 import { FileBrowserContainer } from "../containers/FileBrowserContainer";
 import type { WorkspaceDirectoryLoadState, WorkspaceEntry } from "../types";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
@@ -27,11 +27,13 @@ const child: WorkspaceEntry = {
 interface DirectoryBrowserProps {
   initialLoadState: WorkspaceDirectoryLoadState;
   resolveChildren: boolean;
+  onUploadFiles?: (files: FileList | File[]) => void;
 }
 
 function DirectoryBrowser({
   initialLoadState,
   resolveChildren,
+  onUploadFiles = (): void => {},
 }: DirectoryBrowserProps): React.ReactElement {
   const [entriesByPath, setEntriesByPath] = useState<
     Record<string, WorkspaceEntry[]>
@@ -86,6 +88,7 @@ function DirectoryBrowser({
         onRefresh={fn()}
         onSetBrowserMode={fn()}
         onAddProject={fn()}
+        onUploadFiles={onUploadFiles}
         query={query}
         expanded={expanded}
         onQueryChange={setQuery}
@@ -172,5 +175,40 @@ export const AsyncDirectoryChildren = {
     await userEvent.click(canvas.getByText("slow-directory"));
     await expect(canvas.getByText("Loading directory…")).toBeVisible();
     await expect(await canvas.findByText("child.txt")).toBeVisible();
+  },
+} satisfies Story;
+
+const uploadFiles = fn<(files: FileList | File[]) => void>();
+
+export const UploadPickerAcceptsMultipleFiles = {
+  args: {
+    initialLoadState: { type: "IDLE" },
+    resolveChildren: false,
+    onUploadFiles: uploadFiles,
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const input = canvas.getByTestId("workspace-upload-input");
+    const first = new File(["first"], "first.txt", { type: "text/plain" });
+    const second = new File(["second"], "second.csv", { type: "text/csv" });
+
+    await fireEvent.change(input, {
+      target: { files: [first, second] },
+    });
+
+    await expect(uploadFiles).toHaveBeenCalledTimes(1);
+    const selected = uploadFiles.mock.calls[0]?.[0];
+    if (!Array.isArray(selected)) {
+      throw new Error(
+        "Expected the picker to pass the selected files as an array.",
+      );
+    }
+    const selectedFiles = selected.filter(
+      (file): file is File => file instanceof File,
+    );
+    await expect(selectedFiles.map((file) => file.name)).toEqual([
+      "first.txt",
+      "second.csv",
+    ]);
   },
 } satisfies Story;

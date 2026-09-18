@@ -6,11 +6,27 @@ import type {
   WorkspacePanelState,
   WorkspaceProjectPanelState,
 } from "../types";
+import type {
+  WorkspaceUploadContainerOutput,
+  WorkspaceUploadRow,
+} from "../workspaceUploadTypes";
 import type { RuntimeSystemMetricsOverviewState } from "@/shared/runtime-metrics/types";
 import type { AgentRuntimeLifecyclePresentationResponse } from "@azents/public-client";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
 const noop = (): void => {};
+const noopFiles = (): void => {};
+const noopUploadId = (): void => {};
+const noopRetry = (): void => {};
+
+const emptyWorkspaceUploads: WorkspaceUploadContainerOutput = {
+  rows: [],
+  hasActiveUploads: false,
+  uploadFiles: noopFiles,
+  cancelUpload: noopUploadId,
+  retryUpload: noopRetry,
+  dismissUpload: noopUploadId,
+};
 
 const startAction = {
   type: "START_RUNTIME",
@@ -351,6 +367,123 @@ const freshMetricsState: RuntimeSystemMetricsOverviewState = {
   },
 };
 
+const uploadRows: WorkspaceUploadRow[] = [
+  {
+    id: "upload-hashing",
+    filename: "dataset.csv",
+    destinationPath: "/workspace/agent/project/dataset.csv",
+    expectedSize: 5_242_880,
+    phase: "hashing",
+    progress: 12,
+    transferredBytes: 3_145_728,
+    uploadId: null,
+    revision: null,
+    currentDeliveryNumber: null,
+    failure: null,
+    errorMessage: null,
+    retryAvailable: false,
+    serverRetryAvailable: false,
+    overwriteAvailable: false,
+    conflictPrecondition: null,
+  },
+  {
+    id: "upload-direct-put",
+    filename: "diagram.png",
+    destinationPath: "/workspace/agent/project/diagram.png",
+    expectedSize: 1_048_576,
+    phase: "uploading",
+    progress: 48,
+    transferredBytes: 524_288,
+    uploadId: "upload-2",
+    revision: 1,
+    currentDeliveryNumber: null,
+    failure: null,
+    errorMessage: null,
+    retryAvailable: false,
+    serverRetryAvailable: false,
+    overwriteAvailable: false,
+    conflictPrecondition: null,
+  },
+  {
+    id: "upload-moving",
+    filename: "release.zip",
+    destinationPath: "/workspace/agent/project/release.zip",
+    expectedSize: 8_388_608,
+    phase: "moving_to_runtime",
+    progress: 82,
+    transferredBytes: 8_388_608,
+    uploadId: "upload-3",
+    revision: 3,
+    currentDeliveryNumber: 1,
+    failure: null,
+    errorMessage: null,
+    retryAvailable: false,
+    serverRetryAvailable: false,
+    overwriteAvailable: false,
+    conflictPrecondition: null,
+  },
+  {
+    id: "upload-success",
+    filename: "README-upload.md",
+    destinationPath: "/workspace/agent/project/README-upload.md",
+    expectedSize: 2_048,
+    phase: "succeeded",
+    progress: 100,
+    transferredBytes: 2_048,
+    uploadId: "upload-4",
+    revision: 4,
+    currentDeliveryNumber: 1,
+    failure: null,
+    errorMessage: null,
+    retryAvailable: false,
+    serverRetryAvailable: false,
+    overwriteAvailable: false,
+    conflictPrecondition: null,
+  },
+  {
+    id: "upload-conflict",
+    filename: "report.json",
+    destinationPath: "/workspace/agent/project/report.json",
+    expectedSize: 512,
+    phase: "conflicted",
+    progress: 75,
+    transferredBytes: 512,
+    uploadId: "upload-5",
+    revision: 5,
+    currentDeliveryNumber: 1,
+    failure: "destination_conflict",
+    errorMessage: null,
+    retryAvailable: true,
+    serverRetryAvailable: true,
+    overwriteAvailable: true,
+    conflictPrecondition: "AQI",
+  },
+  {
+    id: "upload-failed",
+    filename: "notes.txt",
+    destinationPath: "/workspace/agent/project/notes.txt",
+    expectedSize: 128,
+    phase: "failed",
+    progress: 20,
+    transferredBytes: 0,
+    uploadId: null,
+    revision: null,
+    currentDeliveryNumber: null,
+    failure: "transfer",
+    errorMessage: "The storage request was unavailable.",
+    retryAvailable: true,
+    serverRetryAvailable: false,
+    overwriteAvailable: false,
+    conflictPrecondition: null,
+  },
+];
+
+const workspaceUploadsWithRows: WorkspaceUploadContainerOutput = {
+  ...emptyWorkspaceUploads,
+  rows: uploadRows,
+  hasActiveUploads: true,
+};
+
 const projectsState: WorkspacePanelState = {
   ...readyState,
   manifest: {
@@ -486,6 +619,13 @@ type Story = StoryObj<typeof meta>;
 export const Browser = {
   args: {
     state: readyState,
+  },
+} satisfies Story;
+
+export const Uploads = {
+  args: {
+    state: readyState,
+    workspaceUploads: workspaceUploadsWithRows,
   },
 } satisfies Story;
 

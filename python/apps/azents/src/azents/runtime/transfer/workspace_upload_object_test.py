@@ -38,6 +38,43 @@ def _object_store(s3: _S3) -> WorkspaceUploadObjectStore:
     )
 
 
+class _AdvancingClock:
+    """Return deterministic clock samples to expose double-sampling drift."""
+
+    def __init__(self, *values: datetime) -> None:
+        self.values = list(values)
+
+    def __call__(self) -> datetime:
+        if not self.values:
+            raise AssertionError("clock was sampled more than expected")
+        return self.values.pop(0)
+
+
+@pytest.mark.asyncio
+async def test_download_ticket_uses_one_clock_sample_for_deadline() -> None:
+    """The direct GET ticket must not exceed its authoritative deadline."""
+    deadline_at = _NOW + timedelta(minutes=1)
+    s3 = _S3(now=_NOW)
+    clock = _AdvancingClock(_NOW, _NOW + timedelta(microseconds=11))
+    object_store = WorkspaceUploadObjectStore(
+        s3_service=s3,
+        bucket="bucket",
+        ingress_object_prefix="workspace-upload-ingress",
+        source_object_prefix="workspace-upload-sources",
+        ticket_ttl=timedelta(minutes=1),
+        multipart_copy_threshold=1,
+        multipart_part_size=1,
+        clock=clock,
+    )
+
+    ticket = await object_store.issue_download_ticket(
+        source_handle="a" * 32,
+        deadline_at=deadline_at,
+    )
+
+    assert ticket.expires_at == deadline_at
+
+
 class _PagedS3(_S3):
     """S3 double with explicit prefix-owned continuation pages."""
 

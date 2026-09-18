@@ -32,6 +32,7 @@ from azents.runtime.transfer.data import (
     RuntimeTransferFailure,
     RuntimeTransferOutcome,
     RuntimeTransferRecord,
+    RuntimeTransferSourceTransport,
 )
 from azents.runtime.transfer.memory import InMemoryRuntimeTransferStateStore
 from azents.testing.runtime_coordination import (
@@ -351,6 +352,63 @@ async def test_upload_dispatch_preserves_admission_sha256() -> None:
     )
     assert claimed is not None
     assert claimed.envelope.payload["expected_sha256"] == "b" * 64
+
+
+@pytest.mark.asyncio
+async def test_direct_object_dispatch_preserves_admission_sha256() -> None:
+    """Direct-object downloads carry their admission digest to the Runner."""
+    state = InMemoryRuntimeTransferStateStore(config=_config(), clock=lambda: _NOW)
+    coordination = InMemoryRuntimeCoordinationStore()
+    await publish_next_test_connection(
+        coordination,
+        kind=RuntimeConnectionKind.RUNNER,
+        subject_id="runtime-1",
+        connection_id="connection-1",
+        owner_replica_id="replica-1",
+        connected_at=datetime.now(UTC),
+        heartbeat_at=datetime.now(UTC),
+        ttl_seconds=60,
+        metadata={},
+    )
+    coordinator = RuntimeTransferCoordinator(
+        state_store=state,
+        coordination_store=coordination,
+        cleanup=None,
+        clock=lambda: _NOW,
+    )
+    admitted = await coordinator.admit(
+        replace(
+            _admission(),
+            source_transport=RuntimeTransferSourceTransport.DIRECT_OBJECT,
+            source_handle="workspace-upload-source",
+        ),
+        lease_id="lease-1",
+    )
+    assert admitted is not None
+    ready = await coordinator.mark_ready_direct(
+        admitted,
+        expected_revision=admitted.revision,
+        source_handle="workspace-upload-source",
+        size=3,
+        sha256="a" * 64,
+    )
+    assert ready is not None
+
+    dispatched = await coordinator.dispatch(
+        ready,
+        expected_revision=ready.revision,
+        dispatch_id="dispatch-1",
+    )
+
+    claimed = await coordination.claim_next_request(
+        dispatched.request_stream_id,
+        consumer_group="runner-1",
+        consumer_id="consumer-1",
+        block_ms=0,
+    )
+    assert claimed is not None
+    assert claimed.envelope.payload["source_transport"] == "direct_object"
+    assert claimed.envelope.payload["expected_sha256"] == "a" * 64
 
 
 @pytest.mark.asyncio

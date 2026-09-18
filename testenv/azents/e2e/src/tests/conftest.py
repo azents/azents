@@ -167,6 +167,14 @@ class _CorePrerequisites:
 
 
 @dataclasses.dataclass(frozen=True)
+class _WebGatewayTlsMaterial:
+    """Hold the self-signed certificate shared by the web and S3 gateways."""
+
+    certificate_path: Path
+    key_path: Path
+
+
+@dataclasses.dataclass(frozen=True)
 class _SeleniumContainerStartResult:
     """Retain one background Chromium start outcome for main-thread evidence."""
 
@@ -1571,6 +1579,9 @@ def azents_core_service_containers(
         credential_encryption_key,
         system_bootstrap_setup_token,
     )
+    public_container = public_container.with_env(
+        "AZ_RUNTIME_TRANSFER_COORDINATOR_ENDPOINT", "runtime-control:8030"
+    ).with_env("AZ_RUNTIME_TRANSFER_COORDINATOR_ALLOW_INSECURE", "true")
     admin_base_container = (
         DockerContainer(
             image=azents_server_image,
@@ -1848,9 +1859,15 @@ def azents_runtime_control_container(
     system_bootstrap_setup_token: str,
     openai_proxy_container: DockerContainer,
     azents_runtime_runner_image: str,
+    azents_admin_gateway_container: DockerContainer,
+    azents_web_gateway_tls_material: _WebGatewayTlsMaterial,
 ) -> Generator[DockerContainer, None, None]:
     """Runtime Control gRPC server container."""
-    del azents_admin_server_container, openai_proxy_container
+    del (
+        azents_admin_server_container,
+        openai_proxy_container,
+        azents_admin_gateway_container,
+    )
 
     base_container = (
         DockerContainer(
@@ -1940,11 +1957,20 @@ def azents_runtime_control_container(
         .with_env("AZ_RUNTIME_CONTROL_WORKSPACE_S3_ENDPOINT_URL", "http://rustfs:9000")
         .with_env(
             "AZ_RUNTIME_CONTROL_WORKSPACE_S3_PUBLIC_ENDPOINT_URL",
-            "http://rustfs:9000",
+            "https://azents-web-gateway:8446",
         )
         .with_env(
             "AZ_RUNTIME_CONTROL_WORKSPACE_S3_CORS_ORIGINS",
             _MAIN_WEB_BROWSER_URL,
+        )
+        .with_volume_mapping(
+            str(azents_web_gateway_tls_material.certificate_path),
+            "/etc/ssl/certs/azents-web-gateway-ca.crt",
+            "ro",
+        )
+        .with_env(
+            "AWS_CA_BUNDLE",
+            "/etc/ssl/certs/azents-web-gateway-ca.crt",
         )
         .with_env("AZ_RUNTIME_CONTROL_WORKSPACE_S3_ACCESS_KEY_ID", rustfs_access_key)
         .with_env(
@@ -1975,6 +2001,7 @@ def azents_runtime_provider_docker_container(
     runtime_workspace_path: str,
     azents_admin_server_url: str,
     system_bootstrap_evidence: SystemBootstrapEvidence,
+    azents_web_gateway_tls_material: _WebGatewayTlsMaterial,
 ) -> Generator[DockerContainer, None, None]:
     """Docker Runtime Provider container."""
     del azents_runtime_control_container
@@ -1996,6 +2023,11 @@ def azents_runtime_provider_docker_container(
             .with_network(container_network)
             .with_volume_mapping(docker_socket_path, "/var/run/docker.sock", "rw")
             .with_volume_mapping(data_root, data_root, "rw")
+            .with_volume_mapping(
+                str(azents_web_gateway_tls_material.certificate_path),
+                str(azents_web_gateway_tls_material.certificate_path),
+                "ro",
+            )
             .with_env("AZ_RUNTIME_CONTROL_ENDPOINT", "runtime-control:8030")
             .with_env("AZ_RUNTIME_CONTROL_ALLOW_INSECURE", "true")
             .with_env("AZ_RUNTIME_PROVIDER_ID", _RUNTIME_PROVIDER_ID)
@@ -2004,6 +2036,10 @@ def azents_runtime_provider_docker_container(
             .with_env(
                 "AZ_RUNTIME_PROVIDER_WORKSPACE_PATH",
                 runtime_workspace_path,
+            )
+            .with_env(
+                "AZ_RUNTIME_PROVIDER_RUNTIME_NETWORK_CA_PATH",
+                str(azents_web_gateway_tls_material.certificate_path),
             )
             .with_env(
                 "AZ_RUNTIME_PROVIDER_DOCKER_HOST",
@@ -2556,6 +2592,44 @@ def runtime_provider_credential(
 # =============================================================================
 
 
+@pytest.fixture(scope="session")
+def azents_web_gateway_tls_material(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> _WebGatewayTlsMaterial:
+    """Create one short-lived TLS certificate trusted by Runtime Control."""
+    tls_root = tmp_path_factory.mktemp("azents-web-gateway-tls")
+    certificate_path = tls_root / "tls.crt"
+    key_path = tls_root / "tls.key"
+    subprocess.run(
+        [
+            "openssl",
+            "req",
+            "-x509",
+            "-nodes",
+            "-newkey",
+            "rsa:2048",
+            "-keyout",
+            str(key_path),
+            "-out",
+            str(certificate_path),
+            "-days",
+            "1",
+            "-subj",
+            "/CN=azents-web-gateway",
+            "-addext",
+            "subjectAltName=DNS:azents-web-gateway",
+            "-addext",
+            "basicConstraints=critical,CA:TRUE",
+        ],
+        check=True,
+        capture_output=True,
+    )
+    return _WebGatewayTlsMaterial(
+        certificate_path=certificate_path,
+        key_path=key_path,
+    )
+
+
 def _wait_for_web_ready(
     container: DockerContainer,
     *,
@@ -2695,6 +2769,7 @@ def azents_admin_gateway_container(
     azents_main_web_container: DockerContainer,
     azents_admin_web_container: DockerContainer,
     azents_admin_web_path_container: DockerContainer,
+    azents_web_gateway_tls_material: _WebGatewayTlsMaterial,
 ) -> Generator[DockerContainer, None, None]:
     """Expose Main and Admin Web profiles through a TLS gateway."""
     del (
@@ -2762,35 +2837,29 @@ server {
         proxy_pass http://azents-admin-web:3000;
     }
 }
+
+server {
+    listen 8446 ssl;
+    ssl_certificate /etc/nginx/tls/tls.crt;
+    ssl_certificate_key /etc/nginx/tls/tls.key;
+
+    client_max_body_size 0;
+
+    location / {
+        proxy_http_version 1.1;
+        proxy_request_buffering off;
+        proxy_buffering off;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Forwarded-Host $http_host;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_pass http://rustfs:9000;
+    }
+}
 """.strip()
     with tempfile.TemporaryDirectory(prefix="azents-web-gateway-") as temp_dir:
         temp_path = Path(temp_dir)
         config_path = temp_path / "default.conf"
-        certificate_path = temp_path / "tls.crt"
-        key_path = temp_path / "tls.key"
         config_path.write_text(config, encoding="utf-8")
-        subprocess.run(
-            [
-                "openssl",
-                "req",
-                "-x509",
-                "-nodes",
-                "-newkey",
-                "rsa:2048",
-                "-keyout",
-                str(key_path),
-                "-out",
-                str(certificate_path),
-                "-days",
-                "1",
-                "-subj",
-                "/CN=azents-web-gateway",
-                "-addext",
-                "subjectAltName=DNS:azents-web-gateway",
-            ],
-            check=True,
-            capture_output=True,
-        )
         container = (
             DockerContainer(
                 image="nginx:1.29-alpine",
@@ -2804,13 +2873,22 @@ server {
                 "/etc/nginx/conf.d/default.conf",
                 "ro",
             )
-            .with_volume_mapping(str(certificate_path), "/etc/nginx/tls/tls.crt", "ro")
-            .with_volume_mapping(str(key_path), "/etc/nginx/tls/tls.key", "ro")
-            .with_exposed_ports(8443, 8444, 8445)
+            .with_volume_mapping(
+                str(azents_web_gateway_tls_material.certificate_path),
+                "/etc/nginx/tls/tls.crt",
+                "ro",
+            )
+            .with_volume_mapping(
+                str(azents_web_gateway_tls_material.key_path),
+                "/etc/nginx/tls/tls.key",
+                "ro",
+            )
+            .with_exposed_ports(8443, 8444, 8445, 8446)
         )
         with container:
             host = container.get_container_host_ip()
             port = container.get_exposed_port(8443)
+            storage_port = container.get_exposed_port(8446)
             for _ in range(30):
                 try:
                     response = requests.get(
@@ -2818,7 +2896,15 @@ server {
                         timeout=2,
                         verify=False,
                     )
-                    if response.status_code < 500:
+                    storage_response = requests.get(
+                        f"https://{host}:{storage_port}/",
+                        timeout=2,
+                        verify=False,
+                    )
+                    if (
+                        response.status_code < 500
+                        and storage_response.status_code < 500
+                    ):
                         break
                 except requests.exceptions.RequestException:
                     pass
@@ -3051,6 +3137,16 @@ def azents_admin_web_gateway_url(
 ) -> str:
     """Return the path-prefix Admin Web URL reachable from the browser."""
     return _ADMIN_WEB_GATEWAY_URL
+
+
+@pytest.fixture(scope="session")
+def azents_workspace_upload_gateway_url(
+    azents_admin_gateway_container: DockerContainer,
+) -> str:
+    """Return the host-mapped HTTPS endpoint for direct upload API E2E PUTs."""
+    host = azents_admin_gateway_container.get_container_host_ip()
+    port = azents_admin_gateway_container.get_exposed_port(8446)
+    return f"https://{host}:{port}"
 
 
 # =============================================================================

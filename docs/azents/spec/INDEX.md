@@ -18,12 +18,12 @@ Details of all living specs. Synchronized from frontmatter.
 | goal | [Goal Domain Spec](domain/goal.md) | - | 2026-08-23 | 15 |
 | memory | [Memory](domain/memory.md) | @Hardtack | 2026-08-18 | 7 |
 | model-catalog | [Model Catalog Domain Spec](domain/model-catalog.md) | - | 2026-09-15 | 25 |
-| runtime-provider | [Runtime Provider](domain/runtime-provider.md) | - | 2026-09-17 | 29 |
+| runtime-provider | [Runtime Provider](domain/runtime-provider.md) | - | 2026-09-18 | 30 |
 | scheduled-task | [Scheduled Task Domain Spec](domain/scheduled-task.md) | - | 2026-09-15 | 12 |
 | system-settings | [System Settings](domain/system-settings.md) | @Hardtack | 2026-09-15 | 6 |
 | toolkit | [Toolkit](domain/toolkit.md) | @Hardtack | 2026-09-15 | 118 |
 | user-auth | [User & Authentication](domain/user-auth.md) | @Hardtack | 2026-09-16 | 22 |
-| workspace | [Workspace & Membership](domain/workspace.md) | @Hardtack | 2026-09-18 | 86 |
+| workspace | [Workspace & Membership](domain/workspace.md) | @Hardtack | 2026-09-18 | 87 |
 
 ## Flow Specs
 
@@ -47,6 +47,6 @@ Details of all living specs. Synchronized from frontmatter.
 | [Public Release Publication](flow/public-release.md) | @Hardtack | 2026-09-18 | 3 |
 | [Run Resume](flow/run-resume.md) | @Hardtack | 2026-09-13 | 37 |
 | [Session Context Inspector](flow/session-context-inspector.md) | @Hardtack | 2026-09-13 | 22 |
-| [E2E Primary Test Strategy](flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-09-17 | 64 |
+| [E2E Primary Test Strategy](flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-09-18 | 65 |
 | [xAI API Key Provider Flow](flow/xai-api-key.md) | @Hardtack | 2026-09-15 | 4 |
 | [xAI OAuth Flow](flow/xai-oauth.md) | @Hardtack | 2026-09-15 | 8 |

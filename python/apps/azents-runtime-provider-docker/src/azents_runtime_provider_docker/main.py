@@ -84,6 +84,7 @@ async def _run_control_loop(
             runner_env=settings.runner_env,
             workspace_mount_path=settings.workspace_path,
             tmp_mount_path=settings.tmp_path,
+            runtime_network_ca_path=settings.runtime_network_ca_path,
         ),
     )
     registration = _provider_registration(settings)
@@ -159,6 +160,12 @@ class ProviderSettings:
         self.host_data_root = Path(_required_env("AZ_RUNTIME_PROVIDER_HOST_DATA_ROOT"))
         self.workspace_path = _required_env("AZ_RUNTIME_PROVIDER_WORKSPACE_PATH")
         self.tmp_path = os.environ.get("AZ_RUNTIME_PROVIDER_TMP_PATH", "/tmp/agent")
+        runtime_network_ca_path = os.environ.get(
+            "AZ_RUNTIME_PROVIDER_RUNTIME_NETWORK_CA_PATH"
+        )
+        self.runtime_network_ca_path = (
+            Path(runtime_network_ca_path) if runtime_network_ca_path else None
+        )
         self.runner_env = _runner_env_from_env()
         self.docker_host = os.environ.get("AZ_RUNTIME_PROVIDER_DOCKER_HOST")
         self.connection_id = os.environ.get(

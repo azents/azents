@@ -50,6 +50,7 @@ import type {
   WorkspacePanelTab,
   WorkspaceProjectPanelState,
 } from "../types";
+import type { WorkspaceUploadRow } from "../workspaceUploadTypes";
 import type {
   ProjectDirectoryPickerEntry,
   ProjectDirectoryPickerState,
@@ -94,6 +95,11 @@ export interface WorkspacePanelProps {
   onToggleSelectedPath: (path: string) => void;
   onClearSelection: () => void;
   onRefresh: () => void;
+  uploadRows?: WorkspaceUploadRow[];
+  onUploadFiles?: (files: FileList | File[]) => void;
+  onCancelUpload?: (id: string) => void;
+  onRetryUpload?: (id: string, overwrite: boolean) => void;
+  onDismissUpload?: (id: string) => void;
   onCreateDirectory: (path: string) => void;
   onRenamePath: (sourcePath: string, newName: string) => void;
   onMovePath: (sourcePath: string, destinationPath: string) => void;
@@ -163,6 +169,11 @@ export function WorkspacePanel({
   onToggleSelectedPath,
   onClearSelection,
   onRefresh,
+  uploadRows = [],
+  onUploadFiles = (): void => {},
+  onCancelUpload = (): void => {},
+  onRetryUpload = (): void => {},
+  onDismissUpload = (): void => {},
   getDownloadHref,
   projectPickerState,
   isProjectPickerOpen,
@@ -714,6 +725,11 @@ export function WorkspacePanel({
                     onShowInfo={onShowInfo}
                     onToggleSelectedPath={onToggleSelectedPath}
                     onClearSelection={onClearSelection}
+                    uploadRows={uploadRows}
+                    onUploadFiles={onUploadFiles}
+                    onCancelUpload={onCancelUpload}
+                    onRetryUpload={onRetryUpload}
+                    onDismissUpload={onDismissUpload}
                     onBulkMove={() => onRequestBulkMove(state.directory.path)}
                     onBulkDelete={() =>
                       onRequestBulkDelete(state.selectedPaths.length)

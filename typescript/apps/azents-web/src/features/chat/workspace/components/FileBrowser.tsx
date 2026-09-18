@@ -38,17 +38,20 @@ import {
   IconRefresh,
   IconSearch,
   IconTrash,
+  IconUpload,
   IconX,
 } from "@tabler/icons-react";
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useRef } from "react";
 import { chatChevronTransition } from "../../components/collapsiblePresentation";
 import { buildFileTree, type FileTreeNode } from "../fileBrowserTree";
+import { WorkspaceUploadPanel } from "./WorkspaceUploadPanel";
 import type { WorkspacePanelTranslator } from "../containers/useWorkspacePanelTranslations";
 import type {
   WorkspaceBrowserMode,
   WorkspaceDirectoryLoadState,
   WorkspaceEntry,
 } from "../types";
+import type { WorkspaceUploadRow } from "../workspaceUploadTypes";
 
 export interface FileBrowserProps {
   root: string;
@@ -80,6 +83,11 @@ export interface FileBrowserProps {
   onRefresh: () => void;
   onSetBrowserMode: (mode: WorkspaceBrowserMode) => void;
   onAddProject: () => void;
+  uploadRows?: WorkspaceUploadRow[];
+  onUploadFiles?: (files: FileList | File[]) => void;
+  onCancelUpload?: (id: string) => void;
+  onRetryUpload?: (id: string, overwrite: boolean) => void;
+  onDismissUpload?: (id: string) => void;
   query?: string;
   expanded?: Set<string>;
   onQueryChange?: (query: string) => void;
@@ -655,11 +663,29 @@ export function FileBrowser({
   onRefresh,
   onSetBrowserMode,
   onAddProject,
+  uploadRows = [],
+  onUploadFiles = (): void => {},
+  onCancelUpload = (): void => {},
+  onRetryUpload = (): void => {},
+  onDismissUpload = (): void => {},
   query = "",
   expanded = new Set<string>(),
   onQueryChange = (): void => {},
   onExpandedChange = (): void => {},
 }: FileBrowserViewProps): React.ReactElement {
+  const uploadInputRef = useRef<HTMLInputElement>(null);
+  const handleUploadInputChange = useCallback(
+    (event: React.ChangeEvent<HTMLInputElement>): void => {
+      const files = event.currentTarget.files;
+      if (!files || files.length === 0) {
+        return;
+      }
+      const selectedFiles = Array.from(files);
+      event.currentTarget.value = "";
+      onUploadFiles(selectedFiles);
+    },
+    [onUploadFiles],
+  );
   const tree = useMemo(
     () => buildFileTree(cwd, manifestEntries, directoryEntriesByPath),
     [cwd, directoryEntriesByPath, manifestEntries],
@@ -748,6 +774,23 @@ export function FileBrowser({
           }
           styles={{ input: { border: 0, background: "transparent" } }}
         />
+        <ActionIcon
+          size="sm"
+          variant="subtle"
+          aria-label={t("upload.openPicker")}
+          data-testid="workspace-upload-open"
+          onClick={() => uploadInputRef.current?.click()}
+        >
+          <IconUpload size="0.8125rem" />
+        </ActionIcon>
+        <input
+          ref={uploadInputRef}
+          type="file"
+          multiple
+          hidden
+          data-testid="workspace-upload-input"
+          onChange={handleUploadInputChange}
+        />
         <Menu withinPortal position="bottom-end">
           <Menu.Target>
             <ActionIcon aria-label={t("actions")} size="sm" variant="subtle">
@@ -828,6 +871,14 @@ export function FileBrowser({
           </Text>
         </Group>
       ) : null}
+
+      <WorkspaceUploadPanel
+        rows={uploadRows}
+        t={t}
+        onCancel={onCancelUpload}
+        onRetry={onRetryUpload}
+        onDismiss={onDismissUpload}
+      />
 
       <ScrollArea
         flex={1}

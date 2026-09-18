@@ -1,5 +1,7 @@
 """Docker Runtime Provider process settings tests."""
 
+from pathlib import Path
+
 import pytest
 from azents_runtime_control.grpc_provider_client import GrpcProviderControlClient
 from azents_runtime_control.provider import JsonValue
@@ -74,6 +76,19 @@ def test_runner_limit_environment_is_empty_when_unset(
         monkeypatch.delenv(name, raising=False)
 
     assert ProviderSettings().runner_env == {}
+    assert ProviderSettings().runtime_network_ca_path is None
+
+
+def test_runtime_network_ca_path_is_read_from_environment(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _set_required_env(monkeypatch)
+    ca_path = tmp_path / "ca.crt"
+    ca_path.write_text("certificate")
+    monkeypatch.setenv("AZ_RUNTIME_PROVIDER_RUNTIME_NETWORK_CA_PATH", str(ca_path))
+
+    assert ProviderSettings().runtime_network_ca_path == ca_path
 
 
 @pytest.mark.parametrize(

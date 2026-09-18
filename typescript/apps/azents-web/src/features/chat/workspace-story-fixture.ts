@@ -4,7 +4,19 @@ import type {
   WorkspacePanelState,
   WorkspaceProjectPanelState,
 } from "./workspace/types";
+import type { WorkspaceUploadContainerOutput } from "./workspace/workspaceUploadTypes";
 const noop = (): void => {};
+const noopFiles = (): void => {};
+const noopUploadId = (): void => {};
+const noopRetry = (): void => {};
+const emptyWorkspaceUploads: WorkspaceUploadContainerOutput = {
+  rows: [],
+  hasActiveUploads: false,
+  uploadFiles: noopFiles,
+  cancelUpload: noopUploadId,
+  retryUpload: noopRetry,
+  dismissUpload: noopUploadId,
+};
 const noopPath = (): void => {};
 const closedProjectPickerState: ProjectDirectoryPickerState = {
   type: "CLOSED",
@@ -138,6 +150,7 @@ const readyWorkspaceState: WorkspacePanelState = {
 export const workspacePanelStoryFixture: WorkspacePanelContainerOutput = {
   state: readyWorkspaceState,
   metricsState: { type: "LOADING" },
+  workspaceUploads: emptyWorkspaceUploads,
   runtimeWebServices: {
     state: {
       type: "READY",

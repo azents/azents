@@ -21,12 +21,12 @@ Design documents are accumulated records and are not listed individually in this
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-08-23 | 15 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-08-18 | 7 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-09-15 | 25 |
-| [Runtime Provider](spec/domain/runtime-provider.md) | runtime-provider | - | 2026-09-17 | 29 |
+| [Runtime Provider](spec/domain/runtime-provider.md) | runtime-provider | - | 2026-09-18 | 30 |
 | [Scheduled Task Domain Spec](spec/domain/scheduled-task.md) | scheduled-task | - | 2026-09-15 | 12 |
 | [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-09-15 | 6 |
 | [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-09-15 | 118 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-09-16 | 22 |
-| [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-09-18 | 86 |
+| [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-09-18 | 87 |
 
 ## Living Specs — Flow
 
@@ -50,7 +50,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Public Release Publication](spec/flow/public-release.md) | @Hardtack | 2026-09-18 | 3 |
 | [Run Resume](spec/flow/run-resume.md) | @Hardtack | 2026-09-13 | 37 |
 | [Session Context Inspector](spec/flow/session-context-inspector.md) | @Hardtack | 2026-09-13 | 22 |
-| [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-09-17 | 64 |
+| [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-09-18 | 65 |
 | [xAI API Key Provider Flow](spec/flow/xai-api-key.md) | @Hardtack | 2026-09-15 | 4 |
 | [xAI OAuth Flow](spec/flow/xai-oauth.md) | @Hardtack | 2026-09-15 | 8 |
 

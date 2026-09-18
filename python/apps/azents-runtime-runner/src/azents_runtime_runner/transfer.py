@@ -8,6 +8,7 @@ import hashlib
 import logging
 import os
 import secrets
+import ssl
 import stat
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
@@ -127,10 +128,15 @@ class _DestinationObservation:
 
 @dataclass(frozen=True)
 class _ConflictPrecondition:
-    """Runner-local overwrite authority for one observed destination identity."""
+    """Runner-local overwrite authority for one observed destination identity.
+
+    The evidence is intentionally independent from one delivery operation. A
+    public Workspace upload retry creates a new Runtime Transfer operation but
+    must be able to consume the token captured by the failed no-overwrite
+    attempt.
+    """
 
     identity: RunnerTransferIdentity
-    operation_id: str
     runtime_path: str
     destination_identity: _FileIdentity | None
     expires_at: datetime
@@ -168,6 +174,7 @@ class RunnerTransferManager:
         accepted_generation: Callable[[], int | None],
         workspace: Workspace,
         http_proxy: str | None,
+        http_ssl_context: ssl.SSLContext | None = None,
         max_active_transfers: int = _DEFAULT_MAX_ACTIVE_TRANSFERS,
         max_tombstones: int = _DEFAULT_MAX_TOMBSTONES,
     ) -> None:
@@ -179,6 +186,7 @@ class RunnerTransferManager:
         self._accepted_generation = accepted_generation
         self._workspace = workspace
         self._http_proxy = http_proxy
+        self._http_ssl_context = http_ssl_context
         self._max_active_transfers = max_active_transfers
         self._max_tombstones = max_tombstones
         self._active: dict[_TransferKey, _ActiveTransfer] = {}
@@ -655,9 +663,15 @@ class RunnerTransferManager:
                 client_timeout = aiohttp.ClientTimeout(
                     total=min(remaining, ticket_remaining)
                 )
+                connector = (
+                    aiohttp.TCPConnector(ssl=self._http_ssl_context)
+                    if self._http_ssl_context is not None
+                    else None
+                )
                 async with aiohttp.ClientSession(
                     timeout=client_timeout,
                     trust_env=False,
+                    connector=connector,
                 ) as session:
                     request = session.request(
                         ticket.method,
@@ -1126,7 +1140,6 @@ class RunnerTransferManager:
             or record.expires_at < datetime.now(UTC)
             or record.identity.runtime_id != intent.identity.runtime_id
             or record.identity.runner_generation != intent.identity.runner_generation
-            or record.operation_id != intent.operation_id
             or record.runtime_path != intent.runtime_path
             or observation.identity is None
             or observation.identity != record.destination_identity
@@ -1178,7 +1191,6 @@ class RunnerTransferManager:
             token = secrets.token_bytes(32)
         self._conflict_preconditions[token] = _ConflictPrecondition(
             identity=intent.identity,
-            operation_id=intent.operation_id,
             runtime_path=intent.runtime_path,
             destination_identity=destination_identity,
             expires_at=intent.deadline_at,

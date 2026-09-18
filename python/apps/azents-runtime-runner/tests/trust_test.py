@@ -7,7 +7,10 @@ import pytest
 
 from azents_runtime_runner.execution import DirectExecutionBackend
 from azents_runtime_runner.network import prepare_runner_network_environment
-from azents_runtime_runner.trust import prepare_trust_bundle
+from azents_runtime_runner.trust import (
+    prepare_trust_bundle,
+    runner_http_ssl_context,
+)
 
 _TRUST_ENVIRONMENT_NAMES = (
     "SSL_CERT_FILE",
@@ -63,6 +66,33 @@ def test_prepare_trust_bundle_preserves_system_roots_and_exports_all_clients(
     }
     ssl.create_default_context(cafile=writable_bundle)
     assert not list(writable_bundle.parent.glob(".ca-bundle.*"))
+
+
+def test_runner_http_ssl_context_uses_provider_owned_bundle(tmp_path: Path) -> None:
+    """Runner direct HTTP uses the same verified bundle as child processes."""
+    public_ca = tmp_path / "mounted" / "ca.crt"
+    public_ca.parent.mkdir()
+    public_ca.write_text(_TEST_PUBLIC_CERTIFICATE)
+    system_bundle = tmp_path / "system-ca.crt"
+    system_bundle.write_text(_TEST_PUBLIC_CERTIFICATE)
+    writable_bundle = tmp_path / "runtime" / "ca-bundle.crt"
+
+    environment = prepare_trust_bundle(
+        public_ca_path=public_ca,
+        system_ca_bundle_path=system_bundle,
+        writable_ca_bundle_path=writable_bundle,
+    )
+
+    context = runner_http_ssl_context(environment)
+
+    assert context is not None
+    assert context.verify_mode is ssl.CERT_REQUIRED
+    assert context.check_hostname is True
+
+
+def test_runner_http_ssl_context_is_default_without_provider_bundle() -> None:
+    """Runners without a Provider CA keep aiohttp's normal verified defaults."""
+    assert runner_http_ssl_context({}) is None
 
 
 @pytest.mark.parametrize(
