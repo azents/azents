@@ -52,7 +52,6 @@ from azents_runtime_provider_kubernetes.kubernetes_api import (
 from azents_runtime_provider_kubernetes.network_enforcement import (
     InvalidMandatoryService,
     MandatoryServiceReference,
-    PlatformTransferEgress,
 )
 from azents_runtime_provider_kubernetes.owned_resources import (
     InvalidOwnedResourceMetadata,
@@ -366,7 +365,6 @@ def _provider(
     network_hard_cap_allowed_cidrs: tuple[str, ...] = (),
     network_hard_cap_denied_cidrs: tuple[str, ...] = (),
     network_hard_cap_extra_egress: tuple[NetworkPolicyEgressRule, ...] = (),
-    platform_transfer_egress: tuple[PlatformTransferEgress, ...] = (),
 ) -> KubernetesRuntimeProvider:
     return _provider_with_runner_env(
         api,
@@ -374,7 +372,6 @@ def _provider(
         network_hard_cap_allowed_cidrs=network_hard_cap_allowed_cidrs,
         network_hard_cap_denied_cidrs=network_hard_cap_denied_cidrs,
         network_hard_cap_extra_egress=network_hard_cap_extra_egress,
-        platform_transfer_egress=platform_transfer_egress,
     )
 
 
@@ -385,7 +382,6 @@ def _provider_with_runner_env(
     network_hard_cap_allowed_cidrs: tuple[str, ...] = (),
     network_hard_cap_denied_cidrs: tuple[str, ...] = (),
     network_hard_cap_extra_egress: tuple[NetworkPolicyEgressRule, ...] = (),
-    platform_transfer_egress: tuple[PlatformTransferEgress, ...] = (),
 ) -> KubernetesRuntimeProvider:
     return KubernetesRuntimeProvider(
         api,
@@ -423,7 +419,6 @@ def _provider_with_runner_env(
             network_hard_cap_allowed_cidrs=network_hard_cap_allowed_cidrs,
             network_hard_cap_denied_cidrs=network_hard_cap_denied_cidrs,
             network_hard_cap_extra_egress=network_hard_cap_extra_egress,
-            platform_transfer_egress=platform_transfer_egress,
         ),
     )
 
@@ -2857,129 +2852,6 @@ async def test_direct_network_policy_is_bounded_by_deployment_hard_cap() -> None
     ]
     optional_rules = network_policy.spec.egress[2:]
     assert optional_rules == (extra_egress,)
-
-
-@pytest.mark.asyncio
-async def test_platform_transfer_egress_reaches_direct_runtime_policy() -> None:
-    api = FakeKubernetesApi()
-    _install_mandatory_services(api)
-    route = PlatformTransferEgress(
-        endpoint_hostnames=("objects.example.com",),
-        cidrs=("198.51.100.10/32",),
-        ports=(443,),
-    )
-    provider = _provider(
-        api,
-        network_hard_cap_allowed_cidrs=("203.0.113.0/24",),
-        platform_transfer_egress=(route,),
-    )
-
-    await provider.start(
-        _command(
-            RuntimeLifecycleCommandType.START,
-            runtime_configuration=_runtime_configuration(
-                schema_version=3,
-                allowed_cidrs=["203.0.113.0/24"],
-            ),
-        )
-    )
-
-    policy = api.network_policies[
-        ("azents-runtime", "azents-runtime-runtime-1-execution")
-    ]
-    assert any(
-        peer.ip_block is not None and peer.ip_block.cidr == "198.51.100.10/32"
-        for rule in policy.spec.egress
-        for peer in rule.peers
-    )
-
-
-@pytest.mark.asyncio
-async def test_platform_transfer_egress_stays_on_proxy_for_proxy_required_runtime() -> (
-    None
-):
-    api = FakeKubernetesApi()
-    _install_mandatory_services(api)
-    route = PlatformTransferEgress(
-        endpoint_hostnames=("objects.example.com",),
-        cidrs=("198.51.100.10/32",),
-        ports=(443,),
-    )
-    provider = _provider(api, platform_transfer_egress=(route,))
-    command = _command(
-        RuntimeLifecycleCommandType.START,
-        runtime_configuration=_runtime_configuration(
-            schema_version=3,
-            network_mode="proxy_required",
-        ),
-    )
-
-    await provider.start(command)
-    _mark_proxy_ready(api)
-    await provider.start(command)
-
-    runtime_policy = api.network_policies[
-        ("azents-runtime", "azents-runtime-runtime-1-execution")
-    ]
-    proxy_policy = api.network_policies[
-        ("azents-runtime", "azents-runtime-runtime-1-proxy-egress")
-    ]
-    assert all(
-        peer.ip_block is None or peer.ip_block.cidr != "198.51.100.10/32"
-        for rule in runtime_policy.spec.egress
-        for peer in rule.peers
-    )
-    assert any(
-        peer.ip_block is not None and peer.ip_block.cidr == "198.51.100.10/32"
-        for rule in proxy_policy.spec.egress
-        for peer in rule.peers
-    )
-
-
-@pytest.mark.asyncio
-async def test_platform_transfer_egress_is_available_in_no_network_mode() -> None:
-    api = FakeKubernetesApi()
-    _install_mandatory_services(api)
-    route = PlatformTransferEgress(
-        endpoint_hostnames=("objects.example.com",),
-        cidrs=("198.51.100.10/32",),
-        ports=(443,),
-    )
-    provider = _provider(
-        api,
-        network_hard_cap_allowed_cidrs=("203.0.113.0/24",),
-        platform_transfer_egress=(route,),
-    )
-
-    await provider.start(
-        _command(
-            RuntimeLifecycleCommandType.START,
-            runtime_configuration=_runtime_configuration(
-                schema_version=3,
-                network_mode="no_network",
-                allowed_cidrs=["203.0.113.0/24"],
-            ),
-        )
-    )
-
-    pod = api.pods[("azents-runtime", "azents-runtime-runtime-1")]
-    policy = api.network_policies[
-        ("azents-runtime", "azents-runtime-runtime-1-execution")
-    ]
-    assert any(
-        alias.ip == "198.51.100.10" and alias.hostnames == ("objects.example.com",)
-        for alias in pod.spec.host_aliases
-    )
-    assert any(
-        peer.ip_block is not None and peer.ip_block.cidr == "198.51.100.10/32"
-        for rule in policy.spec.egress
-        for peer in rule.peers
-    )
-    assert all(
-        peer.ip_block is None or peer.ip_block.cidr != "203.0.113.0/24"
-        for rule in policy.spec.egress
-        for peer in rule.peers
-    )
 
 
 @pytest.mark.asyncio

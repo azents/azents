@@ -36,9 +36,6 @@ def _helm_template(*values: str, json_values: tuple[str, ...] = ()) -> str:
     if "server.runtimeControl.enabled=true" in values:
         object_storage_defaults = {
             "endpoint": "objectStorage.external.endpoint=https://s3.internal",
-            "publicEndpoint": (
-                "objectStorage.external.publicEndpoint=https://s3.example.com"
-            ),
             "bucket": "objectStorage.external.bucket=workspace-bucket",
         }
         configured_keys = {
@@ -56,12 +53,6 @@ def _helm_template(*values: str, json_values: tuple[str, ...] = ()) -> str:
             for key, value in object_storage_defaults.items()
             if key not in configured_keys
         )
-        if "runtimeProviderKubernetes.enabled=true" in values:
-            base_values += (
-                "runtimeProviderKubernetes.networkPolicy.platformTransferEgress[0].endpointHostnames[0]=s3.example.com",
-                "runtimeProviderKubernetes.networkPolicy.platformTransferEgress[0].cidrs[0]=198.51.100.10/32",
-                "runtimeProviderKubernetes.networkPolicy.platformTransferEgress[0].ports[0]=443",
-            )
     for value in (*base_values, *values):
         command.extend(["--set", value])
     for value in json_values:
@@ -549,19 +540,3 @@ def test_runtime_control_requires_workspace_s3_bucket() -> None:
     error = raised.value.stderr.lower()
     assert "objectstorage/external/bucket" in error
     assert "minlength" in error
-
-
-def test_runtime_control_requires_workspace_s3_public_endpoint() -> None:
-    """Runtime Control cannot render without the browser signing endpoint."""
-    with pytest.raises(subprocess.CalledProcessError) as raised:
-        _helm_template(
-            "server.runtimeControl.enabled=true",
-            "objectStorage.external.publicEndpoint=",
-            "server.runtimeControl.runnerImage.repository=repo/runner",
-            "server.runtimeControl.runnerImage.tag=sha",
-            f"server.runtimeControl.runnerImage.digest={_RUNNER_DIGEST}",
-        )
-
-    assert "objectstorage.external.publicendpoint is required" in (
-        raised.value.stderr.lower()
-    )

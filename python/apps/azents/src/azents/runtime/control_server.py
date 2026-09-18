@@ -13,7 +13,6 @@ from contextlib import AsyncExitStack, asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal, Protocol, cast
-from urllib.parse import urlsplit
 
 import aioboto3
 import boto3
@@ -1777,50 +1776,12 @@ def validate_runtime_control_workspace_upload_settings(
     _workspace_upload_config(settings)
     if not settings.runtime_control_workspace_s3_bucket.strip():
         raise ValueError("Runtime Control workspace S3 bucket is required")
-    _validate_workspace_s3_public_endpoint(settings)
     if not settings.runtime_control_workspace_upload_redis_namespace.strip():
         raise ValueError("Workspace upload Redis namespace is required")
     if settings.runtime_control_workspace_upload_status_poll_interval_seconds <= 0:
         raise ValueError("Workspace upload status poll interval must be positive")
     if settings.runtime_control_workspace_upload_repair_interval_seconds <= 0:
         raise ValueError("Workspace upload repair interval must be positive")
-
-
-def _validate_workspace_s3_public_endpoint(
-    settings: RuntimeControlSettings,
-) -> None:
-    """Require one reachable, non-ambiguous public presigning endpoint."""
-    value = settings.runtime_control_workspace_s3_public_endpoint_url
-    if value is None or not value.strip():
-        raise ValueError(
-            "Runtime Control workspace S3 public endpoint is required when "
-            "Workspace Upload storage is configured"
-        )
-    parsed = urlsplit(value)
-    if (
-        parsed.scheme not in {"http", "https"}
-        or not parsed.netloc
-        or not parsed.hostname
-        or parsed.username is not None
-        or parsed.password is not None
-        or parsed.query
-        or parsed.fragment
-    ):
-        raise ValueError(
-            "Runtime Control workspace S3 public endpoint must be an absolute "
-            "HTTP(S) URL without credentials, query, or fragment"
-        )
-    try:
-        if parsed.port is not None and not 1 <= parsed.port <= 65_535:
-            raise ValueError
-    except ValueError as exc:
-        raise ValueError(
-            "Runtime Control workspace S3 public endpoint port is invalid"
-        ) from exc
-    if settings.runtime_env is RuntimeEnvironment.DEPLOYED and parsed.scheme != "https":
-        raise ValueError(
-            "Runtime Control workspace S3 public endpoint must use HTTPS when deployed"
-        )
 
 
 def validate_runtime_control_web_settings(

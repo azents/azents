@@ -47,7 +47,6 @@ from azents_runtime_provider_kubernetes.leader import (
 )
 from azents_runtime_provider_kubernetes.network_enforcement import (
     MandatoryServiceReference,
-    PlatformTransferEgress,
 )
 from azents_runtime_provider_kubernetes.provider import (
     RUNNER_LIMIT_ENV_NAMES,
@@ -502,9 +501,6 @@ class ProviderSettings:
         self.network_hard_cap_extra_egress = _json_network_policy_egress_env(
             "AZ_RUNTIME_PROVIDER_NETWORK_HARD_CAP_EXTRA_EGRESS"
         )
-        self.platform_transfer_egress = _json_platform_transfer_egress_env(
-            "AZ_RUNTIME_PROVIDER_PLATFORM_TRANSFER_EGRESS"
-        )
         self.image_pull_secrets: tuple[LocalObjectReference, ...] = (
             _json_local_object_references_env(
                 "AZ_RUNTIME_PROVIDER_POD_IMAGE_PULL_SECRETS"
@@ -567,7 +563,6 @@ async def prepare_runtime_provider(
                 ),
                 network_hard_cap_denied_cidrs=(settings.network_hard_cap_denied_cidrs),
                 network_hard_cap_extra_egress=settings.network_hard_cap_extra_egress,
-                platform_transfer_egress=settings.platform_transfer_egress,
                 image_pull_secrets=settings.image_pull_secrets,
                 pod_annotations=settings.pod_annotations,
                 workspace_mount_path=settings.workspace_path,
@@ -794,51 +789,6 @@ def _json_network_policy_egress_env(
     if not isinstance(parsed, list):
         raise RuntimeError(f"{name} must be a JSON array")
     return tuple(_network_policy_egress_rule(item, name) for item in parsed)
-
-
-def _json_platform_transfer_egress_env(
-    name: str,
-) -> tuple[PlatformTransferEgress, ...]:
-    """Parse exact deployment-owned object-storage endpoint routes."""
-    value = os.environ.get(name)
-    if value is None or value.strip() == "":
-        return ()
-    parsed = json.loads(value)
-    if not isinstance(parsed, list):
-        raise RuntimeError(f"{name} must be a JSON array")
-    routes: list[PlatformTransferEgress] = []
-    for item in parsed:
-        if not isinstance(item, dict) or set(item) != {
-            "endpoint_hostnames",
-            "cidrs",
-            "ports",
-        }:
-            raise RuntimeError(f"{name} entries have an invalid object shape")
-        endpoint_hostnames = item["endpoint_hostnames"]
-        cidrs = item["cidrs"]
-        ports = item["ports"]
-        if (
-            not isinstance(endpoint_hostnames, list)
-            or not all(isinstance(hostname, str) for hostname in endpoint_hostnames)
-            or not isinstance(cidrs, list)
-            or not all(isinstance(cidr, str) for cidr in cidrs)
-            or not isinstance(ports, list)
-            or not all(
-                not isinstance(port, bool) and isinstance(port, int) for port in ports
-            )
-        ):
-            raise RuntimeError(f"{name} entries contain invalid field values")
-        try:
-            routes.append(
-                PlatformTransferEgress(
-                    endpoint_hostnames=tuple(endpoint_hostnames),
-                    cidrs=tuple(cidrs),
-                    ports=tuple(ports),
-                )
-            )
-        except ValueError as error:
-            raise RuntimeError(f"{name} entry is invalid") from error
-    return tuple(routes)
 
 
 def _network_policy_egress_rule(

@@ -9,9 +9,6 @@
 {{- if not $objectStorageBucket }}
 {{- fail "objectStorage.external.bucket is required when Runtime Control is enabled" }}
 {{- end }}
-{{- if not $objectStoragePublicEndpoint }}
-{{- fail "objectStorage.external.publicEndpoint is required when Runtime Control is enabled" }}
-{{- end }}
 {{- if and (eq $transfer.stateBackend "memory") (or (ne (int .Values.server.runtimeControl.replicas) 1) .Values.server.runtimeControl.autoscaling.enabled) }}
 {{- fail "memory Runtime Transfer state requires exactly one runtime-control replica and disabled autoscaling" }}
 {{- end }}

@@ -5,55 +5,6 @@
 {{- end -}}
 {{- $runtimeControlService := .Values.runtimeProviderKubernetes.strictNetwork.mandatoryServices.runtimeControl -}}
 {{- $runtimeTransferService := .Values.runtimeProviderKubernetes.strictNetwork.mandatoryServices.runtimeTransfer -}}
-{{- if and .Values.server.runtimeControl.enabled .Values.objectStorage.external.publicEndpoint (not .Values.runtimeProviderKubernetes.networkPolicy.platformTransferEgress) }}
-{{- fail "runtimeProviderKubernetes.networkPolicy.platformTransferEgress is required when Workspace Upload is enabled" }}
-{{- end }}
-{{- if and .Values.server.runtimeControl.enabled .Values.objectStorage.external.publicEndpoint }}
-{{- $publicEndpoint := urlParse .Values.objectStorage.external.publicEndpoint -}}
-{{- $publicEndpointHost := $publicEndpoint.hostname -}}
-{{- $publicEndpointPort := 80 -}}
-{{- if eq (lower $publicEndpoint.scheme) "https" }}
-  {{- $publicEndpointPort = 443 -}}
-{{- end }}
-{{- if regexMatch ":[0-9]+$" $publicEndpoint.host }}
-  {{- $publicEndpointPort = atoi (regexFind "[0-9]+$" $publicEndpoint.host) -}}
-{{- end }}
-{{- $platformEndpointHostMatched := false -}}
-{{- $platformEndpointRouteMatched := false -}}
-{{- range $route := .Values.runtimeProviderKubernetes.networkPolicy.platformTransferEgress }}
-  {{- range $hostname := $route.endpointHostnames }}
-    {{- if eq (lower $hostname) (lower $publicEndpointHost) }}
-      {{- $platformEndpointHostMatched = true -}}
-      {{- range $port := $route.ports }}
-        {{- if eq (int $port) $publicEndpointPort }}
-          {{- $platformEndpointRouteMatched = true -}}
-        {{- end }}
-      {{- end }}
-    {{- end }}
-  {{- end }}
-{{- end }}
-{{- if not $platformEndpointHostMatched }}
-{{- fail "runtimeProviderKubernetes.networkPolicy.platformTransferEgress must include the public S3 endpoint hostname" }}
-{{- end }}
-{{- if not $platformEndpointRouteMatched }}
-{{- fail "runtimeProviderKubernetes.networkPolicy.platformTransferEgress must include the public S3 endpoint effective port on the matching hostname route" }}
-{{- end }}
-{{- end }}
-{{- range $route := .Values.runtimeProviderKubernetes.networkPolicy.platformTransferEgress }}
-  {{- range $cidr := $route.cidrs }}
-    {{- if not (or (regexMatch "/32$" $cidr) (regexMatch "/128$" $cidr)) }}
-      {{- fail "runtimeProviderKubernetes.networkPolicy.platformTransferEgress CIDRs must be /32 or /128 host routes" }}
-    {{- end }}
-  {{- end }}
-{{- end }}
-{{- $platformTransferEgress := list -}}
-{{- range $route := .Values.runtimeProviderKubernetes.networkPolicy.platformTransferEgress }}
-  {{- $platformTransferEgress = append $platformTransferEgress (dict
-    "endpoint_hostnames" $route.endpointHostnames
-    "cidrs" $route.cidrs
-    "ports" $route.ports
-  ) -}}
-{{- end }}
 {{- $mandatoryServices := list
   (dict
     "role" "runtime_control"
@@ -168,8 +119,6 @@ spec:
               value: {{ ternary .Values.runtimeProviderKubernetes.networkPolicy.deniedCidrs (list) .Values.runtimeProviderKubernetes.networkPolicy.enabled | toJson | quote }}
             - name: AZ_RUNTIME_PROVIDER_NETWORK_HARD_CAP_EXTRA_EGRESS
               value: {{ ternary .Values.runtimeProviderKubernetes.networkPolicy.extraEgress (list) .Values.runtimeProviderKubernetes.networkPolicy.enabled | toJson | quote }}
-            - name: AZ_RUNTIME_PROVIDER_PLATFORM_TRANSFER_EGRESS
-              value: {{ $platformTransferEgress | toJson | quote }}
             - name: AZ_RUNTIME_RUNNER_RESOURCES
               value: {{ .Values.runtimeProviderKubernetes.runnerResources | toJson | quote }}
             - name: AZ_RUNTIME_RUNNER_MAX_CONCURRENT_OPERATIONS_PER_SESSION

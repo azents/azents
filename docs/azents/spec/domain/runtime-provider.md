@@ -328,17 +328,14 @@ Runtime Control uses its server ServiceAccount to create Kubernetes TokenReview 
 
 The active chart has no Provider credential or shared Runtime Control authentication values, credential bootstrap Job, staging/final Provider credential Secret, credential volume, or authentication-bootstrap Secret RBAC. The logical-Runtime CA Secret is execution-policy material owned by strict proxy enforcement, not Provider or Runtime Control authentication state. Runtime Control TLS remains mandatory and separate from Provider authentication. Admin Provider policy cannot mutate cluster RBAC, chart-level NetworkPolicy, RuntimeClass, arbitrary Secret contents, or other deployment-owned security controls.
 
-When Workspace Upload is enabled, Helm requires the configured public S3 endpoint and a
-matching `platformTransferEgress` route. The route must contain the endpoint hostname and
-effective port and may contain only host CIDRs. Missing, mismatched, or broad routes fail chart
-rendering rather than widening Runtime network authority. Runtime Control readiness separately
-proves bucket access, checksum-aware metadata, presigned PUT/GET signing, public endpoint
-reachability, and immutable native-copy support; the operator-owned object-storage CORS policy
-is not duplicated in the Azents chart or used as a Runtime Control render/readiness gate.
-Failed prerequisites keep the feature unavailable without a byte-relay fallback. The Docker
-Provider's public gateway CA is mounted into the Provider process by the deployment/test
-fixture so the managed Runner can verify the same HTTPS endpoint used by browser-direct
-Workspace Upload.
+Workspace Upload uses the configured object-storage endpoint for trusted operations and
+presigned URLs. An optional public endpoint may override the URL used for browser- and
+Runner-reachable requests; when it is omitted, the primary endpoint is reused. Runtime Control
+readiness proves bucket access, checksum-aware metadata, presigned PUT/GET signing, endpoint
+reachability, and immutable native-copy support; failed prerequisites keep the feature unavailable
+without a byte-relay fallback. The Docker Provider's public gateway CA is mounted into the
+Provider process by the deployment/test fixture so the managed Runner can verify the same HTTPS
+endpoint used by browser-direct Workspace Upload.
 
 Authentication rollout does not render, own, select, delete, rename, or recreate Runtime PersistentVolumeClaims or PersistentVolumes. Credential-driven Runtime Pod replacement reuses the existing PVC; only the established explicit Runtime reset or terminal-delete operations may invoke PVC deletion.
 
@@ -349,6 +346,8 @@ Admin Profile editing cannot mutate those deployment boundaries.
 
 ## Version history
 
+- **32 (2026-09-18):** Restored optional public-endpoint fallback and removed the
+  unapproved Workspace Upload chart and Runtime network gates.
 - **31 (2026-09-18):** Removed the duplicated Azents chart and Runtime Control CORS
   contract; object-storage CORS remains an operator-owned prerequisite.
 - **30 (2026-09-18):** Added Docker Provider and Runner Runtime network CA

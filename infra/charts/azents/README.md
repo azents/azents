@@ -216,14 +216,14 @@ required enforcing substrate.
 - `external`: use consumer-provided endpoints and Secrets.
 - `objectStorage.external.credentialMode=ambientAws`: do not inject explicit S3 credential env vars. EKS Pod Identity, IAM Roles, or another ambient credential provider must be configured outside this chart.
 - `objectStorage.external.endpoint`: trusted server-side S3 endpoint used for object operations.
-- `objectStorage.external.publicEndpoint`: browser- and Runner-reachable S3 endpoint used to sign Workspace Upload PUT/GET requests. It is required when Runtime Control is enabled; Workspace Upload has no byte-relay fallback when this endpoint is absent or unreachable.
+- `objectStorage.external.publicEndpoint`: optional browser- and Runner-reachable S3 endpoint used to sign Workspace Upload PUT/GET requests. When omitted, the configured `objectStorage.external.endpoint` is used.
 
 External secret-store delivery remains outside this chart. External Secrets Operator, Infisical, SOPS, Sealed Secrets, cloud secret managers, and manual Secrets must be wired by the consumer-owned deployment layer.
 
 ## Optional Component Prerequisites
 
 - `server.mcpEgressProxy.enabled=true`: renders the Squid proxy Deployment/Service/NetworkPolicy in the server namespace and injects `AZ_MCP_PROXY_URL` into the server ConfigMap.
-- `runtimeProviderKubernetes.enabled=true`: requires `runtimeProviderKubernetes.image.*`, digest-pinned `runtimeProviderKubernetes.runnerImage.*` and `runtimeProviderKubernetes.engineImage.*`, `server.runtimeControl.enabled=true`, a digest-pinned `server.runtimeControl.runnerImage.*`, and an operator-owned Runtime Control TLS Secret. When Runtime Control and Workspace Upload are enabled, `networkPolicy.platformTransferEgress` must include the public S3 hostname with exact `/32` or `/128` routes and bounded ports; the matching route must allow the public endpoint's explicit port or its HTTP/HTTPS default (80/443). Provider authentication uses the rendered ServiceAccount identity; no Provider credential Secret or shared Runtime Control auth Secret is required.
+- `runtimeProviderKubernetes.enabled=true`: requires `runtimeProviderKubernetes.image.*`, digest-pinned `runtimeProviderKubernetes.runnerImage.*` and `runtimeProviderKubernetes.engineImage.*`, `server.runtimeControl.enabled=true`, a digest-pinned `server.runtimeControl.runnerImage.*`, and an operator-owned Runtime Control TLS Secret. Provider authentication uses the rendered ServiceAccount identity; no Provider credential Secret or shared Runtime Control auth Secret is required.
 
 ## Kustomize Label Differences
 
