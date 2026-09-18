@@ -65,7 +65,6 @@ from testcontainers.postgres import PostgresContainer
 from websockets.asyncio.client import connect as async_connect
 from websockets.exceptions import ConnectionClosed
 from websockets.sync.client import connect
-from websockets.sync.connection import Connection
 from websockets.typing import Origin
 
 from support.runtime_profiles import create_workspace_runtime_profile
@@ -2086,6 +2085,100 @@ async def _browser_neutral_websocket_evidence(
             await pong
 
 
+async def _assert_long_lived_stream_drain(
+    *,
+    stack: _RuntimeWebStack,
+    endpoint_url: str,
+    headers: dict[str, str],
+    runtime_terminal: _RuntimeApplicationCommands,
+    stream_state_before: _RuntimeApplicationState,
+) -> None:
+    """Keep WebSocket and SSE streams active until Gateway drain closes both."""
+    endpoint_host = endpoint_url.removeprefix("https://").rstrip("/")
+    websocket_drained = asyncio.Event()
+    sse_started = threading.Event()
+    sse_drained = threading.Event()
+
+    async def hold_websocket() -> None:
+        try:
+            await websocket.recv()
+        except ConnectionClosed:
+            websocket_drained.set()
+        else:
+            raise AssertionError(
+                "Runtime Web drain did not close the long-lived stream"
+            )
+
+    def hold_sse() -> None:
+        try:
+            with requests.get(
+                f"{stack.edge_host_url}/events-held",
+                headers=headers,
+                verify=False,
+                timeout=20,
+                stream=True,
+            ) as response:
+                response.raise_for_status()
+                chunks = response.iter_content(chunk_size=14)
+                assert b"data: active" in next(chunks)
+                sse_started.set()
+                for _ in chunks:
+                    pass
+        except requests.RequestException:
+            pass
+        finally:
+            sse_drained.set()
+
+    edge_address = stack.edge_host_url.removeprefix("https://")
+    edge_host, edge_port_text = edge_address.rsplit(":", maxsplit=1)
+    raw_socket = socket.create_connection(
+        (edge_host, int(edge_port_text)),
+        timeout=10,
+    )
+    raw_socket.setblocking(False)
+    tls_context = ssl.create_default_context()
+    tls_context.check_hostname = False
+    tls_context.verify_mode = ssl.CERT_NONE
+
+    async with async_connect(
+        f"wss://{endpoint_host}/ws",
+        sock=raw_socket,
+        ssl=tls_context,
+        server_hostname=endpoint_host,
+        origin=Origin(endpoint_url.rstrip("/")),
+        additional_headers={"Cookie": headers["Cookie"]},
+        user_agent_header=headers["User-Agent"],
+        proxy=None,
+        open_timeout=10,
+    ) as websocket:
+        websocket_reader = asyncio.create_task(hold_websocket())
+        sse = asyncio.create_task(asyncio.to_thread(hold_sse))
+        assert await asyncio.to_thread(sse_started.wait, 10)
+        active_long_lived = await asyncio.to_thread(
+            _runtime_application_state_via_terminal,
+            runtime_terminal,
+        )
+        assert active_long_lived.active_websockets == 1
+        assert (
+            active_long_lived.websocket_connections
+            == stream_state_before.websocket_connections + 1
+        )
+        assert active_long_lived.active_sse == 1
+        assert (
+            active_long_lived.sse_connections == stream_state_before.sse_connections + 1
+        )
+        assert (
+            active_long_lived.upload_invocations
+            == stream_state_before.upload_invocations
+        )
+        await asyncio.to_thread(_drain_gateway, stack)
+        async with asyncio.timeout(10):
+            await websocket_drained.wait()
+        assert await asyncio.to_thread(sse_drained.wait, 10)
+        await websocket_reader
+        await sse
+
+
 def _assert_redis_capacity_fallback(
     *,
     stack: _RuntimeWebStack,
@@ -2544,86 +2637,15 @@ def test_runtime_web_gateway_hard_limit_rejects_before_body_admission(
         stream_state_before = _runtime_application_state_via_terminal(runtime_terminal)
         assert stream_state_before.active_websockets == 0
         assert stream_state_before.active_sse == 0
-        websocket_drained = threading.Event()
-        sse_started = threading.Event()
-        sse_drained = threading.Event()
-
-        def hold_websocket(websocket: Connection) -> None:
-            try:
-                websocket.recv(timeout=15)
-            except ConnectionClosed:
-                websocket_drained.set()
-            else:
-                raise AssertionError(
-                    "Runtime Web drain did not close the long-lived stream"
-                )
-
-        def hold_sse() -> None:
-            try:
-                with requests.get(
-                    f"{stack.edge_host_url}/events-held",
-                    headers=headers,
-                    verify=False,
-                    timeout=20,
-                    stream=True,
-                ) as response:
-                    response.raise_for_status()
-                    chunks = response.iter_content(chunk_size=14)
-                    assert b"data: active" in next(chunks)
-                    sse_started.set()
-                    for _ in chunks:
-                        pass
-            except requests.RequestException:
-                pass
-            finally:
-                sse_drained.set()
-
-        edge_address = stack.edge_host_url.removeprefix("https://")
-        edge_host, edge_port_text = edge_address.rsplit(":", maxsplit=1)
-        tls_context = ssl.create_default_context()
-        tls_context.check_hostname = False
-        tls_context.verify_mode = ssl.CERT_NONE
-        with socket.create_connection(
-            (edge_host, int(edge_port_text)),
-            timeout=10,
-        ) as raw_socket:
-            with ThreadPoolExecutor(max_workers=2) as executor:
-                with connect(
-                    f"wss://{endpoint_host}/ws",
-                    sock=raw_socket,
-                    ssl=tls_context,
-                    server_hostname=endpoint_host,
-                    origin=Origin(endpoint_url.rstrip("/")),
-                    additional_headers={"Cookie": headers["Cookie"]},
-                    user_agent_header=headers["User-Agent"],
-                    proxy=None,
-                    open_timeout=10,
-                ) as websocket:
-                    websocket_reader = executor.submit(hold_websocket, websocket)
-                    sse = executor.submit(hold_sse)
-                    assert sse_started.wait(timeout=10)
-                    active_long_lived = _runtime_application_state_via_terminal(
-                        runtime_terminal
-                    )
-                    assert active_long_lived.active_websockets == 1
-                    assert (
-                        active_long_lived.websocket_connections
-                        == stream_state_before.websocket_connections + 1
-                    )
-                    assert active_long_lived.active_sse == 1
-                    assert (
-                        active_long_lived.sse_connections
-                        == stream_state_before.sse_connections + 1
-                    )
-                    assert (
-                        active_long_lived.upload_invocations
-                        == stream_state_before.upload_invocations
-                    )
-                    _drain_gateway(stack)
-                    assert websocket_drained.wait(timeout=10)
-                    assert sse_drained.wait(timeout=10)
-                    websocket_reader.result(timeout=10)
-                    sse.result(timeout=10)
+        asyncio.run(
+            _assert_long_lived_stream_drain(
+                stack=stack,
+                endpoint_url=endpoint_url,
+                headers=headers,
+                runtime_terminal=runtime_terminal,
+                stream_state_before=stream_state_before,
+            )
+        )
 
         deadline = time.monotonic() + 10
         while True:
