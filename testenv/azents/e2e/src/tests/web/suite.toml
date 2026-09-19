@@ -2,7 +2,3 @@
 name = "web"
 lanes = 1
 timeout_minutes = 45
-cache_write_repositories = [
-  "azents-web",
-  "azents-admin-web",
-]

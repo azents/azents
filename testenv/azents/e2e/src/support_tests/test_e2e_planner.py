@@ -12,19 +12,15 @@ def _write_suite(root: Path, name: str, *, lanes: int = 2) -> Path:
     suite_root = root / name
     suite_root.mkdir(parents=True)
     (suite_root / "suite.toml").write_text(
-        (
-            "[suite]\n"
-            f'name = "{name}"\n'
-            f"lanes = {lanes}\n"
-            "timeout_minutes = 30\n"
-            'cache_write_repositories = ["image-a"]\n'
-        ),
+        (f'[suite]\nname = "{name}"\nlanes = {lanes}\ntimeout_minutes = 30\n'),
         encoding="utf-8",
     )
     return suite_root
 
 
-def test_plan_suites_balances_files_and_assigns_cache_writer(tmp_path: Path) -> None:
+def test_plan_suites_balances_files_without_cache_writer_ownership(
+    tmp_path: Path,
+) -> None:
     tests_root = tmp_path / "tests"
     suite_root = _write_suite(tests_root, "required")
     for name in ("test_a.py", "test_b.py", "test_c.py"):
@@ -60,8 +56,7 @@ def test_plan_suites_balances_files_and_assigns_cache_writer(tmp_path: Path) -> 
     )
 
     assert len(matrix["include"]) == 2
-    assert matrix["include"][0]["cache_write_repositories"] == "image-a"
-    assert matrix["include"][1]["cache_write_repositories"] == ""
+    assert all("cache_write_repositories" not in lane for lane in matrix["include"])
     lane_files = [
         (tmp_path / "plan" / lane["plan_file"]).read_text(encoding="utf-8")
         for lane in matrix["include"]

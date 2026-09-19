@@ -594,7 +594,6 @@ jobs:
         uses: ./.github/actions/expose-github-runtime
       - name: Run E2E lane
         env:
-          CACHE_WRITE_REPOSITORIES: ${{ matrix.cache_write_repositories }}
           AZENTS_E2E_IMAGE_BUILD_PROFILE: ${{ matrix.suite }}
         run: |
           set -o pipefail
@@ -602,17 +601,11 @@ jobs:
           mkdir -p "$report_dir"
           mapfile -t test_files < "e2e-plan/${{ matrix.plan_file }}"
           cd testenv/azents/e2e
-          cache_writers=''
-          if [ "${{ github.event_name }}" = 'push' ] \
-            && [ "${{ github.ref }}" = 'refs/heads/main' ]; then
-            cache_writers="$CACHE_WRITE_REPOSITORIES"
-          fi
           SECONDS=0
           set +e
           AZENTS_E2E_ARTIFACT_DIR="$report_dir" \
             AZENTS_E2E_DOCKER_BUILDER="${{ steps.buildx.outputs.name }}" \
             AZENTS_E2E_DOCKER_GHA_CACHE_SCOPE_PREFIX="azents-e2e-v1" \
-            AZENTS_E2E_DOCKER_GHA_CACHE_WRITE_REPOSITORIES="$cache_writers" \
             uv run pytest -vv \
             --junitxml="$report_dir/junit.xml" \
             --durations=30 \

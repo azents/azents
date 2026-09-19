@@ -38,34 +38,42 @@ jobs:
             package: azents-server-snapshot
             dockerfile: azents.Dockerfile
             extra_context: ""
+            e2e_cache_repository: azents-server
           - component: web
             package: azents-web-snapshot
             dockerfile: azents-web.Dockerfile
             extra_context: "--build-context next-cache=/tmp/next-cache"
+            e2e_cache_repository: azents-web
           - component: admin-web
             package: azents-admin-web-snapshot
             dockerfile: azents-admin-web.Dockerfile
             extra_context: "--build-context next-cache=/tmp/next-cache"
+            e2e_cache_repository: azents-admin-web
           - component: runtime-runner
             package: azents-runtime-runner-snapshot
             dockerfile: python/apps/azents-runtime-runner/Dockerfile
             extra_context: ""
+            e2e_cache_repository: azents-runtime-runner
           - component: runtime-proxy
             package: azents-runtime-proxy-snapshot
             dockerfile: python/apps/azents-runtime-proxy/Dockerfile
             extra_context: ""
+            e2e_cache_repository: ""
           - component: runtime-engine
             package: azents-runtime-engine-snapshot
             dockerfile: images/azents-runtime-engine/Dockerfile
             extra_context: ""
+            e2e_cache_repository: ""
           - component: runtime-provider-kubernetes
             package: azents-runtime-provider-kubernetes-snapshot
             dockerfile: python/apps/azents-runtime-provider-kubernetes/Dockerfile
             extra_context: ""
+            e2e_cache_repository: ""
           - component: runtime-provider-docker
             package: azents-runtime-provider-docker-snapshot
             dockerfile: python/apps/azents-runtime-provider-docker/Dockerfile
             extra_context: ""
+            e2e_cache_repository: azents-runtime-provider-docker
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -77,6 +85,8 @@ jobs:
           password: ${{ github.token }}
       - name: Setup Docker Buildx
         uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+      - name: Expose GitHub Actions runtime
+        uses: ./.github/actions/expose-github-runtime
       - name: Prepare image metadata
         id: meta
         run: |
@@ -118,8 +128,20 @@ jobs:
               "type=registry,compression=zstd,compression-level=3,force-compression=true"
             )
           fi
+          cache_args=()
+          cache_repository="${{ matrix.e2e_cache_repository }}"
+          if [ -n "$cache_repository" ]; then
+            cache_scope="azents-e2e-v1-$cache_repository"
+            cache_args=(
+              --cache-from
+              "type=gha,scope=$cache_scope"
+              --cache-to
+              "type=gha,scope=$cache_scope,mode=max,ignore-error=true"
+            )
+          fi
           docker buildx build \
             "${output[@]}" \
+            "${cache_args[@]}" \
             --provenance=true \
             --sbom=true \
             --metadata-file /tmp/build-metadata.json \
