@@ -41,7 +41,7 @@ import {
   IconUpload,
   IconX,
 } from "@tabler/icons-react";
-import { useCallback, useMemo, useRef } from "react";
+import { useCallback, useMemo } from "react";
 import { chatChevronTransition } from "../../components/collapsiblePresentation";
 import { buildFileTree, type FileTreeNode } from "../fileBrowserTree";
 import { WorkspaceUploadPanel } from "./WorkspaceUploadPanel";
@@ -97,9 +97,10 @@ export interface FileBrowserProps {
   onExpandedChange?: (expanded: Set<string>) => void;
 }
 
-interface FileBrowserViewProps extends FileBrowserProps {
+interface FileBrowserViewProps extends Omit<FileBrowserProps, "onUploadFiles"> {
   compact: boolean;
   t: WorkspacePanelTranslator;
+  onOpenUploadPicker: (directoryPath: string) => void;
 }
 
 function getRelativePath(path: string, root: string): string {
@@ -679,7 +680,6 @@ export function FileBrowser({
   onSetBrowserMode,
   onAddProject,
   uploadRows = [],
-  onUploadFiles = (): void => {},
   onCancelUpload = (): void => {},
   onRetryUpload = (): void => {},
   onDismissUpload = (): void => {},
@@ -687,27 +687,8 @@ export function FileBrowser({
   expanded = new Set<string>(),
   onQueryChange = (): void => {},
   onExpandedChange = (): void => {},
+  onOpenUploadPicker,
 }: FileBrowserViewProps): React.ReactElement {
-  const uploadInputRef = useRef<HTMLInputElement>(null);
-  const pendingUploadDirectoryRef = useRef<string | null>(null);
-  const handleUploadInputChange = useCallback(
-    (event: React.ChangeEvent<HTMLInputElement>): void => {
-      const files = event.currentTarget.files;
-      if (!files || files.length === 0) {
-        return;
-      }
-      const selectedFiles = Array.from(files);
-      const destinationDirectory = pendingUploadDirectoryRef.current ?? cwd;
-      pendingUploadDirectoryRef.current = null;
-      event.currentTarget.value = "";
-      onUploadFiles(selectedFiles, destinationDirectory);
-    },
-    [cwd, onUploadFiles],
-  );
-  const handleOpenUploadPicker = useCallback((directoryPath: string): void => {
-    pendingUploadDirectoryRef.current = directoryPath;
-    uploadInputRef.current?.click();
-  }, []);
   const tree = useMemo(
     () => buildFileTree(cwd, manifestEntries, directoryEntriesByPath),
     [cwd, directoryEntriesByPath, manifestEntries],
@@ -843,14 +824,6 @@ export function FileBrowser({
             </Menu.Item>
           </Menu.Dropdown>
         </Menu>
-        <input
-          ref={uploadInputRef}
-          type="file"
-          multiple
-          hidden
-          data-testid="workspace-upload-input"
-          onChange={handleUploadInputChange}
-        />
         <ActionIcon
           size="sm"
           variant="subtle"
@@ -963,7 +936,7 @@ export function FileBrowser({
                   onShowInfo={onShowInfo}
                   onToggleSelectedPath={onToggleSelectedPath}
                   onCreateDirectory={onCreateDirectory}
-                  onOpenUploadPicker={handleOpenUploadPicker}
+                  onOpenUploadPicker={onOpenUploadPicker}
                   onRenamePath={onRenamePath}
                   onMovePath={onMovePath}
                   onDeletePath={onDeletePath}

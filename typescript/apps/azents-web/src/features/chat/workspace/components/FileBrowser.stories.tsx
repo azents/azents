@@ -1,6 +1,13 @@
 import { Box } from "@mantine/core";
 import { useCallback, useState } from "react";
-import { expect, fireEvent, fn, userEvent, within } from "storybook/test";
+import {
+  expect,
+  fireEvent,
+  fn,
+  userEvent,
+  waitFor,
+  within,
+} from "storybook/test";
 import { FileBrowserContainer } from "../containers/FileBrowserContainer";
 import type { WorkspaceDirectoryLoadState, WorkspaceEntry } from "../types";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
@@ -207,8 +214,9 @@ export const FolderUploadPickerAcceptsMultipleFiles = {
       await userEvent.click(
         canvas.getByRole("button", { name: "Actions (slow-directory)" }),
       );
-      await expect(body.getByText("Upload files")).toBeVisible();
-      await userEvent.click(body.getByText("Upload files"));
+      const uploadFilesMenuItem = await body.findByText("Upload files");
+      await waitFor(() => expect(uploadFilesMenuItem).toBeVisible());
+      await userEvent.click(uploadFilesMenuItem);
       await expect(inputClick).toHaveBeenCalledTimes(1);
     } finally {
       if (originalInputClick) {
