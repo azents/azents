@@ -130,7 +130,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/agents
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/channel-defaults
-last_verified_at: 2026-09-20
+last_verified_at: 2026-09-19
 spec_version: 89
 ---
 
@@ -922,7 +922,7 @@ stateDiagram-v2
 
 ## Changelog
 
-- **2026-09-20 (spec_version=89)** — Added the repository coverage for
+- **2026-09-19 (spec_version=89)** — Added the repository coverage for
   requester authorization and aligned the concrete-session upload UI with its
   directory-row action and exact destination binding.
 - **2026-09-18 (spec_version=88)** — Clarified that Workspace Upload uses an
