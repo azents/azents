@@ -8,7 +8,7 @@ import dataclasses
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import PurePosixPath
-from typing import Annotated, Protocol, assert_never
+from typing import Annotated, NamedTuple, Protocol, assert_never
 
 import grpc
 from azcommon.result import Failure, Result, Success
@@ -20,6 +20,7 @@ from azents_runtime_control.grpc_workspace_upload_client import (
     WorkspaceUploadRetryRequest,
     WorkspaceUploadStatus,
     WorkspaceUploadTicket,
+    WorkspaceUploadTicketResult,
 )
 from fastapi import Depends
 
@@ -144,6 +145,14 @@ class WorkspaceUploadCreateOutput:
     ticket: WorkspaceUploadTicket
 
 
+class WorkspaceUploadDestinationResolution(NamedTuple):
+    """Validated Runtime target and destination paths."""
+
+    target: RuntimeOperationTarget
+    directory: PurePosixPath
+    destination_path: PurePosixPath
+
+
 class WorkspaceUploadRunnerOperations(Protocol):
     """Runner operation boundary required for destination validation."""
 
@@ -175,7 +184,7 @@ class WorkspaceUploadCoordinator(Protocol):
         *,
         identity: WorkspaceUploadIdentity,
         expected_revision: int,
-    ) -> tuple[WorkspaceUploadStatus, WorkspaceUploadTicket]:
+    ) -> WorkspaceUploadTicketResult:
         """Issue one transient browser PUT ticket."""
         ...
 
@@ -575,7 +584,7 @@ class WorkspaceUploadService:
         destination_directory: str,
         filename: str,
     ) -> Result[
-        tuple[RuntimeOperationTarget, PurePosixPath, PurePosixPath],
+        WorkspaceUploadDestinationResolution,
         WorkspaceUploadError,
     ]:
         """Resolve and validate the exact Runner-backed destination."""
@@ -624,7 +633,13 @@ class WorkspaceUploadService:
                     detail="Destination path is not an existing directory.",
                 )
             )
-        return Success((target, directory, directory / filename))
+        return Success(
+            WorkspaceUploadDestinationResolution(
+                target=target,
+                directory=directory,
+                destination_path=directory / filename,
+            )
+        )
 
     async def _resolve_current_target(
         self,

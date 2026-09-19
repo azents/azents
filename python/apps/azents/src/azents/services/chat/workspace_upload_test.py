@@ -6,6 +6,7 @@ import dataclasses
 import datetime
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
+from typing import NamedTuple
 
 import pytest
 from azcommon.result import Failure, Result, Success
@@ -17,6 +18,7 @@ from azents_runtime_control.grpc_workspace_upload_client import (
     WorkspaceUploadRetryRequest,
     WorkspaceUploadStatus,
     WorkspaceUploadTicket,
+    WorkspaceUploadTicketResult,
 )
 
 from azents.core.enums import (
@@ -264,10 +266,13 @@ class _Coordinator:
         *,
         identity: WorkspaceUploadIdentity,
         expected_revision: int,
-    ) -> tuple[WorkspaceUploadStatus, WorkspaceUploadTicket]:
+    ) -> WorkspaceUploadTicketResult:
         """Record ticket issuance and return status plus transient ticket."""
         self.issue_calls.append((identity, expected_revision))
-        return (self.ticket_status or self.status, self.ticket)
+        return WorkspaceUploadTicketResult(
+            status=self.ticket_status or self.status,
+            ticket=self.ticket,
+        )
 
     async def get(self, identity: WorkspaceUploadIdentity) -> WorkspaceUploadStatus:
         """Record status lookup and return its configured result."""
@@ -381,6 +386,15 @@ def _status(
     )
 
 
+class _ServiceDependencies(NamedTuple):
+    """Service and observable dependency doubles."""
+
+    service: WorkspaceUploadService
+    resolver: _RuntimeResolver
+    runner: _RunnerOperations
+    coordinator: _Coordinator
+
+
 def _service(
     *,
     agent: Agent | None = None,
@@ -391,7 +405,7 @@ def _service(
     snapshot_error: RuntimeStorageError | None = None,
     runner: _RunnerOperations | None = None,
     coordinator: _Coordinator | None = None,
-) -> tuple[WorkspaceUploadService, _RuntimeResolver, _RunnerOperations, _Coordinator]:
+) -> _ServiceDependencies:
     """Build the service and all observable dependency doubles."""
     resolved_runner = runner or _RunnerOperations()
     resolved_coordinator = coordinator or _Coordinator(status=_status())
@@ -400,8 +414,8 @@ def _service(
         snapshot_runtime_id=snapshot_runtime_id,
         snapshot_error=snapshot_error,
     )
-    return (
-        WorkspaceUploadService(
+    return _ServiceDependencies(
+        service=WorkspaceUploadService(
             authorization_repository=_AuthorizationRepository(
                 agent=agent,
                 membership=membership,
@@ -411,9 +425,9 @@ def _service(
             runner_operations=resolved_runner,
             coordinator=resolved_coordinator,
         ),
-        resolver,
-        resolved_runner,
-        resolved_coordinator,
+        resolver=resolver,
+        runner=resolved_runner,
+        coordinator=resolved_coordinator,
     )
 
 

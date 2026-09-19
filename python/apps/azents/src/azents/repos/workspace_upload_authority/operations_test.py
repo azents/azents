@@ -2,6 +2,7 @@
 
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from typing import NamedTuple
 
 import pytest
 from azcommon.result import Failure, Success
@@ -119,22 +120,29 @@ def _membership(*, role: WorkspaceUserRole) -> WorkspaceUser:
     )
 
 
+class _RepositoryDependencies(NamedTuple):
+    """Authorization repository and observable admin dependency."""
+
+    repository: WorkspaceUploadAuthorizationRepository
+    admin_repository: _AgentAdminRepository
+
+
 def _repository(
     *,
     agent: Agent | None,
     membership: WorkspaceUser | None,
-    admin: bool = False,
-) -> tuple[WorkspaceUploadAuthorizationRepository, _AgentAdminRepository]:
+    admin: bool,
+) -> _RepositoryDependencies:
     """Build the operation repository and observable admin dependency."""
     admin_repository = _AgentAdminRepository(admin)
-    return (
-        WorkspaceUploadAuthorizationRepository(
+    return _RepositoryDependencies(
+        repository=WorkspaceUploadAuthorizationRepository(
             agent_repository=_AgentRepository(agent),
             agent_admin_repository=admin_repository,
             workspace_user_repository=_WorkspaceUserRepository(membership),
             session_manager=_SessionManager(),
         ),
-        admin_repository,
+        admin_repository=admin_repository,
     )
 
 
@@ -148,6 +156,7 @@ async def test_authorize_rejects_unavailable_agent() -> None:
         repository, _ = _repository(
             agent=agent,
             membership=_membership(role=WorkspaceUserRole.OWNER),
+            admin=False,
         )
 
         result = await repository.authorize(agent_id=_AGENT_ID, user_id=_USER_ID)
@@ -159,7 +168,7 @@ async def test_authorize_rejects_unavailable_agent() -> None:
 @pytest.mark.asyncio
 async def test_authorize_rejects_missing_membership() -> None:
     """Workspace membership is required."""
-    repository, _ = _repository(agent=_agent(), membership=None)
+    repository, _ = _repository(agent=_agent(), membership=None, admin=False)
 
     result = await repository.authorize(agent_id=_AGENT_ID, user_id=_USER_ID)
 
@@ -173,6 +182,7 @@ async def test_authorize_accepts_public_agent_member() -> None:
     repository, admin_repository = _repository(
         agent=_agent(),
         membership=_membership(role=WorkspaceUserRole.MEMBER),
+        admin=False,
     )
 
     result = await repository.authorize(agent_id=_AGENT_ID, user_id=_USER_ID)
