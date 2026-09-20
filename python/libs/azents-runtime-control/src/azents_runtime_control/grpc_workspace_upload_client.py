@@ -6,7 +6,7 @@ from collections.abc import Awaitable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import TYPE_CHECKING, Protocol, TypeAlias, TypeVar
+from typing import TYPE_CHECKING, NamedTuple, Protocol, TypeAlias, TypeVar
 
 import grpc
 from google.protobuf import timestamp_pb2
@@ -174,6 +174,13 @@ class WorkspaceUploadTicket:
     url: str
     expires_at: datetime
     headers: tuple[tuple[str, str], ...]
+
+
+class WorkspaceUploadTicketResult(NamedTuple):
+    """Decoded upload status and short-lived browser PUT capability."""
+
+    status: WorkspaceUploadStatus
+    ticket: WorkspaceUploadTicket
 
 
 @dataclass(frozen=True)
@@ -345,7 +352,7 @@ class GrpcRuntimeWorkspaceUploadCoordinatorClient:
         *,
         identity: WorkspaceUploadIdentity,
         expected_revision: int,
-    ) -> tuple[WorkspaceUploadStatus, WorkspaceUploadTicket]:
+    ) -> WorkspaceUploadTicketResult:
         message = pb.IssueWorkspaceUploadTicketRequest(
             identity=workspace_upload_identity_to_message(identity),
             expected_revision=expected_revision,
@@ -541,16 +548,16 @@ def workspace_upload_status_response_from_message(
 
 def workspace_upload_ticket_response_from_message(
     message: pb.WorkspaceUploadTicketResponse,
-) -> tuple[WorkspaceUploadStatus, WorkspaceUploadTicket]:
+) -> WorkspaceUploadTicketResult:
     """Decode one metadata status and short-lived browser PUT capability."""
     if not message.HasField("status") or not message.HasField("ticket"):
         raise ValueError("Workspace upload ticket response is incomplete")
     ticket = message.ticket
     if not ticket.HasField("expires_at"):
         raise ValueError("Workspace upload ticket expiry is missing")
-    return (
-        workspace_upload_status_from_message(message.status),
-        WorkspaceUploadTicket(
+    return WorkspaceUploadTicketResult(
+        status=workspace_upload_status_from_message(message.status),
+        ticket=WorkspaceUploadTicket(
             method=ticket.method,
             url=ticket.url,
             expires_at=_datetime_from_message(ticket.expires_at),
