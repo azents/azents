@@ -94,9 +94,6 @@ _RUNTIME_PROVIDER_BOOTSTRAP_SOURCE_CONTAINER_PATH = (
 _RUNTIME_CONTAINER_NAME_RE = re.compile(r"^azents-runtime-[0-9a-f]{32}$")
 _DOCKER_BUILDER_ENV = "AZENTS_E2E_DOCKER_BUILDER"
 _GHA_DOCKER_CACHE_SCOPE_PREFIX_ENV = "AZENTS_E2E_DOCKER_GHA_CACHE_SCOPE_PREFIX"
-_GHA_DOCKER_CACHE_WRITE_REPOSITORIES_ENV = (
-    "AZENTS_E2E_DOCKER_GHA_CACHE_WRITE_REPOSITORIES"
-)
 _LOCAL_DOCKER_CACHE_ROOT_ENV = "AZENTS_E2E_DOCKER_CACHE_ROOT"
 _LOCAL_DOCKER_CACHE_WRITE_ROOT_ENV = "AZENTS_E2E_DOCKER_CACHE_WRITE_ROOT"
 _E2E_ARTIFACT_DIR_ENV = "AZENTS_E2E_ARTIFACT_DIR"
@@ -1084,26 +1081,9 @@ def _get_e2e_image_cache_options(
 
         cache_scope = f"{gha_scope_prefix}-{cache_repository}"
         cache_from = [{"type": "gha", "scope": cache_scope}]
-        write_repositories = frozenset(
-            repository.strip()
-            for repository in os.environ.get(
-                _GHA_DOCKER_CACHE_WRITE_REPOSITORIES_ENV, ""
-            ).split(",")
-            if repository.strip()
-        )
-        cache_to = (
-            {
-                "type": "gha",
-                "scope": cache_scope,
-                "mode": "max",
-                "ignore-error": "true",
-            }
-            if cache_repository in write_repositories
-            else None
-        )
         return _E2EImageCacheOptions(
             cache_from=cache_from,
-            cache_to=cache_to,
+            cache_to=None,
             cache_backend="gha",
             cache_scope=cache_scope,
         )

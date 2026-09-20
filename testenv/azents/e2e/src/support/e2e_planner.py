@@ -67,7 +67,6 @@ class Suite:
     root: Path
     lanes: int
     timeout_minutes: int
-    cache_write_repositories: tuple[str, ...]
 
 
 def load_suites(tests_root: Path) -> tuple[Suite, ...]:
@@ -82,20 +81,12 @@ def load_suites(tests_root: Path) -> tuple[Suite, ...]:
             raise ValueError(
                 f"suite name {name!r} must match directory name {root.name!r}"
             )
-        repositories = config.get("cache_write_repositories", [])
-        if not isinstance(repositories, list) or not all(
-            isinstance(value, str) and value for value in repositories
-        ):
-            raise ValueError(
-                f"{config_path}: cache_write_repositories must be a string list"
-            )
         suites.append(
             Suite(
                 name=name,
                 root=root,
                 lanes=_required_positive_int(config, "lanes"),
                 timeout_minutes=_required_positive_int(config, "timeout_minutes"),
-                cache_write_repositories=tuple(repositories),
             )
         )
 
@@ -197,9 +188,6 @@ def plan_suites(
                     "lane": lane_name,
                     "plan_file": plan_path.name,
                     "timeout_minutes": suite.timeout_minutes,
-                    "cache_write_repositories": (
-                        ",".join(suite.cache_write_repositories) if index == 1 else ""
-                    ),
                 }
             )
 

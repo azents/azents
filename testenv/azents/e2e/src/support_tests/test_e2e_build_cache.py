@@ -2,6 +2,7 @@
 
 import importlib.util
 import inspect
+import re
 import sys
 import threading
 from pathlib import Path
@@ -20,20 +21,17 @@ assert _CONFTEST_SPEC.loader is not None
 _CONFTEST_MODULE = importlib.util.module_from_spec(_CONFTEST_SPEC)
 sys.modules[_CONFTEST_SPEC.name] = _CONFTEST_MODULE
 _CONFTEST_SPEC.loader.exec_module(_CONFTEST_MODULE)
+_SNAPSHOT_WORKFLOW_PATH = REPOSITORY_ROOT / ".github/workflows/snapshot.yaml"
 
 
-def test_gha_cache_imports_every_image_and_exports_only_owned_scope(
+def test_gha_cache_imports_every_image_without_exporting_from_e2e(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """GHA cache scopes are per image and use max-mode only for the owner."""
+    """GHA cache scopes are per image and E2E lanes remain import-only."""
     monkeypatch.setenv(_CONFTEST_MODULE._DOCKER_BUILDER_ENV, "e2e-builder")
     monkeypatch.setenv(
         _CONFTEST_MODULE._GHA_DOCKER_CACHE_SCOPE_PREFIX_ENV,
         "azents-e2e-v1",
-    )
-    monkeypatch.setenv(
-        _CONFTEST_MODULE._GHA_DOCKER_CACHE_WRITE_REPOSITORIES_ENV,
-        "azents-server,azents-web",
     )
 
     cache_from, cache_to, backend, scope = (
@@ -41,12 +39,7 @@ def test_gha_cache_imports_every_image_and_exports_only_owned_scope(
     )
 
     assert cache_from == [{"type": "gha", "scope": "azents-e2e-v1-azents-server"}]
-    assert cache_to == {
-        "type": "gha",
-        "scope": "azents-e2e-v1-azents-server",
-        "mode": "max",
-        "ignore-error": "true",
-    }
+    assert cache_to is None
     assert backend == "gha"
     assert scope == "azents-e2e-v1-azents-server"
 
@@ -75,7 +68,7 @@ def test_gha_cache_requires_the_named_buildx_builder(
         _CONFTEST_MODULE._get_e2e_image_cache_options("azents-server")
 
 
-def test_build_passes_gha_cache_options_to_buildx_and_records_duration(
+def test_build_passes_import_only_gha_cache_to_buildx_and_records_duration(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -90,10 +83,6 @@ def test_build_passes_gha_cache_options_to_buildx_and_records_duration(
         _CONFTEST_MODULE._GHA_DOCKER_CACHE_SCOPE_PREFIX_ENV,
         "azents-e2e-v1",
     )
-    monkeypatch.setenv(
-        _CONFTEST_MODULE._GHA_DOCKER_CACHE_WRITE_REPOSITORIES_ENV,
-        "azents-server",
-    )
     monkeypatch.setenv(_CONFTEST_MODULE._E2E_ARTIFACT_DIR_ENV, str(tmp_path))
     monkeypatch.setattr(_CONFTEST_MODULE.pow_docker, "build", fake_build)
 
@@ -107,15 +96,27 @@ def test_build_passes_gha_cache_options_to_buildx_and_records_duration(
     assert build_arguments["cache_from"] == [
         {"type": "gha", "scope": "azents-e2e-v1-azents-server"}
     ]
-    assert build_arguments["cache_to"] == {
-        "type": "gha",
-        "scope": "azents-e2e-v1-azents-server",
-        "mode": "max",
-        "ignore-error": "true",
-    }
-    assert '"completed": true' in (tmp_path / "image-build-timings.jsonl").read_text(
-        encoding="utf-8"
+    assert build_arguments["cache_to"] is None
+    timings = (tmp_path / "image-build-timings.jsonl").read_text(encoding="utf-8")
+    assert '"cache_export_enabled": false' in timings
+    assert '"completed": true' in timings
+
+
+def test_snapshot_workflow_owns_every_e2e_gha_cache_scope() -> None:
+    """Snapshot cache writers exactly cover the repositories imported by E2E."""
+    workflow = _SNAPSHOT_WORKFLOW_PATH.read_text(encoding="utf-8")
+    writer_repositories = set(
+        re.findall(r"            e2e_cache_repository: (azents-[a-z-]+)", workflow)
     )
+    reader_repositories = {
+        image_build.cache_repository
+        for image_build in _CONFTEST_MODULE._E2E_IMAGE_BUILD_PROFILES["web"]
+    }
+
+    assert writer_repositories == reader_repositories
+    assert 'cache_repository="${{ matrix.e2e_cache_repository }}"' in workflow
+    assert 'cache_scope="azents-e2e-v1-$cache_repository"' in workflow
+    assert '"type=gha,scope=$cache_scope,mode=max,ignore-error=true"' in workflow
 
 
 def test_server_source_overlay_uses_snapshot_base_without_remote_cache(

@@ -28,8 +28,8 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
-last_verified_at: 2026-09-18
-spec_version: 65
+last_verified_at: 2026-09-19
+spec_version: 66
 ---
 
 # E2E Primary Test Strategy
@@ -382,11 +382,13 @@ Always-on required CI does not depend on external credentials.
   Independent images for the selected CI suite build concurrently inside each lane;
   focused local runs retain lazy per-image builds unless they explicitly select a CI
   image-build profile.
-  Only `main` push jobs export cache, with one existing lane owning each scope;
-  pull request jobs import without exporting. E2E artifacts include safe per-image
-  build timing metadata and Buildx cache disk usage, but never cache credentials or
-  cache URLs. Testcontainers-managed Selenium remains an external image pull rather
-  than an Actions-cached Docker archive.
+  Gated E2E lanes import without exporting. The existing Snapshot workflow build
+  matrix exports the same per-image scopes while publishing immutable images, so
+  cache refresh remains outside the required E2E critical path without adding a
+  runner. E2E artifacts include safe per-image build timing metadata and Buildx cache
+  disk usage, but never cache credentials or cache URLs. Testcontainers-managed
+  Selenium remains an external image pull rather than an Actions-cached Docker
+  archive.
 - Session working-folder coverage uses public API and the focused Docker Runtime Provider without
   direct product-database writes. Runtime-free roots prove nullable `none` bindings with no folder
   setup; managed roots prove `pending` to `bound` using current Runner evidence; permanent removal
