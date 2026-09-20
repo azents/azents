@@ -65,6 +65,30 @@ def test_path_matches_directory_glob() -> None:
     )
 
 
+def test_load_state_rejects_unknown_fields(tmp_path: Path) -> None:
+    state = dict(audit_state.empty_state())
+    state["unexpected"] = True
+    state_path = tmp_path / "state.json"
+    state_path.write_text(json.dumps(state))
+
+    with pytest.raises(
+        audit_state.AuditStateError,
+        match="unknown or missing fields",
+    ):
+        audit_state.load_state(state_path)
+
+
+def test_load_plan_rejects_non_object_payload(tmp_path: Path) -> None:
+    plan_path = tmp_path / "plan.json"
+    plan_path.write_text("[]")
+
+    with pytest.raises(
+        audit_state.AuditStateError,
+        match="Unsupported or invalid audit plan",
+    ):
+        audit_state.load_plan(plan_path)
+
+
 def test_discover_scope_rotates_only_declared_files_and_reports_missing_paths(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
