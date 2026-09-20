@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from typing import TypedDict
+from urllib.parse import urlsplit
 
 import azentsadminclient
 import azentspublicclient
@@ -117,7 +118,12 @@ def _login_main_web(
         ec.element_to_be_clickable((By.NAME, "password"))
     )
     password_input.send_keys(_SIGNUP_PASSWORD, Keys.ENTER)
-    _wait(driver).until(ec.url_contains("/workspaces"))
+    _wait(driver).until(
+        lambda current_driver: (
+            current_driver.get_cookie("az-token") is not None
+            and not urlsplit(current_driver.current_url).path.startswith("/login")
+        )
+    )
 
 
 def _assert_visible_text(driver: WebDriver, text: str) -> None:
