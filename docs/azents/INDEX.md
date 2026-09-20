@@ -26,7 +26,7 @@ Design documents are accumulated records and are not listed individually in this
 | [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-09-15 | 6 |
 | [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-09-15 | 118 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-09-16 | 22 |
-| [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-09-18 | 87 |
+| [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-09-19 | 89 |
 
 ## Living Specs — Flow
 

@@ -17,6 +17,7 @@ code_paths:
   - python/apps/azents/src/azents/core/auth/roles.py
   - python/apps/azents/src/azents/services/chat/workspace.py
   - python/apps/azents/src/azents/services/chat/workspace_upload.py
+  - python/apps/azents/src/azents/repos/workspace_upload_authority/**
   - python/apps/azents/src/azents/services/file_download_stream.py
   - python/apps/azents/src/azents/api/public/file_download.py
   - python/apps/azents/src/azents/runtime/transfer/**
@@ -129,8 +130,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/agents
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/channel-defaults
-last_verified_at: 2026-09-18
-spec_version: 87
+last_verified_at: 2026-09-19
+spec_version: 89
 ---
 
 # Workspace & Membership
@@ -509,7 +510,10 @@ overwrite authority after a destination conflict.
 
 The concrete-session Workspace UI computes SHA-256 in a worker, shows bounded
 uploading/uploaded/conflict/cancelled/failed states, and refreshes the FileBrowser
-only after authoritative commit. A conflict does not overwrite the existing file
+only after authoritative commit. Upload begins from an exact directory row's
+actions menu, and files selected by that picker retain that directory as their
+destination; the global browser toolbar does not expose a separate upload or
+destination-selection action. A conflict does not overwrite the existing file
 implicitly, and cancellation does not publish a partial destination.
 
 ### Session working-folder lifecycle
@@ -918,6 +922,9 @@ stateDiagram-v2
 
 ## Changelog
 
+- **2026-09-19 (spec_version=89)** — Added the repository coverage for
+  requester authorization and aligned the concrete-session upload UI with its
+  directory-row action and exact destination binding.
 - **2026-09-18 (spec_version=88)** — Clarified that Workspace Upload uses an
   optional public object-storage endpoint override and reuses the primary endpoint
   when the override is omitted.
