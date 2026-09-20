@@ -28,7 +28,7 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
-last_verified_at: 2026-09-19
+last_verified_at: 2026-09-20
 spec_version: 66
 ---
 
@@ -527,6 +527,9 @@ Local/PR environment without live substrate does not fake live PASS. Instead, se
 
 ## Changelog
 
+- **2026-09-20 (spec_version 66)** — Moved per-image BuildKit GitHub Actions
+  cache exports from gated E2E lanes to the Snapshot workflow build matrix while
+  retaining cache imports in gated lanes and avoiding an additional runner.
 - **2026-09-18 (spec_version 65)** — Added the public-API Workspace Upload
   matrix and its HTTPS S3 gateway trust boundary: exact PUT/commit bytes,
   conflict-overwrite retry, cancellation without publication, Runtime Control
