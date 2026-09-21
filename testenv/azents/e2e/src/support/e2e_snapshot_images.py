@@ -250,6 +250,16 @@ def _compatible_with_base(
     return comparison.returncode == 0
 
 
+def _ordered_snapshot_candidates(
+    *,
+    current_sha: str | None,
+    candidate_shas: Sequence[str],
+) -> tuple[str, ...]:
+    """Prefer the current snapshot while preserving ordered fallbacks."""
+    ordered = ((current_sha,) if current_sha else ()) + tuple(candidate_shas)
+    return tuple(dict.fromkeys(ordered))
+
+
 def _pull_snapshot(
     request: SnapshotPullRequest,
     *,
@@ -329,7 +339,10 @@ def prepare_e2e_snapshot_images(
                 (current_sha,)
                 if environment.get(image.changed_environment_variable) == "true"
                 and current_sha is not None
-                else tuple(candidate_shas)
+                else _ordered_snapshot_candidates(
+                    current_sha=current_sha,
+                    candidate_shas=candidate_shas,
+                )
             ),
             compatibility_base_sha=(
                 None
