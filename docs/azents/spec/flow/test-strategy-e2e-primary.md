@@ -28,8 +28,8 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
-last_verified_at: 2026-09-20
-spec_version: 66
+last_verified_at: 2026-09-21
+spec_version: 67
 ---
 
 # E2E Primary Test Strategy
@@ -203,7 +203,10 @@ Always-on required CI does not depend on external credentials.
   base, the direct `main` predecessor, or a compatible first-parent ancestor.
   A same-repository pull request, `main` push, or explicit workflow dispatch may
   additionally reuse an already-published snapshot tagged for the exact current
-  commit SHA. Snapshot availability is never a workflow dependency or wait condition:
+  commit SHA. For unchanged inputs, the lane tries a content-compatible exact-current
+  snapshot before the predecessor and ancestor candidates, allowing a completed
+  current publication to replace a cancelled predecessor publication without adding
+  a workflow dependency. Snapshot availability is never a workflow dependency or wait condition:
   a missing, late, cancelled, or failed publication immediately preserves the
   existing local Buildx/cache build path. Snapshot pulls run in parallel. The direct
   snapshot attempt starts immediately after checkout and overlaps uv installation,
@@ -527,6 +530,9 @@ Local/PR environment without live substrate does not fake live PASS. Instead, se
 
 ## Changelog
 
+- **2026-09-21 (spec_version 67)** — Preferred compatible exact-current-SHA
+  snapshots for unchanged E2E image inputs before predecessor and ancestor
+  candidates, preserving immediate fallback when the current publication is absent.
 - **2026-09-20 (spec_version 66)** — Moved per-image BuildKit GitHub Actions
   cache exports from gated E2E lanes to the Snapshot workflow build matrix while
   retaining cache imports in gated lanes and avoiding an additional runner.

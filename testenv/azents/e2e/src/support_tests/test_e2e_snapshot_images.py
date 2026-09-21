@@ -104,6 +104,78 @@ def test_prepares_all_unchanged_images() -> None:
     assert sum(command[0][1] == "tag" for command in runner.commands) == 3
 
 
+def test_unchanged_images_prefer_compatible_current_snapshot() -> None:
+    runner = FakeCommandRunner(frozenset())
+
+    result = prepare_e2e_snapshot_images(
+        base_sha=_BASE_SHA,
+        candidate_shas=(_BASE_SHA,),
+        current_sha=_ANCESTOR_SHA,
+        github_token="token",
+        github_actor="github-actions",
+        environment=_unchanged_environment(),
+        command_runner=runner,
+    )
+
+    assert result.all_images_prepared
+    assert {pull.candidate_sha for pull in result.pulls} == {_ANCESTOR_SHA}
+    assert all(
+        pull.attempted_sources
+        == (f"ghcr.io/azents/{pull.image}-snapshot:sha-{_ANCESTOR_SHA}",)
+        for pull in result.pulls
+    )
+    assert (
+        (
+            "git",
+            "diff",
+            "--quiet",
+            _ANCESTOR_SHA,
+            _BASE_SHA,
+            "--",
+            ".dockerignore",
+            "azents.Dockerfile",
+            "python/apps/azents",
+            "python/libs/az-common",
+            "python/libs/azents-runtime-control",
+        ),
+        None,
+    ) in runner.commands
+
+
+def test_missing_unchanged_current_snapshot_uses_base_snapshot() -> None:
+    runner = FakeCommandRunner(
+        frozenset(
+            {
+                f"azents-server-snapshot:sha-{_ANCESTOR_SHA}",
+                f"azents-runtime-runner-snapshot:sha-{_ANCESTOR_SHA}",
+                f"azents-runtime-provider-docker-snapshot:sha-{_ANCESTOR_SHA}",
+            }
+        )
+    )
+
+    result = prepare_e2e_snapshot_images(
+        base_sha=_BASE_SHA,
+        candidate_shas=(_BASE_SHA,),
+        current_sha=_ANCESTOR_SHA,
+        github_token="token",
+        github_actor="github-actions",
+        environment=_unchanged_environment(),
+        command_runner=runner,
+    )
+
+    assert result.all_images_prepared
+    assert not result.fallback_required
+    assert {pull.candidate_sha for pull in result.pulls} == {_BASE_SHA}
+    assert all(
+        pull.attempted_sources
+        == (
+            f"ghcr.io/azents/{pull.image}-snapshot:sha-{_ANCESTOR_SHA}",
+            f"ghcr.io/azents/{pull.image}-snapshot:sha-{_BASE_SHA}",
+        )
+        for pull in result.pulls
+    )
+
+
 def test_web_profile_prepares_unchanged_web_images() -> None:
     runner = FakeCommandRunner(frozenset())
     environment = _unchanged_environment()
