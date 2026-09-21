@@ -53,6 +53,29 @@ class Rule:
         return self.raw_hash
 
 
+@dataclass(frozen=True)
+class ToolInput:
+    file_paths: tuple[str, ...]
+    command: str | None
+
+
+@dataclass(frozen=True)
+class HookInput:
+    cwd: str | None
+    session_id: str
+    source: str
+    transcript_path: Path | None
+    tool_name: str | None
+    tool_input: ToolInput
+    tool_failed: bool
+
+
+@dataclass
+class HookState:
+    active_rules: dict[str, str]
+    last_transcript_size: int | None
+
+
 def _realpath(path: Path) -> Path:
     try:
         return path.resolve(strict=True)
@@ -340,47 +363,110 @@ def _format_rules(rules: list[Rule]) -> str:
     return "\n".join(parts).rstrip()
 
 
-def _read_hook_input() -> dict[str, Any]:
-    try:
-        raw = sys.stdin.read()
-        if not raw.strip():
-            return {}
-        parsed = json.loads(raw)
-        return parsed if isinstance(parsed, dict) else {}
-    except json.JSONDecodeError:
-        return {}
-
-
-def _project_root(payload: dict[str, Any]) -> Path:
-    cwd = payload.get("cwd")
-    if isinstance(cwd, str) and cwd:
-        return _realpath(Path(cwd))
-    return _realpath(Path.cwd())
-
-
-def _session_id(payload: dict[str, Any]) -> str:
-    for key in ("session_id", "sessionId", "sessionID"):
+def _first_nonempty_string(
+    payload: dict[str, Any], keys: tuple[str, ...]
+) -> str | None:
+    for key in keys:
         value = payload.get(key)
         if isinstance(value, str) and value:
             return value
-    return "__global__"
-
-
-def _session_source(payload: dict[str, Any]) -> str:
-    value = payload.get("source")
-    if isinstance(value, str):
-        return value
-    return ""
-
-
-def _transcript_path(payload: dict[str, Any]) -> Path | None:
-    value = payload.get("transcript_path")
-    if isinstance(value, str) and value:
-        return Path(value)
-    value = payload.get("transcriptPath")
-    if isinstance(value, str) and value:
-        return Path(value)
     return None
+
+
+def _decode_tool_failed(payload: dict[str, Any]) -> bool:
+    for key in ("tool_response", "toolResponse", "tool_output", "toolOutput", "result"):
+        value = payload.get(key)
+        if not isinstance(value, dict):
+            continue
+        success = value.get("success")
+        if success is False:
+            return True
+        is_error = value.get("is_error")
+        if is_error is True:
+            return True
+        status = value.get("status")
+        if isinstance(status, str) and status.lower() in {
+            "error",
+            "failed",
+            "failure",
+        }:
+            return True
+        error = value.get("error")
+        if error:
+            return True
+    return False
+
+
+def _decode_tool_input(payload: dict[str, Any]) -> ToolInput:
+    value = payload.get("tool_input")
+    if not isinstance(value, dict):
+        value = payload.get("toolInput")
+    if not isinstance(value, dict):
+        return ToolInput(file_paths=(), command=None)
+
+    file_paths = tuple(
+        path
+        for key in ("filePath", "file_path", "path")
+        if isinstance((path := value.get(key)), str) and path
+    )
+    command = value.get("command")
+    return ToolInput(
+        file_paths=file_paths,
+        command=command if isinstance(command, str) else None,
+    )
+
+
+def _decode_hook_input(payload: dict[str, Any]) -> HookInput:
+    cwd = payload.get("cwd")
+    transcript_path = _first_nonempty_string(
+        payload, ("transcript_path", "transcriptPath")
+    )
+    tool_name = _first_nonempty_string(payload, ("tool_name", "toolName"))
+    return HookInput(
+        cwd=cwd if isinstance(cwd, str) and cwd else None,
+        session_id=_first_nonempty_string(
+            payload, ("session_id", "sessionId", "sessionID")
+        )
+        or "__global__",
+        source=_first_nonempty_string(payload, ("source",)) or "",
+        transcript_path=Path(transcript_path) if transcript_path is not None else None,
+        tool_name=tool_name,
+        tool_input=_decode_tool_input(payload),
+        tool_failed=_decode_tool_failed(payload),
+    )
+
+
+def _empty_hook_input() -> HookInput:
+    return HookInput(
+        cwd=None,
+        session_id="__global__",
+        source="",
+        transcript_path=None,
+        tool_name=None,
+        tool_input=ToolInput(file_paths=(), command=None),
+        tool_failed=False,
+    )
+
+
+def _read_hook_input() -> HookInput:
+    try:
+        raw = sys.stdin.read()
+        if not raw.strip():
+            return _empty_hook_input()
+        parsed = json.loads(raw)
+        if not isinstance(parsed, dict):
+            return _empty_hook_input()
+        # Codex owns additional hook fields. Decode only this hook's compatibility
+        # surface and ignore unrelated provider fields.
+        return _decode_hook_input(parsed)
+    except json.JSONDecodeError:
+        return _empty_hook_input()
+
+
+def _project_root(payload: HookInput) -> Path:
+    if payload.cwd is not None:
+        return _realpath(Path(payload.cwd))
+    return _realpath(Path.cwd())
 
 
 def _state_dir(project_root: Path) -> Path:
@@ -416,14 +502,11 @@ def _reset_state(project_root: Path, session_id: str) -> None:
         pass
 
 
-def _empty_state() -> dict[str, Any]:
-    return {
-        "active_rules": {},
-        "last_transcript_size": None,
-    }
+def _empty_state() -> HookState:
+    return HookState(active_rules={}, last_transcript_size=None)
 
 
-def _read_state(path: Path) -> dict[str, Any]:
+def _read_state(path: Path) -> HookState:
     try:
         parsed = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
@@ -445,42 +528,41 @@ def _read_state(path: Path) -> dict[str, Any]:
     last_transcript_size = parsed.get("last_transcript_size")
     if not isinstance(last_transcript_size, int):
         last_transcript_size = None
-    return {
-        "active_rules": active_rules,
-        "last_transcript_size": last_transcript_size,
-    }
-
-
-def _write_state(path: Path, state: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    return HookState(
+        active_rules=active_rules,
+        last_transcript_size=last_transcript_size,
     )
 
 
-def _update_transcript_state(payload: dict[str, Any], state: dict[str, Any]) -> bool:
-    transcript = _transcript_path(payload)
+def _write_state(path: Path, state: HookState) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "active_rules": state.active_rules,
+                "last_transcript_size": state.last_transcript_size,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+def _update_transcript_state(payload: HookInput, state: HookState) -> bool:
+    transcript = payload.transcript_path
     if transcript is None:
         return False
     try:
         current_size = transcript.stat().st_size
     except OSError:
         return False
-    previous_size = state.get("last_transcript_size")
-    state["last_transcript_size"] = current_size
-    if not isinstance(previous_size, int) or previous_size <= 0:
+    previous_size = state.last_transcript_size
+    state.last_transcript_size = current_size
+    if previous_size is None or previous_size <= 0:
         return False
     return current_size < int(previous_size * TRANSCRIPT_SHRINK_RATIO)
-
-
-def _tool_input(payload: dict[str, Any]) -> dict[str, Any]:
-    value = payload.get("tool_input")
-    if isinstance(value, dict):
-        return value
-    value = payload.get("toolInput")
-    if isinstance(value, dict):
-        return value
-    return {}
 
 
 def _extract_patch_targets(command: str, project_root: Path) -> list[Path]:
@@ -603,19 +685,15 @@ def _extract_bash_targets(command: str, project_root: Path) -> list[Path]:
     return _command_targets(tokens, project_root)
 
 
-def _targets_from_payload(payload: dict[str, Any], project_root: Path) -> list[Path]:
-    tool_input = _tool_input(payload)
+def _targets_from_payload(payload: HookInput, project_root: Path) -> list[Path]:
     targets: list[Path] = []
-    for key in ("filePath", "file_path", "path"):
-        value = tool_input.get(key)
-        if isinstance(value, str) and value:
-            target = Path(value) if os.path.isabs(value) else project_root / value
-            targets.append(_realpath(target))
-    command = tool_input.get("command")
-    if isinstance(command, str):
+    for value in payload.tool_input.file_paths:
+        target = Path(value) if os.path.isabs(value) else project_root / value
+        targets.append(_realpath(target))
+    command = payload.tool_input.command
+    if command is not None:
         targets.extend(_extract_patch_targets(command, project_root))
-        tool_name = payload.get("tool_name") or payload.get("toolName")
-        if tool_name == "Bash":
+        if payload.tool_name == "Bash":
             targets.extend(_extract_bash_targets(command, project_root))
     deduped: list[Path] = []
     seen: set[Path] = set()
@@ -627,36 +705,13 @@ def _targets_from_payload(payload: dict[str, Any], project_root: Path) -> list[P
     return deduped
 
 
-def _tool_failed(payload: dict[str, Any]) -> bool:
-    for key in ("tool_response", "toolResponse", "tool_output", "toolOutput", "result"):
-        value = payload.get(key)
-        if isinstance(value, dict):
-            success = value.get("success")
-            if success is False:
-                return True
-            is_error = value.get("is_error")
-            if is_error is True:
-                return True
-            status = value.get("status")
-            if isinstance(status, str) and status.lower() in {
-                "error",
-                "failed",
-                "failure",
-            }:
-                return True
-            error = value.get("error")
-            if error:
-                return True
-    return False
-
-
 def _emit(payload: dict[str, Any]) -> int:
     print(json.dumps(payload, ensure_ascii=False))
     return 0
 
 
 def _activate_new_rules(
-    payload: dict[str, Any],
+    payload: HookInput,
     project_root: Path,
     session_id: str,
     targets: list[Path],
@@ -665,9 +720,9 @@ def _activate_new_rules(
     state_path = _state_path(project_root, session_id)
     state = _read_state(state_path)
     if _update_transcript_state(payload, state):
-        state["active_rules"] = {}
+        state.active_rules = {}
     rules = _rules_for_targets(project_root, targets)
-    active_rules = state["active_rules"]
+    active_rules = state.active_rules
     new_rules = [
         rule
         for rule in rules
@@ -682,10 +737,9 @@ def _activate_new_rules(
 def session_start() -> int:
     payload = _read_hook_input()
     project_root = _project_root(payload)
-    session_id = _session_id(payload)
-    if _session_source(payload) == "clear":
-        _reset_state(project_root, session_id)
-    new_rules = _activate_new_rules(payload, project_root, session_id, [])
+    if payload.source == "clear":
+        _reset_state(project_root, payload.session_id)
+    new_rules = _activate_new_rules(payload, project_root, payload.session_id, [])
     if not new_rules:
         return 0
     return _emit(
@@ -700,14 +754,13 @@ def session_start() -> int:
 
 def post_tool_use() -> int:
     payload = _read_hook_input()
-    if _tool_failed(payload):
+    if payload.tool_failed:
         return 0
     project_root = _project_root(payload)
-    session_id = _session_id(payload)
     targets = _targets_from_payload(payload, project_root)
     if not targets:
         return 0
-    new_rules = _activate_new_rules(payload, project_root, session_id, targets)
+    new_rules = _activate_new_rules(payload, project_root, payload.session_id, targets)
     if not new_rules:
         return 0
     context = _format_rules(new_rules)
