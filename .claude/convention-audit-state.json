@@ -1,14 +1,12 @@
 {
   "change_checkpoint": {
-    "checked_at": "2026-09-20T22:20:54Z",
+    "checked_at": "2026-09-21T22:16:02Z",
     "checked_ruleset_revisions": [
       "077a5584a71947f841c4f9bb4408a38671bc06c03ad3f8b7a07c5bbde94d7ad5",
       "193cd524af5bf589eeab7744b06e813623015ce64d6d503b684ddbbbf9bbced2",
-      "54a25573d8ff81ac5a2cd2a5b3f3d59e4a86f7305779185adc9154bb8d474d52",
-      "62f8502dfaead68e71a6667c5d096e57071fa99d0d528840ea2505268d711835",
-      "753224fe20ed069ad162c506972f515615951fedb74fa83a1f6ae81a77bd43f2"
+      "62f8502dfaead68e71a6667c5d096e57071fa99d0d528840ea2505268d711835"
     ],
-    "checked_through_commit": "22516a813d0380f97d77856363e958c30431fae7"
+    "checked_through_commit": "242ed8c4367d1f6bbf5876e3013987f019bba28e"
   },
   "ranges": {
     ".::bucket-1-of-8": {
@@ -92,34 +90,34 @@
       "checked_through_commit": "22516a813d0380f97d77856363e958c30431fae7"
     },
     ".claude/**::bucket-8-of-8": {
-      "checked_at": "2026-08-20T22:51:59Z",
-      "checked_ruleset_revision": "b0ab4c8acce3682456801902d945d5ecc9ae48cdf9e5e51ed643a8b6edb7d7fd",
-      "checked_through_commit": "fec4d095f1a3f37cf35aa858b4d8ffb679453506"
+      "checked_at": "2026-09-21T22:16:02Z",
+      "checked_ruleset_revision": "62f8502dfaead68e71a6667c5d096e57071fa99d0d528840ea2505268d711835",
+      "checked_through_commit": "242ed8c4367d1f6bbf5876e3013987f019bba28e"
     },
     ".codex/**::bucket-3-of-8": {
-      "checked_at": "2026-08-20T22:51:59Z",
-      "checked_ruleset_revision": "b0ab4c8acce3682456801902d945d5ecc9ae48cdf9e5e51ed643a8b6edb7d7fd",
-      "checked_through_commit": "fec4d095f1a3f37cf35aa858b4d8ffb679453506"
+      "checked_at": "2026-09-21T22:16:02Z",
+      "checked_ruleset_revision": "62f8502dfaead68e71a6667c5d096e57071fa99d0d528840ea2505268d711835",
+      "checked_through_commit": "242ed8c4367d1f6bbf5876e3013987f019bba28e"
     },
     ".codex/**::bucket-5-of-8": {
-      "checked_at": "2026-08-21T22:17:56Z",
-      "checked_ruleset_revision": "d3273713102261830b2b966c3519368115303d2baf000c398dc12b1fb00645c8",
-      "checked_through_commit": "3390e7ba3a58a86e0acc3227ac99f2827aa5f9f2"
+      "checked_at": "2026-09-21T22:16:02Z",
+      "checked_ruleset_revision": "62f8502dfaead68e71a6667c5d096e57071fa99d0d528840ea2505268d711835",
+      "checked_through_commit": "242ed8c4367d1f6bbf5876e3013987f019bba28e"
     },
     ".codex/**::bucket-8-of-8": {
-      "checked_at": "2026-08-21T22:17:56Z",
-      "checked_ruleset_revision": "d3273713102261830b2b966c3519368115303d2baf000c398dc12b1fb00645c8",
-      "checked_through_commit": "3390e7ba3a58a86e0acc3227ac99f2827aa5f9f2"
+      "checked_at": "2026-09-21T22:16:02Z",
+      "checked_ruleset_revision": "62f8502dfaead68e71a6667c5d096e57071fa99d0d528840ea2505268d711835",
+      "checked_through_commit": "242ed8c4367d1f6bbf5876e3013987f019bba28e"
     },
     ".github/**::bucket-1-of-8": {
-      "checked_at": "2026-08-21T22:17:56Z",
-      "checked_ruleset_revision": "d3273713102261830b2b966c3519368115303d2baf000c398dc12b1fb00645c8",
-      "checked_through_commit": "3390e7ba3a58a86e0acc3227ac99f2827aa5f9f2"
+      "checked_at": "2026-09-21T22:16:02Z",
+      "checked_ruleset_revision": "62f8502dfaead68e71a6667c5d096e57071fa99d0d528840ea2505268d711835",
+      "checked_through_commit": "242ed8c4367d1f6bbf5876e3013987f019bba28e"
     },
     ".github/**::bucket-2-of-8": {
-      "checked_at": "2026-08-21T22:17:56Z",
-      "checked_ruleset_revision": "d3273713102261830b2b966c3519368115303d2baf000c398dc12b1fb00645c8",
-      "checked_through_commit": "3390e7ba3a58a86e0acc3227ac99f2827aa5f9f2"
+      "checked_at": "2026-09-21T22:16:02Z",
+      "checked_ruleset_revision": "62f8502dfaead68e71a6667c5d096e57071fa99d0d528840ea2505268d711835",
+      "checked_through_commit": "242ed8c4367d1f6bbf5876e3013987f019bba28e"
     },
     ".github/**::bucket-3-of-8": {
       "checked_at": "2026-08-21T22:17:56Z",
@@ -1197,21 +1195,6 @@
       ".claude/conventions/typescript/trpc-cache-invalidation.md",
       ".claude/conventions/typescript/use-generated-public-client.md",
       ".claude/conventions/typescript/user-relevant-status-copy.md"
-    ],
-    "b0ab4c8acce3682456801902d945d5ecc9ae48cdf9e5e51ed643a8b6edb7d7fd": [
-      ".claude/conventions/global/avoid-oppositional-negative-rewrites.md",
-      ".claude/conventions/global/comments-and-docstrings-in-english.md",
-      ".claude/conventions/global/decode-json-into-typed-payloads.md",
-      ".claude/conventions/global/dependency-updates-without-overrides.md",
-      ".claude/conventions/global/deterministic-test-synchronization.md",
-      ".claude/conventions/global/diagrams-in-mermaid.md",
-      ".claude/conventions/global/patch-null-means-set-null.md",
-      ".claude/conventions/global/prefer-supported-external-service-sdks.md",
-      ".claude/conventions/global/redis-optional-no-ha.md",
-      ".claude/conventions/global/runner-reported-agent-workspace.md",
-      ".claude/conventions/global/stacked-pr-rebase-script.md",
-      ".claude/conventions/global/user-facing-text-in-english.md",
-      ".claude/conventions/global/worktree-rebase-origin-main.md"
     ],
     "d3273713102261830b2b966c3519368115303d2baf000c398dc12b1fb00645c8": [
       ".claude/conventions/global/avoid-oppositional-negative-rewrites.md",
