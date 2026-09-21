@@ -11,10 +11,11 @@ import re
 import subprocess
 import sys
 import tempfile
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, TypedDict, cast
 
 SCHEMA_VERSION = 1
 DEFAULT_STATE_PATH = ".claude/living-spec-audit-state.json"
@@ -54,6 +55,36 @@ class ChangedPaths:
     deleted: tuple[str, ...]
 
 
+class AuditState(TypedDict):
+    """Validated persisted Living Spec audit state."""
+
+    schema_version: int
+    change_checkpoint: dict[str, Any]
+    ranges: dict[str, dict[str, Any]]
+
+
+class AuditPlan(TypedDict, total=False):
+    """Validated disposable Living Spec audit execution plan."""
+
+    schema_version: int
+    change_checkpoint_before: str | None
+    generated_at: str
+    head_commit: str
+    missing_code_paths: list[dict[str, str]]
+    mode: str
+    state_sha256: str
+    plan_sha256: str
+    bootstrap: bool
+    changed_checks: list[dict[str, Any]]
+    changed_specs: list[str]
+    deleted_checks: list[dict[str, Any]]
+    deleted_specs: list[str]
+    full_ranges: list[dict[str, Any]]
+    range_limit: int
+    rotation_days: int | None
+    rotation_ranges: list[dict[str, Any]]
+
+
 def run_git(repo_root: Path, *args: str) -> str:
     """Run Git and return decoded stdout."""
     result = subprocess.run(
@@ -86,7 +117,7 @@ def utc_now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
-def empty_state() -> dict[str, Any]:
+def empty_state() -> AuditState:
     """Return an empty versioned audit state."""
     return {
         "schema_version": SCHEMA_VERSION,
@@ -98,7 +129,7 @@ def empty_state() -> dict[str, Any]:
     }
 
 
-def load_state(state_path: Path) -> dict[str, Any]:
+def load_state(state_path: Path) -> AuditState:
     """Load and validate the audit state."""
     if not state_path.exists():
         return empty_state()
@@ -108,6 +139,8 @@ def load_state(state_path: Path) -> dict[str, Any]:
         raise AuditStateError(f"Cannot read state file: {exc}") from exc
     if not isinstance(state, dict):
         raise AuditStateError("Audit state must be a JSON object")
+    if set(state) != {"schema_version", "change_checkpoint", "ranges"}:
+        raise AuditStateError("Audit state has unknown or missing fields")
     if state.get("schema_version") != SCHEMA_VERSION:
         raise AuditStateError(
             f"Unsupported audit state schema: {state.get('schema_version')!r}"
@@ -121,10 +154,61 @@ def load_state(state_path: Path) -> dict[str, Any]:
     for range_name, range_checkpoint in ranges.items():
         if not isinstance(range_name, str) or not isinstance(range_checkpoint, dict):
             raise AuditStateError("Audit state has an invalid range checkpoint")
-    return state
+    return cast(AuditState, state)
 
 
-def serialize_json(value: dict[str, Any]) -> str:
+def load_plan(plan_path: Path) -> AuditPlan:
+    """Load and validate one disposable Living Spec audit plan."""
+    try:
+        plan = json.loads(plan_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise AuditStateError(f"Cannot read plan file: {exc}") from exc
+    allowed_fields = {
+        "bootstrap",
+        "change_checkpoint_before",
+        "changed_checks",
+        "changed_specs",
+        "deleted_checks",
+        "deleted_specs",
+        "full_ranges",
+        "generated_at",
+        "head_commit",
+        "missing_code_paths",
+        "mode",
+        "plan_sha256",
+        "range_limit",
+        "rotation_days",
+        "rotation_ranges",
+        "schema_version",
+        "state_sha256",
+    }
+    if (
+        not isinstance(plan, dict)
+        or set(plan) - allowed_fields
+        or plan.get("schema_version") != SCHEMA_VERSION
+        or not isinstance(plan.get("generated_at"), str)
+        or not isinstance(plan.get("head_commit"), str)
+        or plan.get("mode") not in {"full", "incremental"}
+        or not isinstance(plan.get("state_sha256"), str)
+        or not isinstance(plan.get("plan_sha256"), str)
+        or not all(
+            isinstance(plan.get(field), list)
+            for field in (
+                "changed_checks",
+                "changed_specs",
+                "deleted_checks",
+                "deleted_specs",
+                "full_ranges",
+                "missing_code_paths",
+                "rotation_ranges",
+            )
+        )
+    ):
+        raise AuditStateError("Unsupported or invalid audit plan")
+    return cast(AuditPlan, plan)
+
+
+def serialize_json(value: Mapping[str, Any]) -> str:
     """Serialize JSON deterministically."""
     return json.dumps(value, indent=2, sort_keys=True) + "\n"
 
@@ -134,7 +218,7 @@ def emit_json(value: dict[str, Any]) -> None:
     sys.stdout.write(json.dumps(value, sort_keys=True) + "\n")
 
 
-def write_json_atomic(path: Path, value: dict[str, Any]) -> None:
+def write_json_atomic(path: Path, value: Mapping[str, Any]) -> None:
     """Atomically replace a JSON file."""
     path.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(
@@ -155,7 +239,7 @@ def file_sha256(path: Path) -> str:
     return hashlib.sha256(content).hexdigest()
 
 
-def plan_sha256(plan: dict[str, Any]) -> str:
+def plan_sha256(plan: Mapping[str, Any]) -> str:
     """Hash a plan payload without its embedded integrity field."""
     payload = dict(plan)
     payload.pop("plan_sha256", None)
@@ -371,7 +455,7 @@ def empty_range_checkpoint() -> dict[str, Any]:
 
 
 def reconcile_state(
-    state: dict[str, Any],
+    state: Mapping[str, Any],
     current_ranges: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
     """Add current ranges, prune removed ranges, and preserve checkpoints."""
@@ -643,7 +727,7 @@ def rotation_range_plans(
     ]
 
 
-def validated_plan_range_limit(plan: dict[str, Any], range_count: int) -> int:
+def validated_plan_range_limit(plan: Mapping[str, Any], range_count: int) -> int:
     """Validate and return the rotation limit encoded in a plan."""
     range_limit = plan.get("range_limit")
     rotation_days = plan.get("rotation_days")
@@ -746,12 +830,7 @@ def build_plan(
 def complete_plan(repo_root: Path, state_path: Path, plan_path: Path) -> None:
     """Advance state after one successfully executed exact plan."""
     ensure_tracked_tree_clean(repo_root)
-    try:
-        plan = json.loads(plan_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise AuditStateError(f"Cannot read plan file: {exc}") from exc
-    if not isinstance(plan, dict) or plan.get("schema_version") != SCHEMA_VERSION:
-        raise AuditStateError("Unsupported or invalid audit plan")
+    plan = load_plan(plan_path)
     if plan.get("plan_sha256") != plan_sha256(plan):
         raise AuditStateError("Audit plan payload changed after planning")
     if plan.get("state_sha256") != file_sha256(state_path):
@@ -846,7 +925,7 @@ def complete_plan(repo_root: Path, state_path: Path, plan_path: Path) -> None:
 
 
 def status_summary(
-    state: dict[str, Any],
+    state: Mapping[str, Any],
     scope: AuditScope,
     *,
     rotation_days: int,

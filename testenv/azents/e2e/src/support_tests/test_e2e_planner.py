@@ -246,6 +246,39 @@ def test_load_file_timings_uses_file_high_watermarks_across_samples(
     }
 
 
+@pytest.mark.parametrize(
+    "record",
+    [
+        [],
+        {
+            "record_type": "test_phase",
+            "phase": "call",
+            "node_id": "src/tests/required/public/test_agent.py::test_agent",
+            "duration_seconds": True,
+        },
+    ],
+)
+def test_load_file_timings_rejects_invalid_call_records(
+    tmp_path: Path,
+    record: object,
+) -> None:
+    timings_path = tmp_path / "timings.jsonl"
+    timings_path.write_text(json.dumps(record), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="invalid test timing record"):
+        load_file_timings(timings_path)
+
+
+def test_load_file_timings_ignores_other_json_record_types(tmp_path: Path) -> None:
+    timings_path = tmp_path / "timings.jsonl"
+    timings_path.write_text(
+        json.dumps({"record_type": "session_start", "started_at": 0}),
+        encoding="utf-8",
+    )
+
+    assert load_file_timings(timings_path) == {}
+
+
 def test_load_file_timings_projects_external_channel_split(tmp_path: Path) -> None:
     timings_path = tmp_path / "timings.jsonl"
     timings_path.write_text(

@@ -96,6 +96,30 @@ def test_reconcile_state_deduplicates_and_prunes_ruleset_manifests() -> None:
     assert pruned["rulesets"] == {"current": [".claude/conventions/global/example.md"]}
 
 
+def test_load_state_rejects_unknown_fields(tmp_path: Path) -> None:
+    state = dict(audit_state.empty_state())
+    state["unexpected"] = True
+    state_path = tmp_path / "state.json"
+    state_path.write_text(json.dumps(state))
+
+    with pytest.raises(
+        audit_state.AuditStateError,
+        match="unknown or missing fields",
+    ):
+        audit_state.load_state(state_path)
+
+
+def test_load_plan_rejects_non_object_payload(tmp_path: Path) -> None:
+    plan_path = tmp_path / "plan.json"
+    plan_path.write_text("[]")
+
+    with pytest.raises(
+        audit_state.AuditStateError,
+        match="Unsupported or invalid audit plan",
+    ):
+        audit_state.load_plan(plan_path)
+
+
 def test_incremental_plan_bootstraps_without_a_full_checkpoint(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

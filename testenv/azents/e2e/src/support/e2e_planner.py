@@ -69,6 +69,14 @@ class Suite:
     timeout_minutes: int
 
 
+@dataclass(frozen=True)
+class _TestPhaseTiming:
+    """One validated pytest timing record used for lane planning."""
+
+    node_id: str
+    duration_seconds: float
+
+
 def load_suites(tests_root: Path) -> tuple[Suite, ...]:
     """Load every suite configuration and reject unowned E2E files."""
     suites: list[Suite] = []
@@ -123,16 +131,33 @@ def _load_file_timing_sample(path: Path) -> dict[str, float]:
     for line in path.read_text(encoding="utf-8").splitlines():
         if not line:
             continue
-        payload = json.loads(line)
-        if payload.get("record_type") != "test_phase" or payload.get("phase") != "call":
+        timing = _decode_test_phase_timing(line)
+        if timing is None:
             continue
-        node_id = payload.get("node_id")
-        duration = payload.get("duration_seconds")
-        if not isinstance(node_id, str) or not isinstance(duration, int | float):
-            raise ValueError("invalid test timing record")
-        file_path = _current_timing_path(node_id)
-        totals[file_path] = totals.get(file_path, 0.0) + float(duration)
+        file_path = _current_timing_path(timing.node_id)
+        totals[file_path] = totals.get(file_path, 0.0) + timing.duration_seconds
     return totals
+
+
+def _decode_test_phase_timing(line: str) -> _TestPhaseTiming | None:
+    """Decode one JSONL record into the timing payload used by the planner."""
+    payload = json.loads(line)
+    if not isinstance(payload, dict):
+        raise ValueError("invalid test timing record")
+    if payload.get("record_type") != "test_phase" or payload.get("phase") != "call":
+        return None
+    node_id = payload.get("node_id")
+    duration = payload.get("duration_seconds")
+    if (
+        not isinstance(node_id, str)
+        or isinstance(duration, bool)
+        or not isinstance(duration, int | float)
+    ):
+        raise ValueError("invalid test timing record")
+    return _TestPhaseTiming(
+        node_id=node_id,
+        duration_seconds=float(duration),
+    )
 
 
 def plan_suites(
