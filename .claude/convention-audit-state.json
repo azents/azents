@@ -1,13 +1,14 @@
 {
   "change_checkpoint": {
-    "checked_at": "2026-09-19T22:29:49Z",
+    "checked_at": "2026-09-20T22:20:54Z",
     "checked_ruleset_revisions": [
       "077a5584a71947f841c4f9bb4408a38671bc06c03ad3f8b7a07c5bbde94d7ad5",
       "193cd524af5bf589eeab7744b06e813623015ce64d6d503b684ddbbbf9bbced2",
       "54a25573d8ff81ac5a2cd2a5b3f3d59e4a86f7305779185adc9154bb8d474d52",
-      "62f8502dfaead68e71a6667c5d096e57071fa99d0d528840ea2505268d711835"
+      "62f8502dfaead68e71a6667c5d096e57071fa99d0d528840ea2505268d711835",
+      "753224fe20ed069ad162c506972f515615951fedb74fa83a1f6ae81a77bd43f2"
     ],
-    "checked_through_commit": "96e5fc6d983d45cdad91f062e771fc7f5509a06c"
+    "checked_through_commit": "22516a813d0380f97d77856363e958c30431fae7"
   },
   "ranges": {
     ".::bucket-1-of-8": {
@@ -61,34 +62,34 @@
       "checked_through_commit": "96e5fc6d983d45cdad91f062e771fc7f5509a06c"
     },
     ".claude/**::bucket-2-of-8": {
-      "checked_at": "2026-08-19T22:22:43Z",
-      "checked_ruleset_revision": "b9e977ecb464a4caf083ed082d4edd1efd44359bac493db5aea5daff6813613c",
-      "checked_through_commit": "8473921385da294a0bad31a185470bcf77408e44"
+      "checked_at": "2026-09-20T22:20:54Z",
+      "checked_ruleset_revision": "62f8502dfaead68e71a6667c5d096e57071fa99d0d528840ea2505268d711835",
+      "checked_through_commit": "22516a813d0380f97d77856363e958c30431fae7"
     },
     ".claude/**::bucket-3-of-8": {
-      "checked_at": "2026-08-19T22:22:43Z",
-      "checked_ruleset_revision": "b9e977ecb464a4caf083ed082d4edd1efd44359bac493db5aea5daff6813613c",
-      "checked_through_commit": "8473921385da294a0bad31a185470bcf77408e44"
+      "checked_at": "2026-09-20T22:20:54Z",
+      "checked_ruleset_revision": "62f8502dfaead68e71a6667c5d096e57071fa99d0d528840ea2505268d711835",
+      "checked_through_commit": "22516a813d0380f97d77856363e958c30431fae7"
     },
     ".claude/**::bucket-4-of-8": {
-      "checked_at": "2026-08-20T22:51:59Z",
-      "checked_ruleset_revision": "b0ab4c8acce3682456801902d945d5ecc9ae48cdf9e5e51ed643a8b6edb7d7fd",
-      "checked_through_commit": "fec4d095f1a3f37cf35aa858b4d8ffb679453506"
+      "checked_at": "2026-09-20T22:20:54Z",
+      "checked_ruleset_revision": "62f8502dfaead68e71a6667c5d096e57071fa99d0d528840ea2505268d711835",
+      "checked_through_commit": "22516a813d0380f97d77856363e958c30431fae7"
     },
     ".claude/**::bucket-5-of-8": {
-      "checked_at": "2026-08-20T22:51:59Z",
-      "checked_ruleset_revision": "b0ab4c8acce3682456801902d945d5ecc9ae48cdf9e5e51ed643a8b6edb7d7fd",
-      "checked_through_commit": "fec4d095f1a3f37cf35aa858b4d8ffb679453506"
+      "checked_at": "2026-09-20T22:20:54Z",
+      "checked_ruleset_revision": "62f8502dfaead68e71a6667c5d096e57071fa99d0d528840ea2505268d711835",
+      "checked_through_commit": "22516a813d0380f97d77856363e958c30431fae7"
     },
     ".claude/**::bucket-6-of-8": {
-      "checked_at": "2026-08-20T22:51:59Z",
-      "checked_ruleset_revision": "b0ab4c8acce3682456801902d945d5ecc9ae48cdf9e5e51ed643a8b6edb7d7fd",
-      "checked_through_commit": "fec4d095f1a3f37cf35aa858b4d8ffb679453506"
+      "checked_at": "2026-09-20T22:20:54Z",
+      "checked_ruleset_revision": "62f8502dfaead68e71a6667c5d096e57071fa99d0d528840ea2505268d711835",
+      "checked_through_commit": "22516a813d0380f97d77856363e958c30431fae7"
     },
     ".claude/**::bucket-7-of-8": {
-      "checked_at": "2026-08-20T22:51:59Z",
-      "checked_ruleset_revision": "b0ab4c8acce3682456801902d945d5ecc9ae48cdf9e5e51ed643a8b6edb7d7fd",
-      "checked_through_commit": "fec4d095f1a3f37cf35aa858b4d8ffb679453506"
+      "checked_at": "2026-09-20T22:20:54Z",
+      "checked_ruleset_revision": "62f8502dfaead68e71a6667c5d096e57071fa99d0d528840ea2505268d711835",
+      "checked_through_commit": "22516a813d0380f97d77856363e958c30431fae7"
     },
     ".claude/**::bucket-8-of-8": {
       "checked_at": "2026-08-20T22:51:59Z",
@@ -1198,21 +1199,6 @@
       ".claude/conventions/typescript/user-relevant-status-copy.md"
     ],
     "b0ab4c8acce3682456801902d945d5ecc9ae48cdf9e5e51ed643a8b6edb7d7fd": [
-      ".claude/conventions/global/avoid-oppositional-negative-rewrites.md",
-      ".claude/conventions/global/comments-and-docstrings-in-english.md",
-      ".claude/conventions/global/decode-json-into-typed-payloads.md",
-      ".claude/conventions/global/dependency-updates-without-overrides.md",
-      ".claude/conventions/global/deterministic-test-synchronization.md",
-      ".claude/conventions/global/diagrams-in-mermaid.md",
-      ".claude/conventions/global/patch-null-means-set-null.md",
-      ".claude/conventions/global/prefer-supported-external-service-sdks.md",
-      ".claude/conventions/global/redis-optional-no-ha.md",
-      ".claude/conventions/global/runner-reported-agent-workspace.md",
-      ".claude/conventions/global/stacked-pr-rebase-script.md",
-      ".claude/conventions/global/user-facing-text-in-english.md",
-      ".claude/conventions/global/worktree-rebase-origin-main.md"
-    ],
-    "b9e977ecb464a4caf083ed082d4edd1efd44359bac493db5aea5daff6813613c": [
       ".claude/conventions/global/avoid-oppositional-negative-rewrites.md",
       ".claude/conventions/global/comments-and-docstrings-in-english.md",
       ".claude/conventions/global/decode-json-into-typed-payloads.md",
