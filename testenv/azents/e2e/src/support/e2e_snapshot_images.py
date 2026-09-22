@@ -87,6 +87,13 @@ class SnapshotPreparation:
     fallback_required: bool
 
 
+@dataclass(frozen=True)
+class SnapshotSetupStatus:
+    """Represent the append-owned fields from snapshot setup observability."""
+
+    current_sha: str | None
+
+
 CommandRunner = Callable[
     [Sequence[str], str | None],
     subprocess.CompletedProcess[str],
@@ -478,6 +485,16 @@ def _write_github_output(path: Path, preparation: SnapshotPreparation) -> None:
         )
 
 
+def _decode_snapshot_setup_status(payload: object) -> SnapshotSetupStatus:
+    """Decode the fields needed when appending snapshot setup evidence."""
+    if not isinstance(payload, dict):
+        return SnapshotSetupStatus(current_sha=None)
+    current_sha = payload.get("current_sha")
+    return SnapshotSetupStatus(
+        current_sha=current_sha if isinstance(current_sha, str) else None,
+    )
+
+
 def _write_observability(
     artifact_dir: Path,
     preparation: SnapshotPreparation,
@@ -490,8 +507,10 @@ def _write_observability(
     status_path = artifact_dir / "snapshot-image-setup.json"
     preserved_current_sha = current_sha
     if append and status_path.exists() and preserved_current_sha is None:
-        existing_status = json.loads(status_path.read_text(encoding="utf-8"))
-        preserved_current_sha = existing_status.get("current_sha")
+        existing_status = _decode_snapshot_setup_status(
+            json.loads(status_path.read_text(encoding="utf-8"))
+        )
+        preserved_current_sha = existing_status.current_sha
     status = {
         "base_sha": base_sha,
         "candidate_shas": list(candidate_shas),
