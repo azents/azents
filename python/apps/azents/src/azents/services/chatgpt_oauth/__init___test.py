@@ -17,6 +17,7 @@ from azents.core.crypto import CredentialCipher
 from azents.core.enums import LLMCatalogPurpose, LLMCatalogScope, LLMProvider
 from azents.rdb.session import SessionManager
 from azents.repos.chatgpt_oauth_session import ChatGPTOAuthSessionRepository
+from azents.repos.chatgpt_oauth_session.operations import ChatGPTOAuthOperations
 from azents.repos.llm_catalog import LLMCatalogRepository
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.user import UserRepository
@@ -150,12 +151,14 @@ def _make_service(
     """Create service for tests."""
     cipher = CredentialCipher(_TEST_KEY)
     return ChatGPTOAuthService(
-        session_manager=cast(
-            SessionManager[AsyncSession], _SessionManager(rdb_session)
+        operations=ChatGPTOAuthOperations(
+            session_manager=cast(
+                SessionManager[AsyncSession], _SessionManager(rdb_session)
+            ),
+            session_repository=ChatGPTOAuthSessionRepository(cipher),
+            integration_repository=LLMProviderIntegrationRepository(cipher),
+            catalog_repository=LLMCatalogRepository(),
         ),
-        session_repo=ChatGPTOAuthSessionRepository(cipher),
-        integration_repo=LLMProviderIntegrationRepository(cipher),
-        catalog_repo=LLMCatalogRepository(),
         client=cast(ChatGPTOAuthClient, fake_client),
     )
 

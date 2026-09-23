@@ -18,6 +18,7 @@ from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace.data import WorkspaceCreate
 from azents.repos.xai_oauth_session import XaiOAuthSessionRepository
+from azents.repos.xai_oauth_session.operations import XaiOAuthOperations
 
 from . import XaiOAuthService
 from .client import XaiOAuthClient
@@ -83,10 +84,12 @@ async def test_slow_down_increases_and_returns_poll_interval(
     cipher = CredentialCipher(_TEST_KEY)
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
         service = XaiOAuthService(
-            cast(SessionManager[AsyncSession], _SessionManager(rdb_session)),
-            XaiOAuthSessionRepository(cipher),
-            LLMProviderIntegrationRepository(cipher),
-            LLMCatalogRepository(),
+            XaiOAuthOperations(
+                cast(SessionManager[AsyncSession], _SessionManager(rdb_session)),
+                XaiOAuthSessionRepository(cipher),
+                LLMProviderIntegrationRepository(cipher),
+                LLMCatalogRepository(),
+            ),
             XaiOAuthClient(http_client),
         )
         start = await service.start_device(
@@ -162,10 +165,12 @@ async def test_connected_device_flow_creates_integration_catalog(
     catalog_repo = LLMCatalogRepository()
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
         service = XaiOAuthService(
-            cast(SessionManager[AsyncSession], _SessionManager(rdb_session)),
-            XaiOAuthSessionRepository(cipher),
-            LLMProviderIntegrationRepository(cipher),
-            catalog_repo,
+            XaiOAuthOperations(
+                cast(SessionManager[AsyncSession], _SessionManager(rdb_session)),
+                XaiOAuthSessionRepository(cipher),
+                LLMProviderIntegrationRepository(cipher),
+                catalog_repo,
+            ),
             XaiOAuthClient(http_client),
         )
         start = await service.start_device(
@@ -206,10 +211,12 @@ async def test_connected_device_flow_creates_integration_catalog(
     assert isinstance(invalid.error, InvalidSession)
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
         reconnect_service = XaiOAuthService(
-            cast(SessionManager[AsyncSession], _SessionManager(rdb_session)),
-            XaiOAuthSessionRepository(cipher),
-            repo,
-            catalog_repo,
+            XaiOAuthOperations(
+                cast(SessionManager[AsyncSession], _SessionManager(rdb_session)),
+                XaiOAuthSessionRepository(cipher),
+                repo,
+                catalog_repo,
+            ),
             XaiOAuthClient(http_client),
         )
         reauth = await reconnect_service.start_device(
