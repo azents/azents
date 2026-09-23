@@ -637,3 +637,31 @@ def test_fallback_observability_preserves_current_snapshot_sha(
 
     status = json.loads((tmp_path / "snapshot-image-setup.json").read_text())
     assert status["current_sha"] == _ANCESTOR_SHA
+
+
+def test_fallback_observability_ignores_invalid_current_snapshot_sha(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "snapshot-image-setup.json").write_text(
+        json.dumps({"current_sha": 42}),
+        encoding="utf-8",
+    )
+    fallback_preparation = SnapshotPreparation(
+        environment={},
+        pulls=(),
+        login_completed=True,
+        all_images_prepared=False,
+        fallback_required=False,
+    )
+
+    _write_observability(
+        tmp_path,
+        fallback_preparation,
+        _BASE_SHA,
+        (_ANCESTOR_SHA,),
+        None,
+        append=True,
+    )
+
+    status = json.loads((tmp_path / "snapshot-image-setup.json").read_text())
+    assert status["current_sha"] is None
