@@ -44,6 +44,20 @@ def test_timing_cache_save_keys_are_unique_per_attempt() -> None:
     ) in main_save
 
 
+def test_e2e_aggregate_artifact_download_fails_closed_without_retry() -> None:
+    """Fail the required aggregate when its only artifact download fails."""
+    workflow = _WORKFLOW_PATH.read_text(encoding="utf-8")
+    aggregate = workflow.split("  ci_e2e_aggregate:\n", 1)[1].split(
+        "\n  ci-python-e2e:\n", 1
+    )[0]
+    download = _step_block(aggregate, "Download E2E observability artifacts")
+
+    assert download.count("actions/download-artifact@") == 1
+    assert "continue-on-error:" not in download
+    assert "Retry E2E observability artifact download" not in aggregate
+    assert aggregate.count("      - name: Download E2E observability artifacts") == 1
+
+
 def test_workflow_dispatch_detects_changes_from_first_parent() -> None:
     """Manual runs classify image changes against the checked-out first parent."""
     workflow = _WORKFLOW_PATH.read_text(encoding="utf-8")
