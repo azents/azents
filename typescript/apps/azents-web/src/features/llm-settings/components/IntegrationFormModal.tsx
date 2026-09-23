@@ -125,12 +125,23 @@ export function IntegrationFormModal({
   // Remount form by key: integration id for EDIT, "create" for CREATE
   const contentKey =
     formModal.type === "EDIT" ? formModal.integration.id : "create";
+  const reauthenticating =
+    formModal.type === "EDIT" &&
+    ["chatgpt_oauth", "xai_oauth", "kimi_oauth"].includes(
+      formModal.integration.provider,
+    );
 
   return (
     <Modal
       opened={isOpen}
       onClose={onClose}
-      title={isCreate ? t("createTitle") : t("editTitle")}
+      title={
+        isCreate
+          ? t("createTitle")
+          : reauthenticating
+            ? t("manageSubscriptionTitle")
+            : t("editTitle")
+      }
     >
       <IntegrationFormContent
         key={contentKey}
@@ -248,17 +259,19 @@ function IntegrationFormContent({
       )}
 
       {/* Provider-specific forms (each owns useForm) */}
-      {isChatGPTOAuth && isCreate && (
+      {isChatGPTOAuth && (
         <ChatGPTOAuthConnectionCard
           handle={handle}
           canManage
+          integrationId={integration?.id}
           onConnected={onClose}
         />
       )}
-      {isXaiOAuth && isCreate && (
+      {isXaiOAuth && (
         <XaiOAuthConnectionCard
           handle={handle}
           canManage
+          integrationId={integration?.id}
           onConnected={onClose}
         />
       )}

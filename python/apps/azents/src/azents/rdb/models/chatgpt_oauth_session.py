@@ -73,6 +73,12 @@ class RDBChatGPTOAuthSession(RDBModel):
         TimeZoneDateTime,
         nullable=False,
     )
+    integration_id: Mapped[str | None] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey("llm_provider_integrations.id", ondelete="CASCADE"),
+        nullable=True,
+        default=None,
+    )
     encrypted_device_auth_id: Mapped[str | None] = mapped_column(
         sa.Text, nullable=True, default=None
     )

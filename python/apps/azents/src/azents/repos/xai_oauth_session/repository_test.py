@@ -46,6 +46,7 @@ async def _create_session(
         XaiOAuthSessionCreate(
             workspace_id=workspace_id,
             user_id=user.id,
+            integration_id=None,
             method=XaiOAuthConnectionMethod.DEVICE,
             device_code=f"device-{suffix}",
             user_code="ABCD-EFGH",

@@ -100,12 +100,24 @@ class XaiOAuthService:
         self._client = client
 
     async def start_device(
-        self, *, workspace_id: str, user_id: str
+        self, *, workspace_id: str, user_id: str, integration_id: str | None
     ) -> Result[
         XaiOAuthDeviceStartOutput,
-        ProviderRejected | ProviderEntitlementDenied | ProviderUnavailable,
+        InvalidSession
+        | ProviderRejected
+        | ProviderEntitlementDenied
+        | ProviderUnavailable,
     ]:
         """Start Device OAuth flow."""
+        if integration_id is not None:
+            async with self._session_manager() as session:
+                target = await self._integration_repo.get_by_id(session, integration_id)
+            if (
+                target is None
+                or target.workspace_id != workspace_id
+                or target.provider != LLMProvider.XAI_OAUTH
+            ):
+                return Failure(InvalidSession(reason="Invalid integration target"))
         code_result = await self._client.request_device_user_code()
         match code_result:
             case Success(user_code):
@@ -119,6 +131,7 @@ class XaiOAuthService:
                         XaiOAuthSessionCreate(
                             workspace_id=workspace_id,
                             user_id=user_id,
+                            integration_id=integration_id,
                             method=XaiOAuthConnectionMethod.DEVICE,
                             device_code=user_code.device_code,
                             user_code=user_code.user_code,
@@ -283,34 +296,69 @@ class XaiOAuthService:
         match tokens_result:
             case Success(tokens):
                 now = datetime.datetime.now(datetime.UTC)
+                secrets = XaiOAuthSecrets(
+                    access_token=tokens.access_token,
+                    refresh_token=tokens.refresh_token,
+                    id_token=tokens.id_token,
+                    expires_at=tokens.expires_at,
+                )
+                config = XaiOAuthConfig(
+                    account_id=tokens.account_id,
+                    email=tokens.email,
+                    connection_method=tokens.connection_method.value,
+                    status=XaiOAuthConnectionStatus.CONNECTED.value,
+                    connected_at=now,
+                    last_refreshed_at=now,
+                )
                 async with self._session_manager() as session:
+                    oauth_session = await self._session_repo.get_by_id(
+                        session, session_id
+                    )
+                    if oauth_session is None:
+                        return Failure(SessionTransitionFailed(session_id=session_id))
+                    target = None
+                    if oauth_session.integration_id is not None:
+                        repo = self._integration_repo
+                        target = await repo.get_by_id_with_secrets_for_update(
+                            session, oauth_session.integration_id
+                        )
+                        if (
+                            target is None
+                            or target.workspace_id != workspace_id
+                            or target.provider != LLMProvider.XAI_OAUTH
+                        ):
+                            return Failure(
+                                InvalidSession(reason="Invalid integration target")
+                            )
                     consume_result = await self._session_repo.consume(
                         session, session_id
                     )
                     if isinstance(consume_result, Failure):
                         return Failure(SessionTransitionFailed(session_id=session_id))
-                    integration = await self._integration_repo.create(
-                        session,
-                        LLMProviderIntegrationCreate(
-                            workspace_id=workspace_id,
-                            provider=LLMProvider.XAI_OAUTH,
-                            name="xAI Grok OAuth",
-                            secrets=XaiOAuthSecrets(
-                                access_token=tokens.access_token,
-                                refresh_token=tokens.refresh_token,
-                                id_token=tokens.id_token,
-                                expires_at=tokens.expires_at,
+                    if target is None:
+                        integration = await self._integration_repo.create(
+                            session,
+                            LLMProviderIntegrationCreate(
+                                workspace_id=workspace_id,
+                                provider=LLMProvider.XAI_OAUTH,
+                                name="xAI Grok OAuth",
+                                secrets=secrets,
+                                config=config,
                             ),
-                            config=XaiOAuthConfig(
-                                account_id=tokens.account_id,
-                                email=tokens.email,
-                                connection_method=tokens.connection_method.value,
-                                status=XaiOAuthConnectionStatus.CONNECTED.value,
-                                connected_at=now,
-                                last_refreshed_at=now,
-                            ),
-                        ),
-                    )
+                        )
+                    else:
+                        update_result = await self._integration_repo.update_by_id(
+                            session, target.id, {"secrets": secrets, "config": config}
+                        )
+                        match update_result:
+                            case Success(integration):
+                                pass
+                            case Failure():
+                                return Failure(
+                                    SessionTransitionFailed(session_id=session_id)
+                                )
+                            case _:
+                                assert_never(update_result)
                     await self._catalog_repo.ensure_integration_catalog(
                         session,
                         integration_id=integration.id,

@@ -155,7 +155,7 @@ export function KimiOAuthConnectionCard({
             {state.type === "ERROR"
               ? t("tryAgain")
               : reconnect
-                ? t("reconnectWithDeviceCode")
+                ? t("reauthenticateWithDeviceCode")
                 : t("connectWithDeviceCode")}
           </Button>
           {state.type === "PENDING" ? (

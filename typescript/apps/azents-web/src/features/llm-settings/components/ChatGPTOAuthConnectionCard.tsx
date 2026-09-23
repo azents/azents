@@ -38,12 +38,14 @@ type DeviceState =
 interface ChatGPTOAuthConnectionCardProps {
   handle: string;
   canManage: boolean;
+  integrationId?: string;
   onConnected?: () => void;
 }
 
 export function ChatGPTOAuthConnectionCard({
   handle,
   canManage,
+  integrationId,
   onConnected,
 }: ChatGPTOAuthConnectionCardProps): React.ReactElement {
   const t = useTranslations("workspace.llmSettings.chatgptOAuth");
@@ -128,8 +130,8 @@ export function ChatGPTOAuthConnectionCard({
   }, [deviceState, t]);
 
   const startDevice = useCallback((): void => {
-    deviceStartMutation.mutate({ handle });
-  }, [deviceStartMutation, handle]);
+    deviceStartMutation.mutate({ handle, integrationId });
+  }, [deviceStartMutation, handle, integrationId]);
 
   const cancelDevice = useCallback((): void => {
     if (deviceState.type !== "PENDING") {
@@ -209,7 +211,9 @@ export function ChatGPTOAuthConnectionCard({
             loading={deviceStartMutation.isPending}
             disabled={deviceState.type === "PENDING"}
           >
-            {t("connectWithDeviceCode")}
+            {integrationId
+              ? t("reauthenticateWithDeviceCode")
+              : t("connectWithDeviceCode")}
           </Button>
           {deviceState.type === "PENDING" && (
             <Button

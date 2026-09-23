@@ -48,6 +48,8 @@
     "disabled": "無効",
     "toggleIntegration": "{name} の有効状態を切り替え",
     "editIntegration": "{name} を編集",
+    "reauthenticateIntegration": "{name} を再認証",
+    "manageSubscriptionTitle": "サブスクリプション接続の管理",
     "deleteIntegration": "{name} を削除",
     "subscriptionUsage": {
       "title": "サブスクリプション使用量",
@@ -184,6 +186,7 @@
       "copyCode": "コードをコピー",
       "copied": "コピー済み",
       "connectWithDeviceCode": "デバイスコードで接続",
+      "reauthenticateWithDeviceCode": "デバイスコードで再認証",
       "cancel": "キャンセル",
       "statusError": "デバイス認証ステータス: {status}。"
     },
@@ -281,6 +284,7 @@
       "copyCode": "コードをコピー",
       "copied": "コピーしました",
       "connectWithDeviceCode": "デバイスコードで接続",
+      "reauthenticateWithDeviceCode": "デバイスコードで再認証",
       "cancel": "キャンセル",
       "statusError": "デバイス認証は {status} です。"
     },
@@ -302,6 +306,7 @@
       "expiresAt": "コードの有効期限: {value}",
       "connectWithDeviceCode": "Kimi サブスクリプションを接続",
       "reconnectWithDeviceCode": "Kimi サブスクリプションを再接続",
+      "reauthenticateWithDeviceCode": "デバイスコードで再認証",
       "tryAgain": "再試行",
       "cancel": "キャンセル",
       "statusError": "デバイス認証は {status} です。"

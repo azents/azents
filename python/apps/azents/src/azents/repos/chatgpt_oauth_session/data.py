@@ -19,6 +19,7 @@ class ChatGPTOAuthSession(BaseModel):
     id: str = Field(description="Session ID")
     workspace_id: str = Field(description="Workspace ID")
     user_id: str = Field(description="User ID")
+    integration_id: str | None = Field(description="Reauthentication target")
     method: ChatGPTOAuthConnectionMethod = Field(description="Connection method")
     state: str = Field(description="OAuth state")
     redirect_uri: str = Field(description="Redirect URI")
@@ -45,6 +46,7 @@ class ChatGPTOAuthSessionCreate(BaseModel):
 
     workspace_id: str = Field(description="Workspace ID")
     user_id: str = Field(description="User ID")
+    integration_id: str | None = Field(description="Reauthentication target")
     method: ChatGPTOAuthConnectionMethod = Field(description="Connection method")
     state: str = Field(description="OAuth state")
     code_verifier: str = Field(description="PKCE code verifier")

@@ -105,8 +105,40 @@ export const KimiReconnectRequired = {
     const page = within(canvasElement.ownerDocument.body);
     await expect(page.getByText("Reconnect required")).toBeVisible();
     await expect(
-      page.getByRole("button", { name: "Reconnect Kimi subscription" }),
+      page.getByRole("button", { name: "Reauthenticate with device code" }),
     ).toBeVisible();
     await expect(page.queryByLabelText("API Key")).not.toBeInTheDocument();
+  },
+} satisfies Story;
+
+export const KimiConnectedCanReauthenticate = {
+  args: {
+    availableProviderValues: ["kimi_oauth"],
+    formModal: {
+      type: "EDIT",
+      integration: {
+        id: "integration-kimi-connected",
+        provider: "kimi_oauth",
+        name: "Healthy Kimi subscription",
+        config: {
+          type: "kimi_oauth",
+          connection_method: "device",
+          status: "connected",
+          connected_at: "2026-07-19T00:00:00Z",
+          last_refreshed_at: "2026-07-19T00:00:00Z",
+          last_failed_at: null,
+          last_failure_reason: null,
+        },
+        enabled: true,
+        created_at: "2026-07-19T00:00:00Z",
+        updated_at: "2026-07-19T00:00:00Z",
+      },
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const page = within(canvasElement.ownerDocument.body);
+    await expect(
+      page.getByRole("button", { name: "Reauthenticate with device code" }),
+    ).toBeVisible();
   },
 } satisfies Story;

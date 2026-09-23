@@ -17,7 +17,7 @@ The standard checks cover:
 - one Alembic head;
 - base-to-head upgrade;
 - model definitions matching the migration DDL;
-- the production-equivalent public-schema fingerprint and required singleton seeds;
+- targeted raw-SQL connection-generation trigger/function wiring and required singleton seeds;
 - named model CHECK constraints; and
 - baseline upgrade/downgrade consistency.
 

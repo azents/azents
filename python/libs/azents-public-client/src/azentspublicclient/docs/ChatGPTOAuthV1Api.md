@@ -172,7 +172,7 @@ Name | Type | Description  | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **chatgpt_oauth_v1_start_device**
-> ChatGPTOAuthDeviceStartResponse chatgpt_oauth_v1_start_device(handle)
+> ChatGPTOAuthDeviceStartResponse chatgpt_oauth_v1_start_device(handle, integration_id=integration_id)
 
 Start Device
 
@@ -209,10 +209,11 @@ with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.ChatGPTOAuthV1Api(api_client)
     handle = 'handle_example' # str | 
+    integration_id = 'integration_id_example' # str |  (optional)
 
     try:
         # Start Device
-        api_response = api_instance.chatgpt_oauth_v1_start_device(handle)
+        api_response = api_instance.chatgpt_oauth_v1_start_device(handle, integration_id=integration_id)
         print("The response of ChatGPTOAuthV1Api->chatgpt_oauth_v1_start_device:\n")
         pprint(api_response)
     except Exception as e:
@@ -227,6 +228,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **handle** | **str**|  | 
+ **integration_id** | **str**|  | [optional] 
 
 ### Return type
 

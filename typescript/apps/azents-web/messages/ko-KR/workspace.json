@@ -48,6 +48,8 @@
     "disabled": "비활성",
     "toggleIntegration": "{name} 활성 상태 전환",
     "editIntegration": "{name} 편집",
+    "reauthenticateIntegration": "{name} 재인증",
+    "manageSubscriptionTitle": "구독 연결 관리",
     "deleteIntegration": "{name} 삭제",
     "subscriptionUsage": {
       "title": "구독 사용량",
@@ -184,6 +186,7 @@
       "copyCode": "코드 복사",
       "copied": "복사됨",
       "connectWithDeviceCode": "디바이스 코드로 연결",
+      "reauthenticateWithDeviceCode": "디바이스 코드로 재인증",
       "cancel": "취소",
       "statusError": "디바이스 인증 상태: {status}."
     },
@@ -281,6 +284,7 @@
       "copyCode": "코드 복사",
       "copied": "복사됨",
       "connectWithDeviceCode": "디바이스 코드로 연결",
+      "reauthenticateWithDeviceCode": "디바이스 코드로 재인증",
       "cancel": "취소",
       "statusError": "디바이스 인증 상태: {status}."
     },
@@ -302,6 +306,7 @@
       "expiresAt": "코드 만료: {value}",
       "connectWithDeviceCode": "Kimi 구독 연결",
       "reconnectWithDeviceCode": "Kimi 구독 재연결",
+      "reauthenticateWithDeviceCode": "디바이스 코드로 재인증",
       "tryAgain": "다시 시도",
       "cancel": "취소",
       "statusError": "디바이스 인증 상태: {status}."

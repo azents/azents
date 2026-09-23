@@ -48,6 +48,8 @@
     "disabled": "Disabled",
     "toggleIntegration": "Toggle {name}",
     "editIntegration": "Edit {name}",
+    "reauthenticateIntegration": "Reauthenticate {name}",
+    "manageSubscriptionTitle": "Manage subscription connection",
     "deleteIntegration": "Delete {name}",
     "subscriptionUsage": {
       "title": "Subscription usage",
@@ -184,6 +186,7 @@
       "copyCode": "Copy code",
       "copied": "Copied",
       "connectWithDeviceCode": "Connect with device code",
+      "reauthenticateWithDeviceCode": "Reauthenticate with device code",
       "cancel": "Cancel",
       "statusError": "Device authorization {status}."
     },
@@ -281,6 +284,7 @@
       "copyCode": "Copy code",
       "copied": "Copied",
       "connectWithDeviceCode": "Connect with device code",
+      "reauthenticateWithDeviceCode": "Reauthenticate with device code",
       "cancel": "Cancel",
       "statusError": "Device authorization {status}."
     },
@@ -302,6 +306,7 @@
       "expiresAt": "Code expires {value}",
       "connectWithDeviceCode": "Connect Kimi subscription",
       "reconnectWithDeviceCode": "Reconnect Kimi subscription",
+      "reauthenticateWithDeviceCode": "Reauthenticate with device code",
       "tryAgain": "Try again",
       "cancel": "Cancel",
       "statusError": "Device authorization {status}."

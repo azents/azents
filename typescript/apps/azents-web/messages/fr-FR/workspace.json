@@ -48,6 +48,8 @@
     "disabled": "Désactivé",
     "toggleIntegration": "Activer ou désactiver {name}",
     "editIntegration": "Modifier {name}",
+    "reauthenticateIntegration": "Réauthentifier {name}",
+    "manageSubscriptionTitle": "Gérer la connexion de l’abonnement",
     "deleteIntegration": "Supprimer {name}",
     "subscriptionUsage": {
       "title": "Utilisation de l’abonnement",
@@ -184,6 +186,7 @@
       "copyCode": "Copier le code",
       "copied": "Copié",
       "connectWithDeviceCode": "Connecter avec le code d'appareil",
+      "reauthenticateWithDeviceCode": "Réauthentifier avec un code d’appareil",
       "cancel": "Annuler",
       "statusError": "Autorisation de l'appareil : {status}."
     },
@@ -281,6 +284,7 @@
       "copyCode": "Copier le code",
       "copied": "Copié",
       "connectWithDeviceCode": "Connecter avec un code appareil",
+      "reauthenticateWithDeviceCode": "Réauthentifier avec un code d’appareil",
       "cancel": "Annuler",
       "statusError": "Autorisation appareil {status}."
     },
@@ -302,6 +306,7 @@
       "expiresAt": "Le code expire {value}",
       "connectWithDeviceCode": "Connecter l’abonnement Kimi",
       "reconnectWithDeviceCode": "Reconnecter l’abonnement Kimi",
+      "reauthenticateWithDeviceCode": "Réauthentifier avec un code d’appareil",
       "tryAgain": "Réessayer",
       "cancel": "Annuler",
       "statusError": "Autorisation appareil {status}."
