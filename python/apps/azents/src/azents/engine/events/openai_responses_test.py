@@ -289,6 +289,19 @@ def _response(*, text: str = "done") -> Response:
     )
 
 
+def _patch_standard_openai_pricing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Provide stable public pricing for tests that exercise cost calculation."""
+    monkeypatch.setattr(
+        "azents.engine.events.openai_responses.model_cost",
+        {
+            "gpt-5.1-codex": {
+                "input_cost_per_token": 0.1,
+                "output_cost_per_token": 0.2,
+            }
+        },
+    )
+
+
 def _completed_event(response: Response | None = None) -> ResponseCompletedEvent:
     return ResponseCompletedEvent(
         response=response or _response(),
@@ -2600,6 +2613,7 @@ def test_typed_normalizer_builds_openai_artifact_usage_and_cost(
 ) -> None:
     """Typed completion produces canonical output with SDK usage provenance."""
     captured: dict[str, object] = {}
+    _patch_standard_openai_pricing(monkeypatch)
 
     def fake_completion_cost(**kwargs: object) -> float:
         captured.update(kwargs)
@@ -2995,6 +3009,7 @@ def test_typed_normalizer_accepts_omitted_usage_details(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Usage totals survive compatible providers that omit detail objects."""
+    _patch_standard_openai_pricing(monkeypatch)
     monkeypatch.setattr(
         "azents.engine.events.openai_responses.completion_cost",
         lambda **kwargs: 0.25,
@@ -3181,6 +3196,7 @@ def test_pricing_failure_preserves_successful_usage(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A pricing-map failure does not fail completed provider output."""
+    _patch_standard_openai_pricing(monkeypatch)
 
     def fail_pricing(**kwargs: object) -> float:
         del kwargs
@@ -3236,6 +3252,7 @@ def test_unexpected_pricing_failure_propagates(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Unexpected calculator failures remain visible to monitoring."""
+    _patch_standard_openai_pricing(monkeypatch)
 
     def fail_pricing(**kwargs: object) -> float:
         del kwargs
