@@ -18,12 +18,10 @@ import {
 } from "@mantine/core";
 import { IconCheck, IconCopy, IconExternalLink } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { trpc } from "@/trpc/client";
 
 const DEVICE_VERIFICATION_URL = "https://accounts.x.ai";
 
-type DeviceState =
+export type XaiOAuthDeviceState =
   | { type: "IDLE" }
   | {
       type: "PENDING";
@@ -36,123 +34,40 @@ type DeviceState =
   | { type: "ERROR"; message: string };
 
 interface XaiOAuthConnectionCardProps {
-  handle: string;
   canManage: boolean;
   integrationId?: string;
-  onConnected?: () => void;
+  state: XaiOAuthDeviceState;
+  starting: boolean;
+  cancelling: boolean;
+  onStart: () => void;
+  onCancel: () => void;
 }
 
 export function XaiOAuthConnectionCard({
-  handle,
   canManage,
   integrationId,
-  onConnected,
+  state,
+  starting,
+  cancelling,
+  onStart,
+  onCancel,
 }: XaiOAuthConnectionCardProps): React.ReactElement {
   const t = useTranslations("workspace.llmSettings.xaiOAuth");
-  const utils = trpc.useUtils();
-  const [deviceState, setDeviceState] = useState<DeviceState>({ type: "IDLE" });
-
-  const deviceStartMutation =
-    trpc.llmProviderIntegration.startXaiOauthDevice.useMutation({
-      onSuccess: (data) => {
-        setDeviceState({
-          type: "PENDING",
-          sessionId: data.session_id,
-          userCode: data.user_code,
-          verificationUri: data.verification_uri,
-          intervalMs: data.interval_seconds * 1000,
-        });
-      },
-      onError: (error) => {
-        setDeviceState({ type: "ERROR", message: error.message });
-      },
-    });
-
-  const cancelMutation =
-    trpc.llmProviderIntegration.cancelXaiOauthDevice.useMutation({
-      onSuccess: () => {
-        setDeviceState({ type: "IDLE" });
-      },
-    });
-
-  const deviceSessionId =
-    deviceState.type === "PENDING" ? deviceState.sessionId : "";
-  const deviceStatusQuery =
-    trpc.llmProviderIntegration.getXaiOauthDeviceStatus.useQuery(
-      { handle, sessionId: deviceSessionId },
-      {
-        enabled: deviceState.type === "PENDING",
-        refetchInterval:
-          deviceState.type === "PENDING" ? deviceState.intervalMs : false,
-      },
-    );
-
-  useEffect(() => {
-    if (deviceStatusQuery.data?.status === "pending") {
-      const intervalMs = deviceStatusQuery.data.interval_seconds * 1000;
-      setDeviceState((current) =>
-        current.type === "PENDING" && current.intervalMs !== intervalMs
-          ? { ...current, intervalMs }
-          : current,
-      );
-    } else if (deviceStatusQuery.data?.status === "connected") {
-      setDeviceState({ type: "CONNECTED" });
-      void utils.llmProviderIntegration.list.invalidate({ handle });
-      onConnected?.();
-    } else if (
-      deviceStatusQuery.data?.status === "expired" ||
-      deviceStatusQuery.data?.status === "failed" ||
-      deviceStatusQuery.data?.status === "cancelled"
-    ) {
-      setDeviceState({
-        type: "ERROR",
-        message: t("statusError", { status: deviceStatusQuery.data.status }),
-      });
-    }
-  }, [
-    deviceStatusQuery.data?.interval_seconds,
-    deviceStatusQuery.data?.status,
-    handle,
-    onConnected,
-    t,
-    utils,
-  ]);
-
-  useEffect(() => {
-    if (deviceStatusQuery.isError) {
-      setDeviceState({
-        type: "ERROR",
-        message: deviceStatusQuery.error.message,
-      });
-    }
-  }, [deviceStatusQuery.error?.message, deviceStatusQuery.isError]);
-
-  const isBusy = deviceStartMutation.isPending || cancelMutation.isPending;
-
-  const pendingDescription = useMemo((): React.ReactNode | null => {
-    if (deviceState.type !== "PENDING") {
-      return null;
-    }
-    const href = deviceState.verificationUri || DEVICE_VERIFICATION_URL;
-    return t.rich("deviceInstruction", {
-      link: (chunks) => (
-        <Anchor href={href} target="_blank" rel="noreferrer">
-          {chunks}
-        </Anchor>
-      ),
-    });
-  }, [deviceState, t]);
-
-  const startDevice = useCallback((): void => {
-    deviceStartMutation.mutate({ handle, integrationId });
-  }, [deviceStartMutation, handle, integrationId]);
-
-  const cancelDevice = useCallback((): void => {
-    if (deviceState.type !== "PENDING") {
-      return;
-    }
-    cancelMutation.mutate({ handle, sessionId: deviceState.sessionId });
-  }, [cancelMutation, deviceState, handle]);
+  const isBusy = starting || cancelling;
+  const pendingDescription =
+    state.type === "PENDING"
+      ? t.rich("deviceInstruction", {
+          link: (chunks) => (
+            <Anchor
+              href={state.verificationUri || DEVICE_VERIFICATION_URL}
+              target="_blank"
+              rel="noreferrer"
+            >
+              {chunks}
+            </Anchor>
+          ),
+        })
+      : null;
 
   return (
     <Stack gap="md">
@@ -171,24 +86,22 @@ export function XaiOAuthConnectionCard({
             {t("callbackUnavailable")}
           </Text>
         </Stack>
-        {deviceState.type === "CONNECTED" && (
+        {state.type === "CONNECTED" && (
           <Badge color="green" variant="light">
             {t("connected")}
           </Badge>
         )}
       </Group>
 
-      {deviceState.type === "ERROR" && (
-        <Alert color="red">{deviceState.message}</Alert>
-      )}
+      {state.type === "ERROR" && <Alert color="red">{state.message}</Alert>}
 
-      {deviceState.type === "PENDING" && (
+      {state.type === "PENDING" && (
         <Alert color="blue">
           <Stack gap="xs">
             <Text>{pendingDescription}</Text>
             <Button
               component="a"
-              href={deviceState.verificationUri || DEVICE_VERIFICATION_URL}
+              href={state.verificationUri || DEVICE_VERIFICATION_URL}
               target="_blank"
               rel="noreferrer"
               rightSection={<IconExternalLink size={16} />}
@@ -199,9 +112,9 @@ export function XaiOAuthConnectionCard({
             <Paper withBorder p="xs" radius="sm">
               <Group justify="space-between" wrap="nowrap" gap="xs">
                 <Text ff="monospace" truncate>
-                  {deviceState.userCode}
+                  {state.userCode}
                 </Text>
-                <CopyButton value={deviceState.userCode}>
+                <CopyButton value={state.userCode}>
                   {({ copied, copy }) => (
                     <Tooltip
                       label={copied ? t("copied") : t("copyCode")}
@@ -231,19 +144,19 @@ export function XaiOAuthConnectionCard({
       {canManage && (
         <Group gap="sm">
           <Button
-            onClick={startDevice}
-            loading={deviceStartMutation.isPending}
-            disabled={deviceState.type === "PENDING"}
+            onClick={onStart}
+            loading={starting}
+            disabled={state.type === "PENDING"}
           >
             {integrationId
               ? t("reauthenticateWithDeviceCode")
               : t("connectWithDeviceCode")}
           </Button>
-          {deviceState.type === "PENDING" && (
+          {state.type === "PENDING" && (
             <Button
               variant="subtle"
               color="red"
-              onClick={cancelDevice}
+              onClick={onCancel}
               loading={isBusy}
             >
               {t("cancel")}
