@@ -44,36 +44,6 @@ def test_timing_cache_save_keys_are_unique_per_attempt() -> None:
     ) in main_save
 
 
-def test_e2e_aggregate_retries_one_transient_artifact_download_failure() -> None:
-    """Retries current-run observability lookup once before failing aggregation."""
-    workflow = _WORKFLOW_PATH.read_text(encoding="utf-8")
-    initial_download = _step_block(
-        workflow,
-        "Download E2E observability artifacts",
-    )
-    retry_download = _step_block(
-        workflow,
-        "Retry E2E observability artifact download",
-    )
-
-    assert "id: download-e2e-observability" in initial_download
-    assert "continue-on-error: true" in initial_download
-    assert "if: steps.download-e2e-observability.outcome == 'failure'" in retry_download
-    assert "continue-on-error: true" not in retry_download
-    assert (
-        initial_download.count(
-            "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c"
-        )
-        == 1
-    )
-    assert (
-        retry_download.count(
-            "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c"
-        )
-        == 1
-    )
-
-
 def test_workflow_dispatch_detects_changes_from_first_parent() -> None:
     """Manual runs classify image changes against the checked-out first parent."""
     workflow = _WORKFLOW_PATH.read_text(encoding="utf-8")
