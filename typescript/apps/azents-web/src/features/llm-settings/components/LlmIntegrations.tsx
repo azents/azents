@@ -18,7 +18,12 @@ import {
   Title,
   Tooltip,
 } from "@mantine/core";
-import { IconEdit, IconPlus, IconTrash } from "@tabler/icons-react";
+import {
+  IconEdit,
+  IconPlus,
+  IconRefresh,
+  IconTrash,
+} from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import { IntegrationFormModal } from "./IntegrationFormModal";
 import { KimiConnectionStatusBadge } from "./KimiOAuthConnectionCard";
@@ -212,6 +217,11 @@ function IntegrationCard({
     openrouter: t("providers.openrouter"),
   };
   const kimiConnectionStatus = kimiConnectionStatusForIntegration(integration);
+  const canReauthenticate = [
+    "chatgpt_oauth",
+    "xai_oauth",
+    "kimi_oauth",
+  ].includes(integration.provider);
 
   return (
     <Card withBorder padding="md">
@@ -243,6 +253,23 @@ function IntegrationCard({
                 }
                 size="sm"
               />
+              {canReauthenticate && (
+                <Tooltip
+                  label={t("reauthenticateIntegration", {
+                    name: integration.name,
+                  })}
+                >
+                  <ActionIcon
+                    aria-label={t("reauthenticateIntegration", {
+                      name: integration.name,
+                    })}
+                    variant="subtle"
+                    onClick={() => onEdit(integration)}
+                  >
+                    <IconRefresh size={rem(16)} />
+                  </ActionIcon>
+                </Tooltip>
+              )}
               <Tooltip label={t("editIntegration", { name: integration.name })}>
                 <ActionIcon
                   aria-label={t("editIntegration", { name: integration.name })}

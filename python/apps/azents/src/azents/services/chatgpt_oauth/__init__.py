@@ -109,9 +109,21 @@ class ChatGPTOAuthService:
         self._client = client
 
     async def start_device(
-        self, *, workspace_id: str, user_id: str
-    ) -> Result[ChatGPTOAuthDeviceStartOutput, ProviderRejected | ProviderUnavailable]:
+        self, *, workspace_id: str, user_id: str, integration_id: str | None
+    ) -> Result[
+        ChatGPTOAuthDeviceStartOutput,
+        InvalidSession | ProviderRejected | ProviderUnavailable,
+    ]:
         """Start Device OAuth flow."""
+        if integration_id is not None:
+            async with self._session_manager() as session:
+                target = await self._integration_repo.get_by_id(session, integration_id)
+            if (
+                target is None
+                or target.workspace_id != workspace_id
+                or target.provider != LLMProvider.CHATGPT_OAUTH
+            ):
+                return Failure(InvalidSession(reason="Invalid integration target"))
         code_result = await self._client.request_device_user_code()
         match code_result:
             case Success(user_code):
@@ -123,6 +135,7 @@ class ChatGPTOAuthService:
                         ChatGPTOAuthSessionCreate(
                             workspace_id=workspace_id,
                             user_id=user_id,
+                            integration_id=integration_id,
                             method=ChatGPTOAuthConnectionMethod.DEVICE,
                             state=state,
                             code_verifier=secrets.token_urlsafe(32),
@@ -280,35 +293,71 @@ class ChatGPTOAuthService:
         """Consume Session and store token in integration."""
         match tokens_result:
             case Success(tokens):
+                now = datetime.datetime.now(datetime.UTC)
+                secrets = ChatGPTOAuthSecrets(
+                    access_token=tokens.access_token,
+                    refresh_token=tokens.refresh_token,
+                    id_token=tokens.id_token,
+                    expires_at=tokens.expires_at,
+                )
+                config = ChatGPTOAuthConfig(
+                    account_id=tokens.account_id,
+                    email=tokens.email,
+                    plan_type=tokens.plan_type,
+                    connection_method=tokens.connection_method.value,
+                    status=ChatGPTOAuthConnectionStatus.CONNECTED.value,
+                    connected_at=now,
+                    last_refreshed_at=now,
+                )
                 async with self._session_manager() as session:
+                    oauth_session = await self._session_repo.get_by_id(
+                        session, session_id
+                    )
+                    if oauth_session is None:
+                        return Failure(SessionTransitionFailed(session_id=session_id))
+                    target = None
+                    if oauth_session.integration_id is not None:
+                        repo = self._integration_repo
+                        target = await repo.get_by_id_with_secrets_for_update(
+                            session, oauth_session.integration_id
+                        )
+                        if (
+                            target is None
+                            or target.workspace_id != workspace_id
+                            or target.provider != LLMProvider.CHATGPT_OAUTH
+                        ):
+                            return Failure(
+                                InvalidSession(reason="Invalid integration target")
+                            )
                     consume_result = await self._session_repo.consume(
                         session, session_id
                     )
                     if isinstance(consume_result, Failure):
                         return Failure(SessionTransitionFailed(session_id=session_id))
-                    integration = await self._integration_repo.create(
-                        session,
-                        LLMProviderIntegrationCreate(
-                            workspace_id=workspace_id,
-                            provider=LLMProvider.CHATGPT_OAUTH,
-                            name="ChatGPT Subscription",
-                            secrets=ChatGPTOAuthSecrets(
-                                access_token=tokens.access_token,
-                                refresh_token=tokens.refresh_token,
-                                id_token=tokens.id_token,
-                                expires_at=tokens.expires_at,
+                    if target is None:
+                        integration = await self._integration_repo.create(
+                            session,
+                            LLMProviderIntegrationCreate(
+                                workspace_id=workspace_id,
+                                provider=LLMProvider.CHATGPT_OAUTH,
+                                name="ChatGPT Subscription",
+                                secrets=secrets,
+                                config=config,
                             ),
-                            config=ChatGPTOAuthConfig(
-                                account_id=tokens.account_id,
-                                email=tokens.email,
-                                plan_type=tokens.plan_type,
-                                connection_method=tokens.connection_method.value,
-                                status=ChatGPTOAuthConnectionStatus.CONNECTED.value,
-                                connected_at=datetime.datetime.now(datetime.UTC),
-                                last_refreshed_at=datetime.datetime.now(datetime.UTC),
-                            ),
-                        ),
-                    )
+                        )
+                    else:
+                        update_result = await self._integration_repo.update_by_id(
+                            session, target.id, {"secrets": secrets, "config": config}
+                        )
+                        match update_result:
+                            case Success(integration):
+                                pass
+                            case Failure():
+                                return Failure(
+                                    SessionTransitionFailed(session_id=session_id)
+                                )
+                            case _:
+                                assert_never(update_result)
                     await self._catalog_repo.ensure_integration_catalog(
                         session,
                         integration_id=integration.id,

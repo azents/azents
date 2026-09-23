@@ -435,17 +435,24 @@ export const llmProviderIntegrationRouter = router({
     }),
 
   startChatgptOauthDevice: publicProcedure
-    .input(z.object({ handle: z.string().min(1) }))
+    .input(
+      z.object({
+        handle: z.string().min(1),
+        integrationId: z.string().min(1).optional(),
+      }),
+    )
     .mutation(async ({ ctx, input }) => {
       try {
         const { data } = await chatgptOauthV1StartDevice({
           client: ctx.apiClient,
           path: { handle: input.handle },
+          query: { integration_id: input.integrationId ?? null },
           throwOnError: true,
         });
         return data;
       } catch (e) {
         throw mapExpectedError(e, {
+          400: "BAD_REQUEST",
           401: "UNAUTHORIZED",
           403: "FORBIDDEN",
           503: "SERVICE_UNAVAILABLE",
@@ -501,17 +508,24 @@ export const llmProviderIntegrationRouter = router({
     }),
 
   startXaiOauthDevice: publicProcedure
-    .input(z.object({ handle: z.string().min(1) }))
+    .input(
+      z.object({
+        handle: z.string().min(1),
+        integrationId: z.string().min(1).optional(),
+      }),
+    )
     .mutation(async ({ ctx, input }) => {
       try {
         const { data } = await xaiOauthV1StartDevice({
           client: ctx.apiClient,
           path: { handle: input.handle },
+          query: { integration_id: input.integrationId ?? null },
           throwOnError: true,
         });
         return data;
       } catch (e) {
         throw mapExpectedError(e, {
+          400: "BAD_REQUEST",
           401: "UNAUTHORIZED",
           403: "FORBIDDEN",
         });

@@ -23,8 +23,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/**
   - typescript/apps/azents-web/src/shared/subscription-usage/**
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
-last_verified_at: 2026-09-04
-spec_version: 2
+last_verified_at: 2026-09-23
+spec_version: 3
 ---
 
 # Kimi OAuth Flow
@@ -243,7 +243,7 @@ message submission, or integration management.
   closes the modal. Initial catalog sync remains best-effort background work, so catalog reads retain
   the shared stale/latest-attempt and explicit-sync behavior until that task completes.
 - Integration rows show connected, reconnect-required, temporarily-unavailable, or disabled status.
-- Edit mode keeps alias update separate from reconnect; generic secret fields are never shown.
+- All subscription provider rows expose the same reauthentication action, even while connected. Edit mode keeps alias update separate from reauthentication; generic secret fields are never shown.
 - Read-only workspace members see status but no connect, reconnect, or cancel controls.
 
 ## API Surface

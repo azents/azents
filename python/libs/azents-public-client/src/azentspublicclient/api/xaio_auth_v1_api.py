@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 from typing_extensions import Annotated
 
 from pydantic import StrictStr
+from typing import Optional
 from azentspublicclient.models.xai_o_auth_device_start_response import XaiOAuthDeviceStartResponse
 from azentspublicclient.models.xai_o_auth_device_status_response import XaiOAuthDeviceStatusResponse
 
@@ -600,6 +601,7 @@ class XAIOAuthV1Api:
     def xai_oauth_v1_start_device(
         self,
         handle: StrictStr,
+        integration_id: Optional[StrictStr] = None,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -619,6 +621,8 @@ class XAIOAuthV1Api:
 
         :param handle: (required)
         :type handle: str
+        :param integration_id:
+        :type integration_id: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -643,6 +647,7 @@ class XAIOAuthV1Api:
 
         _param = self._xai_oauth_v1_start_device_serialize(
             handle=handle,
+            integration_id=integration_id,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -668,6 +673,7 @@ class XAIOAuthV1Api:
     def xai_oauth_v1_start_device_with_http_info(
         self,
         handle: StrictStr,
+        integration_id: Optional[StrictStr] = None,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -687,6 +693,8 @@ class XAIOAuthV1Api:
 
         :param handle: (required)
         :type handle: str
+        :param integration_id:
+        :type integration_id: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -711,6 +719,7 @@ class XAIOAuthV1Api:
 
         _param = self._xai_oauth_v1_start_device_serialize(
             handle=handle,
+            integration_id=integration_id,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -736,6 +745,7 @@ class XAIOAuthV1Api:
     def xai_oauth_v1_start_device_without_preload_content(
         self,
         handle: StrictStr,
+        integration_id: Optional[StrictStr] = None,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -755,6 +765,8 @@ class XAIOAuthV1Api:
 
         :param handle: (required)
         :type handle: str
+        :param integration_id:
+        :type integration_id: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -779,6 +791,7 @@ class XAIOAuthV1Api:
 
         _param = self._xai_oauth_v1_start_device_serialize(
             handle=handle,
+            integration_id=integration_id,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -799,6 +812,7 @@ class XAIOAuthV1Api:
     def _xai_oauth_v1_start_device_serialize(
         self,
         handle,
+        integration_id,
         _request_auth,
         _content_type,
         _headers,
@@ -823,6 +837,10 @@ class XAIOAuthV1Api:
         if handle is not None:
             _path_params['handle'] = handle
         # process the query parameters
+        if integration_id is not None:
+            
+            _query_params.append(('integration_id', integration_id))
+            
         # process the header parameters
         # process the form parameters
         # process the body parameter

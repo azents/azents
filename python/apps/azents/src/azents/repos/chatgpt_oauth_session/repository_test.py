@@ -79,6 +79,7 @@ async def _create_session(
         ChatGPTOAuthSessionCreate(
             workspace_id=workspace_id,
             user_id=user_id,
+            integration_id=None,
             method=method,
             state=state or f"state-{suffix}",
             code_verifier=f"verifier-{suffix}",

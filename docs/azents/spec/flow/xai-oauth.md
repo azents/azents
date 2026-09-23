@@ -26,8 +26,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/llm-settings/**
   - typescript/apps/azents-web/src/shared/subscription-usage/**
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
-last_verified_at: 2026-09-15
-spec_version: 8
+last_verified_at: 2026-09-23
+spec_version: 9
 ---
 
 # xAI OAuth Flow
@@ -56,7 +56,7 @@ The OAuth client id is a public native-app identifier, not a secret. Device auth
 
 ## Data Model
 
-`XaiOAuthSession` is intermediate state for device connection.
+`XaiOAuthSession` is intermediate state for device connection. Its optional `integration_id` binds a reauthentication attempt to an existing xAI OAuth integration.
 
 | Field | Meaning |
 |---|---|
@@ -243,7 +243,7 @@ Unexpected presentation failures remain inside a card-local error boundary.
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/llm-provider-integration/v1/workspaces/{handle}/llm-provider-integrations/providers` | list provider options available for new integrations |
-| `POST` | `/llm-provider-integration/v1/workspaces/{handle}/xai-oauth/device/start` | create device session |
+| `POST` | `/llm-provider-integration/v1/workspaces/{handle}/xai-oauth/device/start` | create device session; optional `integration_id` query binds reauthentication to a workspace xAI OAuth integration |
 | `GET` | `/llm-provider-integration/v1/workspaces/{handle}/xai-oauth/device/{session_id}` | device poll |
 | `DELETE` | `/llm-provider-integration/v1/workspaces/{handle}/xai-oauth/device/{session_id}` | device cancel |
 | `GET` | `/llm-provider-integration/v1/workspaces/{handle}/llm-provider-integrations/{integration_id}/subscription-usage` | read one live integration-scoped subscription-usage outcome |
@@ -258,11 +258,12 @@ The returned account-visible models are authoritative for existence and may diff
 
 - xAI OAuth appears in the `Add integration` modal only when the provider capability endpoint returns `xai_oauth`.
 - The connection card shows the provider verification URI, user code copy action, and experimental availability warning.
-- Connected `xai_oauth` integration rows provide enable toggle, alias edit, and delete action like other providers. Edit modal only changes alias, not OAuth secret re-entry.
+- `xai_oauth` integration rows provide enable toggle, alias edit, reauthentication, and delete actions like the other subscription providers. Owners can reauthenticate healthy or failed integrations; the edit modal keeps alias changes separate from device authorization.
 
 ## Security Rules
 
 - Device sessions are bound to workspace and user.
+- The selected reauthentication target is validated against the workspace and provider at start and completion. A successful exchange replaces credentials and connection metadata while keeping the integration ID, alias, enabled state, and catalog ownership; cancellation or failure preserves old credentials. Deleting a target removes its pending device sessions.
 - Device code, access token, refresh token, and id token are never returned in API responses or UI.
 - OAuth client id is the public Grok CLI native-app client identity and is not treated as a secret.
 - The provider remains marked experimental in provider capability responses and the UI.

@@ -4,7 +4,7 @@ import uuid
 from typing import cast
 
 import httpx
-from azcommon.result import Success
+from azcommon.result import Failure, Success
 from cryptography.fernet import Fernet
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,6 +21,7 @@ from azents.repos.xai_oauth_session import XaiOAuthSessionRepository
 
 from . import XaiOAuthService
 from .client import XaiOAuthClient
+from .data import InvalidSession
 
 _TEST_KEY = Fernet.generate_key().decode()
 
@@ -91,6 +92,7 @@ async def test_slow_down_increases_and_returns_poll_interval(
         start = await service.start_device(
             workspace_id=workspace_id,
             user_id=user.id,
+            integration_id=None,
         )
         assert isinstance(start, Success)
 
@@ -169,6 +171,7 @@ async def test_connected_device_flow_creates_integration_catalog(
         start = await service.start_device(
             workspace_id=workspace_id,
             user_id=user.id,
+            integration_id=None,
         )
         assert isinstance(start, Success)
         connected = await service.poll_device(
@@ -186,3 +189,50 @@ async def test_connected_device_flow_creates_integration_catalog(
         purpose=LLMCatalogPurpose.CONVERSATION,
     )
     assert catalog is not None
+    integration_id = connected.value.integration.id
+    repo = LLMProviderIntegrationRepository(cipher)
+    changed = await repo.update_by_id(
+        rdb_session,
+        integration_id,
+        {"name": "My Grok subscription", "enabled": False},
+    )
+    assert isinstance(changed, Success)
+    invalid = await service.start_device(
+        workspace_id="another-workspace",
+        user_id=user.id,
+        integration_id=integration_id,
+    )
+    assert isinstance(invalid, Failure)
+    assert isinstance(invalid.error, InvalidSession)
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
+        reconnect_service = XaiOAuthService(
+            cast(SessionManager[AsyncSession], _SessionManager(rdb_session)),
+            XaiOAuthSessionRepository(cipher),
+            repo,
+            catalog_repo,
+            XaiOAuthClient(http_client),
+        )
+        reauth = await reconnect_service.start_device(
+            workspace_id=workspace_id,
+            user_id=user.id,
+            integration_id=integration_id,
+        )
+        assert isinstance(reauth, Success)
+        reconnected = await reconnect_service.poll_device(
+            workspace_id=workspace_id,
+            user_id=user.id,
+            session_id=reauth.value.session_id,
+        )
+    assert isinstance(reconnected, Success)
+    assert reconnected.value.integration is not None
+    assert reconnected.value.integration.id == integration_id
+    assert reconnected.value.integration.name == "My Grok subscription"
+    assert not reconnected.value.integration.enabled
+    preserved_catalog = await catalog_repo.get_by_integration(
+        rdb_session,
+        integration_id=integration_id,
+        workspace_id=workspace_id,
+        purpose=LLMCatalogPurpose.CONVERSATION,
+    )
+    assert preserved_catalog is not None
+    assert preserved_catalog.id == catalog.id

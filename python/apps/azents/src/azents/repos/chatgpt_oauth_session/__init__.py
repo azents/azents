@@ -41,6 +41,7 @@ class ChatGPTOAuthSessionRepository:
         rdb_session = RDBChatGPTOAuthSession(
             workspace_id=create.workspace_id,
             user_id=create.user_id,
+            integration_id=create.integration_id,
             method=create.method,
             state=create.state,
             encrypted_code_verifier=self._cipher.encrypt(create.code_verifier),
@@ -176,6 +177,7 @@ class ChatGPTOAuthSessionRepository:
             id=rdb.id,
             workspace_id=rdb.workspace_id,
             user_id=rdb.user_id,
+            integration_id=rdb.integration_id,
             method=rdb.method,
             state=rdb.state,
             redirect_uri=rdb.redirect_uri,

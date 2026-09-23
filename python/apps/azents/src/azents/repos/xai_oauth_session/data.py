@@ -19,6 +19,7 @@ class XaiOAuthSession(BaseModel):
     id: str = Field(description="Session ID")
     workspace_id: str = Field(description="Workspace ID")
     user_id: str = Field(description="User ID")
+    integration_id: str | None = Field(description="Reauthentication target")
     method: XaiOAuthConnectionMethod = Field(description="Connection method")
     user_code: str = Field(description="Device user code")
     verification_uri: str = Field(description="Device verification URI")
@@ -40,6 +41,7 @@ class XaiOAuthSessionCreate(BaseModel):
 
     workspace_id: str = Field(description="Workspace ID")
     user_id: str = Field(description="User ID")
+    integration_id: str | None = Field(description="Reauthentication target")
     method: XaiOAuthConnectionMethod = Field(description="Connection method")
     device_code: str = Field(description="OAuth device code")
     user_code: str = Field(description="Device user code")

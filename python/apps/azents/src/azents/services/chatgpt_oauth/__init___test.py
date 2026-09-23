@@ -12,8 +12,9 @@ from azents.core.chatgpt_oauth import (
     ChatGPTOAuthConnectionMethod,
     ChatGPTOAuthSessionStatus,
 )
+from azents.core.credentials import ChatGPTOAuthSecrets
 from azents.core.crypto import CredentialCipher
-from azents.core.enums import LLMCatalogPurpose, LLMCatalogScope
+from azents.core.enums import LLMCatalogPurpose, LLMCatalogScope, LLMProvider
 from azents.rdb.session import SessionManager
 from azents.repos.chatgpt_oauth_session import ChatGPTOAuthSessionRepository
 from azents.repos.llm_catalog import LLMCatalogRepository
@@ -28,6 +29,7 @@ from .client import ChatGPTOAuthClient
 from .data import (
     DeviceAuthorizationCode,
     DeviceUserCode,
+    InvalidSession,
     ProviderPending,
     ProviderRejected,
     ProviderUnavailable,
@@ -170,7 +172,9 @@ class TestChatGPTOAuthService:
         fake_client = _FakeClient()
         service = _make_service(rdb_session, fake_client)
 
-        started = await service.start_device(workspace_id=workspace_id, user_id=user_id)
+        started = await service.start_device(
+            workspace_id=workspace_id, user_id=user_id, integration_id=None
+        )
         assert isinstance(started, Success)
         pending = await service.poll_device(
             workspace_id=workspace_id,
@@ -189,7 +193,7 @@ class TestChatGPTOAuthService:
             session_id=started.value.session_id,
         )
         other_started = await service.start_device(
-            workspace_id=workspace_id, user_id=user_id
+            workspace_id=workspace_id, user_id=user_id, integration_id=None
         )
         assert isinstance(other_started, Success)
         cancelled = await service.cancel_device(
@@ -213,3 +217,81 @@ class TestChatGPTOAuthService:
         assert catalog.scope == LLMCatalogScope.INTEGRATION
         assert isinstance(cancelled, Success)
         assert cancelled.value.status == ChatGPTOAuthSessionStatus.CANCELLED
+
+    async def test_reauthentication_preserves_existing_integration(
+        self, rdb_session: AsyncSession
+    ) -> None:
+        """A healthy connection can rotate credentials without changing its identity."""
+        workspace_id = await _create_workspace(rdb_session)
+        user_id = await _create_user(rdb_session)
+        fake_client = _FakeClient()
+        fake_client.poll_result = Success(
+            DeviceAuthorizationCode(
+                authorization_code="authorization-code",
+                code_verifier="device-code-verifier",
+            )
+        )
+        service = _make_service(rdb_session, fake_client)
+        original_attempt = await service.start_device(
+            workspace_id=workspace_id, user_id=user_id, integration_id=None
+        )
+        assert isinstance(original_attempt, Success)
+        original = await service.poll_device(
+            workspace_id=workspace_id,
+            user_id=user_id,
+            session_id=original_attempt.value.session_id,
+        )
+        assert isinstance(original, Success)
+        assert original.value.integration is not None
+        integration_id = original.value.integration.id
+        repo = LLMProviderIntegrationRepository(CredentialCipher(_TEST_KEY))
+        updated = await repo.update_by_id(
+            rdb_session, integration_id, {"name": "My subscription", "enabled": False}
+        )
+        assert isinstance(updated, Success)
+
+        foreign_workspace = await _create_workspace(rdb_session)
+        invalid = await service.start_device(
+            workspace_id=foreign_workspace,
+            user_id=user_id,
+            integration_id=integration_id,
+        )
+        assert isinstance(invalid, Failure)
+        assert isinstance(invalid.error, InvalidSession)
+
+        attempt = await service.start_device(
+            workspace_id=workspace_id,
+            user_id=user_id,
+            integration_id=integration_id,
+        )
+        assert isinstance(attempt, Success)
+        fake_client.token_result = Success(
+            TokenSet(
+                access_token="rotated-access-token",
+                refresh_token="rotated-refresh-token",
+                expires_at=datetime.datetime.now(datetime.UTC)
+                + datetime.timedelta(hours=1),
+                account_id="new-account",
+                email="other@example.com",
+                plan_type="pro",
+                connection_method=ChatGPTOAuthConnectionMethod.DEVICE,
+            )
+        )
+        connected = await service.poll_device(
+            workspace_id=workspace_id,
+            user_id=user_id,
+            session_id=attempt.value.session_id,
+        )
+        assert isinstance(connected, Success)
+        assert connected.value.integration is not None
+        assert connected.value.integration.id == integration_id
+        assert connected.value.integration.name == "My subscription"
+        assert not connected.value.integration.enabled
+        assert connected.value.integration.provider == LLMProvider.CHATGPT_OAUTH
+        saved = await repo.get_by_id_with_secrets(rdb_session, integration_id)
+        assert saved is not None
+        assert isinstance(saved.secrets, ChatGPTOAuthSecrets)
+        assert saved.secrets.access_token == "rotated-access-token"
+        assert saved.config is not None
+        assert saved.config.type == "chatgpt_oauth"
+        assert saved.config.account_id == "new-account"

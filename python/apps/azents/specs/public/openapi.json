@@ -2274,6 +2274,22 @@
               "type": "string",
               "title": "Handle"
             }
+          },
+          {
+            "name": "integration_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Integration Id"
+            }
           }
         ],
         "responses": {
@@ -16772,6 +16788,22 @@
             "schema": {
               "type": "string",
               "title": "Handle"
+            }
+          },
+          {
+            "name": "integration_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Integration Id"
             }
           }
         ],

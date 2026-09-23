@@ -27,8 +27,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/llm-settings/**
   - typescript/apps/azents-web/src/shared/subscription-usage/**
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
-last_verified_at: 2026-09-12
-spec_version: 23
+last_verified_at: 2026-09-23
+spec_version: 24
 ---
 
 # ChatGPT OAuth Flow
@@ -40,7 +40,7 @@ ChatGPT OAuth flow is provider connection flow that lets workspace run agent wit
 This flow satisfies three requirements at once.
 
 1. **Provider separation** — ChatGPT subscription token differs from OpenAI Platform API key in billing, base URL, and refresh lifecycle, so it is stored as separate `LLMProvider`.
-2. **Single connection method** — Current public API supports only device flow. Browser callback path is not implemented, and reconnect also restarts same device flow.
+2. **Single connection method** — Current public API supports only device flow. Browser callback path is not implemented, and reauthentication also restarts the same device flow for connected or failed integrations.
 3. **Runtime token freshness** — Before agent run starts, check access token expiry and perform refresh token grant if needed. Permanent failure surfaces as `refresh_required`.
 
 ## Provider Constants
@@ -311,7 +311,7 @@ error boundary.
 
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/llm-provider-integration/v1/workspaces/{handle}/chatgpt-oauth/device/start` | create device session |
+| `POST` | `/llm-provider-integration/v1/workspaces/{handle}/chatgpt-oauth/device/start` | create device session; optional `integration_id` query binds reauthentication to a workspace ChatGPT integration |
 | `GET` | `/llm-provider-integration/v1/workspaces/{handle}/chatgpt-oauth/device/{session_id}` | device poll |
 | `DELETE` | `/llm-provider-integration/v1/workspaces/{handle}/chatgpt-oauth/device/{session_id}` | device cancel |
 | `GET` | `/llm-provider-integration/v1/workspaces/{handle}/llm-provider-integrations/{integration_id}/subscription-usage` | read one live integration-scoped subscription-usage outcome |
@@ -320,8 +320,9 @@ error boundary.
 
 - Token, authorization code, code verifier, and device auth id are not exposed in API response, UI, or log.
 - OAuth session has workspace/user binding and expiry.
+- A reauthentication target is validated against the workspace and provider before starting and again before replacing credentials. Successful exchange retains its integration ID, alias, enabled state, and catalog ownership. Cancelled or failed attempts leave the old credentials intact; deleting the target also removes its pending device sessions.
 - Device poll/cancel verifies current member has same workspace/user as session owner.
-- ChatGPT OAuth integration is not modified through generic API key edit form. Secrets are replaced only through reconnect flow.
+- ChatGPT OAuth integration is not modified through the generic API key edit form. Owners may reauthenticate at any connection status through the same card action and device flow used by the other subscription providers; alias editing remains separate.
 - Subscription-usage adapters and logs never expose OAuth tokens, account identifiers, emails, request headers, provider bodies, provider exception serialization, or unauthorized financial values.
 - Operational usage requires integration read permission. Credit and spend-control fields require integration write permission and are omitted otherwise.
 

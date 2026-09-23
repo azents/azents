@@ -44,12 +44,14 @@ def _require_write_permission(member: WorkspaceMember) -> None:
 async def start_device(
     member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
     service: Annotated[ChatGPTOAuthService, Depends()],
+    integration_id: str | None = None,
 ) -> ChatGPTOAuthDeviceStartResponse:
     """Start ChatGPT OAuth device flow."""
     _require_write_permission(member)
     result = await service.start_device(
         workspace_id=member.workspace_id,
         user_id=member.user_id,
+        integration_id=integration_id,
     )
     match result:
         case Success(value):

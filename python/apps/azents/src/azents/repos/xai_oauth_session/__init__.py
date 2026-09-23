@@ -41,6 +41,7 @@ class XaiOAuthSessionRepository:
         rdb_session = RDBXaiOAuthSession(
             workspace_id=create.workspace_id,
             user_id=create.user_id,
+            integration_id=create.integration_id,
             method=create.method,
             encrypted_device_code=self._cipher.encrypt(create.device_code),
             user_code=create.user_code,
@@ -171,6 +172,7 @@ class XaiOAuthSessionRepository:
             id=rdb.id,
             workspace_id=rdb.workspace_id,
             user_id=rdb.user_id,
+            integration_id=rdb.integration_id,
             method=rdb.method,
             user_code=rdb.user_code,
             verification_uri=rdb.verification_uri,
