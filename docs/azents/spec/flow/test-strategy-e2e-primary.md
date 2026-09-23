@@ -28,8 +28,8 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
-last_verified_at: 2026-09-22
-spec_version: 68
+last_verified_at: 2026-09-23
+spec_version: 69
 ---
 
 # E2E Primary Test Strategy
@@ -315,11 +315,6 @@ Always-on required CI does not depend on external credentials.
   `serve_forever` polling interval so `shutdown()` observes termination promptly.
   Tests still complete both `shutdown()` and thread `join()` before releasing the
   fixture; elapsed delay is not used as the success condition.
-- The required E2E aggregate job downloads current-run lane observability before
-  updating rolling timing history. A failed first artifact lookup receives one
-  immediate second attempt without a sleep or timeout extension. Persistent download
-  failure remains visible because the second attempt is not allowed to continue on
-  error, and successful runs retain the existing single-download path.
 - Subagent required journeys reuse one immutable Workspace, model integration, and
   Runtime Profile. Five non-barrier journeys share one max-two Agent Runtime, while
   mailbox, timeout, interrupt, and active-overflow journeys share one max-three
