@@ -78,7 +78,6 @@ class RDBXaiOAuthSession(RDBModel):
         sa.String(32),
         sa.ForeignKey("llm_provider_integrations.id", ondelete="CASCADE"),
         nullable=True,
-        default=None,
     )
     status: Mapped[XaiOAuthSessionStatus] = mapped_column(
         xai_oauth_session_status_enum,

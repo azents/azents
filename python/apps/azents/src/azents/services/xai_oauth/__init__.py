@@ -7,27 +7,19 @@ from typing import Annotated, assert_never
 import httpx
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.credentials import XaiOAuthConfig, XaiOAuthSecrets
-from azents.core.crypto import CredentialCipher
-from azents.core.deps import get_credential_cipher
-from azents.core.enums import LLMCatalogLowererTarget, LLMCatalogPurpose, LLMProvider
 from azents.core.xai_oauth import (
     XaiOAuthConnectionMethod,
     XaiOAuthConnectionStatus,
     XaiOAuthSessionStatus,
 )
-from azents.rdb.deps import get_session_manager
-from azents.rdb.session import SessionManager
-from azents.repos.llm_catalog import LLMCatalogRepository
-from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
-from azents.repos.llm_provider_integration.data import LLMProviderIntegrationCreate
-from azents.repos.xai_oauth_session import XaiOAuthSessionRepository
+from azents.repos.oauth_persistence_errors import OAuthPersistenceError
 from azents.repos.xai_oauth_session.data import (
     XaiOAuthSessionCreate,
     XaiOAuthSessionWithSecrets,
 )
+from azents.repos.xai_oauth_session.operations import XaiOAuthOperations
 
 from .client import XaiOAuthClient
 from .data import (
@@ -56,20 +48,6 @@ async def _get_http_client() -> AsyncIterator[httpx.AsyncClient]:
         yield client
 
 
-def _get_session_repo(
-    cipher: Annotated[CredentialCipher, Depends(get_credential_cipher)],
-) -> XaiOAuthSessionRepository:
-    """Create xAI OAuth session repository dependency."""
-    return XaiOAuthSessionRepository(cipher)
-
-
-def _get_integration_repo(
-    cipher: Annotated[CredentialCipher, Depends(get_credential_cipher)],
-) -> LLMProviderIntegrationRepository:
-    """Create LLM provider integration repository dependency."""
-    return LLMProviderIntegrationRepository(cipher)
-
-
 def _get_client(
     http_client: Annotated[httpx.AsyncClient, Depends(_get_http_client)],
 ) -> XaiOAuthClient:
@@ -82,22 +60,12 @@ class XaiOAuthService:
 
     def __init__(
         self,
-        session_manager: Annotated[
-            SessionManager[AsyncSession], Depends(get_session_manager)
-        ],
-        session_repo: Annotated[XaiOAuthSessionRepository, Depends(_get_session_repo)],
-        integration_repo: Annotated[
-            LLMProviderIntegrationRepository, Depends(_get_integration_repo)
-        ],
-        catalog_repo: Annotated[LLMCatalogRepository, Depends(LLMCatalogRepository)],
+        operations: Annotated[XaiOAuthOperations, Depends(XaiOAuthOperations)],
         client: Annotated[XaiOAuthClient, Depends(_get_client)],
     ) -> None:
         """Inject service dependencies."""
-        self._session_manager = session_manager
-        self._session_repo = session_repo
-        self._integration_repo = integration_repo
-        self._catalog_repo = catalog_repo
-        self._client = client
+        self.operations = operations
+        self.client = client
 
     async def start_device(
         self, *, workspace_id: str, user_id: str, integration_id: str | None
@@ -109,37 +77,30 @@ class XaiOAuthService:
         | ProviderUnavailable,
     ]:
         """Start Device OAuth flow."""
-        if integration_id is not None:
-            async with self._session_manager() as session:
-                target = await self._integration_repo.get_by_id(session, integration_id)
-            if (
-                target is None
-                or target.workspace_id != workspace_id
-                or target.provider != LLMProvider.XAI_OAUTH
-            ):
-                return Failure(InvalidSession(reason="Invalid integration target"))
-        code_result = await self._client.request_device_user_code()
+        if integration_id is not None and not await self.operations.valid_target(
+            workspace_id=workspace_id, integration_id=integration_id
+        ):
+            return Failure(InvalidSession(reason="Invalid integration target"))
+        code_result = await self.client.request_device_user_code()
         match code_result:
             case Success(user_code):
                 expires_at = datetime.datetime.now(datetime.UTC) + min(
                     _SESSION_TTL,
                     datetime.timedelta(seconds=user_code.expires_in_seconds),
                 )
-                async with self._session_manager() as session:
-                    created = await self._session_repo.create(
-                        session,
-                        XaiOAuthSessionCreate(
-                            workspace_id=workspace_id,
-                            user_id=user_id,
-                            integration_id=integration_id,
-                            method=XaiOAuthConnectionMethod.DEVICE,
-                            device_code=user_code.device_code,
-                            user_code=user_code.user_code,
-                            verification_uri=user_code.verification_uri,
-                            interval_seconds=user_code.interval_seconds,
-                            expires_at=expires_at,
-                        ),
+                created = await self.operations.create_session(
+                    XaiOAuthSessionCreate(
+                        workspace_id=workspace_id,
+                        user_id=user_id,
+                        integration_id=integration_id,
+                        method=XaiOAuthConnectionMethod.DEVICE,
+                        device_code=user_code.device_code,
+                        user_code=user_code.user_code,
+                        verification_uri=user_code.verification_uri,
+                        interval_seconds=user_code.interval_seconds,
+                        expires_at=expires_at,
                     )
+                )
                 return Success(
                     XaiOAuthDeviceStartOutput(
                         session_id=created.id,
@@ -166,7 +127,7 @@ class XaiOAuthService:
         )
         match session_result:
             case Success(oauth_session):
-                poll_result = await self._client.poll_device_tokens(
+                poll_result = await self.client.poll_device_tokens(
                     device_code=oauth_session.device_code,
                     connection_method=XaiOAuthConnectionMethod.DEVICE,
                 )
@@ -205,12 +166,9 @@ class XaiOAuthService:
                     )
                 )
             case Failure(ProviderSlowDown()):
-                async with self._session_manager() as session:
-                    interval_result = await self._session_repo.increase_poll_interval(
-                        session,
-                        session_id,
-                        seconds=_SLOW_DOWN_INCREMENT_SECONDS,
-                    )
+                interval_result = await self.operations.increase_poll_interval(
+                    session_id, seconds=_SLOW_DOWN_INCREMENT_SECONDS
+                )
                 match interval_result:
                     case Success(value):
                         return Success(
@@ -241,8 +199,7 @@ class XaiOAuthService:
         )
         if isinstance(check, Failure):
             return Failure(check.error)
-        async with self._session_manager() as session:
-            result = await self._session_repo.cancel(session, session_id)
+        result = await self.operations.cancel_session(session_id)
         match result:
             case Success(value):
                 return Success(
@@ -266,10 +223,7 @@ class XaiOAuthService:
         expected_method: XaiOAuthConnectionMethod,
     ) -> Result[XaiOAuthSessionWithSecrets, SessionNotFound | InvalidSession]:
         """Fetch pending session belonging to requesting user and workspace."""
-        async with self._session_manager() as session:
-            oauth_session = await self._session_repo.get_by_id_with_secrets(
-                session, session_id
-            )
+        oauth_session = await self.operations.get_session_with_secrets(session_id)
         if oauth_session is None:
             return Failure(SessionNotFound(session_id=session_id))
         if (
@@ -310,63 +264,29 @@ class XaiOAuthService:
                     connected_at=now,
                     last_refreshed_at=now,
                 )
-                async with self._session_manager() as session:
-                    oauth_session = await self._session_repo.get_by_id(
-                        session, session_id
-                    )
-                    if oauth_session is None:
-                        return Failure(SessionTransitionFailed(session_id=session_id))
-                    target = None
-                    if oauth_session.integration_id is not None:
-                        repo = self._integration_repo
-                        target = await repo.get_by_id_with_secrets_for_update(
-                            session, oauth_session.integration_id
-                        )
-                        if (
-                            target is None
-                            or target.workspace_id != workspace_id
-                            or target.provider != LLMProvider.XAI_OAUTH
-                        ):
-                            return Failure(
-                                InvalidSession(reason="Invalid integration target")
-                            )
-                    consume_result = await self._session_repo.consume(
-                        session, session_id
-                    )
-                    if isinstance(consume_result, Failure):
-                        return Failure(SessionTransitionFailed(session_id=session_id))
-                    if target is None:
-                        integration = await self._integration_repo.create(
-                            session,
-                            LLMProviderIntegrationCreate(
-                                workspace_id=workspace_id,
-                                provider=LLMProvider.XAI_OAUTH,
-                                name="xAI Grok OAuth",
-                                secrets=secrets,
-                                config=config,
-                            ),
-                        )
-                    else:
-                        update_result = await self._integration_repo.update_by_id(
-                            session, target.id, {"secrets": secrets, "config": config}
-                        )
-                        match update_result:
-                            case Success(integration):
-                                pass
-                            case Failure():
+                stored = await self.operations.save_tokens(
+                    workspace_id=workspace_id,
+                    session_id=session_id,
+                    secrets=secrets,
+                    config=config,
+                )
+                match stored:
+                    case Success(integration):
+                        return Success(XaiOAuthExchangeOutput(integration=integration))
+                    case Failure(error):
+                        match error:
+                            case OAuthPersistenceError.INVALID_TARGET:
+                                return Failure(
+                                    InvalidSession(reason="Invalid integration target")
+                                )
+                            case OAuthPersistenceError.TRANSITION_FAILED:
                                 return Failure(
                                     SessionTransitionFailed(session_id=session_id)
                                 )
                             case _:
-                                assert_never(update_result)
-                    await self._catalog_repo.ensure_integration_catalog(
-                        session,
-                        integration_id=integration.id,
-                        provider=integration.provider,
-                        lowerer_target=LLMCatalogLowererTarget.LITELLM,
-                        purpose=LLMCatalogPurpose.CONVERSATION,
-                    )
-                return Success(XaiOAuthExchangeOutput(integration=integration))
+                                assert_never(error)
+                    case _:
+                        assert_never(stored)
             case Failure(error):
                 return Failure(error)
             case _:
