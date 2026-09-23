@@ -17,14 +17,14 @@ import {
   TextInput,
 } from "@mantine/core";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { ChatGPTOAuthConnectionCardContainer } from "../containers/ChatGPTOAuthConnectionCardContainer";
+import { IntegrationFormContentContainer } from "../containers/IntegrationFormContentContainer";
 import { KimiOAuthConnectionCardContainer } from "../containers/KimiOAuthConnectionCardContainer";
+import { XaiOAuthConnectionCardContainer } from "../containers/XaiOAuthConnectionCardContainer";
 import { ApiKeyForm } from "./ApiKeyForm";
 import { AwsCredentialsForm } from "./AwsCredentialsForm";
-import { ChatGPTOAuthConnectionCard } from "./ChatGPTOAuthConnectionCard";
 import { GcpServiceAccountForm } from "./GcpServiceAccountForm";
 import { SetupGuide } from "./SetupGuide";
-import { XaiOAuthConnectionCard } from "./XaiOAuthConnectionCard";
 import type {
   CreateIntegrationInput,
   FormModalState,
@@ -143,8 +143,9 @@ export function IntegrationFormModal({
             : t("editTitle")
       }
     >
-      <IntegrationFormContent
+      <IntegrationFormContentContainer
         key={contentKey}
+        render={(contentProps) => <IntegrationFormContent {...contentProps} />}
         handle={handle}
         availableProviderValues={availableProviderValues}
         formModal={formModal}
@@ -158,7 +159,7 @@ export function IntegrationFormModal({
 }
 
 /** Modal internal content — remounted by key prop */
-function IntegrationFormContent({
+export function IntegrationFormContent({
   handle,
   availableProviderValues,
   formModal,
@@ -166,15 +167,11 @@ function IntegrationFormContent({
   onClose,
   onCreate,
   onUpdate,
-}: {
-  handle: string;
-  availableProviderValues: string[];
-  formModal: FormModalState;
-  mutationState: MutationState;
-  onClose: () => void;
-  onCreate: (data: CreateIntegrationInput) => void;
-  onUpdate: (data: UpdateIntegrationInput) => void;
-}): React.ReactElement {
+  provider,
+  name,
+  onProviderChange,
+  onNameChange,
+}: IntegrationFormContentProps): React.ReactElement {
   const t = useTranslations("workspace.llmSettings");
   const providerLabels: ProviderLabels = {
     openai: t("providers.openai"),
@@ -197,13 +194,6 @@ function IntegrationFormContent({
   }));
   const isCreate = formModal.type === "CREATE";
   const isSubmitting = mutationState.type === "SUBMITTING";
-
-  const [provider, setProvider] = useState<string | null>(
-    formModal.type === "EDIT" ? formModal.integration.provider : null,
-  );
-  const [name, setName] = useState(
-    formModal.type === "EDIT" ? formModal.integration.name : "",
-  );
 
   const credType = credentialTypeForProvider(provider ?? "");
   const integration = formModal.type === "EDIT" ? formModal.integration : null;
@@ -241,7 +231,7 @@ function IntegrationFormContent({
           placeholder={t("providerPlaceholder")}
           data={providerOptions}
           value={provider}
-          onChange={setProvider}
+          onChange={onProviderChange}
           required
         />
       )}
@@ -254,13 +244,13 @@ function IntegrationFormContent({
               : t("namePlaceholder")
           }
           value={name}
-          onChange={(e) => setName(e.currentTarget.value)}
+          onChange={(e) => onNameChange(e.currentTarget.value)}
         />
       )}
 
       {/* Provider-specific forms (each owns useForm) */}
       {isChatGPTOAuth && (
-        <ChatGPTOAuthConnectionCard
+        <ChatGPTOAuthConnectionCardContainer
           handle={handle}
           canManage
           integrationId={integration?.id}
@@ -268,7 +258,7 @@ function IntegrationFormContent({
         />
       )}
       {isXaiOAuth && (
-        <XaiOAuthConnectionCard
+        <XaiOAuthConnectionCardContainer
           handle={handle}
           canManage
           integrationId={integration?.id}
@@ -306,6 +296,20 @@ function IntegrationFormContent({
       )}
     </Stack>
   );
+}
+
+export interface IntegrationFormContentProps {
+  handle: string;
+  availableProviderValues: string[];
+  formModal: FormModalState;
+  mutationState: MutationState;
+  onClose: () => void;
+  onCreate: (data: CreateIntegrationInput) => void;
+  onUpdate: (data: UpdateIntegrationInput) => void;
+  provider: string | null;
+  name: string;
+  onProviderChange: (value: string | null) => void;
+  onNameChange: (value: string) => void;
 }
 
 function OAuthAliasForm({
