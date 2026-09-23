@@ -217,7 +217,10 @@ Always-on required CI does not depend on external credentials.
   exact public fixture images already required by the lane, overlapping their network
   transfer without replacing the ordinary Testcontainers pull fallback. Lane
   observability records snapshot sources, selected commit SHAs, fallback state, and
-  snapshot and prerequisite image timings. For pull requests
+  snapshot and prerequisite image timings. When the overlapping direct pull appends
+  to an existing snapshot setup status artifact without a new current SHA, it retains
+  that artifact's current SHA rather than discarding the earlier attempt's evidence.
+  For pull requests
   where only `python/apps/azents`
   runtime content changes while the Server Dockerfile, Docker context rules,
   dependency manifest and lock, and installed shared libraries remain identical, the
@@ -534,6 +537,8 @@ Local/PR environment without live substrate does not fake live PASS. Instead, se
 
 ## Changelog
 
+- **2026-09-24 (spec_version 70)** — Documented preservation of the
+  exact-current snapshot SHA when parallel setup observability is appended.
 - **2026-09-21 (spec_version 67)** — Preferred compatible exact-current-SHA
   snapshots for unchanged E2E image inputs before predecessor and ancestor
   candidates, preserving immediate fallback when the current publication is absent.

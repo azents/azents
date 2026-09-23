@@ -6,6 +6,7 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [agent, user-auth, workspace]
 code_paths:
+  - python/apps/azents/db-schemas/rdb/migrations/versions/841e7188d527_bind_oauth_reauthentication_targets.py
   - python/apps/azents/src/azents/core/chatgpt_oauth.py
   - python/apps/azents/src/azents/core/credentials.py
   - python/apps/azents/src/azents/api/public/chatgpt_oauth/**
@@ -27,8 +28,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/llm-settings/**
   - typescript/apps/azents-web/src/shared/subscription-usage/**
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
-last_verified_at: 2026-09-23
-spec_version: 24
+last_verified_at: 2026-09-24
+spec_version: 25
 ---
 
 # ChatGPT OAuth Flow
@@ -340,12 +341,14 @@ error boundary.
 ## Frontend UX Rules
 
 - ChatGPT OAuth connection start is exposed as provider option in existing `Add integration` modal, not as separate provider panel at top of LLM Settings.
-- Connected `chatgpt_oauth` integration row provides enable toggle, alias edit, and delete action same as other providers. Edit modal only changes alias, not OAuth secret re-entry.
+- `chatgpt_oauth` integration rows provide enable toggle, alias edit, reauthentication, and delete actions at every connection status. The subscription management modal keeps alias changes separate from the device authorization flow and never exposes generic OAuth secret fields.
 
 ## Changelog
 
 | Date | Version | Change | Rationale |
 |---|---|---|---|
+| 2026-09-24 | 25 | Mapped the reauthentication-target migration and corrected the connection-row management contract | Match the shared subscription modal and preserve the existing integration during reauthentication |
+| 2026-09-23 | 24 | Documented integration-targeted device reauthentication and preservation of existing credentials on unsuccessful attempts | Describe the implemented in-place subscription credential replacement |
 | 2026-09-12 | 23 | Refreshed current Session model, effort, and Fast intent before each automatic sampling retry attempt | Let users move a failed Turn retry away from an exhausted or undesired model without mutating the failed attempt |
 | 2026-09-08 | 22 | Moved runtime token-refresh reads and persistence behind completed repository operations | Keep OAuth HTTP calls outside database transactions without changing existing refresh outcomes |
 | 2026-09-05 | 21 | Lowered result-less failed image calls to semantic history before stateless provider-item ID omission | Preserve durable failure history without sending an invalid `image_generation_call` lacking both `id` and `result` |
