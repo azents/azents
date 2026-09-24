@@ -1497,6 +1497,24 @@
     }
   },
   "toolkits": {
+    "braveSearch": {
+      "apiKey": "Brave Search API 키",
+      "apiKeyRequired": "검색을 사용하려면 Brave Search API 키를 입력하세요.",
+      "keyConfigured": "API 키가 설정되어 있습니다. 여기서는 키를 볼 수 없습니다.",
+      "replaceKey": "API 키 교체",
+      "keepKey": "기존 키를 유지하려면 비워 두세요.",
+      "country": "국가",
+      "countryHint": "US와 같은 두 글자 국가 코드를 입력하세요. ALL은 뉴스·이미지·동영상을 전 세계에서 검색하지만 웹·컨텍스트에는 Brave 기본 지역(미국)이 적용됩니다.",
+      "language": "검색 언어",
+      "languageHint": "en과 같은 언어 코드를 입력하세요.",
+      "safeSearch": "안전 검색",
+      "strict": "엄격",
+      "moderate": "보통",
+      "off": "끄기",
+      "timeout": "요청 제한 시간(초)",
+      "testQuotaHint": "연결 테스트는 Brave 웹 검색을 한 번 실행하며 API 할당량을 사용할 수 있습니다. 버튼을 누를 때만 실행됩니다.",
+      "testConnection": "연결 테스트"
+    },
     "headline": "툴킷",
     "description": "워크스페이스에서 사용할 툴킷을 관리합니다",
     "addToolkit": "툴킷 추가",

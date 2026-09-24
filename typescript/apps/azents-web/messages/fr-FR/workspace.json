@@ -1497,6 +1497,24 @@
     }
   },
   "toolkits": {
+    "braveSearch": {
+      "apiKey": "Clé API Brave Search",
+      "apiKeyRequired": "Saisissez votre clé API Brave Search pour activer la recherche.",
+      "keyConfigured": "Une clé API est configurée. Elle ne peut pas être affichée ici.",
+      "replaceKey": "Remplacer la clé API",
+      "keepKey": "Laissez ce champ vide pour conserver la clé actuelle.",
+      "country": "Pays",
+      "countryHint": "Saisissez un code pays à deux lettres (comme US). ALL recherche les actualités, images et vidéos dans le monde entier ; Web et Context utilisent la région par défaut de Brave (États-Unis).",
+      "language": "Langue de recherche",
+      "languageHint": "Code de langue tel que en.",
+      "safeSearch": "Recherche sécurisée",
+      "strict": "Strict",
+      "moderate": "Modéré",
+      "off": "Désactivé",
+      "timeout": "Délai d’expiration (secondes)",
+      "testQuotaHint": "Le test de connexion lance une recherche Web Brave et peut consommer du quota API. Il ne s’exécute que lorsque vous cliquez sur le bouton.",
+      "testConnection": "Tester la connexion"
+    },
     "headline": "Toolkits",
     "description": "Gérez les toolkits de votre espace de travail",
     "addToolkit": "Ajouter un toolkit",
