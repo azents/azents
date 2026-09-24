@@ -1,0 +1,5 @@
+User-Agent: *
+Allow: /
+
+Host: https://azents.io
+Sitemap: https://azents.io/sitemap.xml
