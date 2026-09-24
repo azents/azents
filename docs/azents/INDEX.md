@@ -87,6 +87,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Per-Prompt Reasoning Effort Is a Run Boundary Historical Requirements Reconstruction](requirements/boundaries-260710-prompt-reasoning-effort-boundaries.md) | boundaries-260710 | 2026-07-10 | - |
 | [Sandbox Runtime / Workspace State Boundary Historical Requirements Reconstruction](requirements/boundary-260524-sandbox-boundary.md) | boundary-260524 | 2026-05-24 | - |
 | [Historical Document Branding Migration Requirements](requirements/branding-260823-historical-document-migration.md) | branding-260823 | 2026-08-23 | 2026-08-23 |
+| [Brave Search Native Toolkit Requirements](requirements/brave-260925-native-search-toolkit.md) | brave-260925 | 2026-09-25 | - |
 | [Add Session Sandbox Workspace Browser API Historical Requirements Reconstruction](requirements/browser-260501-browser-api.md) | browser-260501 | 2026-05-01 | 2026-05-02 |
 | [Workspace Project Browser Surface Historical Requirements Reconstruction](requirements/browser-260703-browser-surface.md) | browser-260703 | 2026-07-03 | - |
 | [Built-in Tool Support Discussion Historical Requirements Reconstruction](requirements/builtin-260315-builtin-tools.md) | builtin-260315 | 2026-03-15 | 2026-03-15 |
@@ -529,6 +530,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Per-Prompt Reasoning Effort Is a Run Boundary](adr/boundaries-260710-prompt-reasoning-effort-boundaries.md)
 - [Sandbox Runtime / Workspace State Boundary Historical Decision Reconstruction](adr/boundary-260524-sandbox-boundary.md)
 - [Historical Document Branding Migration](adr/branding-260823-historical-document-migration.md)
+- [Brave Search Native Toolkit Decisions](adr/brave-260925-native-search-toolkit.md)
 - [Add Session Sandbox Workspace Browser API](adr/browser-260501-browser-api.md)
 - [Workspace Project Browser Surface](adr/browser-260703-browser-surface.md)
 - [Built-in Tool Support Discussion](adr/builtin-260315-builtin-tools.md)
