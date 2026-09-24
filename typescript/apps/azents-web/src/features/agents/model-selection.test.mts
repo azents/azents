@@ -16,6 +16,8 @@ import {
   type SelectableModelCandidateFormValue,
   type SelectableModelOptionFormValue,
   selectableModelOptionInputsFromFormValues,
+  selectCandidateIntegration,
+  selectCandidateModel,
   withImageGenerationModelIdentifier,
 } from "./model-selection.ts";
 import type { ModelCapabilities } from "@azents/public-client";
@@ -33,6 +35,143 @@ function option(id: string, label: string): SelectableModelOptionFormValue {
     subagent_guidance: null,
   };
 }
+
+function capabilities(
+  tools: string[],
+  maxInputTokens = 64_000,
+  maxOutputTokens = 32_000,
+): ModelCapabilities {
+  return {
+    reasoning: { supported: false, effort_levels: [] },
+    built_in_tools: { supported: tools },
+    context_window: {
+      max_input_tokens: maxInputTokens,
+      max_output_tokens: maxOutputTokens,
+    },
+    modalities: { input: ["text"], output: ["text"] },
+    tool_calling: { supported: true },
+    parameters: {},
+    compatibility: {},
+  };
+}
+
+void test("model replacement preserves every shared capability preference", () => {
+  const configured = {
+    ...candidate("primary"),
+    model_provider_integration_id: "integration-1",
+    model_selection_value: "integration-1:model-a",
+    normalized_capabilities: capabilities([
+      "web_search",
+      "image_generation",
+      "code_execution",
+      "retired_tool",
+    ]),
+    context_window_tokens: 32_000,
+    max_output_tokens: 8_000,
+    builtin_tools: ["code_execution", "retired_tool"],
+    builtin_tool_configs: {
+      code_execution: { limit: 3 },
+      retired_tool: { limit: 1 },
+    },
+  };
+
+  const replacement = selectCandidateModel(configured, {
+    provider: "provider",
+    model_identifier: "model-b",
+    model_display_name: "Model B",
+    normalized_capabilities: capabilities([
+      "image_generation",
+      "web_search",
+      "code_execution",
+      "new_tool",
+    ]),
+  });
+
+  assert.equal(replacement.model_selection_value, "integration-1:model-b");
+  assert.equal(replacement.context_window_tokens, 32_000);
+  assert.equal(replacement.max_output_tokens, 8_000);
+  assert.deepEqual(replacement.builtin_tools, ["code_execution", "new_tool"]);
+  assert.deepEqual(replacement.builtin_tool_configs, {
+    code_execution: { limit: 3 },
+    new_tool: {},
+  });
+});
+
+void test("switching integrations retains preferences but drops provider-specific config", () => {
+  const configured = {
+    ...candidate("primary"),
+    model_provider_integration_id: "integration-a",
+    model_selection_value: "integration-a:model-a",
+    normalized_capabilities: capabilities(["web_search", "image_generation"]),
+    context_window_tokens: 48_000,
+    max_output_tokens: 16_000,
+    builtin_tools: ["image_generation"],
+    builtin_tool_configs: {
+      image_generation: { model: "image-model-a" },
+    },
+  };
+
+  const pending = selectCandidateIntegration(configured, "integration-b");
+  assert.equal(pending.model_selection_value, null);
+  assert.equal(pending.model_provider_integration_id, "integration-b");
+  assert.deepEqual(pending.builtin_tools, ["image_generation"]);
+  assert.deepEqual(pending.builtin_tool_configs, {});
+
+  const replacement = selectCandidateModel(pending, {
+    provider: "provider-b",
+    model_identifier: "model-b",
+    model_display_name: "Model B",
+    normalized_capabilities: capabilities(
+      ["image_generation", "web_search"],
+      32_000,
+      8_000,
+    ),
+  });
+  assert.equal(replacement.model_selection_value, "integration-b:model-b");
+  assert.equal(replacement.context_window_tokens, null);
+  assert.equal(replacement.max_output_tokens, null);
+  assert.deepEqual(replacement.builtin_tools, ["image_generation"]);
+  assert.deepEqual(replacement.builtin_tool_configs, { image_generation: {} });
+});
+
+void test("replacement within one integration keeps image generation configuration", () => {
+  const configured = {
+    ...candidate("primary"),
+    model_provider_integration_id: "integration-a",
+    normalized_capabilities: capabilities(["image_generation", "web_search"]),
+    builtin_tools: ["image_generation"],
+    builtin_tool_configs: {
+      image_generation: { model: "pinned-image-model", quality: "high" },
+    },
+  };
+  const pending = selectCandidateIntegration(configured, "integration-a");
+  const replacement = selectCandidateModel(pending, {
+    provider: "provider",
+    model_identifier: "model-b",
+    model_display_name: "Model B",
+    normalized_capabilities: capabilities(["image_generation", "web_search"]),
+  });
+
+  assert.deepEqual(replacement.builtin_tools, ["image_generation"]);
+  assert.deepEqual(replacement.builtin_tool_configs, {
+    image_generation: { model: "pinned-image-model", quality: "high" },
+  });
+});
+
+void test("initial model selection enables supported tools by default", () => {
+  const pending = selectCandidateIntegration(candidate("new"), "integration-a");
+  const selected = selectCandidateModel(pending, {
+    provider: "provider",
+    model_identifier: "model-a",
+    model_display_name: "Model A",
+    normalized_capabilities: capabilities(["web_search", "image_generation"]),
+  });
+  assert.deepEqual(selected.builtin_tools, ["web_search", "image_generation"]);
+  assert.deepEqual(selected.builtin_tool_configs, {
+    web_search: {},
+    image_generation: {},
+  });
+});
 
 void test("a pending first row preserves a valid selected model label", () => {
   const options = [

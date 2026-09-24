@@ -63,6 +63,8 @@ import {
   MAX_SUBAGENT_GUIDANCE_LENGTH,
   resolveModelContextRange,
   selectableModelLabelSelectData,
+  selectCandidateIntegration,
+  selectCandidateModel,
   withImageGenerationModelIdentifier,
 } from "../model-selection";
 import classes from "./SelectableModelOptionsEditor.module.css";
@@ -70,7 +72,6 @@ import type {
   ImageGenerationCatalogState,
   PrimarySettingsCopyResult,
   ProviderIntegrationOption,
-  SelectableModelCandidate,
   SelectableModelCandidateFormValue,
   SelectableModelOptionFormValue,
 } from "../model-selection";
@@ -107,16 +108,6 @@ interface CandidateTarget {
 
 function createEditorId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-}
-
-function optionModelValue(
-  integrationId: string | null,
-  model: SelectableModelCandidate,
-): string | null {
-  if (integrationId == null) {
-    return null;
-  }
-  return `${integrationId}:${model.model_identifier}`;
 }
 
 function rowHasDuplicateLabel(
@@ -1123,10 +1114,9 @@ export function SelectableModelOptionsEditor({
               return;
             }
             handleChangeOptions(
-              updateCandidate(options, pickerTarget, (candidate) => ({
-                ...createSelectableModelCandidateFormValue(candidate.id),
-                model_provider_integration_id: integrationId,
-              })),
+              updateCandidate(options, pickerTarget, (candidate) =>
+                selectCandidateIntegration(candidate, integrationId),
+              ),
             );
           }}
           onSelectModel={(model) => {
@@ -1134,23 +1124,9 @@ export function SelectableModelOptionsEditor({
               return;
             }
             handleChangeOptions(
-              updateCandidate(options, pickerTarget, (candidate) => ({
-                ...candidate,
-                model_selection_value: optionModelValue(
-                  candidate.model_provider_integration_id,
-                  model,
-                ),
-                model_display_name: model.model_display_name,
-                model_identifier: model.model_identifier,
-                normalized_capabilities: model.normalized_capabilities,
-                context_window_tokens: null,
-                max_output_tokens: null,
-                builtin_tools: [
-                  ...(model.normalized_capabilities.built_in_tools?.supported ??
-                    []),
-                ],
-                builtin_tool_configs: {},
-              })),
+              updateCandidate(options, pickerTarget, (candidate) =>
+                selectCandidateModel(candidate, model),
+              ),
             );
           }}
           onSyncCatalog={onSyncCatalog}
