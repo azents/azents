@@ -15,6 +15,7 @@ code_paths:
   - python/apps/azents/src/azents/services/subscription_usage/**
   - python/apps/azents/src/azents/repos/chatgpt_oauth_runtime/**
   - python/apps/azents/src/azents/repos/chatgpt_oauth_session/**
+  - python/apps/azents/src/azents/repos/oauth_persistence_errors.py
   - python/apps/azents/src/azents/rdb/models/chatgpt_oauth_session.py
   - python/apps/azents/src/azents/engine/run/resolve.py
   - python/apps/azents/src/azents/services/model_listing/**
@@ -28,7 +29,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/llm-settings/**
   - typescript/apps/azents-web/src/shared/subscription-usage/**
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
-last_verified_at: 2026-09-24
+last_verified_at: 2026-09-25
 spec_version: 25
 ---
 
