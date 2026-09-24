@@ -1,13 +1,14 @@
 {
   "change_checkpoint": {
-    "checked_at": "2026-09-23T22:46:43Z",
+    "checked_at": "2026-09-24T22:12:38Z",
     "checked_ruleset_revisions": [
       "077a5584a71947f841c4f9bb4408a38671bc06c03ad3f8b7a07c5bbde94d7ad5",
       "193cd524af5bf589eeab7744b06e813623015ce64d6d503b684ddbbbf9bbced2",
       "54a25573d8ff81ac5a2cd2a5b3f3d59e4a86f7305779185adc9154bb8d474d52",
-      "62f8502dfaead68e71a6667c5d096e57071fa99d0d528840ea2505268d711835"
+      "62f8502dfaead68e71a6667c5d096e57071fa99d0d528840ea2505268d711835",
+      "753224fe20ed069ad162c506972f515615951fedb74fa83a1f6ae81a77bd43f2"
     ],
-    "checked_through_commit": "7b2a68e8a64634d6bd36c524f9069c2cf530dce6"
+    "checked_through_commit": "fa9ea3c759c339f9dda7abb6911c82490cf85000"
   },
   "ranges": {
     ".::bucket-1-of-8": {
@@ -181,34 +182,34 @@
       "checked_through_commit": "7b2a68e8a64634d6bd36c524f9069c2cf530dce6"
     },
     "docs/**::bucket-7-of-8": {
-      "checked_at": "2026-08-23T22:32:41Z",
-      "checked_ruleset_revision": "2b591f0165b54d8002a93e0d82e87962d74f05a0099ea778ee9b4c1c9a786cce",
-      "checked_through_commit": "fa1ecdcd88a31ddfacc7ef0ed2545b729033805d"
+      "checked_at": "2026-09-24T22:12:38Z",
+      "checked_ruleset_revision": "62f8502dfaead68e71a6667c5d096e57071fa99d0d528840ea2505268d711835",
+      "checked_through_commit": "fa9ea3c759c339f9dda7abb6911c82490cf85000"
     },
     "docs/**::bucket-8-of-8": {
-      "checked_at": "2026-08-23T22:32:41Z",
-      "checked_ruleset_revision": "2b591f0165b54d8002a93e0d82e87962d74f05a0099ea778ee9b4c1c9a786cce",
-      "checked_through_commit": "fa1ecdcd88a31ddfacc7ef0ed2545b729033805d"
+      "checked_at": "2026-09-24T22:12:38Z",
+      "checked_ruleset_revision": "62f8502dfaead68e71a6667c5d096e57071fa99d0d528840ea2505268d711835",
+      "checked_through_commit": "fa9ea3c759c339f9dda7abb6911c82490cf85000"
     },
     "images/**::bucket-3-of-8": {
-      "checked_at": "2026-08-23T22:32:41Z",
-      "checked_ruleset_revision": "2b591f0165b54d8002a93e0d82e87962d74f05a0099ea778ee9b4c1c9a786cce",
-      "checked_through_commit": "fa1ecdcd88a31ddfacc7ef0ed2545b729033805d"
+      "checked_at": "2026-09-24T22:12:38Z",
+      "checked_ruleset_revision": "62f8502dfaead68e71a6667c5d096e57071fa99d0d528840ea2505268d711835",
+      "checked_through_commit": "fa9ea3c759c339f9dda7abb6911c82490cf85000"
     },
     "infra/**::bucket-1-of-8": {
-      "checked_at": "2026-08-24T22:40:23Z",
-      "checked_ruleset_revision": "75c5700262cf77e0536d14dd1eb4ee86d3295723d5122ee1dcb000fc839941ae",
-      "checked_through_commit": "bd13ca9777de247db52579f92fcbb3b73ead5892"
+      "checked_at": "2026-09-24T22:12:38Z",
+      "checked_ruleset_revision": "dd33ea3996e4ff2f1c4603341225ede42ed3dda8ac3440e62507dec6abd7d8ff",
+      "checked_through_commit": "fa9ea3c759c339f9dda7abb6911c82490cf85000"
     },
     "infra/**::bucket-2-of-8": {
-      "checked_at": "2026-08-24T22:40:23Z",
-      "checked_ruleset_revision": "75c5700262cf77e0536d14dd1eb4ee86d3295723d5122ee1dcb000fc839941ae",
-      "checked_through_commit": "bd13ca9777de247db52579f92fcbb3b73ead5892"
+      "checked_at": "2026-09-24T22:12:38Z",
+      "checked_ruleset_revision": "dd33ea3996e4ff2f1c4603341225ede42ed3dda8ac3440e62507dec6abd7d8ff",
+      "checked_through_commit": "fa9ea3c759c339f9dda7abb6911c82490cf85000"
     },
     "infra/**::bucket-3-of-8": {
-      "checked_at": "2026-08-24T22:40:23Z",
-      "checked_ruleset_revision": "75c5700262cf77e0536d14dd1eb4ee86d3295723d5122ee1dcb000fc839941ae",
-      "checked_through_commit": "bd13ca9777de247db52579f92fcbb3b73ead5892"
+      "checked_at": "2026-09-24T22:12:38Z",
+      "checked_ruleset_revision": "dd33ea3996e4ff2f1c4603341225ede42ed3dda8ac3440e62507dec6abd7d8ff",
+      "checked_through_commit": "fa9ea3c759c339f9dda7abb6911c82490cf85000"
     },
     "infra/**::bucket-4-of-8": {
       "checked_at": "2026-08-24T22:40:23Z",
