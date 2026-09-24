@@ -115,7 +115,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/default-response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack
-last_verified_at: 2026-09-25
+last_verified_at: 2026-09-24
 spec_version: 82
 ---
 
@@ -711,7 +711,7 @@ Following contracts do not exist in current system.
 
 ## 8. Change History
 
-- **2026-09-25** (spec_version 82) — Preserved compatible token caps and all shared built-in tool choices when replacing an Agent candidate model, including across provider integrations.
+- **2026-09-24** (spec_version 82) — Preserved compatible token caps and all shared built-in tool choices when replacing an Agent candidate model, including across provider integrations.
 - **2026-09-15** (spec_version 81) — Replaced Session-owned Runtime Web approval
   resources with Agent-and-port services, managed-Runtime capability gating, and
   bounded Agent request/list/close authority.
