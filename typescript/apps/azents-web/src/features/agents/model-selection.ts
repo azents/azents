@@ -184,6 +184,67 @@ export function createSelectableModelCandidateFormValue(
   };
 }
 
+export function selectCandidateIntegration(
+  candidate: SelectableModelCandidateFormValue,
+  integrationId: string,
+): SelectableModelCandidateFormValue {
+  return {
+    ...candidate,
+    model_provider_integration_id: integrationId,
+    model_selection_value: null,
+    model_display_name: null,
+    model_identifier: null,
+    builtin_tool_configs:
+      candidate.model_provider_integration_id === integrationId
+        ? candidate.builtin_tool_configs
+        : {},
+  };
+}
+
+export function selectCandidateModel(
+  candidate: SelectableModelCandidateFormValue,
+  model: SelectableModelCandidate,
+): SelectableModelCandidateFormValue {
+  const previousTools =
+    candidate.normalized_capabilities?.built_in_tools?.supported ?? [];
+  const supportedTools =
+    model.normalized_capabilities.built_in_tools?.supported ?? [];
+  const enabledTools = supportedTools.filter(
+    (tool) =>
+      !previousTools.includes(tool) || candidate.builtin_tools.includes(tool),
+  );
+  const context = model.normalized_capabilities.context_window;
+  return {
+    ...candidate,
+    model_selection_value:
+      candidate.model_provider_integration_id == null
+        ? null
+        : `${candidate.model_provider_integration_id}:${model.model_identifier}`,
+    model_display_name: model.model_display_name,
+    model_identifier: model.model_identifier,
+    normalized_capabilities: model.normalized_capabilities,
+    context_window_tokens:
+      candidate.context_window_tokens != null &&
+      context?.max_input_tokens != null &&
+      candidate.context_window_tokens > context.max_input_tokens
+        ? null
+        : candidate.context_window_tokens,
+    max_output_tokens:
+      candidate.max_output_tokens != null &&
+      context?.max_output_tokens != null &&
+      candidate.max_output_tokens > context.max_output_tokens
+        ? null
+        : candidate.max_output_tokens,
+    builtin_tools: enabledTools,
+    builtin_tool_configs: Object.fromEntries(
+      enabledTools.map((tool) => [
+        tool,
+        { ...(candidate.builtin_tool_configs[tool] ?? {}) },
+      ]),
+    ),
+  };
+}
+
 export function createSelectableModelOptionFormValue(
   id: string,
 ): SelectableModelOptionFormValue {
