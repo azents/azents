@@ -25,6 +25,45 @@ export type AgentToolkitManagementState =
       availableShared: AgentToolkitSharedOption[];
     };
 
+export function canAuthorizeAgentToolkitOAuth(
+  item: AgentToolkitManagementItemResponse,
+  canAuthorizeShared: boolean,
+): boolean {
+  if (
+    item.readiness !== "authorization_required" ||
+    (item.ownership_scope === "workspace_shared" && !canAuthorizeShared)
+  ) {
+    return false;
+  }
+  return (
+    item.toolkit.toolkit_type === "notion" ||
+    item.toolkit.toolkit_type === "sentry" ||
+    (item.toolkit.toolkit_type === "mcp" &&
+      item.toolkit.config.auth_type === "oauth2")
+  );
+}
+
+export function decodeAgentToolkitOAuthCallback(
+  event: { origin: string; source: unknown; data: unknown },
+  origin: string,
+  popup: unknown,
+): "SUCCESS" | "FAILURE" | null {
+  if (
+    popup == null ||
+    event.origin !== origin ||
+    event.source !== popup ||
+    event.data == null ||
+    typeof event.data !== "object" ||
+    !("type" in event.data) ||
+    event.data.type !== "azents-oauth-callback" ||
+    !("success" in event.data) ||
+    typeof event.data.success !== "boolean"
+  ) {
+    return null;
+  }
+  return event.data.success ? "SUCCESS" : "FAILURE";
+}
+
 export interface AgentToolkitManagementQuerySnapshot {
   loading: boolean;
   error: string | null;
