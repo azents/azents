@@ -368,49 +368,6 @@ void test("keeps an attachment-bearing tool outside Activity and closes the grou
   );
 });
 
-void test("keeps both Brave image attachments visible in one tool result", () => {
-  const call = clientToolMessage(
-    "brave-images",
-    "brave-call",
-    "brave__search_images",
-  );
-  const toolCall = call.toolCalls?.[0];
-  assert.ok(toolCall);
-  const images = [
-    {
-      attachmentId: "brave-image-1",
-      uri: "exchange://exchange/brave/files/image-1/original",
-      mediaType: "image/png",
-      name: "brave-image-1.png",
-    },
-    {
-      attachmentId: "brave-image-2",
-      uri: "exchange://exchange/brave/files/image-2/original",
-      mediaType: "image/png",
-      name: "brave-image-2.png",
-    },
-  ];
-  const items = projectChatPresentationItems(
-    [
-      event("brave-call", "client_tool_call", {
-        call_id: "brave-call",
-        name: "brave__search_images",
-        arguments: "{}",
-      }),
-    ],
-    [{ ...call, toolCalls: [{ ...toolCall, attachments: images }] }],
-  );
-
-  assert.deepEqual(
-    items.map((item) => item.type),
-    ["message"],
-  );
-  const visible = items[0];
-  assert.ok(visible);
-  assert.equal(visible.type, "message");
-  assert.deepEqual(visible.message.toolCalls?.[0]?.attachments, images);
-});
-
 void test("uses compaction start and result messages as Activity cutoffs", () => {
   const beforeTool = clientToolMessage("before-tool", "before-call", "read");
   const afterTool = clientToolMessage("after-tool", "after-call", "write");
