@@ -331,7 +331,7 @@ def test_agent_owned_toolkit_owner_management_and_member_legacy_view(
     _assert_visible_text(browser_driver, shared_name)
     _assert_visible_text(
         browser_driver,
-        "Edit, authorization, and deletion remain in Workspace Toolkit management.",
+        "Edit and deletion remain in Workspace Toolkit management.",
     )
     detach_button = _wait(browser_driver).until(
         ec.element_to_be_clickable((By.XPATH, "//button[normalize-space()='Detach']"))
