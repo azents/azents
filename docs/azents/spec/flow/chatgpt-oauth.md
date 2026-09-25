@@ -30,7 +30,7 @@ code_paths:
   - typescript/apps/azents-web/src/shared/subscription-usage/**
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
 last_verified_at: 2026-09-25
-spec_version: 25
+spec_version: 26
 ---
 
 # ChatGPT OAuth Flow
@@ -216,7 +216,7 @@ Rules:
 - ChatGPT Codex backend does not allow Responses API server-side persistence, so runtime calls set
   `store=false`, request encrypted reasoning content for stateless replay, send complete logical
   input over either physical transport, and never use `previous_response_id`.
-- Immediately before a `store=false` runtime call, omit top-level Responses input item `id` fields. Azents events and external ids remain preserved in the database, while provider response item ids are not replayed as stored references. Tool `call_id` values and reconstructed `image_generation_call.result` bytes remain in the request for stateless continuity. A compatible result-less failed image call cannot remain a valid native item after this omission, so it lowers to bounded non-executable provider-tool history instead. A compatible generated-image provider call is followed by one bounded user-role context item for its canonical `exchange://` attachment; the attachment is not lowered as a second rich image.
+- Immediately before a `store=false` runtime call, omit top-level Responses input item `id` fields. Azents events and external ids remain preserved in the database, while provider response item ids are not replayed as stored references. Tool `call_id` values remain in the request for stateless continuity. Historical provider-hosted image calls may still reconstruct `image_generation_call.result` bytes; a compatible result-less failed image call lowers to bounded non-executable provider-tool history. New image requests invoke the Azents client function tool against the selected subscription endpoint, and its generated attachment follows ordinary client-tool continuation.
 - Typed terminal events, SDK exceptions, and transport failures use the common `ModelProviderFailure` contract only when their typed status or identifiers map to a known category. Only the bounded, redacted provider-authored reason may reach retry state, UI, or provider-failure logs. Every classified category receives the complete current Run retry budget; category and retryability remain diagnostic metadata. Unclassified outcomes raise through the ordinary internal-error path and do not create provider retry state or generic provider-error presentation.
 - Runtime requests use `originator: azents`, an `azents/<version>` User-Agent, and the connected `ChatGPT-Account-Id` rather than impersonating Codex CLI identity.
 - Sampling always uses the standard Responses contract regardless of model name or backend request-dialect hints. Tools remain in the top-level `tools` field and instructions remain in the top-level `instructions` field.
@@ -348,6 +348,7 @@ error boundary.
 
 | Date | Version | Change | Rationale |
 |---|---|---|---|
+| 2026-09-25 | 26 | Routed new subscription image requests through the client Images tool while retaining historical hosted-image replay | Make client image generation independent of conversation-model hosted-tool support |
 | 2026-09-24 | 25 | Mapped the reauthentication-target migration and corrected the connection-row management contract | Match the shared subscription modal and preserve the existing integration during reauthentication |
 | 2026-09-23 | 24 | Documented integration-targeted device reauthentication and preservation of existing credentials on unsuccessful attempts | Describe the implemented in-place subscription credential replacement |
 | 2026-09-12 | 23 | Refreshed current Session model, effort, and Fast intent before each automatic sampling retry attempt | Let users move a failed Turn retry away from an exhausted or undesired model without mutating the failed attempt |

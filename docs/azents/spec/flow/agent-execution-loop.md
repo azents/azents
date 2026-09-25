@@ -105,7 +105,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
   - typescript/apps/azents-web/messages/*/chat.json
 last_verified_at: 2026-09-25
-spec_version: 182
+spec_version: 183
 ---
 
 # Agent Execution Loop
@@ -650,10 +650,10 @@ clients close on success, failure, timeout, cancellation, and User Stop. Agent
 model-scoped builtin settings store semantic ids such as `web_search` and `image_generation`.
 Before lowering, the runtime validates the selected snapshot capability and partitions every semantic
 builtin into one provider-hosted or client-executed implementation. `web_search` remains
-provider-hosted. xAI API-key and xAI OAuth `image_generation` become an auto-bound client function
-tool; an advertised `image_generation` capability for another provider remains provider-hosted.
-Current automatic hosted capability policy covers supported OpenAI API-key and ChatGPT OAuth models,
-while another provider requires explicit trusted metadata. Only provider-hosted specs reach the
+provider-hosted. OpenAI API-key, ChatGPT OAuth, xAI API-key, and xAI OAuth
+`image_generation` become auto-bound client function tools; an advertised
+`image_generation` capability for another provider remains provider-hosted.
+Only provider-hosted specs reach the
 lowerer; LiteLLM receives those specs as Responses semantic tools for provider-dialect translation.
 An unsupported, unimplemented, or unbound required capability fails before provider dispatch, and no
 configured builtin is silently omitted.
@@ -685,6 +685,8 @@ For xAI image generation, the auto-bound unprefixed `image_generation` client to
 
 xAI API-key execution uses the selected integration key. xAI OAuth execution starts with the proactively refreshed selected integration token. The first Imagine `401` forces one refresh through the existing persistence service and retries once with the new token; a second `401` returns reconnect-required failure. API-key `401`, `403`, `429`, malformed/oversized output, and exhausted transport failures become sanitized client tool failures. Other non-success Imagine responses remain failed tool results and retain structured `http_failure` status metadata plus the provider-authored scalar `error.message`, `error`, `message`, or `detail` when available. The reason is bounded, credential-redacted, and excludes the raw response body. Cancellation propagates immediately. Successful bytes enter the normal generated-file admission path, so the durable `client_tool_result.output` contains an available `AttachmentOutputPart` plus a ModelFile-backed `FileOutputPart` and never contains Base64, credentials, or a parallel top-level attachments field.
 
+For OpenAI API-key and ChatGPT OAuth, the auto-bound `image_generation` client function receives only a prompt of at most 32,000 characters. The server selects `gpt-image-2` for the maintained default, or the validated explicit OpenAI API-key image model, and uses the official SDK Images generation operation with the selected integration's credential, endpoint, and account headers. Each call generates one image. Credentials and configured image model never appear in the model-visible schema or arguments. The provider's Base64 result remains transient and follows the same generated-file admission path as xAI; missing, malformed, or oversized data fails without persisting image bytes. ChatGPT OAuth performs one forced persisted-token refresh and retries after the first image 401, updating the current Run's credential for later model calls; a second 401 requires reconnect. SDK authentication, permission, rate-limit, network, and status failures yield sanitized client-tool errors and no provider-hosted image fallback.
+
 Provider-hosted tool output is normalized through the recognized Responses item registry as one
 `provider_tool_call` per provider-native item. It does not enter the client tool execution loop or by
 itself continue the model turn. Every recognized durable extractor produces bounded provider-neutral
@@ -705,7 +707,7 @@ fails the model output and compensation-deletes unowned prepared keys. Determini
 identities make repeated admission idempotent; cleanup protects keys already referenced by committed
 metadata and identity reuse with different bytes fails explicitly.
 
-On a later request, an exactly compatible native Responses artifact reconstructs the sanitized
+For historical provider-hosted image calls, on a later request, an exactly compatible native Responses artifact reconstructs the sanitized
 `image_generation_call.result` from ModelFile bytes in request-local memory only. ChatGPT OAuth sends
 that reconstructed result without the prior provider item ID in the full `store=false` request. The
 same-native lowerer emits a second bounded semantic context item for the canonical Exchange attachment
@@ -1511,6 +1513,8 @@ icon.
 
 ## Changelog
 
+- **2026-09-25** (spec_version 183) — Routed OpenAI API-key and ChatGPT
+  subscription image generation through client-executed Images API tools.
 - **2026-09-25** (spec_version 182) — Added direct Brave client-tool execution
   and ordered multi-image result admission without a Runtime dependency.
 - **2026-09-15** (spec_version 181) — Replaced Runtime Web

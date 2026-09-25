@@ -1723,6 +1723,83 @@ def _xai_oauth_inference_state() -> SessionInferenceState:
     )
 
 
+@pytest.mark.parametrize(
+    ("provider", "base_url", "model_config"),
+    [
+        (LLMProvider.OPENAI, None, {"model": "gpt-image-2.5-flare"}),
+        (LLMProvider.CHATGPT_OAUTH, CHATGPT_OAUTH_BACKEND_BASE_URL, {}),
+    ],
+)
+async def test_openai_image_generation_is_bound_as_client_function_tool(
+    provider: LLMProvider,
+    base_url: str | None,
+    model_config: dict[str, str],
+) -> None:
+    """Advertise image generation as a function, never a hosted tool."""
+    execution = _Execution()
+    adapter = _agent_engine_adapter(
+        session_manager=_session_context,
+        execution_factory=_capture_execution_factory(execution),
+    )
+    credential_kwargs: dict[str, object] = {"api_key": "private-key"}
+    if base_url is not None:
+        credential_kwargs["base_url"] = base_url
+        credential_kwargs["extra_headers"] = {"ChatGPT-Account-Id": "account-1"}
+
+    _ = [
+        emit
+        async for emit in adapter.run(
+            RunRequest(
+                enabled_execution_options=[],
+                session_id="session-1",
+                user_messages=[],
+                agent_prompt=None,
+                toolkits=[],
+                provider=provider,
+                model="gpt-5.6-luna",
+                model_capabilities=ModelCapabilities(
+                    built_in_tools=ModelBuiltInToolCapabilities(
+                        supported=["image_generation", "web_search"]
+                    )
+                ),
+                credential_kwargs=credential_kwargs,
+                workspace_id="workspace-1",
+                agent_id="agent-1",
+                tool_search_enabled=False,
+                auto_compaction_threshold_tokens=None,
+                inference_state=None,
+                compaction_provider_integration_id=None,
+                builtin_tools=[
+                    BuiltinToolSpec(name="image_generation", config=model_config),
+                    BuiltinToolSpec(name="web_search", config={}),
+                ],
+            ),
+            RunContext(
+                owner_generation=1,
+                tool_admission_barrier=_OpenToolAdmissionBarrier(),
+                turn_action_bridge_boundary=TurnActionBridgeBoundary(),
+                model_transport_state=InMemoryModelTransportState(
+                    websocket_enabled=False
+                ),
+                run_id="0" * 32,
+                publish_event=_noop_publish,
+            ),
+        )
+    ]
+
+    assert execution.prepared_model_call is not None
+    prepared_request = execution.prepared_model_call.native_request
+    assert isinstance(prepared_request, OpenAIResponsesRequest)
+    assert any(
+        tool.get("type") == "function" and tool.get("name") == "image_generation"
+        for tool in prepared_request.tools
+    )
+    assert any(tool.get("type") == "web_search" for tool in prepared_request.tools)
+    assert not any(
+        tool.get("type") == "image_generation" for tool in prepared_request.tools
+    )
+
+
 async def test_xai_image_generation_is_bound_as_client_function_tool(
     caplog: pytest.LogCaptureFixture,
 ) -> None:

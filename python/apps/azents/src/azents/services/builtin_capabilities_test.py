@@ -1,4 +1,4 @@
-"""Trusted provider-hosted tool capability policy tests."""
+"""Trusted effective built-in tool capability policy tests."""
 
 from azents.core.enums import LLMProvider
 from azents.services.builtin_capabilities import supported_builtin_capabilities
@@ -13,13 +13,30 @@ def test_openai_supported_family_gets_image_generation() -> None:
     ) == ["web_search", "image_generation"]
 
 
-def test_explicit_false_overrides_curated_family() -> None:
-    """Honor an explicit provider denial over the curated fallback."""
+def test_hosted_image_denial_does_not_disable_openai_client_tool() -> None:
+    """A tool-capable GPT-6 model may generate images through the client."""
+    for provider in (LLMProvider.OPENAI, LLMProvider.CHATGPT_OAUTH):
+        assert "image_generation" in supported_builtin_capabilities(
+            provider=provider,
+            model_identifier="gpt-6-astra",
+            metadata={"supports_image_generation": False},
+        )
+
+
+def test_openai_client_tool_requires_function_calling_chat_model() -> None:
     assert (
         supported_builtin_capabilities(
             provider=LLMProvider.OPENAI,
-            model_identifier="gpt-5.6-luna",
-            metadata={"supports_image_generation": False},
+            model_identifier="gpt-6-astra",
+            metadata={"supports_function_calling": False},
+        )
+        == []
+    )
+    assert (
+        supported_builtin_capabilities(
+            provider=LLMProvider.OPENAI,
+            model_identifier="gpt-6-astra",
+            metadata={"mode": "image_generation"},
         )
         == []
     )

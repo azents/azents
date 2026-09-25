@@ -14,10 +14,10 @@ from azents.engine.run.types import BuiltinToolSpec
     "provider",
     [LLMProvider.OPENAI, LLMProvider.CHATGPT_OAUTH],
 )
-def test_openai_image_generation_resolves_to_provider_hosted(
+def test_openai_image_generation_resolves_to_client_execution(
     provider: LLMProvider,
 ) -> None:
-    """Keep OpenAI-family image generation provider-hosted."""
+    """Keep both OpenAI credential modes on the same client execution path."""
     tool = BuiltinToolSpec(name="image_generation", config={})
 
     resolved = resolve_builtin_tools(
@@ -26,8 +26,8 @@ def test_openai_image_generation_resolves_to_provider_hosted(
         supported=["image_generation"],
     )
 
-    assert resolved.provider_hosted == [tool]
-    assert resolved.client_executed == []
+    assert resolved.provider_hosted == []
+    assert resolved.client_executed == [tool]
 
 
 @pytest.mark.parametrize("provider", [LLMProvider.XAI, LLMProvider.XAI_OAUTH])

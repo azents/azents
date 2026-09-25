@@ -659,7 +659,10 @@ async def test_list_chatgpt_models_uses_backend_capability_metadata(
     assert candidate.model_identifier == "gpt-6-astra"
     assert candidate.supported_execution_options == [ModelExecutionOptionId.FAST]
     assert standard_candidate.supported_execution_options == []
-    assert candidate.normalized_capabilities.built_in_tools.supported == ["web_search"]
+    assert candidate.normalized_capabilities.built_in_tools.supported == [
+        "web_search",
+        "image_generation",
+    ]
     assert all(
         other_candidate.normalized_capabilities.built_in_tools.supported
         == ["web_search", "image_generation"]

@@ -40,8 +40,8 @@ code_paths:
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
   - typescript/apps/azents-web/src/trpc/routers/workspace-model-settings.ts
   - typescript/apps/azents-admin-web/src/features/model-catalog/containers/useModelCatalogPageContainer.ts
-last_verified_at: 2026-09-15
-spec_version: 25
+last_verified_at: 2026-09-25
+spec_version: 26
 ---
 
 # Model Catalog Domain Spec
@@ -182,7 +182,7 @@ xAI API-key integration catalogs call the configured developer API through the i
 
 Reasoning capabilities are projected from LiteLLM's canonical provider model metadata schema. Explicit effort levels are reconstructed in the deterministic order `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`. The optional `none`, `minimal`, `xhigh`, and `max` levels follow their corresponding LiteLLM support flags. Every model marked as reasoning-capable receives the baseline `low`, `medium`, and `high` levels, except that an explicit `supports_low_reasoning_effort: false` removes `low`. A model with no projected effort levels allows no explicit effort override; an empty list is not interpreted as unrestricted support.
 
-Built-in tool capability projection is filtered through the implemented configurable registry. The current registry contains `web_search` and `image_generation`; unimplemented identifiers such as `web_fetch` are not advertised. Normalized support represents an effective selectable capability rather than only a provider-hosted feature. Trusted `supports_image_generation: true | false` metadata has first precedence, followed by explicit trusted supported-tool lists. When neither declaration exists, the maintained OpenAI/ChatGPT model policy determines hosted support, while selectable xAI API-key and xAI OAuth entries use chat mode plus function-calling support as the client-executed Imagine fallback. Generic image output modality alone is not evidence of image-tool support. The xAI fallback does not use a Grok model identifier allowlist because Imagine execution is provided by the Azents client tool rather than the selected language-model endpoint. Account credential validity, quota, and Imagine entitlement remain runtime concerns. A future built-in tool becomes selectable only after capability projection, validation, runtime execution ownership, UI presentation, and deterministic coverage exist together.
+Built-in tool capability projection is filtered through the implemented configurable registry. The current registry contains `web_search` and `image_generation`; unimplemented identifiers such as `web_fetch` are not advertised. Normalized support represents an effective selectable capability rather than only a provider-hosted feature. OpenAI API-key and ChatGPT OAuth GPT-6, GPT-5, GPT-4.1, GPT-4o, and o3 chat models expose client-executed image generation when function calling is not denied; trusted supported-tool lists can additionally establish support for another OpenAI model. Provider metadata that disables the hosted image tool does not disable this client tool. Other providers honor trusted `supports_image_generation: true | false` metadata before supported-tool lists. Selectable xAI API-key and xAI OAuth entries use chat mode plus function-calling support for client-executed Imagine. Generic image output modality alone is not evidence of image-tool support. Account credential validity, quota, and image-service entitlement remain runtime concerns. A future built-in tool becomes selectable only after capability projection, validation, runtime execution ownership, UI presentation, and deterministic coverage exist together.
 
 Each catalog sync records an attempt with status, counts, failure metadata, action hint, and diagnostics. Failed syncs keep the last successful snapshot available when one exists.
 
@@ -316,6 +316,7 @@ Only Workspace Owners receive the explicit image sync action.
 
 | Date | Version | Change |
 |---|---:|---|
+| 2026-09-25 | 26 | Projected OpenAI and ChatGPT image generation as a client-tool capability, including function-capable GPT-6 models without a provider-hosted image tool. |
 | 2026-09-13 | 25 | Normalized every candidate in an ordered label-local chain, made Primary capabilities drive label controls, and removed singular public mutation compatibility. |
 
 | 2026-09-10 | 24 | Hid image-model selection controls for providers that support maintained-default image generation only. |

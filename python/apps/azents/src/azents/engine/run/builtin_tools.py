@@ -43,7 +43,12 @@ def resolve_builtin_tools(
             case "web_search":
                 provider_hosted.append(tool)
             case "image_generation":
-                if provider in {LLMProvider.XAI, LLMProvider.XAI_OAUTH}:
+                if provider in {
+                    LLMProvider.OPENAI,
+                    LLMProvider.CHATGPT_OAUTH,
+                    LLMProvider.XAI,
+                    LLMProvider.XAI_OAUTH,
+                }:
                     client_executed.append(tool)
                 else:
                     provider_hosted.append(tool)
