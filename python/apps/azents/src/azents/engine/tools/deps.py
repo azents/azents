@@ -11,6 +11,8 @@ from azents.core.crypto import CredentialCipher
 from azents.core.deps import get_appctx, get_config, get_credential_cipher
 from azents.core.tools import ToolkitProvider
 from azents.engine.tools.aws import AwsToolkitProvider
+from azents.engine.tools.brave_search import BraveSearchToolkitProvider
+from azents.engine.tools.brave_search_testenv import make_brave_testenv_transport
 from azents.engine.tools.envvar import EnvVarToolkitProvider
 from azents.engine.tools.external_channel import ExternalChannelToolkitProvider
 from azents.engine.tools.gcp import GcpToolkitProvider
@@ -110,6 +112,11 @@ def get_toolkit_registry(
             session_manager=session_manager,
         ),
         "google_analytics": GoogleAnalyticsToolkitProvider(),
+        "brave_search": BraveSearchToolkitProvider(
+            transport=make_brave_testenv_transport()
+            if config.testenv_api_enabled
+            else None
+        ),
         "kubernetes": KubernetesToolkitProvider(),
         "envvar": EnvVarToolkitProvider(),
     }

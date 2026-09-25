@@ -17,6 +17,8 @@ from urllib.parse import parse_qs, urlsplit
 
 _PROMPT = "Provider image generation handoff"
 _FOLLOW_UP_PROMPT = "Provider image generation follow-up"
+_BRAVE_PROMPT_PREFIX = "Brave Search E2E "
+_BRAVE_KINDS = ("web", "context", "news", "images", "videos")
 _SEMANTIC_PROMPT = "Provider semantic web search handoff"
 _SEMANTIC_SAME_NATIVE_PROMPT = "Provider semantic same-native follow-up"
 _SEMANTIC_CROSS_NATIVE_PROMPT = "Provider semantic cross-native follow-up"
@@ -1264,13 +1266,145 @@ class _Handler(BaseHTTPRequestHandler):
         captured_prompts = _CAPTURED_MODEL_PROMPTS | {
             _SEMANTIC_PROMPT,
             *_SEMANTIC_FOLLOW_UP_RESPONSES,
+            *(f"{_BRAVE_PROMPT_PREFIX}{kind}" for kind in _BRAVE_KINDS),
+            f"{_BRAVE_PROMPT_PREFIX}disabled",
         }
-        if user_text in captured_prompts or compaction_request:
+        if (
+            user_text in captured_prompts
+            or compaction_request
+            or request_has_tool_output(request, "call_brave_e2e_images")
+            or (
+                self.path == "/v1/responses"
+                and "Brave Search E2E external_channel" in json.dumps(request)
+            )
+        ):
             with _State.lock:
                 _State.requests.append(request)
         if self.path == "/v1/responses" and user_text == _PROMPT:
             self._write_image_generation_response(request)
             return
+        if (
+            self.path == "/v1/responses"
+            and "Brave Search E2E external_channel" in json.dumps(request)
+            and (binding := external_channel_binding(request)) is not None
+        ):
+            search_id = "call_brave_e2e_channel_images"
+            finish_id = "call_brave_e2e_channel_finish"
+            if request_has_tool_output(request, finish_id):
+                self._write_text_response(
+                    request,
+                    "BRAVE_SEARCH_E2E_CHANNEL_COMPLETED",
+                    response_id="resp_brave_e2e_channel_completed",
+                )
+                return
+            if request_has_tool_output(request, search_id):
+                if not _request_has_named_tool(request, "channel_action"):
+                    self._write_json(
+                        409,
+                        {"error": {"message": "Channel Action is unavailable."}},
+                    )
+                    return
+                self._write_function_call_response(
+                    request,
+                    call_id=finish_id,
+                    name="channel_action",
+                    arguments={
+                        "mode": "finish",
+                        "binding": binding,
+                        "message": (
+                            "Brave image search found "
+                            "https://example.org/brave/original-1.png "
+                            "on https://example.org/brave/image-page-1."
+                        ),
+                    },
+                )
+                return
+            if not _request_has_named_tool(request, "brave__search_images"):
+                self._write_json(
+                    409,
+                    {"error": {"message": "Brave image search is unavailable."}},
+                )
+                return
+            self._write_function_call_response(
+                request,
+                call_id=search_id,
+                name="brave__search_images",
+                arguments={"q": "Brave Search E2E external_channel", "count": 2},
+            )
+            return
+        disabled_search_id = "call_brave_e2e_disabled_tool_search"
+        if self.path == "/v1/responses" and (
+            user_text == f"{_BRAVE_PROMPT_PREFIX}disabled"
+            or (
+                user_text is None
+                and request_has_tool_output(request, disabled_search_id)
+            )
+        ):
+            if request_has_tool_output(request, disabled_search_id):
+                self._write_text_response(
+                    request,
+                    "BRAVE_SEARCH_E2E_DISABLED_VERIFIED",
+                    response_id="resp_brave_e2e_disabled_completed",
+                )
+                return
+            if _request_has_named_tool(request, "tool_search"):
+                self._write_function_call_response(
+                    request,
+                    call_id=disabled_search_id,
+                    name="tool_search",
+                    arguments={"query": "Private Brave E2E search images", "limit": 10},
+                )
+                return
+            self._write_json(
+                409, {"error": {"message": "Brave E2E Tool Search is missing."}}
+            )
+            return
+        if self.path == "/v1/responses":
+            for kind in _BRAVE_KINDS:
+                call_id = f"call_brave_e2e_{kind}"
+                search_call_id = f"call_brave_e2e_tool_search_{kind}"
+                if user_text != f"{_BRAVE_PROMPT_PREFIX}{kind}" and not (
+                    user_text is None
+                    and (
+                        request_has_tool_output(request, search_call_id)
+                        or request_has_tool_output(request, call_id)
+                    )
+                ):
+                    continue
+                if request_has_tool_output(request, call_id):
+                    self._write_text_response(
+                        request,
+                        f"BRAVE_SEARCH_E2E_COMPLETED_{kind}",
+                        response_id=f"resp_brave_e2e_{kind}_completed",
+                    )
+                    return
+                name = f"brave__search_{kind}"
+                if not _request_has_named_tool(request, name):
+                    if _request_has_named_tool(
+                        request, "tool_search"
+                    ) and not request_has_tool_output(request, search_call_id):
+                        self._write_function_call_response(
+                            request,
+                            call_id=search_call_id,
+                            name="tool_search",
+                            arguments={"query": f"brave search {kind}", "limit": 5},
+                        )
+                        return
+                    self._write_json(
+                        409,
+                        {"error": {"message": f"Brave E2E tool {name} is missing."}},
+                    )
+                    return
+                self._write_function_call_response(
+                    request,
+                    call_id=call_id,
+                    name=name,
+                    arguments={
+                        "q": f"Brave E2E {kind}",
+                        "count": 3 if kind == "images" else 1,
+                    },
+                )
+                return
         if self.path == "/v1/responses" and is_run_tool_to_file_scenario(request):
             if request_has_tool_output(
                 request,

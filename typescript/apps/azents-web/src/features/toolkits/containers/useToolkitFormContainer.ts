@@ -93,6 +93,12 @@ const DEFAULT_CONFIGS: Record<string, Record<string, unknown>> = {
     default_property_id: null,
     timeout: 30,
   },
+  brave_search: {
+    country: "US",
+    search_lang: "en",
+    safesearch: "strict",
+    timeout: 10,
+  },
   github: {
     server_url: "https://api.githubcopilot.com/mcp/",
     auth_type: "bearer",
@@ -120,6 +126,7 @@ const DEFAULT_CREDENTIALS: Record<string, Record<string, unknown> | null> = {
   gcp: { service_account_key: {} },
   aws: { access_key_id: "", secret_access_key: "" },
   google_analytics: { service_account_key: {} },
+  brave_search: null,
   github: { type: "pat" },
   kubernetes: { clusters: {} },
   envvar: { values: {} },

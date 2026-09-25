@@ -47,6 +47,7 @@ from azents.services.model_file import (
 from azents.services.session_resource_authority import SessionResourceAuthority
 
 _MAX_DECODED_IMAGE_BYTES = 20 * 1024 * 1024
+_MAX_CLIENT_IMAGES_PER_RESULT = 8
 _MAX_ENCODED_IMAGE_CHARS = ((_MAX_DECODED_IMAGE_BYTES + 2) // 3) * 4
 _MAX_IMAGE_DIMENSION = 8192
 _MAX_IMAGE_PIXELS = 4096 * 4096
@@ -244,6 +245,11 @@ class ProviderOutputMaterializer:
                 materializer=self,
                 generated_images=(),
             )
+        if len(pending) > _MAX_CLIENT_IMAGES_PER_RESULT:
+            raise ModelCallError("Generated image result count exceeds the limit.")
+        output_indices = [file.output_index for file in pending]
+        if len(output_indices) != len(set(output_indices)):
+            raise ModelCallError("Generated image output identity collided.")
         retention_root_session_id = await self._validate_scope()
         if any(file.call_id != result.call_id for file in pending):
             raise ModelCallError("Generated image result identity is invalid.")
@@ -255,9 +261,8 @@ class ProviderOutputMaterializer:
                 source_provider=None,
                 retention_root_session_id=retention_root_session_id,
             )
-            for file in pending
+            for file in sorted(pending, key=lambda file: file.output_index)
         )
-        self._validate_unique_outputs(generated_images)
         prepared = PreparedClientToolOutput(
             result=self._attach_client_resources(result, generated_images),
             materializer=self,
@@ -737,21 +742,20 @@ class ProviderOutputMaterializer:
         generated_images: tuple[_PreparedGeneratedImage, ...],
     ) -> ClientToolResultPayload:
         """Insert durable generated output parts into the client result."""
-        if len(generated_images) != 1:
+        if not generated_images:
             raise ModelCallError("Generated image result count is invalid.")
-        image = generated_images[0]
-        if image.call_id != result.call_id:
+        if any(image.call_id != result.call_id for image in generated_images):
             raise ModelCallError("Generated image result identity is invalid.")
         output_parts = list(iter_output_parts(result.output))
-        insert_at = min(image.output_index, len(output_parts))
+        for image in reversed(generated_images):
+            insert_at = min(image.output_index, len(output_parts))
+            output_parts[insert_at:insert_at] = [
+                image.file_part,
+                image.attachment_part,
+            ]
         return result.model_copy(
             update={
-                "output": [
-                    *output_parts[:insert_at],
-                    image.file_part,
-                    image.attachment_part,
-                    *output_parts[insert_at:],
-                ],
+                "output": output_parts,
                 "pending_generated_files": [],
             }
         )

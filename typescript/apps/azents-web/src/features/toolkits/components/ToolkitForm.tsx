@@ -29,6 +29,7 @@ import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { getStringArray } from "@/shared/lib/unknown-value";
 import { AwsConfigFields } from "./AwsConfigFields";
+import { BraveSearchConfigFields } from "./BraveSearchConfigFields";
 import { EnvVarConfigFields } from "./EnvVarConfigFields";
 import { GcpConfigFields } from "./GcpConfigFields";
 import { GithubConfigFields } from "./GithubConfigFields";
@@ -318,6 +319,24 @@ export function ToolkitForm({
 
             {currentToolSlug === "google_analytics" && (
               <GoogleAnalyticsConfigFields
+                config={form.getValues().config}
+                onConfigChange={onConfigChange}
+                credentials={form.getValues().credentials ?? null}
+                onCredentialsChange={onCredentialsChange}
+                hasCredentials={
+                  formState.type === "EDIT" &&
+                  formState.config.has_credentials === true
+                }
+                handle={handle}
+                {...(agentId != null && { agentId })}
+                {...(formState.type === "EDIT" && {
+                  toolkitConfigId: formState.config.id,
+                })}
+              />
+            )}
+
+            {currentToolSlug === "brave_search" && (
+              <BraveSearchConfigFields
                 config={form.getValues().config}
                 onConfigChange={onConfigChange}
                 credentials={form.getValues().credentials ?? null}

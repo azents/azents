@@ -114,6 +114,7 @@ class ToolkitType(enum.StrEnum):
     AWS = "aws"
     SENTRY = "sentry"
     GOOGLE_ANALYTICS = "google_analytics"
+    BRAVE_SEARCH = "brave_search"
     KUBERNETES = "kubernetes"
     ENVVAR = "envvar"
 
@@ -601,6 +602,15 @@ class GoogleAnalyticsToolkitConfig(BaseModel):
         ge=1.0,
         le=300.0,
     )
+
+
+class BraveSearchToolkitConfig(BaseModel):
+    """Default options for the direct Brave Search API integration."""
+
+    country: str = Field(default="US", pattern=r"^(ALL|[A-Z]{2})$")
+    search_lang: str = Field(default="en", pattern=r"^[a-z]{2,5}$")
+    safesearch: Literal["strict", "moderate", "off"] = "strict"
+    timeout: float = Field(default=10.0, ge=1.0, le=30.0)
 
 
 class ClusterConfig(BaseModel):

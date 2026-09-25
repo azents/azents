@@ -75,8 +75,10 @@ code_paths:
   - typescript/apps/azents-web/src/features/agents/components/AgentAutomaticProjects.tsx
   - typescript/apps/azents-web/src/features/agents/components/AgentForm.tsx
   - typescript/apps/azents-web/src/features/agents/components/AgentToolkitSection.tsx
+  - typescript/apps/azents-web/src/features/agents/components/SelectableModelOptionsEditor.tsx
   - typescript/apps/azents-web/src/features/agents/containers/useAgentAutomaticProjectsContainer.ts
   - typescript/apps/azents-web/src/features/agents/containers/useAgentToolkitManagementContainer.ts
+  - typescript/apps/azents-web/src/features/agents/model-selection.ts
   - typescript/apps/azents-web/src/features/agents/terminalSettingsVisibility.ts
   - typescript/apps/azents-web/src/features/external-channel-management/**
   - typescript/apps/azents-web/src/features/runtime-profiles/**
@@ -113,8 +115,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/default-response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack
-last_verified_at: 2026-09-15
-spec_version: 81
+last_verified_at: 2026-09-24
+spec_version: 82
 ---
 
 # Agent Domain Spec
@@ -233,6 +235,7 @@ automatically.
 - every option stores one to five ordered candidates, where candidate 1 is Primary and later candidates are fallbacks;
 - the same integration/model identity cannot appear twice inside one label, while separate labels may reuse it;
 - every candidate stores `settings.context_window_tokens`, `settings.max_output_tokens`, and complete `settings.builtin_tools` name/config entries independently;
+- replacing a candidate model in Agent settings retains compatible token caps and the enabled/disabled choice for every built-in tool supported by both models; newly supported tools start enabled, unsupported tools are omitted, and changing the provider integration clears provider-specific tool configs without resetting tool choices;
 - nullable token caps mean no user cap, while an explicit empty built-in tool list disables all provider-hosted tools for that candidate;
 - built-in configuration is scoped by semantic tool name. `image_generation` omits `config.model` for the maintained provider default and stores an exact provider identifier for an explicit pin; changing that field preserves unrelated configuration keys, while disabling the tool removes its complete entry;
 - option-level `subagent_enabled` defaults to true and controls only whether the label is available as an explicit `spawn_agent` model target;
@@ -708,6 +711,7 @@ Following contracts do not exist in current system.
 
 ## 8. Change History
 
+- **2026-09-24** (spec_version 82) — Preserved compatible token caps and all shared built-in tool choices when replacing an Agent candidate model, including across provider integrations.
 - **2026-09-15** (spec_version 81) — Replaced Session-owned Runtime Web approval
   resources with Agent-and-port services, managed-Runtime capability gating, and
   bounded Agent request/list/close authority.
