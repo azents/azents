@@ -19,7 +19,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/agents/components/AgentToolkitSection.tsx
   - typescript/apps/azents-web/src/features/toolkits/**
   - typescript/apps/azents-web/src/trpc/routers/toolkit.ts
-last_verified_at: 2026-09-25
+last_verified_at: 2026-09-26
 spec_version: 7
 ---
 
@@ -277,6 +277,9 @@ The UI does not display account identity. An Agent-owned callback posts only a f
 
 ## Changelog
 
+- **2026-09-25** (spec_version 7) — Exposed ownership-gated OAuth connect and
+  reconnect directly from saved-Agent Toolkit cards without changing the
+  Workspace or Agent OAuth endpoint authority.
 - **2026-09-07** (spec_version 6) — Added Agent-owned MCP OAuth nested routes,
   encrypted Agent callback context, current Owner-or-AgentAdmin revalidation, and
   saved-Agent callback return behavior while retaining Workspace-shared OAuth.

@@ -72,7 +72,7 @@ code_paths:
   - typescript/apps/azents-web/src/trpc/routers/toolkit.ts
 api_routes:
   - /toolkit/v1
-last_verified_at: 2026-09-25
+last_verified_at: 2026-09-26
 spec_version: 120
 ---
 
@@ -1033,6 +1033,9 @@ without requiring a separate Toolkit setup row.
 
 ## Changelog
 
+- **2026-09-25** (spec_version 120) — Enabled ownership-gated OAuth connect
+  and reconnect from saved-Agent Toolkit cards, with popup callback validation
+  and Agent management refresh.
 - **2026-09-25** (spec_version 119) — Added direct, Runtime-free Brave
   Search Toolkit configuration, connection test, and five distinct native tools.
 - **2026-09-15** (spec_version 118) — Replaced same-root Session approval tools
