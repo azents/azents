@@ -1,4 +1,4 @@
-"""Provider-hosted image generation product-path E2E coverage."""
+"""Client-executed OpenAI image generation product-path E2E coverage."""
 
 import base64
 import hashlib
@@ -37,9 +37,11 @@ class _ProfileWorkspaceIntegration(NamedTuple):
 
 
 _PROMPT = "Provider image generation handoff"
+_EXPLICIT_IMAGE_PROMPT = "Provider image generation explicit pin handoff"
 _FOLLOW_UP_PROMPT = "Provider image generation follow-up"
 _FOLLOW_UP_RESPONSE = "PROVIDER_IMAGE_GENERATION_FOLLOW_UP_COMPLETED"
 _PROXY_JOURNAL_PATH = "/v1/_image_generation_requests"
+_IMAGE_API_JOURNAL_PATH = "/v1/_openai_images_requests"
 _IMAGE_PATH = (
     REPOSITORY_ROOT
     / "testenv/azents/e2e/src/support/fixtures/provider-image-generation.png"
@@ -104,14 +106,14 @@ def _wait_for_idle(
     raise TimeoutError(f"image generation session did not become idle: {last_state!r}")
 
 
-def _provider_call(
+def _client_result(
     events: list[dict[str, object]],
 ) -> dict[str, object] | None:
-    """Return the completed image-generation provider call."""
+    """Return the completed image-generation client result."""
     for event in events:
-        if event.get("kind") != "provider_tool_call":
+        if event.get("kind") != "client_tool_result":
             continue
-        payload = json_object_payload(event.get("payload"), label="provider call")
+        payload = json_object_payload(event.get("payload"), label="client result")
         if (
             payload.get("name") == "image_generation"
             and payload.get("status") == "completed"
@@ -165,6 +167,16 @@ def _proxy_journal(openai_proxy_url: str) -> list[dict[str, object]]:
     return _JSON_OBJECT_LIST.validate_python(response.json())
 
 
+def _image_api_journal(openai_proxy_url: str) -> list[dict[str, object]]:
+    """Return Images API requests captured by the deterministic proxy."""
+    response = requests.get(
+        f"{openai_proxy_url}{_IMAGE_API_JOURNAL_PATH}",
+        timeout=10,
+    )
+    response.raise_for_status()
+    return _JSON_OBJECT_LIST.validate_python(response.json())
+
+
 def _last_user_text(request: dict[str, object]) -> str | None:
     """Return the last user input text from one raw Responses request."""
     input_value = request.get("input")
@@ -207,12 +219,16 @@ def _request_for_prompt(
 
 
 def _image_tool(request: dict[str, object]) -> dict[str, object]:
-    """Return the exact image-generation tool from one provider request."""
+    """Return the client image-generation function in a model request."""
     tools = json_object_list_payload(
         request.get("tools"),
         label="provider request tools",
     )
-    image_tools = [tool for tool in tools if tool.get("type") == "image_generation"]
+    image_tools = [
+        tool
+        for tool in tools
+        if tool.get("type") == "function" and tool.get("name") == "image_generation"
+    ]
     assert len(image_tools) == 1, tools
     return image_tools[0]
 
@@ -313,9 +329,9 @@ def _count_typed_items(value: object, item_type: str) -> int:
 
 
 class TestProviderImageGeneration:
-    """Validate hosted image output, storage, replay, and payload hygiene."""
+    """Validate client image output, storage, replay, and payload hygiene."""
 
-    def test_default_omission_and_explicit_pin_reach_provider_request(
+    def test_default_omission_and_explicit_pin_reach_image_api(
         self,
         public_api_client: azentspublicclient.ApiClient,
         admin_api_client: azentsadminclient.ApiClient,
@@ -323,7 +339,7 @@ class TestProviderImageGeneration:
         azents_engine_worker_container: object,
         openai_proxy_url: str,
     ) -> None:
-        """Stored catalog selection controls the exact hosted tool payload."""
+        """Stored catalog selection controls the exact client Images API model."""
         del azents_engine_worker_container
         token, agent_id, session_id = setup_profile_agent(
             public_api_client,
@@ -349,6 +365,10 @@ class TestProviderImageGeneration:
             f"{openai_proxy_url}{_PROXY_JOURNAL_PATH}",
             timeout=10,
         ).raise_for_status()
+        requests.delete(
+            f"{openai_proxy_url}{_IMAGE_API_JOURNAL_PATH}",
+            timeout=10,
+        ).raise_for_status()
         _submit(
             server_url=azents_public_server_url,
             token=token,
@@ -367,7 +387,10 @@ class TestProviderImageGeneration:
             _proxy_journal(openai_proxy_url),
             _PROMPT,
         )
-        assert _image_tool(default_request) == {"type": "image_generation"}
+        assert _image_tool(default_request)["name"] == "image_generation"
+        assert [
+            request.get("model") for request in _image_api_journal(openai_proxy_url)
+        ] == ["gpt-image-2"]
 
         update = requests.patch(
             f"{azents_public_server_url}/agent/v1/workspaces/{handle}/"
@@ -462,12 +485,16 @@ class TestProviderImageGeneration:
             f"{openai_proxy_url}{_PROXY_JOURNAL_PATH}",
             timeout=10,
         ).raise_for_status()
+        requests.delete(
+            f"{openai_proxy_url}{_IMAGE_API_JOURNAL_PATH}",
+            timeout=10,
+        ).raise_for_status()
         _submit(
             server_url=azents_public_server_url,
             token=token,
             agent_id=agent_id,
             session_id=session_id,
-            message=_PROMPT,
+            message=_EXPLICIT_IMAGE_PROMPT,
             reasoning_effort=None,
         )
         _wait_for_idle(
@@ -478,13 +505,12 @@ class TestProviderImageGeneration:
         )
         explicit_request = _request_for_prompt(
             _proxy_journal(openai_proxy_url),
-            _PROMPT,
+            _EXPLICIT_IMAGE_PROMPT,
         )
-        assert _image_tool(explicit_request) == {
-            "type": "image_generation",
-            "model": "gpt-image-2.5-flare",
-            "quality": "high",
-        }
+        assert _image_tool(explicit_request)["name"] == "image_generation"
+        assert [
+            request.get("model") for request in _image_api_journal(openai_proxy_url)
+        ] == ["gpt-image-2.5-flare"]
 
     def test_materializes_downloads_and_replays_generated_image(
         self,
@@ -500,13 +526,16 @@ class TestProviderImageGeneration:
             f"{openai_proxy_url}{_PROXY_JOURNAL_PATH}",
             timeout=10,
         ).raise_for_status()
+        requests.delete(
+            f"{openai_proxy_url}{_IMAGE_API_JOURNAL_PATH}",
+            timeout=10,
+        ).raise_for_status()
         token, agent_id, session_id = setup_profile_agent(
             public_api_client,
             admin_api_client,
             azents_public_server_url,
         )
 
-        observed_statuses: set[str] = set()
         run_cleared = False
         with connect_chat(
             public_api_client=public_api_client,
@@ -538,34 +567,13 @@ class TestProviderImageGeneration:
                 )
                 action_type = action.get("type")
                 observed_action_types.append(action_type)
-                if action_type == "live_event_upserted":
-                    event = json_object_payload(
-                        action.get("event"),
-                        label="provider live event",
-                    )
-                    if event.get("kind") == "provider_tool_call":
-                        payload = json_object_payload(
-                            event.get("payload"),
-                            label="provider live payload",
-                        )
-                        if payload.get("name") == "image_generation":
-                            status = payload.get("status")
-                            if isinstance(status, str):
-                                observed_statuses.add(status)
-                elif action_type == "live_run_cleared":
+                if action_type == "live_run_cleared":
                     run_cleared = True
-                if run_cleared and observed_statuses >= {
-                    "running",
-                    "completed",
-                }:
+                if run_cleared:
                     break
-            if not run_cleared or not observed_statuses >= {
-                "running",
-                "completed",
-            }:
+            if not run_cleared:
                 raise TimeoutError(
                     "image-generation live handoff did not complete: "
-                    f"statuses={observed_statuses!r}, "
                     f"run_cleared={run_cleared!r}, "
                     f"actions={observed_action_types!r}"
                 )
@@ -587,21 +595,16 @@ class TestProviderImageGeneration:
         results = [
             event
             for event in history_events(history)
-            if _provider_call([event]) is not None
+            if _client_result([event]) is not None
         ]
         assert len(results) == 1, serialized_history
         result_payload = json_object_payload(
             results[0].get("payload"),
-            label="durable provider result payload",
-        )
-        assert "output" not in result_payload
-        semantic = json_object_payload(
-            result_payload.get("semantic"),
-            label="provider result semantic content",
+            label="durable client result payload",
         )
         output = json_object_list_payload(
-            semantic.get("output"),
-            label="provider result semantic output",
+            result_payload.get("output"),
+            label="client result output",
         )
         assert "attachments" not in result_payload
         assert len(output) == 2
@@ -636,7 +639,14 @@ class TestProviderImageGeneration:
             initial_request.get("tools"),
             label="initial provider tools",
         )
-        assert {tool.get("type") for tool in tools} >= {"image_generation"}
+        assert any(
+            tool.get("type") == "function" and tool.get("name") == "image_generation"
+            for tool in tools
+        )
+        assert all(tool.get("type") != "image_generation" for tool in tools)
+        assert [
+            request.get("model") for request in _image_api_journal(openai_proxy_url)
+        ] == ["gpt-image-2"]
 
         _submit(
             server_url=azents_public_server_url,
@@ -667,18 +677,10 @@ class TestProviderImageGeneration:
             follow_up_request.get("input"),
             label="follow-up input",
         )
-        image_items = [
-            item for item in input_items if item.get("type") == "image_generation_call"
-        ]
-        assert len(image_items) == 1
+        assert _count_typed_items(input_items, "image_generation_call") == 0
+        assert _count_typed_items(input_items, "function_call_output") >= 1
         assert _count_string_occurrences(input_items, attachment_uri) == 1
-        assert _count_typed_items(input_items, "input_image") == 0
-        replayed_result = image_items[0].get("result")
-        assert isinstance(replayed_result, str)
-        replayed_image = base64.b64decode(replayed_result, validate=True)
-        assert replayed_result != _IMAGE_BASE64
-        assert replayed_image.startswith(b"\xff\xd8\xff")
-        assert replayed_image.endswith(b"\xff\xd9")
+        assert _IMAGE_BASE64 not in json.dumps(input_items)
 
         final_history = list_history(
             server_url=azents_public_server_url,
@@ -697,7 +699,7 @@ class TestProviderImageGeneration:
                 [
                     event
                     for event in history_events(final_history)
-                    if _provider_call([event]) is not None
+                    if _client_result([event]) is not None
                 ]
             )
             == 1
