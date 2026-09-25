@@ -1396,6 +1396,9 @@ class TestResolveAgentTools:
             "list_memories",
             "get_memory",
             "search_memories",
+            "search_sessions",
+            "read_session_history",
+            "read_session_tool_result",
         }
         assert memory_write_tools == {"save_memory", "delete_memory"}
 
