@@ -51,3 +51,14 @@ void test("keeps empty editable credential selections", () => {
 
   assert.equal(normalizeCredentialEdits(credentials), credentials);
 });
+
+void test("Brave Search edit leaves a configured key unchanged", () => {
+  assert.equal(normalizeCredentialEdits(null), null);
+  assert.equal(normalizeCredentialEdits({ api_key: "" }), null);
+});
+
+void test("Brave Search replacement sends only the new key", () => {
+  assert.deepEqual(normalizeCredentialEdits({ api_key: "replacement" }), {
+    api_key: "replacement",
+  });
+});
