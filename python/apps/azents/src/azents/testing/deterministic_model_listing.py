@@ -32,6 +32,7 @@ DeterministicFixtureVariant = Literal[
     "deterministic-no-candidates",
     "deterministic-two-integrations",
     "deterministic-failure",
+    "deterministic-brave-text-only",
 ]
 DETERMINISTIC_FIXTURE_VARIANTS: tuple[DeterministicFixtureVariant, ...] = (
     "deterministic-success",
@@ -42,6 +43,7 @@ DETERMINISTIC_FIXTURE_VARIANTS: tuple[DeterministicFixtureVariant, ...] = (
     "deterministic-no-candidates",
     "deterministic-two-integrations",
     "deterministic-failure",
+    "deterministic-brave-text-only",
 )
 
 
@@ -133,6 +135,20 @@ def build_deterministic_listing(
                     count=1,
                 )
             ]
+        case "deterministic-brave-text-only":
+            models = [
+                _candidate(
+                    provider=provider,
+                    identifier="gpt-5.5",
+                    display_name="GPT 5.5 Text-Only Fixture",
+                    family="gpt-5.5",
+                    integration_id=integration_id,
+                    source=source,
+                    fetched_at=fetched_at,
+                    lightweight=False,
+                )
+            ]
+            skips = []
         case "deterministic-main-only":
             models = [
                 _candidate(
@@ -208,6 +224,13 @@ def _candidate(
     else:
         default_input_tokens = None
         max_input_tokens = 64_000 if lightweight else 128_000
+    input_modalities = (
+        [ModelModality.TEXT, ModelModality.IMAGE]
+        if provider == LLMProvider.OPENROUTER
+        else [ModelModality.TEXT, ModelModality.IMAGE, ModelModality.PDF]
+    )
+    if source == "testenv_fixture:deterministic-brave-text-only":
+        input_modalities = [ModelModality.TEXT]
     return NormalizedModelCandidate(
         provider=provider,
         model_identifier=identifier,
@@ -221,11 +244,7 @@ def _candidate(
                 max_output_tokens=16_000,
             ),
             modalities=ModelModalities(
-                input=(
-                    [ModelModality.TEXT, ModelModality.IMAGE]
-                    if provider == LLMProvider.OPENROUTER
-                    else [ModelModality.TEXT, ModelModality.IMAGE, ModelModality.PDF]
-                ),
+                input=input_modalities,
                 output=[ModelModality.TEXT],
             ),
             tool_calling=ModelToolCallingCapabilities(supported=True),

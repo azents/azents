@@ -138,8 +138,8 @@ api_routes:
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ticket
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ws
-last_verified_at: 2026-09-15
-spec_version: 172
+last_verified_at: 2026-09-25
+spec_version: 173
 ---
 
 # Conversation & Events
@@ -820,6 +820,18 @@ parallel top-level attachments field. Tool output is either a plain string or an
 array containing `OutputTextPart`, `AttachmentOutputPart`, `ArtifactOutputPart`, or `FileOutputPart`;
 the serialized discriminators are `text`/`output_text`, `attachment`, `artifact`, and `file`.
 
+One completed Brave image-search `client_tool_result` may contain multiple ordered
+ModelFile-backed `FileOutputPart` values and independent Exchange
+`AttachmentOutputPart` values alongside bounded text. Each selected thumbnail
+has a distinct output index under the same call identity; unselected or
+unavailable thumbnails included within the bounded text budget retain
+attributable URLs rather than fabricated files. Later entries may be omitted
+with a count when the text budget is exhausted.
+File parts are for later model input, while attachment parts are visible and
+downloadable to the participant. Neither stores image bytes or credentials in
+the event. Provider-hosted image generation retains its own single-image call
+contract.
+
 Every `client_tool_call` and `client_tool_result` persists a closed `wire_dialect`: `json_function`
 or `plaintext_custom`. Call `arguments` remains the exact decoded provider input and must be
 interpreted only through that stored dialect. Result creation copies the dialect from its admitted
@@ -1397,6 +1409,8 @@ presentations.
 
 ## 13. Changelog
 
+- **2026-09-25** — v173. Added ordered multi-thumbnail Brave client-tool
+  results with separate model-file and Exchange attachment parts in one call.
 - **2026-09-15** — v172. Removed Session-owned Runtime Web endpoint, request, and
   cycle resources from the Conversation model and retained only content-free
   Agent-service metadata in tool-call history.

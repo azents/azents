@@ -104,8 +104,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/toolCallActionPresentation.ts
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
   - typescript/apps/azents-web/messages/*/chat.json
-last_verified_at: 2026-09-15
-spec_version: 181
+last_verified_at: 2026-09-25
+spec_version: 182
 ---
 
 # Agent Execution Loop
@@ -980,6 +980,18 @@ return, so individual tool implementations do not own separate general-purpose o
 Normal model input lowering keeps old tool output content instead of replacing it with
 context-pressure placeholders.
 
+The attached Brave Search Toolkit resolves five distinct client functions
+against the direct Brave API without managed Runtime or an MCP process. The
+image function selects bounded thumbnails from the fixed Brave proxy host,
+then the client-result materializer admits multiple generated-file outputs in
+one call with distinct output indices. It pairs each admitted model-only
+FilePart with a participant-visible Exchange attachment. Included image
+entries retain URL/text attribution within the bounded output budget; later
+entries can be omitted with a count. Failed thumbnail fetches do not
+invent image parts; generated-file admission retains its existing ownership,
+compensation, and retry boundaries. Provider-hosted image generation remains
+independent and single-image.
+
 `attachment` parts represent user-agent delivery files and lower to bounded metadata text only.
 `artifact` parts represent agent/tool internal file output and lower to bounded metadata text with
 `artifact://...` URI. `file` parts represent ModelFile-backed rich model input. FilePart native
@@ -1499,6 +1511,8 @@ icon.
 
 ## Changelog
 
+- **2026-09-25** (spec_version 182) — Added direct Brave client-tool execution
+  and ordered multi-image result admission without a Runtime dependency.
 - **2026-09-15** (spec_version 181) — Replaced Runtime Web
   prepare/request/approval-cycle tool behavior with managed-Runtime-gated
   Agent-service request/list/close behavior.

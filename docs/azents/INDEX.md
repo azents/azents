@@ -16,7 +16,7 @@ Design documents are accumulated records and are not listed individually in this
 | Title | Domain | Owner | Last Verified At | Spec Version |
 |---|---|---|---|---|
 | [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-09-24 | 82 |
-| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-09-15 | 172 |
+| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-09-25 | 173 |
 | [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-09-15 | 80 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-08-23 | 15 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-08-18 | 7 |
@@ -24,7 +24,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Runtime Provider](spec/domain/runtime-provider.md) | runtime-provider | - | 2026-09-18 | 33 |
 | [Scheduled Task Domain Spec](spec/domain/scheduled-task.md) | scheduled-task | - | 2026-09-15 | 12 |
 | [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-09-15 | 6 |
-| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-09-15 | 118 |
+| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-09-25 | 119 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-09-16 | 22 |
 | [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-09-19 | 89 |
 
@@ -32,7 +32,7 @@ Design documents are accumulated records and are not listed individually in this
 
 | Title | Owner | Last Verified At | Spec Version |
 |---|---|---|---|
-| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-09-15 | 181 |
+| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-09-25 | 182 |
 | [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-09-17 | 89 |
 | [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-09-16 | 39 |
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-09-15 | 52 |
@@ -42,7 +42,7 @@ Design documents are accumulated records and are not listed individually in this
 | [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-09-12 | 62 |
 | [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-09-12 | 45 |
 | [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-09-13 | 63 |
-| [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-09-17 | 50 |
+| [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-09-25 | 51 |
 | [Kimi OAuth Flow](spec/flow/kimi-oauth.md) | @Hardtack | 2026-09-23 | 3 |
 | [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-09-07 | 6 |
 | [OpenRouter API Key Provider Flow](spec/flow/openrouter-api-key.md) | @Hardtack | 2026-09-15 | 4 |
@@ -87,7 +87,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Per-Prompt Reasoning Effort Is a Run Boundary Historical Requirements Reconstruction](requirements/boundaries-260710-prompt-reasoning-effort-boundaries.md) | boundaries-260710 | 2026-07-10 | - |
 | [Sandbox Runtime / Workspace State Boundary Historical Requirements Reconstruction](requirements/boundary-260524-sandbox-boundary.md) | boundary-260524 | 2026-05-24 | - |
 | [Historical Document Branding Migration Requirements](requirements/branding-260823-historical-document-migration.md) | branding-260823 | 2026-08-23 | 2026-08-23 |
-| [Brave Search Native Toolkit Requirements](requirements/brave-260925-native-search-toolkit.md) | brave-260925 | 2026-09-25 | - |
+| [Brave Search Native Toolkit Requirements](requirements/brave-260925-native-search-toolkit.md) | brave-260925 | 2026-09-25 | 2026-09-25 |
 | [Add Session Sandbox Workspace Browser API Historical Requirements Reconstruction](requirements/browser-260501-browser-api.md) | browser-260501 | 2026-05-01 | 2026-05-02 |
 | [Workspace Project Browser Surface Historical Requirements Reconstruction](requirements/browser-260703-browser-surface.md) | browser-260703 | 2026-07-03 | - |
 | [Built-in Tool Support Discussion Historical Requirements Reconstruction](requirements/builtin-260315-builtin-tools.md) | builtin-260315 | 2026-03-15 | 2026-03-15 |

@@ -1,6 +1,7 @@
 ---
 title: "Brave Search Native Toolkit Requirements"
 created: 2026-09-25
+implemented: 2026-09-25
 tags: [agent, toolkit, search, image]
 document_role: primary
 document_type: requirements
