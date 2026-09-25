@@ -72,8 +72,8 @@ code_paths:
   - typescript/apps/azents-web/src/trpc/routers/toolkit.ts
 api_routes:
   - /toolkit/v1
-last_verified_at: 2026-09-15
-spec_version: 118
+last_verified_at: 2026-09-25
+spec_version: 119
 ---
 
 # Toolkit
@@ -90,6 +90,20 @@ This domain covers four feature groups.
 4. **Managed Skill VFS** — immutable run-scoped `azents://` resources for release-bundled global and Toolkit Provider Skills. Managed files remain outside the Runtime filesystem until `import_file` materializes one selected entry.
 
 All credentials are stored in DB with Fernet (`AZ_CREDENTIAL_ENCRYPTION_KEY`) symmetric encryption and are never exposed in agent prompt. (`CredentialCipher`, [`python/apps/azents/src/azents/core/crypto.py`](../../../../python/apps/azents/src/azents/core/crypto.py))
+
+The attached `brave_search` Toolkit stores a masked, replaceable API key in encrypted
+credentials. Its management form configures country, language, and safe search; an
+explicit connection test makes a quota-consuming Brave Web request, while an
+unchanged saved key can be reused for that test without re-entering it. The
+Runtime-free worker exposes distinct `search_web`, `search_context`,
+`search_news`, `search_images`, and `search_videos` client functions. It calls the
+fixed Brave Search API directly, not a Brave MCP server. Web, context, news,
+and video outputs retain attributable source URLs in bounded text; image entries
+within the output budget retain image and page URLs and attach a bounded set of
+Brave-proxied thumbnails in the same tool result. Later entries can be omitted
+with a count when the text budget is exhausted. Hosted model `web_search` and
+explicit External Channel publication remain separate capabilities. Invalid or missing credentials and
+upstream authorization/quota failures produce safe failures without revealing keys.
 
 ### Team Session execution boundary
 
@@ -1018,6 +1032,8 @@ without requiring a separate Toolkit setup row.
 
 ## Changelog
 
+- **2026-09-25** (spec_version 119) — Added direct, Runtime-free Brave
+  Search Toolkit configuration, connection test, and five distinct native tools.
 - **2026-09-15** (spec_version 118) — Replaced same-root Session approval tools
   with managed-Runtime-gated Agent request/list/close tools and content-free service
   projections.
