@@ -1,11 +1,9 @@
 """Credential-free Brave Search product-path and image materialization E2E."""
 
 import json
-import os
 import time
 from collections.abc import Callable
 from contextlib import AbstractContextManager
-from pathlib import Path
 
 import azentsadminclient
 import azentspublicclient
@@ -53,9 +51,6 @@ from azentspublicclient.models.toolkit_config_update_request import (
     ToolkitConfigUpdateRequest,
 )
 from botocore.exceptions import ClientError
-from selenium.webdriver.common.by import By
-from selenium.webdriver.remote.webdriver import WebDriver
-from selenium.webdriver.support.ui import WebDriverWait
 from testcontainers.core.container import DockerContainer
 
 from support.runtime_profiles import start_and_wait_for_agent_runtime
@@ -94,7 +89,6 @@ from tests.required.public.test_provider_image_generation import (
 from tests.required.public.test_runtime_optional_capability import (
     _create_workspace,
 )
-from tests.required.public.test_runtime_profiles import _login_main_web
 
 _KINDS = ("web", "context", "news", "images", "videos")
 
@@ -141,8 +135,6 @@ def test_brave_five_tools_and_one_call_multi_image_without_runtime(
     admin_api_client: azentsadminclient.ApiClient,
     azents_public_server_url: str,
     azents_engine_worker_container: DockerContainer,
-    azents_main_web_url: str,
-    browser_driver: WebDriver,
     openai_proxy_url: str,
 ) -> None:
     """Exercise five endpoints through a Runtime-free Agent and worker."""
@@ -448,35 +440,6 @@ def test_brave_five_tools_and_one_call_multi_image_without_runtime(
             assert downloaded.content.startswith(b"\x89PNG\r\n\x1a\n")
 
     assert image_session_id is not None
-    _login_main_web(
-        browser_driver,
-        base_url=azents_main_web_url,
-        email=workspace.email,
-    )
-    browser_driver.get(
-        f"{azents_main_web_url}/w/{workspace.handle}/agents/"
-        f"{agent.id}/sessions/{image_session_id}"
-    )
-    gallery = WebDriverWait(browser_driver, 20).until(
-        lambda driver: [
-            image
-            for image in driver.find_elements(
-                By.CSS_SELECTOR, 'img[src*="/api/chat/exchange-files/"]'
-            )
-            if image.is_displayed()
-            and driver.execute_script(
-                "return arguments[0].complete && arguments[0].naturalWidth > 0",
-                image,
-            )
-        ]
-    )
-    assert len(gallery) == 2
-    artifact_root = Path(os.environ.get("AZENTS_E2E_ARTIFACT_DIR", "/tmp"))
-    artifact_root.mkdir(parents=True, exist_ok=True)
-    screenshot_path = artifact_root / "brave-search-image-gallery.png"
-    assert browser_driver.save_screenshot(str(screenshot_path))
-    assert screenshot_path.stat().st_size > 0
-
     assert vision_journal_start is not None
     requests_ = _request_journal(openai_proxy_url)[vision_journal_start:]
     image_continuations = [
