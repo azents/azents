@@ -709,6 +709,104 @@ async def test_materializes_client_tool_image_without_replacing_existing_output(
     )
 
 
+async def test_materializes_ordered_client_images_in_one_result() -> None:
+    """Store two ranked images as distinct model and participant resources."""
+    fixture = _materializer()
+    result = ClientToolResultPayload(
+        call_id="image-search-call",
+        name="brave_search__search_images",
+        status="completed",
+        output=[OutputTextPart(text="Ranked results and source URLs.")],
+        pending_generated_files=[
+            pending_image_generation_output(
+                {"id": "image-search-call", "result": _png_base64(width=2, height=1)},
+                output_index=1,
+            ),
+            pending_image_generation_output(
+                {"id": "image-search-call", "result": _PNG_BASE64},
+                output_index=0,
+            ),
+        ],
+        wire_dialect="json_function",
+    )
+
+    prepared = await fixture.materializer.prepare_client_result(result)
+    assert [image.output_index for image in prepared.generated_images] == [0, 1]
+    output = prepared.result.output
+    assert len(output) == 5
+    assert isinstance(output[0], FileOutputPart)
+    assert isinstance(output[1], AttachmentOutputPart)
+    assert isinstance(output[3], FileOutputPart)
+    assert isinstance(output[4], AttachmentOutputPart)
+    assert output[2] == OutputTextPart(text="Ranked results and source URLs.")
+    assert output[1].attachment_id != output[4].attachment_id
+    assert output[0].model_file_id != output[3].model_file_id
+
+    async with fixture.s3_service.session_manager() as session:
+        await prepared.persist(session)
+    prepared.admitted = True
+    assert len(fixture.model_repository.created) == 2
+    assert len(fixture.exchange_repository.created) == 4
+
+
+async def test_rejects_duplicate_client_rank_before_upload() -> None:
+    """Reject colliding output identities without publishing any objects."""
+    fixture = _materializer()
+    result = ClientToolResultPayload(
+        call_id="image-search-call",
+        name="brave_search__search_images",
+        status="completed",
+        output="Ranked results",
+        pending_generated_files=[
+            pending_image_generation_output(
+                {"id": "image-search-call", "result": _PNG_BASE64},
+                output_index=0,
+            ),
+            pending_image_generation_output(
+                {"id": "image-search-call", "result": _PNG_BASE64},
+                output_index=0,
+            ),
+        ],
+        wire_dialect="json_function",
+    )
+
+    with pytest.raises(ModelCallError, match="identity collided"):
+        await fixture.materializer.prepare_client_result(result)
+    assert fixture.s3_service.uploaded == {}
+
+
+async def test_failed_multi_image_admission_compensates_every_object() -> None:
+    """A failed transaction never leaves one visible file from a search."""
+    fixture = _materializer()
+    result = ClientToolResultPayload(
+        call_id="image-search-call",
+        name="brave_search__search_images",
+        status="completed",
+        output="Ranked results",
+        pending_generated_files=[
+            pending_image_generation_output(
+                {"id": "image-search-call", "result": _PNG_BASE64},
+                output_index=0,
+            ),
+            pending_image_generation_output(
+                {"id": "image-search-call", "result": _png_base64(width=2, height=1)},
+                output_index=1,
+            ),
+        ],
+        wire_dialect="json_function",
+    )
+    prepared = await fixture.materializer.prepare_client_result(result)
+    await prepared.persist(_Session())
+    fixture.exchange_repository.created.clear()
+    fixture.exchange_repository.preview_links.clear()
+    fixture.model_repository.created.clear()
+
+    await prepared.cleanup()
+
+    assert len(fixture.s3_service.uploaded) == 6
+    assert set(fixture.s3_service.deleted) == set(fixture.s3_service.uploaded)
+
+
 async def test_retry_reuses_metadata_and_preserves_admitted_objects() -> None:
     """Keep deterministic resources safe across repeated output admission."""
     fixture = _materializer()
