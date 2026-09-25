@@ -108,6 +108,7 @@ from azents.engine.tools.runtime_io import (
     RuntimeRunnerOperationGenerationError,
     RuntimeRunnerOperationUnavailable,
 )
+from azents.engine.tools.session_history import make_session_history_tools
 from azents.engine.tools.write import make_write_tool
 from azents.rdb.session import SessionManager
 from azents.repos.agent_runtime import AgentRuntimeRepository
@@ -515,6 +516,11 @@ class MemoryReadToolkit(Toolkit[ShellToolkitConfig]):
                         self.session_manager,
                         associated_user_id=associated_user_id,
                     ),
+                    *make_session_history_tools(
+                        agent_id=self._agent_id,
+                        current_session_id=self._session_id,
+                        session_manager=self.session_manager,
+                    ),
                 ]
             )
         return ToolkitState(status=ToolkitStatus.ENABLED, tools=tools)
@@ -717,6 +723,11 @@ class BuiltinToolkit(Toolkit[ShellToolkitConfig]):
                         self.memory_repo,
                         agent_id,
                         self.session_manager,
+                    ),
+                    *make_session_history_tools(
+                        agent_id=agent_id,
+                        current_session_id=self._session_id,
+                        session_manager=self.session_manager,
                     ),
                 ]
             )

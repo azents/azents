@@ -104,8 +104,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/toolCallActionPresentation.ts
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
   - typescript/apps/azents-web/messages/*/chat.json
-last_verified_at: 2026-09-15
-spec_version: 181
+last_verified_at: 2026-09-26
+spec_version: 182
 ---
 
 # Agent Execution Loop
@@ -867,6 +867,19 @@ Model-visible `interrupt_agent` is intentionally narrower and records stop inten
 target agent's current run after rejecting the root and the caller itself.
 
 ## 5. Tool Loop
+
+Memory-enabled runs expose three read-only Session-history tools through the
+Memory read binding in root and subagent execution. Each tool is bound to the
+concrete executing Session ID and rechecks its active root's Agent/Workspace and
+Team/User boundary for every target. `search_sessions` accepts `current` as the
+concrete execution Session and can return matching visible event IDs from a
+specified authorized Session. `read_session_history` presents newest pages
+oldest-to-newest with older/newer cursors or a matching event anchor. It filters
+internal and reverted events before paging. `read_session_tool_result` returns
+only a selected client/hosted tool event's text in bounded chunks, never a
+native artifact or file bytes. Archived targets are unavailable on subsequent
+calls even if their IDs were previously observed. The canonical event
+transcript remains the only history source; no new event or write path is added.
 
 `AgentRunExecution` executes foreground client tool calls in parallel. Each tool result is normalized
 to a `client_tool_result` with status:

@@ -19,7 +19,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-09-15 | 172 |
 | [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-09-15 | 80 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-08-23 | 15 |
-| [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-08-18 | 7 |
+| [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-09-26 | 8 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-09-15 | 25 |
 | [Runtime Provider](spec/domain/runtime-provider.md) | runtime-provider | - | 2026-09-18 | 33 |
 | [Scheduled Task Domain Spec](spec/domain/scheduled-task.md) | scheduled-task | - | 2026-09-15 | 12 |
@@ -32,7 +32,7 @@ Design documents are accumulated records and are not listed individually in this
 
 | Title | Owner | Last Verified At | Spec Version |
 |---|---|---|---|
-| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-09-15 | 181 |
+| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-09-26 | 182 |
 | [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-09-17 | 89 |
 | [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-09-16 | 39 |
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-09-15 | 52 |
@@ -279,6 +279,7 @@ Design documents are accumulated records and are not listed individually in this
 | [MCP Egress Proxy Historical Requirements Reconstruction](requirements/mcp-260319-mcp-egress-proxy.md) | mcp-260319 | 2026-03-19 | 2026-03-19 |
 | [Agent Home Sidecar Discussion (MCP stdio + File ops) Historical Requirements Reconstruction](requirements/mcp-260325-mcp-stdio-sidecar.md) | mcp-260325 | 2026-03-25 | 2026-03-25 |
 | [Move Memory Storage from Filesystem to PostgreSQL Historical Requirements Reconstruction](requirements/memory-260426-memory-filesystem-to-db.md) | memory-260426 | 2026-04-26 | 2026-04-26 |
+| [Memory-Gated Session History Lookup Requirements](requirements/memory-260925-session-history-lookup.md) | memory-260925 | 2026-09-25 | - |
 | [Message Queueing — User Message Injection During Run Historical Requirements Reconstruction](requirements/message-260305-message-queueing.md) | message-260305 | 2026-03-05 | 2026-03-11 |
 | [Display Inference Provenance from User Message Metadata Historical Requirements Reconstruction](requirements/message-260710-message-profile-provenance-display.md) | message-260710 | 2026-07-10 | - |
 | [Resolve User Message Profiles During Buffer Preparation Historical Requirements Reconstruction](requirements/message-260712-message-profile-during-buffer-preparation.md) | message-260712 | 2026-07-12 | - |
@@ -721,6 +722,7 @@ Design documents are accumulated records and are not listed individually in this
 - [MCP Egress Proxy Historical Decision Reconstruction](adr/mcp-260319-mcp-egress-proxy.md)
 - [Agent Home Sidecar Discussion (MCP stdio + File ops)](adr/mcp-260325-mcp-stdio-sidecar.md)
 - [Move Memory Storage from Filesystem to PostgreSQL](adr/memory-260426-memory-filesystem-to-db.md)
+- [Memory-Gated Session History Lookup Technical Decisions](adr/memory-260925-session-history-lookup.md)
 - [Message Queueing — User Message Injection During Run Historical Decision Reconstruction](adr/message-260305-message-queueing.md)
 - [Display Inference Provenance from User Message Metadata](adr/message-260710-message-profile-provenance-display.md)
 - [Resolve User Message Profiles During Buffer Preparation](adr/message-260712-message-profile-during-buffer-preparation.md)
