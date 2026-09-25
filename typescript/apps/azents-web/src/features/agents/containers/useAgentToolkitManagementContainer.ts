@@ -1,11 +1,15 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useWindowEvent } from "@mantine/hooks";
+import { useTranslations } from "next-intl";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { trpc } from "@/trpc/client";
 import {
   type AgentToolkitEditorState,
   type AgentToolkitManagementState,
   type AgentToolkitMutationState,
+  canAuthorizeAgentToolkitOAuth,
+  decodeAgentToolkitOAuthCallback,
   projectAgentToolkitManagementState,
 } from "../agentToolkitManagementState";
 import type { AgentToolkitManagementItemResponse } from "@azents/public-client";
@@ -24,6 +28,9 @@ export interface AgentToolkitManagementContainerOutput extends AgentToolkitManag
   pending: boolean;
   attachPending: boolean;
   deletePending: boolean;
+  canAuthorizeShared: boolean;
+  authorizationPendingId: string | null;
+  onAuthorize: (item: AgentToolkitManagementItemResponse) => void;
   onSelectedToolkitChange: (toolkitId: string | null) => void;
   onStartAdd: () => void;
   onToolkitTypeChange: (toolkitType: string | null) => void;
@@ -42,6 +49,7 @@ export function useAgentToolkitManagementContainer({
   handle,
   agentId,
 }: AgentToolkitManagementContainerProps): AgentToolkitManagementContainerOutput {
+  const t = useTranslations("workspace.agents.toolkitManagement");
   const utils = trpc.useUtils();
   const [selectedToolkitId, setSelectedToolkitId] = useState<string | null>(
     null,
@@ -54,8 +62,15 @@ export function useAgentToolkitManagementContainer({
   );
   const [deleteTarget, setDeleteTarget] =
     useState<AgentToolkitManagementItemResponse | null>(null);
+  const [authorizationPendingId, setAuthorizationPendingId] = useState<
+    string | null
+  >(null);
+  const oauthPopup = useRef<Window | null>(null);
   const query = trpc.toolkit.listAgentManagement.useQuery({ handle, agentId });
   const definitionsQuery = trpc.toolkit.listToolkits.useQuery();
+  const memberQuery = trpc.workspaceMember.me.useQuery({ handle });
+  const canAuthorizeShared =
+    memberQuery.data?.role === "owner" || memberQuery.data?.role === "manager";
   const invalidate = useCallback(async (): Promise<void> => {
     await utils.toolkit.listAgentManagement.invalidate({ handle, agentId });
   }, [agentId, handle, utils.toolkit.listAgentManagement]);
@@ -94,6 +109,97 @@ export function useAgentToolkitManagementContainer({
     onError: (error) =>
       setMutationState({ type: "ERROR", message: error.message }),
   });
+  const connectSharedMutation = trpc.toolkit.connectOauth.useMutation();
+  const connectAgentMutation = trpc.toolkit.connectAgentOauth.useMutation();
+  useWindowEvent("message", (event: MessageEvent<unknown>): void => {
+    const callback = decodeAgentToolkitOAuthCallback(
+      event,
+      window.location.origin,
+      oauthPopup.current,
+    );
+    if (callback == null) {
+      return;
+    }
+    oauthPopup.current = null;
+    if (callback === "SUCCESS") {
+      setMutationState({ type: "IDLE" });
+      void invalidate();
+    } else {
+      setMutationState({ type: "ERROR", message: t("authorizationFailed") });
+    }
+  });
+  const onAuthorize = useCallback(
+    (item: AgentToolkitManagementItemResponse): void => {
+      if (
+        !canAuthorizeAgentToolkitOAuth(item, canAuthorizeShared) ||
+        authorizationPendingId != null
+      ) {
+        return;
+      }
+      if (oauthPopup.current && !oauthPopup.current.closed) {
+        oauthPopup.current.focus();
+        return;
+      }
+      setMutationState({ type: "IDLE" });
+      // Reserve a popup in the click handler before awaiting the OAuth URL.
+      const popup = window.open(
+        "about:blank",
+        "mcp-oauth-popup",
+        "width=1024,height=768",
+      );
+      if (!popup) {
+        setMutationState({
+          type: "ERROR",
+          message: t("popupBlocked"),
+        });
+        return;
+      }
+      oauthPopup.current = popup;
+      setAuthorizationPendingId(item.toolkit.id);
+      const request =
+        item.ownership_scope === "workspace_shared"
+          ? connectSharedMutation.mutateAsync({
+              handle,
+              toolkitConfigId: item.toolkit.id,
+            })
+          : connectAgentMutation.mutateAsync({
+              handle,
+              agentId,
+              toolkitConfigId: item.toolkit.id,
+            });
+      void request
+        .then((data) => {
+          if (popup.closed) {
+            setMutationState({
+              type: "ERROR",
+              message: t("popupClosed"),
+            });
+          } else {
+            popup.location.href = data.authorization_url;
+          }
+        })
+        .catch((error: unknown) => {
+          popup.close();
+          setMutationState({
+            type: "ERROR",
+            message:
+              error instanceof Error
+                ? error.message
+                : t("authorizationStartFailed"),
+          });
+        })
+        .finally(() => setAuthorizationPendingId(null));
+    },
+    [
+      agentId,
+      authorizationPendingId,
+      canAuthorizeShared,
+      connectAgentMutation,
+      connectSharedMutation,
+      handle,
+      t,
+    ],
+  );
   const state = useMemo(
     () =>
       projectAgentToolkitManagementState({
@@ -136,6 +242,9 @@ export function useAgentToolkitManagementContainer({
       deleteMutation.isPending,
     attachPending: attachMutation.isPending,
     deletePending: deleteMutation.isPending,
+    canAuthorizeShared,
+    authorizationPendingId,
+    onAuthorize,
     onSelectedToolkitChange: setSelectedToolkitId,
     onStartAdd: () => {
       setMutationState({ type: "IDLE" });

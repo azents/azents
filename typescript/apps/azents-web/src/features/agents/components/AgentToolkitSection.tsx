@@ -17,12 +17,20 @@ import {
   Text,
   Title,
 } from "@mantine/core";
-import { IconEdit, IconLink, IconPlus, IconTrash } from "@tabler/icons-react";
+import {
+  IconEdit,
+  IconLink,
+  IconLock,
+  IconPlus,
+  IconTrash,
+} from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
+import Link from "next/link";
 import { useMemo, useState } from "react";
 import { ToolkitFormPage } from "@/features/toolkits/ToolkitFormPage";
 import { createReactContainer } from "@/shared/lib/createReactContainer";
 import { trpc } from "@/trpc/client";
+import { canAuthorizeAgentToolkitOAuth } from "../agentToolkitManagementState";
 import {
   type AgentToolkitManagementContainerOutput,
   useAgentToolkitManagementContainer,
@@ -61,6 +69,9 @@ export function ManagedAgentToolkitSectionView({
   pending,
   attachPending,
   deletePending,
+  canAuthorizeShared,
+  authorizationPendingId,
+  onAuthorize,
   onSelectedToolkitChange,
   onStartAdd,
   onToolkitTypeChange,
@@ -212,6 +223,12 @@ export function ManagedAgentToolkitSectionView({
                 key={`${item.ownership_scope}:${item.toolkit.id}`}
                 item={item}
                 pending={pending}
+                canAuthorizeShared={canAuthorizeShared}
+                authorizationPending={
+                  authorizationPendingId === item.toolkit.id
+                }
+                workspaceEditHref={`/w/${handle}/toolkits/${item.toolkit.id}/edit`}
+                onAuthorize={() => onAuthorize(item)}
                 onDetach={() => {
                   if (item.agent_toolkit_id) {
                     onDetach(item.agent_toolkit_id);
@@ -264,6 +281,10 @@ const ManagedAgentToolkitSection = createReactContainer(
 export interface ManagedToolkitCardProps {
   item: AgentToolkitManagementItemResponse;
   pending: boolean;
+  canAuthorizeShared: boolean;
+  authorizationPending: boolean;
+  workspaceEditHref: string;
+  onAuthorize: () => void;
   onDetach: () => void;
   onEdit: () => void;
   onToggle: () => void;
@@ -273,6 +294,10 @@ export interface ManagedToolkitCardProps {
 export function ManagedToolkitCard({
   item,
   pending,
+  canAuthorizeShared,
+  authorizationPending,
+  workspaceEditHref,
+  onAuthorize,
   onDetach,
   onEdit,
   onToggle,
@@ -280,6 +305,8 @@ export function ManagedToolkitCard({
 }: ManagedToolkitCardProps): React.ReactElement {
   const t = useTranslations("workspace.agents");
   const shared = item.ownership_scope === "workspace_shared";
+  const needsAuthorization = item.readiness === "authorization_required";
+  const oauth = canAuthorizeAgentToolkitOAuth(item, canAuthorizeShared);
   return (
     <Card withBorder padding="sm">
       <Stack gap="xs">
@@ -313,48 +340,79 @@ export function ManagedToolkitCard({
               </Badge>
             </Group>
           </Stack>
-          {shared ? (
-            <Button
-              size="xs"
-              variant="subtle"
-              color="red"
-              leftSection={<IconTrash size={14} />}
-              disabled={pending}
-              onClick={onDetach}
-            >
-              {t("toolkitManagement.detach")}
-            </Button>
-          ) : (
-            <Group gap={4}>
-              <ActionIcon
-                variant="subtle"
-                aria-label={t("toolkitManagement.edit")}
-                disabled={pending}
-                onClick={onEdit}
-              >
-                <IconEdit size={16} />
-              </ActionIcon>
+          <Group gap={4}>
+            {needsAuthorization &&
+              (shared ? canAuthorizeShared : true) &&
+              (oauth ? (
+                <Button
+                  size="xs"
+                  variant="light"
+                  leftSection={<IconLock size={14} />}
+                  disabled={pending}
+                  loading={authorizationPending}
+                  onClick={onAuthorize}
+                >
+                  {item.toolkit.oauth_connection == null
+                    ? t("toolkitManagement.authorize")
+                    : t("toolkitManagement.reauthorize")}
+                </Button>
+              ) : shared ? (
+                <Button
+                  size="xs"
+                  variant="light"
+                  component={Link}
+                  href={workspaceEditHref}
+                >
+                  {t("toolkitManagement.reviewAuthorization")}
+                </Button>
+              ) : (
+                <Button size="xs" variant="light" onClick={onEdit}>
+                  {t("toolkitManagement.reviewAuthorization")}
+                </Button>
+              ))}
+            {shared ? (
               <Button
                 size="xs"
                 variant="subtle"
-                disabled={pending}
-                onClick={onToggle}
-              >
-                {item.toolkit.enabled
-                  ? t("toolkitManagement.disable")
-                  : t("toolkitManagement.enable")}
-              </Button>
-              <ActionIcon
-                variant="subtle"
                 color="red"
-                aria-label={t("toolkitManagement.delete")}
-                disabled={pending}
-                onClick={onDelete}
+                leftSection={<IconTrash size={14} />}
+                disabled={pending || authorizationPending}
+                onClick={onDetach}
               >
-                <IconTrash size={16} />
-              </ActionIcon>
-            </Group>
-          )}
+                {t("toolkitManagement.detach")}
+              </Button>
+            ) : (
+              <>
+                <ActionIcon
+                  variant="subtle"
+                  aria-label={t("toolkitManagement.edit")}
+                  disabled={pending || authorizationPending}
+                  onClick={onEdit}
+                >
+                  <IconEdit size={16} />
+                </ActionIcon>
+                <Button
+                  size="xs"
+                  variant="subtle"
+                  disabled={pending || authorizationPending}
+                  onClick={onToggle}
+                >
+                  {item.toolkit.enabled
+                    ? t("toolkitManagement.disable")
+                    : t("toolkitManagement.enable")}
+                </Button>
+                <ActionIcon
+                  variant="subtle"
+                  color="red"
+                  aria-label={t("toolkitManagement.delete")}
+                  disabled={pending || authorizationPending}
+                  onClick={onDelete}
+                >
+                  <IconTrash size={16} />
+                </ActionIcon>
+              </>
+            )}
+          </Group>
         </Flex>
         {item.toolkit.description && (
           <Text size="sm" c="dimmed">
@@ -363,7 +421,9 @@ export function ManagedToolkitCard({
         )}
         {shared && (
           <Text size="xs" c="dimmed">
-            {t("toolkitManagement.workspaceBoundary")}
+            {needsAuthorization && !canAuthorizeShared
+              ? t("toolkitManagement.workspaceAuthorizationRestricted")
+              : t("toolkitManagement.workspaceBoundary")}
           </Text>
         )}
       </Stack>

@@ -21,7 +21,7 @@ Details of all living specs. Synchronized from frontmatter.
 | runtime-provider | [Runtime Provider](domain/runtime-provider.md) | - | 2026-09-18 | 33 |
 | scheduled-task | [Scheduled Task Domain Spec](domain/scheduled-task.md) | - | 2026-09-15 | 12 |
 | system-settings | [System Settings](domain/system-settings.md) | @Hardtack | 2026-09-15 | 6 |
-| toolkit | [Toolkit](domain/toolkit.md) | @Hardtack | 2026-09-25 | 119 |
+| toolkit | [Toolkit](domain/toolkit.md) | @Hardtack | 2026-09-25 | 120 |
 | user-auth | [User & Authentication](domain/user-auth.md) | @Hardtack | 2026-09-16 | 22 |
 | workspace | [Workspace & Membership](domain/workspace.md) | @Hardtack | 2026-09-19 | 89 |
 
@@ -41,7 +41,7 @@ Details of all living specs. Synchronized from frontmatter.
 | [External Channel Provider Ingress](flow/external-channel-provider-ingress.md) | @Hardtack | 2026-09-13 | 63 |
 | [File Exchange Storage](flow/file-exchange-storage.md) | @Hardtack | 2026-09-25 | 51 |
 | [Kimi OAuth Flow](flow/kimi-oauth.md) | @Hardtack | 2026-09-23 | 3 |
-| [MCP OAuth Flow](flow/mcp-oauth.md) | @Hardtack | 2026-09-07 | 6 |
+| [MCP OAuth Flow](flow/mcp-oauth.md) | @Hardtack | 2026-09-25 | 7 |
 | [OpenRouter API Key Provider Flow](flow/openrouter-api-key.md) | @Hardtack | 2026-09-15 | 4 |
 | [Periodic Execution Flow Spec](flow/periodic-execution.md) | - | 2026-09-15 | 20 |
 | [Public Release Publication](flow/public-release.md) | @Hardtack | 2026-09-18 | 3 |

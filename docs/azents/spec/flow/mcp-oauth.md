@@ -19,8 +19,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/agents/components/AgentToolkitSection.tsx
   - typescript/apps/azents-web/src/features/toolkits/**
   - typescript/apps/azents-web/src/trpc/routers/toolkit.ts
-last_verified_at: 2026-09-07
-spec_version: 6
+last_verified_at: 2026-09-25
+spec_version: 7
 ---
 
 # MCP OAuth Flow
@@ -262,7 +262,7 @@ loading/error prompt or retry pseudo-tool is added to the model-visible surface.
 
 ## UI Behavior
 
-Workspace Toolkit edit pages and the authority-gated saved-Agent Toolkit form show OAuth connection state for `mcp` with `auth_type=oauth2`, `notion`, and `sentry`.
+Workspace Toolkit edit pages and the authority-gated saved-Agent Toolkit form show OAuth connection state for `mcp` with `auth_type=oauth2`, `notion`, and `sentry`. When a saved-Agent card for one of these Toolkits shows `authorization_required`, a Workspace Owner/Manager can connect or reconnect a Workspace-shared Toolkit directly, and an Agent administrator can do the same for an Agent-only Toolkit. The card uses the existing ownership-specific OAuth endpoints; callback success refreshes the Agent management projection. Other authorization-required Toolkit types use their editor instead of the MCP OAuth route.
 
 Displayed fields:
 

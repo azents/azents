@@ -1,4 +1,5 @@
 import { rem } from "@mantine/core";
+import { expect, fn, userEvent, within } from "storybook/test";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import { ManagedToolkitCard } from "./AgentToolkitSection";
 import type { AgentToolkitManagementItemResponse } from "@azents/public-client";
@@ -39,6 +40,10 @@ const meta = {
   args: {
     item: shared,
     pending: false,
+    canAuthorizeShared: true,
+    authorizationPending: false,
+    workspaceEditHref: "/w/acme/toolkits/toolkit-1/edit",
+    onAuthorize: fn(),
     onDetach: () => {},
     onEdit: () => {},
     onToggle: () => {},
@@ -50,6 +55,52 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const WorkspaceShared = {} satisfies Story;
+
+export const WorkspaceSentryAuthorizationRequired = {
+  args: {
+    item: {
+      ...shared,
+      readiness: "authorization_required",
+      toolkit: {
+        ...shared.toolkit,
+        name: "Sentry",
+        toolkit_type: "sentry",
+      },
+    },
+  },
+  play: async ({ args, canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(canvas.getByRole("button", { name: "Authorize" }));
+    await expect(args.onAuthorize).toHaveBeenCalledOnce();
+    await expect(canvas.getByRole("button", { name: "Detach" })).toBeVisible();
+  },
+} satisfies Story;
+
+export const WorkspaceSentryAuthorizationPending = {
+  args: {
+    ...WorkspaceSentryAuthorizationRequired.args,
+    authorizationPending: true,
+  },
+  play: async ({ canvasElement }) => {
+    await expect(
+      within(canvasElement).getByRole("button", { name: "Authorize" }),
+    ).toBeDisabled();
+  },
+} satisfies Story;
+
+export const WorkspaceSentryWithoutManagerPermission = {
+  args: {
+    ...WorkspaceSentryAuthorizationRequired.args,
+    canAuthorizeShared: false,
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      canvas.queryByRole("button", { name: "Authorize" }),
+    ).toBeNull();
+    await expect(canvas.getByRole("button", { name: "Detach" })).toBeVisible();
+  },
+} satisfies Story;
 
 export const AgentOnlyAuthorizationRequired = {
   args: {
@@ -63,8 +114,33 @@ export const AgentOnlyAuthorizationRequired = {
         id: "toolkit-2",
         name: "Private MCP",
         toolkit_type: "mcp",
+        config: { auth_type: "oauth2" },
       },
     },
+  },
+  play: async ({ args, canvasElement }) => {
+    await userEvent.click(
+      within(canvasElement).getByRole("button", { name: "Authorize" }),
+    );
+    await expect(args.onAuthorize).toHaveBeenCalledOnce();
+  },
+} satisfies Story;
+
+export const WorkspaceGitHubAuthorizationRequired = {
+  args: {
+    item: {
+      ...shared,
+      readiness: "authorization_required",
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      canvas.getByRole("link", { name: "Review authorization" }),
+    ).toHaveAttribute("href", "/w/acme/toolkits/toolkit-1/edit");
+    await expect(
+      canvas.queryByRole("button", { name: "Authorize" }),
+    ).toBeNull();
   },
 } satisfies Story;
 
