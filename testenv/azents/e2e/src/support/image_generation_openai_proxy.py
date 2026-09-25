@@ -1314,6 +1314,13 @@ class _Handler(BaseHTTPRequestHandler):
                 arguments={"prompt": _OPENAI_IMAGE_PROMPT},
             )
             return
+        if self.path == "/v1/responses" and user_text == _FOLLOW_UP_PROMPT:
+            self._write_text_response(
+                request,
+                "PROVIDER_IMAGE_GENERATION_FOLLOW_UP_COMPLETED",
+                response_id="resp_openai_client_image_follow_up",
+            )
+            return
         if (
             self.path == "/v1/responses"
             and "Brave Search E2E external_channel" in json.dumps(request)
