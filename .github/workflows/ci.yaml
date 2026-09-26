@@ -1024,8 +1024,8 @@ jobs:
           case "${{ matrix.name }}" in
             azents-runtime-runner)
               docker run --rm --entrypoint sh "${{ matrix.image }}" -ec \
-                'docker --version | grep -F "Docker version 29.8.0" &&
-                 docker buildx version | grep -F "github.com/docker/buildx v0.37.0" &&
+                'docker --version | grep -F "Docker version 29.8.1" &&
+                 docker buildx version | grep -F "github.com/docker/buildx v0.37.1" &&
                  docker compose version | grep -F "Docker Compose version v5.5.1" &&
                  test -z "${DOCKER_BUILDKIT:-}" &&
                  test -z "${COMPOSE_DOCKER_CLI_BUILD:-}" &&
@@ -1040,7 +1040,7 @@ jobs:
               ;;
             azents-runtime-engine)
               docker run --rm --entrypoint dockerd "${{ matrix.image }}" --version \
-                | grep -F 'Docker version 29.8.0'
+                | grep -F 'Docker version 29.8.1'
               ;;
           esac
 
