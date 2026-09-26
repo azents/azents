@@ -12,14 +12,19 @@ import httpx
 from azcommon.result import Failure, Success
 from azcommon.uuid import uuid7
 from fastapi import Depends
+from openai import AsyncOpenAI
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.credentials import XaiOAuthSecrets
+from azents.core.credentials import ChatGPTOAuthSecrets, XaiOAuthSecrets
 from azents.core.enums import (
     AgentRunPhase,
     AgentRunStatus,
     EventKind,
     LLMProvider,
+)
+from azents.core.image_generation_config import (
+    ExplicitImageGenerationModel,
+    decode_image_generation_model_config,
 )
 from azents.core.model_operation import ModelOperationKind
 from azents.core.tools import TurnContext
@@ -167,6 +172,7 @@ from azents.engine.run.tool_budget import (
 )
 from azents.engine.run.types import (
     USER_STOP_CANCEL_MESSAGE,
+    BuiltinToolSpec,
     CheckStop,
     FunctionTool,
     FunctionToolError,
@@ -177,6 +183,11 @@ from azents.engine.tooling.tool_search import (
     ToolWorkingSetStore,
     make_tool_search_tool,
     project_tool_catalog,
+)
+from azents.engine.tools.openai_image_generation import (
+    OPENAI_IMAGE_DEFAULT_MODEL,
+    OpenAIImageGenerationExecutor,
+    openai_images_client_factory,
 )
 from azents.engine.tools.run_tool_to_file import (
     RUN_TOOL_TO_FILE_NAME,
@@ -195,6 +206,7 @@ from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session_system_prompt_snapshot import (
     AgentSessionSystemPromptSnapshotRepository,
 )
+from azents.repos.chatgpt_oauth_runtime import ChatGPTOAuthRuntimeRepository
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.llm_provider_integration.deps import (
     get_llm_provider_integration_repository,
@@ -202,6 +214,15 @@ from azents.repos.llm_provider_integration.deps import (
 from azents.repos.model_file_pin import ModelFilePinRepository
 from azents.repos.session_execution.ownership import OwnerBoundSessionManager
 from azents.services.artifact import ArtifactService
+from azents.services.chatgpt_oauth.data import (
+    ProviderRejected as ChatGPTProviderRejected,
+)
+from azents.services.chatgpt_oauth.data import (
+    ProviderUnavailable as ChatGPTProviderUnavailable,
+)
+from azents.services.chatgpt_oauth.runtime import (
+    refresh_runtime_tokens as refresh_chatgpt_runtime_tokens,
+)
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.model_file import ModelFileService
 from azents.services.terminal_finalization import TerminalRunFinalizationCoordinator
@@ -447,6 +468,91 @@ class AgentEngineAdapter:
             refresh_access_token=(
                 refresh_access_token
                 if request.provider == LLMProvider.XAI_OAUTH
+                else None
+            ),
+        ).make_tool()
+
+    def _openai_image_generation_tool(
+        self, request: RunRequest, selection: BuiltinToolSpec
+    ) -> FunctionTool:
+        """Bind the selected OpenAI integration to a client image tool."""
+        access_token = request.credential_kwargs.get("api_key")
+        if not isinstance(access_token, str) or not access_token:
+            raise ClientBuiltinToolImplementationUnavailableError(
+                "OpenAI image generation requires an integration credential."
+            )
+        model_choice = decode_image_generation_model_config(selection.config)
+        model_identifier = (
+            model_choice.model_identifier
+            if isinstance(model_choice, ExplicitImageGenerationModel)
+            else OPENAI_IMAGE_DEFAULT_MODEL
+        )
+        integration_id = (
+            request.inference_state.model_selection.llm_provider_integration_id
+            if request.inference_state is not None
+            else None
+        )
+
+        async def refresh_credential() -> None:
+            if integration_id is None:
+                raise FunctionToolError(
+                    "ChatGPT OAuth reconnect is required for image generation."
+                )
+            persistence_repository = ChatGPTOAuthRuntimeRepository(
+                integration_repository=self.integration_repository,
+                session_manager=self.session_manager,
+            )
+            integration = await persistence_repository.load_integration(
+                integration_id=integration_id
+            )
+            if (
+                integration is None
+                or integration.workspace_id != request.workspace_id
+                or integration.provider != LLMProvider.CHATGPT_OAUTH
+            ):
+                raise FunctionToolError(
+                    "ChatGPT OAuth reconnect is required for image generation."
+                )
+            refreshed = await refresh_chatgpt_runtime_tokens(
+                integration=integration,
+                persistence_repository=persistence_repository,
+            )
+            match refreshed:
+                case Success(updated):
+                    if not isinstance(updated.secrets, ChatGPTOAuthSecrets):
+                        raise FunctionToolError(
+                            "ChatGPT OAuth reconnect is required for image generation."
+                        )
+                    request.credential_kwargs["api_key"] = updated.secrets.access_token
+                case Failure(error):
+                    match error:
+                        case ChatGPTProviderRejected():
+                            message = (
+                                "ChatGPT OAuth reconnect is required for "
+                                "image generation."
+                            )
+                        case ChatGPTProviderUnavailable():
+                            message = (
+                                "ChatGPT OAuth is temporarily unavailable. "
+                                "Try again later."
+                            )
+                        case _ as unreachable:
+                            assert_never(unreachable)
+                    raise FunctionToolError(message)
+
+        def client_factory() -> AsyncOpenAI:
+            config = openai_responses_client_config(
+                provider=request.provider,
+                credential_kwargs=request.credential_kwargs,
+            )
+            return openai_images_client_factory(config)()
+
+        return OpenAIImageGenerationExecutor(
+            model_identifier=model_identifier,
+            client_factory=client_factory,
+            refresh_credential=(
+                refresh_credential
+                if request.provider == LLMProvider.CHATGPT_OAUTH
                 else None
             ),
         ).make_tool()
@@ -704,6 +810,14 @@ class AgentEngineAdapter:
             )
             client_builtin_tools: list[FunctionTool] = []
             for tool in resolved_builtin_tools.client_executed:
+                if tool.name == "image_generation" and request.provider in {
+                    LLMProvider.OPENAI,
+                    LLMProvider.CHATGPT_OAUTH,
+                }:
+                    client_builtin_tools.append(
+                        self._openai_image_generation_tool(request, tool)
+                    )
+                    continue
                 if tool.name == "image_generation" and request.provider in {
                     LLMProvider.XAI,
                     LLMProvider.XAI_OAUTH,

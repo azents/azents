@@ -5,6 +5,7 @@ from collections.abc import Mapping, Sequence
 from azents.core.enums import LLMProvider
 
 _IMAGE_GENERATION_OPENAI_MODEL_PREFIXES = (
+    "gpt-6",
     "gpt-5",
     "gpt-4.1",
     "gpt-4o",
@@ -40,6 +41,17 @@ def _supports_image_generation(
     model_identifier: str,
     metadata: Mapping[str, object],
 ) -> bool:
+    if provider in {LLMProvider.OPENAI, LLMProvider.CHATGPT_OAUTH}:
+        if metadata.get("supports_function_calling") is False:
+            return False
+        if metadata.get("mode") not in {None, "chat"}:
+            return False
+        normalized = model_identifier.removeprefix("openai/").lower()
+        return normalized.startswith(_IMAGE_GENERATION_OPENAI_MODEL_PREFIXES) or any(
+            _string_sequence_contains(metadata.get(key), "image_generation")
+            for key in ("supported_builtin_tools", "experimental_supported_tools")
+        )
+
     explicit = metadata.get("supports_image_generation")
     if isinstance(explicit, bool):
         return explicit
@@ -54,10 +66,7 @@ def _supports_image_generation(
             metadata.get("mode") == "chat"
             and metadata.get("supports_function_calling") is True
         )
-    if provider not in {LLMProvider.OPENAI, LLMProvider.CHATGPT_OAUTH}:
-        return False
-    normalized = model_identifier.removeprefix("openai/").lower()
-    return normalized.startswith(_IMAGE_GENERATION_OPENAI_MODEL_PREFIXES)
+    return False
 
 
 def _string_sequence_contains(value: object, expected: str) -> bool:

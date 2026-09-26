@@ -16,7 +16,10 @@ from typing import ClassVar, NamedTuple, Protocol, runtime_checkable
 from urllib.parse import parse_qs, urlsplit
 
 _PROMPT = "Provider image generation handoff"
+_EXPLICIT_IMAGE_PROMPT = "Provider image generation explicit pin handoff"
 _FOLLOW_UP_PROMPT = "Provider image generation follow-up"
+_OPENAI_IMAGE_PROMPT = "A deterministic OpenAI image"
+_OPENAI_IMAGE_CALL_ID = "call_openai_image_generation"
 _BRAVE_PROMPT_PREFIX = "Brave Search E2E "
 _BRAVE_KINDS = ("web", "context", "news", "images", "videos")
 _SEMANTIC_PROMPT = "Provider semantic web search handoff"
@@ -98,6 +101,7 @@ _IMAGE_PATH = Path(
 )
 _OPENAI_MODEL_LIST_PATH = "/v1/models"
 _JOURNAL_PATH = "/v1/_image_generation_requests"
+_OPENAI_IMAGE_JOURNAL_PATH = "/v1/_openai_images_requests"
 _DYNAMIC_WORKTREE_JOURNAL_PATH = "/v1/_dynamic_worktree_requests"
 _EXTERNAL_CHANNEL_PROGRESS_JOURNAL_PATH = "/v1/_external_channel_progress_requests"
 _EXTERNAL_CHANNEL_FILE_JOURNAL_PATH = "/v1/_external_channel_file_requests"
@@ -139,6 +143,7 @@ _XAI_OAUTH_REFRESH_IMAGE_PROMPT = "A deterministic xAI OAuth refresh aurora"
 _XAI_OAUTH_REJECTED_IMAGE_PROMPT = "A deterministic rejected xAI OAuth aurora"
 _CAPTURED_MODEL_PROMPTS = {
     _PROMPT,
+    _EXPLICIT_IMAGE_PROMPT,
     _FOLLOW_UP_PROMPT,
     "Per prompt Fast retry preserves prepared option",
     "Per prompt fast profile",
@@ -1137,6 +1142,7 @@ def _external_channel_quiet_work_barrier_binding(body: bytes) -> str | None:
 
 class _State:
     requests: ClassVar[list[dict[str, object]]] = []
+    openai_image_requests: ClassVar[list[dict[str, object]]] = []
     dynamic_worktree_requests: ClassVar[list[dict[str, object]]] = []
     external_channel_progress_requests: ClassVar[list[dict[str, object]]] = []
     external_channel_file_requests: ClassVar[list[dict[str, object]]] = []
@@ -1233,7 +1239,7 @@ class _Handler(BaseHTTPRequestHandler):
             self._write_xai_device_code()
             return
         if self.path == "/v1/images/generations":
-            self._write_xai_imagine_response(body)
+            self._write_image_api_response(body)
             return
         if self.path == "/oauth2/token":
             self._write_xai_oauth_token_response(body)
@@ -1280,8 +1286,40 @@ class _Handler(BaseHTTPRequestHandler):
         ):
             with _State.lock:
                 _State.requests.append(request)
-        if self.path == "/v1/responses" and user_text == _PROMPT:
-            self._write_image_generation_response(request)
+        if self.path == "/v1/responses" and user_text in {
+            _PROMPT,
+            _EXPLICIT_IMAGE_PROMPT,
+        }:
+            call_id = (
+                _OPENAI_IMAGE_CALL_ID
+                if user_text == _PROMPT
+                else f"{_OPENAI_IMAGE_CALL_ID}_explicit"
+            )
+            if has_current_tool_output(request, call_id):
+                self._write_text_response(
+                    request,
+                    "OPENAI_CLIENT_IMAGE_GENERATION_COMPLETED",
+                    response_id="resp_openai_client_image_completed",
+                )
+                return
+            if not _request_has_named_tool(request, "image_generation"):
+                self._write_json(
+                    409, {"error": {"message": "image_generation tool is unavailable"}}
+                )
+                return
+            self._write_function_call_response(
+                request,
+                call_id=call_id,
+                name="image_generation",
+                arguments={"prompt": _OPENAI_IMAGE_PROMPT},
+            )
+            return
+        if self.path == "/v1/responses" and user_text == _FOLLOW_UP_PROMPT:
+            self._write_text_response(
+                request,
+                "PROVIDER_IMAGE_GENERATION_FOLLOW_UP_COMPLETED",
+                response_id="resp_openai_client_image_follow_up",
+            )
             return
         if (
             self.path == "/v1/responses"
@@ -2439,6 +2477,8 @@ class _Handler(BaseHTTPRequestHandler):
         """Return the journal selected by the current request path."""
         if self.path == _JOURNAL_PATH:
             return _State.requests
+        if self.path == _OPENAI_IMAGE_JOURNAL_PATH:
+            return _State.openai_image_requests
         if self.path == _DYNAMIC_WORKTREE_JOURNAL_PATH:
             return _State.dynamic_worktree_requests
         if self.path == _EXTERNAL_CHANNEL_PROGRESS_JOURNAL_PATH:
@@ -2878,6 +2918,29 @@ class _Handler(BaseHTTPRequestHandler):
                     "required_headers": required_headers,
                 }
             )
+
+    def _write_image_api_response(self, body: bytes) -> None:
+        """Handle the OpenAI client tool and xAI Imagine on their shared path."""
+        try:
+            value: object = json.loads(body)
+        except json.JSONDecodeError:
+            self._write_json(400, {"error": {"message": "invalid request"}})
+            return
+        if isinstance(value, dict) and value.get("prompt") == _OPENAI_IMAGE_PROMPT:
+            request = _object(value)
+            with _State.lock:
+                _State.openai_image_requests.append(request)
+            self._write_json(
+                200,
+                {
+                    "created": 1,
+                    "data": [
+                        {"b64_json": b64encode(_IMAGE_PATH.read_bytes()).decode()}
+                    ],
+                },
+            )
+            return
+        self._write_xai_imagine_response(body)
 
     def _write_xai_imagine_response(self, body: bytes) -> None:
         """Return deterministic Imagine output and bounded auth failures."""

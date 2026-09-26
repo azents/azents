@@ -20,7 +20,7 @@ Design documents are accumulated records and are not listed individually in this
 | [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-09-15 | 80 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-08-23 | 15 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-09-26 | 8 |
-| [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-09-15 | 25 |
+| [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-09-25 | 26 |
 | [Runtime Provider](spec/domain/runtime-provider.md) | runtime-provider | - | 2026-09-18 | 33 |
 | [Scheduled Task Domain Spec](spec/domain/scheduled-task.md) | scheduled-task | - | 2026-09-15 | 12 |
 | [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-09-15 | 6 |
@@ -32,11 +32,11 @@ Design documents are accumulated records and are not listed individually in this
 
 | Title | Owner | Last Verified At | Spec Version |
 |---|---|---|---|
-| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-09-26 | 183 |
+| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-09-26 | 184 |
 | [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-09-17 | 89 |
 | [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-09-16 | 39 |
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-09-15 | 52 |
-| [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-09-25 | 25 |
+| [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-09-25 | 26 |
 | [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-09-13 | 41 |
 | [External Channel Authorization](spec/flow/external-channel-authorization.md) | @Hardtack | 2026-09-13 | 26 |
 | [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-09-12 | 62 |
@@ -239,6 +239,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Provider Account Linking Requirements](requirements/identity-260913-provider-account-linking.md) | identity-260913 | 2026-09-13 | 2026-09-13 |
 | [Model-Specific Image Generation Execution Historical Requirements Reconstruction](requirements/image-260718-image-generation.md) | image-260718 | 2026-07-18 | 2026-07-18 |
 | [Image Generation Model Selection Requirements](requirements/image-260910-generation-model-selection.md) | image-260910 | 2026-09-10 | 2026-09-10 |
+| [Client-Executed OpenAI Image Generation Requirements](requirements/image-260925-client-executed-openai-generation.md) | image-260925 | 2026-09-25 | - |
 | [Todo-Owned Slack Activity Indicator Requirements](requirements/indicator-260723-todo-owned-progress.md) | indicator-260723 | 2026-07-23 | - |
 | [Store Requested Inference Profiles as Typed Durable Data Historical Requirements Reconstruction](requirements/inference-260710-inference-profile.md) | inference-260710 | 2026-07-10 | - |
 | [Keep Resolved Inference Provenance Run-Owned Historical Requirements Reconstruction](requirements/inference-260711-inference-provenance.md) | inference-260711 | 2026-07-11 | - |
@@ -683,6 +684,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Provider Account Linking Decisions](adr/identity-260913-provider-account-linking.md)
 - [Model-Specific Image Generation Execution Historical Decision Reconstruction](adr/image-260718-image-generation.md)
 - [Image Generation Model Selection](adr/image-260910-generation-model-selection.md)
+- [Execute OpenAI Image Generation in Azents](adr/image-260925-client-executed-openai-generation.md)
 - [Todo-Owned Slack Activity Indicator](adr/indicator-260723-todo-owned-progress.md)
 - [Store Requested Inference Profiles as Typed Durable Data](adr/inference-260710-inference-profile.md)
 - [Keep Resolved Inference Provenance Run-Owned](adr/inference-260711-inference-provenance.md)
