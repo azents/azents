@@ -2393,10 +2393,59 @@ class TestBuiltinToolkitMemoryPrompt:
         tool_names = {tool.spec.name for tool in state.tools}
         assert "save_memory" in tool_names
         assert "search_memories" in tool_names
+        assert {
+            "search_sessions",
+            "read_session_history",
+            "read_session_tool_result",
+        } <= tool_names
         assert "bash" not in tool_names
         assert "exec_command" not in tool_names
         assert "Runtime Files" not in (await toolkit.get_static_prompt(_make_context()))
         assert "Memories" in (await toolkit.get_dynamic_prompt(ctx))
+
+    @pytest.mark.asyncio
+    async def test_history_tools_are_memory_gated_in_read_binding(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The root/subagent Memory read binding owns the three history tools."""
+        monkeypatch.setattr(
+            builtin_module,
+            "_resolve_associated_user_id",
+            AsyncMock(return_value=None),
+        )
+        context = _make_context()
+        enabled = MemoryReadToolkit(
+            config=ShellToolkitConfig(memory_enabled=True),
+            agent_id="agent-1",
+            session_manager=_make_mock_session_manager(),
+            memory_repo=_make_mock_memory_repo(),
+        )
+        enabled.set_session_id("session-1")
+        exposed = (await enabled.update_context(context)).tools
+        names = [tool.spec.name for tool in exposed]
+        for name in (
+            "search_sessions",
+            "read_session_history",
+            "read_session_tool_result",
+        ):
+            assert names.count(name) == 1
+            spec = next(tool.spec for tool in exposed if tool.spec.name == name)
+            assert spec.input_schema["type"] == "object"
+            assert "oneOf" not in spec.input_schema
+            assert "anyOf" not in spec.input_schema
+
+        disabled = MemoryReadToolkit(
+            config=ShellToolkitConfig(memory_enabled=False),
+            agent_id="agent-1",
+            session_manager=_make_mock_session_manager(),
+            memory_repo=_make_mock_memory_repo(),
+        )
+        disabled.set_session_id("session-1")
+        assert (await disabled.update_context(context)).tools == []
+        builtin_disabled = _make_builtin_toolkit(
+            config=ShellToolkitConfig(memory_enabled=False)
+        )
+        assert (await builtin_disabled.update_context(context)).tools == []
 
 
 # ---------------------------------------------------------------------------

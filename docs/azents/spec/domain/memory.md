@@ -12,7 +12,10 @@ code_paths:
   - python/apps/azents/src/azents/api/public/agent/v1/__init__.py
   - python/apps/azents/src/azents/api/public/agent/v1/data.py
   - python/apps/azents/src/azents/engine/tools/memory.py
+  - python/apps/azents/src/azents/engine/tools/session_history.py
   - python/apps/azents/src/azents/engine/tools/builtin.py
+  - python/apps/azents/src/azents/repos/session_history/**
+  - python/apps/azents/src/azents/repos/message/__init__.py
   - python/apps/azents/src/azents/engine/run/resolve.py
   - typescript/apps/azents-web/src/features/agents/AgentMemorySettingsPage.tsx
   - typescript/apps/azents-web/src/features/agents/components/AgentMemorySettings.tsx
@@ -21,8 +24,8 @@ code_paths:
 api_routes:
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/memories
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/memories/{memory_id}
-last_verified_at: 2026-08-18
-spec_version: 7
+last_verified_at: 2026-09-26
+spec_version: 8
 ---
 
 # Memory
@@ -80,12 +83,12 @@ Main constraints of `agent_memories` are:
 ### Tool exposure
 
 During Team Session resolve, an Agent with `memory_enabled` enabled receives the five shared
-Agent-scope Memory tools and an Agent Memory index prompt. User-scope arguments are rejected with a
+Agent-scope Memory tools, three Session-history lookup tools, and an Agent Memory index prompt. User-scope arguments are rejected with a
 tool error, and no generic execution context contains a User identity from which they could be
 resolved.
 
 During User Session resolve, the same Agent with `memory_enabled` enabled receives Agent-scope and
-associated-User Memory tools/index projection for that root's associated User only. Memory tools never
+associated-User Memory tools/index projection plus the three Session-history tools for that root's associated User only. Memory tools never
 read another user's User-scope rows. If `memory_enabled=false`, neither Memory tools nor prompt are
 exposed in either product mode.
 
@@ -106,6 +109,35 @@ rejected because User-scope Memory is unavailable in Team Sessions and available
   searchable field. If exact all-term search finds no rows, it ranks up to 10 any-term partial
   matches by distinct matched-term count. User scope is unavailable even when explicitly requested.
 - `delete_memory(scope, name)` deletes by Agent scope/name and returns existence result as JSON.
+
+### Session-history lookup
+
+The Memory read capability exposes `search_sessions`, `read_session_history`, and
+`read_session_tool_result` in root and subagent executions. It uses the existing
+event transcript, not saved Memory entries, a generated summary, or a second
+history store. The concrete execution Session ID is bound by the Toolkit; `current`
+in `search_sessions` resolves to that concrete Session, while authorization derives
+from its active root. Global discovery includes only active root Sessions of the
+same Agent and Workspace: Team executions see shared Team Sessions; User
+executions see shared Team Sessions and their associated User's private Sessions.
+Known-ID search, history paging, and tool-result reads independently recheck
+target and root status and scope. An archived, purged, or inaccessible target is
+unavailable even if the caller has its ID or a previous search result.
+
+Search covers titles/handles and semantic user, assistant, user-authored action,
+and external-channel message text. Within a known Session it returns bounded
+matching event IDs and snippets; global results include a matching event anchor
+where available. It does not search tool-result content, file metadata, hidden
+instructions, or reasoning. `read_session_history` defaults to the most recent
+visible segment, returns that segment oldest-to-newest, and supports older/newer
+event boundaries and direct opening at a matching event ID. Internal and reverted
+events are filtered *before* pagination and boundary checks. Tool activity in
+the ordinary page exposes the event ID, name/status, and text availability only.
+`read_session_tool_result` returns one selected client or hosted tool event's
+persisted text parts in bounded chunks with a continuation cursor; it omits tool
+inputs, native artifacts, references, and file/attachment bytes. Tool text may
+itself contain sensitive historical data, so the selector and access scope do not
+constitute arbitrary text redaction. Disabled Memory exposes none of these tools.
 
 ### Public API and settings UI
 
@@ -137,6 +169,7 @@ The Agent Memory settings page exposes the Agent `memory_enabled` toggle and man
 
 | Date | Version | Change |
 |---|---:|---|
+| 2026-09-26 | 8 | Added Memory-gated authorized Session discovery, visible history paging, and selected bounded tool-result text lookup |
 | 2026-08-06 | 7 | Documented User Session Agent+User Memory capability projection while Team Sessions remain Agent-scope only |
 | 2026-07-24 | 6 | Restricted current Team Session runtime projection to shared Agent Memory and made User-scope Memory unavailable without a separate User Session capability boundary |
 | 2026-07-17 | 5 | Added runtime exact-to-partial lexical search fallback and index-first duplicate prevention guidance |
