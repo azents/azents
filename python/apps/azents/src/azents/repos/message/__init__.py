@@ -607,12 +607,18 @@ class MessageRepository:
         limit: int = 50,
         before: str | None = None,
         after: str | None = None,
+        visible_kinds: frozenset[EventKind] | None = None,
+        around: str | None = None,
     ) -> EventPage:
         """Fetch session events with bidirectional cursor."""
         query = sa.select(RDBEvent).where(
             RDBEvent.session_id == session_id,
             RDBEvent.reverted.is_(False),
         )
+        visibility_clause = (
+            RDBEvent.kind.in_(visible_kinds) if visible_kinds is not None else sa.true()
+        )
+        query = query.where(visibility_clause)
 
         if before is not None:
             query = query.where(RDBEvent.id < before)
@@ -621,6 +627,8 @@ class MessageRepository:
             query = query.where(RDBEvent.id > after)
             query = query.order_by(RDBEvent.id.asc()).limit(limit + 1)
         else:
+            if around is not None:
+                query = query.where(RDBEvent.id <= around)
             query = query.order_by(RDBEvent.id.desc()).limit(limit + 1)
 
         result = await session.execute(query)
@@ -632,8 +640,8 @@ class MessageRepository:
         if after is None:
             rows.reverse()
 
-        oldest_boundary = rows[0].id if rows else before or after
-        newest_boundary = rows[-1].id if rows else after or before
+        oldest_boundary = rows[0].id if rows else before or after or around
+        newest_boundary = rows[-1].id if rows else after or before or around
         has_more = False
         if oldest_boundary is not None:
             has_more = bool(
@@ -642,6 +650,7 @@ class MessageRepository:
                         sa.exists().where(
                             RDBEvent.session_id == session_id,
                             RDBEvent.reverted.is_(False),
+                            visibility_clause,
                             RDBEvent.id < oldest_boundary,
                         )
                     )
@@ -655,6 +664,7 @@ class MessageRepository:
                         sa.exists().where(
                             RDBEvent.session_id == session_id,
                             RDBEvent.reverted.is_(False),
+                            visibility_clause,
                             RDBEvent.id > newest_boundary,
                         )
                     )

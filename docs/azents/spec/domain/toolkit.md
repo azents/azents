@@ -72,8 +72,8 @@ code_paths:
   - typescript/apps/azents-web/src/trpc/routers/toolkit.ts
 api_routes:
   - /toolkit/v1
-last_verified_at: 2026-09-25
-spec_version: 119
+last_verified_at: 2026-09-26
+spec_version: 120
 ---
 
 # Toolkit
@@ -334,12 +334,13 @@ The AWS Toolkit form describes the current AWS Managed MCP authorization model f
 
 For a saved Agent, the Agent response's requester-relative `toolkit_management_available` flag is true only for a Workspace Owner or explicit AgentAdmin. The enhanced Toolkit section reads the Agent management projection and starts `Add Toolkit` with a persisted Toolkit type choice. After selection it shows only eligible Workspace-shared candidates for that type alongside the option to configure an Agent-only Toolkit. Saved cards label each item `Workspace shared` or `This Agent only`, show text readiness (`ready`, `authorization_required`, or `disabled`), and keep ownership-correct actions separate:
 
-- A Workspace-shared item can be detached only. Workspace object edits, disablement, authorization, and deletion remain in the Workspace Toolkit screens.
-- An Agent-only item can be created, edited, connection-tested, enabled or disabled, OAuth-connected or disconnected, and deleted through nested Agent routes. Deletion is confirmed as removal from that Agent with stored credentials deleted.
+- A Workspace-shared item can be detached. When an OAuth Toolkit requires authorization, a Workspace Owner/Manager can connect or reconnect directly from its Agent card; other Workspace object edits, disablement, and deletion remain in the Workspace Toolkit screens. Other authorization warnings link authorized managers to the Workspace Toolkit editor.
+- An Agent-only item can be created, edited, connection-tested, enabled or disabled, OAuth-connected or disconnected, and deleted through nested Agent routes. When OAuth authorization is required, the card starts connect or reconnect directly; other authorization warnings open its editor. Deletion is confirmed as removal from that Agent with stored credentials deleted.
 - The reusable Toolkit form is embedded only under a saved Agent. Unsaved validation and connection-test errors remain in that form; closing it creates no ToolkitConfig.
 - Requesters without the flag retain the legacy shared attachment section. They receive no Agent-only item, ownership/readiness detail, or Agent-only management action. Chat has no Toolkit management surface.
 
 The Agent-only form uses the existing provider-specific config, credential, test, GitHub, and MCP OAuth controls. The callback return target is the owning Agent's capabilities Toolkit section. The callback's opener notification contains only its fixed event type and success boolean; credentials, tokens, codes, and state plaintext are never rendered or posted.
+The Agent card reserves an OAuth popup before requesting an authorization URL, verifies callback origin and popup source, and invalidates the Agent management projection on callback success. Failure leaves readiness unchanged and displays an error. The existing ownership-specific OAuth endpoints and backend permission checks remain authoritative.
 
 ### GitHub Multi-Installation Routing
 
@@ -1032,6 +1033,9 @@ without requiring a separate Toolkit setup row.
 
 ## Changelog
 
+- **2026-09-25** (spec_version 120) — Enabled ownership-gated OAuth connect
+  and reconnect from saved-Agent Toolkit cards, with popup callback validation
+  and Agent management refresh.
 - **2026-09-25** (spec_version 119) — Added direct, Runtime-free Brave
   Search Toolkit configuration, connection test, and five distinct native tools.
 - **2026-09-15** (spec_version 118) — Replaced same-root Session approval tools

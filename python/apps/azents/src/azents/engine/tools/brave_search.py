@@ -150,7 +150,7 @@ class BraveSearchToolkit(Toolkit[BraveSearchToolkitConfig]):
         client: BraveSearchApi,
     ) -> None:
         self._config = config
-        self._client = client
+        self.client = client
 
     async def update_context(self, context: TurnContext) -> ToolkitState:
         """Offer five distinct static native operations to Tool Search."""
@@ -164,7 +164,7 @@ class BraveSearchToolkit(Toolkit[BraveSearchToolkitConfig]):
             params.update({"count": query.count, "offset": query.offset})
             if query.freshness is not None:
                 params["freshness"] = query.freshness
-            return _text_results("web", await self._client.search("web", params))
+            return _text_results("web", await self.client.search("web", params))
 
         async def search_context(query: _ContextQuery) -> str:
             """Search Brave LLM Context for extracted snippets with source URLs."""
@@ -180,9 +180,7 @@ class BraveSearchToolkit(Toolkit[BraveSearchToolkitConfig]):
             )
             if query.freshness is not None:
                 params["freshness"] = query.freshness
-            return _text_results(
-                "context", await self._client.search("context", params)
-            )
+            return _text_results("context", await self.client.search("context", params))
 
         async def search_news(query: _PagedQuery) -> str:
             """Search Brave News for articles with source pages and date metadata."""
@@ -190,7 +188,7 @@ class BraveSearchToolkit(Toolkit[BraveSearchToolkitConfig]):
             params.update({"count": query.count, "offset": query.offset})
             if query.freshness is not None:
                 params["freshness"] = query.freshness
-            return _text_results("news", await self._client.search("news", params))
+            return _text_results("news", await self.client.search("news", params))
 
         async def search_videos(query: _PagedQuery) -> str:
             """Search Brave Videos for attributable video links and descriptions."""
@@ -198,7 +196,7 @@ class BraveSearchToolkit(Toolkit[BraveSearchToolkitConfig]):
             params.update({"count": query.count, "offset": query.offset})
             if query.freshness is not None:
                 params["freshness"] = query.freshness
-            return _text_results("videos", await self._client.search("videos", params))
+            return _text_results("videos", await self.client.search("videos", params))
 
         async def search_images(query: _ImageQuery) -> FunctionToolResult:
             """Search Brave Images; attach bounded thumbnails in this same result."""
@@ -206,7 +204,7 @@ class BraveSearchToolkit(Toolkit[BraveSearchToolkitConfig]):
             params["count"] = query.count
             if params["safesearch"] == "moderate":
                 params["safesearch"] = "strict"
-            entries = await self._client.search_images(params, attachment_count=4)
+            entries = await self.client.search_images(params, attachment_count=4)
             return FunctionToolResult(
                 output=_image_results(entries),
                 generated_files=[
@@ -236,7 +234,7 @@ class BraveSearchToolkitProvider(ToolkitProvider[BraveSearchToolkitConfig]):
     config_model: ClassVar[type[BaseModel]] = BraveSearchToolkitConfig
 
     def __init__(self, *, transport: httpx.AsyncBaseTransport | None) -> None:
-        self._transport = transport
+        self.transport = transport
 
     async def resolve(
         self,
@@ -256,7 +254,7 @@ class BraveSearchToolkitProvider(ToolkitProvider[BraveSearchToolkitConfig]):
         return BraveSearchToolkit(
             config=config,
             client=BraveSearchApi(
-                api_key=key, timeout=config.timeout, transport=self._transport
+                api_key=key, timeout=config.timeout, transport=self.transport
             ),
         )
 
@@ -290,7 +288,7 @@ class BraveSearchToolkitProvider(ToolkitProvider[BraveSearchToolkitConfig]):
             if not key:
                 raise FunctionToolError("Brave Search API key is required.")
             client = BraveSearchApi(
-                api_key=key, timeout=config.timeout, transport=self._transport
+                api_key=key, timeout=config.timeout, transport=self.transport
             )
             params: dict[str, str | int] = {"q": "connection test", "count": 1}
             if config.country != "ALL":
