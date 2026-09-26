@@ -139,7 +139,7 @@ class BraveSearchApi:
     ) -> None:
         self._api_key = api_key
         self._timeout = timeout
-        self._transport = transport
+        self.transport = transport
 
     async def _get(
         self,
@@ -156,7 +156,7 @@ class BraveSearchApi:
                     base_url=_API_BASE,
                     timeout=self._timeout,
                     follow_redirects=False,
-                    transport=self._transport,
+                    transport=self.transport,
                 ) as client:
                     async with client.stream(
                         "GET",
@@ -353,7 +353,7 @@ class BraveSearchApi:
                     timeout=self._timeout,
                     follow_redirects=False,
                     trust_env=False,
-                    transport=self._transport,
+                    transport=self.transport,
                 ) as client:
                     async with client.stream("GET", url) as response:
                         if response.status_code != 200:
