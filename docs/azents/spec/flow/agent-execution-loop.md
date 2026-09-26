@@ -104,8 +104,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/toolCallActionPresentation.ts
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
   - typescript/apps/azents-web/messages/*/chat.json
-last_verified_at: 2026-09-26
-spec_version: 184
+last_verified_at: 2026-09-27
+spec_version: 185
 ---
 
 # Agent Execution Loop
@@ -661,14 +661,15 @@ configured builtin is silently omitted.
 Before every initial, recovered, or profile-switched run dispatch, image-generation
 configuration is revalidated against the selected enabled integration and current
 stored image authority. The maintained default requires a supported provider and
-lowers without a `model` field. An explicit pin requires an executable reviewed
+stores no explicit `model` field. An explicit pin requires an executable reviewed
 registry entry, a current-generation integration catalog snapshot, a matching
 selectable entry, and a provider matching the selected conversation model. A
 disabled integration, unsupported explicit mode, missing or generation-mismatched
 catalog, unavailable model, or provider mismatch becomes a typed profile-resolution
-failure before credentials are refreshed or a provider request is sent. For a valid
-OpenAI hosted image tool, the lowerer forwards the exact explicit `model` and
-preserves other configured fields; the maintained default omits only `model`.
+failure before credentials are refreshed or a provider request is sent. For OpenAI
+client execution, the bound Images SDK call uses `gpt-image-2` for the maintained
+default or the exact validated explicit image-model identifier. Neither choice
+is forwarded as a provider-hosted image tool or placed in model-visible arguments.
 
 OpenAI SDK completion usage maps directly into the existing turn-marker token fields. Its raw usage is
 the SDK usage object serialized to plain JSON and does not synthesize LiteLLM hidden parameters.
@@ -1526,6 +1527,9 @@ icon.
 
 ## Changelog
 
+- **2026-09-27** (spec_version 185) — Reconciled pre-dispatch image-model
+  validation text with current client Images execution instead of the retired
+  OpenAI hosted-tool lowering path.
 - **2026-09-26** (spec_version 184) — Combined read-only Session-history
   tools with client-executed OpenAI image generation after parallel updates.
 - **2026-09-25** (spec_version 183) — Routed OpenAI API-key and ChatGPT
