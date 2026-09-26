@@ -1,10 +1,11 @@
 """Memory-gated history tool authority and output checks."""
 
+import base64
 import json
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from types import SimpleNamespace
-from typing import Any, AsyncIterator, cast
+from typing import Any, AsyncIterator, NamedTuple, cast
 from unittest.mock import AsyncMock
 
 import pytest
@@ -78,13 +79,22 @@ async def _session_context() -> AsyncIterator[AsyncSession]:
     yield cast(AsyncSession, AsyncMock())
 
 
+class _HistoryToolFixture(NamedTuple):
+    """Named tools and injected repository doubles for one test."""
+
+    tools: dict[str, FunctionTool]
+    history: AsyncMock
+    messages: AsyncMock
+    users: AsyncMock
+
+
 def _tools(
     monkeypatch: pytest.MonkeyPatch,
     *,
     current: AgentSession,
     target: AgentSession | None = None,
     root: AgentSession | None = None,
-) -> tuple[dict[str, FunctionTool], AsyncMock, AsyncMock, AsyncMock]:
+) -> _HistoryToolFixture:
     """Provide injected repositories for one execution-bound tool factory."""
     sessions = AsyncMock(spec=AgentSessionRepository)
     history = AsyncMock(spec=SessionHistoryRepository)
@@ -109,7 +119,12 @@ def _tools(
         current_session_id=current.id,
         session_manager=cast(SessionManager[AsyncSession], _session_context),
     )
-    return {tool.spec.name: tool for tool in tools}, history, messages, users
+    return _HistoryToolFixture(
+        tools={tool.spec.name: tool for tool in tools},
+        history=history,
+        messages=messages,
+        users=users,
+    )
 
 
 async def _json_result(
@@ -122,13 +137,55 @@ async def _json_result(
     return decoded
 
 
+def _cursor(payload: dict[str, object]) -> str:
+    """Encode a deliberately controlled cursor payload for validation tests."""
+    return base64.urlsafe_b64encode(json.dumps(payload).encode()).decode().rstrip("=")
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"time": "2026-09-26T00:00:00+00:00", "session": _CURRENT, "extra": 1},
+        {"time": "not-a-date", "session": _CURRENT},
+        {"time": "2026-09-26T00:00:00+00:00", "session": 42},
+    ],
+)
+async def test_global_search_rejects_invalid_cursor_payload(
+    monkeypatch: pytest.MonkeyPatch, payload: dict[str, object]
+) -> None:
+    """Global search validates its opaque continuation before querying."""
+    fixture = _tools(monkeypatch, current=_root(_CURRENT))
+    with pytest.raises(FunctionToolError, match="Invalid history cursor"):
+        await fixture.tools["search_sessions"].handler(
+            json.dumps({"cursor": _cursor(payload)})
+        )
+    fixture.history.search_roots.assert_not_awaited()
+
+
+async def test_global_search_accepts_typed_cursor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A valid continuation passes the parsed time and Session ID to SQL."""
+    fixture = _tools(monkeypatch, current=_root(_CURRENT))
+    fixture.history.search_roots.return_value = SearchPage(items=[], has_more=False)
+    await _json_result(
+        fixture.tools["search_sessions"],
+        {"cursor": _cursor({"time": "2026-09-26T00:00:00+00:00", "session": _CURRENT})},
+    )
+    assert fixture.history.search_roots.await_args.kwargs["before"] == (
+        datetime(2026, 9, 26, tzinfo=UTC),
+        _CURRENT,
+    )
+
+
 async def test_current_search_uses_concrete_child_but_root_team_authority(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The current selector never substitutes the root Session's ID."""
     root = _root(_CURRENT)
     child = _child(_CHILD)
-    tools, history, _, _ = _tools(monkeypatch, current=child, root=root)
+    fixture = _tools(monkeypatch, current=child, root=root)
+    tools, history = fixture.tools, fixture.history
     history.search_events.return_value = SearchPage(
         items=[
             EventSearchHit(
@@ -165,11 +222,12 @@ async def test_team_execution_cannot_read_private_user_session(
     permitted: bool,
 ) -> None:
     """Known IDs must not authorize private history for Team execution."""
-    tools, _, messages, _ = _tools(
+    fixture = _tools(
         monkeypatch,
         current=_root(_CURRENT),
         target=_root(_TARGET, mode=mode, owner=owner),
     )
+    tools, messages = fixture.tools, fixture.messages
     if not permitted:
         with pytest.raises(FunctionToolError, match="Session history is unavailable"):
             await tools["read_session_history"].handler(
@@ -190,7 +248,8 @@ async def test_user_execution_can_read_own_private_and_team_only(
     """Association and current Workspace membership bound private reads."""
     own = _root(_CURRENT, mode=AgentSessionProductMode.USER, owner="user-1")
     other = _root(_TARGET, mode=AgentSessionProductMode.USER, owner="user-2")
-    tools, _, messages, users = _tools(monkeypatch, current=own, target=other)
+    fixture = _tools(monkeypatch, current=own, target=other)
+    tools, messages, users = fixture.tools, fixture.messages, fixture.users
     with pytest.raises(FunctionToolError, match="Session history is unavailable"):
         await tools["read_session_history"].handler(json.dumps({"session_id": _TARGET}))
     messages.list_events_by_session_id_paginated.assert_not_awaited()
@@ -206,9 +265,8 @@ async def test_archived_target_denied_even_when_id_was_known(
 ) -> None:
     """Archive is read-time unavailability, not just a search filter."""
     archived = _root(_TARGET, status=AgentSessionStatus.ARCHIVED)
-    tools, history, messages, _ = _tools(
-        monkeypatch, current=_root(_CURRENT), target=archived
-    )
+    fixture = _tools(monkeypatch, current=_root(_CURRENT), target=archived)
+    tools, history, messages = fixture.tools, fixture.history, fixture.messages
     for name, args in (
         ("search_sessions", {"session_id": _TARGET, "query": "word"}),
         ("read_session_history", {"session_id": _TARGET}),
@@ -224,9 +282,8 @@ async def test_selected_result_only_returns_text_chunks(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Tool arguments, attachment metadata and other events never enter output."""
-    tools, _, messages, _ = _tools(
-        monkeypatch, current=_root(_CURRENT), target=_root(_TARGET)
-    )
+    fixture = _tools(monkeypatch, current=_root(_CURRENT), target=_root(_TARGET))
+    tools, messages = fixture.tools, fixture.messages
     row = RDBEvent(
         session_id=_TARGET,
         kind=EventKind.CLIENT_TOOL_RESULT,
@@ -269,9 +326,8 @@ async def test_selected_result_caps_unbounded_persisted_tool_name(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Tool-provided names cannot turn a bounded result into unbounded output."""
-    tools, _, messages, _ = _tools(
-        monkeypatch, current=_root(_CURRENT), target=_root(_TARGET)
-    )
+    fixture = _tools(monkeypatch, current=_root(_CURRENT), target=_root(_TARGET))
+    tools, messages = fixture.tools, fixture.messages
     row = RDBEvent(
         session_id=_TARGET,
         kind=EventKind.CLIENT_TOOL_RESULT,
@@ -294,9 +350,8 @@ async def test_result_cursor_is_not_authority(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A copied cursor never permits access to a different target event."""
-    tools, _, messages, _ = _tools(
-        monkeypatch, current=_root(_CURRENT), target=_root(_TARGET)
-    )
+    fixture = _tools(monkeypatch, current=_root(_CURRENT), target=_root(_TARGET))
+    tools, messages = fixture.tools, fixture.messages
     row = RDBEvent(
         session_id=_TARGET,
         kind=EventKind.CLIENT_TOOL_RESULT,
@@ -324,13 +379,47 @@ async def test_result_cursor_is_not_authority(
         )
 
 
+@pytest.mark.parametrize(
+    "offset",
+    [True, "1", -1],
+)
+async def test_result_cursor_rejects_invalid_offset(
+    monkeypatch: pytest.MonkeyPatch, offset: object
+) -> None:
+    """Typed result cursors do not coerce booleans or strings into offsets."""
+    fixture = _tools(monkeypatch, current=_root(_CURRENT), target=_root(_TARGET))
+    row = RDBEvent(
+        session_id=_TARGET,
+        kind=EventKind.CLIENT_TOOL_RESULT,
+        payload={
+            "call_id": "call-1",
+            "name": "test_tool",
+            "status": "completed",
+            "output": "result",
+        },
+    )
+    row.id = _EVENT
+    fixture.messages.get_by_id.return_value = row
+    with pytest.raises(FunctionToolError, match="Invalid history cursor"):
+        await fixture.tools["read_session_tool_result"].handler(
+            json.dumps(
+                {
+                    "session_id": _TARGET,
+                    "event_id": _EVENT,
+                    "cursor": _cursor(
+                        {"session": _TARGET, "event": _EVENT, "offset": offset}
+                    ),
+                }
+            )
+        )
+
+
 async def test_hosted_tool_page_and_selected_detail_exclude_input_and_native_data(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Hosted output lives in the call event, with only its text selectively shown."""
-    tools, _, messages, _ = _tools(
-        monkeypatch, current=_root(_CURRENT), target=_root(_TARGET)
-    )
+    fixture = _tools(monkeypatch, current=_root(_CURRENT), target=_root(_TARGET))
+    tools, messages = fixture.tools, fixture.messages
     payload = ProviderToolCallPayload(
         call_id="hosted-1",
         name="web_search",

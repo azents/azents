@@ -1,12 +1,13 @@
 """Memory-gated, root-authorized Session history lookup tools."""
 
 import base64
+import binascii
 import datetime
 import json
 from collections.abc import Sequence
 from typing import NamedTuple
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
@@ -115,23 +116,38 @@ class ReadSessionToolResultInput(BaseModel):
     cursor: str | None = Field(default=None, max_length=500)
 
 
-def _encode_cursor(value: dict[str, object]) -> str:
+class _RootSearchCursor(BaseModel):
+    """Validated continuation for global root Session search."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    time: datetime.datetime
+    session: str
+
+
+class _ToolResultCursor(BaseModel):
+    """Validated continuation for one selected tool result."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    session: str
+    event: str
+    offset: int = Field(ge=0)
+
+
+def _encode_cursor(value: BaseModel) -> str:
     return (
-        base64.urlsafe_b64encode(json.dumps(value, separators=(",", ":")).encode())
-        .decode()
-        .rstrip("=")
+        base64.urlsafe_b64encode(value.model_dump_json().encode()).decode().rstrip("=")
     )
 
 
-def _decode_cursor(value: str) -> dict[str, object]:
+def _decode_cursor[CursorT: BaseModel](value: str, model: type[CursorT]) -> CursorT:
+    """Validate the decoded JSON against the cursor's operation-specific shape."""
     try:
         raw = base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
-        parsed = json.loads(raw)
-    except (ValueError, UnicodeError) as exc:
+        return model.model_validate_json(raw)
+    except (ValueError, binascii.Error) as exc:
         raise FunctionToolError("Invalid history cursor") from exc
-    if not isinstance(parsed, dict):
-        raise FunctionToolError("Invalid history cursor")
-    return parsed
 
 
 async def _active_root(
@@ -349,14 +365,8 @@ def make_session_history_tools(
                 )
             before: tuple[datetime.datetime, str] | None = None
             if args.cursor is not None:
-                parsed = _decode_cursor(args.cursor)
-                stamp, session_id = parsed.get("time"), parsed.get("session")
-                if not isinstance(stamp, str) or not isinstance(session_id, str):
-                    raise FunctionToolError("Invalid history cursor")
-                try:
-                    before = (datetime.datetime.fromisoformat(stamp), session_id)
-                except ValueError as exc:
-                    raise FunctionToolError("Invalid history cursor") from exc
+                cursor = _decode_cursor(args.cursor, _RootSearchCursor)
+                before = (cursor.time, cursor.session)
             page = await history.search_roots(
                 session,
                 scope=scope,
@@ -380,10 +390,9 @@ def make_session_history_tools(
                     ],
                     "next_cursor": (
                         _encode_cursor(
-                            {
-                                "time": last.updated_at.isoformat(),
-                                "session": last.session_id,
-                            }
+                            _RootSearchCursor(
+                                time=last.updated_at, session=last.session_id
+                            )
                         )
                         if page.has_more and last is not None
                         else None
@@ -471,15 +480,11 @@ def make_session_history_tools(
                 raise FunctionToolError(_UNAVAILABLE)
             offset = 0
             if args.cursor is not None:
-                parsed = _decode_cursor(args.cursor)
-                if (
-                    parsed.get("session") != target.id
-                    or parsed.get("event") != args.event_id
-                    or type(parsed.get("offset")) is not int
-                ):
+                cursor = _decode_cursor(args.cursor, _ToolResultCursor)
+                if cursor.session != target.id or cursor.event != args.event_id:
                     raise FunctionToolError("Invalid history cursor")
-                offset = parsed["offset"]
-                if not isinstance(offset, int) or offset < 0 or offset > len(text):
+                offset = cursor.offset
+                if offset > len(text):
                     raise FunctionToolError("Invalid history cursor")
             end = min(offset + _RESULT_TEXT_LIMIT, len(text))
             return json.dumps(
@@ -490,11 +495,9 @@ def make_session_history_tools(
                     "text": text[offset:end],
                     "next_cursor": (
                         _encode_cursor(
-                            {
-                                "session": target.id,
-                                "event": args.event_id,
-                                "offset": end,
-                            }
+                            _ToolResultCursor(
+                                session=target.id, event=args.event_id, offset=end
+                            )
                         )
                         if end < len(text)
                         else None
