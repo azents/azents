@@ -115,8 +115,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/default-response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack
-last_verified_at: 2026-09-24
-spec_version: 82
+last_verified_at: 2026-09-29
+spec_version: 83
 ---
 
 # Agent Domain Spec
@@ -656,7 +656,7 @@ Each selectable model option owns a semantic built-in tool opt-in list. Model sn
 
 The configurable implemented registry contains `web_search` and `image_generation`. Capability projection filters out unimplemented identifiers such as `web_fetch`. Agent and Workspace submit normalization rejects unknown, duplicate, or capability-unsupported names per option. `image_generation` uses the same model-scoped validation contract as other builtins and does not restore historical provider-specific Agent validation conditions.
 
-Runtime passes the selected Session settings as `BuiltinToolSpec(name, config)` and resolves every selected semantic capability to one execution owner before provider dispatch. `web_search` remains provider-hosted. xAI API-key and xAI OAuth `image_generation` become an auto-bound unprefixed client function tool backed by Imagine; an advertised `image_generation` capability for any other provider remains provider-hosted. The maintained automatic hosted policy currently advertises this capability for supported OpenAI API-key and ChatGPT OAuth models, while another provider requires an explicit trusted metadata declaration. Only the provider-hosted partition reaches the request lowerer. A capability missing from the selected snapshot, unimplemented by the resolver, or lacking its required client binding fails before provider dispatch; no configured builtin is silently omitted or exposed through both execution paths.
+Runtime passes the selected Session settings as `BuiltinToolSpec(name, config)` and resolves every selected semantic capability to one execution owner before provider dispatch. `web_search` remains provider-hosted. OpenAI API-key and ChatGPT OAuth `image_generation` become an auto-bound unprefixed client function backed by the selected integration's Images SDK endpoint; xAI API-key and xAI OAuth use an auto-bound client function backed by Imagine. An advertised `image_generation` capability for another provider remains provider-hosted. OpenAI and ChatGPT capability projection includes supported function-capable chat models even when provider metadata does not advertise a hosted image tool; other providers require their trusted capability metadata or implemented fallback policy. Only the provider-hosted partition reaches the request lowerer. A capability missing from the selected snapshot, unimplemented by the resolver, or lacking its required client binding fails before provider dispatch; no configured builtin is silently omitted or exposed through both execution paths.
 
 ## 5. Context Window / Compaction
 
@@ -711,6 +711,8 @@ Following contracts do not exist in current system.
 
 ## 8. Change History
 
+- **2026-09-29** (spec_version 83) — Corrected OpenAI API-key and ChatGPT OAuth
+  image-generation execution ownership to the auto-bound client Images tool.
 - **2026-09-24** (spec_version 82) — Preserved compatible token caps and all shared built-in tool choices when replacing an Agent candidate model, including across provider integrations.
 - **2026-09-15** (spec_version 81) — Replaced Session-owned Runtime Web approval
   resources with Agent-and-port services, managed-Runtime capability gating, and
