@@ -25,6 +25,7 @@ Method | HTTP request | Description
 [**chat_v1_download_exchange_file**](ChatV1Api.md#chat_v1_download_exchange_file) | **GET** /chat/v1/exchange-files/{file_id}/download | Download Exchange File
 [**chat_v1_edit_message**](ChatV1Api.md#chat_v1_edit_message) | **POST** /chat/v1/sessions/{session_id}/edit-message | Edit Message
 [**chat_v1_finalize_agent_workspace_upload**](ChatV1Api.md#chat_v1_finalize_agent_workspace_upload) | **POST** /chat/v1/agents/{agent_id}/workspace/uploads/{upload_id}/finalize | Finalize Agent Workspace Upload
+[**chat_v1_finalize_file_upload_for_agent**](ChatV1Api.md#chat_v1_finalize_file_upload_for_agent) | **POST** /chat/v1/agents/{agent_id}/uploads/{upload_id}/finalize | Finalize File Upload For Agent
 [**chat_v1_get_agent_session**](ChatV1Api.md#chat_v1_get_agent_session) | **GET** /chat/v1/agents/{agent_id}/sessions/{session_id} | Get Agent Session
 [**chat_v1_get_agent_session_context**](ChatV1Api.md#chat_v1_get_agent_session_context) | **GET** /chat/v1/agents/{agent_id}/sessions/{session_id}/context | Get Agent Session Context
 [**chat_v1_get_agent_session_model_availability**](ChatV1Api.md#chat_v1_get_agent_session_model_availability) | **GET** /chat/v1/agents/{agent_id}/sessions/{session_id}/model-availability | Get Agent Session Model Availability
@@ -46,6 +47,7 @@ Method | HTTP request | Description
 [**chat_v1_list_live_events**](ChatV1Api.md#chat_v1_list_live_events) | **GET** /chat/v1/sessions/{session_id}/live | List Live Events
 [**chat_v1_list_sessions**](ChatV1Api.md#chat_v1_list_sessions) | **GET** /chat/v1/workspaces/{handle}/sessions | List Sessions
 [**chat_v1_move_agent_workspace_path**](ChatV1Api.md#chat_v1_move_agent_workspace_path) | **POST** /chat/v1/agents/{agent_id}/workspace/move | Move Agent Workspace Path
+[**chat_v1_prepare_file_upload_for_agent**](ChatV1Api.md#chat_v1_prepare_file_upload_for_agent) | **POST** /chat/v1/agents/{agent_id}/uploads | Prepare File Upload For Agent
 [**chat_v1_prepare_session_working_folder**](ChatV1Api.md#chat_v1_prepare_session_working_folder) | **POST** /chat/v1/agents/{agent_id}/sessions/{session_id}/workspace/session-folder/prepare | Prepare Session Working Folder
 [**chat_v1_preview_agent_git_refs**](ChatV1Api.md#chat_v1_preview_agent_git_refs) | **GET** /chat/v1/agents/{agent_id}/git-refs | Preview Agent Git Refs
 [**chat_v1_preview_project_browser_manifest**](ChatV1Api.md#chat_v1_preview_project_browser_manifest) | **POST** /chat/v1/agents/{agent_id}/workspace/project-browser-manifest/preview | Preview Project Browser Manifest
@@ -62,7 +64,6 @@ Method | HTTP request | Description
 [**chat_v1_update_agent_session_title**](ChatV1Api.md#chat_v1_update_agent_session_title) | **PATCH** /chat/v1/sessions/{session_id}/title | Update Agent Session Title
 [**chat_v1_update_session_goal**](ChatV1Api.md#chat_v1_update_session_goal) | **PATCH** /chat/v1/sessions/{session_id}/goal | Update Session Goal
 [**chat_v1_update_session_goal_status**](ChatV1Api.md#chat_v1_update_session_goal_status) | **PATCH** /chat/v1/sessions/{session_id}/goal/status | Update Session Goal Status
-[**chat_v1_upload_file_for_agent**](ChatV1Api.md#chat_v1_upload_file_for_agent) | **POST** /chat/v1/agents/{agent_id}/upload | Upload File For Agent
 
 
 # **chat_v1_acknowledge_agent_session_unread_terminal_run**
@@ -1778,6 +1779,87 @@ Name | Type | Description  | Notes
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
+# **chat_v1_finalize_file_upload_for_agent**
+> UploadResponse chat_v1_finalize_file_upload_for_agent(agent_id, upload_id)
+
+Finalize File Upload For Agent
+
+Publish an attachment only after trusted checksum/size verification.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentspublicclient
+from azentspublicclient.models.upload_response import UploadResponse
+from azentspublicclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentspublicclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentspublicclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentspublicclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentspublicclient.ChatV1Api(api_client)
+    agent_id = 'agent_id_example' # str | 
+    upload_id = 'upload_id_example' # str | 
+
+    try:
+        # Finalize File Upload For Agent
+        api_response = api_instance.chat_v1_finalize_file_upload_for_agent(agent_id, upload_id)
+        print("The response of ChatV1Api->chat_v1_finalize_file_upload_for_agent:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling ChatV1Api->chat_v1_finalize_file_upload_for_agent: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **agent_id** | **str**|  | 
+ **upload_id** | **str**|  | 
+
+### Return type
+
+[**UploadResponse**](UploadResponse.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
 # **chat_v1_get_agent_session**
 > AgentSessionResponse chat_v1_get_agent_session(agent_id, session_id)
 
@@ -3468,6 +3550,88 @@ Name | Type | Description  | Notes
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
+# **chat_v1_prepare_file_upload_for_agent**
+> ChatUploadPrepareResponse chat_v1_prepare_file_upload_for_agent(agent_id, chat_upload_prepare_request)
+
+Prepare File Upload For Agent
+
+Authorize a metadata-only Chat upload and issue its direct PUT ticket.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentspublicclient
+from azentspublicclient.models.chat_upload_prepare_request import ChatUploadPrepareRequest
+from azentspublicclient.models.chat_upload_prepare_response import ChatUploadPrepareResponse
+from azentspublicclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentspublicclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentspublicclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentspublicclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentspublicclient.ChatV1Api(api_client)
+    agent_id = 'agent_id_example' # str | 
+    chat_upload_prepare_request = azentspublicclient.ChatUploadPrepareRequest() # ChatUploadPrepareRequest | 
+
+    try:
+        # Prepare File Upload For Agent
+        api_response = api_instance.chat_v1_prepare_file_upload_for_agent(agent_id, chat_upload_prepare_request)
+        print("The response of ChatV1Api->chat_v1_prepare_file_upload_for_agent:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling ChatV1Api->chat_v1_prepare_file_upload_for_agent: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **agent_id** | **str**|  | 
+ **chat_upload_prepare_request** | [**ChatUploadPrepareRequest**](ChatUploadPrepareRequest.md)|  | 
+
+### Return type
+
+[**ChatUploadPrepareResponse**](ChatUploadPrepareResponse.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: application/json
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
 # **chat_v1_prepare_session_working_folder**
 > ChatWriteResponse chat_v1_prepare_session_working_folder(agent_id, session_id, prepare_session_working_folder_request)
 
@@ -4775,87 +4939,6 @@ Name | Type | Description  | Notes
 ### HTTP request headers
 
  - **Content-Type**: application/json
- - **Accept**: application/json
-
-### HTTP response details
-
-| Status code | Description | Response headers |
-|-------------|-------------|------------------|
-**200** | Successful Response |  -  |
-**422** | Validation Error |  -  |
-
-[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
-
-# **chat_v1_upload_file_for_agent**
-> UploadResponse chat_v1_upload_file_for_agent(agent_id, file)
-
-Upload File For Agent
-
-Upload only Exchange attachments scoped to the Agent.
-
-### Example
-
-* Bearer Authentication (HTTPBearer):
-
-```python
-import azentspublicclient
-from azentspublicclient.models.upload_response import UploadResponse
-from azentspublicclient.rest import ApiException
-from pprint import pprint
-
-# Defining the host is optional and defaults to http://localhost
-# See configuration.py for a list of all supported configuration parameters.
-configuration = azentspublicclient.Configuration(
-    host = "http://localhost"
-)
-
-# The client must configure the authentication and authorization parameters
-# in accordance with the API server security policy.
-# Examples for each auth method are provided below, use the example that
-# satisfies your auth use case.
-
-# Configure Bearer authorization: HTTPBearer
-configuration = azentspublicclient.Configuration(
-    access_token = os.environ["BEARER_TOKEN"]
-)
-
-# Enter a context with an instance of the API client
-with azentspublicclient.ApiClient(configuration) as api_client:
-    # Create an instance of the API class
-    api_instance = azentspublicclient.ChatV1Api(api_client)
-    agent_id = 'agent_id_example' # str | 
-    file = 'file_example' # str | 
-
-    try:
-        # Upload File For Agent
-        api_response = api_instance.chat_v1_upload_file_for_agent(agent_id, file)
-        print("The response of ChatV1Api->chat_v1_upload_file_for_agent:\n")
-        pprint(api_response)
-    except Exception as e:
-        print("Exception when calling ChatV1Api->chat_v1_upload_file_for_agent: %s\n" % e)
-```
-
-
-
-### Parameters
-
-
-Name | Type | Description  | Notes
-------------- | ------------- | ------------- | -------------
- **agent_id** | **str**|  | 
- **file** | **str**|  | 
-
-### Return type
-
-[**UploadResponse**](UploadResponse.md)
-
-### Authorization
-
-[HTTPBearer](../README.md#HTTPBearer)
-
-### HTTP request headers
-
- - **Content-Type**: multipart/form-data
  - **Accept**: application/json
 
 ### HTTP response details

@@ -188,6 +188,8 @@ __all__ = [
     "ChatSessionModelProfileResponse",
     "ChatSessionModelProfileUpdateRequest",
     "ChatStopResponse",
+    "ChatUploadPrepareRequest",
+    "ChatUploadPrepareResponse",
     "ChatWriteAcceptedResponse",
     "ChatWriteResponse",
     "ChatWriteSnapshotResponse",
@@ -760,6 +762,8 @@ from azentspublicclient.models.chat_session_create_message_write_request import 
 from azentspublicclient.models.chat_session_model_profile_response import ChatSessionModelProfileResponse as ChatSessionModelProfileResponse
 from azentspublicclient.models.chat_session_model_profile_update_request import ChatSessionModelProfileUpdateRequest as ChatSessionModelProfileUpdateRequest
 from azentspublicclient.models.chat_stop_response import ChatStopResponse as ChatStopResponse
+from azentspublicclient.models.chat_upload_prepare_request import ChatUploadPrepareRequest as ChatUploadPrepareRequest
+from azentspublicclient.models.chat_upload_prepare_response import ChatUploadPrepareResponse as ChatUploadPrepareResponse
 from azentspublicclient.models.chat_write_accepted_response import ChatWriteAcceptedResponse as ChatWriteAcceptedResponse
 from azentspublicclient.models.chat_write_response import ChatWriteResponse as ChatWriteResponse
 from azentspublicclient.models.chat_write_snapshot_response import ChatWriteSnapshotResponse as ChatWriteSnapshotResponse

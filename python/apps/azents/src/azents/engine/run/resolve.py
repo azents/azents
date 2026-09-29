@@ -119,6 +119,7 @@ from azents.services.model_file import (
     ModelFileService,
     ModelFileSessionNotFound,
     model_file_size_limit_message,
+    model_file_source_size_error,
 )
 from azents.services.session_resource_authority import SessionResourceAuthority
 from azents.services.xai_oauth.data import (
@@ -1108,6 +1109,13 @@ async def _materialize_admitted_input_exchange_file_attachment(
             file_part=None,
         )
 
+    size_warning = _attachment_model_input_size_warning(attachment)
+    if size_warning is not None:
+        return _MaterializedUserInputAttachment(
+            attachment=size_warning,
+            file_part=None,
+        )
+
     download_result = await exchange_file_service.resolve_admitted_input_attachment(
         uri=uri,
         agent_id=authority.agent_id,
@@ -1224,6 +1232,13 @@ async def _materialize_user_input_exchange_file_attachment(
             file_part=None,
         )
 
+    size_warning = _attachment_model_input_size_warning(attachment)
+    if size_warning is not None:
+        return _MaterializedUserInputAttachment(
+            attachment=size_warning,
+            file_part=None,
+        )
+
     download_result = await exchange_file_service.resolve_attachment_for_agent(
         uri=uri,
         agent_id=agent_id,
@@ -1248,6 +1263,30 @@ async def _materialize_user_input_exchange_file_attachment(
     return _MaterializedUserInputAttachment(
         attachment=attachment,
         file_part=None,
+    )
+
+
+def _attachment_model_input_size_warning(
+    attachment: RuntimeAttachment,
+) -> RuntimeAttachment | None:
+    """Retain an oversized attachment without opening its original object."""
+    error = model_file_source_size_error(
+        media_type=attachment.media_type,
+        size_bytes=attachment.size,
+    )
+    if error is None:
+        return None
+    return attachment.model_copy(
+        update={
+            "text_preview": "\n".join(
+                value
+                for value in (
+                    attachment.text_preview,
+                    model_file_size_limit_message(error),
+                )
+                if value
+            )
+        }
     )
 
 

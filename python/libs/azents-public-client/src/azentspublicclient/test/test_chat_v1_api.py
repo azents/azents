@@ -173,6 +173,13 @@ class TestChatV1Api(unittest.TestCase):
         """
         pass
 
+    def test_chat_v1_finalize_file_upload_for_agent(self) -> None:
+        """Test case for chat_v1_finalize_file_upload_for_agent
+
+        Finalize File Upload For Agent
+        """
+        pass
+
     def test_chat_v1_get_agent_session(self) -> None:
         """Test case for chat_v1_get_agent_session
 
@@ -320,6 +327,13 @@ class TestChatV1Api(unittest.TestCase):
         """
         pass
 
+    def test_chat_v1_prepare_file_upload_for_agent(self) -> None:
+        """Test case for chat_v1_prepare_file_upload_for_agent
+
+        Prepare File Upload For Agent
+        """
+        pass
+
     def test_chat_v1_prepare_session_working_folder(self) -> None:
         """Test case for chat_v1_prepare_session_working_folder
 
@@ -429,13 +443,6 @@ class TestChatV1Api(unittest.TestCase):
         """Test case for chat_v1_update_session_goal_status
 
         Update Session Goal Status
-        """
-        pass
-
-    def test_chat_v1_upload_file_for_agent(self) -> None:
-        """Test case for chat_v1_upload_file_for_agent
-
-        Upload File For Agent
         """
         pass
 

@@ -138,6 +138,7 @@ Class | Method | HTTP request | Description
 *ChatV1Api* | [**chat_v1_download_exchange_file**](azentspublicclient/docs/ChatV1Api.md#chat_v1_download_exchange_file) | **GET** /chat/v1/exchange-files/{file_id}/download | Download Exchange File
 *ChatV1Api* | [**chat_v1_edit_message**](azentspublicclient/docs/ChatV1Api.md#chat_v1_edit_message) | **POST** /chat/v1/sessions/{session_id}/edit-message | Edit Message
 *ChatV1Api* | [**chat_v1_finalize_agent_workspace_upload**](azentspublicclient/docs/ChatV1Api.md#chat_v1_finalize_agent_workspace_upload) | **POST** /chat/v1/agents/{agent_id}/workspace/uploads/{upload_id}/finalize | Finalize Agent Workspace Upload
+*ChatV1Api* | [**chat_v1_finalize_file_upload_for_agent**](azentspublicclient/docs/ChatV1Api.md#chat_v1_finalize_file_upload_for_agent) | **POST** /chat/v1/agents/{agent_id}/uploads/{upload_id}/finalize | Finalize File Upload For Agent
 *ChatV1Api* | [**chat_v1_get_agent_session**](azentspublicclient/docs/ChatV1Api.md#chat_v1_get_agent_session) | **GET** /chat/v1/agents/{agent_id}/sessions/{session_id} | Get Agent Session
 *ChatV1Api* | [**chat_v1_get_agent_session_context**](azentspublicclient/docs/ChatV1Api.md#chat_v1_get_agent_session_context) | **GET** /chat/v1/agents/{agent_id}/sessions/{session_id}/context | Get Agent Session Context
 *ChatV1Api* | [**chat_v1_get_agent_session_model_availability**](azentspublicclient/docs/ChatV1Api.md#chat_v1_get_agent_session_model_availability) | **GET** /chat/v1/agents/{agent_id}/sessions/{session_id}/model-availability | Get Agent Session Model Availability
@@ -159,6 +160,7 @@ Class | Method | HTTP request | Description
 *ChatV1Api* | [**chat_v1_list_live_events**](azentspublicclient/docs/ChatV1Api.md#chat_v1_list_live_events) | **GET** /chat/v1/sessions/{session_id}/live | List Live Events
 *ChatV1Api* | [**chat_v1_list_sessions**](azentspublicclient/docs/ChatV1Api.md#chat_v1_list_sessions) | **GET** /chat/v1/workspaces/{handle}/sessions | List Sessions
 *ChatV1Api* | [**chat_v1_move_agent_workspace_path**](azentspublicclient/docs/ChatV1Api.md#chat_v1_move_agent_workspace_path) | **POST** /chat/v1/agents/{agent_id}/workspace/move | Move Agent Workspace Path
+*ChatV1Api* | [**chat_v1_prepare_file_upload_for_agent**](azentspublicclient/docs/ChatV1Api.md#chat_v1_prepare_file_upload_for_agent) | **POST** /chat/v1/agents/{agent_id}/uploads | Prepare File Upload For Agent
 *ChatV1Api* | [**chat_v1_prepare_session_working_folder**](azentspublicclient/docs/ChatV1Api.md#chat_v1_prepare_session_working_folder) | **POST** /chat/v1/agents/{agent_id}/sessions/{session_id}/workspace/session-folder/prepare | Prepare Session Working Folder
 *ChatV1Api* | [**chat_v1_preview_agent_git_refs**](azentspublicclient/docs/ChatV1Api.md#chat_v1_preview_agent_git_refs) | **GET** /chat/v1/agents/{agent_id}/git-refs | Preview Agent Git Refs
 *ChatV1Api* | [**chat_v1_preview_project_browser_manifest**](azentspublicclient/docs/ChatV1Api.md#chat_v1_preview_project_browser_manifest) | **POST** /chat/v1/agents/{agent_id}/workspace/project-browser-manifest/preview | Preview Project Browser Manifest
@@ -175,7 +177,6 @@ Class | Method | HTTP request | Description
 *ChatV1Api* | [**chat_v1_update_agent_session_title**](azentspublicclient/docs/ChatV1Api.md#chat_v1_update_agent_session_title) | **PATCH** /chat/v1/sessions/{session_id}/title | Update Agent Session Title
 *ChatV1Api* | [**chat_v1_update_session_goal**](azentspublicclient/docs/ChatV1Api.md#chat_v1_update_session_goal) | **PATCH** /chat/v1/sessions/{session_id}/goal | Update Session Goal
 *ChatV1Api* | [**chat_v1_update_session_goal_status**](azentspublicclient/docs/ChatV1Api.md#chat_v1_update_session_goal_status) | **PATCH** /chat/v1/sessions/{session_id}/goal/status | Update Session Goal Status
-*ChatV1Api* | [**chat_v1_upload_file_for_agent**](azentspublicclient/docs/ChatV1Api.md#chat_v1_upload_file_for_agent) | **POST** /chat/v1/agents/{agent_id}/upload | Upload File For Agent
 *ExternalChannelV1Api* | [**external_channel_v1_add_multi_discord_route**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_add_multi_discord_route) | **POST** /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/agents | Add Multi Discord Route
 *ExternalChannelV1Api* | [**external_channel_v1_add_multi_slack_route**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_add_multi_slack_route) | **POST** /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/agents | Add Multi Slack Route
 *ExternalChannelV1Api* | [**external_channel_v1_clear_multi_discord_channel_default**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_clear_multi_discord_channel_default) | **DELETE** /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/channel-defaults/{provider_channel_id} | Clear Multi Discord Channel Default
@@ -498,6 +499,8 @@ Class | Method | HTTP request | Description
  - [ChatSessionModelProfileResponse](azentspublicclient/docs/ChatSessionModelProfileResponse.md)
  - [ChatSessionModelProfileUpdateRequest](azentspublicclient/docs/ChatSessionModelProfileUpdateRequest.md)
  - [ChatStopResponse](azentspublicclient/docs/ChatStopResponse.md)
+ - [ChatUploadPrepareRequest](azentspublicclient/docs/ChatUploadPrepareRequest.md)
+ - [ChatUploadPrepareResponse](azentspublicclient/docs/ChatUploadPrepareResponse.md)
  - [ChatWriteAcceptedResponse](azentspublicclient/docs/ChatWriteAcceptedResponse.md)
  - [ChatWriteResponse](azentspublicclient/docs/ChatWriteResponse.md)
  - [ChatWriteSnapshotResponse](azentspublicclient/docs/ChatWriteSnapshotResponse.md)

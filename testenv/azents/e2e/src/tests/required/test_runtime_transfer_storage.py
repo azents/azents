@@ -90,6 +90,7 @@ async def test_rustfs_presigned_put_finalize_and_get_round_trip(
             upload_request = await service.get_upload_request(
                 identity=ingress,
                 content_type="application/octet-stream",
+                content_length=len(body),
                 checksum_sha256=digest,
                 expires_in=timedelta(seconds=60),
             )
@@ -165,6 +166,7 @@ async def test_rustfs_signed_128_mib_put_copy_and_get_without_buffering_body(
                 upload_request = await service.get_upload_request(
                     identity=ingress,
                     content_type="application/octet-stream",
+                    content_length=expected_size,
                     checksum_sha256=checksum.hexdigest(),
                     expires_in=timedelta(minutes=5),
                 )

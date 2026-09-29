@@ -204,6 +204,7 @@ class _ObjectStore:
         *,
         identity: S3ObjectIdentity,
         content_type: str | None,
+        content_length: int,
         checksum_sha256: str,
         expires_in: timedelta,
         now: datetime | None = None,

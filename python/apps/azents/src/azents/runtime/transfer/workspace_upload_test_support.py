@@ -66,11 +66,13 @@ class _S3:
         *,
         identity: S3ObjectIdentity,
         content_type: str | None,
+        content_length: int,
         checksum_sha256: str,
         expires_in: timedelta,
         now: datetime | None = None,
     ) -> S3PresignedRequest:
         """Return one transient checksum-bound PUT capability."""
+        assert content_length >= 0
         current = now or self.now
         headers: dict[str, str] = {
             "x-amz-checksum-sha256": base64.b64encode(

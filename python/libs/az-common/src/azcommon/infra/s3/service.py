@@ -271,6 +271,7 @@ class S3Service:
             await self.get_upload_request(
                 identity=source,
                 content_type="application/octet-stream",
+                content_length=0,
                 checksum_sha256=probe_checksum,
                 expires_in=datetime.timedelta(seconds=60),
             )
@@ -1537,13 +1538,16 @@ class S3Service:
         *,
         identity: S3ObjectIdentity,
         content_type: str | None,
+        content_length: int,
         checksum_sha256: str,
         expires_in: datetime.timedelta,
         now: datetime.datetime | None = None,
     ) -> S3PresignedRequest:
-        """Create one checksum-bound presigned PUT request capability."""
+        """Create one exact-size and checksum-bound presigned PUT capability."""
         if expires_in <= datetime.timedelta():
             raise ValueError("presigned request lifetime must be positive")
+        if isinstance(content_length, bool) or content_length < 0:
+            raise ValueError("presigned PUT content length must be non-negative")
         _validate_sha256(checksum_sha256)
         current = now or datetime.datetime.now(datetime.UTC)
         if current.tzinfo is None or current.utcoffset() is None:
@@ -1551,11 +1555,14 @@ class S3Service:
         checksum_header = base64.b64encode(bytes.fromhex(checksum_sha256)).decode(
             "ascii"
         )
-        params: dict[str, str] = {
+        params: dict[str, str | int] = {
             "Bucket": identity.bucket,
             "Key": identity.key,
+            "ContentLength": content_length,
             "ChecksumSHA256": checksum_header,
         }
+        # The browser supplies signed Content-Length from the immutable File body;
+        # it is a forbidden script-set header and must not be exposed as one.
         headers: dict[str, str] = {
             "x-amz-checksum-sha256": checksum_header,
         }

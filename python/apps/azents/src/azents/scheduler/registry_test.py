@@ -11,6 +11,7 @@ from azents.repos.external_account_oauth.data import (
 from azents.scheduler import registry
 from azents.scheduler.types import TaskContext
 from azents.services.chat import ChatSessionService
+from azents.services.exchange_file import ExchangeFileService
 from azents.services.external_account_oauth.service import (
     ExternalAccountOAuthAttemptService,
 )
@@ -32,13 +33,20 @@ from .user_scheduled_task_dispatch import (
 class _Container:
     """Container test double that resolves one lifecycle cleanup service."""
 
-    def __init__(self, service: FileLifecycleCleanupService) -> None:
+    def __init__(
+        self,
+        service: FileLifecycleCleanupService,
+        exchange_service: ExchangeFileService,
+    ) -> None:
         self.service = service
+        self.exchange_service = exchange_service
 
     async def solve(self, target: type[object]) -> object:
         """Return the configured lifecycle cleanup service."""
-        assert target is FileLifecycleCleanupService
-        return self.service
+        if target is FileLifecycleCleanupService:
+            return self.service
+        assert target is ExchangeFileService
+        return self.exchange_service
 
 
 class _AutoArchiveContainer:
@@ -183,6 +191,8 @@ async def test_file_lifecycle_cleanup_handler_logs_structured_summary(
     )
     service = Mock()
     service.cleanup_once = AsyncMock(return_value=summary)
+    exchange_service = Mock(spec=ExchangeFileService)
+    exchange_service.cleanup_agent_browser_uploads = AsyncMock(return_value=14)
     logger_info = Mock()
     monkeypatch.setattr(registry.logger, "info", logger_info)
     now = datetime.datetime(2026, 7, 18, tzinfo=datetime.UTC)
@@ -192,7 +202,7 @@ async def test_file_lifecycle_cleanup_handler_logs_structured_summary(
         lease_owner="scheduler-1",
         deadline=now + datetime.timedelta(minutes=2),
         manual_triggered=False,
-        container=_Container(service),  # ty: ignore[invalid-argument-type] # Focused container implements only solve().
+        container=_Container(service, exchange_service),  # ty: ignore[invalid-argument-type] # Focused container implements only solve().
     )
 
     result = await registry.file_lifecycle_cleanup_handler(context)
@@ -202,6 +212,7 @@ async def test_file_lifecycle_cleanup_handler_logs_structured_summary(
         "attempt_started_at": now.isoformat(),
         "manual_triggered": False,
         **summary.to_dict(),
+        "chat_upload_operations_cleaned": 14,
     }
     assert result.summary == expected_summary
     logger_info.assert_called_once_with(
@@ -210,9 +221,11 @@ async def test_file_lifecycle_cleanup_handler_logs_structured_summary(
             "task_key": "file_lifecycle_cleanup",
             "manual_triggered": False,
             **summary.to_dict(),
+            "chat_upload_operations_cleaned": 14,
         },
     )
     service.cleanup_once.assert_awaited_once_with(lease_owner="scheduler-1")
+    exchange_service.cleanup_agent_browser_uploads.assert_awaited_once_with(limit=100)
 
 
 @pytest.mark.asyncio

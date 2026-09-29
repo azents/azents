@@ -1,17 +1,17 @@
-interface HashWorkerProgress {
+interface FileHashWorkerProgress {
   type: "progress";
   loadedBytes: number;
   totalBytes: number;
 }
 
-interface HashWorkerDone {
+interface FileHashWorkerDone {
   type: "done";
   sha256: string;
 }
 
-type HashWorkerResponse = HashWorkerProgress | HashWorkerDone;
+type FileHashWorkerResponse = FileHashWorkerProgress | FileHashWorkerDone;
 
-export interface WorkspaceFileHashTask {
+export interface FileHashTask {
   promise: Promise<string>;
   cancel: () => void;
 }
@@ -23,20 +23,19 @@ export interface WorkspaceFileHashTask {
  * the worker lifecycle explicit lets a cancelled upload release the worker
  * immediately instead of waiting for a large local file to finish hashing.
  */
-export function startWorkspaceFileHash(
+export function startFileHash(
   file: File,
   onProgress: (loadedBytes: number, totalBytes: number) => void,
-): WorkspaceFileHashTask {
-  const worker = new Worker(
-    new URL("./workspaceUploadHash.worker.ts", import.meta.url),
-    { type: "module" },
-  );
+): FileHashTask {
+  const worker = new Worker(new URL("./fileHash.worker.ts", import.meta.url), {
+    type: "module",
+  });
   let settled = false;
   let rejectPromise: ((reason?: unknown) => void) | null = null;
 
   const promise = new Promise<string>((resolve, reject) => {
     rejectPromise = reject;
-    worker.onmessage = (event: MessageEvent<HashWorkerResponse>): void => {
+    worker.onmessage = (event: MessageEvent<FileHashWorkerResponse>): void => {
       if (event.data.type === "progress") {
         onProgress(event.data.loadedBytes, event.data.totalBytes);
         return;

@@ -1,5 +1,6 @@
 """Shared helpers for Azents E2E tests."""
 
+import hashlib
 import time
 import uuid
 from collections.abc import Callable, Iterator
@@ -24,6 +25,9 @@ from azentspublicclient.models.agent_model_selection_input import (
 )
 from azentspublicclient.models.agent_type import AgentType
 from azentspublicclient.models.api_key_secrets import ApiKeySecrets
+from azentspublicclient.models.chat_upload_prepare_response import (
+    ChatUploadPrepareResponse,
+)
 from azentspublicclient.models.create_invitation_request import (
     CreateInvitationRequest,
 )
@@ -738,7 +742,7 @@ def upload_file(
     content: bytes = PNG_1X1,
     media_type: str = "image/png",
 ) -> http_requests.Response:
-    """Upload a file through the Agent-scoped public API.
+    """Prepare metadata, PUT directly to S3, and finalize one Chat attachment.
 
     :param server_url: public API server URL
     :param token: auth token
@@ -746,11 +750,37 @@ def upload_file(
     :param filename: file name
     :param content: file content
     :param media_type: MIME type
-    :returns: HTTP response
+    :returns: preparation rejection or final publication HTTP response
     """
-    return http_requests.post(
-        f"{server_url}/chat/v1/agents/{agent_id}/upload",
-        files={"file": (filename, content, media_type)},
+    prepared = http_requests.post(
+        f"{server_url}/chat/v1/agents/{agent_id}/uploads",
+        json={
+            "filename": filename,
+            "media_type": media_type,
+            "size": len(content),
+            "sha256": hashlib.sha256(content).hexdigest(),
+        },
         headers={"Authorization": f"Bearer {token}"},
         timeout=10,
+    )
+    if prepared.status_code != 200:
+        return prepared
+    ticket = ChatUploadPrepareResponse.model_validate(prepared.json())
+    # Credential-free E2E uses the fixture's self-signed HTTPS S3 gateway.
+    uploaded = http_requests.put(
+        ticket.put_url,
+        headers=ticket.put_headers,
+        data=content,
+        timeout=180,
+        verify=False,
+        allow_redirects=False,
+    )
+    if uploaded.status_code != 200:
+        raise AssertionError(
+            f"Direct object PUT failed with HTTP {uploaded.status_code}."
+        )
+    return http_requests.post(
+        f"{server_url}/chat/v1/agents/{agent_id}/uploads/{ticket.upload_id}/finalize",
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=180,
     )

@@ -1,14 +1,18 @@
 "use client";
 
-/**
- * file upload hook.
- *
- * chat in file attachment and upload feature text.
- */
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  BrowserFileUploadHttpError,
+  BrowserFileUploadInvalidResponseError,
+  type BrowserFileUploadTask,
+  isFileUploadSizeAllowed,
+  startBrowserFileUpload,
+} from "./browserFileUpload";
+import {
+  createFileUploadCancellationCoordinator,
+  type FileUploadCancellationCoordinator,
+} from "./fileUploadCancellation";
 
-import { useCallback, useRef, useState } from "react";
-
-/** upload complete file metadata */
 export interface UploadedFile {
   attachmentId: string;
   uri: string;
@@ -28,15 +32,12 @@ export type UploadErrorReason =
   | "invalidResponse"
   | "unknown";
 
-/** pending file */
 export interface PendingFile {
   id: string;
   file: File;
   status: "pending" | "uploading" | "done" | "error";
   errorReason?: UploadErrorReason;
-  /** server insidetext detail etc. textfor text. */
   errorDetail?: string;
-  /** user when sendwhen textwhenalsoto can exists textwhether whether. */
   errorRetryable?: boolean;
 }
 
@@ -50,14 +51,6 @@ interface UseFileUploadReturn {
   isUploading: boolean;
 }
 
-interface UploadResponse {
-  attachment_id: string;
-  uri: string;
-  media_type: string;
-  size: number;
-  name?: string;
-}
-
 interface UploadFailureInfo {
   reason: UploadErrorReason;
   message: string;
@@ -65,22 +58,12 @@ interface UploadFailureInfo {
   detail?: string;
 }
 
-const MAX_FILES = 5;
-const MAX_UPLOAD_SIZE_BYTES = 20 * 1024 * 1024;
-
-class UploadFailure extends Error {
-  readonly reason: UploadErrorReason;
-  readonly detail?: string;
-  readonly retryable: boolean;
-
-  constructor(info: UploadFailureInfo) {
-    super(info.message);
-    this.name = "UploadFailure";
-    this.reason = info.reason;
-    this.detail = info.detail;
-    this.retryable = info.retryable;
-  }
+interface UploadOperation {
+  task: BrowserFileUploadTask | null;
+  cancelled: boolean;
 }
+
+const MAX_FILES = 5;
 
 function getErrorBodyMessage(body: unknown): string | null {
   if (typeof body !== "object" || body === null) {
@@ -151,38 +134,14 @@ function getUploadFailureInfo(
 function createFileTooLargeFailure(): UploadFailureInfo {
   return {
     reason: "fileTooLarge",
-    message: "Upload failed: file size exceeds the 20 MB limit.",
+    message: "Upload failed: file size exceeds the 128 MiB limit.",
     retryable: false,
-    detail: "File size exceeds the 20 MB limit.",
+    detail: "File size exceeds the 128 MiB limit.",
   };
 }
 
-async function readUploadErrorBody(response: Response): Promise<unknown> {
-  try {
-    return await response.json();
-  } catch {
-    return null;
-  }
-}
-
-function isUploadResponse(value: unknown): value is UploadResponse {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    "uri" in value &&
-    typeof value.uri === "string" &&
-    "attachment_id" in value &&
-    typeof value.attachment_id === "string" &&
-    "media_type" in value &&
-    typeof value.media_type === "string" &&
-    "size" in value &&
-    typeof value.size === "number" &&
-    (!("name" in value) || typeof value.name === "string")
-  );
-}
-
 function getPendingFileUploadFailure(file: File): UploadFailureInfo | null {
-  if (file.size > MAX_UPLOAD_SIZE_BYTES) {
+  if (!isFileUploadSizeAllowed(file.size)) {
     return createFileTooLargeFailure();
   }
   return null;
@@ -191,7 +150,7 @@ function getPendingFileUploadFailure(file: File): UploadFailureInfo | null {
 function toPendingFile(file: File): PendingFile {
   const failure = getPendingFileUploadFailure(file);
   return {
-    id: `file-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+    id: `file-${globalThis.crypto.randomUUID()}`,
     file,
     status: failure ? "error" : "pending",
     ...(failure
@@ -220,12 +179,14 @@ function shouldUpload(file: PendingFile): boolean {
 }
 
 function getUploadFailure(error: unknown): UploadFailureInfo {
-  if (error instanceof UploadFailure) {
+  if (error instanceof BrowserFileUploadHttpError) {
+    return getUploadFailureInfo(error.status, error.body);
+  }
+  if (error instanceof BrowserFileUploadInvalidResponseError) {
     return {
-      reason: error.reason,
+      reason: "invalidResponse",
       message: error.message,
-      retryable: error.retryable,
-      ...(error.detail ? { detail: error.detail } : {}),
+      retryable: true,
     };
   }
   if (error instanceof TypeError) {
@@ -251,116 +212,159 @@ function getUploadFailure(error: unknown): UploadFailureInfo {
   };
 }
 
+function cancelUploadOperation(operation: UploadOperation): void {
+  operation.cancelled = true;
+  operation.task?.cancel();
+}
+
 export function useFileUpload(): UseFileUploadReturn {
   const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
-
-  const addFiles = useCallback((files: FileList | File[]) => {
-    const fileArray = Array.from(files);
-    setPendingFiles((prev) => {
-      const remaining = MAX_FILES - prev.length;
-      if (remaining <= 0) {
-        return prev;
-      }
-      const newFiles = fileArray.slice(0, remaining).map(toPendingFile);
-      return [...prev, ...newFiles];
-    });
-  }, []);
-
-  const removeFile = useCallback((id: string) => {
-    setPendingFiles((prev) => prev.filter((f) => f.id !== id));
-  }, []);
-
-  const clearFiles = useCallback(() => {
-    setPendingFiles([]);
-  }, []);
-
-  /** send text when complete status text textwhenalso when when uploadto can existstext . */
-  const resetDoneFiles = useCallback(() => {
-    setPendingFiles((prev) =>
-      prev.map((f) => (f.status === "done" ? { ...f, status: "pending" } : f)),
+  const pendingFilesRef = useRef<PendingFile[]>([]);
+  const cancellationRef =
+    useRef<FileUploadCancellationCoordinator<UploadOperation> | null>(null);
+  if (cancellationRef.current === null) {
+    cancellationRef.current = createFileUploadCancellationCoordinator(
+      cancelUploadOperation,
     );
+  }
+
+  const updatePendingFiles = useCallback(
+    (update: (files: PendingFile[]) => PendingFile[]): void => {
+      setPendingFiles((previous) => {
+        const next = update(previous);
+        pendingFilesRef.current = next;
+        return next;
+      });
+    },
+    [],
+  );
+
+  const cancelFile = useCallback((id: string): void => {
+    cancellationRef.current?.cancelFile(id);
   }, []);
 
-  // pendingFiles ref with addtext uploadAll in latest status textalsotext .
-  // useCallback of deps to pendingFiles textwhen file add wheneach
-  // new docan createtext ChatView of handleSend not possiblerequiredtext textcreateis..
-  const pendingFilesRef = useRef(pendingFiles);
-  pendingFilesRef.current = pendingFiles;
+  const addFiles = useCallback(
+    (files: FileList | File[]): void => {
+      const fileArray = Array.from(files);
+      updatePendingFiles((previous) => {
+        const remaining = MAX_FILES - previous.length;
+        if (remaining <= 0) {
+          return previous;
+        }
+        const nextFiles = fileArray.slice(0, remaining).map(toPendingFile);
+        for (const file of nextFiles) {
+          cancellationRef.current?.restoreFile(file.id);
+        }
+        return [...previous, ...nextFiles];
+      });
+    },
+    [updatePendingFiles],
+  );
+
+  const removeFile = useCallback(
+    (id: string): void => {
+      cancelFile(id);
+      updatePendingFiles((previous) =>
+        previous.filter((file) => file.id !== id),
+      );
+    },
+    [cancelFile, updatePendingFiles],
+  );
+
+  const clearFiles = useCallback((): void => {
+    for (const file of pendingFilesRef.current) {
+      cancelFile(file.id);
+    }
+    updatePendingFiles(() => []);
+  }, [cancelFile, updatePendingFiles]);
+
+  const resetDoneFiles = useCallback((): void => {
+    updatePendingFiles((previous) =>
+      previous.map((file) =>
+        file.status === "done" ? { ...file, status: "pending" } : file,
+      ),
+    );
+  }, [updatePendingFiles]);
+
+  useEffect(
+    () => () => {
+      cancellationRef.current?.cancelFiles(
+        pendingFilesRef.current.map((file) => file.id),
+      );
+    },
+    [],
+  );
 
   const uploadAll = useCallback(
     async (agentId: string): Promise<UploadedFile[]> => {
       const uploaded: UploadedFile[] = [];
-
       const currentFiles = pendingFilesRef.current.filter(shouldUpload);
-      for (const pf of currentFiles) {
-        setPendingFiles((prev) =>
-          prev.map((f) =>
-            f.id === pf.id ? updatePendingFileStatus(f, "uploading") : f,
+
+      for (const pendingFile of currentFiles) {
+        if (cancellationRef.current?.isCancelled(pendingFile.id)) {
+          continue;
+        }
+
+        const operation: UploadOperation = {
+          task: null,
+          cancelled: false,
+        };
+        cancellationRef.current?.registerOperation(pendingFile.id, operation);
+        updatePendingFiles((previous) =>
+          previous.map((file) =>
+            file.id === pendingFile.id
+              ? updatePendingFileStatus(file, "uploading")
+              : file,
           ),
         );
 
         try {
-          const formData = new FormData();
-          formData.append("file", pf.file);
-          formData.append("agentId", agentId);
-
-          const response = await fetch("/api/chat/upload", {
-            method: "POST",
-            body: formData,
+          operation.task = startBrowserFileUpload({
+            agentId,
+            file: pendingFile.file,
           });
+          const uploadedFile = await operation.task.promise;
 
-          if (!response.ok) {
-            const errorBody = await readUploadErrorBody(response);
-            throw new UploadFailure(
-              getUploadFailureInfo(response.status, errorBody),
-            );
+          if (operation.cancelled) {
+            continue;
           }
-
-          const data: unknown = await response.json();
-          if (!isUploadResponse(data)) {
-            throw new UploadFailure({
-              reason: "invalidResponse",
-              message: "Invalid upload response",
-              retryable: true,
-            });
-          }
-          uploaded.push({
-            attachmentId: data.attachment_id,
-            uri: data.uri,
-            name: data.name ?? pf.file.name,
-            mediaType: data.media_type,
-            size: data.size,
-          });
-
-          setPendingFiles((prev) =>
-            prev.map((f) =>
-              f.id === pf.id ? updatePendingFileStatus(f, "done") : f,
+          uploaded.push(uploadedFile);
+          updatePendingFiles((previous) =>
+            previous.map((file) =>
+              file.id === pendingFile.id
+                ? updatePendingFileStatus(file, "done")
+                : file,
             ),
           );
         } catch (error) {
+          if (operation.cancelled) {
+            continue;
+          }
           const failure = getUploadFailure(error);
-          setPendingFiles((prev) =>
-            prev.map((f) =>
-              f.id === pf.id
+          updatePendingFiles((previous) =>
+            previous.map((file) =>
+              file.id === pendingFile.id
                 ? {
-                    ...updatePendingFileStatus(f, "error"),
+                    ...updatePendingFileStatus(file, "error"),
                     errorReason: failure.reason,
                     errorRetryable: failure.retryable,
                     ...(failure.detail ? { errorDetail: failure.detail } : {}),
                   }
-                : f,
+                : file,
             ),
           );
           throw error;
+        } finally {
+          cancellationRef.current?.unregisterOperation(pendingFile.id);
         }
       }
 
       return uploaded;
     },
-    [],
+    [updatePendingFiles],
   );
 
-  const isUploading = pendingFiles.some((f) => f.status === "uploading");
+  const isUploading = pendingFiles.some((file) => file.status === "uploading");
 
   return {
     pendingFiles,

@@ -1,4 +1,4 @@
-import { chatV1PrepareFileUploadForAgent } from "@azents/public-client";
+import { chatV1FinalizeFileUploadForAgent } from "@azents/public-client";
 import { TRPCError } from "@trpc/server";
 import { type NextRequest, NextResponse } from "next/server";
 import { rejectUntrustedMainWebOrigin } from "@/shared/lib/request-origin";
@@ -8,61 +8,52 @@ import {
   getFreshAccessToken,
 } from "@/trpc/context";
 
-const ROUTE = "/api/chat/upload";
+const ROUTE = "/api/chat/upload/[uploadId]/finalize";
 
-interface PrepareUploadRequest {
+interface FinalizeUploadRequest {
   agentId: string;
-  filename: string;
-  media_type: string;
-  size: number;
-  sha256: string;
 }
 
-function isPrepareUploadRequest(value: unknown): value is PrepareUploadRequest {
+function isFinalizeUploadRequest(
+  value: unknown,
+): value is FinalizeUploadRequest {
   return (
     typeof value === "object" &&
     value !== null &&
     "agentId" in value &&
-    typeof value.agentId === "string" &&
-    "filename" in value &&
-    typeof value.filename === "string" &&
-    "media_type" in value &&
-    typeof value.media_type === "string" &&
-    "size" in value &&
-    typeof value.size === "number" &&
-    Number.isSafeInteger(value.size) &&
-    value.size >= 0 &&
-    "sha256" in value &&
-    typeof value.sha256 === "string"
+    typeof value.agentId === "string"
   );
 }
 
-async function readPrepareUploadRequest(
+async function readFinalizeUploadRequest(
   request: NextRequest,
   headers: Headers,
-): Promise<PrepareUploadRequest | NextResponse> {
+): Promise<FinalizeUploadRequest | NextResponse> {
   let body: unknown;
   try {
     body = await request.json();
   } catch (error) {
     if (error instanceof SyntaxError) {
       return NextResponse.json(
-        { error: "Invalid upload preparation request" },
+        { error: "Invalid upload finalize request" },
         { status: 400, headers },
       );
     }
     throw error;
   }
-  if (!isPrepareUploadRequest(body)) {
+  if (!isFinalizeUploadRequest(body)) {
     return NextResponse.json(
-      { error: "Invalid upload preparation request" },
+      { error: "Invalid upload finalize request" },
       { status: 400, headers },
     );
   }
   return body;
 }
 
-async function post(request: NextRequest): Promise<NextResponse> {
+async function post(
+  request: NextRequest,
+  { params }: { params: Promise<{ uploadId: string }> },
+): Promise<NextResponse> {
   const rejection = rejectUntrustedMainWebOrigin(request);
   if (rejection !== null) {
     return new NextResponse(rejection.body, {
@@ -72,7 +63,7 @@ async function post(request: NextRequest): Promise<NextResponse> {
   }
 
   const responseHeaders = new Headers({ "Cache-Control": "no-store" });
-  const body = await readPrepareUploadRequest(request, responseHeaders);
+  const body = await readFinalizeUploadRequest(request, responseHeaders);
   if (body instanceof NextResponse) {
     return body;
   }
@@ -96,28 +87,23 @@ async function post(request: NextRequest): Promise<NextResponse> {
     );
   }
 
-  const { data, error, response } = await chatV1PrepareFileUploadForAgent({
+  const { uploadId } = await params;
+  const { data, error, response } = await chatV1FinalizeFileUploadForAgent({
     client: createApiClientWithAccessToken(accessToken),
-    path: { agent_id: body.agentId },
-    body: {
-      filename: body.filename,
-      media_type: body.media_type,
-      size: body.size,
-      sha256: body.sha256,
-    },
+    path: { agent_id: body.agentId, upload_id: uploadId },
     throwOnError: false,
   });
   if (!response) {
-    throw new Error("Upload preparation completed without a backend response.");
+    throw new Error("Upload finalize completed without a backend response.");
   }
   if (!response.ok) {
-    return NextResponse.json(error ?? { error: "Upload preparation failed" }, {
+    return NextResponse.json(error ?? { error: "Upload finalize failed" }, {
       status: response.status,
       headers: responseHeaders,
     });
   }
   if (!data) {
-    throw new Error("Upload preparation completed without a response body.");
+    throw new Error("Upload finalize completed without a response body.");
   }
 
   return NextResponse.json(data, { headers: responseHeaders });

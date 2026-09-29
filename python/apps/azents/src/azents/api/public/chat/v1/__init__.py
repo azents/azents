@@ -10,7 +10,7 @@ import re
 from collections.abc import AsyncIterator
 from datetime import datetime
 from textwrap import dedent
-from typing import Annotated, Literal, NamedTuple, NoReturn, assert_never
+from typing import Annotated, Literal, NoReturn, assert_never
 from urllib.parse import quote
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -22,7 +22,6 @@ from fastapi import (
     HTTPException,
     Query,
     Response,
-    UploadFile,
     WebSocket,
     WebSocketDisconnect,
 )
@@ -53,6 +52,7 @@ from azents.core.auth.jwt import (
 from azents.core.config import AuthConfig, Config
 from azents.core.deps import get_appctx, get_auth_config
 from azents.core.enums import AgentSessionKind, AgentSessionStatus
+from azents.core.exchange_upload import ExchangeUploadError
 from azents.core.redis import create_redis_client
 from azents.engine.events.action_messages import CommandAction, PublicTurnAction
 from azents.engine.events.types import FileOutputPart
@@ -162,7 +162,6 @@ from azents.services.session_git_worktree import (
     GitWorktreeCleanupSubagentReadOnly,
     SessionGitWorktreeService,
 )
-from azents.services.session_storage import guess_media_type
 from azents.services.session_workspace_project import (
     AgentNotFound as ProjectAgentNotFound,
 )
@@ -236,6 +235,8 @@ from .data import (
     ChatSessionModelProfileResponse,
     ChatSessionModelProfileUpdateRequest,
     ChatStopResponse,
+    ChatUploadPrepareRequest,
+    ChatUploadPrepareResponse,
     ChatWriteAcceptedResponse,
     ChatWriteResponse,
     ChatWriteSnapshotResponse,
@@ -3201,39 +3202,6 @@ def _workspace_file_response_from_domain(
             assert_never(value)
 
 
-_MAX_UPLOAD_SIZE = 20 * 1024 * 1024  # 20 MB
-
-
-class _UploadFileData(NamedTuple):
-    """Validated upload bytes and inferred file metadata."""
-
-    data: bytes
-    original_filename: str | None
-    media_type: str
-
-
-async def _read_upload_file(file: UploadFile) -> _UploadFileData:
-    """Read an upload within size limits and infer media type from filename."""
-    if file.size is not None and file.size > _MAX_UPLOAD_SIZE:
-        raise HTTPException(
-            status_code=413,
-            detail="File size exceeds the 20 MB limit.",
-        )
-    data = await file.read(_MAX_UPLOAD_SIZE + 1)
-    if len(data) > _MAX_UPLOAD_SIZE:
-        raise HTTPException(
-            status_code=413,
-            detail="File size exceeds the 20 MB limit.",
-        )
-    original_filename = file.filename
-    media_type = guess_media_type(original_filename or "upload")
-    return _UploadFileData(
-        data=data,
-        original_filename=original_filename,
-        media_type=media_type,
-    )
-
-
 @router.post("/agents/{agent_id}/workspace/uploads")
 async def create_agent_workspace_upload(
     agent_id: str,
@@ -3373,51 +3341,86 @@ async def retry_agent_workspace_upload(
             assert_never(result)
 
 
-@router.post("/agents/{agent_id}/upload")
-async def upload_file_for_agent(
+@router.post("/agents/{agent_id}/uploads")
+async def prepare_file_upload_for_agent(
     agent_id: str,
-    file: UploadFile,
+    request: ChatUploadPrepareRequest,
+    response: Response,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    exchange_file_service: Annotated[ExchangeFileService, Depends()],
+) -> ChatUploadPrepareResponse:
+    """Authorize a metadata-only Chat upload and issue its direct PUT ticket."""
+    response.headers["Cache-Control"] = "no-store"
+    _validate_uuid7_hex(agent_id, label="agent ID")
+    result = await exchange_file_service.prepare_agent_browser_upload(
+        agent_id=agent_id,
+        user_id=current_user.user_id,
+        filename=request.filename,
+        media_type=request.media_type,
+        size=request.size,
+        sha256=request.sha256,
+    )
+    match result:
+        case Success(value):
+            return ChatUploadPrepareResponse(
+                upload_id=value.upload_id,
+                put_url=value.request.url,
+                put_headers=dict(value.request.headers),
+                expires_at=value.request.expires_at,
+            )
+        case Failure(error):
+            _raise_chat_upload_error(error)
+        case _:
+            assert_never(result)
+
+
+@router.post("/agents/{agent_id}/uploads/{upload_id}/finalize")
+async def finalize_file_upload_for_agent(
+    agent_id: str,
+    upload_id: str,
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
     exchange_file_service: Annotated[ExchangeFileService, Depends()],
 ) -> UploadResponse:
-    """Upload only Exchange attachments scoped to the Agent."""
+    """Publish an attachment only after trusted checksum/size verification."""
     _validate_uuid7_hex(agent_id, label="agent ID")
-    data, original_filename, media_type = await _read_upload_file(file)
-    result = await exchange_file_service.create_agent_upload(
-        agent_id=agent_id,
-        user_id=current_user.user_id,
-        filename=original_filename,
-        media_type=media_type,
-        body=data,
+    _validate_uuid7_hex(upload_id, label="upload ID")
+    result = await exchange_file_service.finalize_agent_browser_upload(
+        agent_id=agent_id, user_id=current_user.user_id, upload_id=upload_id
     )
-    if result.success:
-        value = result.value
-        return UploadResponse(
-            attachment_id=value.id,
-            uri=value.uri,
-            media_type=value.media_type,
-            size=value.size_bytes,
-            name=value.filename,
-        )
-    else:
-        error = result.error
-        match error:
-            case ExchangeSessionNotFound():
-                raise HTTPException(status_code=404, detail="Agent not found.")
-            case FileAccessDenied():
-                logger.warning(
-                    "Chat upload denied by agent workspace access check",
-                    extra={
-                        "agent_id": agent_id,
-                        "user_id": current_user.user_id,
-                    },
-                )
-                raise HTTPException(
-                    status_code=403,
-                    detail="Workspace membership required.",
-                )
-            case _:
-                assert_never(error)
+    match result:
+        case Success(value):
+            return UploadResponse(
+                attachment_id=value.id,
+                uri=value.uri,
+                media_type=value.media_type,
+                size=value.size_bytes,
+                name=value.filename,
+            )
+        case Failure(error):
+            _raise_chat_upload_error(error)
+        case _:
+            assert_never(result)
+
+
+def _raise_chat_upload_error(error: ExchangeUploadError) -> NoReturn:
+    """Map bounded failures without leaking object-store keys or URLs."""
+    match error:
+        case ExchangeUploadError.NOT_FOUND:
+            raise HTTPException(status_code=404, detail="Upload or Agent not found.")
+        case ExchangeUploadError.ACCESS_DENIED:
+            raise HTTPException(status_code=403, detail="Upload access denied.")
+        case ExchangeUploadError.EXPIRED:
+            raise HTTPException(status_code=410, detail="Upload has expired.")
+        case ExchangeUploadError.BUSY | ExchangeUploadError.FENCED:
+            raise HTTPException(status_code=409, detail="Upload claim is unavailable.")
+        case ExchangeUploadError.MANIFEST_MISMATCH:
+            raise HTTPException(
+                status_code=400, detail="Upload does not match its manifest."
+            )
+        case ExchangeUploadError.INVALID_REQUEST:
+            raise HTTPException(status_code=400, detail="Invalid upload manifest.")
+        case _:
+            assert_never(error)
 
 
 @router.get(

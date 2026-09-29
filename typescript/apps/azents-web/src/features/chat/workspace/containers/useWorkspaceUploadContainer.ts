@@ -1,8 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  type FileHashTask,
+  startFileHash,
+} from "@/shared/file-upload/fileHash";
 import { trpc } from "@/trpc/client";
-import { startWorkspaceFileHash } from "../workspaceUploadHash";
 import { pollWorkspaceUploadStatus } from "../workspaceUploadPolling";
 import {
   startWorkspaceUploadPut,
@@ -24,11 +27,6 @@ interface UseWorkspaceUploadContainerInput {
   onDestinationChanged: (destinationDirectory: string) => Promise<void> | void;
 }
 
-interface HashTask {
-  promise: Promise<string>;
-  cancel: () => void;
-}
-
 interface UploadOperation {
   agentId: string;
   sessionId: string;
@@ -38,7 +36,7 @@ interface UploadOperation {
   uploadId: string | null;
   revision: number | null;
   currentDeliveryNumber: number | null;
-  hashTask: HashTask | null;
+  hashTask: FileHashTask | null;
   putTask: WorkspaceUploadPutTask | null;
   pollTimer: number | null;
   pollWaitResolver: (() => void) | null;
@@ -375,7 +373,7 @@ export function useWorkspaceUploadContainer({
   const runUpload = useCallback(
     async (operation: UploadOperation): Promise<void> => {
       try {
-        operation.hashTask = startWorkspaceFileHash(
+        operation.hashTask = startFileHash(
           operation.file,
           (loadedBytes, totalBytes) => {
             updateRow(operation.row.id, (row) => ({

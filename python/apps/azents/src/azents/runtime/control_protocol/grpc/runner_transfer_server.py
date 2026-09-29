@@ -215,6 +215,7 @@ class RuntimeRunnerTransferObjectStore(Protocol):
         *,
         identity: S3ObjectIdentity,
         content_type: str | None,
+        content_length: int,
         checksum_sha256: str,
         expires_in: timedelta,
         now: datetime | None = None,
@@ -773,6 +774,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
             ticket = await self._object_store.get_upload_request(
                 identity=self._object_identity(claimed.direct_ingress_handle),
                 content_type=None,
+                content_length=request.expected_size,
                 checksum_sha256=request.expected_sha256,
                 expires_in=timedelta(seconds=remaining_seconds),
                 now=now,
