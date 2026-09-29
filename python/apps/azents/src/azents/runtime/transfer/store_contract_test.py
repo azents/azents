@@ -11,6 +11,7 @@ import pytest
 
 from azents.core.redis import create_redis_client
 from azents.runtime.transfer.data import (
+    DIRECT_INGRESS_CLEANUP_GRACE,
     RuntimeTransferAdmission,
     RuntimeTransferCancellationReason,
     RuntimeTransferCleanupArtifact,
@@ -24,6 +25,7 @@ from azents.runtime.transfer.data import (
     RuntimeTransferPreparationCleanupState,
     RuntimeTransferRecord,
     RuntimeTransferSourceTransport,
+    RuntimeTransferUploadTransport,
 )
 from azents.runtime.transfer.memory import InMemoryRuntimeTransferStateStore
 from azents.runtime.transfer.redis import RedisRuntimeTransferStateStore
@@ -683,6 +685,255 @@ async def test_ready_consumes_provider_canonical_pre_ready_evidence(
     )
     assert ready.preparation_object_handle is None
     assert ready.pre_ready_object_handle is None
+
+
+@pytest.mark.asyncio
+async def test_direct_upload_reserves_only_its_owned_ingress_before_put(
+    store_harness: _StoreHarness,
+) -> None:
+    """Both stores fence one mutable ingress to the active Runner claim."""
+    store = store_harness.store
+    admitted = await store.admit(
+        replace(
+            _admission(),
+            transfer_id="direct-upload",
+            expected_sha256=None,
+            upload_transport=RuntimeTransferUploadTransport.DIRECT_OBJECT,
+        ),
+        lease_id="direct-upload-lease",
+    )
+    assert admitted is not None
+    ready = await store.mark_ready(
+        "direct-upload",
+        attempt_id="attempt",
+        runtime_id="runtime",
+        desired_generation=1,
+        expected_revision=admitted.revision,
+        object=RuntimeTransferObject("immutable-source", 1, None),
+    )
+    assert ready is not None
+    stream = await _claim_stream(
+        store,
+        "direct-upload",
+        attempt_id="attempt",
+        runtime_id="runtime",
+        desired_generation=1,
+        accepted_runner_generation=2,
+        expected_revision=ready.revision,
+        claim_id="direct-claim",
+    )
+    assert stream is not None
+    assert (
+        await store.reserve_direct_ingress(
+            "direct-upload",
+            attempt_id="attempt",
+            accepted_runner_generation=2,
+            expected_revision=stream.revision,
+            claim_id="wrong-claim",
+            owner_replica_id="test-replica",
+            ingress_handle="mutable-ingress",
+            expires_at=store_harness.clock.now + timedelta(minutes=1),
+            sha256="a" * 64,
+        )
+        is None
+    )
+    assert (
+        await store.reserve_direct_ingress(
+            "direct-upload",
+            attempt_id="attempt",
+            accepted_runner_generation=2,
+            expected_revision=stream.revision,
+            claim_id="direct-claim",
+            owner_replica_id="test-replica",
+            ingress_handle="immutable-source",
+            expires_at=store_harness.clock.now + timedelta(minutes=1),
+            sha256="a" * 64,
+        )
+        is None
+    )
+    reserved = await store.reserve_direct_ingress(
+        "direct-upload",
+        attempt_id="attempt",
+        accepted_runner_generation=2,
+        expected_revision=stream.revision,
+        claim_id="direct-claim",
+        owner_replica_id="test-replica",
+        ingress_handle="mutable-ingress",
+        expires_at=store_harness.clock.now + timedelta(minutes=1),
+        sha256="a" * 64,
+    )
+    assert reserved is not None
+    assert reserved.direct_ingress_handle == "mutable-ingress"
+    assert reserved.direct_ingress_sha256 == "a" * 64
+    assert reserved.direct_ingress_expires_at == (
+        store_harness.clock.now + timedelta(minutes=1)
+    )
+    assert reserved.object is not None
+    assert reserved.object.key == "immutable-source"
+    assert (
+        await store.reserve_direct_ingress(
+            "direct-upload",
+            attempt_id="attempt",
+            accepted_runner_generation=2,
+            expected_revision=reserved.revision,
+            claim_id="direct-claim",
+            owner_replica_id="test-replica",
+            ingress_handle="other-ingress",
+            expires_at=store_harness.clock.now + timedelta(minutes=1),
+            sha256="a" * 64,
+        )
+        is None
+    )
+
+
+@pytest.mark.asyncio
+async def test_direct_upload_cannot_verify_after_stream_lease_expires(
+    store_harness: _StoreHarness,
+) -> None:
+    """A stalled HEAD cannot publish without renewing its owned lease."""
+    store = store_harness.store
+    admitted = await store.admit(
+        replace(
+            _admission(),
+            transfer_id="direct-expired-lease",
+            upload_transport=RuntimeTransferUploadTransport.DIRECT_OBJECT,
+        ),
+        lease_id="lease-direct-expired",
+    )
+    assert admitted is not None
+    ready = await store.mark_ready(
+        "direct-expired-lease",
+        attempt_id="attempt",
+        runtime_id="runtime",
+        desired_generation=1,
+        expected_revision=admitted.revision,
+        object=RuntimeTransferObject("immutable-object", 1, "a" * 64),
+    )
+    assert ready is not None
+    claimed = await _claim_stream(
+        store,
+        "direct-expired-lease",
+        attempt_id="attempt",
+        runtime_id="runtime",
+        desired_generation=1,
+        accepted_runner_generation=2,
+        expected_revision=ready.revision,
+        claim_id="claim-direct-expired",
+    )
+    assert claimed is not None and claimed.stream_lease_expires_at is not None
+    store_harness.clock.now = claimed.stream_lease_expires_at
+    assert (
+        await store.begin_verification(
+            "direct-expired-lease",
+            attempt_id="attempt",
+            runtime_id="runtime",
+            desired_generation=1,
+            accepted_runner_generation=2,
+            claim_id="claim-direct-expired",
+            expected_revision=claimed.revision,
+        )
+        is None
+    )
+
+
+@pytest.mark.asyncio
+async def test_direct_ingress_cleanup_waits_for_deadline_grace_in_both_stores(
+    store_harness: _StoreHarness,
+) -> None:
+    """A failed direct attempt survives terminal TTL until PUT cleanup is safe."""
+    store = store_harness.store
+    admitted = await store.admit(
+        replace(
+            _admission(),
+            transfer_id="direct-grace",
+            upload_transport=RuntimeTransferUploadTransport.DIRECT_OBJECT,
+        ),
+        lease_id="lease-direct-grace",
+    )
+    assert admitted is not None
+    ready = await store.mark_ready(
+        "direct-grace",
+        attempt_id="attempt",
+        runtime_id="runtime",
+        desired_generation=1,
+        expected_revision=admitted.revision,
+        object=RuntimeTransferObject("immutable-object", 1, "a" * 64),
+    )
+    assert ready is not None
+    claim = await _claim_stream(
+        store,
+        "direct-grace",
+        attempt_id="attempt",
+        runtime_id="runtime",
+        desired_generation=1,
+        accepted_runner_generation=2,
+        expected_revision=ready.revision,
+        claim_id="claim-direct-grace",
+    )
+    assert claim is not None
+    reserved = await store.reserve_direct_ingress(
+        "direct-grace",
+        attempt_id="attempt",
+        accepted_runner_generation=2,
+        expected_revision=claim.revision,
+        claim_id="claim-direct-grace",
+        owner_replica_id="test-replica",
+        ingress_handle="mutable-ingress",
+        expires_at=store_harness.clock.now + timedelta(minutes=1),
+        sha256="a" * 64,
+    )
+    assert reserved is not None
+    pending = await store.record_cleanup(
+        "direct-grace",
+        attempt_id="attempt",
+        expected_revision=reserved.revision,
+        status=RuntimeTransferCleanupStatus.PENDING,
+        cleanup_failure=None,
+    )
+    assert pending is not None
+    settled = await store.settle(
+        "direct-grace",
+        attempt_id="attempt",
+        expected_revision=pending.revision,
+        outcome=RuntimeTransferOutcome.FAILED,
+        failure=RuntimeTransferFailure.STREAM,
+        destination_conflict=None,
+    )
+    assert settled is not None
+    store_harness.clock.now = (
+        admitted.admission.deadline_at + DIRECT_INGRESS_CLEANUP_GRACE
+    ) - timedelta(seconds=1)
+    terminal = await store.get("direct-grace")
+    assert terminal is not None
+    assert terminal.phase is RuntimeTransferPhase.TERMINAL
+    assert (
+        await store.clear_direct_ingress(
+            "direct-grace",
+            attempt_id="attempt",
+            expected_revision=terminal.revision,
+        )
+        is None
+    )
+    store_harness.clock.now += timedelta(seconds=2)
+    terminal = await store.get("direct-grace")
+    assert terminal is not None
+    assert (
+        await store.clear_direct_ingress(
+            "direct-grace",
+            attempt_id="wrong-attempt",
+            expected_revision=terminal.revision,
+        )
+        is None
+    )
+    cleared = await store.clear_direct_ingress(
+        "direct-grace",
+        attempt_id="attempt",
+        expected_revision=terminal.revision,
+    )
+    assert cleared is not None
+    assert cleared.direct_ingress_handle is None
+    assert cleared.direct_ingress_expires_at is None
+    assert cleared.direct_ingress_sha256 is None
 
 
 @pytest.mark.asyncio

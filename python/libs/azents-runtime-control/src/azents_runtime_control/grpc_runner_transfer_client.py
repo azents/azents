@@ -61,6 +61,18 @@ class RunnerDirectObjectTicket:
 
 
 @dataclass(frozen=True)
+class RunnerDirectUploadTicket:
+    """Ephemeral checksum-bound PUT capability for one Runner attempt."""
+
+    method: str
+    url: str
+    expires_at: datetime
+    headers: Mapping[str, str]
+    expected_size: int
+    expected_sha256: str
+
+
+@dataclass(frozen=True)
 class RunnerUploadComplete:
     """Runner-observed upload manifest declaration."""
 
@@ -255,6 +267,105 @@ class GrpcRunnerTransferClient:
         return RunnerUploadResult(
             actual_size=result.actual_size,
             sha256=result.sha256,
+        )
+
+    async def claim_direct_upload(
+        self,
+        identity: RunnerTransferIdentity,
+        *,
+        dispatch_id: str,
+        claim_id: str,
+        size: int,
+        sha256: str,
+        timeout: float,
+    ) -> RunnerDirectUploadTicket:
+        """Claim one exact PUT, without exposing its URL to the dispatch plane."""
+        if timeout <= 0 or size < 0 or not dispatch_id or not claim_id:
+            raise ValueError("Invalid direct upload claim")
+        response = await self._stub.ClaimDirectObjectUpload(
+            runtime_runner_transfer_pb2.DirectObjectUploadClaimRequest(
+                identity=_identity_message(identity),
+                dispatch_id=dispatch_id,
+                claim_id=claim_id,
+                expected_size=size,
+                expected_sha256=sha256,
+            ),
+            metadata=self._metadata,
+            timeout=timeout,
+        )
+        if (
+            response.method != "PUT"
+            or not response.url
+            or not response.HasField("expires_at")
+            or response.expected_size != size
+            or response.expected_sha256 != sha256
+        ):
+            raise ValueError("Direct upload ticket is invalid")
+        headers: dict[str, str] = {}
+        for header in response.headers:
+            if not header.name or not header.value or header.name.lower() in headers:
+                raise ValueError("Direct upload ticket headers are invalid")
+            headers[header.name.lower()] = header.value
+        return RunnerDirectUploadTicket(
+            method=response.method,
+            url=response.url,
+            expires_at=response.expires_at.ToDatetime(tzinfo=UTC),
+            headers=headers,
+            expected_size=response.expected_size,
+            expected_sha256=response.expected_sha256,
+        )
+
+    async def renew_direct_upload(
+        self,
+        identity: RunnerTransferIdentity,
+        *,
+        dispatch_id: str,
+        claim_id: str,
+        timeout: float,
+    ) -> None:
+        """Refresh only the authenticated stream lease during S3 PUT."""
+        await self._stub.RenewDirectObjectUpload(
+            runtime_runner_transfer_pb2.DirectObjectUploadRenewRequest(
+                identity=_identity_message(identity),
+                dispatch_id=dispatch_id,
+                claim_id=claim_id,
+            ),
+            metadata=self._metadata,
+            timeout=timeout,
+        )
+
+    async def complete_direct_upload(
+        self,
+        identity: RunnerTransferIdentity,
+        *,
+        dispatch_id: str,
+        claim_id: str,
+        size: int,
+        sha256: str,
+        timeout: float,
+    ) -> RunnerUploadResult:
+        """Request trusted HEAD/checksum verification and immutable promotion."""
+        response = await self._stub.CompleteDirectObjectUpload(
+            runtime_runner_transfer_pb2.DirectObjectUploadCompleteRequest(
+                identity=_identity_message(identity),
+                dispatch_id=dispatch_id,
+                claim_id=claim_id,
+                actual_size=size,
+                sha256=sha256,
+            ),
+            metadata=self._metadata,
+            timeout=timeout,
+        )
+        if (
+            response.status
+            != runtime_runner_transfer_pb2.UPLOAD_TRANSFER_STATUS_SUCCEEDED
+            or not response.HasField("actual_size")
+            or response.actual_size != size
+            or response.sha256 != sha256
+        ):
+            raise ValueError("Direct upload completion is invalid")
+        return RunnerUploadResult(
+            actual_size=response.actual_size, sha256=response.sha256
         )
 
     async def close(self) -> None:

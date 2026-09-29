@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 RUNTIME_TRANSFER_MAXIMUM_AGE = timedelta(hours=1)
+RUNTIME_TRANSFER_DIRECT_UPLOAD_MAXIMUM_BYTES = 128 * 1024 * 1024
+DIRECT_INGRESS_CLEANUP_GRACE = timedelta(minutes=5)
 RUNTIME_TRANSFER_MAXIMUM_PAGE_SIZE = 1000
 RUNTIME_TRANSFER_MAXIMUM_CLEANUP_FAILURE_ATTEMPTS = 100
 
@@ -20,6 +22,13 @@ class RuntimeTransferSourceTransport(enum.StrEnum):
     """Physical source transport selected for one Runtime transfer."""
 
     TRANSFER_OBJECT = "transfer_object"
+    DIRECT_OBJECT = "direct_object"
+
+
+class RuntimeTransferUploadTransport(enum.StrEnum):
+    """Physical destination transport selected for one Runner upload."""
+
+    CONTROL_STREAM = "control_stream"
     DIRECT_OBJECT = "direct_object"
 
 
@@ -196,6 +205,9 @@ class RuntimeTransferAdmission:
         RuntimeTransferSourceTransport.TRANSFER_OBJECT
     )
     source_handle: str | None = None
+    upload_transport: RuntimeTransferUploadTransport = (
+        RuntimeTransferUploadTransport.CONTROL_STREAM
+    )
 
     def __post_init__(self) -> None:
         """Validate trusted admission metadata."""
@@ -207,6 +219,13 @@ class RuntimeTransferAdmission:
         _bounded(self.resource_class, "resource_class", 64)
         if not isinstance(self.source_transport, RuntimeTransferSourceTransport):
             raise ValueError("source_transport is invalid")
+        if not isinstance(self.upload_transport, RuntimeTransferUploadTransport):
+            raise ValueError("upload_transport is invalid")
+        if (
+            self.upload_transport is RuntimeTransferUploadTransport.DIRECT_OBJECT
+            and self.direction is not RuntimeTransferDirection.UPLOAD
+        ):
+            raise ValueError("direct object upload requires UPLOAD direction")
         if self.source_handle is not None:
             _opaque_handle(self.source_handle, "source_handle")
         if self.source_transport is RuntimeTransferSourceTransport.DIRECT_OBJECT:
@@ -238,6 +257,11 @@ class RuntimeTransferAdmission:
             < 0
         ):
             raise ValueError("generations and sizes must not be negative")
+        if (
+            self.upload_transport is RuntimeTransferUploadTransport.DIRECT_OBJECT
+            and self.expected_size > RUNTIME_TRANSFER_DIRECT_UPLOAD_MAXIMUM_BYTES
+        ):
+            raise ValueError("direct upload exceeds the 128 MiB maximum")
         _sha(self.expected_sha256)
         _aware(self.deadline_at, "deadline_at")
         if self.source_expires_at is not None:
@@ -339,6 +363,9 @@ class RuntimeTransferRecord:
         RuntimeTransferPreparationCleanupState.NOT_REQUIRED
     )
     pre_ready_object_handle: str | None = None
+    direct_ingress_handle: str | None = None
+    direct_ingress_expires_at: datetime | None = None
+    direct_ingress_sha256: str | None = None
 
     def __post_init__(self) -> None:
         if self.revision <= 0:
@@ -399,6 +426,31 @@ class RuntimeTransferRecord:
             )
         if self.pre_ready_object_handle is not None:
             _opaque_handle(self.pre_ready_object_handle, "pre_ready_object_handle")
+        if self.direct_ingress_handle is not None:
+            _opaque_handle(self.direct_ingress_handle, "direct_ingress_handle")
+            if (
+                self.direct_ingress_expires_at is None
+                or self.direct_ingress_sha256 is None
+            ):
+                raise ValueError("direct ingress requires expiry and checksum")
+            _aware(self.direct_ingress_expires_at, "direct_ingress_expires_at")
+            _sha(self.direct_ingress_sha256)
+            if (
+                self.admission.direction is not RuntimeTransferDirection.UPLOAD
+                or self.admission.upload_transport
+                is not RuntimeTransferUploadTransport.DIRECT_OBJECT
+                or (
+                    self.object is not None
+                    and self.direct_ingress_handle == self.object.key
+                )
+                or self.direct_ingress_handle == self.pre_ready_object_handle
+            ):
+                raise ValueError("direct ingress must be a distinct upload object")
+        elif (
+            self.direct_ingress_expires_at is not None
+            or self.direct_ingress_sha256 is not None
+        ):
+            raise ValueError("direct ingress evidence requires its handle")
         if (
             self.preparation_cleanup_state
             is RuntimeTransferPreparationCleanupState.NOT_REQUIRED

@@ -27,6 +27,7 @@ from azents.runtime.coordination.data import (
 from azents.runtime.coordination.store import RuntimeCoordinationStore
 from azents.runtime.coordination.stream_ids import operation_reply_stream_id
 from azents.runtime.transfer.data import (
+    DIRECT_INGRESS_CLEANUP_GRACE,
     RuntimeTransferAdmission,
     RuntimeTransferCancellationReason,
     RuntimeTransferCleanupArtifact,
@@ -383,6 +384,7 @@ class RuntimeTransferCoordinator:
                 is RuntimeTransferPreparationCleanupState.NOT_REQUIRED
             )
             and current.pre_ready_object_handle is None
+            and current.direct_ingress_handle is None
         )
         if not cleanup_completed:
             current = await self._cleanup_before_terminal(current)
@@ -419,7 +421,25 @@ class RuntimeTransferCoordinator:
                 is RuntimeTransferPreparationCleanupState.NOT_REQUIRED
             )
             and record.pre_ready_object_handle is None
+            and record.direct_ingress_handle is None
         ):
+            return record
+        if record.direct_ingress_expires_at is not None and self._now() < (
+            max(record.direct_ingress_expires_at, record.admission.deadline_at)
+            + DIRECT_INGRESS_CLEANUP_GRACE
+        ):
+            if (
+                record.cleanup_status is RuntimeTransferCleanupStatus.NOT_REQUIRED
+                and not record.completed_object_cleanup_required
+            ):
+                marked = await self._state_store.record_cleanup(
+                    record.admission.transfer_id,
+                    attempt_id=record.admission.attempt_id,
+                    expected_revision=record.revision,
+                    status=RuntimeTransferCleanupStatus.PENDING,
+                    cleanup_failure=None,
+                )
+                return marked or record
             return record
         preparation_required = (
             record.preparation_cleanup_state
@@ -441,6 +461,7 @@ class RuntimeTransferCoordinator:
             and not pre_ready_object_required
             and not multipart_required
             and not completed_required
+            and record.direct_ingress_handle is None
         ):
             return record
         if record.cleanup_status is RuntimeTransferCleanupStatus.RETRYABLE_FAILURE:
@@ -507,6 +528,16 @@ class RuntimeTransferCoordinator:
             return retained or marked
         if preparation_required or pre_ready_object_required:
             cleared = await self._state_store.clear_preparation_cleanup(
+                marked.admission.transfer_id,
+                attempt_id=marked.admission.attempt_id,
+                expected_revision=marked.revision,
+            )
+            if cleared is None:
+                current = await self._state_store.get(marked.admission.transfer_id)
+                return current or marked
+            marked = cleared
+        if marked.direct_ingress_handle is not None:
+            cleared = await self._state_store.clear_direct_ingress(
                 marked.admission.transfer_id,
                 attempt_id=marked.admission.attempt_id,
                 expected_revision=marked.revision,
@@ -1188,6 +1219,7 @@ def _intent_envelope(
                 ).decode("ascii")
             ),
             "source_transport": record.admission.source_transport.value,
+            "upload_transport": record.admission.upload_transport.value,
             "expected_size": record.admission.expected_size,
             "expected_sha256": (
                 (

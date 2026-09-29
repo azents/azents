@@ -14,6 +14,7 @@ from azents_runtime_control.grpc_transfer_coordinator_client import (
     CoordinatorTransferDirection,
     CoordinatorTransferFailure,
     CoordinatorTransferOutcome,
+    CoordinatorUploadTransport,
     coordinator_identity_from_message,
 )
 from azents_runtime_control.proto import (
@@ -46,6 +47,7 @@ from azents.runtime.transfer.data import (
     RuntimeTransferPhase,
     RuntimeTransferPreparationCleanupState,
     RuntimeTransferRecord,
+    RuntimeTransferUploadTransport,
 )
 
 
@@ -618,6 +620,19 @@ def _admission_from_request(
             else None
         ),
         resource_class=request.resource_class,
+        upload_transport=RuntimeTransferUploadTransport(
+            {
+                pb.COORDINATOR_UPLOAD_TRANSPORT_UNSPECIFIED: (
+                    CoordinatorUploadTransport.CONTROL_STREAM.value
+                ),
+                pb.COORDINATOR_UPLOAD_TRANSPORT_CONTROL_STREAM: (
+                    CoordinatorUploadTransport.CONTROL_STREAM.value
+                ),
+                pb.COORDINATOR_UPLOAD_TRANSPORT_DIRECT_OBJECT: (
+                    CoordinatorUploadTransport.DIRECT_OBJECT.value
+                ),
+            }[request.upload_transport]
+        ),
     )
 
 

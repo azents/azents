@@ -732,6 +732,16 @@
                 },
                 "runtimeTransfer": {
                   "$ref": "#/definitions/runtimeProviderMandatoryService"
+                },
+                "objectStorage": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/definitions/runtimeProviderMandatoryService"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 }
               }
             },

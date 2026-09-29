@@ -270,6 +270,7 @@ class KubernetesRuntimeProviderConfig:
     network_hard_cap_extra_egress: tuple[NetworkPolicyEgressRule, ...] = ()
     image_pull_secrets: tuple[LocalObjectReference, ...] = ()
     pod_annotations: Mapping[str, str] = dataclasses.field(default_factory=dict)
+    object_storage_endpoint: str | None = None
 
 
 class KubernetesRuntimeProvider:
@@ -291,12 +292,19 @@ class KubernetesRuntimeProvider:
             raise ValueError("Runtime Control NetworkPolicy labels are required.")
         if not 1 <= config.runtime_control_port <= 65_535:
             raise ValueError("Runtime Control NetworkPolicy port is invalid.")
-        if len(config.mandatory_services) != 2 or {
-            item.role for item in config.mandatory_services
-        } != {"runtime_control", "runtime_transfer"}:
+        roles = {item.role for item in config.mandatory_services}
+        if (
+            len(roles) != len(config.mandatory_services)
+            or not {"runtime_control", "runtime_transfer"} <= roles
+            or roles - {"runtime_control", "runtime_transfer", "runtime_object_storage"}
+            or (
+                ("runtime_object_storage" in roles)
+                != (config.object_storage_endpoint is not None)
+            )
+        ):
             raise ValueError(
-                "Runtime Control and transfer mandatory Service references are "
-                "required."
+                "Mandatory Service references must match the configured "
+                "Runtime Control, transfer, and object-storage endpoints."
             )
         if not 1 <= config.proxy_port <= 65_535:
             raise ValueError("proxy port is invalid")
@@ -950,6 +958,15 @@ class KubernetesRuntimeProvider:
             result,
             role="runtime_transfer",
         )
+        if self._config.object_storage_endpoint is not None:
+            validate_endpoint_authority(
+                endpoint_from_url(
+                    self._config.object_storage_endpoint,
+                    default_port=None,
+                ),
+                result,
+                role="runtime_object_storage",
+            )
         return result
 
     def _network_enforcement_inputs(

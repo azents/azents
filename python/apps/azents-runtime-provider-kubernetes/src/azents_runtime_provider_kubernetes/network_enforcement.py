@@ -72,7 +72,11 @@ class MandatoryServiceReference:
 
     def __post_init__(self) -> None:
         """Reject incomplete or over-broad deployment references."""
-        if self.role not in {"runtime_control", "runtime_transfer"}:
+        if self.role not in {
+            "runtime_control",
+            "runtime_transfer",
+            "runtime_object_storage",
+        }:
             raise ValueError("mandatory Service role is unsupported")
         if not self.namespace or not self.name:
             raise ValueError("mandatory Service namespace and name are required")

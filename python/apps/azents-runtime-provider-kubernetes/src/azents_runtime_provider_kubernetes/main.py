@@ -470,6 +470,9 @@ class ProviderSettings:
         self.mandatory_services = _json_mandatory_services_env(
             "AZ_RUNTIME_PROVIDER_MANDATORY_SERVICES"
         )
+        self.object_storage_endpoint = _optional_env(
+            "AZ_RUNTIME_PROVIDER_OBJECT_STORAGE_ENDPOINT"
+        )
         self.attest_proxy_required = _required_bool_env(
             "AZ_RUNTIME_PROVIDER_ATTEST_PROXY_REQUIRED"
         )
@@ -554,6 +557,7 @@ async def prepare_runtime_provider(
                 runtime_control_labels=settings.runtime_control_labels,
                 runtime_control_port=settings.runtime_control_port,
                 mandatory_services=settings.mandatory_services,
+                object_storage_endpoint=settings.object_storage_endpoint,
                 proxy_image=settings.proxy_image,
                 proxy_addon_digest=settings.proxy_addon_digest,
                 proxy_port=settings.proxy_port,

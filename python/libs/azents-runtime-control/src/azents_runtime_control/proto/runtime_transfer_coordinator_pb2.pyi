@@ -363,6 +363,32 @@ WORKSPACE_UPLOAD_FAILURE_CANCELLED: WorkspaceUploadFailure.ValueType  # 10
 WORKSPACE_UPLOAD_FAILURE_EXPIRED: WorkspaceUploadFailure.ValueType  # 11
 Global___WorkspaceUploadFailure: _TypeAlias = WorkspaceUploadFailure
 
+class _CoordinatorUploadTransport:
+    ValueType = _typing.NewType("ValueType", _builtins.int)
+    V: _TypeAlias = ValueType
+
+class _CoordinatorUploadTransportEnumTypeWrapper(
+    _enum_type_wrapper._EnumTypeWrapper[_CoordinatorUploadTransport.ValueType],
+    _builtins.type,
+):
+    DESCRIPTOR: _descriptor.EnumDescriptor
+    COORDINATOR_UPLOAD_TRANSPORT_UNSPECIFIED: _CoordinatorUploadTransport.ValueType  # 0
+    COORDINATOR_UPLOAD_TRANSPORT_CONTROL_STREAM: (
+        _CoordinatorUploadTransport.ValueType
+    )  # 1
+    COORDINATOR_UPLOAD_TRANSPORT_DIRECT_OBJECT: (
+        _CoordinatorUploadTransport.ValueType
+    )  # 2
+
+class CoordinatorUploadTransport(
+    _CoordinatorUploadTransport, metaclass=_CoordinatorUploadTransportEnumTypeWrapper
+): ...
+
+COORDINATOR_UPLOAD_TRANSPORT_UNSPECIFIED: CoordinatorUploadTransport.ValueType  # 0
+COORDINATOR_UPLOAD_TRANSPORT_CONTROL_STREAM: CoordinatorUploadTransport.ValueType  # 1
+COORDINATOR_UPLOAD_TRANSPORT_DIRECT_OBJECT: CoordinatorUploadTransport.ValueType  # 2
+Global___CoordinatorUploadTransport: _TypeAlias = CoordinatorUploadTransport
+
 @_typing.final
 class CoordinatorTransferIdentity(_message.Message):
     DESCRIPTOR: _descriptor.Descriptor
@@ -715,6 +741,7 @@ class AdmitTransferRequest(_message.Message):
     SOURCE_EXPIRES_AT_FIELD_NUMBER: _builtins.int
     RESOURCE_CLASS_FIELD_NUMBER: _builtins.int
     CONFLICT_PRECONDITION_FIELD_NUMBER: _builtins.int
+    UPLOAD_TRANSPORT_FIELD_NUMBER: _builtins.int
     lease_id: _builtins.str
     runtime_path: _builtins.str
     overwrite: _builtins.bool
@@ -722,6 +749,7 @@ class AdmitTransferRequest(_message.Message):
     provider_maximum_size: _builtins.int
     resource_class: _builtins.str
     conflict_precondition: _builtins.bytes
+    upload_transport: Global___CoordinatorUploadTransport.ValueType
     @_builtins.property
     def identity(self) -> Global___CoordinatorTransferIdentity: ...
     @_builtins.property
@@ -744,6 +772,7 @@ class AdmitTransferRequest(_message.Message):
         source_expires_at: _timestamp_pb2.Timestamp | None = ...,
         resource_class: _builtins.str = ...,
         conflict_precondition: _builtins.bytes | None = ...,
+        upload_transport: Global___CoordinatorUploadTransport.ValueType = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _typing.Literal[
         "_conflict_precondition",
@@ -803,6 +832,8 @@ class AdmitTransferRequest(_message.Message):
         b"runtime_path",
         "source_expires_at",
         b"source_expires_at",
+        "upload_transport",
+        b"upload_transport",
     ]
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     _WhichOneofReturnType__conflict_precondition: _TypeAlias = _typing.Literal[

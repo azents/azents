@@ -128,6 +128,12 @@ enum RunnerTransferSourceTransport {
   RUNNER_TRANSFER_SOURCE_TRANSPORT_DIRECT_OBJECT = 2;
 }
 
+enum RunnerTransferUploadTransport {
+  RUNNER_TRANSFER_UPLOAD_TRANSPORT_UNSPECIFIED = 0;
+  RUNNER_TRANSFER_UPLOAD_TRANSPORT_CONTROL_STREAM = 1;
+  RUNNER_TRANSFER_UPLOAD_TRANSPORT_DIRECT_OBJECT = 2;
+}
+
 message RunnerTransferIntent {
   TransferIdentity identity = 1;
   TransferDirection direction = 2;
@@ -143,6 +149,7 @@ message RunnerTransferIntent {
   string dispatch_id = 12;
   optional bytes conflict_precondition = 13;
   RunnerTransferSourceTransport source_transport = 14;
+  RunnerTransferUploadTransport upload_transport = 15;
 }
 
 message RunnerTransferCancel {

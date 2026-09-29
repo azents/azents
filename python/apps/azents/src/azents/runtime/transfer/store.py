@@ -1,5 +1,6 @@
 """Runtime transfer state-store contract."""
 
+from datetime import datetime
 from typing import Protocol
 
 from azents.runtime.transfer.data import (
@@ -78,6 +79,7 @@ class RuntimeTransferStateStore(Protocol):
         accepted_runner_generation: int,
         claim_id: str,
         owner_replica_id: str,
+        upload: bool = False,
     ) -> RuntimeTransferRecord | None: ...
 
     async def bind_dispatch(
@@ -154,6 +156,28 @@ class RuntimeTransferStateStore(Protocol):
         claim_id: str,
         owner_replica_id: str,
         object_handle: str,
+    ) -> RuntimeTransferRecord | None: ...
+
+    async def reserve_direct_ingress(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        accepted_runner_generation: int,
+        expected_revision: int,
+        claim_id: str,
+        owner_replica_id: str,
+        ingress_handle: str,
+        expires_at: datetime,
+        sha256: str,
+    ) -> RuntimeTransferRecord | None: ...
+
+    async def clear_direct_ingress(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        expected_revision: int,
     ) -> RuntimeTransferRecord | None: ...
 
     async def register_preparation_cleanup(

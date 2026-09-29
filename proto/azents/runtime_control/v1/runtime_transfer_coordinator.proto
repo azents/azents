@@ -202,6 +202,13 @@ message AdmitTransferRequest {
   google.protobuf.Timestamp source_expires_at = 9;
   string resource_class = 10;
   optional bytes conflict_precondition = 11;
+  CoordinatorUploadTransport upload_transport = 12;
+}
+
+enum CoordinatorUploadTransport {
+  COORDINATOR_UPLOAD_TRANSPORT_UNSPECIFIED = 0;
+  COORDINATOR_UPLOAD_TRANSPORT_CONTROL_STREAM = 1;
+  COORDINATOR_UPLOAD_TRANSPORT_DIRECT_OBJECT = 2;
 }
 
 message AdmitTransferResponse {

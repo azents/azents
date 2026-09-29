@@ -5,6 +5,7 @@
 {{- end -}}
 {{- $runtimeControlService := .Values.runtimeProviderKubernetes.strictNetwork.mandatoryServices.runtimeControl -}}
 {{- $runtimeTransferService := .Values.runtimeProviderKubernetes.strictNetwork.mandatoryServices.runtimeTransfer -}}
+{{- $objectStorageService := .Values.runtimeProviderKubernetes.strictNetwork.mandatoryServices.objectStorage -}}
 {{- $mandatoryServices := list
   (dict
     "role" "runtime_control"
@@ -19,6 +20,16 @@
     "endpoint_hostnames" (include "azents.runtimeProviderMandatoryServiceHostnames" (dict "root" . "service" $runtimeTransferService) | fromJsonArray)
     "ports" $runtimeTransferService.ports)
 -}}
+{{- if $objectStorageService -}}
+{{- $mandatoryServices = append $mandatoryServices
+  (dict
+    "role" "runtime_object_storage"
+    "namespace" (include "azents.runtimeProviderMandatoryServiceNamespace" (dict "root" . "service" $objectStorageService))
+    "name" $objectStorageService.name
+    "endpoint_hostnames" (include "azents.runtimeProviderMandatoryServiceHostnames" (dict "root" . "service" $objectStorageService) | fromJsonArray)
+    "ports" $objectStorageService.ports)
+-}}
+{{- end -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -103,6 +114,8 @@ spec:
               value: {{ .Values.runtimeProviderKubernetes.strictNetwork.attestations.noNetwork | quote }}
             - name: AZ_RUNTIME_PROVIDER_MANDATORY_SERVICES
               value: {{ $mandatoryServices | toJson | quote }}
+            - name: AZ_RUNTIME_PROVIDER_OBJECT_STORAGE_ENDPOINT
+              value: {{ if $objectStorageService }}{{ coalesce .Values.objectStorage.external.publicEndpoint .Values.objectStorage.external.endpoint | required "Runtime object-storage endpoint is required for mandatory Service egress" | quote }}{{ else }}""{{ end }}
             - name: AZ_RUNTIME_PROVIDER_PROXY_IMAGE
               value: {{ include "azents.runtimeProxyImage" . | quote }}
             - name: AZ_RUNTIME_PROVIDER_PROXY_ADDON_DIGEST

@@ -26,6 +26,7 @@ from azents.core.runtime_connection_generation import (
     runtime_connection_generation_to_redis,
 )
 from azents.runtime.transfer.data import (
+    DIRECT_INGRESS_CLEANUP_GRACE,
     RUNTIME_TRANSFER_MAXIMUM_CLEANUP_FAILURE_ATTEMPTS,
     RuntimeTransferAdmission,
     RuntimeTransferCancellationReason,
@@ -45,6 +46,7 @@ from azents.runtime.transfer.data import (
     RuntimeTransferProgress,
     RuntimeTransferRecord,
     RuntimeTransferSourceTransport,
+    RuntimeTransferUploadTransport,
     cancellation_settlement,
     logical_expiry,
     terminal_expiry,
@@ -215,6 +217,9 @@ _RECORD_FIELDS = frozenset(
         "preparation_multipart_cleanup_handle",
         "preparation_cleanup_state",
         "pre_ready_object_handle",
+        "direct_ingress_handle",
+        "direct_ingress_expires_at",
+        "direct_ingress_sha256",
     }
 )
 _ADMISSION_FIELDS = frozenset(
@@ -239,6 +244,7 @@ _ADMISSION_FIELDS = frozenset(
         "resource_class",
         "source_transport",
         "source_handle",
+        "upload_transport",
     }
 )
 _OBJECT_FIELDS = frozenset({"key", "size", "sha256"})
@@ -505,11 +511,38 @@ def _record_to_value(record: RuntimeTransferRecord) -> dict[str, object]:
         ),
         "preparation_cleanup_state": record.preparation_cleanup_state.value,
         "pre_ready_object_handle": record.pre_ready_object_handle,
+        "direct_ingress_handle": record.direct_ingress_handle,
+        "direct_ingress_expires_at": _optional_datetime_to_value(
+            record.direct_ingress_expires_at
+        ),
+        "direct_ingress_sha256": record.direct_ingress_sha256,
     }
 
 
 def _record_from_value(value: object) -> RuntimeTransferRecord:
     """Restore one public record through exact schema and domain validation."""
+    if isinstance(value, dict) and frozenset(value) == (
+        _RECORD_FIELDS
+        - {
+            "direct_ingress_handle",
+            "direct_ingress_expires_at",
+            "direct_ingress_sha256",
+        }
+    ):
+        value = {
+            **value,
+            "direct_ingress_handle": None,
+            "direct_ingress_expires_at": None,
+            "direct_ingress_sha256": None,
+        }
+    elif isinstance(value, dict) and frozenset(value) == (
+        _RECORD_FIELDS - {"direct_ingress_expires_at", "direct_ingress_sha256"}
+    ):
+        value = {
+            **value,
+            "direct_ingress_expires_at": None,
+            "direct_ingress_sha256": None,
+        }
     record = _require_object(value, "record", _RECORD_FIELDS)
     terminal_outcome = record["terminal_outcome"]
     failure = record["failure"]
@@ -636,6 +669,16 @@ def _record_from_value(value: object) -> RuntimeTransferRecord:
             record["pre_ready_object_handle"],
             "pre_ready_object_handle",
         ),
+        direct_ingress_handle=_optional_string(
+            record["direct_ingress_handle"],
+            "direct_ingress_handle",
+        ),
+        direct_ingress_expires_at=_optional_datetime_from_value(
+            record["direct_ingress_expires_at"], "direct_ingress_expires_at"
+        ),
+        direct_ingress_sha256=_optional_string(
+            record["direct_ingress_sha256"], "direct_ingress_sha256"
+        ),
     )
 
 
@@ -750,11 +793,19 @@ def _admission_to_value(admission: RuntimeTransferAdmission) -> dict[str, object
         "resource_class": admission.resource_class,
         "source_transport": admission.source_transport.value,
         "source_handle": admission.source_handle,
+        "upload_transport": admission.upload_transport.value,
     }
 
 
 def _admission_from_value(value: object) -> RuntimeTransferAdmission:
     """Restore one admission through exact schema and domain validation."""
+    if isinstance(value, dict) and frozenset(value) == (
+        _ADMISSION_FIELDS - {"upload_transport"}
+    ):
+        value = {
+            **value,
+            "upload_transport": RuntimeTransferUploadTransport.CONTROL_STREAM.value,
+        }
     admission = _require_object(value, "admission", _ADMISSION_FIELDS)
     return RuntimeTransferAdmission(
         transfer_id=_require_string(admission["transfer_id"], "transfer_id"),
@@ -799,6 +850,9 @@ def _admission_from_value(value: object) -> RuntimeTransferAdmission:
             _require_string(admission["source_transport"], "source_transport")
         ),
         source_handle=_optional_string(admission["source_handle"], "source_handle"),
+        upload_transport=RuntimeTransferUploadTransport(
+            _require_string(admission["upload_transport"], "upload_transport")
+        ),
     )
 
 
@@ -1411,8 +1465,9 @@ class RedisRuntimeTransferStateStore:
         accepted_runner_generation: int,
         claim_id: str,
         owner_replica_id: str,
+        upload: bool = False,
     ) -> RuntimeTransferRecord | None:
-        """Claim or reuse one exact direct-object download claim."""
+        """Claim or renew one exact direct-object upload or download."""
         now = self._now()
         async with self._locked() as token:
             entries = await self._load_reclaimed_entries(now)
@@ -1425,9 +1480,21 @@ class RedisRuntimeTransferStateStore:
             record = None if envelope is None else envelope.record
             if (
                 record is None
-                or record.admission.source_transport
-                is not RuntimeTransferSourceTransport.DIRECT_OBJECT
-                or record.admission.direction is not RuntimeTransferDirection.DOWNLOAD
+                or (
+                    (
+                        record.admission.upload_transport
+                        is not RuntimeTransferUploadTransport.DIRECT_OBJECT
+                        or record.admission.direction
+                        is not RuntimeTransferDirection.UPLOAD
+                    )
+                    if upload
+                    else (
+                        record.admission.source_transport
+                        is not RuntimeTransferSourceTransport.DIRECT_OBJECT
+                        or record.admission.direction
+                        is not RuntimeTransferDirection.DOWNLOAD
+                    )
+                )
                 or record.dispatch_status
                 not in {
                     RuntimeTransferDispatchStatus.DELIVERABLE,
@@ -2052,6 +2119,108 @@ class RedisRuntimeTransferStateStore:
             await self._commit(token, entries, now)
             return updated
 
+    async def reserve_direct_ingress(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        accepted_runner_generation: int,
+        expected_revision: int,
+        claim_id: str,
+        owner_replica_id: str,
+        ingress_handle: str,
+        expires_at: datetime,
+        sha256: str,
+    ) -> RuntimeTransferRecord | None:
+        """Persist an exact direct PUT cleanup owner before URL issuance."""
+        now = self._now()
+        async with self._locked() as token:
+            entries = await self._load_reclaimed_entries(now)
+            key, envelope = await self._load_exact_entry(
+                entries, transfer_id, attempt_id, now
+            )
+            if not await self._active_matches(
+                transfer_id,
+                key,
+                envelope,
+                expected_revision,
+                RuntimeTransferPhase.STREAMING,
+                now,
+                accepted_runner_generation=accepted_runner_generation,
+                claim_id=claim_id,
+            ) or (
+                envelope is not None
+                and (
+                    envelope.record.admission.upload_transport
+                    is not RuntimeTransferUploadTransport.DIRECT_OBJECT
+                    or envelope.record.stream_owner_replica_id != owner_replica_id
+                    or envelope.record.direct_ingress_handle is not None
+                    or expires_at <= now
+                    or expires_at > envelope.record.admission.deadline_at
+                    or (
+                        envelope.record.admission.expected_sha256 is not None
+                        and sha256 != envelope.record.admission.expected_sha256
+                    )
+                    or (
+                        envelope.record.object is not None
+                        and ingress_handle == envelope.record.object.key
+                    )
+                )
+            ):
+                await self._commit(token, entries, now)
+                return None
+            assert key is not None and envelope is not None
+            updated = dataclasses.replace(
+                envelope.record,
+                revision=envelope.record.revision + 1,
+                updated_at=now,
+                direct_ingress_handle=ingress_handle,
+                direct_ingress_expires_at=expires_at,
+                direct_ingress_sha256=sha256,
+            )
+            entries[key] = dataclasses.replace(envelope, record=updated)
+            await self._commit(token, entries, now)
+            return updated
+
+    async def clear_direct_ingress(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        expected_revision: int,
+    ) -> RuntimeTransferRecord | None:
+        """Clear terminal ingress evidence after the PUT deadline and grace."""
+        now = self._now()
+        async with self._locked() as token:
+            entries = await self._load_reclaimed_entries(now)
+            key, envelope = await self._load_exact_entry(
+                entries, transfer_id, attempt_id, now
+            )
+            record = None if envelope is None else envelope.record
+            if (
+                record is None
+                or record.revision != expected_revision
+                or record.phase is not RuntimeTransferPhase.TERMINAL
+                or record.direct_ingress_expires_at is None
+                or now
+                < max(record.direct_ingress_expires_at, record.admission.deadline_at)
+                + DIRECT_INGRESS_CLEANUP_GRACE
+            ):
+                await self._commit(token, entries, now)
+                return None
+            assert key is not None and envelope is not None
+            cleared = dataclasses.replace(
+                record,
+                revision=record.revision + 1,
+                updated_at=now,
+                direct_ingress_handle=None,
+                direct_ingress_expires_at=None,
+                direct_ingress_sha256=None,
+            )
+            entries[key] = dataclasses.replace(envelope, record=cleared)
+            await self._commit(token, entries, now)
+            return cleared
+
     async def publish_available(
         self,
         transfer_id: str,
@@ -2194,7 +2363,11 @@ class RedisRuntimeTransferStateStore:
                 revision=envelope.record.revision + 1,
                 updated_at=now,
                 upload_response_committed_at=now,
-                cleanup_status=RuntimeTransferCleanupStatus.COMPLETE,
+                cleanup_status=(
+                    RuntimeTransferCleanupStatus.PENDING
+                    if envelope.record.direct_ingress_handle is not None
+                    else RuntimeTransferCleanupStatus.COMPLETE
+                ),
                 cleanup_failure=None,
                 completed_object_cleanup_required=False,
             )
@@ -3005,6 +3178,16 @@ class RedisRuntimeTransferStateStore:
                                 )
                             )
                         )
+                    )
+                )
+                or (
+                    envelope is not None
+                    and target is RuntimeTransferPhase.VERIFYING
+                    and envelope.record.admission.upload_transport
+                    is RuntimeTransferUploadTransport.DIRECT_OBJECT
+                    and (
+                        envelope.record.stream_lease_expires_at is None
+                        or envelope.record.stream_lease_expires_at <= now
                     )
                 )
                 or (

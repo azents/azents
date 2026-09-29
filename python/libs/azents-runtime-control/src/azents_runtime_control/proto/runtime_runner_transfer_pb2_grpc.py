@@ -57,6 +57,24 @@ class RuntimeRunnerTransferStub:
             response_deserializer=runtime__runner__transfer__pb2.DirectObjectDownloadClaimResponse.FromString,
             _registered_method=True,
         )
+        self.ClaimDirectObjectUpload = channel.unary_unary(
+            "/azents.runtime_control.v1.RuntimeRunnerTransfer/ClaimDirectObjectUpload",
+            request_serializer=runtime__runner__transfer__pb2.DirectObjectUploadClaimRequest.SerializeToString,
+            response_deserializer=runtime__runner__transfer__pb2.DirectObjectUploadClaimResponse.FromString,
+            _registered_method=True,
+        )
+        self.RenewDirectObjectUpload = channel.unary_unary(
+            "/azents.runtime_control.v1.RuntimeRunnerTransfer/RenewDirectObjectUpload",
+            request_serializer=runtime__runner__transfer__pb2.DirectObjectUploadRenewRequest.SerializeToString,
+            response_deserializer=runtime__runner__transfer__pb2.DirectObjectUploadRenewResponse.FromString,
+            _registered_method=True,
+        )
+        self.CompleteDirectObjectUpload = channel.unary_unary(
+            "/azents.runtime_control.v1.RuntimeRunnerTransfer/CompleteDirectObjectUpload",
+            request_serializer=runtime__runner__transfer__pb2.DirectObjectUploadCompleteRequest.SerializeToString,
+            response_deserializer=runtime__runner__transfer__pb2.UploadTransferResult.FromString,
+            _registered_method=True,
+        )
 
 
 class RuntimeRunnerTransferServicer:
@@ -80,6 +98,24 @@ class RuntimeRunnerTransferServicer:
         context.set_details("Method not implemented!")
         raise NotImplementedError("Method not implemented!")
 
+    def ClaimDirectObjectUpload(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details("Method not implemented!")
+        raise NotImplementedError("Method not implemented!")
+
+    def RenewDirectObjectUpload(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details("Method not implemented!")
+        raise NotImplementedError("Method not implemented!")
+
+    def CompleteDirectObjectUpload(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details("Method not implemented!")
+        raise NotImplementedError("Method not implemented!")
+
 
 def add_RuntimeRunnerTransferServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -97,6 +133,21 @@ def add_RuntimeRunnerTransferServicer_to_server(servicer, server):
             servicer.ClaimDirectObjectDownload,
             request_deserializer=runtime__runner__transfer__pb2.DirectObjectDownloadClaimRequest.FromString,
             response_serializer=runtime__runner__transfer__pb2.DirectObjectDownloadClaimResponse.SerializeToString,
+        ),
+        "ClaimDirectObjectUpload": grpc.unary_unary_rpc_method_handler(
+            servicer.ClaimDirectObjectUpload,
+            request_deserializer=runtime__runner__transfer__pb2.DirectObjectUploadClaimRequest.FromString,
+            response_serializer=runtime__runner__transfer__pb2.DirectObjectUploadClaimResponse.SerializeToString,
+        ),
+        "RenewDirectObjectUpload": grpc.unary_unary_rpc_method_handler(
+            servicer.RenewDirectObjectUpload,
+            request_deserializer=runtime__runner__transfer__pb2.DirectObjectUploadRenewRequest.FromString,
+            response_serializer=runtime__runner__transfer__pb2.DirectObjectUploadRenewResponse.SerializeToString,
+        ),
+        "CompleteDirectObjectUpload": grpc.unary_unary_rpc_method_handler(
+            servicer.CompleteDirectObjectUpload,
+            request_deserializer=runtime__runner__transfer__pb2.DirectObjectUploadCompleteRequest.FromString,
+            response_serializer=runtime__runner__transfer__pb2.UploadTransferResult.SerializeToString,
         ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -191,6 +242,96 @@ class RuntimeRunnerTransfer:
             "/azents.runtime_control.v1.RuntimeRunnerTransfer/ClaimDirectObjectDownload",
             runtime__runner__transfer__pb2.DirectObjectDownloadClaimRequest.SerializeToString,
             runtime__runner__transfer__pb2.DirectObjectDownloadClaimResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True,
+        )
+
+    @staticmethod
+    def ClaimDirectObjectUpload(
+        request,
+        target,
+        options=(),
+        channel_credentials=None,
+        call_credentials=None,
+        insecure=False,
+        compression=None,
+        wait_for_ready=None,
+        timeout=None,
+        metadata=None,
+    ):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            "/azents.runtime_control.v1.RuntimeRunnerTransfer/ClaimDirectObjectUpload",
+            runtime__runner__transfer__pb2.DirectObjectUploadClaimRequest.SerializeToString,
+            runtime__runner__transfer__pb2.DirectObjectUploadClaimResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True,
+        )
+
+    @staticmethod
+    def RenewDirectObjectUpload(
+        request,
+        target,
+        options=(),
+        channel_credentials=None,
+        call_credentials=None,
+        insecure=False,
+        compression=None,
+        wait_for_ready=None,
+        timeout=None,
+        metadata=None,
+    ):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            "/azents.runtime_control.v1.RuntimeRunnerTransfer/RenewDirectObjectUpload",
+            runtime__runner__transfer__pb2.DirectObjectUploadRenewRequest.SerializeToString,
+            runtime__runner__transfer__pb2.DirectObjectUploadRenewResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True,
+        )
+
+    @staticmethod
+    def CompleteDirectObjectUpload(
+        request,
+        target,
+        options=(),
+        channel_credentials=None,
+        call_credentials=None,
+        insecure=False,
+        compression=None,
+        wait_for_ready=None,
+        timeout=None,
+        metadata=None,
+    ):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            "/azents.runtime_control.v1.RuntimeRunnerTransfer/CompleteDirectObjectUpload",
+            runtime__runner__transfer__pb2.DirectObjectUploadCompleteRequest.SerializeToString,
+            runtime__runner__transfer__pb2.UploadTransferResult.FromString,
             options,
             channel_credentials,
             insecure,

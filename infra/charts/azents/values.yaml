@@ -327,6 +327,8 @@ runtimeProviderKubernetes:
         endpointHostnames: []
         ports:
           - 8030
+      # Required for direct Runner S3 transfers; omitted before transport cutover.
+      objectStorage: null
     diagnostics:
       refreshIntervalSeconds: 300
   serviceAccount:

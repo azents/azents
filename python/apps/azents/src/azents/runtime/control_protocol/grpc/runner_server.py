@@ -40,6 +40,7 @@ from azents_runtime_control.runner_terminal import (
 from azents_runtime_control.runner_transfer import (
     RunnerTransferDirection,
     RunnerTransferSourceTransport,
+    RunnerTransferUploadTransport,
 )
 from azents_runtime_control.runtime_configuration import (
     RuntimeConfigurationEvidence,
@@ -1168,6 +1169,30 @@ def _runner_transfer_intent(
         source_transport = source_transports[source_transport_value]
     except KeyError:
         raise ValueError("Transfer source transport is invalid") from None
+    upload_transport_value = payload.get(
+        "upload_transport",
+        RunnerTransferUploadTransport.CONTROL_STREAM.value,
+    )
+    if not isinstance(upload_transport_value, str):
+        raise ValueError("Transfer upload transport must be a string")
+    upload_transports = {
+        RunnerTransferUploadTransport.CONTROL_STREAM.value: (
+            runtime_runner_control_pb2.RUNNER_TRANSFER_UPLOAD_TRANSPORT_CONTROL_STREAM
+        ),
+        RunnerTransferUploadTransport.DIRECT_OBJECT.value: (
+            runtime_runner_control_pb2.RUNNER_TRANSFER_UPLOAD_TRANSPORT_DIRECT_OBJECT
+        ),
+    }
+    try:
+        upload_transport = upload_transports[upload_transport_value]
+    except KeyError:
+        raise ValueError("Transfer upload transport is invalid") from None
+    if (
+        upload_transport
+        == runtime_runner_control_pb2.RUNNER_TRANSFER_UPLOAD_TRANSPORT_DIRECT_OBJECT
+        and direction != RunnerTransferDirection.UPLOAD.value
+    ):
+        raise ValueError("Direct object upload requires UPLOAD direction")
     deadline_at = envelope.deadline_at
     if deadline_at is None or envelope.body_stream_id is not None:
         raise ValueError("Transfer intent requires metadata-only deadline routing")
@@ -1190,6 +1215,7 @@ def _runner_transfer_intent(
         capability="file.transfer.v1",
         dispatch_id=dispatch_id,
         source_transport=source_transport,
+        upload_transport=upload_transport,
     )
     owner_session_id = payload.get("owner_session_id")
     if isinstance(owner_session_id, str):

@@ -21,6 +21,7 @@ import aiohttp
 import grpc
 from azents_runtime_control.grpc_runner_transfer_client import (
     RunnerDirectObjectTicket,
+    RunnerDirectUploadTicket,
     RunnerDownloadChunk,
     RunnerDownloadComplete,
     RunnerUploadComplete,
@@ -37,6 +38,7 @@ from azents_runtime_control.runner_transfer import (
     RunnerTransferOutcome,
     RunnerTransferResult,
     RunnerTransferSourceTransport,
+    RunnerTransferUploadTransport,
 )
 from azents_runtime_control.transfer import (
     MAX_TRANSFER_CHUNK_BYTES,
@@ -52,6 +54,7 @@ _DEFAULT_MAX_ACTIVE_TRANSFERS = 4
 _DEFAULT_MAX_TOMBSTONES = 256
 _MAX_CONFLICT_PRECONDITIONS = 256
 _MAX_DIRECT_TICKET_REACQUISITIONS = 1
+_MAX_DIRECT_PUT_RESPONSE_BYTES = 4096
 _LOGGER = logging.getLogger(__name__)
 _AwaitableResult = TypeVar("_AwaitableResult")
 
@@ -99,6 +102,37 @@ class RunnerTransferClient(Protocol):
     ) -> RunnerUploadResult:
         """Open one bounded client-streaming upload."""
         ...
+
+    async def claim_direct_upload(
+        self,
+        identity: RunnerTransferIdentity,
+        *,
+        dispatch_id: str,
+        claim_id: str,
+        size: int,
+        sha256: str,
+        timeout: float,
+    ) -> RunnerDirectUploadTicket: ...
+
+    async def renew_direct_upload(
+        self,
+        identity: RunnerTransferIdentity,
+        *,
+        dispatch_id: str,
+        claim_id: str,
+        timeout: float,
+    ) -> None: ...
+
+    async def complete_direct_upload(
+        self,
+        identity: RunnerTransferIdentity,
+        *,
+        dispatch_id: str,
+        claim_id: str,
+        size: int,
+        sha256: str,
+        timeout: float,
+    ) -> RunnerUploadResult: ...
 
 
 @dataclass(frozen=True)
@@ -312,7 +346,9 @@ class RunnerTransferManager:
                         direct_claim_lease=direct_claim_lease,
                     )
                 else:
-                    result = await self._upload(intent, cancelled)
+                    result = await self._upload(
+                        intent, cancelled, direct_claim_lease=direct_claim_lease
+                    )
             except grpc.aio.AioRpcError as exc:
                 result = _failed(intent, runner_transfer_failure_from_grpc(exc))
                 _log_failure(
@@ -833,6 +869,7 @@ class RunnerTransferManager:
         cancelled: asyncio.Event,
         *,
         claim_id: str,
+        upload: bool = False,
         failed: asyncio.Event,
         error: list[_TransferFailure],
     ) -> None:
@@ -842,20 +879,28 @@ class RunnerTransferManager:
                 remaining = _remaining_timeout(intent)
                 await asyncio.sleep(min(STREAM_OWNER_RENEWAL_SECONDS, remaining))
                 self._check_direct_stop(intent, cancelled)
-                renewed = await self._transfer.claim_direct_object(
-                    intent.identity,
-                    dispatch_id=intent.dispatch_id,
-                    claim_id=claim_id,
-                    timeout=_remaining_timeout(intent),
-                )
-                _validate_direct_ticket(
-                    renewed,
-                    expected_size=intent.expected_size
-                    if intent.expected_size is not None
-                    else -1,
-                    expected_sha256=intent.expected_sha256 or "",
-                    deadline_at=intent.deadline_at,
-                )
+                if upload:
+                    await self._transfer.renew_direct_upload(
+                        intent.identity,
+                        dispatch_id=intent.dispatch_id,
+                        claim_id=claim_id,
+                        timeout=_remaining_timeout(intent),
+                    )
+                else:
+                    renewed = await self._transfer.claim_direct_object(
+                        intent.identity,
+                        dispatch_id=intent.dispatch_id,
+                        claim_id=claim_id,
+                        timeout=_remaining_timeout(intent),
+                    )
+                    _validate_direct_ticket(
+                        renewed,
+                        expected_size=intent.expected_size
+                        if intent.expected_size is not None
+                        else -1,
+                        expected_sha256=intent.expected_sha256 or "",
+                        deadline_at=intent.deadline_at,
+                    )
         except asyncio.CancelledError:
             raise
         except _TransferFailure as exc:
@@ -905,6 +950,8 @@ class RunnerTransferManager:
         self,
         intent: RunnerTransferIntent,
         cancelled: asyncio.Event,
+        *,
+        direct_claim_lease: list["_DirectClaimLease | None"],
     ) -> RunnerTransferResult:
         expected_size = intent.expected_size
         if expected_size is None:
@@ -975,6 +1022,15 @@ class RunnerTransferManager:
                     reason="upload_source_digest_mismatch",
                 )
             assert snapshot_fd is not None
+            if intent.upload_transport is RunnerTransferUploadTransport.DIRECT_OBJECT:
+                return await self._upload_direct(
+                    intent,
+                    cancelled,
+                    snapshot_fd=snapshot_fd,
+                    size=copied,
+                    sha256=actual_sha256,
+                    direct_claim_lease=direct_claim_lease,
+                )
 
             async def frames() -> AsyncIterator[
                 RunnerDownloadChunk | RunnerUploadComplete
@@ -1033,6 +1089,130 @@ class RunnerTransferManager:
             if snapshot_fd is not None:
                 os.close(snapshot_fd)
             os.close(parent_fd)
+
+    async def _upload_direct(
+        self,
+        intent: RunnerTransferIntent,
+        cancelled: asyncio.Event,
+        *,
+        snapshot_fd: int,
+        size: int,
+        sha256: str,
+        direct_claim_lease: list["_DirectClaimLease | None"],
+    ) -> RunnerTransferResult:
+        """PUT only the stable bounded snapshot, then request trusted promotion."""
+        self._check_direct_stop(intent, cancelled)
+        claim_id = _direct_claim_id(intent)
+        ticket = await self._transfer.claim_direct_upload(
+            intent.identity,
+            dispatch_id=intent.dispatch_id,
+            claim_id=claim_id,
+            size=size,
+            sha256=sha256,
+            timeout=_remaining_timeout(intent),
+        )
+        _validate_direct_ticket(
+            ticket,
+            expected_size=size,
+            expected_sha256=sha256,
+            deadline_at=intent.deadline_at,
+            method="PUT",
+        )
+        lease = _DirectClaimLease(
+            manager=self,
+            intent=intent,
+            cancelled=cancelled,
+            claim_id=claim_id,
+            upload=True,
+        )
+        direct_claim_lease[0] = lease
+        await lease.start()
+
+        async def body() -> AsyncIterator[bytes]:
+            offset = 0
+            while offset < size:
+                lease.check()
+                self._check_direct_stop(intent, cancelled)
+                chunk = await asyncio.to_thread(
+                    os.pread, snapshot_fd, min(_BUFFER_BYTES, size - offset), offset
+                )
+                if not chunk:
+                    raise _TransferFailure(
+                        RunnerTransferFailure.INTEGRITY_FAILED,
+                        reason="upload_snapshot_truncated",
+                    )
+                offset += len(chunk)
+                yield chunk
+            if os.fstat(snapshot_fd).st_size != size:
+                raise _TransferFailure(
+                    RunnerTransferFailure.INTEGRITY_FAILED,
+                    reason="upload_snapshot_changed",
+                )
+
+        connector = (
+            aiohttp.TCPConnector(ssl=self._http_ssl_context)
+            if self._http_ssl_context is not None
+            else None
+        )
+        headers = dict(ticket.headers)
+        headers["content-length"] = str(size)
+        async with aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=_remaining_timeout(intent)),
+            trust_env=False,
+            connector=connector,
+        ) as session:
+            async with session.put(
+                ticket.url,
+                data=body(),
+                headers=headers,
+                allow_redirects=False,
+                proxy=self._http_proxy,
+            ) as response:
+                if response.status != 200:
+                    raise _TransferFailure(
+                        RunnerTransferFailure.STREAM_FAILED,
+                        reason="direct_put_status_invalid",
+                    )
+                response_bytes = 0
+                async for chunk in response.content.iter_chunked(1024):
+                    lease.check()
+                    self._check_direct_stop(intent, cancelled)
+                    response_bytes += len(chunk)
+                    if response_bytes > _MAX_DIRECT_PUT_RESPONSE_BYTES:
+                        raise _TransferFailure(
+                            RunnerTransferFailure.STREAM_FAILED,
+                            reason="direct_put_response_too_large",
+                        )
+        lease.check()
+        self._check_direct_stop(intent, cancelled)
+        await lease.close()
+        direct_claim_lease[0] = None
+        authoritative = await self._transfer.complete_direct_upload(
+            intent.identity,
+            dispatch_id=intent.dispatch_id,
+            claim_id=claim_id,
+            size=size,
+            sha256=sha256,
+            timeout=_remaining_timeout(intent),
+        )
+        if authoritative.actual_size != size or authoritative.sha256 != sha256:
+            raise _TransferFailure(
+                RunnerTransferFailure.INTEGRITY_FAILED,
+                reason="direct_put_authoritative_manifest_mismatch",
+            )
+        return RunnerTransferResult(
+            identity=intent.identity,
+            operation_id=intent.operation_id,
+            dispatch_id=intent.dispatch_id,
+            direction=intent.direction,
+            outcome=RunnerTransferOutcome.SUCCEEDED,
+            actual_size=size,
+            sha256=sha256,
+            destination_committed=False,
+            failure=None,
+            conflict_precondition=None,
+            destination_conflict=None,
+        )
 
     async def _enqueue_result(self, result: RunnerTransferResult) -> None:
         await self._enqueue_pending_result(_PendingRunnerTransferResult(result=result))
@@ -1242,12 +1422,14 @@ class _DirectClaimLease:
         intent: RunnerTransferIntent,
         cancelled: asyncio.Event,
         claim_id: str,
+        upload: bool = False,
     ) -> None:
         """Initialize one claim renewal task and its failure signal."""
         self.manager = manager
         self.intent = intent
         self.cancelled = cancelled
         self.claim_id = claim_id
+        self.upload = upload
         self.failed = asyncio.Event()
         self.error: list[_TransferFailure] = []
         self.task: asyncio.Task[None] | None = None
@@ -1259,6 +1441,7 @@ class _DirectClaimLease:
                 self.intent,
                 self.cancelled,
                 claim_id=self.claim_id,
+                upload=self.upload,
                 failed=self.failed,
                 error=self.error,
             )
@@ -1489,14 +1672,15 @@ def _direct_claim_id(intent: RunnerTransferIntent) -> str:
 
 
 def _validate_direct_ticket(
-    ticket: RunnerDirectObjectTicket,
+    ticket: RunnerDirectObjectTicket | RunnerDirectUploadTicket,
     *,
     expected_size: int,
     expected_sha256: str,
     deadline_at: datetime,
+    method: str = "GET",
 ) -> None:
-    """Validate one transient direct-object GET capability before use."""
-    if ticket.method != "GET":
+    """Validate a transient exact-attempt object capability before use."""
+    if ticket.method != method:
         raise _TransferFailure(
             RunnerTransferFailure.PROTOCOL_VIOLATION,
             reason="direct_ticket_method_invalid",
@@ -1559,6 +1743,15 @@ def _validate_direct_ticket(
             or any(character in name for character in "\r\n:")
             or any(ord(character) < 32 or ord(character) == 127 for character in value)
         ):
+            raise _TransferFailure(
+                RunnerTransferFailure.PROTOCOL_VIOLATION,
+                reason="direct_ticket_headers_invalid",
+            )
+        if method == "PUT" and name.lower() in {
+            "content-length",
+            "transfer-encoding",
+            "host",
+        }:
             raise _TransferFailure(
                 RunnerTransferFailure.PROTOCOL_VIOLATION,
                 reason="direct_ticket_headers_invalid",

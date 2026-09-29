@@ -69,6 +69,13 @@ class CoordinatorTransferDirection(StrEnum):
     UPLOAD = "upload"
 
 
+class CoordinatorUploadTransport(StrEnum):
+    """Trusted physical destination for one Runner upload."""
+
+    CONTROL_STREAM = "control_stream"
+    DIRECT_OBJECT = "direct_object"
+
+
 class CoordinatorTransferPhase(StrEnum):
     """Trusted coordinator transfer lifecycle phase."""
 
@@ -239,12 +246,22 @@ class CoordinatorAdmitTransferRequest:
     deadline_at: datetime
     source_expires_at: datetime | None
     resource_class: str
+    upload_transport: CoordinatorUploadTransport = (
+        CoordinatorUploadTransport.CONTROL_STREAM
+    )
 
     def __post_init__(self) -> None:
         """Validate complete bounded admission request metadata."""
         _bounded(self.lease_id, "lease_id", 128)
         _bounded(self.runtime_path, "runtime_path", 4096)
         _bounded(self.resource_class, "resource_class", 64)
+        if not isinstance(self.upload_transport, CoordinatorUploadTransport):
+            raise ValueError("upload_transport is invalid")
+        if (
+            self.upload_transport is CoordinatorUploadTransport.DIRECT_OBJECT
+            and self.identity.direction != CoordinatorTransferDirection.UPLOAD.value
+        ):
+            raise ValueError("direct object upload requires UPLOAD direction")
         if self.overwrite is None:
             raise ValueError("overwrite presence is required")
         if self.conflict_precondition is not None and not (
@@ -1210,6 +1227,7 @@ def admit_transfer_request_to_message(
         expected_manifest=expected_manifest_to_message(value.expected_manifest),
         deadline_at=_timestamp_message(value.deadline_at),
         resource_class=value.resource_class,
+        upload_transport=_UPLOAD_TRANSPORT_TO_PROTO[value.upload_transport],
     )
     message.identity.CopyFrom(coordinator_identity_to_message(value.identity))
     if value.overwrite is not None:
@@ -1501,6 +1519,14 @@ _DIRECTION_TO_PROTO = {
     ),
 }
 _DIRECTION_FROM_PROTO = {value: key for key, value in _DIRECTION_TO_PROTO.items()}
+_UPLOAD_TRANSPORT_TO_PROTO = {
+    CoordinatorUploadTransport.CONTROL_STREAM: (
+        runtime_transfer_coordinator_pb2.COORDINATOR_UPLOAD_TRANSPORT_CONTROL_STREAM
+    ),
+    CoordinatorUploadTransport.DIRECT_OBJECT: (
+        runtime_transfer_coordinator_pb2.COORDINATOR_UPLOAD_TRANSPORT_DIRECT_OBJECT
+    ),
+}
 _PHASE_FROM_PROTO = {
     runtime_transfer_coordinator_pb2.COORDINATOR_TRANSFER_PHASE_PREPARING: (
         CoordinatorTransferPhase.PREPARING

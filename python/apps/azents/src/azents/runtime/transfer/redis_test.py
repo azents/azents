@@ -23,6 +23,7 @@ from azents.runtime.transfer.data import (
     RuntimeTransferPhase,
     RuntimeTransferProgress,
     RuntimeTransferRecord,
+    RuntimeTransferUploadTransport,
     terminal_expiry,
 )
 from azents.runtime.transfer.redis import (
@@ -189,6 +190,30 @@ def test_record_envelope_round_trips_all_public_and_private_evidence() -> None:
     assert _decode_record_envelope(encoded) == _RedisTransferRecordEnvelope(
         record=record,
         admission_released=True,
+    )
+
+
+def test_direct_upload_transport_round_trips_and_reads_old_records() -> None:
+    """Persist the exact new direction while draining older in-flight attempts."""
+    record = replace(
+        _record(),
+        admission=replace(
+            _record().admission,
+            upload_transport=RuntimeTransferUploadTransport.DIRECT_OBJECT,
+        ),
+    )
+    encoded = _encode_record_envelope(
+        _RedisTransferRecordEnvelope(record=record, admission_released=True)
+    )
+    assert _decode_record_envelope(encoded).record == record
+
+    previous = _json_payload(_record())
+    _admission_value(previous).pop("upload_transport")
+    restored = _decode_record_envelope(
+        json.dumps(previous, separators=(",", ":")).encode()
+    )
+    assert restored.record.admission.upload_transport is (
+        RuntimeTransferUploadTransport.CONTROL_STREAM
     )
 
 

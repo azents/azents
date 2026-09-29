@@ -3,8 +3,8 @@
 import asyncio
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timedelta
-from typing import Protocol
+from datetime import UTC, datetime, timedelta
+from typing import Callable, Protocol
 
 from azcommon.infra.s3.service import (
     S3MultipartUpload,
@@ -14,6 +14,7 @@ from azcommon.infra.s3.service import (
 )
 
 from azents.runtime.transfer.data import (
+    DIRECT_INGRESS_CLEANUP_GRACE,
     RUNTIME_TRANSFER_MAXIMUM_PAGE_SIZE,
     RuntimeTransferPreparationCleanupState,
     RuntimeTransferRecord,
@@ -98,6 +99,7 @@ class RuntimeTransferS3Cleanup:
         object_store: RuntimeTransferObjectStore,
         bucket: str,
         object_prefix: str,
+        clock: Callable[[], datetime] | None = None,
     ) -> None:
         """Initialize trusted S3 cleanup dependencies.
 
@@ -111,6 +113,7 @@ class RuntimeTransferS3Cleanup:
             _prefix(object_prefix),
             "Runtime transfer object prefix",
         )
+        self._clock = clock or (lambda: datetime.now(UTC))
         self._object_continuation_token: str | None = None
         self._multipart_key_marker: str | None = None
         self._multipart_upload_id_marker: str | None = None
@@ -120,6 +123,13 @@ class RuntimeTransferS3Cleanup:
 
         :param record: exact stale stream record with trusted cleanup evidence
         """
+        if record.direct_ingress_handle is not None:
+            assert record.direct_ingress_expires_at is not None
+            if self._clock() < (
+                max(record.direct_ingress_expires_at, record.admission.deadline_at)
+                + DIRECT_INGRESS_CLEANUP_GRACE
+            ):
+                raise RuntimeError("Direct PUT ingress cleanup is not yet safe")
         error: BaseException | None = None
         if record.preparation_object_handle is not None:
             preparation_identity = runtime_transfer_object_identity(
@@ -162,6 +172,20 @@ class RuntimeTransferS3Cleanup:
                 await self._object_store.delete(
                     bucket=pre_ready_identity.bucket,
                     key=pre_ready_identity.key,
+                )
+            except BaseException as exc:
+                if error is None:
+                    error = exc
+        if record.direct_ingress_handle is not None:
+            ingress_identity = runtime_transfer_object_identity(
+                bucket=self._bucket,
+                object_prefix=self._object_prefix,
+                opaque_key=record.direct_ingress_handle,
+            )
+            try:
+                await self._object_store.delete(
+                    bucket=ingress_identity.bucket,
+                    key=ingress_identity.key,
                 )
             except BaseException as exc:
                 if error is None:
@@ -215,6 +239,7 @@ class RuntimeTransferS3Cleanup:
             and record.multipart_cleanup_handle is None
             and not record.completed_object_cleanup_required
             and record.pre_ready_object_handle is None
+            and record.direct_ingress_handle is None
         ):
             raise ValueError("Stale transfer cleanup evidence is unavailable")
         if error is not None:

@@ -107,6 +107,9 @@ subjects:
   .Values.runtimeProviderKubernetes.strictNetwork.mandatoryServices.runtimeControl
   .Values.runtimeProviderKubernetes.strictNetwork.mandatoryServices.runtimeTransfer
 -}}
+{{- with .Values.runtimeProviderKubernetes.strictNetwork.mandatoryServices.objectStorage -}}
+{{- $mandatoryServices = append $mandatoryServices . -}}
+{{- end -}}
 {{- $seenMandatoryServices := dict -}}
 {{- range $service := $mandatoryServices -}}
 {{- $namespace := include "azents.runtimeProviderMandatoryServiceNamespace" (dict "root" $ "service" $service) -}}
@@ -146,6 +149,6 @@ subjects:
   - kind: ServiceAccount
     name: {{ include "azents.runtimeProviderKubernetesServiceAccountName" $ | quote }}
     namespace: {{ include "azents.runtimeProviderKubernetesNamespace" $ | quote }}
-{{- end -}}
+{{ end }}
 {{- end }}
 {{- end }}

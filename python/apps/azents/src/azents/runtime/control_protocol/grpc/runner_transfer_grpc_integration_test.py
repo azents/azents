@@ -18,6 +18,7 @@ from azcommon.infra.s3.service import (
     S3MultipartUpload,
     S3ObjectIdentity,
     S3ObjectMetadata,
+    S3PresignedRequest,
     S3TransferObjectMetadata,
     S3VerifiedObject,
 )
@@ -182,6 +183,22 @@ class _ObjectStore:
         self.block_upload_part = False
         self.upload_part_blocked = asyncio.Event()
         self.resume_upload_part = asyncio.Event()
+
+    async def get_upload_request(
+        self,
+        *,
+        identity: S3ObjectIdentity,
+        content_type: str | None,
+        checksum_sha256: str,
+        expires_in: timedelta,
+        now: datetime | None = None,
+    ) -> S3PresignedRequest:
+        raise AssertionError("direct upload is not configured")
+
+    async def head_with_checksum(
+        self, identity: S3ObjectIdentity
+    ) -> S3ObjectMetadata | None:
+        raise AssertionError("direct upload is not configured")
 
     async def verify_transfer_object(
         self,

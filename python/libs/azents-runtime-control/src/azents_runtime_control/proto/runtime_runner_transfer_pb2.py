@@ -24,7 +24,7 @@ from google.protobuf import timestamp_pb2 as google_dot_protobuf_dot_timestamp__
 
 
 DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(
-    b'\n\x1druntime_runner_transfer.proto\x12\x19\x61zents.runtime_control.v1\x1a\x1fgoogle/protobuf/timestamp.proto"j\n\x10TransferIdentity\x12\x13\n\x0btransfer_id\x18\x01 \x01(\t\x12\x12\n\nattempt_id\x18\x02 \x01(\t\x12\x12\n\nruntime_id\x18\x03 \x01(\t\x12\x19\n\x11runner_generation\x18\x04 \x01(\x04"-\n\rTransferChunk\x12\x0e\n\x06offset\x18\x01 \x01(\x04\x12\x0c\n\x04\x64\x61ta\x18\x02 \x01(\x0c"X\n\x17\x44ownloadTransferRequest\x12=\n\x08identity\x18\x01 \x01(\x0b\x32+.azents.runtime_control.v1.TransferIdentity"\x88\x01\n DirectObjectDownloadClaimRequest\x12=\n\x08identity\x18\x01 \x01(\x0b\x32+.azents.runtime_control.v1.TransferIdentity\x12\x13\n\x0b\x64ispatch_id\x18\x02 \x01(\t\x12\x10\n\x08\x63laim_id\x18\x03 \x01(\t"9\n\x1a\x44irectObjectDownloadHeader\x12\x0c\n\x04name\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t"\xe8\x01\n!DirectObjectDownloadClaimResponse\x12\x0e\n\x06method\x18\x01 \x01(\t\x12\x0b\n\x03url\x18\x02 \x01(\t\x12.\n\nexpires_at\x18\x03 \x01(\x0b\x32\x1a.google.protobuf.Timestamp\x12\x46\n\x07headers\x18\x04 \x03(\x0b\x32\x35.azents.runtime_control.v1.DirectObjectDownloadHeader\x12\x15\n\rexpected_size\x18\x05 \x01(\x04\x12\x17\n\x0f\x65xpected_sha256\x18\x06 \x01(\t"T\n\x18\x44ownloadTransferComplete\x12\x18\n\x0b\x61\x63tual_size\x18\x01 \x01(\x04H\x00\x88\x01\x01\x12\x0e\n\x06sha256\x18\x02 \x01(\tB\x0e\n\x0c_actual_size"\xa6\x01\n\x15\x44ownloadTransferFrame\x12\x39\n\x05\x63hunk\x18\x01 \x01(\x0b\x32(.azents.runtime_control.v1.TransferChunkH\x00\x12G\n\x08\x63omplete\x18\x02 \x01(\x0b\x32\x33.azents.runtime_control.v1.DownloadTransferCompleteH\x00\x42\t\n\x07payload"S\n\x12UploadTransferOpen\x12=\n\x08identity\x18\x01 \x01(\x0b\x32+.azents.runtime_control.v1.TransferIdentity"R\n\x16UploadTransferComplete\x12\x18\n\x0b\x61\x63tual_size\x18\x01 \x01(\x04H\x00\x88\x01\x01\x12\x0e\n\x06sha256\x18\x02 \x01(\tB\x0e\n\x0c_actual_size"\xe1\x01\n\x13UploadTransferFrame\x12=\n\x04open\x18\x01 \x01(\x0b\x32-.azents.runtime_control.v1.UploadTransferOpenH\x00\x12\x39\n\x05\x63hunk\x18\x02 \x01(\x0b\x32(.azents.runtime_control.v1.TransferChunkH\x00\x12\x45\n\x08\x63omplete\x18\x03 \x01(\x0b\x32\x31.azents.runtime_control.v1.UploadTransferCompleteH\x00\x42\t\n\x07payload"\x91\x01\n\x14UploadTransferResult\x12?\n\x06status\x18\x01 \x01(\x0e\x32/.azents.runtime_control.v1.UploadTransferStatus\x12\x18\n\x0b\x61\x63tual_size\x18\x02 \x01(\x04H\x00\x88\x01\x01\x12\x0e\n\x06sha256\x18\x03 \x01(\tB\x0e\n\x0c_actual_size*w\n\x11TransferDirection\x12"\n\x1eTRANSFER_DIRECTION_UNSPECIFIED\x10\x00\x12\x1f\n\x1bTRANSFER_DIRECTION_DOWNLOAD\x10\x01\x12\x1d\n\x19TRANSFER_DIRECTION_UPLOAD\x10\x02*d\n\x14UploadTransferStatus\x12&\n"UPLOAD_TRANSFER_STATUS_UNSPECIFIED\x10\x00\x12$\n UPLOAD_TRANSFER_STATUS_SUCCEEDED\x10\x01\x32\xa1\x03\n\x15RuntimeRunnerTransfer\x12z\n\x10\x44ownloadTransfer\x12\x32.azents.runtime_control.v1.DownloadTransferRequest\x1a\x30.azents.runtime_control.v1.DownloadTransferFrame0\x01\x12s\n\x0eUploadTransfer\x12..azents.runtime_control.v1.UploadTransferFrame\x1a/.azents.runtime_control.v1.UploadTransferResult(\x01\x12\x96\x01\n\x19\x43laimDirectObjectDownload\x12;.azents.runtime_control.v1.DirectObjectDownloadClaimRequest\x1a<.azents.runtime_control.v1.DirectObjectDownloadClaimResponseb\x06proto3'
+    b'\n\x1druntime_runner_transfer.proto\x12\x19\x61zents.runtime_control.v1\x1a\x1fgoogle/protobuf/timestamp.proto"j\n\x10TransferIdentity\x12\x13\n\x0btransfer_id\x18\x01 \x01(\t\x12\x12\n\nattempt_id\x18\x02 \x01(\t\x12\x12\n\nruntime_id\x18\x03 \x01(\t\x12\x19\n\x11runner_generation\x18\x04 \x01(\x04"-\n\rTransferChunk\x12\x0e\n\x06offset\x18\x01 \x01(\x04\x12\x0c\n\x04\x64\x61ta\x18\x02 \x01(\x0c"X\n\x17\x44ownloadTransferRequest\x12=\n\x08identity\x18\x01 \x01(\x0b\x32+.azents.runtime_control.v1.TransferIdentity"\x88\x01\n DirectObjectDownloadClaimRequest\x12=\n\x08identity\x18\x01 \x01(\x0b\x32+.azents.runtime_control.v1.TransferIdentity\x12\x13\n\x0b\x64ispatch_id\x18\x02 \x01(\t\x12\x10\n\x08\x63laim_id\x18\x03 \x01(\t"9\n\x1a\x44irectObjectDownloadHeader\x12\x0c\n\x04name\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t"\xe8\x01\n!DirectObjectDownloadClaimResponse\x12\x0e\n\x06method\x18\x01 \x01(\t\x12\x0b\n\x03url\x18\x02 \x01(\t\x12.\n\nexpires_at\x18\x03 \x01(\x0b\x32\x1a.google.protobuf.Timestamp\x12\x46\n\x07headers\x18\x04 \x03(\x0b\x32\x35.azents.runtime_control.v1.DirectObjectDownloadHeader\x12\x15\n\rexpected_size\x18\x05 \x01(\x04\x12\x17\n\x0f\x65xpected_sha256\x18\x06 \x01(\t"\xb6\x01\n\x1e\x44irectObjectUploadClaimRequest\x12=\n\x08identity\x18\x01 \x01(\x0b\x32+.azents.runtime_control.v1.TransferIdentity\x12\x13\n\x0b\x64ispatch_id\x18\x02 \x01(\t\x12\x10\n\x08\x63laim_id\x18\x03 \x01(\t\x12\x15\n\rexpected_size\x18\x04 \x01(\x04\x12\x17\n\x0f\x65xpected_sha256\x18\x05 \x01(\t"\xe6\x01\n\x1f\x44irectObjectUploadClaimResponse\x12\x0e\n\x06method\x18\x01 \x01(\t\x12\x0b\n\x03url\x18\x02 \x01(\t\x12.\n\nexpires_at\x18\x03 \x01(\x0b\x32\x1a.google.protobuf.Timestamp\x12\x46\n\x07headers\x18\x04 \x03(\x0b\x32\x35.azents.runtime_control.v1.DirectObjectDownloadHeader\x12\x15\n\rexpected_size\x18\x05 \x01(\x04\x12\x17\n\x0f\x65xpected_sha256\x18\x06 \x01(\t"\x86\x01\n\x1e\x44irectObjectUploadRenewRequest\x12=\n\x08identity\x18\x01 \x01(\x0b\x32+.azents.runtime_control.v1.TransferIdentity\x12\x13\n\x0b\x64ispatch_id\x18\x02 \x01(\t\x12\x10\n\x08\x63laim_id\x18\x03 \x01(\t"!\n\x1f\x44irectObjectUploadRenewResponse"\xae\x01\n!DirectObjectUploadCompleteRequest\x12=\n\x08identity\x18\x01 \x01(\x0b\x32+.azents.runtime_control.v1.TransferIdentity\x12\x13\n\x0b\x64ispatch_id\x18\x02 \x01(\t\x12\x10\n\x08\x63laim_id\x18\x03 \x01(\t\x12\x13\n\x0b\x61\x63tual_size\x18\x04 \x01(\x04\x12\x0e\n\x06sha256\x18\x05 \x01(\t"T\n\x18\x44ownloadTransferComplete\x12\x18\n\x0b\x61\x63tual_size\x18\x01 \x01(\x04H\x00\x88\x01\x01\x12\x0e\n\x06sha256\x18\x02 \x01(\tB\x0e\n\x0c_actual_size"\xa6\x01\n\x15\x44ownloadTransferFrame\x12\x39\n\x05\x63hunk\x18\x01 \x01(\x0b\x32(.azents.runtime_control.v1.TransferChunkH\x00\x12G\n\x08\x63omplete\x18\x02 \x01(\x0b\x32\x33.azents.runtime_control.v1.DownloadTransferCompleteH\x00\x42\t\n\x07payload"S\n\x12UploadTransferOpen\x12=\n\x08identity\x18\x01 \x01(\x0b\x32+.azents.runtime_control.v1.TransferIdentity"R\n\x16UploadTransferComplete\x12\x18\n\x0b\x61\x63tual_size\x18\x01 \x01(\x04H\x00\x88\x01\x01\x12\x0e\n\x06sha256\x18\x02 \x01(\tB\x0e\n\x0c_actual_size"\xe1\x01\n\x13UploadTransferFrame\x12=\n\x04open\x18\x01 \x01(\x0b\x32-.azents.runtime_control.v1.UploadTransferOpenH\x00\x12\x39\n\x05\x63hunk\x18\x02 \x01(\x0b\x32(.azents.runtime_control.v1.TransferChunkH\x00\x12\x45\n\x08\x63omplete\x18\x03 \x01(\x0b\x32\x31.azents.runtime_control.v1.UploadTransferCompleteH\x00\x42\t\n\x07payload"\x91\x01\n\x14UploadTransferResult\x12?\n\x06status\x18\x01 \x01(\x0e\x32/.azents.runtime_control.v1.UploadTransferStatus\x12\x18\n\x0b\x61\x63tual_size\x18\x02 \x01(\x04H\x00\x88\x01\x01\x12\x0e\n\x06sha256\x18\x03 \x01(\tB\x0e\n\x0c_actual_size*w\n\x11TransferDirection\x12"\n\x1eTRANSFER_DIRECTION_UNSPECIFIED\x10\x00\x12\x1f\n\x1bTRANSFER_DIRECTION_DOWNLOAD\x10\x01\x12\x1d\n\x19TRANSFER_DIRECTION_UPLOAD\x10\x02*d\n\x14UploadTransferStatus\x12&\n"UPLOAD_TRANSFER_STATUS_UNSPECIFIED\x10\x00\x12$\n UPLOAD_TRANSFER_STATUS_SUCCEEDED\x10\x01\x32\xd5\x06\n\x15RuntimeRunnerTransfer\x12z\n\x10\x44ownloadTransfer\x12\x32.azents.runtime_control.v1.DownloadTransferRequest\x1a\x30.azents.runtime_control.v1.DownloadTransferFrame0\x01\x12s\n\x0eUploadTransfer\x12..azents.runtime_control.v1.UploadTransferFrame\x1a/.azents.runtime_control.v1.UploadTransferResult(\x01\x12\x96\x01\n\x19\x43laimDirectObjectDownload\x12;.azents.runtime_control.v1.DirectObjectDownloadClaimRequest\x1a<.azents.runtime_control.v1.DirectObjectDownloadClaimResponse\x12\x90\x01\n\x17\x43laimDirectObjectUpload\x12\x39.azents.runtime_control.v1.DirectObjectUploadClaimRequest\x1a:.azents.runtime_control.v1.DirectObjectUploadClaimResponse\x12\x90\x01\n\x17RenewDirectObjectUpload\x12\x39.azents.runtime_control.v1.DirectObjectUploadRenewRequest\x1a:.azents.runtime_control.v1.DirectObjectUploadRenewResponse\x12\x8b\x01\n\x1a\x43ompleteDirectObjectUpload\x12<.azents.runtime_control.v1.DirectObjectUploadCompleteRequest\x1a/.azents.runtime_control.v1.UploadTransferResultb\x06proto3'
 )
 
 _globals = globals()
@@ -34,10 +34,10 @@ _builder.BuildTopDescriptorsAndMessages(
 )
 if not _descriptor._USE_C_DESCRIPTORS:
     DESCRIPTOR._loaded_options = None
-    _globals["_TRANSFERDIRECTION"]._serialized_start = 1571
-    _globals["_TRANSFERDIRECTION"]._serialized_end = 1690
-    _globals["_UPLOADTRANSFERSTATUS"]._serialized_start = 1692
-    _globals["_UPLOADTRANSFERSTATUS"]._serialized_end = 1792
+    _globals["_TRANSFERDIRECTION"]._serialized_start = 2338
+    _globals["_TRANSFERDIRECTION"]._serialized_end = 2457
+    _globals["_UPLOADTRANSFERSTATUS"]._serialized_start = 2459
+    _globals["_UPLOADTRANSFERSTATUS"]._serialized_end = 2559
     _globals["_TRANSFERIDENTITY"]._serialized_start = 93
     _globals["_TRANSFERIDENTITY"]._serialized_end = 199
     _globals["_TRANSFERCHUNK"]._serialized_start = 201
@@ -50,18 +50,28 @@ if not _descriptor._USE_C_DESCRIPTORS:
     _globals["_DIRECTOBJECTDOWNLOADHEADER"]._serialized_end = 534
     _globals["_DIRECTOBJECTDOWNLOADCLAIMRESPONSE"]._serialized_start = 537
     _globals["_DIRECTOBJECTDOWNLOADCLAIMRESPONSE"]._serialized_end = 769
-    _globals["_DOWNLOADTRANSFERCOMPLETE"]._serialized_start = 771
-    _globals["_DOWNLOADTRANSFERCOMPLETE"]._serialized_end = 855
-    _globals["_DOWNLOADTRANSFERFRAME"]._serialized_start = 858
-    _globals["_DOWNLOADTRANSFERFRAME"]._serialized_end = 1024
-    _globals["_UPLOADTRANSFEROPEN"]._serialized_start = 1026
-    _globals["_UPLOADTRANSFEROPEN"]._serialized_end = 1109
-    _globals["_UPLOADTRANSFERCOMPLETE"]._serialized_start = 1111
-    _globals["_UPLOADTRANSFERCOMPLETE"]._serialized_end = 1193
-    _globals["_UPLOADTRANSFERFRAME"]._serialized_start = 1196
-    _globals["_UPLOADTRANSFERFRAME"]._serialized_end = 1421
-    _globals["_UPLOADTRANSFERRESULT"]._serialized_start = 1424
-    _globals["_UPLOADTRANSFERRESULT"]._serialized_end = 1569
-    _globals["_RUNTIMERUNNERTRANSFER"]._serialized_start = 1795
-    _globals["_RUNTIMERUNNERTRANSFER"]._serialized_end = 2212
+    _globals["_DIRECTOBJECTUPLOADCLAIMREQUEST"]._serialized_start = 772
+    _globals["_DIRECTOBJECTUPLOADCLAIMREQUEST"]._serialized_end = 954
+    _globals["_DIRECTOBJECTUPLOADCLAIMRESPONSE"]._serialized_start = 957
+    _globals["_DIRECTOBJECTUPLOADCLAIMRESPONSE"]._serialized_end = 1187
+    _globals["_DIRECTOBJECTUPLOADRENEWREQUEST"]._serialized_start = 1190
+    _globals["_DIRECTOBJECTUPLOADRENEWREQUEST"]._serialized_end = 1324
+    _globals["_DIRECTOBJECTUPLOADRENEWRESPONSE"]._serialized_start = 1326
+    _globals["_DIRECTOBJECTUPLOADRENEWRESPONSE"]._serialized_end = 1359
+    _globals["_DIRECTOBJECTUPLOADCOMPLETEREQUEST"]._serialized_start = 1362
+    _globals["_DIRECTOBJECTUPLOADCOMPLETEREQUEST"]._serialized_end = 1536
+    _globals["_DOWNLOADTRANSFERCOMPLETE"]._serialized_start = 1538
+    _globals["_DOWNLOADTRANSFERCOMPLETE"]._serialized_end = 1622
+    _globals["_DOWNLOADTRANSFERFRAME"]._serialized_start = 1625
+    _globals["_DOWNLOADTRANSFERFRAME"]._serialized_end = 1791
+    _globals["_UPLOADTRANSFEROPEN"]._serialized_start = 1793
+    _globals["_UPLOADTRANSFEROPEN"]._serialized_end = 1876
+    _globals["_UPLOADTRANSFERCOMPLETE"]._serialized_start = 1878
+    _globals["_UPLOADTRANSFERCOMPLETE"]._serialized_end = 1960
+    _globals["_UPLOADTRANSFERFRAME"]._serialized_start = 1963
+    _globals["_UPLOADTRANSFERFRAME"]._serialized_end = 2188
+    _globals["_UPLOADTRANSFERRESULT"]._serialized_start = 2191
+    _globals["_UPLOADTRANSFERRESULT"]._serialized_end = 2336
+    _globals["_RUNTIMERUNNERTRANSFER"]._serialized_start = 2562
+    _globals["_RUNTIMERUNNERTRANSFER"]._serialized_end = 3415
 # @@protoc_insertion_point(module_scope)

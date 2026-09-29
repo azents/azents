@@ -105,6 +105,29 @@ def test_transfer_intent_maps_direct_object_source_transport() -> None:
     assert intent.source_transport.value == "direct_object"
 
 
+def test_transfer_intent_maps_direct_object_upload_transport() -> None:
+    """Keep the direct PUT intent separate from an ordinary upload stream."""
+    message = runtime_runner_control_pb2.RunnerTransferIntent(
+        identity=_identity_message(),
+        direction=runtime_runner_transfer_pb2.TRANSFER_DIRECTION_UPLOAD,
+        operation_id="operation-1",
+        runtime_path="/workspace/input.txt",
+        deadline_at=_timestamp(datetime(2026, 7, 25, tzinfo=UTC)),
+        protocol_version="2026-07-25",
+        capability="file.transfer.v1",
+        dispatch_id="dispatch-1",
+        upload_transport=(
+            runtime_runner_control_pb2.RUNNER_TRANSFER_UPLOAD_TRANSPORT_DIRECT_OBJECT
+        ),
+    )
+    intent = runner_transfer_intent_from_message(message)
+
+    assert intent.upload_transport.value == "direct_object"
+    message.direction = runtime_runner_transfer_pb2.TRANSFER_DIRECTION_DOWNLOAD
+    with pytest.raises(ValueError, match="UPLOAD direction"):
+        runner_transfer_intent_from_message(message)
+
+
 def test_transfer_intent_maps_absent_optional_fields_to_none() -> None:
     """Keep omitted transfer intent optional fields distinct from falsey values."""
     message = runtime_runner_control_pb2.RunnerTransferIntent(
@@ -127,6 +150,7 @@ def test_transfer_intent_maps_absent_optional_fields_to_none() -> None:
     assert intent.expected_sha256 is None
     assert intent.conflict_precondition is None
     assert intent.source_transport.value == "transfer_object"
+    assert intent.upload_transport.value == "control_stream"
 
 
 def test_transfer_result_maps_destination_conflict_evidence() -> None:

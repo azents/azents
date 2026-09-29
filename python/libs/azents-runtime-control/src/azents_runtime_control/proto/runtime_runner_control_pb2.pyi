@@ -150,6 +150,41 @@ RUNNER_TRANSFER_SOURCE_TRANSPORT_DIRECT_OBJECT: (
 )  # 2
 Global___RunnerTransferSourceTransport: _TypeAlias = RunnerTransferSourceTransport
 
+class _RunnerTransferUploadTransport:
+    ValueType = _typing.NewType("ValueType", _builtins.int)
+    V: _TypeAlias = ValueType
+
+class _RunnerTransferUploadTransportEnumTypeWrapper(
+    _enum_type_wrapper._EnumTypeWrapper[_RunnerTransferUploadTransport.ValueType],
+    _builtins.type,
+):
+    DESCRIPTOR: _descriptor.EnumDescriptor
+    RUNNER_TRANSFER_UPLOAD_TRANSPORT_UNSPECIFIED: (
+        _RunnerTransferUploadTransport.ValueType
+    )  # 0
+    RUNNER_TRANSFER_UPLOAD_TRANSPORT_CONTROL_STREAM: (
+        _RunnerTransferUploadTransport.ValueType
+    )  # 1
+    RUNNER_TRANSFER_UPLOAD_TRANSPORT_DIRECT_OBJECT: (
+        _RunnerTransferUploadTransport.ValueType
+    )  # 2
+
+class RunnerTransferUploadTransport(
+    _RunnerTransferUploadTransport,
+    metaclass=_RunnerTransferUploadTransportEnumTypeWrapper,
+): ...
+
+RUNNER_TRANSFER_UPLOAD_TRANSPORT_UNSPECIFIED: (
+    RunnerTransferUploadTransport.ValueType
+)  # 0
+RUNNER_TRANSFER_UPLOAD_TRANSPORT_CONTROL_STREAM: (
+    RunnerTransferUploadTransport.ValueType
+)  # 1
+RUNNER_TRANSFER_UPLOAD_TRANSPORT_DIRECT_OBJECT: (
+    RunnerTransferUploadTransport.ValueType
+)  # 2
+Global___RunnerTransferUploadTransport: _TypeAlias = RunnerTransferUploadTransport
+
 class _RunnerSystemMetricsScope:
     ValueType = _typing.NewType("ValueType", _builtins.int)
     V: _TypeAlias = ValueType
@@ -735,6 +770,7 @@ class RunnerTransferIntent(_message.Message):
     DISPATCH_ID_FIELD_NUMBER: _builtins.int
     CONFLICT_PRECONDITION_FIELD_NUMBER: _builtins.int
     SOURCE_TRANSPORT_FIELD_NUMBER: _builtins.int
+    UPLOAD_TRANSPORT_FIELD_NUMBER: _builtins.int
     direction: _runtime_runner_transfer_pb2.TransferDirection.ValueType
     operation_id: _builtins.str
     owner_session_id: _builtins.str
@@ -747,6 +783,7 @@ class RunnerTransferIntent(_message.Message):
     dispatch_id: _builtins.str
     conflict_precondition: _builtins.bytes
     source_transport: Global___RunnerTransferSourceTransport.ValueType
+    upload_transport: Global___RunnerTransferUploadTransport.ValueType
     @_builtins.property
     def identity(self) -> _runtime_runner_transfer_pb2.TransferIdentity: ...
     @_builtins.property
@@ -768,6 +805,7 @@ class RunnerTransferIntent(_message.Message):
         dispatch_id: _builtins.str = ...,
         conflict_precondition: _builtins.bytes | None = ...,
         source_transport: Global___RunnerTransferSourceTransport.ValueType = ...,
+        upload_transport: Global___RunnerTransferUploadTransport.ValueType = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _typing.Literal[
         "_conflict_precondition",
@@ -835,6 +873,8 @@ class RunnerTransferIntent(_message.Message):
         b"runtime_path",
         "source_transport",
         b"source_transport",
+        "upload_transport",
+        b"upload_transport",
     ]
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     _WhichOneofReturnType__conflict_precondition: _TypeAlias = _typing.Literal[

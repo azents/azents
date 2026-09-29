@@ -199,6 +199,54 @@ def _settings() -> RuntimeControlSettings:
 
 
 @pytest.mark.asyncio
+async def test_runtime_s3_clients_use_checksum_capable_sigv4_presigning(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Both trusted and Runner-reachable endpoints sign with SigV4."""
+    calls: list[dict[str, object]] = []
+
+    class FakeClient:
+        async def __aenter__(self) -> "FakeClient":
+            return self
+
+        async def __aexit__(
+            self, exc_type: object, exc_value: object, traceback: object
+        ) -> None:
+            del exc_type, exc_value, traceback
+
+    class FakeSession:
+        def client(self, service: str, **kwargs: object) -> FakeClient:
+            assert service == "s3"
+            calls.append(kwargs)
+            return FakeClient()
+
+    async def readiness(self: object, *, bucket: str, probe_prefix: str) -> None:
+        del self, probe_prefix
+        assert bucket == "transfer-bucket"
+
+    monkeypatch.setattr(control_server.aioboto3, "Session", FakeSession)
+    monkeypatch.setattr(
+        control_server.S3Service, "validate_workspace_upload_readiness", readiness
+    )
+    settings = _settings().model_copy(
+        update={"runtime_control_workspace_s3_public_endpoint_url": "http://s3.public"}
+    )
+    async with control_server._runtime_transfer_s3_service(settings):
+        pass
+
+    assert len(calls) == 2
+    assert [call["endpoint_url"] for call in calls] == [
+        "http://s3.internal",
+        "http://s3.public",
+    ]
+    assert all(
+        isinstance(call["config"], control_server.BotoConfig)
+        and getattr(call["config"], "signature_version", None) == "s3v4"
+        for call in calls
+    )
+
+
+@pytest.mark.asyncio
 async def test_lifespan_composes_all_transfer_services_and_closes_resources(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
