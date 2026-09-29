@@ -55,6 +55,23 @@ max(required-1 wall, required-2 wall, ..., web-1 wall, ...)
 
 Use job `startedAt` and `completedAt`. Do not use queue time.
 
+### Test and fixture phase attribution
+
+Read `pytest-timings.jsonl` by `record_type` and `phase`:
+
+- Use `test_phase` records with `phase=call` for actual test-body runtime.
+- Inspect `setup` and `teardown` separately, using `fixture` records and their scope
+  to identify shared startup, cleanup, or repeated initialization.
+- Summarize successful samples by node ID with sample count, mean, median, and range;
+  keep failures and skips separate. Follow moved tests across lane assignments.
+- Treat first-test setup as fixture work, not as test-body work. A body may itself
+  create provider/Gateway contexts, so profile those operations inside the call.
+- Count shared fixture time once when building a budget. Do not add nested fixture
+  records or a test's setup total to the same startup cost again.
+
+Use measured phase boundaries to distinguish removable waste from required readiness,
+restart, recovery, or elapsed-time behavior. Preserve those observable boundaries.
+
 ### Candidate critical-path saving
 
 For every run:
@@ -65,6 +82,33 @@ For every run:
 
 Average those per-run savings. Never omit an enabled suite or use aggregate
 test-duration reduction as the required-CI claim.
+
+### Compatible small-change bundles
+
+Apply the 30-second/5-percent threshold to the final bundle. Keep small, validated
+test/scenario/fixture improvements available for combination:
+
+1. Record each candidate's affected node IDs, fixture scopes, lanes, removed work,
+   retained assertions/state transitions, evidence, saving estimate, and overhead.
+2. Apply the complete set to every baseline run's observed lane assignment; subtract
+   non-overlapping savings once and add producer, setup, transfer, and cleanup costs.
+3. Recompute the maximum across all gated lanes after each addition and for the bundle.
+   Investigate takeover lanes as well as the original critical lane.
+4. Check compatibility: one change may remove another's saving or alter fixture
+   lifetime/resource contention. Do not simply sum independently measured gains.
+5. Validate each mechanism locally, then measure the final unchanged SHA in at least
+   two successful full workflows. Distinguish modeled budgets from observed CI gains.
+
+Synthetic calculation example, **not CI evidence**: lane A takes 500s, lane B 490s,
+and all other gated lanes at most 470s. Three independent 10s reductions in A make
+A 470s, but the gate becomes B's 490s: only 10s saved. Add two compatible 10s
+reductions in B and the gate becomes 470s: 30s saved by the bundle. This example
+assumes zero new overhead; real acceptance must include it.
+
+Before reporting an exhausted recurring cycle, retain the ranked candidate ledger and
+the concrete evidence or constraint rejecting each remaining feasible combination.
+An unprofiled slow test or one subthreshold infrastructure experiment does not establish
+that every compatible test-level improvement is infeasible.
 
 ### Parallel overlap
 
