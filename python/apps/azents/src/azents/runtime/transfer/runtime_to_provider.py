@@ -25,6 +25,7 @@ from azents_runtime_control.grpc_transfer_coordinator_client import (
     CoordinatorMarkTransferReadyRequest,
     CoordinatorObjectManifest,
     CoordinatorSettleTransferRequest,
+    CoordinatorSourceTransport,
     CoordinatorTransferDirection,
     CoordinatorTransferOutcome,
     CoordinatorTransferPhase,
@@ -774,6 +775,7 @@ class RuntimeToProviderBatchService:
                 deadline_at=request.deadline_at,
                 source_expires_at=None,
                 resource_class=request.resource_class,
+                source_transport=CoordinatorSourceTransport.TRANSFER_OBJECT,
             )
         )
         prepared_source = _PreparedRuntimeSource(

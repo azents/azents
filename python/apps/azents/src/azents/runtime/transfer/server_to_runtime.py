@@ -25,6 +25,7 @@ from azents_runtime_control.grpc_transfer_coordinator_client import (
     CoordinatorOpaqueObjectHandle,
     CoordinatorPromotePreparationCleanupRequest,
     CoordinatorRegisterPreparationCleanupRequest,
+    CoordinatorSourceTransport,
     CoordinatorTransferDirection,
     CoordinatorTransferFailure,
     CoordinatorTransferOutcome,
@@ -329,6 +330,7 @@ class ServerToRuntimeTransferRequest:
     product_maximum_size: int
     provider_maximum_size: int
     deadline_at: datetime
+    source_transport: CoordinatorSourceTransport
 
 
 @dataclass
@@ -479,6 +481,7 @@ class ServerToRuntimeTransferService:
                     deadline_at=request.deadline_at,
                     source_expires_at=metadata.expires_at,
                     resource_class=metadata.source_kind,
+                    source_transport=request.source_transport,
                 )
             )
             expected_revision = admitted.status.revision

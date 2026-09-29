@@ -231,10 +231,8 @@ class RuntimeTransferAdmission:
         if self.source_transport is RuntimeTransferSourceTransport.DIRECT_OBJECT:
             if self.direction is not RuntimeTransferDirection.DOWNLOAD:
                 raise ValueError("direct object source is download-only")
-            if self.source_handle is None:
-                raise ValueError("direct object source requires a source handle")
-            if self.expected_sha256 is None:
-                raise ValueError("direct object source requires a SHA-256")
+            if self.source_handle is not None and self.expected_sha256 is None:
+                raise ValueError("external direct object source requires a SHA-256")
         elif self.source_handle is not None:
             raise ValueError(
                 "transfer-object source must not retain an external source handle"
@@ -513,9 +511,12 @@ class RuntimeTransferRecord:
         if (
             self.admission.source_transport
             is RuntimeTransferSourceTransport.DIRECT_OBJECT
+            and self.admission.source_handle is not None
             and self.object is not None
         ):
-            raise ValueError("direct object sources must not retain Runtime objects")
+            raise ValueError(
+                "external direct object sources must not retain Runtime objects"
+            )
         if (
             self.phase
             in {

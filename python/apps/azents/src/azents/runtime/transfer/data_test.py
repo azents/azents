@@ -16,6 +16,7 @@ from azents.runtime.transfer.data import (
     RuntimeTransferPhase,
     RuntimeTransferProgress,
     RuntimeTransferRecord,
+    RuntimeTransferSourceTransport,
     RuntimeTransferUploadTransport,
     logical_expiry,
     validate_admission_time,
@@ -60,6 +61,22 @@ def test_logical_expiry_uses_one_hour_or_source_ceiling() -> None:
         minutes=10
     )
     assert logical_expiry(_NOW, _NOW + timedelta(hours=2)) == _NOW + timedelta(hours=1)
+
+
+def test_attempt_owned_direct_download_allows_late_digest_without_source_handle() -> (
+    None
+):
+    """Only an owned transfer object may bind its digest at READY."""
+    direct = replace(
+        _admission(),
+        direction=RuntimeTransferDirection.DOWNLOAD,
+        source_transport=RuntimeTransferSourceTransport.DIRECT_OBJECT,
+        expected_sha256=None,
+    )
+    assert direct.source_handle is None
+    with pytest.raises(ValueError, match="SHA-256"):
+        replace(direct, source_handle="workspace-source")
+    assert replace(direct, source_handle="workspace-source", expected_sha256=_DIGEST)
 
 
 def test_direct_upload_transport_requires_upload_direction() -> None:

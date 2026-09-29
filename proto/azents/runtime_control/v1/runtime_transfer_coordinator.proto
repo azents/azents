@@ -203,6 +203,13 @@ message AdmitTransferRequest {
   string resource_class = 10;
   optional bytes conflict_precondition = 11;
   CoordinatorUploadTransport upload_transport = 12;
+  CoordinatorSourceTransport source_transport = 13;
+}
+
+enum CoordinatorSourceTransport {
+  COORDINATOR_SOURCE_TRANSPORT_UNSPECIFIED = 0;
+  COORDINATOR_SOURCE_TRANSPORT_TRANSFER_OBJECT = 1;
+  COORDINATOR_SOURCE_TRANSPORT_DIRECT_OBJECT = 2;
 }
 
 enum CoordinatorUploadTransport {

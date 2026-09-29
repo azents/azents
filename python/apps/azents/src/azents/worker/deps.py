@@ -124,6 +124,7 @@ from .health import HealthServer
 
 _DEFAULT_HEALTH_PORT = 8012
 _TRANSFER_MAXIMUM_FILE_BYTES = 8 * 1024 * 1024
+_DIRECT_INBOUND_RUNTIME_FILE_MAXIMUM_BYTES = 128 * 1024 * 1024
 _TRANSFER_CHUNK_BYTES = 256 * 1024
 _TRANSFER_MULTIPART_PART_BYTES = 5 * 1024 * 1024
 _TRANSFER_STATUS_POLL_INTERVAL = datetime.timedelta(milliseconds=250)
@@ -441,7 +442,7 @@ def create_worker_transfer_services(
             transfer_object_prefix=object_prefix,
             multipart_copy_threshold=_TRANSFER_MULTIPART_PART_BYTES,
             multipart_part_size=_TRANSFER_MULTIPART_PART_BYTES,
-            maximum_size=_TRANSFER_MAXIMUM_FILE_BYTES,
+            maximum_size=_DIRECT_INBOUND_RUNTIME_FILE_MAXIMUM_BYTES,
             deadline_after=_TRANSFER_DEADLINE,
         ),
     )

@@ -55,6 +55,7 @@ from azents.runtime.transfer.data import (
     RuntimeTransferOutcome,
     RuntimeTransferPhase,
     RuntimeTransferRecord,
+    RuntimeTransferSourceTransport,
     RuntimeTransferUploadTransport,
 )
 from azents.runtime.transfer.memory import InMemoryRuntimeTransferStateStore
@@ -187,6 +188,7 @@ class _ObjectStore:
     def __init__(self, chunks: list[bytes]) -> None:
         self.chunks = chunks
         self.verify_calls = 0
+        self.download_requests: list[S3ObjectIdentity] = []
         self.closed = False
         self.multipart_creates = 0
         self.preparation_multipart_creates = 0
@@ -201,6 +203,22 @@ class _ObjectStore:
         self.abort_error_message = "abort failed"
         self.complete_error = False
         self.verify_error = False
+
+    async def get_download_request(
+        self,
+        *,
+        identity: S3ObjectIdentity,
+        expires_in: timedelta,
+        now: datetime | None = None,
+    ) -> S3PresignedRequest:
+        assert now is not None
+        self.download_requests.append(identity)
+        return S3PresignedRequest(
+            method="GET",
+            url=f"https://storage.example/{identity.bucket}/{identity.key}",
+            expires_at=now + expires_in,
+            headers={},
+        )
 
     async def get_upload_request(
         self,
@@ -1112,6 +1130,10 @@ async def _harness(
     upload_transport: RuntimeTransferUploadTransport = (
         RuntimeTransferUploadTransport.CONTROL_STREAM
     ),
+    source_transport: RuntimeTransferSourceTransport = (
+        RuntimeTransferSourceTransport.TRANSFER_OBJECT
+    ),
+    late_digest: bool = False,
 ) -> _Harness:
     clock = clock or (lambda: _NOW)
     state = InMemoryRuntimeTransferStateStore(
@@ -1120,8 +1142,11 @@ async def _harness(
     )
     admitted = await state.admit(
         replace(
-            _admission(direction, size, sha256, desired_generation),
+            _admission(
+                direction, size, None if late_digest else sha256, desired_generation
+            ),
             upload_transport=upload_transport,
+            source_transport=source_transport,
         ),
         lease_id="lease-1",
     )
@@ -1201,6 +1226,112 @@ def _request(*, runner_generation: int = 1) -> pb.DownloadTransferRequest:
             runner_generation=runner_generation,
         )
     )
+
+
+@pytest.mark.asyncio
+async def test_direct_owned_claim_verifies_exact_bound_object_and_never_relays() -> (
+    None
+):
+    """Late digest binds at READY; only a dispatched Runner receives the GET."""
+    harness = await _harness(
+        chunks=[b"abc"],
+        source_transport=RuntimeTransferSourceTransport.DIRECT_OBJECT,
+        late_digest=True,
+    )
+    request = pb.DirectObjectDownloadClaimRequest(
+        identity=_request().identity,
+        dispatch_id="dispatch-1",
+        claim_id="claim-1",
+    )
+    response = await harness.servicer.ClaimDirectObjectDownload(request, _Context())
+    assert response.method == "GET"
+    assert response.expected_size == 3
+    assert response.expected_sha256 == _DIGEST
+    assert response.url.endswith("/transfer-bucket/object-1")
+    assert harness.object_store.verify_calls == 1
+    assert harness.object_store.download_requests == [
+        S3ObjectIdentity(bucket="transfer-bucket", key="object-1")
+    ]
+    with pytest.raises(_Abort) as error:
+        async for _ in harness.servicer.DownloadTransfer(_request(), _Context()):
+            pytest.fail("Direct-only attempt must not relay body bytes")
+    assert error.value.code is grpc.StatusCode.FAILED_PRECONDITION
+
+
+@pytest.mark.asyncio
+async def test_direct_owned_claim_fences_wrong_dispatch_and_failed_verification() -> (
+    None
+):
+    """No ticket is signed before dispatch and trusted checksum verification."""
+    harness = await _harness(
+        chunks=[b"abc"],
+        source_transport=RuntimeTransferSourceTransport.DIRECT_OBJECT,
+        late_digest=True,
+    )
+    request = pb.DirectObjectDownloadClaimRequest(
+        identity=_request().identity,
+        dispatch_id="wrong-dispatch",
+        claim_id="claim-1",
+    )
+    with pytest.raises(_Abort) as error:
+        await harness.servicer.ClaimDirectObjectDownload(request, _Context())
+    assert error.value.code is grpc.StatusCode.FAILED_PRECONDITION
+    assert harness.object_store.verify_calls == 0
+    assert harness.object_store.download_requests == []
+
+    request.dispatch_id = "dispatch-1"
+    harness.object_store.verify_error = True
+    with pytest.raises(_Abort) as error:
+        await harness.servicer.ClaimDirectObjectDownload(request, _Context())
+    assert error.value.code is grpc.StatusCode.FAILED_PRECONDITION
+    assert harness.object_store.verify_calls == 1
+    assert harness.object_store.download_requests == []
+
+
+@pytest.mark.asyncio
+async def test_direct_owned_claim_fences_cancellation_during_head(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A slow trusted HEAD cannot publish a ticket after claim cancellation."""
+    harness = await _harness(
+        chunks=[b"abc"],
+        source_transport=RuntimeTransferSourceTransport.DIRECT_OBJECT,
+        late_digest=True,
+    )
+    request = pb.DirectObjectDownloadClaimRequest(
+        identity=_request().identity,
+        dispatch_id="dispatch-1",
+        claim_id="claim-1",
+    )
+    original_verify = harness.object_store.verify_transfer_object
+
+    async def verify(
+        *,
+        identity: S3ObjectIdentity,
+        expected_size: int,
+        expected_sha256: str,
+    ) -> S3VerifiedObject:
+        record = await harness.state.get("transfer-1")
+        assert record is not None
+        cancelled = await harness.state.request_cancellation(
+            "transfer-1",
+            attempt_id="attempt-1",
+            expected_revision=record.revision,
+            reason=RuntimeTransferCancellationReason.CALLER,
+        )
+        assert cancelled is not None
+        return await original_verify(
+            identity=identity,
+            expected_size=expected_size,
+            expected_sha256=expected_sha256,
+        )
+
+    monkeypatch.setattr(harness.object_store, "verify_transfer_object", verify)
+    with pytest.raises(_Abort) as error:
+        await harness.servicer.ClaimDirectObjectDownload(request, _Context())
+    assert error.value.code is grpc.StatusCode.FAILED_PRECONDITION
+    assert harness.object_store.download_requests
+    # Signing can finish after cancellation, but its URL must never leave Control.
 
 
 async def _frames(

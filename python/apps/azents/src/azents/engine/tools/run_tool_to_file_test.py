@@ -14,6 +14,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 from azcommon.result import Success
+from azents_runtime_control.grpc_transfer_coordinator_client import (
+    CoordinatorSourceTransport,
+)
 
 from azents.core.enums import ArtifactStatus, ModelFileStatus
 from azents.engine.events.generated_files import PendingGeneratedFileOutput
@@ -259,6 +262,7 @@ class _Transfer:
         self.requests: list[ServerToRuntimeTransferRequest] = []
 
     async def transfer(self, request: ServerToRuntimeTransferRequest) -> None:
+        assert request.source_transport is CoordinatorSourceTransport.DIRECT_OBJECT
         self.requests.append(request)
         if request.destination in self.failed_destinations:
             raise ServerToRuntimeTransferError("forced transfer failure")

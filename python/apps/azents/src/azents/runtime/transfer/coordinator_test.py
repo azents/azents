@@ -412,6 +412,62 @@ async def test_direct_object_dispatch_preserves_admission_sha256() -> None:
 
 
 @pytest.mark.asyncio
+async def test_attempt_owned_direct_dispatch_uses_verified_ready_digest() -> None:
+    """A late provider digest is bound to the metadata-only Runner intent."""
+    state = InMemoryRuntimeTransferStateStore(config=_config(), clock=lambda: _NOW)
+    coordination = InMemoryRuntimeCoordinationStore()
+    await publish_next_test_connection(
+        coordination,
+        kind=RuntimeConnectionKind.RUNNER,
+        subject_id="runtime-1",
+        connection_id="connection-1",
+        owner_replica_id="replica-1",
+        connected_at=datetime.now(UTC),
+        heartbeat_at=datetime.now(UTC),
+        ttl_seconds=60,
+        metadata={},
+    )
+    coordinator = RuntimeTransferCoordinator(
+        state_store=state,
+        coordination_store=coordination,
+        cleanup=None,
+        clock=lambda: _NOW,
+    )
+    admitted = await coordinator.admit(
+        replace(
+            _admission(),
+            source_transport=RuntimeTransferSourceTransport.DIRECT_OBJECT,
+            expected_sha256=None,
+        ),
+        lease_id="lease-1",
+    )
+    assert admitted is not None
+    ready = await coordinator.mark_ready(
+        admitted,
+        expected_revision=admitted.revision,
+        object_handle=object_handle_for(admitted),
+        size=3,
+        sha256="b" * 64,
+    )
+    assert ready is not None
+    dispatched = await coordinator.dispatch(
+        ready,
+        expected_revision=ready.revision,
+        dispatch_id="dispatch-1",
+    )
+    claimed = await coordination.claim_next_request(
+        dispatched.request_stream_id,
+        consumer_group="runner-1",
+        consumer_id="consumer-1",
+        block_ms=0,
+    )
+    assert claimed is not None
+    assert claimed.envelope.payload["source_transport"] == "direct_object"
+    assert claimed.envelope.payload["expected_sha256"] == "b" * 64
+    assert claimed.envelope.body_stream_id is None
+
+
+@pytest.mark.asyncio
 async def test_generation_repair_fences_replaced_dispatch() -> None:
     state = InMemoryRuntimeTransferStateStore(config=_config(), clock=lambda: _NOW)
     coordination = InMemoryRuntimeCoordinationStore()

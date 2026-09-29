@@ -14,6 +14,16 @@ from azcommon.infra.s3.service import (
     S3ObjectSummaryPage,
 )
 
+from azents.runtime.transfer.data import (
+    DIRECT_INGRESS_CLEANUP_GRACE,
+    RuntimeTransferAdmission,
+    RuntimeTransferCleanupStatus,
+    RuntimeTransferConfig,
+    RuntimeTransferDirection,
+    RuntimeTransferObject,
+    RuntimeTransferSourceTransport,
+)
+from azents.runtime.transfer.memory import InMemoryRuntimeTransferStateStore
 from azents.runtime.transfer.object_store import RuntimeTransferS3Cleanup
 
 _NOW = datetime(2026, 7, 28, 12, tzinfo=UTC)
@@ -137,6 +147,78 @@ class _ObjectStore:
         """Record verified cleanup through the ordinary fake delete path."""
         del expected_size, expected_sha256
         await self.delete(bucket=identity.bucket, key=identity.key)
+
+
+@pytest.mark.asyncio
+async def test_direct_get_cleanup_preserves_issued_ticket_grace() -> None:
+    """Owned transfer objects remain available past the deadline for active GETs."""
+    now = _NOW
+    store = InMemoryRuntimeTransferStateStore(
+        config=RuntimeTransferConfig(
+            per_runtime_attempts=2,
+            per_runtime_bytes=10,
+            deployment_attempts=2,
+            deployment_bytes=10,
+            admission_lease=timedelta(minutes=5),
+            consumer_lease=timedelta(minutes=1),
+            stream_lease=timedelta(seconds=30),
+            terminal_ttl=timedelta(minutes=5),
+            list_page_size=2,
+        ),
+        clock=lambda: now,
+    )
+    admitted = await store.admit(
+        RuntimeTransferAdmission(
+            transfer_id="owned-get",
+            attempt_id="attempt",
+            direction=RuntimeTransferDirection.DOWNLOAD,
+            runtime_id="runtime",
+            desired_generation=1,
+            operation_id="operation",
+            session_id=None,
+            agent_id=None,
+            runtime_path="/workspace/file",
+            overwrite=False,
+            conflict_precondition=None,
+            expected_size=1,
+            expected_sha256=None,
+            product_maximum_size=10,
+            provider_maximum_size=10,
+            deadline_at=_NOW + timedelta(minutes=5),
+            source_expires_at=None,
+            resource_class="file",
+            source_transport=RuntimeTransferSourceTransport.DIRECT_OBJECT,
+        ),
+        lease_id="lease",
+    )
+    assert admitted is not None
+    ready = await store.mark_ready(
+        "owned-get",
+        attempt_id="attempt",
+        runtime_id="runtime",
+        desired_generation=1,
+        expected_revision=admitted.revision,
+        object=RuntimeTransferObject("owned-object", 1, "a" * 64),
+    )
+    assert ready is not None
+    pending = replace(
+        ready,
+        cleanup_status=RuntimeTransferCleanupStatus.PENDING,
+        completed_object_cleanup_required=True,
+    )
+    object_store = _ObjectStore()
+    cleanup = RuntimeTransferS3Cleanup(
+        object_store=object_store,
+        bucket="bucket",
+        object_prefix="v1/runtime-transfer",
+        clock=lambda: now,
+    )
+    with pytest.raises(RuntimeError, match="not yet safe"):
+        await cleanup.cleanup(pending)
+    assert object_store.deleted == []
+    now = admitted.admission.deadline_at + DIRECT_INGRESS_CLEANUP_GRACE
+    await cleanup.cleanup(pending)
+    assert object_store.deleted == ["v1/runtime-transfer/owned-object"]
 
 
 @pytest.mark.asyncio

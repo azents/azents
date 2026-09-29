@@ -12,6 +12,7 @@ import httpx
 from azcommon.infra.s3.service import S3TransferCleanupRequired
 from azcommon.uuid import uuid7
 from azents_runtime_control.grpc_transfer_coordinator_client import (
+    CoordinatorSourceTransport,
     CoordinatorTransferFailure,
 )
 from fastapi import Depends
@@ -468,6 +469,7 @@ class ExternalChannelFileTransferService:
             await transfer_service.transfer(
                 ServerToRuntimeTransferRequest(
                     source=source,
+                    source_transport=CoordinatorSourceTransport.DIRECT_OBJECT,
                     target=transfer_target,
                     agent_id=agent_id,
                     session_id=session_id,
@@ -649,6 +651,7 @@ class ExternalChannelFileTransferService:
             await transfer_service.transfer(
                 ServerToRuntimeTransferRequest(
                     source=source,
+                    source_transport=CoordinatorSourceTransport.DIRECT_OBJECT,
                     target=transfer_target,
                     agent_id=agent_id,
                     session_id=session_id,

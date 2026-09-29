@@ -11,6 +11,7 @@ from azents_runtime_control.grpc_transfer_coordinator_client import (
     CoordinatorCancellationReason,
     CoordinatorCleanupStatus,
     CoordinatorRequestMessage,
+    CoordinatorSourceTransport,
     CoordinatorTransferDirection,
     CoordinatorTransferFailure,
     CoordinatorTransferOutcome,
@@ -47,6 +48,7 @@ from azents.runtime.transfer.data import (
     RuntimeTransferPhase,
     RuntimeTransferPreparationCleanupState,
     RuntimeTransferRecord,
+    RuntimeTransferSourceTransport,
     RuntimeTransferUploadTransport,
 )
 
@@ -587,6 +589,11 @@ def _admission_from_request(
         or not request.HasField("provider_maximum_size")
     ):
         raise ValueError("Required admission field presence is missing")
+    if request.source_transport not in {
+        pb.COORDINATOR_SOURCE_TRANSPORT_TRANSFER_OBJECT,
+        pb.COORDINATOR_SOURCE_TRANSPORT_DIRECT_OBJECT,
+    }:
+        raise ValueError("Source transport must be explicitly selected")
     return RuntimeTransferAdmission(
         transfer_id=identity.transfer_id,
         attempt_id=identity.attempt_id,
@@ -620,6 +627,16 @@ def _admission_from_request(
             else None
         ),
         resource_class=request.resource_class,
+        source_transport=RuntimeTransferSourceTransport(
+            {
+                pb.COORDINATOR_SOURCE_TRANSPORT_TRANSFER_OBJECT: (
+                    CoordinatorSourceTransport.TRANSFER_OBJECT.value
+                ),
+                pb.COORDINATOR_SOURCE_TRANSPORT_DIRECT_OBJECT: (
+                    CoordinatorSourceTransport.DIRECT_OBJECT.value
+                ),
+            }[request.source_transport]
+        ),
         upload_transport=RuntimeTransferUploadTransport(
             {
                 pb.COORDINATOR_UPLOAD_TRANSPORT_UNSPECIFIED: (

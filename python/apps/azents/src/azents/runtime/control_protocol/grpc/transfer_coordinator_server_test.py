@@ -163,6 +163,84 @@ async def test_authenticated_transitions_preserve_state_and_dispatch_metadata() 
 
 
 @pytest.mark.asyncio
+async def test_direct_owned_admission_binds_late_digest_at_ready() -> None:
+    """gRPC preserves the direct GET choice and READY object SHA independently."""
+    state = InMemoryRuntimeTransferStateStore(config=_config(), clock=lambda: _NOW)
+    coordinator = RuntimeTransferCoordinator(
+        state_store=state,
+        coordination_store=InMemoryRuntimeCoordinationStore(),
+        cleanup=None,
+        clock=lambda: _NOW,
+    )
+    server, channel, stub, supplier = await _server(coordinator)
+    try:
+        request = _admit_request(sha256=None)
+        request.source_transport = pb.COORDINATOR_SOURCE_TRANSPORT_DIRECT_OBJECT
+        admitted = await stub.AdmitTransfer(
+            request,
+            metadata=await _metadata(
+                supplier, COORDINATOR_OPERATION_ADMIT_TRANSFER, request
+            ),
+        )
+        record = await state.get(request.identity.transfer_id)
+        assert record is not None
+        assert record.admission.source_handle is None
+        assert record.admission.expected_sha256 is None
+        ready_request = pb.MarkTransferReadyRequest(
+            identity=request.identity,
+            expected_revision=admitted.status.revision,
+            object_handle=admitted.admitted_object_handle,
+            object_manifest=pb.ObjectManifest(size=3, sha256="b" * 64),
+        )
+        ready = await stub.MarkTransferReady(
+            ready_request,
+            metadata=await _metadata(
+                supplier, COORDINATOR_OPERATION_MARK_TRANSFER_READY, ready_request
+            ),
+        )
+        record = await state.get(request.identity.transfer_id)
+        assert ready.status.phase == pb.COORDINATOR_TRANSFER_PHASE_READY
+        assert record is not None and record.object is not None
+        assert record.object.sha256 == "b" * 64
+        assert record.object.key == admitted.admitted_object_handle.value
+    finally:
+        await channel.close()
+        await server.stop(None)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source_transport", (0, 99))
+async def test_admission_requires_explicit_known_source_transport(
+    source_transport: int,
+) -> None:
+    """Missing or unknown transport cannot silently select the byte relay."""
+    state = InMemoryRuntimeTransferStateStore(config=_config(), clock=lambda: _NOW)
+    coordinator = RuntimeTransferCoordinator(
+        state_store=state,
+        coordination_store=InMemoryRuntimeCoordinationStore(),
+        cleanup=None,
+        clock=lambda: _NOW,
+    )
+    server, channel, stub, supplier = await _server(coordinator)
+    try:
+        request = _admit_request()
+        # Field 13 is a varint; exercise invalid enum values from the wire.
+        request.MergeFromString(bytes((13 << 3, source_transport)))
+        with pytest.raises(grpc.aio.AioRpcError) as error:
+            await stub.AdmitTransfer(
+                request,
+                metadata=await _metadata(
+                    supplier, COORDINATOR_OPERATION_ADMIT_TRANSFER, request
+                ),
+            )
+        assert error.value.code() is grpc.StatusCode.INVALID_ARGUMENT
+        assert await state.get("transfer-1") is None
+    finally:
+        await channel.close()
+        await server.stop(None)
+
+
+@pytest.mark.asyncio
 async def test_upload_ready_allows_unknown_expected_digest() -> None:
     """Upload readiness preserves absent SHA-256 until Runtime verification."""
     state = InMemoryRuntimeTransferStateStore(config=_config(), clock=lambda: _NOW)
@@ -371,6 +449,7 @@ def _admit_request(
         expected_manifest=pb.ExpectedManifest(size=3),
         deadline_at=_timestamp(_NOW + timedelta(minutes=5)),
         resource_class="file",
+        source_transport=pb.COORDINATOR_SOURCE_TRANSPORT_TRANSFER_OBJECT,
     )
     if sha256 is not None:
         request.expected_manifest.sha256 = sha256

@@ -30,6 +30,7 @@ from azents_runtime_control.grpc_transfer_coordinator_client import (
     CoordinatorPreparationCleanupState,
     CoordinatorPromotePreparationCleanupRequest,
     CoordinatorRegisterPreparationCleanupRequest,
+    CoordinatorSourceTransport,
     CoordinatorTransferDirection,
     CoordinatorTransferPhase,
     CoordinatorTransferStatus,
@@ -515,6 +516,7 @@ async def test_provider_stream_does_not_open_when_admission_rejects() -> None:
                 provider_maximum_size=4,
                 deadline_at=_NOW + timedelta(minutes=1),
                 conflict_precondition=None,
+                source_transport=CoordinatorSourceTransport.TRANSFER_OBJECT,
             )
         )
 

@@ -361,6 +361,11 @@ class InMemoryRuntimeTransferStateStore:
             )
             if (
                 record is None
+                or (
+                    record.admission.direction is RuntimeTransferDirection.DOWNLOAD
+                    and record.admission.source_transport
+                    is RuntimeTransferSourceTransport.DIRECT_OBJECT
+                )
                 or record.dispatch_status
                 not in {
                     RuntimeTransferDispatchStatus.DELIVERABLE,
@@ -420,6 +425,10 @@ class InMemoryRuntimeTransferStateStore:
                         is not RuntimeTransferSourceTransport.DIRECT_OBJECT
                         or record.admission.direction
                         is not RuntimeTransferDirection.DOWNLOAD
+                        or (
+                            record.admission.source_handle is None
+                            and (record.object is None or record.object.sha256 is None)
+                        )
                     )
                 )
                 or record.admission.runtime_id != runtime_id
@@ -1191,11 +1200,15 @@ class InMemoryRuntimeTransferStateStore:
                 or (
                     record.admission.source_transport
                     is RuntimeTransferSourceTransport.DIRECT_OBJECT
+                    and record.admission.source_handle is not None
                     and record.object is not None
                 )
                 or (
-                    record.admission.source_transport
-                    is not RuntimeTransferSourceTransport.DIRECT_OBJECT
+                    (
+                        record.admission.source_transport
+                        is not RuntimeTransferSourceTransport.DIRECT_OBJECT
+                        or record.admission.source_handle is None
+                    )
                     and (
                         record.object is None
                         or record.object.size != actual_size
@@ -1746,6 +1759,18 @@ class InMemoryRuntimeTransferStateStore:
                                     )
                                 )
                                 or object.size != record.admission.expected_size
+                                or (
+                                    record.admission.source_transport
+                                    is RuntimeTransferSourceTransport.DIRECT_OBJECT
+                                    and (
+                                        record.admission.source_handle is not None
+                                        or (
+                                            record.admission.direction
+                                            is RuntimeTransferDirection.DOWNLOAD
+                                            and object.sha256 is None
+                                        )
+                                    )
+                                )
                                 or (
                                     record.admission.expected_sha256 is not None
                                     and (

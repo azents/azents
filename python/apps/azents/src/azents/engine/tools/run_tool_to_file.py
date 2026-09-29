@@ -16,6 +16,9 @@ from typing import Protocol, assert_never, runtime_checkable
 
 from azcommon.result import Failure
 from azcommon.uuid import uuid7
+from azents_runtime_control.grpc_transfer_coordinator_client import (
+    CoordinatorSourceTransport,
+)
 from pydantic import BaseModel, Field
 
 from azents.engine.client_tools import ClientToolWireDialect
@@ -356,6 +359,7 @@ def make_run_tool_to_file_tool(
                 await runtime.transfer_service.transfer(
                     ServerToRuntimeTransferRequest(
                         source=resolved.source,
+                        source_transport=CoordinatorSourceTransport.DIRECT_OBJECT,
                         target=target,
                         agent_id=runtime.authority.agent_id,
                         session_id=runtime.authority.session_id,
@@ -445,6 +449,7 @@ def make_run_tool_to_file_tool(
                         media_type="application/json",
                         runtime=runtime,
                     ),
+                    source_transport=CoordinatorSourceTransport.DIRECT_OBJECT,
                     target=target,
                     agent_id=runtime.authority.agent_id,
                     session_id=runtime.authority.session_id,

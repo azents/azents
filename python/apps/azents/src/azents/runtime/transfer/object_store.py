@@ -16,8 +16,10 @@ from azcommon.infra.s3.service import (
 from azents.runtime.transfer.data import (
     DIRECT_INGRESS_CLEANUP_GRACE,
     RUNTIME_TRANSFER_MAXIMUM_PAGE_SIZE,
+    RuntimeTransferDirection,
     RuntimeTransferPreparationCleanupState,
     RuntimeTransferRecord,
+    RuntimeTransferSourceTransport,
 )
 from azents.utils.logging import sanitized_exception_info
 
@@ -130,6 +132,16 @@ class RuntimeTransferS3Cleanup:
                 + DIRECT_INGRESS_CLEANUP_GRACE
             ):
                 raise RuntimeError("Direct PUT ingress cleanup is not yet safe")
+        if (
+            record.admission.direction is RuntimeTransferDirection.DOWNLOAD
+            and record.admission.source_transport
+            is RuntimeTransferSourceTransport.DIRECT_OBJECT
+            and record.admission.source_handle is None
+            and record.object is not None
+            and self._clock()
+            < record.admission.deadline_at + DIRECT_INGRESS_CLEANUP_GRACE
+        ):
+            raise RuntimeError("Direct GET transfer cleanup is not yet safe")
         error: BaseException | None = None
         if record.preparation_object_handle is not None:
             preparation_identity = runtime_transfer_object_identity(

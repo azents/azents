@@ -18,6 +18,7 @@ from azents_runtime_control.grpc_transfer_coordinator_client import (
     CoordinatorDispatchStatus,
     CoordinatorDispatchTransferRequest,
     CoordinatorExpectedManifest,
+    CoordinatorSourceTransport,
     CoordinatorUploadTransport,
     GrpcRuntimeTransferCoordinatorClient,
     admit_transfer_request_to_message,
@@ -29,6 +30,33 @@ from azents_runtime_control.proto import runtime_transfer_coordinator_pb2
 from azents_runtime_control.transfer import CoordinatorTransferIdentity
 
 _NOW = datetime(2026, 7, 25, 12, 0, tzinfo=UTC)
+
+
+def test_admit_message_binds_direct_owned_source_transport_and_late_digest() -> None:
+    """The trusted request binds a direct GET without predeclared source digest."""
+    request = CoordinatorAdmitTransferRequest(
+        identity=_identity(),
+        lease_id="lease-1",
+        runtime_path="/workspace/file.txt",
+        overwrite=False,
+        conflict_precondition=None,
+        expected_manifest=CoordinatorExpectedManifest(size=3, sha256=None),
+        product_maximum_size=10,
+        provider_maximum_size=10,
+        deadline_at=_NOW + timedelta(minutes=5),
+        source_expires_at=None,
+        resource_class="file",
+        source_transport=CoordinatorSourceTransport.DIRECT_OBJECT,
+    )
+    encoded = admit_transfer_request_to_message(request)
+    assert encoded.source_transport == (
+        runtime_transfer_coordinator_pb2.COORDINATOR_SOURCE_TRANSPORT_DIRECT_OBJECT
+    )
+    assert not encoded.expected_manifest.HasField("sha256")
+    with pytest.raises(ValueError, match="DOWNLOAD direction"):
+        dataclasses.replace(
+            request, identity=dataclasses.replace(_identity(), direction="upload")
+        )
 
 
 def test_admit_message_keeps_direct_upload_transport_in_authenticated_request() -> None:
@@ -45,6 +73,7 @@ def test_admit_message_keeps_direct_upload_transport_in_authenticated_request() 
         deadline_at=_NOW + timedelta(minutes=5),
         source_expires_at=None,
         resource_class="file",
+        source_transport=CoordinatorSourceTransport.TRANSFER_OBJECT,
         upload_transport=CoordinatorUploadTransport.DIRECT_OBJECT,
     )
     encoded = admit_transfer_request_to_message(request)
@@ -324,6 +353,7 @@ async def test_client_issues_exact_bearer_metadata_per_request() -> None:
         deadline_at=_NOW + timedelta(minutes=5),
         source_expires_at=None,
         resource_class="file",
+        source_transport=CoordinatorSourceTransport.TRANSFER_OBJECT,
     )
 
     result = await client.admit_transfer(admission)

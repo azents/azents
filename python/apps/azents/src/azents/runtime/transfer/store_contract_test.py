@@ -259,6 +259,85 @@ async def test_rejects_invalid_size_and_expired_source_without_record(
 
 
 @pytest.mark.asyncio
+async def test_attempt_owned_direct_get_requires_ready_dispatch_and_bound_digest(
+    store_harness: _StoreHarness,
+) -> None:
+    """Both stores reject early claims and byte relay for a late-digest GET."""
+    store = store_harness.store
+    admitted = await store.admit(
+        replace(
+            _admission(),
+            transfer_id="owned-get",
+            attempt_id="owned-get-attempt",
+            direction=RuntimeTransferDirection.DOWNLOAD,
+            source_transport=RuntimeTransferSourceTransport.DIRECT_OBJECT,
+            expected_sha256=None,
+        ),
+        lease_id="owned-get-lease",
+    )
+    assert admitted is not None
+
+    async def claim(generation: int = 2) -> RuntimeTransferRecord | None:
+        return await store.claim_direct_object(
+            "owned-get",
+            attempt_id="owned-get-attempt",
+            runtime_id="runtime",
+            desired_generation=1,
+            accepted_runner_generation=generation,
+            claim_id="get-claim",
+            owner_replica_id="owner",
+        )
+
+    assert await claim() is None
+    object = RuntimeTransferObject("owned-get-object", 1, "b" * 64)
+    ready = await store.mark_ready(
+        "owned-get",
+        attempt_id="owned-get-attempt",
+        runtime_id="runtime",
+        desired_generation=1,
+        expected_revision=admitted.revision,
+        object=object,
+    )
+    assert ready is not None and ready.object == object
+    assert await claim() is None
+    bound = await store.bind_dispatch(
+        "owned-get",
+        attempt_id="owned-get-attempt",
+        runtime_id="runtime",
+        desired_generation=1,
+        accepted_runner_generation=2,
+        expected_revision=ready.revision,
+        dispatch_id="get-dispatch",
+        dispatch_request_id="get-request",
+    )
+    assert bound is not None
+    deliverable = await store.mark_dispatch_deliverable(
+        "owned-get",
+        attempt_id="owned-get-attempt",
+        expected_revision=bound.revision,
+        dispatch_id="get-dispatch",
+        dispatch_request_id="get-request",
+    )
+    assert deliverable is not None
+    assert (
+        await store.claim_stream(
+            "owned-get",
+            attempt_id="owned-get-attempt",
+            runtime_id="runtime",
+            desired_generation=1,
+            accepted_runner_generation=2,
+            expected_revision=deliverable.revision,
+            claim_id="legacy-relay",
+            owner_replica_id="owner",
+        )
+        is None
+    )
+    claimed = await claim()
+    assert claimed is not None and claimed.object == object
+    assert await claim(generation=3) is None
+
+
+@pytest.mark.asyncio
 async def test_direct_claim_replay_renews_lease_and_fences_owner(
     store_harness: _StoreHarness,
 ) -> None:

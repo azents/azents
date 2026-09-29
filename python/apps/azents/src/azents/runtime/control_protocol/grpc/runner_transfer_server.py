@@ -54,6 +54,7 @@ from azents.runtime.transfer.data import (
     RuntimeTransferFailure,
     RuntimeTransferObject,
     RuntimeTransferOutcome,
+    RuntimeTransferPhase,
     RuntimeTransferRecord,
     RuntimeTransferSourceTransport,
     RuntimeTransferUploadTransport,
@@ -198,6 +199,16 @@ class _StreamLeaseKeeper:
 
 class RuntimeRunnerTransferObjectStore(Protocol):
     """Trusted object-store operations needed for bounded Runner transfers."""
+
+    async def get_download_request(
+        self,
+        *,
+        identity: S3ObjectIdentity,
+        expires_in: timedelta,
+        now: datetime | None = None,
+    ) -> S3PresignedRequest:
+        """Sign one exact transfer-object GET."""
+        ...
 
     async def get_upload_request(
         self,
@@ -451,12 +462,6 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
                 "Runner credential is no longer authorized",
             )
             raise AssertionError("unreachable")
-        if self._direct_object_store is None:
-            await context.abort(
-                grpc.StatusCode.FAILED_PRECONDITION,
-                "Direct object transfer is unavailable",
-            )
-            raise AssertionError("unreachable")
         if (
             not request.HasField("identity")
             or not _valid_identity(request.identity)
@@ -509,7 +514,21 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
             )
             raise AssertionError("unreachable")
         source_handle = record.admission.source_handle
-        if source_handle is None or record.admission.expected_sha256 is None:
+        transfer_object = record.object
+        if (
+            source_handle is not None
+            and (
+                self._direct_object_store is None
+                or record.admission.expected_sha256 is None
+            )
+        ) or (
+            source_handle is None
+            and (
+                transfer_object is None
+                or transfer_object.sha256 is None
+                or transfer_object.size != record.admission.expected_size
+            )
+        ):
             await context.abort(
                 grpc.StatusCode.FAILED_PRECONDITION,
                 "Direct object manifest is unavailable",
@@ -530,7 +549,12 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
                 "Direct object transfer claim is unavailable",
             )
             raise AssertionError("unreachable")
-        expected_sha256 = claimed.admission.expected_sha256
+        transfer_object = claimed.object
+        expected_sha256 = (
+            claimed.admission.expected_sha256
+            if source_handle is not None
+            else (None if transfer_object is None else transfer_object.sha256)
+        )
         if expected_sha256 is None:
             await context.abort(
                 grpc.StatusCode.FAILED_PRECONDITION,
@@ -545,10 +569,29 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
             else claimed.logical_expires_at,
         )
         try:
-            ticket = await self._direct_object_store.issue_download_ticket(
-                source_handle=source_handle,
-                deadline_at=deadline_at,
-            )
+            if source_handle is not None:
+                assert self._direct_object_store is not None
+                ticket = await self._direct_object_store.issue_download_ticket(
+                    source_handle=source_handle,
+                    deadline_at=deadline_at,
+                )
+            else:
+                assert transfer_object is not None
+                object_identity = self._object_identity(transfer_object.key)
+                await self._object_store.verify_transfer_object(
+                    identity=object_identity,
+                    expected_size=transfer_object.size,
+                    expected_sha256=expected_sha256,
+                )
+                now = self._now()
+                expires_in = min(timedelta(minutes=5), deadline_at - now)
+                if expires_in <= timedelta():
+                    raise ValueError("Direct object claim expired")
+                ticket = await self._object_store.get_download_request(
+                    identity=object_identity,
+                    expires_in=expires_in,
+                    now=now,
+                )
         except asyncio.CancelledError:
             raise
         except FileNotFoundError:
@@ -557,10 +600,47 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
                 "Direct object source is unavailable",
             )
             raise AssertionError("unreachable")
+        except ValueError:
+            await context.abort(
+                grpc.StatusCode.FAILED_PRECONDITION,
+                "Direct object verification failed",
+            )
+            raise AssertionError("unreachable")
         except Exception:
             await context.abort(
                 grpc.StatusCode.FAILED_PRECONDITION,
                 "Direct object capability is unavailable",
+            )
+            raise AssertionError("unreachable")
+        current = await self._state_store.get(identity.transfer_id)
+        connection = await self._coordination_store.get_connection(
+            kind=RuntimeConnectionKind.RUNNER,
+            subject_id=identity.runtime_id,
+        )
+        if (
+            current is None
+            or current.admission.attempt_id != identity.attempt_id
+            or current.revision != claimed.revision
+            or current.stream_claim_id != request.claim_id
+            or current.stream_owner_replica_id != self._owner_replica_id
+            or current.stream_lease_expires_at is None
+            or current.stream_lease_expires_at <= self._now()
+            or current.lease_expires_at <= self._now()
+            or current.accepted_runner_generation != identity.runner_generation
+            or current.dispatch_id != request.dispatch_id
+            or current.object != claimed.object
+            or current.phase is not RuntimeTransferPhase.STREAMING
+            or _expired(current, self._now())
+            or connection is None
+            or connection.generation != identity.runner_generation
+            or not await self._runner_authenticator.authorize_runner(credential)
+            or ticket.method != "GET"
+            or ticket.expires_at <= self._now()
+            or ticket.expires_at > deadline_at
+        ):
+            await context.abort(
+                grpc.StatusCode.FAILED_PRECONDITION,
+                "Direct object transfer claim is unavailable",
             )
             raise AssertionError("unreachable")
         response = pb.DirectObjectDownloadClaimResponse(
@@ -1672,6 +1752,8 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
             or record.admission.runtime_id != identity.runtime_id
             or record.admission.desired_generation != credential.desired_generation
             or record.admission.direction is not RuntimeTransferDirection.DOWNLOAD
+            or record.admission.source_transport
+            is RuntimeTransferSourceTransport.DIRECT_OBJECT
             or record.phase.value != "ready"
             or record.dispatch_status
             not in {

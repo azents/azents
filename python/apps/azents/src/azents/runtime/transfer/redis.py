@@ -1424,7 +1424,13 @@ class RedisRuntimeTransferStateStore:
             ) or (
                 envelope is not None
                 and (
-                    envelope.record.dispatch_status
+                    (
+                        envelope.record.admission.direction
+                        is RuntimeTransferDirection.DOWNLOAD
+                        and envelope.record.admission.source_transport
+                        is RuntimeTransferSourceTransport.DIRECT_OBJECT
+                    )
+                    or envelope.record.dispatch_status
                     not in {
                         RuntimeTransferDispatchStatus.DELIVERABLE,
                         RuntimeTransferDispatchStatus.ENQUEUED,
@@ -1493,6 +1499,10 @@ class RedisRuntimeTransferStateStore:
                         is not RuntimeTransferSourceTransport.DIRECT_OBJECT
                         or record.admission.direction
                         is not RuntimeTransferDirection.DOWNLOAD
+                        or (
+                            record.admission.source_handle is None
+                            and (record.object is None or record.object.sha256 is None)
+                        )
                     )
                 )
                 or record.dispatch_status
@@ -2414,11 +2424,15 @@ class RedisRuntimeTransferStateStore:
                 or (
                     record.admission.source_transport
                     is RuntimeTransferSourceTransport.DIRECT_OBJECT
+                    and record.admission.source_handle is not None
                     and record.object is not None
                 )
                 or (
-                    record.admission.source_transport
-                    is not RuntimeTransferSourceTransport.DIRECT_OBJECT
+                    (
+                        record.admission.source_transport
+                        is not RuntimeTransferSourceTransport.DIRECT_OBJECT
+                        or record.admission.source_handle is None
+                    )
                     and (
                         record.object is None
                         or record.object.size != actual_size
@@ -3148,6 +3162,19 @@ class RedisRuntimeTransferStateStore:
                                 or (
                                     object.size
                                     != envelope.record.admission.expected_size
+                                )
+                                or (
+                                    envelope.record.admission.source_transport
+                                    is RuntimeTransferSourceTransport.DIRECT_OBJECT
+                                    and (
+                                        envelope.record.admission.source_handle
+                                        is not None
+                                        or (
+                                            envelope.record.admission.direction
+                                            is RuntimeTransferDirection.DOWNLOAD
+                                            and object.sha256 is None
+                                        )
+                                    )
                                 )
                                 or (
                                     (
