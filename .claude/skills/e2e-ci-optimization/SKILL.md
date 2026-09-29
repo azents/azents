@@ -90,6 +90,23 @@ successful same-SHA attempts are available for acceptance.
 
 ## 2. Rank by impact
 
+Inspect test-level waste before selecting infrastructure-only candidates:
+
+1. Separate per-test `setup`, `call`, and `teardown` from session/module fixture,
+   image, and CI step timings. Use actual `call` records to identify slow test bodies;
+   do not attribute shared startup charged to the first test to its assertions.
+2. Inspect slow bodies and expensive setup/teardown on the current critical lanes and
+   likely takeover lanes. Read their scenarios and support code, then profile repeated
+   initialization, provider/Gateway lifecycle work, API round trips, serialized
+   independent operations, and polling against authoritative completion evidence.
+3. Identify removable work while preserving every assertion, isolated state, required
+   restart/recovery transition, and real failure boundary. Slow duration alone is not
+   proof of waste; do not shorten behavior whose contract is elapsed time.
+4. Maintain a candidate ledger with the affected tests/fixtures and lanes, mechanism,
+   preserved coverage, evidence, estimated net saving, compatibility with other
+   candidates, and next validation or concrete rejection reason. Include test-level
+   candidates even when each saves only a few seconds.
+
 Rank candidates in this order:
 
 1. A current reproducible reliability failure.
@@ -106,6 +123,11 @@ Default performance acceptance threshold:
 - at least 30 seconds net critical-path reduction; or
 - at least 5 percent net critical-path reduction.
 
+Apply this threshold to the complete compatible candidate set, not to each change.
+Retain evidence-backed 5–10 second improvements as building blocks. Use a single-lane
+saving ceiling to identify takeover lanes that also need work, not to declare all
+test-level or cross-lane combinations exhausted.
+
 Reliability value may justify work below the performance threshold.
 
 Include every new producer, dependency, artifact transfer, pull, load, setup, and
@@ -121,6 +143,13 @@ Build an acceptance budget before editing:
 4. Keep each change separately explainable and validate its mechanism even when CI
    acceptance is measured for the combined set.
 
+Before finishing a recurring run without an accepted implementation, account for the
+ranked test-level candidates and their feasible combinations in the ledger. One
+subthreshold infrastructure candidate or isolated lane ceiling is not exhaustion.
+Profile remaining actionable test candidates and evaluate compatible bundles first;
+when necessary evidence or prerequisites are unavailable, report the specific blocker
+and an inconclusive result rather than claiming that no feasible improvement exists.
+
 ## 3. Validate the candidate
 
 For a reliability candidate:
@@ -135,10 +164,14 @@ For a reliability candidate:
 For a performance candidate:
 
 1. Identify the actual required-gate critical path.
-2. Model lane takeover after the candidate is shortened.
-3. Validate dependency and resource contention assumptions.
-4. Prefer changes that overlap independent work without adding a new prerequisite.
-5. Define the exact artifact evidence that will prove the mechanism worked.
+2. Profile the affected test or fixture phases and verify the proposed removed work.
+   Preserve the same observable behavior; local total runtime alone does not prove
+   which phase improved.
+3. Model lane takeover after each candidate and the complete bundle are applied.
+   Count shared savings once and include each change's added overhead.
+4. Validate dependency and resource contention assumptions.
+5. Prefer changes that overlap independent work without adding a new prerequisite.
+6. Define the exact artifact evidence that will prove the mechanism worked.
 
 ## 4. Implement and validate
 
@@ -252,6 +285,8 @@ implementation is complete.
 Report:
 
 - selected candidate set and why each change was included;
+- slow test/fixture phases investigated, each candidate's evidence and saving budget,
+  and concrete blockers or shortfalls for unshipped candidates and combinations;
 - implementation summary;
 - review result;
 - PR URL;
