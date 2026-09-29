@@ -2,7 +2,7 @@
 
 import asyncio
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -23,9 +23,11 @@ from azents_runtime_control.grpc_transfer_coordinator_client import (
     CoordinatorOpaqueObjectHandle,
     CoordinatorPreparationCleanupState,
     CoordinatorSettleTransferRequest,
+    CoordinatorSourceTransport,
     CoordinatorTransferOutcome,
     CoordinatorTransferPhase,
     CoordinatorTransferStatus,
+    CoordinatorUploadTransport,
 )
 from azents_runtime_control.transfer import CoordinatorTransferIdentity
 
@@ -98,6 +100,7 @@ class _CancellableCallback:
 class _Coordinator:
     def __init__(self, *, ack_fails: bool = False) -> None:
         self.calls: list[str] = []
+        self.admissions: list[CoordinatorAdmitTransferRequest] = []
         self.ack_fails = ack_fails
         self.ack_attempted = False
         self.second_renewal = asyncio.Event()
@@ -106,6 +109,7 @@ class _Coordinator:
         self, request: CoordinatorAdmitTransferRequest
     ) -> CoordinatorAdmitTransferResult:
         self.calls.append("admit")
+        self.admissions.append(request)
         return CoordinatorAdmitTransferResult(_status(1, request.identity), _HANDLE)
 
     async def mark_transfer_ready(
@@ -560,6 +564,36 @@ async def test_prepare_consumer_defers_ack_and_settlement_until_completion() -> 
     await consumer.complete()
     assert coordinator.calls[-2:] == ["ack", "settle"]
     assert consumer.committed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "resource_class", ("present_file", "read_image", "workspace_download")
+)
+async def test_outbound_feature_consumers_admit_only_direct_put(
+    resource_class: str,
+) -> None:
+    """Each outbound feature uses the verified direct PUT consumer lifecycle."""
+    coordinator = _Coordinator()
+    service = RuntimeToServerTransferService(
+        coordinator=coordinator,
+        clock=lambda: _NOW,
+        status_poll_interval=timedelta(milliseconds=1),
+        consumer_lease_renew_interval=timedelta(seconds=1),
+    )
+    request = replace(_consumer_request(), resource_class=resource_class)
+
+    consumer = await service.prepare_consumer(request)
+
+    assert len(coordinator.admissions) == 1
+    admitted = coordinator.admissions[0]
+    assert admitted.upload_transport is CoordinatorUploadTransport.DIRECT_OBJECT
+    assert admitted.source_transport is CoordinatorSourceTransport.TRANSFER_OBJECT
+    assert admitted.runtime_path == request.runtime_path
+    assert admitted.expected_manifest.size == request.expected_size
+    assert admitted.resource_class == resource_class
+    await consumer.complete()
+    assert coordinator.calls[-2:] == ["ack", "settle"]
 
 
 @pytest.mark.asyncio

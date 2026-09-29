@@ -30,6 +30,7 @@ from azents_runtime_control.grpc_transfer_coordinator_client import (
     CoordinatorTransferOutcome,
     CoordinatorTransferPhase,
     CoordinatorTransferStatus,
+    CoordinatorUploadTransport,
 )
 from azents_runtime_control.transfer import CoordinatorTransferIdentity
 
@@ -776,6 +777,7 @@ class RuntimeToProviderBatchService:
                 source_expires_at=None,
                 resource_class=request.resource_class,
                 source_transport=CoordinatorSourceTransport.TRANSFER_OBJECT,
+                upload_transport=CoordinatorUploadTransport.DIRECT_OBJECT,
             )
         )
         prepared_source = _PreparedRuntimeSource(
@@ -907,17 +909,18 @@ class RuntimeToProviderBatchService:
             raise ValueError("Runtime provider batch requires at least one source")
         if self.maximum_chunk_size <= 0:
             raise ValueError("Runtime provider maximum_chunk_size must be positive")
+        maximum_size = min(request.product_maximum_size, request.provider_maximum_size)
+        if maximum_size <= 0:
+            raise ValueError("Runtime provider per-file maximum must be positive")
         if self.clock() >= request.deadline_at:
             raise RuntimeToProviderTransferError(
                 "Runtime provider batch deadline expired"
             )
-        total_size = 0
         for source in request.sources:
             if source.expected_size <= 0:
                 raise ValueError("Runtime provider source size must be positive")
-            total_size += source.expected_size
-        if total_size > request.provider_maximum_size:
-            raise ValueError("Runtime provider batch exceeds provider maximum size")
+            if source.expected_size > maximum_size:
+                raise ValueError("Runtime provider source exceeds the per-file maximum")
 
 
 class RuntimeToProviderDeliveryService:
