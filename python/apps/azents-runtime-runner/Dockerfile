@@ -1,4 +1,4 @@
-FROM docker:29.8.0-cli@sha256:eccaacfeed644c7de222ff047483568cb988dde95476fbaaf10ea2d04921bb66 AS docker-cli
+FROM docker:29.8.1-cli@sha256:018edbc908e08fcc9dbf029c812c34251e9b4719e6f71ca0e5eae2a987d014ca AS docker-cli
 
 FROM python:3.14-slim@sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6
 
@@ -141,8 +141,8 @@ RUN pip install --no-cache-dir --break-system-packages \
 
 RUN playwright install-deps chromium
 
-RUN docker --version | grep -F "Docker version 29.8.0" \
-    && docker buildx version | grep -F "github.com/docker/buildx v0.37.0" \
+RUN docker --version | grep -F "Docker version 29.8.1" \
+    && docker buildx version | grep -F "github.com/docker/buildx v0.37.1" \
     && docker compose version | grep -F "Docker Compose version v5.5.1" \
     && unshare --version \
     && test ! -e /var/run/azents-engine/docker.sock
