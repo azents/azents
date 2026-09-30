@@ -10,6 +10,7 @@ import aiohttp
 import pytest
 from aiohttp import web
 from azents_runtime_control.provider import ProviderRunLoop, RuntimeProviderReport
+from kubernetes_asyncio import client
 
 from azents_runtime_provider_kubernetes import main as provider_main
 from azents_runtime_provider_kubernetes.kubernetes_http import (
@@ -68,7 +69,7 @@ async def _watch_api(
     app = web.Application()
 
     async def serve(request: web.Request) -> web.Response:
-        assert request.query["watch"] == "true"
+        assert request.query["watch"].lower() == "true"
         return web.Response(
             body=(json.dumps(event) + "\n").encode(),
             content_type="application/json",
@@ -83,10 +84,16 @@ async def _watch_api(
             port = listener.getsockname()[1]
             site = web.SockSite(runner, listener)
             await site.start()
-            async with aiohttp.ClientSession(
-                base_url=f"http://127.0.0.1:{port}"
-            ) as session:
-                yield KubernetesHttpApi(session)
+            configuration = client.Configuration(host=f"http://127.0.0.1:{port}")
+            async with client.ApiClient(configuration) as sdk:
+                yield KubernetesHttpApi(
+                    sdk=sdk,
+                    core=client.CoreV1Api(sdk),
+                    networking=client.NetworkingV1Api(sdk),
+                    coordination=client.CoordinationV1Api(sdk),
+                    authorization=client.AuthorizationV1Api(sdk),
+                    apis=client.ApisApi(sdk),
+                )
         finally:
             await runner.cleanup()
 
@@ -116,8 +123,8 @@ async def test_http_200_status_becomes_api_failure(code: int) -> None:
             with pytest.raises(KubernetesApiRequestError) as raised:
                 await anext(stream)
             assert raised.value.status == code
-            assert raised.value.reason == "Expired"
-            assert raised.value.body == "too old resource version"
+            assert "Expired" in str(raised.value)
+            assert "too old resource version" in str(raised.value)
         finally:
             await stream.aclose()
 
@@ -154,6 +161,60 @@ async def test_malformed_watch_status_propagates(
 
     monkeypatch.setattr(provider_main, "_wait_for_reconnect", reconnect)
     async with _watch_api(_status_event(code)) as api:
+        with pytest.raises(RuntimeError, match="watch Status"):
+            await provider_main._report_pod_watch_events(
+                _StreamLifecycle(api), _UnusedRunLoop(), stop=stop
+            )
+
+
+@pytest.mark.parametrize("field", ["reason", "message"])
+@pytest.mark.parametrize("omitted", [True, False])
+async def test_optional_watch_status_information_reconnects(
+    monkeypatch: pytest.MonkeyPatch, field: str, omitted: bool
+) -> None:
+    """Missing or null Status details do not terminate a valid API-error watch."""
+    event = dict(_status_event(500))
+    status = event["object"]
+    assert isinstance(status, dict)
+    if omitted:
+        status.pop(field)
+    else:
+        status[field] = None
+    stop = asyncio.Event()
+    reconnect_calls = 0
+
+    async def reconnect(event: asyncio.Event) -> None:
+        nonlocal reconnect_calls
+        reconnect_calls += 1
+        event.set()
+
+    monkeypatch.setattr(provider_main, "_wait_for_reconnect", reconnect)
+    async with _watch_api(event) as api:
+        await provider_main._report_pod_watch_events(
+            _StreamLifecycle(api), _UnusedRunLoop(), stop=stop
+        )
+    assert reconnect_calls == 1
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("kind", "Pod"), ("code", True), ("reason", False), ("message", 42)],
+)
+async def test_malformed_watch_status_shape_propagates(
+    monkeypatch: pytest.MonkeyPatch, field: str, value: object
+) -> None:
+    """SDK handling preserves typed Status validation instead of hiding bugs."""
+    event = dict(_status_event(500))
+    status = event["object"]
+    assert isinstance(status, dict)
+    status[field] = value
+    stop = asyncio.Event()
+
+    async def reconnect(event: asyncio.Event) -> None:
+        raise AssertionError("Malformed Status shape triggered reconnect")
+
+    monkeypatch.setattr(provider_main, "_wait_for_reconnect", reconnect)
+    async with _watch_api(event) as api:
         with pytest.raises(RuntimeError, match="watch Status"):
             await provider_main._report_pod_watch_events(
                 _StreamLifecycle(api), _UnusedRunLoop(), stop=stop

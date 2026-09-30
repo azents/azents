@@ -1,18 +1,17 @@
-"""In-cluster Kubernetes HTTP adapter for Runtime Provider resources."""
+"""SDK-backed Kubernetes resource boundary for Runtime Provider resources."""
 
+import asyncio
 import base64
 import binascii
 import dataclasses
 import json
-import logging
-import os
-import ssl
-from collections.abc import AsyncIterator, Mapping, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any, Self
 
 import aiohttp
+from kubernetes_asyncio import client, config, watch
+from kubernetes_asyncio.client.exceptions import ApiException
 
 from azents_runtime_provider_kubernetes.kubernetes_api import (
     ConfigMapResource,
@@ -65,15 +64,11 @@ from azents_runtime_provider_kubernetes.kubernetes_api import (
     VolumeMount,
 )
 
-_SERVICE_ACCOUNT_DIR = Path("/var/run/secrets/kubernetes.io/serviceaccount")
-_TOKEN_PATH = _SERVICE_ACCOUNT_DIR / "token"
-_CA_CERT_PATH = _SERVICE_ACCOUNT_DIR / "ca.crt"
 POD_WATCH_TIMEOUT = aiohttp.ClientTimeout(
     total=None,
     sock_connect=30,
     sock_read=None,
 )
-_LOGGER = logging.getLogger(__name__)
 
 JsonObject = dict[str, Any]
 
@@ -102,64 +97,189 @@ class KubernetesApiRequestError(RuntimeError):
 
 
 @dataclasses.dataclass(frozen=True)
-class KubernetesHttpConfig:
-    """HTTP connection settings for the in-cluster Kubernetes API."""
+class KubernetesResourceOperations:
+    """Public SDK operations for one namespaced Kubernetes resource kind."""
 
-    api_server: str
-    bearer_token: str
-    ca_cert_path: str | None
+    read: Callable[..., Awaitable[object]]
+    list: Callable[..., Awaitable[object]]
+    create: Callable[..., Awaitable[object]]
+    replace: Callable[..., Awaitable[object]]
+    patch: Callable[..., Awaitable[object]]
+    delete: Callable[..., Awaitable[object]]
+
+
+class ProviderPodWatch(watch.Watch):
+    """Preserve Provider Status validation through the public SDK decoder hook."""
+
+    def unmarshal_event(self, data: str | bytes, response_type: str | None) -> object:
+        """Validate Status errors while the SDK owns transport and reconnects."""
+        event = _decode_json_object(json.loads(data))
+        if event.get("type") == "ERROR":
+            status = _required_object(event.get("object"), "watch Status")
+            code = _required_int(status.get("code"), "watch Status code")
+            if status.get("kind") != "Status" or not 400 <= code <= 599:
+                raise RuntimeError("Kubernetes watch Status is malformed")
+            reason = _optional_string(status.get("reason"), "watch Status reason")
+            message = _optional_string(status.get("message"), "watch Status message")
+            error = ApiException(status=code, reason=reason)
+            error.body = (
+                message
+                if message is not None
+                else "Kubernetes Pod watch returned a Status error"
+            ).encode()
+            raise error
+        return super().unmarshal_event(data, response_type)
 
 
 class KubernetesHttpApi(KubernetesApi):
-    """KubernetesApi implementation using in-cluster REST calls."""
+    """Typed Provider boundary backed by public Kubernetes SDK operations."""
 
-    def __init__(self, session: aiohttp.ClientSession) -> None:
-        """Initialize the adapter."""
-        self._session = session
+    def __init__(
+        self,
+        sdk: client.ApiClient,
+        core: client.CoreV1Api,
+        networking: client.NetworkingV1Api,
+        coordination: client.CoordinationV1Api,
+        authorization: client.AuthorizationV1Api,
+        apis: client.ApisApi,
+    ) -> None:
+        self.sdk = sdk
+        self.core = core
+        self.networking = networking
+        self.coordination = coordination
+        self.authorization = authorization
+        self.apis = apis
+        self.pods = KubernetesResourceOperations(
+            read=core.read_namespaced_pod,
+            list=core.list_namespaced_pod,
+            create=core.create_namespaced_pod,
+            replace=core.replace_namespaced_pod,
+            patch=core.patch_namespaced_pod,
+            delete=core.delete_namespaced_pod,
+        )
+        self.pvcs = KubernetesResourceOperations(
+            read=core.read_namespaced_persistent_volume_claim,
+            list=core.list_namespaced_persistent_volume_claim,
+            create=core.create_namespaced_persistent_volume_claim,
+            replace=core.replace_namespaced_persistent_volume_claim,
+            patch=core.patch_namespaced_persistent_volume_claim,
+            delete=core.delete_namespaced_persistent_volume_claim,
+        )
+        self.services = KubernetesResourceOperations(
+            read=core.read_namespaced_service,
+            list=core.list_namespaced_service,
+            create=core.create_namespaced_service,
+            replace=core.replace_namespaced_service,
+            patch=core.patch_namespaced_service,
+            delete=core.delete_namespaced_service,
+        )
+        self.config_maps = KubernetesResourceOperations(
+            read=core.read_namespaced_config_map,
+            list=core.list_namespaced_config_map,
+            create=core.create_namespaced_config_map,
+            replace=core.replace_namespaced_config_map,
+            patch=core.patch_namespaced_config_map,
+            delete=core.delete_namespaced_config_map,
+        )
+        self.secrets = KubernetesResourceOperations(
+            read=core.read_namespaced_secret,
+            list=core.list_namespaced_secret,
+            create=core.create_namespaced_secret,
+            replace=core.replace_namespaced_secret,
+            patch=core.patch_namespaced_secret,
+            delete=core.delete_namespaced_secret,
+        )
+        self.network_policies = KubernetesResourceOperations(
+            read=networking.read_namespaced_network_policy,
+            list=networking.list_namespaced_network_policy,
+            create=networking.create_namespaced_network_policy,
+            replace=networking.replace_namespaced_network_policy,
+            patch=networking.patch_namespaced_network_policy,
+            delete=networking.delete_namespaced_network_policy,
+        )
 
     @classmethod
     async def from_in_cluster(cls) -> Self:
-        """Create an adapter from service account credentials."""
-        config = _load_in_cluster_config()
-        ssl_context: ssl.SSLContext | bool = (
-            ssl.create_default_context(cafile=config.ca_cert_path)
-            if config.ca_cert_path is not None
-            else False
+        """Compose SDK clients using SDK-owned ServiceAccount auth and TLS."""
+        configuration = client.Configuration()
+        config.load_incluster_config(client_configuration=configuration)
+        sdk = client.ApiClient(configuration=configuration)
+        return cls(
+            sdk=sdk,
+            core=client.CoreV1Api(sdk),
+            networking=client.NetworkingV1Api(sdk),
+            coordination=client.CoordinationV1Api(sdk),
+            authorization=client.AuthorizationV1Api(sdk),
+            apis=client.ApisApi(sdk),
         )
-        session = aiohttp.ClientSession(
-            base_url=config.api_server,
-            headers={"Authorization": f"Bearer {config.bearer_token}"},
-            connector=aiohttp.TCPConnector(ssl=ssl_context),
-        )
-        return cls(session)
 
     async def close(self) -> None:
-        """Close the underlying HTTP session."""
-        await self._session.close()
+        """Close the SDK client and its token-refresh/session resources."""
+        await self.sdk.close()
+
+    async def _request(
+        self,
+        operation: Awaitable[object],
+        *,
+        allow_not_found: bool,
+        method: str,
+        resource: str,
+    ) -> JsonObject | None:
+        """Translate SDK outcomes only at the typed Provider ingress boundary."""
+        try:
+            result = await operation
+        except ApiException as error:
+            if error.status == 404 and allow_not_found:
+                return None
+            raise KubernetesApiRequestError(
+                method=method,
+                path=resource,
+                status=error.status,
+                reason=error.reason,
+                body=_api_error_body(error.body),
+            ) from error
+        if result is None:
+            return None
+        return _decode_json_object(self.sdk.sanitize_for_serialization(result))
 
     async def discover_api_resources(self, api_version: str) -> frozenset[str]:
-        """Return resource names advertised by one Kubernetes API version."""
-        path = (
-            f"/api/{api_version}" if "/" not in api_version else f"/apis/{api_version}"
+        """Return resources for the API versions used by Provider diagnostics."""
+        match api_version:
+            case "v1":
+                operation = self.core.get_api_resources()
+            case "networking.k8s.io/v1":
+                operation = self.networking.get_api_resources()
+            case "coordination.k8s.io/v1":
+                operation = self.coordination.get_api_resources()
+            case "authorization.k8s.io/v1":
+                operation = self.authorization.get_api_resources()
+            case _:
+                raise ValueError(f"Unsupported Provider API version: {api_version}")
+        data = await self._request(
+            operation, allow_not_found=False, method="GET", resource=api_version
         )
-        data = await self._request_json("GET", path)
         if data is None:
             return frozenset()
         resources = _object_list(data.get("resources") or [], "resources")
         return frozenset(
-            str(item["name"])
+            item["name"]
             for item in resources
-            if isinstance(item.get("name"), str) and "/" not in str(item["name"])
+            if isinstance(item.get("name"), str) and "/" not in item["name"]
         )
 
     async def list_api_groups(self) -> frozenset[str]:
-        """Return Kubernetes API group names visible to the Provider."""
-        data = await self._request_json("GET", "/apis")
+        """Return group names using SDK-owned API discovery."""
+        data = await self._request(
+            self.apis.get_api_versions(),
+            allow_not_found=False,
+            method="GET",
+            resource="API groups",
+        )
         if data is None:
             return frozenset()
         groups = _object_list(data.get("groups") or [], "groups")
         return frozenset(
-            str(item["name"]) for item in groups if isinstance(item.get("name"), str)
+            item["name"] for item in groups if isinstance(item.get("name"), str)
         )
 
     async def check_resource_access(
@@ -171,36 +291,38 @@ class KubernetesHttpApi(KubernetesApi):
         verb: str,
         resource_name: str | None,
     ) -> bool:
-        """Evaluate one exact Provider permission with SelfSubjectAccessReview."""
-        attributes: JsonObject = {
-            "group": api_group,
-            "resource": resource,
-            "verb": verb,
-        }
-        if namespace is not None:
-            attributes["namespace"] = namespace
-        if resource_name is not None:
-            attributes["name"] = resource_name
-        data = await self._request_json(
-            "POST",
-            "/apis/authorization.k8s.io/v1/selfsubjectaccessreviews",
-            json={
-                "apiVersion": "authorization.k8s.io/v1",
-                "kind": "SelfSubjectAccessReview",
-                "spec": {"resourceAttributes": attributes},
-            },
+        """Evaluate one exact permission with the SDK access-review API."""
+        body = client.V1SelfSubjectAccessReview(
+            api_version="authorization.k8s.io/v1",
+            kind="SelfSubjectAccessReview",
+            spec=client.V1SelfSubjectAccessReviewSpec(
+                resource_attributes=client.V1ResourceAttributes(
+                    group=api_group,
+                    resource=resource,
+                    verb=verb,
+                    namespace=namespace,
+                    name=resource_name,
+                ),
+            ),
+        )
+        data = await self._request(
+            self.authorization.create_self_subject_access_review(body=body),
+            allow_not_found=False,
+            method="POST",
+            resource="SelfSubjectAccessReview",
         )
         if data is None:
             return False
-        status = _required_object(data.get("status") or {}, "status")
-        return status.get("allowed") is True
+        return (
+            _required_object(data.get("status") or {}, "status").get("allowed") is True
+        )
 
     async def get_namespace(self, name: str) -> NamespaceResource | None:
-        """Return one Namespace by exact name."""
-        data = await self._request_json(
-            "GET",
-            f"/api/v1/namespaces/{name}",
+        data = await self._request(
+            self.core.read_namespace(name=name),
             allow_not_found=True,
+            method="GET",
+            resource="Namespace",
         )
         if data is None:
             return None
@@ -210,20 +332,105 @@ class KubernetesHttpApi(KubernetesApi):
             labels=_string_mapping(metadata.get("labels") or {}, "metadata.labels"),
         )
 
-    async def get_pod(self, name: str, namespace: str) -> PodResource | None:
-        data = await self._request_json(
-            "GET",
-            f"/api/v1/namespaces/{namespace}/pods/{name}",
+    async def _get(
+        self,
+        operations: KubernetesResourceOperations,
+        name: str,
+        namespace: str,
+    ) -> JsonObject | None:
+        return await self._request(
+            operations.read(name=name, namespace=namespace),
             allow_not_found=True,
+            method="GET",
+            resource=name,
         )
+
+    async def _list(
+        self,
+        operations: KubernetesResourceOperations,
+        labels: Mapping[str, str],
+        namespace: str,
+    ) -> list[JsonObject]:
+        data = await self._request(
+            operations.list(
+                namespace=namespace, label_selector=_label_selector(labels)
+            ),
+            allow_not_found=False,
+            method="GET",
+            resource=namespace,
+        )
+        return _object_list(
+            _required_object(data, "list response").get("items"), "items"
+        )
+
+    async def _delete(
+        self,
+        operations: KubernetesResourceOperations,
+        name: str,
+        namespace: str,
+        *,
+        body: client.V1DeleteOptions | None,
+    ) -> None:
+        await self._request(
+            operations.delete(name=name, namespace=namespace, body=body),
+            allow_not_found=True,
+            method="DELETE",
+            resource=name,
+        )
+
+    async def _apply(
+        self,
+        operations: KubernetesResourceOperations,
+        metadata: ObjectMeta,
+        manifest: JsonObject,
+        *,
+        replace: bool,
+    ) -> None:
+        for attempt in range(2 if replace else 1):
+            existing = await self._get(operations, metadata.name, metadata.namespace)
+            try:
+                if existing is None:
+                    await self._request(
+                        operations.create(namespace=metadata.namespace, body=manifest),
+                        allow_not_found=False,
+                        method="POST",
+                        resource=metadata.name,
+                    )
+                elif replace:
+                    await self._request(
+                        operations.replace(
+                            name=metadata.name,
+                            namespace=metadata.namespace,
+                            body=_replacement_manifest(manifest, existing),
+                        ),
+                        allow_not_found=False,
+                        method="PUT",
+                        resource=metadata.name,
+                    )
+                else:
+                    await self._request(
+                        operations.patch(
+                            name=metadata.name,
+                            namespace=metadata.namespace,
+                            body=manifest,
+                            _content_type="application/merge-patch+json",
+                        ),
+                        allow_not_found=False,
+                        method="PATCH",
+                        resource=metadata.name,
+                    )
+                return
+            except KubernetesApiRequestError as error:
+                if not replace or error.status != 409 or attempt == 1:
+                    raise
+        raise AssertionError("Kubernetes resource replacement retry exhausted")
+
+    async def get_pod(self, name: str, namespace: str) -> PodResource | None:
+        data = await self._get(self.pods, name, namespace)
         return None if data is None else pod_resource(data)
 
     async def apply_pod(self, pod: PodResource) -> None:
-        await self._create_or_merge_patch(
-            f"/api/v1/namespaces/{pod.metadata.namespace}/pods/{pod.metadata.name}",
-            f"/api/v1/namespaces/{pod.metadata.namespace}/pods",
-            pod_manifest(pod),
-        )
+        await self._apply(self.pods, pod.metadata, pod_manifest(pod), replace=False)
 
     async def delete_pod(
         self,
@@ -232,34 +439,25 @@ class KubernetesHttpApi(KubernetesApi):
         *,
         grace_period_seconds: int | None = None,
     ) -> None:
-        body = None
-        if grace_period_seconds is not None:
-            body = {
-                "apiVersion": "v1",
-                "kind": "DeleteOptions",
-                "gracePeriodSeconds": grace_period_seconds,
-            }
-        await self._request_json(
-            "DELETE",
-            f"/api/v1/namespaces/{namespace}/pods/{name}",
-            allow_not_found=True,
-            json=body,
+        body = (
+            None
+            if grace_period_seconds is None
+            else client.V1DeleteOptions(
+                api_version="v1",
+                kind="DeleteOptions",
+                grace_period_seconds=grace_period_seconds,
+            )
         )
+        await self._delete(self.pods, name, namespace, body=body)
 
     async def list_pods(
-        self, labels: Mapping[str, str], namespace: str
+        self,
+        labels: Mapping[str, str],
+        namespace: str,
     ) -> Sequence[PodResource]:
-        data = await self._request_json(
-            "GET",
-            f"/api/v1/namespaces/{namespace}/pods",
-            params={"labelSelector": _label_selector(labels)},
-        )
         return tuple(
             pod_resource(item)
-            for item in _object_list(
-                _required_object(data, "list response").get("items"),
-                "items",
-            )
+            for item in await self._list(self.pods, labels, namespace)
         )
 
     async def watch_pods(
@@ -267,436 +465,215 @@ class KubernetesHttpApi(KubernetesApi):
         labels: Mapping[str, str],
         namespace: str,
     ) -> AsyncIterator[PodWatchEvent]:
-        async with self._session.request(
-            "GET",
-            f"/api/v1/namespaces/{namespace}/pods",
-            params={
-                "labelSelector": _label_selector(labels),
-                "watch": "true",
-                "allowWatchBookmarks": "true",
-            },
-            timeout=POD_WATCH_TIMEOUT,
-        ) as response:
-            if response.status >= 400:
-                body = await response.text()
-                _LOGGER.warning(
-                    "Kubernetes API watch failed",
-                    extra={
-                        "method": "GET",
-                        "path": f"/api/v1/namespaces/{namespace}/pods",
-                        "status": response.status,
-                        "reason": response.reason,
-                        "body": body,
-                    },
-                )
-                raise KubernetesApiRequestError(
-                    method="GET",
-                    path=f"/api/v1/namespaces/{namespace}/pods",
-                    status=response.status,
-                    reason=response.reason,
-                    body=body,
-                )
-            async for raw_line in response.content:
-                line = raw_line.strip()
-                if not line:
-                    continue
-                event = _decode_json_object(json.loads(line))
-                event_type = str(event.get("type") or "")
-                if event_type == "BOOKMARK":
-                    continue
-                if event_type == "ERROR":
-                    status = _required_object(event.get("object"), "watch Status")
-                    code = _required_int(status.get("code"), "watch Status code")
-                    if status.get("kind") != "Status" or not 400 <= code <= 599:
-                        raise RuntimeError("Kubernetes watch Status is malformed")
-                    reason = _optional_string(
-                        status.get("reason"), "watch Status reason"
-                    )
-                    message = _optional_string(
-                        status.get("message"), "watch Status message"
-                    )
-                    raise KubernetesApiRequestError(
-                        method="GET",
-                        path=f"/api/v1/namespaces/{namespace}/pods",
-                        status=code,
-                        reason=reason,
-                        body=(
-                            message
-                            if message is not None
-                            else "Kubernetes Pod watch returned a Status error"
-                        ),
-                    )
-                pod = _optional_object(event.get("object"), "watch object")
-                if pod is None:
-                    continue
-                yield PodWatchEvent(event_type=event_type, pod=pod_resource(pod))
+        try:
+            async with ProviderPodWatch() as watcher:
+                async for value in watcher.stream(
+                    self.core.list_namespaced_pod,
+                    namespace=namespace,
+                    label_selector=_label_selector(labels),
+                    allow_watch_bookmarks=True,
+                    _request_timeout=POD_WATCH_TIMEOUT,
+                ):
+                    if not isinstance(value, dict):
+                        raise RuntimeError(
+                            "Kubernetes SDK watch event must be an object"
+                        )
+                    event_type = str(value.get("type") or "")
+                    if event_type == "BOOKMARK":
+                        continue
+                    pod = _optional_object(value.get("raw_object"), "watch object")
+                    if pod is not None:
+                        yield PodWatchEvent(
+                            event_type=event_type, pod=pod_resource(pod)
+                        )
+        except asyncio.CancelledError:
+            raise
+        except ApiException as error:
+            code = _required_int(error.status, "watch Status code")
+            if not 400 <= code <= 599:
+                raise RuntimeError("Kubernetes watch Status is malformed") from error
+            raise KubernetesApiRequestError(
+                method="GET",
+                path="Pod watch",
+                status=code,
+                reason=error.reason,
+                body=_api_error_body(error.body),
+            ) from error
 
     async def get_pvc(
-        self,
-        name: str,
-        namespace: str,
+        self, name: str, namespace: str
     ) -> PersistentVolumeClaimResource | None:
-        data = await self._request_json(
-            "GET",
-            f"/api/v1/namespaces/{namespace}/persistentvolumeclaims/{name}",
-            allow_not_found=True,
-        )
+        data = await self._get(self.pvcs, name, namespace)
         return None if data is None else _pvc_resource(data)
 
     async def apply_pvc(self, pvc: PersistentVolumeClaimResource) -> None:
-        await self._create_or_merge_patch(
-            (
-                f"/api/v1/namespaces/{pvc.metadata.namespace}"
-                f"/persistentvolumeclaims/{pvc.metadata.name}"
-            ),
-            f"/api/v1/namespaces/{pvc.metadata.namespace}/persistentvolumeclaims",
-            _pvc_manifest(pvc),
-        )
+        await self._apply(self.pvcs, pvc.metadata, _pvc_manifest(pvc), replace=False)
 
     async def delete_pvc(self, name: str, namespace: str) -> None:
-        await self._request_json(
-            "DELETE",
-            f"/api/v1/namespaces/{namespace}/persistentvolumeclaims/{name}",
-            allow_not_found=True,
-        )
+        await self._delete(self.pvcs, name, namespace, body=None)
 
     async def list_pvcs(
-        self,
-        labels: Mapping[str, str],
-        namespace: str,
+        self, labels: Mapping[str, str], namespace: str
     ) -> Sequence[PersistentVolumeClaimResource]:
-        data = await self._request_json(
-            "GET",
-            f"/api/v1/namespaces/{namespace}/persistentvolumeclaims",
-            params={"labelSelector": _label_selector(labels)},
-        )
         return tuple(
             _pvc_resource(item)
-            for item in _object_list(
-                _required_object(data, "list response").get("items"),
-                "items",
-            )
+            for item in await self._list(self.pvcs, labels, namespace)
         )
 
-    async def get_service(
-        self,
-        name: str,
-        namespace: str,
-    ) -> ServiceResource | None:
-        data = await self._request_json(
-            "GET",
-            f"/api/v1/namespaces/{namespace}/services/{name}",
-            allow_not_found=True,
-        )
+    async def get_service(self, name: str, namespace: str) -> ServiceResource | None:
+        data = await self._get(self.services, name, namespace)
         return None if data is None else service_resource(data)
 
     async def apply_service(self, service: ServiceResource) -> None:
-        namespace = service.metadata.namespace
-        name = service.metadata.name
-        await self._create_or_replace(
-            f"/api/v1/namespaces/{namespace}/services/{name}",
-            f"/api/v1/namespaces/{namespace}/services",
-            service_manifest(service),
+        await self._apply(
+            self.services, service.metadata, service_manifest(service), replace=False
         )
 
     async def delete_service(self, name: str, namespace: str) -> None:
-        await self._request_json(
-            "DELETE",
-            f"/api/v1/namespaces/{namespace}/services/{name}",
-            allow_not_found=True,
-        )
+        await self._delete(self.services, name, namespace, body=None)
 
     async def list_services(
-        self,
-        labels: Mapping[str, str],
-        namespace: str,
+        self, labels: Mapping[str, str], namespace: str
     ) -> Sequence[ServiceResource]:
-        data = await self._request_json(
-            "GET",
-            f"/api/v1/namespaces/{namespace}/services",
-            params={"labelSelector": _label_selector(labels)},
-        )
         return tuple(
             service_resource(item)
-            for item in _object_list(
-                _required_object(data, "list response").get("items"),
-                "items",
-            )
+            for item in await self._list(self.services, labels, namespace)
         )
 
     async def get_config_map(
-        self,
-        name: str,
-        namespace: str,
+        self, name: str, namespace: str
     ) -> ConfigMapResource | None:
-        data = await self._request_json(
-            "GET",
-            f"/api/v1/namespaces/{namespace}/configmaps/{name}",
-            allow_not_found=True,
-        )
+        data = await self._get(self.config_maps, name, namespace)
         return None if data is None else config_map_resource(data)
 
     async def apply_config_map(self, config_map: ConfigMapResource) -> None:
-        namespace = config_map.metadata.namespace
-        name = config_map.metadata.name
-        await self._create_or_replace(
-            f"/api/v1/namespaces/{namespace}/configmaps/{name}",
-            f"/api/v1/namespaces/{namespace}/configmaps",
+        await self._apply(
+            self.config_maps,
+            config_map.metadata,
             config_map_manifest(config_map),
+            replace=False,
         )
 
     async def delete_config_map(self, name: str, namespace: str) -> None:
-        await self._request_json(
-            "DELETE",
-            f"/api/v1/namespaces/{namespace}/configmaps/{name}",
-            allow_not_found=True,
-        )
+        await self._delete(self.config_maps, name, namespace, body=None)
 
     async def list_config_maps(
-        self,
-        labels: Mapping[str, str],
-        namespace: str,
+        self, labels: Mapping[str, str], namespace: str
     ) -> Sequence[ConfigMapResource]:
-        data = await self._request_json(
-            "GET",
-            f"/api/v1/namespaces/{namespace}/configmaps",
-            params={"labelSelector": _label_selector(labels)},
-        )
         return tuple(
             config_map_resource(item)
-            for item in _object_list(
-                _required_object(data, "list response").get("items"),
-                "items",
-            )
+            for item in await self._list(self.config_maps, labels, namespace)
         )
 
-    async def get_secret(
-        self,
-        name: str,
-        namespace: str,
-    ) -> SecretResource | None:
-        data = await self._request_json(
-            "GET",
-            f"/api/v1/namespaces/{namespace}/secrets/{name}",
-            allow_not_found=True,
-        )
+    async def get_secret(self, name: str, namespace: str) -> SecretResource | None:
+        data = await self._get(self.secrets, name, namespace)
         return None if data is None else secret_resource(data)
 
     async def apply_secret(self, secret: SecretResource) -> None:
-        namespace = secret.metadata.namespace
-        name = secret.metadata.name
-        await self._create_or_replace(
-            f"/api/v1/namespaces/{namespace}/secrets/{name}",
-            f"/api/v1/namespaces/{namespace}/secrets",
-            secret_manifest(secret),
+        await self._apply(
+            self.secrets, secret.metadata, secret_manifest(secret), replace=False
         )
 
     async def delete_secret(self, name: str, namespace: str) -> None:
-        await self._request_json(
-            "DELETE",
-            f"/api/v1/namespaces/{namespace}/secrets/{name}",
-            allow_not_found=True,
-        )
+        await self._delete(self.secrets, name, namespace, body=None)
 
     async def list_secrets(
-        self,
-        labels: Mapping[str, str],
-        namespace: str,
+        self, labels: Mapping[str, str], namespace: str
     ) -> Sequence[SecretResource]:
-        data = await self._request_json(
-            "GET",
-            f"/api/v1/namespaces/{namespace}/secrets",
-            params={"labelSelector": _label_selector(labels)},
-        )
         return tuple(
             secret_resource(item)
-            for item in _object_list(
-                _required_object(data, "list response").get("items"),
-                "items",
-            )
+            for item in await self._list(self.secrets, labels, namespace)
         )
 
     async def get_network_policy(
-        self,
-        name: str,
-        namespace: str,
+        self, name: str, namespace: str
     ) -> NetworkPolicyResource | None:
-        data = await self._request_json(
-            "GET",
-            (
-                f"/apis/networking.k8s.io/v1/namespaces/{namespace}"
-                f"/networkpolicies/{name}"
-            ),
-            allow_not_found=True,
-        )
+        data = await self._get(self.network_policies, name, namespace)
         return None if data is None else network_policy_resource(data)
 
-    async def apply_network_policy(
-        self,
-        network_policy: NetworkPolicyResource,
-    ) -> None:
-        namespace = network_policy.metadata.namespace
-        name = network_policy.metadata.name
-        await self._create_or_replace(
-            (
-                f"/apis/networking.k8s.io/v1/namespaces/{namespace}"
-                f"/networkpolicies/{name}"
-            ),
-            f"/apis/networking.k8s.io/v1/namespaces/{namespace}/networkpolicies",
+    async def apply_network_policy(self, network_policy: NetworkPolicyResource) -> None:
+        await self._apply(
+            self.network_policies,
+            network_policy.metadata,
             network_policy_manifest(network_policy),
+            replace=True,
         )
 
     async def delete_network_policy(self, name: str, namespace: str) -> None:
-        await self._request_json(
-            "DELETE",
-            (
-                f"/apis/networking.k8s.io/v1/namespaces/{namespace}"
-                f"/networkpolicies/{name}"
-            ),
-            allow_not_found=True,
-        )
+        await self._delete(self.network_policies, name, namespace, body=None)
 
     async def list_network_policies(
-        self,
-        labels: Mapping[str, str],
-        namespace: str,
+        self, labels: Mapping[str, str], namespace: str
     ) -> Sequence[NetworkPolicyResource]:
-        data = await self._request_json(
-            "GET",
-            f"/apis/networking.k8s.io/v1/namespaces/{namespace}/networkpolicies",
-            params={"labelSelector": _label_selector(labels)},
-        )
         return tuple(
             network_policy_resource(item)
-            for item in _object_list(
-                _required_object(data, "list response").get("items"),
-                "items",
-            )
+            for item in await self._list(self.network_policies, labels, namespace)
         )
 
     async def get_lease(self, name: str, namespace: str) -> LeaseResource | None:
-        data = await self._request_json(
-            "GET",
-            f"/apis/coordination.k8s.io/v1/namespaces/{namespace}/leases/{name}",
+        data = await self._request(
+            self.coordination.read_namespaced_lease(name=name, namespace=namespace),
             allow_not_found=True,
+            method="GET",
+            resource=name,
         )
         return None if data is None else _lease_resource(data)
 
     async def apply_lease(self, lease: LeaseResource) -> None:
-        resource_path = (
-            f"/apis/coordination.k8s.io/v1/namespaces/"
-            f"{lease.metadata.namespace}/leases/{lease.metadata.name}"
-        )
-        collection_path = (
-            f"/apis/coordination.k8s.io/v1/namespaces/{lease.metadata.namespace}/leases"
+        body = client.V1Lease(
+            api_version="coordination.k8s.io/v1",
+            kind="Lease",
+            metadata=client.V1ObjectMeta(
+                name=lease.metadata.name,
+                namespace=lease.metadata.namespace,
+                labels=dict(lease.metadata.labels),
+                annotations=dict(lease.metadata.annotations),
+                resource_version=lease.resource_version,
+            ),
+            spec=client.V1LeaseSpec(
+                holder_identity=lease.spec.holder_identity,
+                acquire_time=lease.spec.acquire_time,
+                renew_time=lease.spec.renew_time,
+                lease_duration_seconds=lease.spec.lease_duration_seconds,
+                lease_transitions=lease.spec.lease_transitions,
+            ),
         )
         try:
             if lease.resource_version is None:
-                await self._request_json(
-                    "POST",
-                    collection_path,
-                    json=_lease_manifest(lease),
+                await self._request(
+                    self.coordination.create_namespaced_lease(
+                        namespace=lease.metadata.namespace, body=body
+                    ),
+                    allow_not_found=False,
+                    method="POST",
+                    resource=lease.metadata.name,
                 )
-                return
-            await self._request_json(
-                "PUT",
-                resource_path,
-                json=_lease_manifest(lease),
-            )
+            else:
+                await self._request(
+                    self.coordination.replace_namespaced_lease(
+                        name=lease.metadata.name,
+                        namespace=lease.metadata.namespace,
+                        body=body,
+                    ),
+                    allow_not_found=False,
+                    method="PUT",
+                    resource=lease.metadata.name,
+                )
         except KubernetesApiRequestError as error:
             if error.status == 409:
                 raise LeaseConflictError() from error
             raise
 
-    async def _create_or_merge_patch(
-        self,
-        resource_path: str,
-        collection_path: str,
-        manifest: JsonObject,
-    ) -> None:
-        existing = await self._request_json(
-            "GET",
-            resource_path,
-            allow_not_found=True,
-        )
-        if existing is None:
-            await self._request_json("POST", collection_path, json=manifest)
-            return
-        await self._request_json(
-            "PATCH",
-            resource_path,
-            json=manifest,
-            headers={"Content-Type": "application/merge-patch+json"},
-        )
 
-    async def _create_or_replace(
-        self,
-        resource_path: str,
-        collection_path: str,
-        manifest: JsonObject,
-    ) -> None:
-        for attempt in range(2):
-            existing = await self._request_json(
-                "GET",
-                resource_path,
-                allow_not_found=True,
-            )
-            try:
-                if existing is None:
-                    await self._request_json("POST", collection_path, json=manifest)
-                else:
-                    await self._request_json(
-                        "PUT",
-                        resource_path,
-                        json=_replacement_manifest(manifest, existing),
-                    )
-                return
-            except KubernetesApiRequestError as error:
-                if error.status != 409 or attempt == 1:
-                    raise
-        raise AssertionError("Kubernetes resource replacement retry exhausted")
-
-    async def _request_json(
-        self,
-        method: str,
-        path: str,
-        *,
-        allow_not_found: bool = False,
-        params: Mapping[str, str] | None = None,
-        json: JsonObject | None = None,
-        headers: Mapping[str, str] | None = None,
-    ) -> JsonObject | None:
-        async with self._session.request(
-            method,
-            path,
-            params=params,
-            json=json,
-            headers=headers,
-        ) as response:
-            if response.status == 404 and allow_not_found:
-                return None
-            if response.status >= 400:
-                body = await response.text()
-                _LOGGER.warning(
-                    "Kubernetes API request failed",
-                    extra={
-                        "method": method,
-                        "path": path,
-                        "status": response.status,
-                        "reason": response.reason,
-                        "body": body,
-                    },
-                )
-                raise KubernetesApiRequestError(
-                    method=method,
-                    path=path,
-                    status=response.status,
-                    reason=response.reason,
-                    body=body,
-                )
-            if response.status == 204:
-                return None
-            return _decode_json_object(await response.json())
+def _api_error_body(value: object) -> str:
+    """Normalize SDK error evidence without hiding non-text body bugs."""
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    if isinstance(value, str):
+        return value
+    raise TypeError("Kubernetes SDK error body must be text or bytes")
 
 
 def _decode_json_object(value: object) -> JsonObject:
@@ -768,25 +745,6 @@ def _string_mapping(value: object, field: str) -> dict[str, str]:
             raise RuntimeError(f"{field} must map strings to strings")
         result[key] = item
     return result
-
-
-def _load_in_cluster_config() -> KubernetesHttpConfig:
-    host = _required_env("KUBERNETES_SERVICE_HOST")
-    port = _required_env("KUBERNETES_SERVICE_PORT")
-    token = _TOKEN_PATH.read_text(encoding="utf-8").strip()
-    ca_cert_path = str(_CA_CERT_PATH) if _CA_CERT_PATH.exists() else None
-    return KubernetesHttpConfig(
-        api_server=f"https://{host}:{port}",
-        bearer_token=token,
-        ca_cert_path=ca_cert_path,
-    )
-
-
-def _required_env(name: str) -> str:
-    value = os.environ.get(name)
-    if value is None or not value:
-        raise RuntimeError(f"required environment variable is missing: {name}")
-    return value
 
 
 def _metadata(metadata: ObjectMeta) -> JsonObject:

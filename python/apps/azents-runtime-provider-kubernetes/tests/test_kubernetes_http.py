@@ -2,10 +2,12 @@
 
 import dataclasses
 from collections import deque
-from collections.abc import Mapping, Sequence
+from collections.abc import Coroutine, Mapping, Sequence
 from typing import Any
 
 import pytest
+from kubernetes_asyncio import client
+from kubernetes_asyncio.client.exceptions import ApiException
 
 from azents_runtime_provider_kubernetes.kubernetes_api import (
     ConfigMapResource,
@@ -70,47 +72,73 @@ type StubResponse = JsonObject | None | KubernetesApiRequestError
 
 @dataclasses.dataclass(frozen=True)
 class RecordedRequest:
-    """One Kubernetes API request captured by the test adapter."""
+    """One request produced by the SDK's public generated operation."""
 
     method: str
     path: str
-    allow_not_found: bool
     params: Mapping[str, str] | None
     json: JsonObject | None
     headers: Mapping[str, str] | None
 
 
-class RecordingKubernetesHttpApi(KubernetesHttpApi):
-    """Kubernetes HTTP adapter with deterministic request responses."""
+class RecordingApiClient(client.ApiClient):
+    """SDK transport fake preserving generated routing and serialization."""
 
     def __init__(self, responses: Sequence[StubResponse]) -> None:
         self.responses = deque(responses)
         self.requests: list[RecordedRequest] = []
+        self.client_side_validation = True
 
-    async def _request_json(
+    def call_api(
         self,
+        resource_path: str,
         method: str,
-        path: str,
-        *,
-        allow_not_found: bool = False,
-        params: Mapping[str, str] | None = None,
-        json: JsonObject | None = None,
-        headers: Mapping[str, str] | None = None,
-    ) -> JsonObject | None:
+        path_params: Mapping[str, object] | None = None,
+        query_params: Sequence[tuple[str, str]] | None = None,
+        header_params: Mapping[str, str] | None = None,
+        body: object = None,
+        *args: object,
+        **kwargs: object,
+    ) -> Coroutine[object, object, object]:
+        """Record the SDK-owned request without opening a network session."""
+        path = resource_path
+        for key, value in (path_params or {}).items():
+            path = path.replace("{" + key + "}", str(value))
         self.requests.append(
             RecordedRequest(
                 method=method,
                 path=path,
-                allow_not_found=allow_not_found,
-                params=params,
-                json=json,
-                headers=headers,
+                params=dict(query_params) if query_params else None,
+                json=self.sanitize_for_serialization(body),
+                headers=header_params,
             )
         )
+        return self.respond()
+
+    async def respond(self) -> object:
+        """Expose one controlled SDK result or native API failure."""
         response = self.responses.popleft()
         if isinstance(response, KubernetesApiRequestError):
-            raise response
+            error = ApiException(status=response.status, reason=response.reason)
+            error.body = response.body.encode()
+            raise error
         return response
+
+
+class RecordingKubernetesHttpApi(KubernetesHttpApi):
+    """Provider boundary with real SDK operations and deterministic transport."""
+
+    def __init__(self, responses: Sequence[StubResponse]) -> None:
+        sdk = RecordingApiClient(responses)
+        super().__init__(
+            sdk=sdk,
+            core=client.CoreV1Api(sdk),
+            networking=client.NetworkingV1Api(sdk),
+            coordination=client.CoordinationV1Api(sdk),
+            authorization=client.AuthorizationV1Api(sdk),
+            apis=client.ApisApi(sdk),
+        )
+        self.requests = sdk.requests
 
 
 def test_pod_watch_has_no_total_or_socket_read_timeout() -> None:
@@ -784,8 +812,8 @@ async def test_deployment_diagnostics_use_read_only_discovery_and_exact_access()
     assert namespace is not None
     assert namespace.name == "azents-runtime"
     assert [(item.method, item.path) for item in api.requests] == [
-        ("GET", "/api/v1"),
-        ("GET", "/apis"),
+        ("GET", "/api/v1/"),
+        ("GET", "/apis/"),
         (
             "POST",
             "/apis/authorization.k8s.io/v1/selfsubjectaccessreviews",
