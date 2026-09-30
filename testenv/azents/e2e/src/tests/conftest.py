@@ -41,7 +41,7 @@ from testcontainers.postgres import PostgresContainer
 from types_boto3_s3.client import S3Client
 
 from support.browser_artifact_safety import sanitize_browser_artifact
-from support.consts import REPOSITORY_ROOT
+from support.consts import E2E_GENERAL_FILE_MAXIMUM_BYTES, REPOSITORY_ROOT
 from support.container_logs import (
     ContainerLogs,
     emit_container_logs,
@@ -1176,6 +1176,10 @@ def _configure_azents_server_container(
         .with_env("AWS_ACCESS_KEY_ID", rustfs_access_key)
         .with_env("AWS_SECRET_ACCESS_KEY", rustfs_secret_key)
         .with_env("AZ_AUTH_JWT_SECRET_KEY", auth_jwt_secret_key)
+        .with_env(
+            "AZ_TESTENV_GENERAL_FILE_MAXIMUM_BYTES",
+            str(E2E_GENERAL_FILE_MAXIMUM_BYTES),
+        )
         .with_env("AZ_CREDENTIAL_ENCRYPTION_KEY", credential_encryption_key)
         .with_env("AZ_SYSTEM_BOOTSTRAP_SETUP_TOKEN", system_bootstrap_setup_token)
         .with_env("AZ_REDIS_URL", "redis://valkey:6379")

@@ -25,6 +25,7 @@ from types_boto3_s3.client import S3Client
 from websockets.sync.client import connect as ws_connect
 from websockets.sync.connection import Connection
 
+from support.consts import E2E_GENERAL_FILE_MAXIMUM_BYTES
 from support.utils import (
     PNG_1X1,
     AgentSessionSetup,
@@ -37,7 +38,7 @@ from support.utils import (
 )
 
 _UPLOAD_PROMPT = "Describe uploaded image and file"
-_CHAT_UPLOAD_MAX_BYTES = 128 * 1024 * 1024
+_CHAT_UPLOAD_MAX_BYTES = E2E_GENERAL_FILE_MAXIMUM_BYTES
 _JSON_OBJECT = TypeAdapter(dict[str, object])
 _JSON_OBJECT_LIST = TypeAdapter(list[dict[str, object]])
 
@@ -178,6 +179,19 @@ def _assert_file_payload_is_blob_free(payload: object, *, label: str) -> None:
 def _mock_openai_journal_payload(mock_openai_url: str) -> object:
     """Return the AIMock request journal payload."""
     return requests.get(f"{mock_openai_url}/v1/_requests", timeout=10).json()
+
+
+def _scenario_model_requests(payload: object, *, prompt: str) -> list[str]:
+    """Select only provider request bodies belonging to this unique scenario."""
+    bodies: list[str] = []
+    for entry in _object_items(payload, label="model request journal"):
+        body = json.dumps(
+            _object_item(entry.get("body"), label="model request body"),
+            ensure_ascii=False,
+        )
+        if prompt in body:
+            bodies.append(body)
+    return bodies
 
 
 def _reset_mock_openai(mock_openai_url: str) -> None:
@@ -375,13 +389,23 @@ class TestFileUpload:
         )
         assert response.status_code == 403
 
+    @pytest.mark.parametrize(
+        ("size", "expected_status"),
+        [
+            (_CHAT_UPLOAD_MAX_BYTES + 1, 400),
+            (128 * 1024 * 1024 + 1, 422),
+        ],
+        ids=["configured-limit-exceeded", "schema-ceiling-exceeded"],
+    )
     def test_upload_exceeding_size_limit_rejects_metadata(
         self,
         public_api_client: azentspublicclient.ApiClient,
         admin_api_client: azentsadminclient.ApiClient,
         azents_public_server_url: str,
+        size: int,
+        expected_status: int,
     ) -> None:
-        """128 MiB plus one byte is rejected before any object PUT."""
+        """Configured and schema bounds reject metadata before any object PUT."""
         token, _, agent_id = create_chat_session_with_agent(
             public_api_client,
             admin_api_client,
@@ -394,12 +418,12 @@ class TestFileUpload:
             json={
                 "filename": "large.bin",
                 "media_type": "application/octet-stream",
-                "size": _CHAT_UPLOAD_MAX_BYTES + 1,
+                "size": size,
                 "sha256": hashlib.sha256(b"oversized metadata only").hexdigest(),
             },
             timeout=10,
         )
-        assert response.status_code == 422
+        assert response.status_code == expected_status
         assert "put_url" not in response.json()
 
 
@@ -507,16 +531,22 @@ def _assert_no_chat_publication(
 class TestDirectChatUpload:
     """Exercise real RustFS checksum and immutable Exchange publication."""
 
-    def test_128_mib_inclusive_native_checksum_and_idempotent_publication(
+    @pytest.mark.parametrize(
+        "size",
+        [_CHAT_UPLOAD_MAX_BYTES - 1, _CHAT_UPLOAD_MAX_BYTES],
+        ids=["below-configured-limit", "at-configured-limit"],
+    )
+    def test_configured_boundary_native_checksum_and_idempotent_publication(
         self,
         azents_public_server_url: str,
         chat_upload_setup: AgentSessionSetup,
         chat_upload_s3: S3Client,
         s3_bucket_name: str,
         mock_openai_url: str,
+        size: int,
     ) -> None:
-        """The inclusive maximum is one native checksum PUT, not multipart."""
-        content = b"x" * _CHAT_UPLOAD_MAX_BYTES
+        """Small injected limits exercise real checksum/copy/publication bounds."""
+        content = b"x" * size
         digest = hashlib.sha256(content).hexdigest()
         checksum = base64.b64encode(bytes.fromhex(digest)).decode("ascii")
         ticket = _prepare_chat_upload(
@@ -545,7 +575,7 @@ class TestDirectChatUpload:
         ingress = chat_upload_s3.head_object(
             Bucket=s3_bucket_name, Key=ingress_key, ChecksumMode="ENABLED"
         )
-        assert ingress["ContentLength"] == _CHAT_UPLOAD_MAX_BYTES
+        assert ingress["ContentLength"] == size
         assert ingress["ChecksumSHA256"] == checksum
         _assert_no_chat_publication(chat_upload_s3, s3_bucket_name, ticket)
 
@@ -554,7 +584,7 @@ class TestDirectChatUpload:
         )
         assert finalized.status_code == 200
         published = _object_item(finalized.json(), label="Chat upload publication")
-        assert published["size"] == _CHAT_UPLOAD_MAX_BYTES
+        assert published["size"] == size
         assert _exchange_uri_is_file_location(published["uri"])
         assert published["media_type"] == "application/octet-stream"
         assert not {"put_url", "put_headers", "expires_at", "file_part"} & set(
@@ -571,7 +601,7 @@ class TestDirectChatUpload:
         source = chat_upload_s3.head_object(
             Bucket=s3_bucket_name, Key=source_key, ChecksumMode="ENABLED"
         )
-        assert source["ContentLength"] == _CHAT_UPLOAD_MAX_BYTES
+        assert source["ContentLength"] == size
         assert source["Metadata"]["azents-transfer-sha256"] == digest
         original_key = (
             f"exchange/{workspace_id}/files/{published['attachment_id']}/original"
@@ -579,7 +609,7 @@ class TestDirectChatUpload:
         original = chat_upload_s3.get_object(
             Bucket=s3_bucket_name, Key=original_key, ChecksumMode="ENABLED"
         )
-        assert original["ContentLength"] == _CHAT_UPLOAD_MAX_BYTES
+        assert original["ContentLength"] == size
         assert original["Metadata"]["azents-product-publication-sha256"] == digest
         assert (
             original["Metadata"]["azents-product-publication-id"]
@@ -594,7 +624,7 @@ class TestDirectChatUpload:
                 observed_size += len(chunk)
         finally:
             body.close()
-        assert observed_size == _CHAT_UPLOAD_MAX_BYTES
+        assert observed_size == size
         assert observed_digest.hexdigest() == digest
         publications = chat_upload_s3.list_objects_v2(
             Bucket=s3_bucket_name, Prefix=f"exchange/{workspace_id}/files/"
@@ -636,25 +666,26 @@ class TestDirectChatUpload:
         )
         assert len(attachments) == 1
         assert attachments[0]["uri"] == published["uri"]
-        assert attachments[0]["size"] == _CHAT_UPLOAD_MAX_BYTES
+        assert attachments[0]["size"] == size
         deadline = time.monotonic() + 90
         warning = (
-            "134217728 bytes > 1000000 bytes. This file was not stored as model input."
+            f"{size} bytes > 1000000 bytes. This file was not stored as model input."
         )
         while time.monotonic() < deadline:
-            journal = json.dumps(
-                _mock_openai_journal_payload(mock_openai_url), ensure_ascii=False
+            scenario_requests = _scenario_model_requests(
+                _mock_openai_journal_payload(mock_openai_url), prompt=prompt
             )
-            if prompt in journal and warning in journal:
+            if any(warning in request for request in scenario_requests):
                 break
             time.sleep(0.5)
         else:
             raise AssertionError(
                 "Large attachment model-input warning was not observed."
             )
-        assert len(journal) < 1024 * 1024
         _assert_file_payload_is_blob_free(message, label="large user message")
-        _assert_file_payload_is_blob_free(journal, label="large model input")
+        for request in scenario_requests:
+            assert len(request) < 1024 * 1024
+            _assert_file_payload_is_blob_free(request, label="large model input")
 
     @pytest.mark.parametrize(
         "failure", ["missing_checksum", "wrong_checksum", "wrong_body"]

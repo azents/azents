@@ -11,7 +11,7 @@ from typing import Literal, Self
 
 from azcommon.logging import RuntimeEnvironment
 from mypy_boto3_rds import RDSClient
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from azents.core.enums import (
@@ -20,6 +20,7 @@ from azents.core.enums import (
 from azents.core.enums import (
     JobRuntimeBackend,
 )
+from azents.core.file_transfer import GENERAL_FILE_MAXIMUM_BYTES
 
 RegistrationMode = Literal["closed", "signup_token", "open"]
 
@@ -139,6 +140,9 @@ class Settings(BaseSettings):
     testenv_discord_oauth_base_url: str | None = None
     testenv_external_channel_gateway_lease_duration_seconds: float | None = None
     testenv_external_channel_gateway_renewal_interval_seconds: float | None = None
+    testenv_general_file_maximum_bytes: int | None = Field(
+        default=None, gt=0, le=GENERAL_FILE_MAXIMUM_BYTES
+    )
     testenv_external_channel_gateway_poll_interval_seconds: float | None = Field(
         default=None,
         gt=0,
@@ -167,6 +171,26 @@ class Settings(BaseSettings):
     # File lifecycle retention
     artifact_retention_days: int = 7
     exchange_file_retention_days: int = 30
+
+    @field_validator("testenv_general_file_maximum_bytes", mode="before")
+    @classmethod
+    def _validate_testenv_general_file_limit_type(cls, value: object) -> object:
+        """Reject boolean values while preserving integer environment parsing."""
+        if isinstance(value, bool):
+            raise ValueError("The general file limit must be a positive integer.")
+        return value
+
+    @model_validator(mode="after")
+    def _validate_testenv_general_file_limit(self) -> Self:
+        """Keep lower general file limits behind the explicit testenv gate."""
+        if (
+            self.testenv_general_file_maximum_bytes is not None
+            and not self.testenv_api_enabled
+        ):
+            raise ValueError(
+                "The general file limit override requires the testenv API gate."
+            )
+        return self
 
     @model_validator(mode="after")
     def _validate_testenv_gateway_lease_timing(self) -> "Settings":
@@ -552,6 +576,12 @@ class Config(BaseModel):
     mcp_proxy_url: str | None = None
     workspace_s3: WorkspaceS3Config
     file_lifecycle: FileLifecycleConfig = FileLifecycleConfig()
+    general_file_maximum_bytes: int = Field(
+        default=GENERAL_FILE_MAXIMUM_BYTES,
+        gt=0,
+        le=GENERAL_FILE_MAXIMUM_BYTES,
+        strict=True,
+    )
     avatar_cdn_base_url: str | None = None
     # Testenv-only flags and deterministic external-service boundaries
     testenv_api_enabled: bool = False
@@ -705,6 +735,12 @@ class Config(BaseModel):
             file_lifecycle=FileLifecycleConfig(
                 artifact_retention_days=settings.artifact_retention_days,
                 exchange_file_retention_days=settings.exchange_file_retention_days,
+            ),
+            general_file_maximum_bytes=(
+                settings.testenv_general_file_maximum_bytes
+                if settings.testenv_api_enabled
+                and settings.testenv_general_file_maximum_bytes is not None
+                else GENERAL_FILE_MAXIMUM_BYTES
             ),
             avatar_cdn_base_url=settings.avatar_cdn_base_url,
             testenv_api_enabled=settings.testenv_api_enabled,

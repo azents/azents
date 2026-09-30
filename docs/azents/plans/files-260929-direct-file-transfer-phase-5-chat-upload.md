@@ -1,6 +1,7 @@
 ---
 title: "Direct File Transfer Phase 5 Chat Browser PUT"
 created: 2026-09-29
+updated: 2026-09-30
 tags: [files, chat, browser, implementation, phase-plan]
 ---
 
@@ -34,6 +35,16 @@ tags: [files, chat, browser, implementation, phase-plan]
 - Final validation: `Root backend Ruff/format/ty/full pytest, public contract and checksum/immutable storage tests, full relevant TypeScript format/lint/typecheck/build/tests, regenerated OpenAPI/client drift, actual browser/API/RustFS upload journey, oversized attachment message without original-body read, doc/pre-commit and git diff --check. Record fixture prerequisites and distinguish optional live tests from verified product journeys.`
 - Scope-drift check: `Only M1/M4/M6 and existing M7 prerequisites. Preserve existing Exchange retention, upload owner and Agent scope, Session-root claiming, final attachment fields, small-file model behavior, image20MiB and provider policies. No new material transport, authority, product identity or fallback. Phase 6 retains browser GET and coordinated common/Admin policy migration; Phase 7 retains full integrated deployment/network coverage and Spec promotion.`
 - Context checkpoint: `Record prepare/finalize contract, operation manifest and expiry/cleanup ownership, immutable-source evidence, UI/hash/cancel behavior, generated surfaces, model-input no-read boundary, commands/E2E evidence, assigned review, risks and next-phase inputs. Keep the exact reviewer and stack bases.`
+
+## CI Repair Execution — September 30, 2026
+
+- Root owns the complete stack's CI correction; `Design delta: None`. This refines existing M1/M4/M6 verification under the global load-tests-as-reports convention and the requester's explicit lowered-limit instruction.
+- `/root/direct-get-core` owns only the already-reviewed Config gate/default, canonical 128 MiB constant, Chat prepare admission, and matching unit tests. `/root` owns small required E2E boundaries, scenario-specific request evidence, testenv fixture injection, this plan, integrated checks and GitHub/stack operations.
+- Production upload remains 128 MiB. Gated test-only injection is positive and lowering-only. Unit tests use 15/16/17 bytes at 16 bytes; integrated Chat uses a 1 MiB cap so its existing independent 1,000,000-byte model-budget warning remains exercised. Real storage protocol bodies use 32 KiB. No Admin setting, image/model/provider change, TLS relaxation in product, or later-phase GET behavior is added here.
+- Required removal: the two actual 128 MiB recurring bodies. Existing completed heavyweight evidence remains in the Phase 7 supporting report; routine suite execution must not repeat it.
+- Integration: finish backend and E2E work → root Ruff/format/ty and focused backend/product/storage/browser validation → freeze correction → root requests `/root/files-260929-reviewer` read-only review → correct findings and rerun affected checks → normal Phase 5 follow-up commit → rebase dependent phases through the repository script → replay Phase 6 consumer/download fixes → validate/review → synchronize Phase 7 and verify its final tree → push all phases before waiting on CI.
+- Absence proof: search required file journeys for actual 128 MiB bodies/test names; metadata-only schema-ceiling probes remain allowed. Explicitly preserve authorization, checksum/publication, idempotency, model-budget warning and browser completion.
+- Phase 6 owns generic consumer propagation and TLS-fixture-only GET verification. Phase 7 owns final Specs/report/plan cleanup. Do not revive deleted plans or modify implemented snapshots while synchronizing later branches.
 
 ## Entry Checkpoint
 

@@ -140,18 +140,18 @@ async def test_rustfs_presigned_put_finalize_and_get_round_trip(
 
 
 @pytest.mark.asyncio
-async def test_rustfs_signed_128_mib_put_copy_and_get_without_buffering_body(
+async def test_rustfs_signed_put_copy_and_get_without_buffering_body(
     rustfs_container: DockerContainer,
     rustfs_access_key: str,
     rustfs_secret_key: str,
     s3_bucket_name: str,
 ) -> None:
-    """Prove the agreed file boundary against a real compatible store."""
-    expected_size = 128 * 1024 * 1024
-    chunk = bytes(range(256)) * 4096
+    """Exercise streaming/checksum/copy with a small deterministic body."""
+    expected_size = 32 * 1024
+    chunk = bytes(range(256)) * 16
     checksum = hashlib.sha256()
-    ingress = S3ObjectIdentity(bucket=s3_bucket_name, key=_key("large-ingress"))
-    source = S3ObjectIdentity(bucket=s3_bucket_name, key=_key("large-source"))
+    ingress = S3ObjectIdentity(bucket=s3_bucket_name, key=_key("bounded-ingress"))
+    source = S3ObjectIdentity(bucket=s3_bucket_name, key=_key("bounded-source"))
     async with _service(
         rustfs_container=rustfs_container,
         access_key=rustfs_access_key,

@@ -152,6 +152,7 @@ def _fixture(operation: ExchangeUploadOperation) -> _Fixture:
     trace.attach_mock(s3, "s3")
     config = Mock()
     config.workspace_s3.bucket = "test-bucket"
+    config.general_file_maximum_bytes = CHAT_UPLOAD_MAX_SIZE
     config.file_lifecycle.exchange_file_ttl = datetime.timedelta(days=7)
     service = ExchangeFileService(
         operation_repository=repository,
@@ -169,6 +170,37 @@ async def _finalize(fixture: _Fixture) -> object:
     return await fixture.service.finalize_agent_browser_upload(
         agent_id="agent-1", user_id="user-1", upload_id="upload-1"
     )
+
+
+@pytest.mark.parametrize("size", [15, 16, 17])
+async def test_prepare_uses_injected_small_limit_before_authorization_and_presign(
+    size: int,
+) -> None:
+    """Small boundary fixtures exercise effective admission without large bodies."""
+    operation = replace(_operation(), expected_size=size)
+    fixture = _fixture(operation)
+    fixture.service.config.general_file_maximum_bytes = 16
+    result = await fixture.service.prepare_agent_browser_upload(
+        agent_id=operation.agent_id,
+        user_id=operation.uploader_user_id,
+        filename=operation.filename,
+        media_type=operation.media_type,
+        size=size,
+        sha256=operation.expected_sha256,
+    )
+    if size <= 16:
+        assert isinstance(result, Success)
+        assert (
+            fixture.repository.prepare_agent_upload_operation.call_args.kwargs[
+                "expected_size"
+            ]
+            == size
+        )
+        assert fixture.s3.get_upload_request.call_args.kwargs["content_length"] == size
+    else:
+        assert result == Failure(ExchangeUploadError.INVALID_REQUEST)
+        fixture.repository.prepare_agent_upload_operation.assert_not_awaited()
+        fixture.s3.get_upload_request.assert_not_awaited()
 
 
 async def test_prepare_authorizes_manifest_before_exact_put_ticket() -> None:

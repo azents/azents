@@ -480,7 +480,7 @@ class ExchangeFileService:
         """Reserve an authorized manifest before issuing an exact-object PUT."""
         if (
             isinstance(size, bool)
-            or not 0 <= size <= CHAT_UPLOAD_MAX_SIZE
+            or not 0 <= size <= self.config.general_file_maximum_bytes
             or not media_type
             or "\r" in media_type
             or "\n" in media_type
