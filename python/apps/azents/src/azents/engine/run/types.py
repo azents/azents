@@ -302,9 +302,9 @@ class TokenUsage(BaseModel):
     are cache write tokens with surcharge. Anthropic pricing is create 1.25x and
     read 0.1x, so separate storage is required.
 
-    ``cost_usd`` is call cost in USD calculated by LiteLLM
-    (``_hidden_params.response_cost``), and ``raw_hidden_params`` is original
-    ``_hidden_params`` used for post-analysis such as model ID, latency, provider.
+    ``cost_usd`` is the provider-reported charge or the captured source-snapshot
+    estimate for this attempt. ``raw_hidden_params`` retains optional billing
+    diagnostics without becoming a pricing or execution authority.
     """
 
     model_config = ConfigDict(frozen=True)

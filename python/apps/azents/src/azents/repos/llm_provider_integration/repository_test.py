@@ -22,7 +22,6 @@ from azents.core.credentials import (
 )
 from azents.core.crypto import CredentialCipher
 from azents.core.enums import (
-    LLMCatalogLowererTarget,
     LLMCatalogPurpose,
     LLMProvider,
 )
@@ -544,7 +543,6 @@ class TestLLMProviderIntegrationRepository:
                 setup_session,
                 integration_id=integration.id,
                 provider=integration.provider,
-                lowerer_target=LLMCatalogLowererTarget.LITELLM,
                 purpose=LLMCatalogPurpose.CONVERSATION,
             )
             await setup_session.commit()

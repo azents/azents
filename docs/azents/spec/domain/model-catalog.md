@@ -25,6 +25,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/llm_catalog/data.py
   - python/apps/azents/src/azents/rdb/models/llm_catalog.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/097a97177350_create_operational_schema_baseline.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/4550a9c9083a_remove_catalog_execution_descriptors.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/2d91f8044dad_reconcile_validated_catalog_cutover_.py
   - python/apps/azents/src/azents/api/public/llm_provider_integration/v1/__init__.py
   - python/apps/azents/src/azents/api/public/llm_provider_integration/v1/data.py
   - python/apps/azents/src/azents/api/admin/model_catalog/v1/__init__.py
@@ -46,7 +48,7 @@ code_paths:
   - typescript/apps/azents-web/src/trpc/routers/workspace-model-settings.ts
   - typescript/apps/azents-admin-web/src/features/model-catalog/containers/useModelCatalogPageContainer.ts
 last_verified_at: 2026-09-30
-spec_version: 28
+spec_version: 29
 ---
 
 # Model Catalog Domain Spec
@@ -62,10 +64,25 @@ includes `purpose = conversation | image_generation`, so one integration can own
 independent conversation and image-generation snapshots without sharing entries,
 attempts, or publication state.
 
-- System catalog: managed by Azents for providers whose selectable models are not scoped to a customer integration. Current system catalogs cover OpenAI, Anthropic, and Google Gemini using the active lowerer target projection source.
+- System catalog: managed by Azents for providers whose selectable models are not scoped to a customer integration. Current system catalogs cover OpenAI, Anthropic, and Google Gemini using the retained validated metadata source.
 - Integration catalog: scoped to a provider integration for providers whose visible models depend on customer credential, account, region, or project. Current user-scoped integration catalogs cover AWS Bedrock, ChatGPT OAuth, xAI API key, xAI OAuth, Kimi OAuth, Google Vertex AI, and OpenRouter.
 
 An integration-scoped catalog is created in the same transaction as its provider integration. Public reads for integration-scoped providers use only that catalog and never fall back to a system catalog. For providers with system-owned model visibility, the picker resolves the provider system catalog through the enabled integration.
+
+Catalog identity is semantic rather than execution-library-specific. System catalogs are unique by
+`(provider, purpose)` and integration catalogs by `(provider_integration_id, purpose)` within their
+respective ownership scopes. Catalogs, conversation entries, public responses, active projection
+metadata, and newly created selection diagnostics do not carry `lowerer_target` or a stored
+`runtime_model_identifier`. Dispatch uses the saved provider and exact provider model ID.
+
+Migration `4550a9c9083a` checks target-free identity collisions before removing the old dimensions;
+it does not merge catalogs or recreate IDs. Existing catalog/source/snapshot/attempt links and
+image-generation purpose separation remain intact. Historical Agent diagnostic snapshots and
+native conversation artifacts remain historical evidence, not execution inputs.
+
+Generated merge revision `2d91f8044dad` joins the unchanged, independently validated
+catalog cutover and current-main schema revision `43a0fbdc96fe`. It introduces no
+additional DDL or data transformation and retains the existing migration history.
 
 ## Stored projection entries
 
@@ -74,8 +91,6 @@ A catalog snapshot contains entries projected into Azents' canonical model contr
 - provider
 - optional provider integration id
 - provider model identifier
-- lowerer target
-- runtime model identifier
 - display name
 - normalized capabilities
 - lifecycle status
@@ -94,6 +109,13 @@ maximum is the hard ceiling for an explicit Agent option cap. A maximum-only
 capability, including historical catalog and Agent snapshots, resolves that maximum
 as its default. The capability remains additive JSON and requires no relational
 migration.
+
+Runtime and Agent context displays supplement only a missing maximum from an exact model match in
+the locally captured validated source. A known provider default is a floor for this fallback;
+when default, maximum and source maximum are all missing, the resolved limit is 128,000 tokens.
+Saved maximums win over source data and no SDK profile changes a saved capability. A paired
+foreground/lightweight budget shares one source capture; an Agent list shares a capture across
+all displayed Agents needing fallback instead of fetching one payload per candidate.
 
 ### Image-generation entries
 
@@ -189,7 +211,7 @@ work begins.
 
 ChatGPT OAuth integration catalogs additionally fetch the authenticated account-visible model list from the ChatGPT Codex backend during sync. Backend metadata is authoritative for visibility, reasoning efforts, modalities, and context window. `context_window` projects to the default input window and `max_context_window` projects to the maximum; when the maximum is absent, the default also supplies the maximum. Request-dialect hints are excluded from normalized capabilities and stored projection metadata. Following Codex's provider-level capability policy, every API-supported and picker-visible ChatGPT OAuth model is projected with the semantic `web_search` built-in tool capability. `image_generation` is projected only from an explicit trusted source flag or the maintained OpenAI-family model support policy shared with OpenAI system catalog projection. ChatGPT entries do not require a matching LiteLLM model metadata key or source snapshot.
 
-OpenRouter integration catalogs fetch the authenticated account-visible text-output model list from the fixed OpenRouter `/models/user` endpoint. Every valid returned model is eligible for direct projection without a model, publisher, family, upstream-provider, or LiteLLM metadata allowlist. Exact provider identifiers are preserved and receive the `openrouter/` runtime prefix. Recognized publisher aliases map to the canonical model developer; an unrecognized publisher maps to `other` and never falls back to Anthropic. OpenRouter capabilities remain conservative: missing or unverified metadata disables an individual capability rather than hiding the model. The initial projection can advertise text and verified image input, text output, function tools, reasoning, standard parameters, and semantic `web_search`; it does not advertise PDF, audio, video, image generation, prompt caching, or strict structured output.
+OpenRouter integration catalogs fetch the authenticated account-visible text-output model list from the fixed OpenRouter `/models/user` endpoint. Every valid returned model is eligible for direct projection without a model, publisher, family, upstream-provider, or LiteLLM metadata allowlist. Exact provider identifiers, including publisher paths, are preserved without an execution-library prefix. Recognized publisher aliases map to the canonical model developer; an unrecognized publisher maps to `other` and never falls back to Anthropic. OpenRouter capabilities remain conservative: missing or unverified metadata disables an individual capability rather than hiding the model. The initial projection can advertise text and verified image input, text output, function tools, reasoning, standard parameters, and semantic `web_search`; it does not advertise PDF, audio, video, image generation, prompt caching, or strict structured output.
 
 xAI API-key integration catalogs call the configured developer API through the installed OpenAI-compatible SDK. xAI OAuth integration catalogs refresh the stored OAuth credential when required and then call the authenticated Grok CLI proxy model endpoint with the pinned CLI request identity. Each response is authoritative only for that integration, so API-key and OAuth integrations may publish different model sets. Every valid provider-listed model remains selectable without a LiteLLM match. Provider-supplied context window, reasoning-effort, backend-search, and Responses-backend values take precedence; an exact `xai/<model>` LiteLLM entry or expanded alias may fill omitted capability fields and bounded pricing metadata. Missing source authority and exact-match misses remain diagnostic and leave unknown capabilities disabled.
 
@@ -345,6 +367,7 @@ Only Workspace Owners receive the explicit image sync action.
 
 | Date | Version | Change |
 |---|---:|---|
+| 2026-09-30 | 29 | Removed active execution-library catalog descriptors and documented semantic identity, preserved historical/source links, and exact raw provider IDs. |
 | 2026-09-25 | 26 | Projected OpenAI and ChatGPT image generation as a client-tool capability, including function-capable GPT-6 models without a provider-hosted image tool. |
 | 2026-09-13 | 25 | Normalized every candidate in an ordered label-local chain, made Primary capabilities drive label controls, and removed singular public mutation compatibility. |
 
@@ -377,12 +400,11 @@ The current implementation does not use models.dev for model catalog source data
 OpenAI and Anthropic provider API listing are not part of the conversation model
 catalog path. OpenAI provider listing is used only for the purpose-separated
 credential-visible image-generation registry intersection. Current system
-conversation providers use the latest explicitly validated remote LiteLLM DB
-snapshot for the active lowerer target. The process-local or package-bundled
-LiteLLM model map is diagnostic fallback data only and cannot replace source
-authority. ChatGPT OAuth, OpenRouter, xAI API key, and xAI OAuth have no system
+conversation providers use the latest explicitly validated remote LiteLLM JSON DB
+snapshot. No executable LiteLLM package, process-local map, or package-bundled fallback supplies
+catalog or runtime authority. ChatGPT OAuth, OpenRouter, xAI API key, and xAI OAuth have no system
 catalog; their authenticated integration catalogs are authoritative for
 conversation-model visibility. The xAI projections may enrich provider-visible
 models from an exact or expanded-alias LiteLLM `xai/<model>` entry without
-requiring a match. Provider-facing xAI model identifiers omit the `xai/` prefix,
-and runtime invocation reconstructs the LiteLLM route prefix.
+requiring a match. Provider-facing and runtime xAI model identifiers are the same exact raw ID.
+The `xai/` namespace identifies a retained-source lookup key, not an execution prefix.

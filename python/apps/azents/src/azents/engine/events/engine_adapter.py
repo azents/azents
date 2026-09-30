@@ -69,18 +69,12 @@ from azents.engine.events.filters import (
     NativeRequestSizeGuard,
     PostLowerFilterPipeline,
 )
-from azents.engine.events.litellm_responses import (
-    LiteLLMResponsesLowerer,
-    LiteLLMResponsesModelAdapter,
-    LiteLLMResponsesOutputNormalizer,
-)
 from azents.engine.events.model_file_materializer import ModelFileMaterializer
 from azents.engine.events.openai_responses import (
     OpenAIResponsesLowerer,
     OpenAIResponsesModelAdapter,
     OpenAIResponsesOutputNormalizer,
     OpenAIResponsesRequest,
-    create_openai_responses_client,
     openai_responses_websocket_endpoint_eligible,
 )
 from azents.engine.events.output_parts import (
@@ -93,7 +87,6 @@ from azents.engine.events.protocols import (
     ContentDeltaProjection,
     FunctionCallDeltaProjection,
     ManualCompactor,
-    NativeModelRequest,
     NormalizedAdapterOutput,
     ProviderToolActivityProjection,
     ReasoningDeltaProjection,
@@ -105,6 +98,10 @@ from azents.engine.events.protocols import (
 )
 from azents.engine.events.provider_output import ProviderOutputMaterializer
 from azents.engine.events.provider_tool_rendering import render_provider_tool_semantic
+from azents.engine.events.pydantic_ai_adapter import PydanticAIModelAdapter
+from azents.engine.events.pydantic_ai_lowering import PydanticAILowerer
+from azents.engine.events.pydantic_ai_output import PydanticAIOutputNormalizer
+from azents.engine.events.pydantic_ai_types import PydanticAIRequest
 from azents.engine.events.responses_continuation import ResponsesContinuationPlanner
 from azents.engine.events.responses_lowering import resolve_openai_service_tier
 from azents.engine.events.system_prompt import build_system_prompt
@@ -151,6 +148,10 @@ from azents.engine.hooks.types import (
     TurnEndReason,
     TurnStartHookContext,
 )
+from azents.engine.io.user_input import RunUserMessage
+from azents.engine.model_assembly import ModelAssemblyMetadata
+from azents.engine.model_factories import get_model_sdk_factories
+from azents.engine.model_factory_types import ModelSDKFactories
 from azents.engine.model_stream import ModelStreamWatchdog, get_model_stream_watchdog
 from azents.engine.run.builtin_tools import (
     ClientBuiltinToolImplementationUnavailableError,
@@ -288,6 +289,7 @@ def _tool_working_set_store(
 
 def _summary_model_call(
     watchdog: Annotated[ModelStreamWatchdog, Depends(get_model_stream_watchdog)],
+    sdk_factories: Annotated[ModelSDKFactories, Depends(get_model_sdk_factories)],
 ) -> SummaryModelCall:
     """Bind the process-owned watchdog to compaction model calls."""
 
@@ -297,6 +299,7 @@ def _summary_model_call(
         provider_integration_id: str | None,
         model: str,
         credential_kwargs: dict[str, object],
+        assembly_metadata: ModelAssemblyMetadata | None,
         system_prompt: str,
         user_prompt: str,
         conversation_text: str,
@@ -304,11 +307,13 @@ def _summary_model_call(
         session_id: str | None = None,
     ) -> str:
         return await summarize_text_with_model(
+            sdk_factories=sdk_factories,
             watchdog=watchdog,
             provider=provider,
             provider_integration_id=provider_integration_id,
             model=model,
             credential_kwargs=credential_kwargs,
+            assembly_metadata=assembly_metadata,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             conversation_text=conversation_text,
@@ -369,6 +374,7 @@ class AgentEngineAdapter:
         Depends(get_llm_provider_integration_repository),
     ]
     metadata_service: Annotated[ModelMetadataService, Depends(ModelMetadataService)]
+    sdk_factories: Annotated[ModelSDKFactories, Depends(get_model_sdk_factories)]
     xai_imagine_client_factory: Annotated[
         XaiImagineClientFactory,
         Depends(_xai_imagine_client_factory),
@@ -700,7 +706,7 @@ class AgentEngineAdapter:
             *,
             transcript: Sequence[Event],
             model: str,
-        ) -> PreparedModelCall[NativeModelRequest | OpenAIResponsesRequest]:
+        ) -> PreparedModelCall[PydanticAIRequest | OpenAIResponsesRequest]:
             await owner_session_manager.assert_current()
             model_selection = (
                 request.inference_state.model_selection
@@ -727,7 +733,7 @@ class AgentEngineAdapter:
             lowerer_type = (
                 OpenAIResponsesLowerer
                 if _uses_openai_sdk(request.provider)
-                else LiteLLMResponsesLowerer
+                else PydanticAILowerer
             )
             client_tool_route = ClientToolRoute(
                 provider=request.provider,
@@ -993,11 +999,6 @@ class AgentEngineAdapter:
                 model=model,
                 tools=catalog.native_tools_for(provider_visible_tool_names),
                 provider_id=request.provider,
-                credential_kwargs=(
-                    {}
-                    if _uses_openai_sdk(request.provider)
-                    else request.credential_kwargs
-                ),
                 temperature=request.temperature,
                 max_output_tokens=request.max_output_tokens,
                 top_p=request.top_p,
@@ -1083,6 +1084,15 @@ class AgentEngineAdapter:
                     model=model,
                     system_prompt=system_prompt_result.prompt,
                 )
+                if isinstance(native_request, PydanticAIRequest):
+                    native_request = dataclasses.replace(
+                        native_request,
+                        assembly_metadata=(
+                            ModelAssemblyMetadata.from_selection(model_selection)
+                            if model_selection is not None
+                            else request.model_assembly_metadata
+                        ),
+                    )
             except asyncio.CancelledError:
                 await on_turn_end("cancelled")
                 raise
@@ -1092,7 +1102,7 @@ class AgentEngineAdapter:
             requested_service_tier = (
                 native_request.options.get("service_tier")
                 if isinstance(native_request, OpenAIResponsesRequest)
-                else native_request.kwargs.get("service_tier")
+                else native_request.settings.get("service_tier")
             )
             output_normalizer.service_tier = (
                 requested_service_tier
@@ -1178,7 +1188,7 @@ class AgentEngineAdapter:
                 credential_kwargs=request.credential_kwargs,
             )
             model_adapter = OpenAIResponsesModelAdapter(
-                client=create_openai_responses_client(config=client_config),
+                client=self.sdk_factories.openai_responses(config=client_config),
                 continuation_planner=(
                     ResponsesContinuationPlanner()
                     if request.provider == LLMProvider.OPENAI
@@ -1214,8 +1224,13 @@ class AgentEngineAdapter:
                 ),
             )
         else:
-            model_adapter = LiteLLMResponsesModelAdapter(ResponsesContinuationPlanner())
-            output_normalizer = LiteLLMResponsesOutputNormalizer(
+            model_adapter = PydanticAIModelAdapter(
+                factory=self.sdk_factories.provider_model(
+                    provider=request.provider,
+                    credential_kwargs=request.credential_kwargs,
+                )
+            )
+            output_normalizer = PydanticAIOutputNormalizer(
                 provider=provider,
                 model=request.model,
                 pricing=None,
@@ -1749,6 +1764,11 @@ def _event_summary_generator(
             provider_integration_id=provider_integration_id,
             model=model,
             credential_kwargs=dict(credential_kwargs),
+            assembly_metadata=(
+                request.compaction_assembly_metadata
+                if request.compaction_provider is not None
+                else request.model_assembly_metadata
+            ),
             system_prompt=SUMMARY_SYSTEM_PROMPT,
             user_prompt=SUMMARY_USER_TEMPLATE,
             conversation_text=conversation_text,

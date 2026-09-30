@@ -9,21 +9,20 @@ from collections.abc import Awaitable
 from typing import Protocol
 
 from azcommon.logging import bind_extra
-from litellm.exceptions import OpenAIError as LiteLLMOpenAIError
-from openai import OpenAIError as OpenAIBaseError
 
 from azents.core.enums import LLMProvider
-from azents.engine.events.litellm_responses import map_litellm_provider_error
 from azents.engine.events.openai_responses import call_openai_responses_text
+from azents.engine.model_assembly import ModelAssemblyMetadata
+from azents.engine.model_factory_types import ModelSDKFactories
 from azents.engine.model_stream import (
     ModelStreamCallContext,
     ModelStreamWatchdog,
 )
+from azents.engine.model_text import call_provider_text
+from azents.engine.provider_errors import SDK_PROVIDER_ERRORS, map_model_provider_error
 from azents.engine.responses import (
     DEFAULT_RESPONSES_TEXT_CONFIG,
     ResponsesOutputError,
-    call_responses_model,
-    extract_response_text,
     responses_max_output_tokens,
 )
 from azents.engine.run.errors import (
@@ -71,6 +70,7 @@ class SummaryModelCall(Protocol):
         provider_integration_id: str | None,
         model: str,
         credential_kwargs: dict[str, object],
+        assembly_metadata: ModelAssemblyMetadata | None,
         system_prompt: str,
         user_prompt: str,
         conversation_text: str,
@@ -250,11 +250,13 @@ def _clamp(value: int, minimum: int, maximum: int) -> int:
 
 async def summarize_text_with_model(
     *,
+    sdk_factories: ModelSDKFactories,
     watchdog: ModelStreamWatchdog,
     provider: LLMProvider,
     provider_integration_id: str | None,
     model: str,
     credential_kwargs: dict[str, object],
+    assembly_metadata: ModelAssemblyMetadata | None,
     system_prompt: str,
     user_prompt: str,
     conversation_text: str,
@@ -289,11 +291,13 @@ async def summarize_text_with_model(
         },
     )
     summary = await _summarize_text_attempt(
+        sdk_factories=sdk_factories,
         watchdog=watchdog,
         provider=provider,
         provider_integration_id=provider_integration_id,
         model=model,
         credential_kwargs=credential_kwargs,
+        assembly_metadata=assembly_metadata,
         system_prompt=system_prompt,
         user_prompt=user_prompt,
         conversation_text=conversation_text,
@@ -314,18 +318,20 @@ async def summarize_text_with_model(
 
 async def _summarize_text_attempt(
     *,
+    sdk_factories: ModelSDKFactories,
     watchdog: ModelStreamWatchdog,
     provider: LLMProvider,
     provider_integration_id: str | None,
     model: str,
     credential_kwargs: dict[str, object],
+    assembly_metadata: ModelAssemblyMetadata | None,
     system_prompt: str,
     user_prompt: str,
     conversation_text: str,
     endpoint_max_output_tokens: int | None,
     session_id: str | None,
 ) -> str:
-    """Try creating summary once with LiteLLM Responses API."""
+    """Create one summary through the authorized provider model."""
     timeout_policy = watchdog.resolve_policy(
         provider=provider.value,
         model=model,
@@ -347,6 +353,7 @@ async def _summarize_text_attempt(
         ]
         if provider in {LLMProvider.OPENAI, LLMProvider.CHATGPT_OAUTH}:
             return await call_openai_responses_text(
+                client_factory=sdk_factories.openai_responses,
                 provider=provider,
                 model=model,
                 credential_kwargs=credential_kwargs,
@@ -357,20 +364,21 @@ async def _summarize_text_attempt(
                 timeout_policy=timeout_policy,
                 call_context=call_context,
             )
-        response = await call_responses_model(
+        return await call_provider_text(
+            sdk_factories=sdk_factories,
             provider=provider,
             model=model,
             credential_kwargs=credential_kwargs,
-            input_items=input_items,
+            assembly_metadata=assembly_metadata,
+            input_text=user_prompt + conversation_text,
             instructions=system_prompt,
-            stream=True,
             max_output_tokens=endpoint_max_output_tokens,
             watchdog=watchdog,
             timeout_policy=timeout_policy,
             call_context=call_context,
+            text=None,
             extra_body=None,
         )
-        return await extract_response_text(response)
     except ModelProviderFailure:
         raise
     except ModelStreamTimeoutError as exc:
@@ -389,8 +397,8 @@ async def _summarize_text_attempt(
         ) from None
     except ModelCallError as exc:
         raise CompactionFailedError(exc.user_message) from exc
-    except (LiteLLMOpenAIError, OpenAIBaseError) as exc:
-        failure = map_litellm_provider_error(exc, call_context=call_context)
+    except SDK_PROVIDER_ERRORS as exc:
+        failure = map_model_provider_error(exc, call_context=call_context)
         raise failure from None
 
 

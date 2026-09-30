@@ -73,7 +73,7 @@ code_paths:
 api_routes:
   - /toolkit/v1
 last_verified_at: 2026-09-30
-spec_version: 121
+spec_version: 122
 ---
 
 # Toolkit
@@ -259,8 +259,8 @@ authority is available and `tool_search` when deferred entries require search.
 
 The current dual-variant entry is `apply_patch`. It requires the reviewed V4A patch semantic profile
 and declares JSON-function and plaintext-custom variants. Native OpenAI Responses prefers plaintext
-custom, while the reviewed OpenRouter LiteLLM Responses profile selects JSON function. Other current
-LiteLLM routes keep ordinary JSON tools but do not enable the V4A patch semantic profile. A prepared
+custom, while the reviewed OpenRouter Pydantic AI Responses profile selects JSON function. Other
+Pydantic AI model-message routes keep ordinary JSON tools but do not enable the V4A patch semantic profile. A prepared
 catalog exposes one variant, never both, and Tool Search/declaration-budget projection counts that
 selected declaration once.
 
@@ -1042,9 +1042,10 @@ without requiring a separate Toolkit setup row.
 
 ## Changelog
 
+- **2026-09-30** (spec_version 122) — Mapped provider-specific tool dialect selection to the
+  current Pydantic AI model-message boundary while retaining native OpenAI custom tools.
 - **2026-09-30** (spec_version 121) — Promoted builtin file consumers to exact-attempt
   direct GET/PUT under shared general-file eligibility, preserving semantic limits.
-
 - **2026-09-25** (spec_version 120) — Enabled ownership-gated OAuth connect
   and reconnect from saved-Agent Toolkit cards, with popup callback validation
   and Agent management refresh.

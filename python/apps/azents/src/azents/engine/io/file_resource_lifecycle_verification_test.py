@@ -26,7 +26,7 @@ from azents.core.enums import (
 )
 from azents.core.llm_catalog import ModelCapabilities, ModelModalities, ModelModality
 from azents.engine.events.file_parts import ModelFileLoweringContent
-from azents.engine.events.litellm_responses import LiteLLMResponsesLowerer
+from azents.engine.events.openai_responses import OpenAIResponsesLowerer
 from azents.engine.events.types import (
     ArtifactOutputPart,
     AttachmentOutputPart,
@@ -417,7 +417,7 @@ async def test_artifact_output_import_and_expiration_e2e_path() -> None:
     assert isinstance(created, Success)
     artifact = created.value
 
-    lowerer = LiteLLMResponsesLowerer(
+    lowerer = OpenAIResponsesLowerer(
         supported_execution_options=[],
         enabled_execution_options=[],
         provider="openai",
@@ -505,7 +505,7 @@ async def test_artifact_output_import_and_expiration_e2e_path() -> None:
 @pytest.mark.asyncio
 async def test_attachment_output_lowers_as_metadata_only() -> None:
     """Attachment lowers to bounded metadata text, not rich input."""
-    lowerer = LiteLLMResponsesLowerer(
+    lowerer = OpenAIResponsesLowerer(
         supported_execution_options=[],
         enabled_execution_options=[],
         provider="openai",
@@ -586,7 +586,7 @@ async def test_file_part_capability_branch_e2e_path() -> None:
         ),
     ]
 
-    image_request = LiteLLMResponsesLowerer(
+    image_request = OpenAIResponsesLowerer(
         supported_execution_options=[],
         enabled_execution_options=[],
         provider="openai",
@@ -604,7 +604,7 @@ async def test_file_part_capability_branch_e2e_path() -> None:
         }
     ]
 
-    text_only_request = LiteLLMResponsesLowerer(
+    text_only_request = OpenAIResponsesLowerer(
         supported_execution_options=[],
         enabled_execution_options=[],
         provider="openai",

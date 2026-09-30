@@ -21,6 +21,7 @@ from azents.core.tools import PublishEventFn, Toolkit
 from azents.engine.context.window import compute_effective_context_window_tokens
 from azents.engine.events.types import Event
 from azents.engine.io.user_input import RunUserMessage
+from azents.engine.model_assembly import ModelAssemblyMetadata
 from azents.engine.run.emit import Emit
 from azents.engine.run.model_transport import ModelTransportState
 from azents.engine.run.turn_action_bridge import TurnActionBridgeBoundary
@@ -96,6 +97,8 @@ class RunRequest:
     """Exact Session inference snapshot applied to this model-call turn."""
     compaction_provider_integration_id: str | None
     """Provider integration used by the compaction model, when configured."""
+    model_assembly_metadata: ModelAssemblyMetadata | None
+    compaction_assembly_metadata: ModelAssemblyMetadata | None
     model_capabilities: ModelCapabilities = dataclasses.field(
         default_factory=ModelCapabilities,
     )
@@ -122,7 +125,7 @@ class RunRequest:
     max_turns: int | None = None
     """SDK Runner max_turns. None means no turn limit."""
     compaction_model: str | None = None
-    """LiteLLM model string for compaction summary. None uses main model."""
+    """Exact saved provider model ID for compaction. None uses the main model."""
     compaction_provider: LLMProvider | None = None
     """Provider for compaction summary. None uses main provider."""
     compaction_credential_kwargs: dict[str, object] | None = None

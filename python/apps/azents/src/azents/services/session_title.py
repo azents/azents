@@ -11,13 +11,10 @@ from typing import Annotated
 
 from azcommon.logging import bind_extra
 from fastapi import Depends
-from litellm.exceptions import OpenAIError as LiteLLMOpenAIError
-from openai import OpenAIError as OpenAIBaseError
 from openai.types.responses.response_text_config_param import ResponseTextConfigParam
 from pydantic import TypeAdapter
 
 from azents.core.enums import EventKind, ExternalChannelPrincipalAuthorType, LLMProvider
-from azents.engine.events.litellm_responses import map_litellm_provider_error
 from azents.engine.events.openai_responses import call_openai_responses_text
 from azents.engine.events.types import (
     AssistantMessagePayload,
@@ -28,16 +25,19 @@ from azents.engine.events.types import (
     OutputTextPart,
     UserMessagePayload,
 )
+from azents.engine.model_assembly import ModelAssemblyMetadata
+from azents.engine.model_factories import get_model_sdk_factories
+from azents.engine.model_factory_types import ModelSDKFactories
 from azents.engine.model_stream import (
     ModelStreamCallContext,
     ModelStreamWatchdog,
     get_model_stream_watchdog,
 )
+from azents.engine.model_text import call_provider_text
+from azents.engine.provider_errors import SDK_PROVIDER_ERRORS, map_model_provider_error
 from azents.engine.responses import (
     DEFAULT_RESPONSES_TEXT_CONFIG,
     ResponsesOutputError,
-    call_responses_model,
-    extract_response_text,
 )
 from azents.engine.run.errors import ModelCallError, ModelStreamTimeoutError
 from azents.engine.run.provider_failure import (
@@ -275,6 +275,7 @@ class SessionTitleService:
     model_metadata_service: Annotated[
         ModelMetadataService, Depends(ModelMetadataService)
     ]
+    sdk_factories: Annotated[ModelSDKFactories, Depends(get_model_sdk_factories)]
     chatgpt_oauth_runtime_repository: Annotated[
         ChatGPTOAuthRuntimeRepository, Depends(ChatGPTOAuthRuntimeRepository)
     ]
@@ -375,10 +376,14 @@ class SessionTitleService:
                     return None
                 try:
                     return await generate_session_title_with_model(
+                        sdk_factories=self.sdk_factories,
                         provider=runtime.provider,
                         provider_integration_id=runtime.provider_integration_id,
                         model=model,
                         credential_kwargs=runtime.credential_kwargs,
+                        assembly_metadata=ModelAssemblyMetadata.from_selection(
+                            selection
+                        ),
                         context=context,
                         session_id=session_id,
                         attempt_number=attempt_number,
@@ -581,10 +586,12 @@ class SessionTitleService:
 
 async def generate_session_title_with_model(
     *,
+    sdk_factories: ModelSDKFactories,
     provider: LLMProvider,
     provider_integration_id: str | None,
     model: str,
     credential_kwargs: dict[str, object],
+    assembly_metadata: ModelAssemblyMetadata | None,
     context: str,
     session_id: str | None,
     attempt_number: int | None,
@@ -623,6 +630,7 @@ async def generate_session_title_with_model(
     try:
         if provider in {LLMProvider.OPENAI, LLMProvider.CHATGPT_OAUTH}:
             text = await call_openai_responses_text(
+                client_factory=sdk_factories.openai_responses,
                 provider=provider,
                 model=model,
                 credential_kwargs=credential_kwargs,
@@ -634,13 +642,14 @@ async def generate_session_title_with_model(
                 call_context=call_context,
             )
         else:
-            response = await call_responses_model(
+            text = await call_provider_text(
+                sdk_factories=sdk_factories,
                 provider=provider,
                 model=model,
                 credential_kwargs=credential_kwargs,
-                input_items=input_items,
+                assembly_metadata=assembly_metadata,
+                input_text="Create a title from this request:\n" + context,
                 instructions=instructions,
-                stream=True,
                 max_output_tokens=_TITLE_RESPONSE_MAX_OUTPUT_TOKENS,
                 watchdog=watchdog,
                 timeout_policy=timeout_policy,
@@ -652,7 +661,6 @@ async def generate_session_title_with_model(
                     else None
                 ),
             )
-            text = await extract_response_text(response)
     except ModelProviderFailure:
         raise
     except ResponsesOutputError as exc:
@@ -667,8 +675,8 @@ async def generate_session_title_with_model(
             provider_error_type=exc.event_type,
             provider_error_param=exc.param,
         ) from None
-    except (LiteLLMOpenAIError, OpenAIBaseError) as exc:
-        failure = map_litellm_provider_error(exc, call_context=call_context)
+    except SDK_PROVIDER_ERRORS as exc:
+        failure = map_model_provider_error(exc, call_context=call_context)
         raise failure from None
     if not text:
         return None

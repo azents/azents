@@ -8,8 +8,10 @@ from collections.abc import AsyncIterable, AsyncIterator, Awaitable, Callable
 from typing import Annotated, Literal, Protocol, TypeVar, runtime_checkable
 
 import httpx
+import httpx2
+from anthropic import APITimeoutError as AnthropicAPITimeoutError
+from botocore.exceptions import ConnectTimeoutError, ReadTimeoutError
 from fastapi import Depends
-from litellm.exceptions import Timeout as LiteLLMTimeout
 from openai import APITimeoutError
 
 from azents.core.config import Config, ModelStreamTimeoutConfig
@@ -361,6 +363,7 @@ class ModelStreamWatchdog:
         *,
         policy: ModelStreamTimeoutPolicy,
         context: ModelStreamCallContext,
+        parsed_event_activity: Callable[[object], bool] | None,
     ) -> object:
         """Watch response-handle acquisition and return a watched iterable."""
         state = self._start_state(policy=policy, context=context)
@@ -390,7 +393,14 @@ class ModelStreamWatchdog:
                 state, outcome="timeout", failure_code=error.failure_code
             )
             raise error from None
-        except (LiteLLMTimeout, APITimeoutError) as exc:
+        except (
+            APITimeoutError,
+            AnthropicAPITimeoutError,
+            httpx.TimeoutException,
+            httpx2.TimeoutException,
+            ConnectTimeoutError,
+            ReadTimeoutError,
+        ) as exc:
             error = self._connect_error(state=state)
             self._log_terminal(
                 state, outcome="timeout", failure_code=error.failure_code
@@ -404,7 +414,11 @@ class ModelStreamWatchdog:
             self._log_terminal(state, outcome="completed", failure_code=None)
             return response
         return self.watch_iterable(
-            response, policy=policy, context=context, state=state
+            response,
+            policy=policy,
+            context=context,
+            state=state,
+            parsed_event_activity=parsed_event_activity,
         )
 
     async def watch_iterable(
@@ -413,6 +427,7 @@ class ModelStreamWatchdog:
         *,
         policy: ModelStreamTimeoutPolicy,
         context: ModelStreamCallContext,
+        parsed_event_activity: Callable[[T], bool] | None,
         state: _ModelStreamCallState | None = None,
     ) -> AsyncIterator[T]:
         """Yield parsed provider events within idle and absolute deadlines."""
@@ -464,7 +479,14 @@ class ModelStreamWatchdog:
                         failure_code=error.failure_code,
                     )
                     raise error from None
-                except (LiteLLMTimeout, APITimeoutError) as exc:
+                except (
+                    APITimeoutError,
+                    AnthropicAPITimeoutError,
+                    httpx.TimeoutException,
+                    httpx2.TimeoutException,
+                    ConnectTimeoutError,
+                    ReadTimeoutError,
+                ) as exc:
                     cleanup_started = True
                     await self._cleanup_after_timeout(
                         operation,
@@ -485,6 +507,11 @@ class ModelStreamWatchdog:
                         failure_code=None,
                     )
                     raise
+                if parsed_event_activity is not None and not parsed_event_activity(
+                    event
+                ):
+                    yield event
+                    continue
                 now = self.clock.time()
                 if call_state.first_event_at is None:
                     call_state.first_event_at = now

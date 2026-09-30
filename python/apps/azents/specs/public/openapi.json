@@ -28522,10 +28522,6 @@
             "type": "string",
             "title": "Provider Model Identifier"
           },
-          "runtime_model_identifier": {
-            "type": "string",
-            "title": "Runtime Model Identifier"
-          },
           "display_name": {
             "type": "string",
             "title": "Display Name"
@@ -28600,7 +28596,6 @@
           "id",
           "provider",
           "provider_model_identifier",
-          "runtime_model_identifier",
           "display_name",
           "normalized_capabilities",
           "supported_execution_options",

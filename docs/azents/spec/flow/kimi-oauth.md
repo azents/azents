@@ -18,13 +18,17 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/kimi_oauth_session.py
   - python/apps/azents/src/azents/engine/run/resolve.py
   - python/apps/azents/src/azents/core/llm_mapping.py
+  - python/apps/azents/src/azents/engine/events/pydantic_ai_lowering.py
+  - python/apps/azents/src/azents/engine/events/pydantic_ai_adapter.py
+  - python/apps/azents/src/azents/engine/events/pydantic_ai_output.py
+  - python/apps/azents/src/azents/engine/providers/**
   - typescript/apps/azents-web/src/features/llm-settings/**
   - typescript/apps/azents-web/src/features/agents/components/ModelCatalogPicker.tsx
   - typescript/apps/azents-web/src/features/chat/**
   - typescript/apps/azents-web/src/shared/subscription-usage/**
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
-last_verified_at: 2026-09-23
-spec_version: 3
+last_verified_at: 2026-09-30
+spec_version: 4
 ---
 
 # Kimi OAuth Flow
@@ -149,7 +153,7 @@ sequenceDiagram
     participant OAuth as Kimi OAuth runtime
     participant Auth as Kimi token endpoint
     participant DB as PostgreSQL
-    participant LiteLLM
+    participant Model as Pydantic AI / official OpenAI SDK
     participant Kimi as Kimi Code API
 
     Operation->>OAuth: Ensure fresh integration
@@ -169,8 +173,8 @@ sequenceDiagram
             OAuth-->>Operation: Retryable unavailable failure
         end
     end
-    Operation->>LiteLLM: moonshot/{model}, Kimi base URL, access token, compatibility headers
-    LiteLLM->>Kimi: Chat completion request
+    Operation->>Model: Exact model ID, Kimi base URL, access token, compatibility headers
+    Model->>Kimi: Chat completion request
 ```
 
 A refresh response may omit a new refresh token; in that case the existing refresh token is retained.
@@ -182,10 +186,12 @@ Permanent rejection maps to `refresh_required`; transport, rate limit, and provi
 to `temporarily_unavailable`. Only `connected` and `temporarily_unavailable` states may attempt
 another refresh without reconnecting.
 
-Runtime model identifiers use `moonshot/{provider_model_identifier}`. LiteLLM receives the Kimi Code
-API root as both base URL forms, `custom_llm_provider=moonshot`, the OAuth access token as API key,
-and Kimi compatibility headers. Kimi does not add a provider-native Azents lowerer; it uses the common
-LiteLLM adapter, provider-failure classification, retry, compaction, and title-generation boundaries.
+Runtime uses the exact saved provider model identifier. The Pydantic AI Chat Completions model
+receives an official OpenAI-compatible SDK client configured with the existing Kimi Code API root,
+OAuth access token and device compatibility headers. Shared Pydantic lowering/normalization retain
+Azents canonical history, native completion evidence, provider-failure classification, retries,
+compaction and titles. The `moonshot/` namespace remains a source-metadata lookup key, not a stored
+or reconstructed execution identifier.
 
 ## Integration-Scoped Model Catalog
 
@@ -275,6 +281,7 @@ message submission, or integration management.
 
 | Date | Version | Change | Rationale |
 |---|---:|---|---|
+| 2026-09-30 | 4 | Documented public Pydantic AI Chat Completions/SDK execution with raw model IDs | Retain Kimi OAuth device identity and existing engine ownership without the executable shared package |
 | 2026-09-23 | 3 | Documented the shared subscription reauthentication action for connected and failed integrations | Match the current connection-row and management-modal behavior |
 | 2026-09-04 | 2 | Mapped the shared subscription-usage state and container modules | Keep provider usage eligibility, retained-success refresh state, summary, and threshold presentation linked after the frontend boundary relocation |
 | 2026-07-19 | 1 | Documented Kimi device authorization, encrypted identity, refresh, catalog, Moonshot runtime routing, usage, and UI behavior | [ambiguous historical ADR reference](../../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-289) and validated implementation |

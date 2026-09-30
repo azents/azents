@@ -38,7 +38,6 @@ class TestModelCatalogEntryResponse(unittest.TestCase):
                 id = '',
                 provider = 'openai',
                 provider_model_identifier = '',
-                runtime_model_identifier = '',
                 display_name = '',
                 normalized_capabilities = azentspublicclient.models.model_capabilities.ModelCapabilities(
                     context_window = azentspublicclient.models.model_context_window.ModelContextWindow(
@@ -91,7 +90,6 @@ class TestModelCatalogEntryResponse(unittest.TestCase):
                 id = '',
                 provider = 'openai',
                 provider_model_identifier = '',
-                runtime_model_identifier = '',
                 display_name = '',
                 normalized_capabilities = azentspublicclient.models.model_capabilities.ModelCapabilities(
                     context_window = azentspublicclient.models.model_context_window.ModelContextWindow(

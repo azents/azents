@@ -10,7 +10,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     LLMCatalogAttemptStatus,
-    LLMCatalogLowererTarget,
     LLMCatalogPurpose,
     LLMCatalogScope,
     LLMProvider,
@@ -78,7 +77,6 @@ async def test_read_service_returns_latest_failed_attempt_without_snapshot() -> 
             provider=LLMProvider.AWS_BEDROCK,
             purpose=LLMCatalogPurpose.CONVERSATION,
             provider_integration_id="integration-id",
-            lowerer_target=LLMCatalogLowererTarget.LITELLM,
             current_snapshot_id=None,
             latest_attempt_id="attempt-id",
         ),

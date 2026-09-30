@@ -5,7 +5,7 @@ import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import TypeVar
 
-import httpx
+import httpx2
 import pytest
 from openai import APITimeoutError
 
@@ -356,11 +356,12 @@ async def test_open_response_classifies_provider_connect_timeout() -> None:
     watchdog = _watchdog(clock, policy=policy)
 
     async def fail_connect() -> object:
-        raise APITimeoutError(httpx.Request("POST", "https://example.test"))
+        raise APITimeoutError(httpx2.Request("POST", "https://example.test"))
 
     with pytest.raises(ModelStreamTimeoutError) as captured:
         await watchdog.open_response(
             fail_connect,
+            parsed_event_activity=None,
             policy=policy,
             context=_context(),
         )
@@ -386,6 +387,7 @@ async def test_open_response_enforces_application_connect_deadline() -> None:
     task = asyncio.create_task(
         watchdog.open_response(
             block_connect,
+            parsed_event_activity=None,
             policy=policy,
             context=_context(),
         )
@@ -413,6 +415,7 @@ async def test_parsed_event_idle_timeout_closes_cooperative_iterator() -> None:
             event
             async for event in watchdog.watch_iterable(
                 stream,
+                parsed_event_activity=None,
                 policy=policy,
                 context=_context(),
             )
@@ -441,6 +444,7 @@ async def test_all_parsed_events_reset_idle_deadline() -> None:
         event
         async for event in watchdog.watch_iterable(
             stream,
+            parsed_event_activity=None,
             policy=policy,
             context=_context(),
         )
@@ -460,6 +464,7 @@ async def test_absolute_attempt_cap_wins_despite_continuous_events() -> None:
     with pytest.raises(ModelStreamTimeoutError) as captured:
         async for event in watchdog.watch_iterable(
             stream,
+            parsed_event_activity=None,
             policy=policy,
             context=_context(),
         ):
@@ -479,6 +484,7 @@ async def test_consumer_close_releases_iterator_between_events() -> None:
     stream = TimedStream(clock, event_times=[1, 1])
     watched = watchdog.watch_iterable(
         stream,
+        parsed_event_activity=None,
         policy=policy,
         context=_context(),
     )
@@ -502,6 +508,7 @@ async def test_user_stop_preempts_simultaneous_idle_timeout() -> None:
     async def consume() -> None:
         async for _ in watchdog.watch_iterable(
             stream,
+            parsed_event_activity=None,
             policy=policy,
             context=_context(check_stop=check_stop),
         ):
@@ -537,6 +544,7 @@ async def test_timeout_adopts_non_cooperative_cleanup_and_closes_late_handle() -
     task = asyncio.create_task(
         watchdog.open_response(
             open_late,
+            parsed_event_activity=None,
             policy=policy,
             context=_context(),
         )
@@ -576,6 +584,7 @@ async def test_timeout_logs_late_operation_failure_without_changing_outcome(
     task = asyncio.create_task(
         watchdog.open_response(
             fail_late,
+            parsed_event_activity=None,
             policy=policy,
             context=_context(),
         )

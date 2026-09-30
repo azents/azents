@@ -1,9 +1,8 @@
 """Context compaction tests."""
 
-from collections.abc import AsyncIterator
-
+import httpx2
 import pytest
-from litellm.exceptions import ContextWindowExceededError
+from anthropic import BadRequestError
 from pytest import MonkeyPatch
 
 from azents.core.enums import LLMProvider
@@ -15,6 +14,7 @@ from azents.engine.context.compaction import (
     enforce_summary_char_budget,
     summarize_text_with_model,
 )
+from azents.engine.model_factories import get_model_sdk_factories
 from azents.engine.run.errors import (
     CompactionModelStreamTimeoutError,
     ModelStreamTimeoutError,
@@ -24,18 +24,6 @@ from azents.engine.run.provider_failure import (
     ModelProviderFailureCategory,
 )
 from azents.testing.model_stream import make_test_model_stream_watchdog
-
-
-class _ResponsesStreamEvent:
-    """Streaming Responses event for tests."""
-
-    def __init__(self, payload: dict[str, object]) -> None:
-        self._payload = payload
-
-    def model_dump(self, *, mode: str = "python") -> dict[str, object]:
-        """Return payload in the same shape as a Pydantic event."""
-        del mode
-        return self._payload
 
 
 class TestSummaryBudget:
@@ -175,6 +163,8 @@ class TestSummarizeTextWithModel:
 
         with pytest.raises(CompactionModelStreamTimeoutError) as raised:
             await summarize_text_with_model(
+                assembly_metadata=None,
+                sdk_factories=get_model_sdk_factories(),
                 watchdog=make_test_model_stream_watchdog(),
                 provider=LLMProvider.OPENAI,
                 provider_integration_id=None,
@@ -207,6 +197,8 @@ class TestSummarizeTextWithModel:
         )
 
         result = await summarize_text_with_model(
+            assembly_metadata=None,
+            sdk_factories=get_model_sdk_factories(),
             watchdog=make_test_model_stream_watchdog(),
             provider=LLMProvider.CHATGPT_OAUTH,
             provider_integration_id=None,
@@ -250,6 +242,8 @@ class TestSummarizeTextWithModel:
         )
 
         await summarize_text_with_model(
+            assembly_metadata=None,
+            sdk_factories=get_model_sdk_factories(),
             watchdog=make_test_model_stream_watchdog(),
             provider=LLMProvider.OPENAI,
             provider_integration_id=None,
@@ -266,387 +260,83 @@ class TestSummarizeTextWithModel:
         assert "max_output_tokens" not in calls[0]
         assert calls[0]["text"] == {"format": {"type": "text"}, "verbosity": "low"}
 
-    async def test_extracts_streaming_summary_text_helper(
-        self,
-        monkeypatch: MonkeyPatch,
-    ) -> None:
-        """Streaming response extraction helper keeps supporting legacy response."""
-        guarded_streams: list[object] = []
 
-        async def fake_aresponses(**kwargs: object) -> object:
-            calls.append(dict(kwargs))
+async def test_replacement_summary_uses_single_authorized_model_text_operation(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Replacement compaction keeps the selected ID, prompts and output budget."""
+    calls: list[dict[str, object]] = []
 
-            async def stream() -> AsyncIterator[_ResponsesStreamEvent]:
-                yield _ResponsesStreamEvent({"delta": "sum"})
-                yield _ResponsesStreamEvent({"delta": "mary"})
+    async def text_operation(**kwargs: object) -> str:
+        calls.append(kwargs)
+        return "summary"
 
-            return stream()
+    monkeypatch.setattr(
+        "azents.engine.context.compaction.call_provider_text", text_operation
+    )
+    summary = await summarize_text_with_model(
+        assembly_metadata=None,
+        sdk_factories=get_model_sdk_factories(),
+        watchdog=make_test_model_stream_watchdog(),
+        provider=LLMProvider.ANTHROPIC,
+        provider_integration_id="integration",
+        model="publisher/exact/model",
+        credential_kwargs={"api_key": "synthetic"},
+        system_prompt="System summary instructions",
+        user_prompt="User summary prefix\n",
+        conversation_text="[User]: hello",
+        max_output_tokens=4000,
+        session_id="session-1",
+    )
+    assert summary == "summary"
+    assert len(calls) == 1
+    assert calls[0]["model"] == "publisher/exact/model"
+    assert calls[0]["instructions"] == "System summary instructions"
+    assert calls[0]["input_text"] == "User summary prefix\n[User]: hello"
+    assert calls[0]["max_output_tokens"] == 4000
+    assert calls[0]["text"] is None
 
-        calls: list[dict[str, object]] = []
-        monkeypatch.setattr(
-            "azents.engine.responses.aresponses",
-            fake_aresponses,
+
+async def test_replacement_context_error_is_safe_and_never_retried_internally(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """The SDK's context failure retains its existing classified operation."""
+    attempts = 0
+
+    async def fail_context(**kwargs: object) -> str:
+        nonlocal attempts
+        attempts += 1
+        request = httpx2.Request("POST", "https://synthetic.test/messages")
+        raise BadRequestError(
+            "Context exhausted",
+            response=httpx2.Response(400, request=request),
+            body={
+                "error": {
+                    "type": "context_length_exceeded",
+                    "message": "Input too long",
+                }
+            },
         )
-        monkeypatch.setattr(
-            "azents.engine.responses.guard_litellm_streaming_logging",
-            guarded_streams.append,
-        )
 
-        result = await summarize_text_with_model(
+    monkeypatch.setattr(
+        "azents.engine.context.compaction.call_provider_text", fail_context
+    )
+    with pytest.raises(ModelProviderFailure) as caught:
+        await summarize_text_with_model(
+            assembly_metadata=None,
+            sdk_factories=get_model_sdk_factories(),
             watchdog=make_test_model_stream_watchdog(),
             provider=LLMProvider.ANTHROPIC,
-            provider_integration_id=None,
-            model="claude-sonnet-4-5",
-            credential_kwargs={"api_key": "test-key"},
-            system_prompt="summarize system",
-            user_prompt="summarize user\n",
+            provider_integration_id="integration",
+            model="publisher/exact/model",
+            credential_kwargs={"api_key": "synthetic"},
+            system_prompt="Summary instructions",
+            user_prompt="Summary prefix\n",
             conversation_text="[User]: hello",
             max_output_tokens=4000,
             session_id="session-1",
         )
-
-        assert result == "summary"
-        assert calls[0]["stream"] is True
-        assert calls[0]["max_output_tokens"] == 4000
-        assert calls[0]["text"] == {"format": {"type": "text"}, "verbosity": "low"}
-        assert len(guarded_streams) == 1
-
-    async def test_extracts_streaming_summary_text_from_item_delta(
-        self,
-        monkeypatch: MonkeyPatch,
-    ) -> None:
-        """Streaming response extraction helper also supports item.delta shape."""
-
-        async def fake_aresponses(**kwargs: object) -> object:
-            calls.append(dict(kwargs))
-
-            async def stream() -> AsyncIterator[_ResponsesStreamEvent]:
-                yield _ResponsesStreamEvent(
-                    {"type": "ResponseTextDeltaEvent", "item": {"delta": "sum"}}
-                )
-                yield _ResponsesStreamEvent(
-                    {"type": "ResponseTextDeltaEvent", "item": {"delta": "mary"}}
-                )
-
-            return stream()
-
-        calls: list[dict[str, object]] = []
-        monkeypatch.setattr(
-            "azents.engine.responses.aresponses",
-            fake_aresponses,
-        )
-
-        result = await summarize_text_with_model(
-            watchdog=make_test_model_stream_watchdog(),
-            provider=LLMProvider.ANTHROPIC,
-            provider_integration_id=None,
-            model="gpt-5.5",
-            credential_kwargs={"api_key": "test-key"},
-            system_prompt="summarize system",
-            user_prompt="summarize user\n",
-            conversation_text="[User]: hello",
-            max_output_tokens=4000,
-            session_id="session-1",
-        )
-
-        assert result == "summary"
-        assert calls[0]["stream"] is True
-
-    async def test_extracts_streaming_summary_text_from_completed_response(
-        self,
-        monkeypatch: MonkeyPatch,
-    ) -> None:
-        """When there is no delta, extract summary from completed response output."""
-
-        async def fake_aresponses(**kwargs: object) -> object:
-            calls.append(dict(kwargs))
-
-            async def stream() -> AsyncIterator[_ResponsesStreamEvent]:
-                yield _ResponsesStreamEvent(
-                    {
-                        "type": "ResponseCompletedEvent",
-                        "response": {
-                            "output": [
-                                {
-                                    "type": "message",
-                                    "content": [
-                                        {"type": "output_text", "text": "summary"}
-                                    ],
-                                }
-                            ]
-                        },
-                    }
-                )
-
-            return stream()
-
-        calls: list[dict[str, object]] = []
-        monkeypatch.setattr(
-            "azents.engine.responses.aresponses",
-            fake_aresponses,
-        )
-
-        result = await summarize_text_with_model(
-            watchdog=make_test_model_stream_watchdog(),
-            provider=LLMProvider.ANTHROPIC,
-            provider_integration_id=None,
-            model="gpt-5.5",
-            credential_kwargs={"api_key": "test-key"},
-            system_prompt="summarize system",
-            user_prompt="summarize user\n",
-            conversation_text="[User]: hello",
-            max_output_tokens=4000,
-            session_id="session-1",
-        )
-
-        assert result == "summary"
-        assert calls[0]["stream"] is True
-
-    async def test_extracts_streaming_summary_text_from_output_text_done(
-        self,
-        monkeypatch: MonkeyPatch,
-    ) -> None:
-        """Streaming response extraction helper supports done event text."""
-
-        async def fake_aresponses(**kwargs: object) -> object:
-            calls.append(dict(kwargs))
-
-            async def stream() -> AsyncIterator[_ResponsesStreamEvent]:
-                yield _ResponsesStreamEvent(
-                    {
-                        "type": "response.output_text.done",
-                        "text": "summary",
-                    }
-                )
-
-            return stream()
-
-        calls: list[dict[str, object]] = []
-        monkeypatch.setattr(
-            "azents.engine.responses.aresponses",
-            fake_aresponses,
-        )
-
-        result = await summarize_text_with_model(
-            watchdog=make_test_model_stream_watchdog(),
-            provider=LLMProvider.ANTHROPIC,
-            provider_integration_id=None,
-            model="gpt-5.5",
-            credential_kwargs={"api_key": "test-key"},
-            system_prompt="summarize system",
-            user_prompt="summarize user\n",
-            conversation_text="[User]: hello",
-            max_output_tokens=4000,
-            session_id="session-1",
-        )
-
-        assert result == "summary"
-        assert calls[0]["stream"] is True
-
-    async def test_done_text_takes_precedence_over_delta_fragments(
-        self,
-        monkeypatch: MonkeyPatch,
-    ) -> None:
-        """Use completed text from done event instead of delta fragments."""
-
-        async def fake_aresponses(**kwargs: object) -> object:
-            calls.append(dict(kwargs))
-
-            async def stream() -> AsyncIterator[_ResponsesStreamEvent]:
-                yield _ResponsesStreamEvent(
-                    {"type": "response.output_text.delta", "delta": "partial"}
-                )
-                yield _ResponsesStreamEvent(
-                    {
-                        "type": "response.output_text.done",
-                        "text": "final summary",
-                    }
-                )
-
-            return stream()
-
-        calls: list[dict[str, object]] = []
-        monkeypatch.setattr(
-            "azents.engine.responses.aresponses",
-            fake_aresponses,
-        )
-
-        result = await summarize_text_with_model(
-            watchdog=make_test_model_stream_watchdog(),
-            provider=LLMProvider.ANTHROPIC,
-            provider_integration_id=None,
-            model="gpt-5.5",
-            credential_kwargs={"api_key": "test-key"},
-            system_prompt="summarize system",
-            user_prompt="summarize user\n",
-            conversation_text="[User]: hello",
-            max_output_tokens=4000,
-            session_id="session-1",
-        )
-
-        assert result == "final summary"
-        assert calls[0]["stream"] is True
-
-    async def test_extracts_summary_text_from_response_output_text_dict(
-        self,
-        monkeypatch: MonkeyPatch,
-    ) -> None:
-        """Use output_text from non-stream dict response as summary too."""
-
-        async def fake_aresponses(**kwargs: object) -> dict[str, object]:
-            calls.append(dict(kwargs))
-            return {"output_text": "summary"}
-
-        calls: list[dict[str, object]] = []
-        monkeypatch.setattr(
-            "azents.engine.responses.aresponses",
-            fake_aresponses,
-        )
-
-        result = await summarize_text_with_model(
-            watchdog=make_test_model_stream_watchdog(),
-            provider=LLMProvider.ANTHROPIC,
-            provider_integration_id=None,
-            model="gpt-5.5",
-            credential_kwargs={"api_key": "test-key"},
-            system_prompt="summarize system",
-            user_prompt="summarize user\n",
-            conversation_text="[User]: hello",
-            max_output_tokens=4000,
-            session_id="session-1",
-        )
-
-        assert result == "summary"
-        assert calls[0]["stream"] is True
-
-    async def test_propagates_context_window_error_without_internal_retry(
-        self,
-        monkeypatch: MonkeyPatch,
-    ) -> None:
-        """Context failures cross the compaction boundary for Run retry."""
-
-        async def fake_aresponses(**kwargs: object) -> object:
-            calls.append(dict(kwargs))
-
-            async def failed_stream() -> AsyncIterator[_ResponsesStreamEvent]:
-                yield _ResponsesStreamEvent(
-                    {
-                        "type": "error",
-                        "error": {
-                            "code": "context_length_exceeded",
-                            "message": (
-                                "Your input exceeds the context window of this "
-                                "model. Please adjust your input and try again."
-                            ),
-                        },
-                    }
-                )
-
-            return failed_stream()
-
-        calls: list[dict[str, object]] = []
-        monkeypatch.setattr("azents.engine.responses.aresponses", fake_aresponses)
-
-        with pytest.raises(ModelProviderFailure) as raised:
-            await summarize_text_with_model(
-                watchdog=make_test_model_stream_watchdog(),
-                provider=LLMProvider.ANTHROPIC,
-                provider_integration_id=None,
-                model="gpt-5.4-mini",
-                credential_kwargs={"api_key": "test-key"},
-                system_prompt="summarize system",
-                user_prompt="summarize user\n",
-                conversation_text="[User]: hello",
-                max_output_tokens=4000,
-                session_id="session-1",
-            )
-
-        assert len(calls) == 1
-        assert raised.value.operation == "compaction"
-        assert raised.value.category is ModelProviderFailureCategory.CONTEXT_LIMIT
-        assert raised.value.provider_code == "context_length_exceeded"
-        assert "exceeds the context window" in raised.value.user_message
-
-    async def test_propagates_non_context_stream_provider_failure(
-        self,
-        monkeypatch: MonkeyPatch,
-    ) -> None:
-        """Non-context provider failures retain typed compaction metadata."""
-
-        async def fake_aresponses(**kwargs: object) -> object:
-            calls.append(dict(kwargs))
-
-            async def stream() -> AsyncIterator[_ResponsesStreamEvent]:
-                yield _ResponsesStreamEvent(
-                    {
-                        "type": "response.failed",
-                        "response": {
-                            "error": {
-                                "code": "bad_request",
-                                "message": "The request is invalid.",
-                            }
-                        },
-                    }
-                )
-
-            return stream()
-
-        calls: list[dict[str, object]] = []
-        monkeypatch.setattr("azents.engine.responses.aresponses", fake_aresponses)
-
-        with pytest.raises(ModelProviderFailure) as raised:
-            await summarize_text_with_model(
-                watchdog=make_test_model_stream_watchdog(),
-                provider=LLMProvider.ANTHROPIC,
-                provider_integration_id="integration-compact",
-                model="gpt-5.4-mini",
-                credential_kwargs={"api_key": "test-key"},
-                system_prompt="summarize system",
-                user_prompt="summarize user\n",
-                conversation_text="[User]: hello",
-                max_output_tokens=4000,
-                session_id="session-1",
-            )
-
-        assert len(calls) == 1
-        assert raised.value.operation == "compaction"
-        assert raised.value.category is ModelProviderFailureCategory.INVALID_REQUEST
-        assert raised.value.provider_code == "bad_request"
-        assert raised.value.provider_message == "The request is invalid."
-        assert raised.value.integration == "integration-compact"
-
-    async def test_propagates_litellm_context_window_exception(
-        self,
-        monkeypatch: MonkeyPatch,
-    ) -> None:
-        """LiteLLM context failures also use the common provider contract."""
-
-        async def fake_aresponses(**kwargs: object) -> object:
-            calls.append(dict(kwargs))
-            raise ContextWindowExceededError(
-                "input exceeds context window",
-                model="gpt-5.4-mini",
-                llm_provider="openai",
-            )
-
-        calls: list[dict[str, object]] = []
-        monkeypatch.setattr("azents.engine.responses.aresponses", fake_aresponses)
-
-        with pytest.raises(ModelProviderFailure) as raised:
-            await summarize_text_with_model(
-                watchdog=make_test_model_stream_watchdog(),
-                provider=LLMProvider.ANTHROPIC,
-                provider_integration_id=None,
-                model="gpt-5.4-mini",
-                credential_kwargs={"api_key": "test-key"},
-                system_prompt="summarize system",
-                user_prompt="summarize user\n",
-                conversation_text="[User]: hello",
-                max_output_tokens=4000,
-                session_id="session-1",
-            )
-
-        assert len(calls) == 1
-        assert raised.value.operation == "compaction"
-        assert raised.value.category is ModelProviderFailureCategory.CONTEXT_LIMIT
-        assert raised.value.provider_error_type == "ContextWindowExceededError"
+    assert attempts == 1
+    assert caught.value.operation == "compaction"
+    assert caught.value.category is ModelProviderFailureCategory.CONTEXT_LIMIT
+    assert caught.value.route_model == "publisher/exact/model"

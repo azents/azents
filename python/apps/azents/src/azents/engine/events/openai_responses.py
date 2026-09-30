@@ -13,6 +13,7 @@ from collections.abc import (
     Sequence,
 )
 from typing import (
+    TYPE_CHECKING,
     Any,
     Literal,
     Protocol,
@@ -22,6 +23,10 @@ from typing import (
     runtime_checkable,
 )
 
+if TYPE_CHECKING:
+    from azents.engine.model_factory_types import OpenAIResponsesClientFactory
+
+import httpx2
 from openai import (
     APIError,
     APIStatusError,
@@ -114,7 +119,6 @@ from azents.engine.model_stream import (
     ModelStreamTimeoutPolicy,
     ModelStreamWatchdog,
     close_stream_response,
-    connect_only_http_timeout,
 )
 from azents.engine.run.errors import ModelStreamCallKind
 from azents.engine.run.model_transport import ModelTransportKey, ModelTransportState
@@ -530,7 +534,7 @@ def create_openai_responses_client(
 
 def _suppress_openai_wire_loggers() -> None:
     """Keep SDK and transport wire diagnostics below the application log boundary."""
-    for name in ("openai", "httpx", "httpcore", "websockets"):
+    for name in ("openai", "httpx", "httpx2", "httpcore", "websockets"):
         logging.getLogger(name).setLevel(logging.WARNING)
 
 
@@ -709,6 +713,7 @@ class OpenAIResponsesModelAdapter:
                 open_response,
                 policy=timeout_policy,
                 context=call_context,
+                parsed_event_activity=None,
             )
             if not _is_response_event_stream(response):
                 raise RuntimeError("OpenAI Responses call returned a non-stream")
@@ -852,7 +857,7 @@ class OpenAIResponsesModelAdapter:
             **self._response_create_kwargs(request, plan=plan),
             extra_headers=_optional_headers(options, "extra_headers"),
             extra_body=_stop_extra_body(options),
-            timeout=connect_only_http_timeout(connect_timeout_seconds),
+            timeout=httpx2.Timeout(None, connect=connect_timeout_seconds),
         )
 
     async def _create_websocket_stream(
@@ -1813,6 +1818,7 @@ def _optional_usage_detail(details: object, field: str) -> int | None:
 
 async def call_openai_responses_text(
     *,
+    client_factory: OpenAIResponsesClientFactory,
     provider: LLMProvider,
     model: str,
     credential_kwargs: Mapping[str, object],
@@ -1824,7 +1830,7 @@ async def call_openai_responses_text(
     call_context: ModelStreamCallContext,
 ) -> str:
     """Run one operation-scoped standard-dialect Responses text call."""
-    client = create_openai_responses_client(
+    client = client_factory(
         config=openai_responses_client_config(
             provider=provider,
             credential_kwargs=credential_kwargs,

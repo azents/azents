@@ -52,6 +52,7 @@ from azents.engine.events.types import (
     NativeArtifact,
     UserMessagePayload,
 )
+from azents.engine.model_factories import get_model_sdk_factories
 from azents.engine.model_stream import ModelStreamCallContext
 from azents.engine.run.provider_failure import (
     UnclassifiedModelProviderError,
@@ -216,21 +217,23 @@ class TestSessionTitleHelpers:
         self,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """Generated title delegates to the shared Responses helper."""
+        """Generated title delegates to the authorized single-dispatch helper."""
         calls: list[dict[str, object]] = []
 
-        async def fake_call_responses_model(**kwargs: object) -> object:
+        async def fake_call_provider_text(**kwargs: object) -> str:
             calls.append(kwargs)
-            return {"output_text": "Insurance option comparison"}
+            return "Insurance option comparison"
 
         monkeypatch.setattr(
             session_title_module,
-            "call_responses_model",
-            fake_call_responses_model,
+            "call_provider_text",
+            fake_call_provider_text,
         )
 
         watchdog = make_test_model_stream_watchdog()
         title = await generate_session_title_with_model(
+            assembly_metadata=None,
+            sdk_factories=get_model_sdk_factories(),
             provider=LLMProvider.ANTHROPIC,
             provider_integration_id=None,
             model="anthropic/test",
@@ -245,18 +248,14 @@ class TestSessionTitleHelpers:
         assert title == "Insurance option comparison"
         assert calls == [
             {
+                "sdk_factories": calls[0]["sdk_factories"],
                 "provider": LLMProvider.ANTHROPIC,
                 "model": "anthropic/test",
                 "credential_kwargs": {},
-                "input_items": [
-                    {
-                        "role": "user",
-                        "content": "Create a title from this request:\n"
-                        "Compare two insurance options",
-                    }
-                ],
+                "assembly_metadata": None,
+                "input_text": "Create a title from this request:\n"
+                "Compare two insurance options",
                 "instructions": calls[0]["instructions"],
-                "stream": True,
                 "max_output_tokens": 80,
                 "watchdog": watchdog,
                 "timeout_policy": calls[0]["timeout_policy"],
@@ -295,6 +294,8 @@ class TestSessionTitleHelpers:
 
         watchdog = make_test_model_stream_watchdog()
         title = await generate_session_title_with_model(
+            assembly_metadata=None,
+            sdk_factories=get_model_sdk_factories(),
             provider=provider,
             provider_integration_id="integration-title",
             model="gpt-test",
@@ -706,17 +707,19 @@ class TestSessionTitleHelpers:
         """OpenRouter receives require_parameters only for Structured titles."""
         calls: list[dict[str, object]] = []
 
-        async def fake_call_responses_model(**kwargs: object) -> object:
+        async def fake_call_provider_text(**kwargs: object) -> str:
             calls.append(kwargs)
-            return {"output_text": '{"title":"OpenRouter title"}'}
+            return '{"title":"OpenRouter title"}'
 
         monkeypatch.setattr(
             session_title_module,
-            "call_responses_model",
-            fake_call_responses_model,
+            "call_provider_text",
+            fake_call_provider_text,
         )
 
         title = await generate_session_title_with_model(
+            assembly_metadata=None,
+            sdk_factories=get_model_sdk_factories(),
             provider=LLMProvider.OPENROUTER,
             provider_integration_id="integration-openrouter",
             model="openrouter/test",
@@ -746,6 +749,7 @@ class TestSessionTitleHelpers:
     ) -> None:
         """Model call failures are logged by the title service and not re-raised."""
         service = SessionTitleService(
+            sdk_factories=get_model_sdk_factories(),
             model_metadata_service=make_test_model_metadata_service(snapshot=None),
             session_title_repository=_session_title_repository(
                 strict_json_schema=None,
@@ -837,6 +841,7 @@ class TestSessionTitleHelpers:
     ) -> None:
         """Standalone title generation does not retry unclassified outcomes."""
         service = SessionTitleService(
+            sdk_factories=get_model_sdk_factories(),
             model_metadata_service=make_test_model_metadata_service(snapshot=None),
             session_title_repository=_session_title_repository(
                 strict_json_schema=None,
@@ -914,6 +919,7 @@ class TestSessionTitleHelpers:
 
         title_repository = MutableTitleRepository()
         service = SessionTitleService(
+            sdk_factories=get_model_sdk_factories(),
             model_metadata_service=make_test_model_metadata_service(snapshot=None),
             session_title_repository=SessionTitleRepository(
                 agent_repository=_AgentRepository(),
@@ -1026,6 +1032,7 @@ class TestSessionTitleHelpers:
 
         repository = WinningRepository()
         service = SessionTitleService(
+            sdk_factories=get_model_sdk_factories(),
             model_metadata_service=make_test_model_metadata_service(snapshot=None),
             session_title_repository=SessionTitleRepository(
                 agent_repository=_AgentRepository(),
@@ -1144,6 +1151,7 @@ class TestSessionTitleHelpers:
             session_title_module, "generate_session_title_with_model", generate_title
         )
         service = SessionTitleService(
+            sdk_factories=get_model_sdk_factories(),
             model_metadata_service=make_test_model_metadata_service(snapshot=None),
             session_title_repository=SessionTitleRepository(
                 agent_repository=_AgentRepository(),
@@ -1395,6 +1403,7 @@ def _title_service(
     max_retries: int = 0,
 ) -> SessionTitleService:
     return SessionTitleService(
+        sdk_factories=get_model_sdk_factories(),
         model_metadata_service=make_test_model_metadata_service(snapshot=None),
         session_title_repository=_session_title_repository(
             strict_json_schema=strict_json_schema,

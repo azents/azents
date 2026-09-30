@@ -418,8 +418,10 @@ class TestModelSelectionReadiness:
         unknown = entries["new-publisher/frontier-text"]
         assert unknown["provider"] == "openrouter"
         assert unknown["publisher"] == "other"
-        assert unknown["runtime_model_identifier"] == (
-            "openrouter/new-publisher/frontier-text"
+        assert unknown["provider_model_identifier"] == "new-publisher/frontier-text"
+        assert all(
+            "runtime_model_identifier" not in entry and "lowerer_target" not in entry
+            for entry in entries.values()
         )
         assert unknown["normalized_capabilities"]["modalities"] == {
             "input": ["text", "image"],

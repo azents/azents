@@ -60,7 +60,7 @@ def _key(
     return ToolRequestCompatibilityKey(
         provider=provider,
         adapter=adapter,
-        native_format="responses",
+        native_format="model_messages" if adapter == "pydantic_ai" else "responses",
         model_identifier=model_identifier,
         model_developer=model_developer,
         model_family=model_family,
@@ -141,7 +141,7 @@ def test_registry_rejects_same_specificity_overlap() -> None:
 def test_unknown_request_path_remains_unlimited() -> None:
     budget = resolve_tool_declaration_budget(
         registry=build_default_tool_request_compatibility_registry(),
-        key=_key(provider=LLMProvider.ANTHROPIC, adapter="litellm"),
+        key=_key(provider=LLMProvider.ANTHROPIC, adapter="pydantic_ai"),
         provider_hosted=ProviderHostedToolDeclarationCounts(
             total_tools=2,
             function_declarations=0,
@@ -159,7 +159,7 @@ def test_xai_limit_counts_provider_hosted_tools() -> None:
         registry=build_default_tool_request_compatibility_registry(),
         key=_key(
             provider=LLMProvider.XAI,
-            adapter="litellm",
+            adapter="pydantic_ai",
             model_identifier="grok-4",
             model_developer=LLMModelDeveloper.XAI,
             model_family="grok-4",
@@ -182,7 +182,7 @@ def test_vertex_google_limit_counts_only_function_declarations() -> None:
         registry=build_default_tool_request_compatibility_registry(),
         key=_key(
             provider=LLMProvider.GOOGLE_VERTEX_AI,
-            adapter="litellm",
+            adapter="pydantic_ai",
             model_identifier="gemini-2.5-pro",
             model_developer=LLMModelDeveloper.GOOGLE,
             model_family="gemini-2.5-pro",
@@ -205,7 +205,7 @@ def test_vertex_anthropic_does_not_inherit_google_limit() -> None:
         registry=build_default_tool_request_compatibility_registry(),
         key=_key(
             provider=LLMProvider.GOOGLE_VERTEX_AI,
-            adapter="litellm",
+            adapter="pydantic_ai",
             model_identifier="claude-sonnet-4@20250514",
             model_developer=LLMModelDeveloper.ANTHROPIC,
             model_family="claude-sonnet-4",
@@ -225,7 +225,7 @@ def test_direct_gemini_api_remains_unmatched() -> None:
         registry=build_default_tool_request_compatibility_registry(),
         key=_key(
             provider=LLMProvider.GOOGLE_GEMINI,
-            adapter="litellm",
+            adapter="pydantic_ai",
             model_identifier="gemini-2.5-pro",
             model_developer=LLMModelDeveloper.GOOGLE,
             model_family="gemini-2.5-pro",

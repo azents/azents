@@ -16,16 +16,18 @@ code_paths:
   - python/apps/azents/src/azents/services/llm_provider_integration/**
   - python/apps/azents/src/azents/services/model_listing/**
   - python/apps/azents/src/azents/services/llm_catalog/**
-  - python/apps/azents/src/azents/engine/events/litellm_responses.py
-  - python/apps/azents/src/azents/engine/events/responses_lowering.py
+  - python/apps/azents/src/azents/engine/events/pydantic_ai_lowering.py
+  - python/apps/azents/src/azents/engine/events/pydantic_ai_adapter.py
+  - python/apps/azents/src/azents/engine/events/pydantic_ai_output.py
+  - python/apps/azents/src/azents/engine/providers/**
   - python/apps/azents/src/azents/engine/model_stream.py
   - typescript/apps/azents-web/src/features/llm-settings/**
   - typescript/apps/azents-web/src/features/agents/components/ModelCatalogPicker.tsx
   - typescript/apps/azents-web/src/shared/subscription-usage/**
   - testenv/azents/e2e/src/tests/required/public/test_llm_provider_integration.py
   - testenv/azents/e2e/src/tests/required/public/test_model_selection.py
-last_verified_at: 2026-09-15
-spec_version: 4
+last_verified_at: 2026-09-30
+spec_version: 5
 ---
 
 # OpenRouter API Key Provider Flow
@@ -94,7 +96,8 @@ The provider response is normalized under these rules:
 - Catalog reads use the stored projection and never call OpenRouter on the picker read path.
 - Failed refreshes use the common catalog-attempt status, retry, backoff, and stale-snapshot behavior.
 
-The runtime model identifier adds the LiteLLM routing prefix to the exact provider identifier, for example `openrouter/anthropic/claude-sonnet-4.6`.
+Runtime dispatch uses the exact saved provider identifier, for example
+`anthropic/claude-sonnet-4.6`, without an execution-library prefix or publisher-path stripping.
 
 ## Capability Projection
 
@@ -114,14 +117,18 @@ The initial projection does not advertise PDF, audio, video, image output, image
 Run resolution maps an OpenRouter integration to:
 
 - `api_key=<decrypted API key>`;
-- `base_url` and `api_base` set to `https://openrouter.ai/api/v1`;
-- `custom_llm_provider="openrouter"`;
+- `base_url` set to `https://openrouter.ai/api/v1`;
 - `extra_headers={"X-OpenRouter-Title": "Azents"}`;
-- a runtime model identifier prefixed with `openrouter/`.
+- the exact provider model identifier, including its publisher path.
 
 Azents does not send `HTTP-Referer` by default and does not add request-level upstream routing or privacy overrides. OpenRouter account and API-key settings remain authoritative for upstream selection and data policy.
 
-OpenRouter execution uses the LiteLLM Responses adapter and the common canonical transcript, streaming, usage, cost, and provider-failure paths. Response-handle acquisition has a provider-specific 60-second deadline instead of the common 15-second deadline so transient upstream routing and model preparation do not prematurely fail the attempt. Parsed-event idle and absolute-attempt deadlines remain on the common policy. Provider-first lowering applies these dialect rules:
+OpenRouter execution uses the Pydantic AI public Responses model boundary with an official
+OpenAI-compatible SDK client. It retains the Responses API envelope rather than switching to a
+Chat Completions wrapper. Canonical transcript, provider-safe failures, usage and captured-source
+cost normalization remain Azents-owned. Response-handle acquisition has a provider-specific
+60-second deadline; parsed-native-event idle and absolute-attempt deadlines remain on the common
+policy. Provider-first lowering applies these dialect rules:
 
 - semantic `web_search` lowers to the OpenRouter Responses tool type `openrouter:web_search`;
 - Anthropic cache-control hints are disabled even when the model publisher is Anthropic;
@@ -158,6 +165,7 @@ Later OpenRouter catalog changes do not mutate existing Agent or Workspace snaps
 
 | Date | Version | Change | Rationale |
 |---|---:|---|---|
+| 2026-09-30 | 5 | Replaced executable transport with the public Pydantic AI Responses/SDK boundary and exact raw model identity | Preserve the existing account, envelope and execution-control contracts |
 | 2026-09-04 | 4 | Mapped the shared subscription-usage state and container modules | Keep bounded-key usage eligibility, retained-success refresh state, summary, and threshold presentation linked after the frontend boundary relocation |
 | 2026-07-19 | 3 | Added API-key credit usage with bounded-key percentage and manager financial details; unlimited keys remain hidden | Reuse the shared usage surface without presenting a meaningless limit for `null` OpenRouter key limits |
 | 2026-07-19 | 2 | Extended OpenRouter response-handle acquisition to 60 seconds while preserving common stream idle and absolute bounds | Prevent transient upstream routing and model preparation from crossing the common 15-second acquisition deadline |

@@ -32,7 +32,6 @@ class ModelCatalogEntryResponse(BaseModel):
     id: StrictStr
     provider: LLMProvider
     provider_model_identifier: StrictStr
-    runtime_model_identifier: StrictStr
     display_name: StrictStr
     normalized_capabilities: ModelCapabilities
     supported_execution_options: List[ModelExecutionOptionId]
@@ -43,7 +42,7 @@ class ModelCatalogEntryResponse(BaseModel):
     source_metadata: Optional[Dict[str, Any]]
     projection_metadata: Optional[Dict[str, Any]]
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["id", "provider", "provider_model_identifier", "runtime_model_identifier", "display_name", "normalized_capabilities", "supported_execution_options", "lifecycle_status", "visibility_status", "publisher", "family", "source_metadata", "projection_metadata"]
+    __properties: ClassVar[List[str]] = ["id", "provider", "provider_model_identifier", "display_name", "normalized_capabilities", "supported_execution_options", "lifecycle_status", "visibility_status", "publisher", "family", "source_metadata", "projection_metadata"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -129,7 +128,6 @@ class ModelCatalogEntryResponse(BaseModel):
             "id": obj.get("id"),
             "provider": obj.get("provider"),
             "provider_model_identifier": obj.get("provider_model_identifier"),
-            "runtime_model_identifier": obj.get("runtime_model_identifier"),
             "display_name": obj.get("display_name"),
             "normalized_capabilities": ModelCapabilities.from_dict(obj["normalized_capabilities"]) if obj.get("normalized_capabilities") is not None else None,
             "supported_execution_options": obj.get("supported_execution_options"),

@@ -128,8 +128,8 @@ def _sanitize_tool_call_arguments(arguments: str, *, tc_id: str) -> str:
     """Validate tool call arguments JSON and replace malformed value.
 
     A model can cut JSON in the middle when exceeding max output tokens.
-    If such truncated JSON remains in conversation history, LiteLLM Bedrock
-    conversion can raise ``JSONDecodeError`` and permanently stick the session.
+    If truncated JSON remains in history, provider tool-argument conversion can
+    raise ``JSONDecodeError`` and permanently stick the session.
 
     :param arguments: Tool call arguments JSON string
     :param tc_id: Tool call ID for logging

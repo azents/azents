@@ -5,8 +5,8 @@ created: 2026-05-30
 spec_type: flow
 owner: "@Hardtack"
 touches_domains: [agent, conversation]
-last_verified_at: 2026-09-29
-spec_version: 23
+last_verified_at: 2026-09-30
+spec_version: 24
 code_paths:
   - python/apps/azents/src/azents/services/agent/**
   - python/apps/azents/src/azents/api/public/agent/**
@@ -19,6 +19,9 @@ code_paths:
   - python/apps/azents/src/azents/engine/events/types.py
   - python/apps/azents/src/azents/engine/events/execution.py
   - python/apps/azents/src/azents/engine/events/openai_responses.py
+  - python/apps/azents/src/azents/engine/events/pydantic_ai_output.py
+  - python/apps/azents/src/azents/engine/events/model_usage_pricing.py
+  - python/apps/azents/src/azents/core/model_pricing.py
   - typescript/apps/azents-web/src/shared/agent-session/AgentSessionHeader.tsx
   - typescript/apps/azents-web/src/features/agents/AgentContextPage.tsx
   - typescript/apps/azents-web/src/features/chat/components/ChatSessionView.tsx
@@ -79,7 +82,8 @@ Latest usage comes from event `TurnMarkerPayload.usage`. Usage is value returned
 
 For OpenAI API-key and ChatGPT OAuth turns, token fields and raw usage come directly from the official
 OpenAI SDK completed `ResponseUsage`; raw usage does not contain synthetic LiteLLM hidden parameters.
-Their `cost_usd` is a content-free LiteLLM public price-map estimate using the actual response tier.
+Their `cost_usd` is a content-free Azents estimate from the operation's captured validated-source
+pricing view, with optional typed method/source/tier provenance.
 Actual Ultrafast and unknown premium tiers leave cost unavailable; an Ultrafast request with
 missing, empty, or `auto` actual tier also cannot be priced as Standard. This does not fail
 successful output or remove provider token usage. REST history omits unavailable cost fields,
@@ -162,6 +166,8 @@ cd typescript && corepack pnpm --filter @azents/web typecheck
 
 ## Changelog
 
+- **2026-09-30** — v24. Documented captured-source cost estimation and truthful usage provenance
+  without changing the Context inspector's amount display or historical inference snapshot rules.
 - **2026-09-29** — v23. Added processing-speed intent and unavailable Ultrafast
   pricing without substituting Standard estimates or losing token usage.
 - **2026-09-13** — v22. Added immutable actual-candidate route details, including candidate role

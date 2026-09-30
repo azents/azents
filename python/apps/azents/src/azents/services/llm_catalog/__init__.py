@@ -6,7 +6,7 @@ import hashlib
 import json
 import os
 import re
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Annotated, Any, assert_never
 
 import httpx
@@ -20,7 +20,6 @@ from azents.core.crypto import CredentialCipher
 from azents.core.deps import get_credential_cipher
 from azents.core.enums import (
     LLMCatalogEntryVisibility,
-    LLMCatalogLowererTarget,
     LLMCatalogPurpose,
     LLMCatalogScope,
     LLMModelDeveloper,
@@ -47,7 +46,6 @@ from azents.core.llm_catalog_sync import (
     IntegrationCatalogSyncTrigger,
     evaluate_integration_catalog_sync_policy,
 )
-from azents.core.llm_mapping import to_runtime_model
 from azents.core.model_execution_options import ModelExecutionOptionId
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
@@ -182,7 +180,6 @@ def _developer_from_entry(entry: LLMCatalogEntry) -> LLMModelDeveloper:
         entry.publisher,
         entry.family,
         entry.provider_model_identifier,
-        entry.runtime_model_identifier,
     ]
     for candidate in candidates:
         if candidate is None:
@@ -300,8 +297,6 @@ class ModelCatalogEntryOutput(BaseModel):
     id: str = Field(description="Catalog entry ID")
     provider: LLMProvider = Field(description="Hosting provider")
     provider_model_identifier: str = Field(description="Provider model identifier")
-    lowerer_target: LLMCatalogLowererTarget = Field(description="Lowerer target")
-    runtime_model_identifier: str = Field(description="Runtime model identifier")
     display_name: str = Field(description="Display name")
     normalized_capabilities: ModelCapabilities = Field(
         description="Normalized capability contract"
@@ -325,8 +320,6 @@ class ModelCatalogEntryOutput(BaseModel):
             id=entry.id,
             provider=entry.provider,
             provider_model_identifier=entry.provider_model_identifier,
-            lowerer_target=entry.lowerer_target,
-            runtime_model_identifier=entry.runtime_model_identifier,
             display_name=entry.display_name,
             normalized_capabilities=ModelCapabilities.model_validate(
                 entry.normalized_capabilities
@@ -487,8 +480,6 @@ class ModelCatalogReadService:
                     "catalog_id": catalog.id,
                     "snapshot_id": entry.snapshot_id,
                     "entry_id": entry.id,
-                    "runtime_model_identifier": entry.runtime_model_identifier,
-                    "lowerer_target": entry.lowerer_target.value,
                     "lifecycle_status": entry.lifecycle_status.value,
                 },
                 source_metadata=entry.source_metadata,
@@ -756,7 +747,6 @@ class SystemCatalogProjectionService:
                 catalog = await self.catalog_repository.get_system_catalog(
                     session,
                     provider=provider,
-                    lowerer_target=LLMCatalogLowererTarget.LITELLM,
                     purpose=LLMCatalogPurpose.CONVERSATION,
                 )
                 if catalog is None:
@@ -833,7 +823,6 @@ class SystemCatalogProjectionService:
             catalog = await self.catalog_repository.ensure_system_catalog(
                 session,
                 provider=provider,
-                lowerer_target=LLMCatalogLowererTarget.LITELLM,
                 purpose=LLMCatalogPurpose.CONVERSATION,
             )
             attempt = await self.catalog_repository.begin_attempt(
@@ -907,6 +896,23 @@ class SystemCatalogProjectionService:
             )
 
 
+type IntegrationModelListing = Callable[
+    [LLMProviderIntegrationWithSecrets], Awaitable[ModelListingOutput]
+]
+
+
+async def provider_model_listing(
+    integration: LLMProviderIntegrationWithSecrets,
+) -> ModelListingOutput:
+    """Dispatch the existing provider-owned discovery operation."""
+    return await _list_provider_visible_models(integration)
+
+
+def get_integration_model_listing() -> IntegrationModelListing:
+    """Provide the normal discovery collaborator at process composition."""
+    return provider_model_listing
+
+
 @dataclasses.dataclass(frozen=True)
 class IntegrationCatalogProjectionService:
     """Project integration catalogs from provider visibility and LiteLLM metadata."""
@@ -926,6 +932,9 @@ class IntegrationCatalogProjectionService:
     ]
     source_sync_service: Annotated[
         LiteLLMSourceSyncService, Depends(LiteLLMSourceSyncService)
+    ]
+    provider_listing: Annotated[
+        IntegrationModelListing, Depends(get_integration_model_listing)
     ]
 
     async def sync_integration_catalog(
@@ -969,7 +978,6 @@ class IntegrationCatalogProjectionService:
                 session,
                 integration_id=integration.id,
                 provider=integration.provider,
-                lowerer_target=LLMCatalogLowererTarget.LITELLM,
                 purpose=LLMCatalogPurpose.CONVERSATION,
             )
         started_at = _utcnow()
@@ -1079,9 +1087,7 @@ class IntegrationCatalogProjectionService:
                     )
                 except LiteLLMSourceSyncError:
                     source_snapshot = None
-            listing = deterministic_listing or await _list_provider_visible_models(
-                integration
-            )
+            listing = deterministic_listing or await self.provider_listing(integration)
             if deterministic_listing is not None:
                 entries = project_deterministic_integration_entries(
                     integration_id=integration.id,
@@ -1431,11 +1437,6 @@ def project_deterministic_integration_entries(
             LLMCatalogEntryCreate(
                 provider=provider,
                 provider_model_identifier=candidate.model_identifier,
-                lowerer_target=LLMCatalogLowererTarget.LITELLM,
-                runtime_model_identifier=to_runtime_model(
-                    provider,
-                    candidate.model_identifier,
-                ),
                 display_name=candidate.model_display_name,
                 normalized_capabilities=candidate.normalized_capabilities.model_dump(
                     mode="json"
@@ -1452,7 +1453,6 @@ def project_deterministic_integration_entries(
                     "provider_listing_source": listing.summary.source,
                 },
                 projection_metadata={
-                    "lowerer_target": LLMCatalogLowererTarget.LITELLM.value,
                     "testenv_fixture": True,
                     "freshness_rank": model_freshness_rank(candidate.model_identifier),
                 },
@@ -1475,8 +1475,6 @@ def project_chatgpt_integration_entries(
             LLMCatalogEntryCreate(
                 provider=LLMProvider.CHATGPT_OAUTH,
                 provider_model_identifier=candidate.model_identifier,
-                lowerer_target=LLMCatalogLowererTarget.LITELLM,
-                runtime_model_identifier=candidate.model_identifier,
                 display_name=candidate.model_display_name,
                 normalized_capabilities=capabilities.model_dump(mode="json"),
                 supported_execution_options=[
@@ -1492,7 +1490,6 @@ def project_chatgpt_integration_entries(
                     "provider_metadata": candidate.source_metadata,
                 },
                 projection_metadata={
-                    "lowerer_target": LLMCatalogLowererTarget.LITELLM.value,
                     "freshness_rank": model_freshness_rank(candidate.model_identifier),
                 },
                 hidden_reason=None,
@@ -1513,11 +1510,6 @@ def project_kimi_integration_entries(
             LLMCatalogEntryCreate(
                 provider=LLMProvider.KIMI_OAUTH,
                 provider_model_identifier=candidate.model_identifier,
-                lowerer_target=LLMCatalogLowererTarget.LITELLM,
-                runtime_model_identifier=to_runtime_model(
-                    LLMProvider.KIMI_OAUTH,
-                    candidate.model_identifier,
-                ),
                 display_name=candidate.model_display_name,
                 normalized_capabilities=candidate.normalized_capabilities.model_dump(
                     mode="json"
@@ -1535,7 +1527,6 @@ def project_kimi_integration_entries(
                     "provider_metadata": candidate.source_metadata,
                 },
                 projection_metadata={
-                    "lowerer_target": LLMCatalogLowererTarget.LITELLM.value,
                     "target_metadata_match_required": False,
                     "freshness_rank": model_freshness_rank(candidate.model_identifier),
                 },
@@ -1557,11 +1548,6 @@ def project_openrouter_integration_entries(
             LLMCatalogEntryCreate(
                 provider=LLMProvider.OPENROUTER,
                 provider_model_identifier=candidate.model_identifier,
-                lowerer_target=LLMCatalogLowererTarget.LITELLM,
-                runtime_model_identifier=to_runtime_model(
-                    LLMProvider.OPENROUTER,
-                    candidate.model_identifier,
-                ),
                 display_name=candidate.model_display_name,
                 normalized_capabilities=candidate.normalized_capabilities.model_dump(
                     mode="json"
@@ -1579,7 +1565,6 @@ def project_openrouter_integration_entries(
                     "provider_metadata": candidate.source_metadata,
                 },
                 projection_metadata={
-                    "lowerer_target": LLMCatalogLowererTarget.LITELLM.value,
                     "target_metadata_match_required": False,
                     "freshness_rank": model_freshness_rank(candidate.model_identifier),
                 },
@@ -1618,11 +1603,6 @@ def project_xai_integration_entries(
             LLMCatalogEntryCreate(
                 provider=provider,
                 provider_model_identifier=candidate.model_identifier,
-                lowerer_target=LLMCatalogLowererTarget.LITELLM,
-                runtime_model_identifier=to_runtime_model(
-                    provider,
-                    candidate.model_identifier,
-                ),
                 display_name=candidate.model_display_name,
                 normalized_capabilities=capabilities.model_dump(mode="json"),
                 supported_execution_options=[
@@ -1645,7 +1625,6 @@ def project_xai_integration_entries(
                     ),
                 },
                 projection_metadata={
-                    "lowerer_target": LLMCatalogLowererTarget.LITELLM.value,
                     "target_metadata_match_required": False,
                     "matched": metadata is not None,
                     "freshness_rank": model_freshness_rank(candidate.model_identifier),
@@ -1763,8 +1742,6 @@ def project_integration_entries(
             LLMCatalogEntryCreate(
                 provider=provider,
                 provider_model_identifier=candidate.model_identifier,
-                lowerer_target=LLMCatalogLowererTarget.LITELLM,
-                runtime_model_identifier=source_key,
                 display_name=candidate.model_display_name,
                 normalized_capabilities=capabilities.model_dump(mode="json"),
                 supported_execution_options=[
@@ -1781,7 +1758,6 @@ def project_integration_entries(
                     "source_hash": source_snapshot.source_hash,
                 },
                 projection_metadata={
-                    "lowerer_target": LLMCatalogLowererTarget.LITELLM.value,
                     "matched": hidden_reason is None,
                     "freshness_rank": model_freshness_rank(candidate.model_identifier),
                     "exact_projection_key": source_key,
@@ -1824,8 +1800,6 @@ def project_system_entries(
                 provider_model_identifier=_provider_model_identifier(
                     provider, model_key
                 ),
-                lowerer_target=LLMCatalogLowererTarget.LITELLM,
-                runtime_model_identifier=model_key,
                 display_name=_display_name(model_key),
                 normalized_capabilities=_capabilities_from_litellm_metadata(
                     metadata,
@@ -1850,7 +1824,6 @@ def project_system_entries(
                     "source_hash": source_snapshot.source_hash,
                 },
                 projection_metadata={
-                    "lowerer_target": LLMCatalogLowererTarget.LITELLM.value,
                     "litellm_provider": metadata.get("litellm_provider"),
                     "freshness_rank": model_freshness_rank(
                         _provider_model_identifier(provider, model_key)

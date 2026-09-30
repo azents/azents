@@ -17,13 +17,16 @@ code_paths:
   - python/apps/azents/src/azents/services/llm_provider_integration/**
   - python/apps/azents/src/azents/services/llm_catalog/**
   - python/apps/azents/src/azents/services/model_listing/providers.py
-  - python/apps/azents/src/azents/engine/events/litellm_responses.py
+  - python/apps/azents/src/azents/engine/events/pydantic_ai_lowering.py
+  - python/apps/azents/src/azents/engine/events/pydantic_ai_adapter.py
+  - python/apps/azents/src/azents/engine/events/pydantic_ai_output.py
+  - python/apps/azents/src/azents/engine/providers/**
   - python/apps/azents/src/azents/engine/responses.py
   - python/apps/azents/src/azents/engine/run/resolve.py
   - typescript/apps/azents-web/src/features/llm-settings/**
   - testenv/azents/e2e/src/tests/required/public/test_llm_provider_integration.py
-last_verified_at: 2026-09-15
-spec_version: 4
+last_verified_at: 2026-09-30
+spec_version: 5
 ---
 
 # xAI API Key Provider Flow
@@ -66,7 +69,11 @@ The consolidated PostgreSQL baseline includes the `xai` value in the `llm_provid
 
 Each `xai` integration has its own stored integration catalog. Enabled creation, API-key replacement, re-enable, stale picker reads, and explicit sync use the shared integration-catalog lifecycle. Synchronization calls xAI's configured developer model endpoint through the installed OpenAI-compatible SDK using that integration's decrypted key.
 
-xAI's response is authoritative for model existence. An exact or expanded-alias LiteLLM `xai/<model>` entry may fill capabilities and bounded pricing metadata omitted by xAI, but a missing entry never hides the model. Unknown capabilities remain disabled. Normal picker reads use only the stored integration snapshot and do not call xAI. Provider-facing model identifiers omit the LiteLLM `xai/` prefix, while runtime mapping restores it before invocation.
+xAI's response is authoritative for model existence. An exact or expanded-alias retained-source
+`xai/<model>` entry may fill capabilities and bounded pricing metadata omitted by xAI, but a
+missing entry never hides the model. Unknown capabilities remain disabled. Picker reads use only
+the stored integration snapshot and do not call xAI. Runtime uses the same exact raw provider ID;
+`xai/` belongs only to the metadata source's lookup vocabulary.
 
 ## Runtime Resolution and Request Lowering
 
@@ -82,14 +89,23 @@ API-key integrations never enter the OAuth token refresh path. Refresh and entit
 
 Both xAI provider identities share these transport rules:
 
-- Responses requests use `https://api.x.ai/v1/responses` through LiteLLM.
+- Responses requests use the configured xAI HTTP endpoint (by default
+  `https://api.x.ai/v1/responses`) through the public Pydantic AI model boundary and official
+  OpenAI-compatible SDK; there is no gRPC mode or transport fallback.
 - System instructions are lowered as the first `system` input item; the top-level `instructions` field is omitted.
 - Provider-hosted `web_search` is lowered to the xAI Responses tool target.
 - Anthropic cache-control hints are not applied.
 
 A model-call HTTP 403 surfaces as a user-visible provider failure and does not trigger token-expiry refresh handling. In the separate OAuth refresh path, HTTP 403 persists `entitlement_denied` rather than treating the token as merely expired.
 
-LiteLLM HTTP, transport, and typed terminal failures are normalized into the common `ModelProviderFailure` contract only when their typed status or identifiers map to a known category. The default presentation preserves only the bounded, redacted provider-authored reason under `Model provider error`; credentials, headers, request/output data, raw bodies, and SDK serialization remain excluded. Every classified provider failure receives the complete current Run retry budget regardless of category or diagnostic retryability. Unclassified outcomes follow internal-error handling and do not create provider retry state or generic provider-error presentation.
+Official SDK/model HTTP, transport, and typed native-terminal failures enter the common
+`ModelProviderFailure` contract only when their typed status or identifiers map to a known category.
+The default presentation preserves only the bounded, redacted provider-authored reason under
+`Model provider error`; credentials, headers, request/output data, raw bodies, and SDK serialization
+remain excluded. Classified provider failures receive the complete current Run retry budget
+regardless of diagnostic retryability. Unclassified outcomes remain internal errors. Native
+response acquisition, parsed-event progress and successful completion are observed independently
+of common model assembly; SDK/model recovery cannot issue a hidden second generation.
 
 ## Frontend Behavior
 
@@ -110,6 +126,7 @@ LiteLLM HTTP, transport, and typed terminal failures are normalized into the com
 
 | Date | Version | Change | Rationale |
 |---|---:|---|---|
+| 2026-09-30 | 5 | Documented public Pydantic AI/official SDK HTTP Responses execution with raw model IDs | Preserve developer API-key identity and account discovery while removing executable package routing |
 | 2026-08-18 | 4 | Moved API-key model visibility to credential-specific integration catalogs with provider-authoritative discovery | [xai-260818/ADR](../../adr/xai-260818-integration-model-discovery.md) |
 | 2026-07-18 | 3 | Routed unclassified provider outcomes to internal-error handling without provider retry state | Preserve actionable incident tracebacks instead of generic unknown-provider logs |
 | 2026-07-18 | 2 | Applied the bounded common provider-failure contract and complete Run retry budget | [failures-260718/ADR](../../adr/failures-260718-failures-transparent.md) coordinated provider-failure cutover |

@@ -17,7 +17,6 @@ from azents.core.credentials import (
 from azents.core.crypto import CredentialCipher
 from azents.core.enums import (
     LLMCatalogEntryVisibility,
-    LLMCatalogLowererTarget,
     LLMCatalogPurpose,
     LLMModelLifecycleStatus,
     LLMProvider,
@@ -97,7 +96,6 @@ async def test_replace_current_snapshot_persists_snapshot_before_entries(
     catalog = await repository.ensure_system_catalog(
         rdb_session,
         provider=LLMProvider.OPENAI,
-        lowerer_target=LLMCatalogLowererTarget.LITELLM,
         purpose=LLMCatalogPurpose.CONVERSATION,
     )
 
@@ -109,8 +107,6 @@ async def test_replace_current_snapshot_persists_snapshot_before_entries(
             LLMCatalogEntryCreate(
                 provider=LLMProvider.OPENAI,
                 provider_model_identifier="gpt-4o",
-                lowerer_target=LLMCatalogLowererTarget.LITELLM,
-                runtime_model_identifier="gpt-4o",
                 display_name="GPT-4o",
                 normalized_capabilities=ModelCapabilities().model_dump(mode="json"),
                 supported_execution_options=[],
@@ -185,7 +181,6 @@ async def test_partial_catalog_upserts_survive_prepared_statement_reuse(
                 rdb_session,
                 integration_id=integration.id,
                 provider=LLMProvider.CHATGPT_OAUTH,
-                lowerer_target=LLMCatalogLowererTarget.LITELLM,
                 purpose=LLMCatalogPurpose.CONVERSATION,
             )
         ).id
@@ -196,7 +191,6 @@ async def test_partial_catalog_upserts_survive_prepared_statement_reuse(
             await repository.ensure_system_catalog(
                 rdb_session,
                 provider=LLMProvider.OPENAI,
-                lowerer_target=LLMCatalogLowererTarget.LITELLM,
                 purpose=LLMCatalogPurpose.CONVERSATION,
             )
         ).id
@@ -252,7 +246,6 @@ async def test_chatgpt_integration_never_falls_back_to_system_catalog(
     system_catalog = await repository.ensure_system_catalog(
         rdb_session,
         provider=LLMProvider.CHATGPT_OAUTH,
-        lowerer_target=LLMCatalogLowererTarget.LITELLM,
         purpose=LLMCatalogPurpose.CONVERSATION,
     )
     await repository.replace_current_snapshot(
@@ -263,8 +256,6 @@ async def test_chatgpt_integration_never_falls_back_to_system_catalog(
             LLMCatalogEntryCreate(
                 provider=LLMProvider.CHATGPT_OAUTH,
                 provider_model_identifier="gpt-system-only",
-                lowerer_target=LLMCatalogLowererTarget.LITELLM,
-                runtime_model_identifier="chatgpt/gpt-system-only",
                 display_name="System-only GPT",
                 normalized_capabilities=ModelCapabilities().model_dump(mode="json"),
                 supported_execution_options=[],
@@ -335,7 +326,6 @@ async def test_integration_attempt_claim_enforces_running_and_cooldown(
         rdb_session,
         integration_id=integration.id,
         provider=integration.provider,
-        lowerer_target=LLMCatalogLowererTarget.LITELLM,
         purpose=LLMCatalogPurpose.CONVERSATION,
     )
     now = datetime.datetime(2026, 7, 16, 12, 0, tzinfo=datetime.UTC)
@@ -419,14 +409,12 @@ async def test_catalog_identity_is_purpose_aware(
         rdb_session,
         integration_id=integration_id,
         provider=LLMProvider.OPENAI,
-        lowerer_target=LLMCatalogLowererTarget.LITELLM,
         purpose=LLMCatalogPurpose.CONVERSATION,
     )
     image = await repository.ensure_integration_catalog(
         rdb_session,
         integration_id=integration_id,
         provider=LLMProvider.OPENAI,
-        lowerer_target=LLMCatalogLowererTarget.LITELLM,
         purpose=LLMCatalogPurpose.IMAGE_GENERATION,
     )
 
@@ -466,7 +454,6 @@ async def test_image_catalog_fences_generation_and_preserves_last_good(
         rdb_session,
         integration_id=integration_id,
         provider=LLMProvider.OPENAI,
-        lowerer_target=LLMCatalogLowererTarget.LITELLM,
         purpose=LLMCatalogPurpose.IMAGE_GENERATION,
     )
     started_at = datetime.datetime.now(datetime.UTC)

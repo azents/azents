@@ -124,8 +124,8 @@ def test_project_integration_entries_requires_exact_target_projection() -> None:
     )
 
     assert entries[0].visibility_status == LLMCatalogEntryVisibility.SELECTABLE
-    assert entries[0].runtime_model_identifier == (
-        "bedrock/anthropic.claude-3-haiku-20240307-v1:0"
+    assert entries[0].provider_model_identifier == (
+        "anthropic.claude-3-haiku-20240307-v1:0"
     )
     assert entries[1].visibility_status == LLMCatalogEntryVisibility.HIDDEN
     assert entries[1].hidden_reason == "missing_target_projection"
@@ -170,14 +170,13 @@ def test_project_chatgpt_entries_does_not_require_litellm_metadata() -> None:
 
     [entry] = entries
     assert entry.visibility_status == LLMCatalogEntryVisibility.SELECTABLE
-    assert entry.runtime_model_identifier == "gpt-5.6-luna"
+    assert entry.provider_model_identifier == "gpt-5.6-luna"
     assert entry.normalized_capabilities["compatibility"] == {
         "provider_family": "chatgpt",
         "responses_api": True,
         "unsupported_media_policy": None,
     }
     assert entry.projection_metadata == {
-        "lowerer_target": "litellm",
         "freshness_rank": 5060,
     }
     assert entry.source_metadata is not None
@@ -224,11 +223,9 @@ def test_project_kimi_entries_does_not_require_litellm_metadata() -> None:
     [entry] = entries
     assert entry.visibility_status == LLMCatalogEntryVisibility.SELECTABLE
     assert entry.provider_model_identifier == "kimi-k2.5"
-    assert entry.runtime_model_identifier == "moonshot/kimi-k2.5"
     assert entry.publisher == "moonshot"
     assert entry.hidden_reason is None
     assert entry.projection_metadata == {
-        "lowerer_target": "litellm",
         "target_metadata_match_required": False,
         "freshness_rank": 2050,
     }
@@ -276,11 +273,9 @@ def test_project_openrouter_entries_does_not_require_litellm_metadata() -> None:
     [entry] = entries
     assert entry.visibility_status == LLMCatalogEntryVisibility.SELECTABLE
     assert entry.provider_model_identifier == "new-publisher/new-model"
-    assert entry.runtime_model_identifier == "openrouter/new-publisher/new-model"
     assert entry.publisher == "other"
     assert entry.hidden_reason is None
     assert entry.projection_metadata == {
-        "lowerer_target": "litellm",
         "target_metadata_match_required": False,
         "freshness_rank": 0,
     }
@@ -376,7 +371,7 @@ def test_project_xai_entries_preserves_provider_authority_and_enriches_gaps() ->
 
     [entry] = entries
     assert entry.visibility_status == LLMCatalogEntryVisibility.SELECTABLE
-    assert entry.runtime_model_identifier == "xai/grok-4.6"
+    assert entry.provider_model_identifier == "grok-4.6"
     capabilities = entry.normalized_capabilities
     assert capabilities["context_window"] == {
         "default_input_tokens": None,
@@ -563,6 +558,7 @@ async def test_deterministic_integration_sync_does_not_require_source_authority(
         transport=httpx.MockTransport(unexpected_source_request)
     ) as client:
         result = await IntegrationCatalogProjectionService(
+            provider_listing=llm_catalog_service.get_integration_model_listing(),
             session_manager=rdb_session_manager,
             catalog_repository=LLMCatalogRepository(),
             integration_repository=integration_repository,
@@ -704,6 +700,7 @@ async def test_xai_oauth_sync_refreshes_before_listing(
 
     async with httpx.AsyncClient() as client:
         result = await IntegrationCatalogProjectionService(
+            provider_listing=llm_catalog_service.get_integration_model_listing(),
             session_manager=rdb_session_manager,
             catalog_repository=LLMCatalogRepository(),
             integration_repository=integration_repository,
@@ -818,6 +815,7 @@ async def test_xai_failure_preserves_last_successful_snapshot(
     catalog_repository = LLMCatalogRepository()
     async with httpx.AsyncClient() as client:
         service = IntegrationCatalogProjectionService(
+            provider_listing=llm_catalog_service.get_integration_model_listing(),
             session_manager=rdb_session_manager,
             catalog_repository=catalog_repository,
             integration_repository=integration_repository,

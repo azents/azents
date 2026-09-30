@@ -22,6 +22,9 @@ code_paths:
   - python/apps/azents/src/azents/services/llm_catalog/__init__.py
   - python/apps/azents/src/azents/core/llm_mapping.py
   - python/apps/azents/src/azents/core/model_execution_options.py
+  - python/apps/azents/src/azents/core/model_pricing.py
+  - python/apps/azents/src/azents/services/model_metadata.py
+  - python/apps/azents/src/azents/engine/events/model_usage_pricing.py
   - python/apps/azents/src/azents/engine/events/**
   - python/apps/azents/src/azents/engine/context/compaction.py
   - python/apps/azents/src/azents/services/session_title.py
@@ -29,8 +32,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/llm-settings/**
   - typescript/apps/azents-web/src/shared/subscription-usage/**
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
-last_verified_at: 2026-09-29
-spec_version: 27
+last_verified_at: 2026-09-30
+spec_version: 28
 ---
 
 # ChatGPT OAuth Flow
@@ -196,7 +199,7 @@ Rules:
 - Transient provider failure is treated as retryable provider unavailable, and permanent rejection is stored as `refresh_required`.
 - Concurrent refresh race rereads latest integration and does not overwrite with failure if token is already refreshed.
 - Sampling, context compaction, and automatic Session title calls use the official OpenAI Python SDK.
-  LiteLLM is not a ChatGPT OAuth transport fallback.
+  There is no alternate model-library transport fallback for ChatGPT OAuth.
 - Primary sampling prefers the persistent Responses WebSocket when
   `AZ_OPENAI_RESPONSES_WEBSOCKET_ENABLED` is enabled and the resolved base URL exactly matches the
   ChatGPT OAuth backend. One sampling execution opens the socket lazily, serially reuses it across its
@@ -221,9 +224,11 @@ Rules:
 - Runtime requests use `originator: azents`, an `azents/<version>` User-Agent, and the connected `ChatGPT-Account-Id` rather than impersonating Codex CLI identity.
 - Sampling always uses the standard Responses contract regardless of model name or backend request-dialect hints. Tools remain in the top-level `tools` field and instructions remain in the top-level `instructions` field.
 - Compaction and title generation use the same standard Responses dialect. They send ordinary user input plus top-level instructions, no sampling tools, and omit `max_output_tokens` while retaining `store=false`, encrypted reasoning inclusion, and common client identity headers.
-- Completed SDK usage maps directly into the existing turn marker. `cost_usd` is a LiteLLM public
-  price-map estimate based only on content-free usage metadata and represents API pricing rather than
-  ChatGPT subscription billing; missing or invalid pricing leaves the estimate unset.
+- Completed SDK usage maps directly into the existing turn marker. Azents captures a validated
+  retained-source DB pricing view for the physical operation and computes `cost_usd` from
+  content-free usage and billing metadata. Optional typed provenance distinguishes an estimate
+  from a provider-reported charge. These estimates represent public API pricing rather than
+  ChatGPT subscription billing; missing, invalid or unsupported tier pricing remains unset.
 
 ## Processing-speed execution options
 
@@ -358,6 +363,7 @@ error boundary.
 
 | Date | Version | Change | Rationale |
 |---|---|---|---|
+| 2026-09-30 | 27 | Retained the native OpenAI runtime while replacing executable price-map access with captured DB pricing provenance | Keep OAuth/subscription authority separate from API cost estimates |
 | 2026-09-25 | 26 | Routed new subscription image requests through the client Images tool while retaining historical hosted-image replay | Make client image generation independent of conversation-model hosted-tool support |
 | 2026-09-24 | 25 | Mapped the reauthentication-target migration and corrected the connection-row management contract | Match the shared subscription modal and preserve the existing integration during reauthentication |
 | 2026-09-23 | 24 | Documented integration-targeted device reauthentication and preservation of existing credentials on unsuccessful attempts | Describe the implemented in-place subscription credential replacement |

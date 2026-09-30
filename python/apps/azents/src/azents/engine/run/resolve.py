@@ -30,7 +30,7 @@ from azents.core.builtin_tools import (
 from azents.core.enums import ExchangeFileStatus, LLMProvider
 from azents.core.inference_profile import RequestedInferenceProfile
 from azents.core.llm_catalog import ModelCapabilities, ModelReasoningEffort
-from azents.core.llm_mapping import build_credential_kwargs, to_runtime_model
+from azents.core.llm_mapping import build_credential_kwargs
 from azents.core.model_execution_options import (
     ModelExecutionOptionId,
     validate_execution_options,
@@ -52,6 +52,7 @@ from azents.engine.events.types import FileOutputPart
 from azents.engine.events.user_messages import make_run_user_message
 from azents.engine.io.attachments import RuntimeAttachment
 from azents.engine.io.user_input import RunUserMessage
+from azents.engine.model_assembly import ModelAssemblyMetadata
 from azents.engine.run.contracts import RunRequest, ToolkitBinding
 from azents.engine.run.types import (
     BuiltinToolSpec,
@@ -373,7 +374,7 @@ async def resolve_model_candidate_runtime(
                 integration_id=selection.llm_provider_integration_id,
             )
         )
-    runtime_model = to_runtime_model(selection.provider, selection.model_identifier)
+    runtime_model = selection.model_identifier
     source_snapshot = (
         context_source.snapshot
         if context_source is not None
@@ -767,10 +768,7 @@ async def resolve_invoke_input_with_model_source(
                     )
                 )
 
-    model = to_runtime_model(
-        main_selection.provider,
-        main_selection.model_identifier,
-    )
+    model = main_selection.model_identifier
     credential_kwargs = build_credential_kwargs(integration)
     params_result = _validate_model_parameters(
         agent_id=invoke_input.agent_id,
@@ -863,10 +861,7 @@ async def resolve_invoke_input_with_model_source(
         main_settings.context_window_tokens,
     )
 
-    compaction_model = to_runtime_model(
-        lightweight_selection.provider,
-        lightweight_selection.model_identifier,
-    )
+    compaction_model = lightweight_selection.model_identifier
     compaction_provider = lightweight_selection.provider
     compaction_credential_kwargs = build_credential_kwargs(lightweight_integration)
     compaction_input_tokens = resolve_model_input_tokens(
@@ -897,6 +892,12 @@ async def resolve_invoke_input_with_model_source(
                 model=model,
                 model_capabilities=main_selection.normalized_capabilities,
                 model_developer=model_developer,
+                model_assembly_metadata=ModelAssemblyMetadata.from_selection(
+                    main_selection
+                ),
+                compaction_assembly_metadata=ModelAssemblyMetadata.from_selection(
+                    lightweight_selection
+                ),
                 credential_kwargs=credential_kwargs,
                 workspace_id=agent.workspace_id,
                 agent_id=invoke_input.agent_id,

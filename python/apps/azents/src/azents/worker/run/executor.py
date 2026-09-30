@@ -38,7 +38,6 @@ from azents.core.inference_profile import (
     SessionInferenceState,
     validate_requested_profile_against_options,
 )
-from azents.core.llm_mapping import to_runtime_model
 from azents.core.model_operation import (
     ModelOperationCandidateOutcomeStatus,
     ModelOperationChainExhaustedError,
@@ -85,6 +84,7 @@ from azents.engine.hooks.types import (
     SessionStartHookContext,
 )
 from azents.engine.io.user_input import RunUserMessage
+from azents.engine.model_assembly import ModelAssemblyMetadata
 from azents.engine.run.commands import CommandHandler
 from azents.engine.run.contracts import (
     AgentEngineProtocol,
@@ -1345,6 +1345,9 @@ class RunExecutor:
         run_request = dataclasses.replace(
             run_request,
             max_input_tokens=turn_inference_state.effective_context_window_tokens,
+            model_assembly_metadata=ModelAssemblyMetadata.from_selection(
+                turn_inference_state.model_selection
+            ),
             context_window_tokens=turn_inference_state.effective_context_window_tokens,
             compaction_max_input_tokens=(
                 turn_inference_state.effective_context_window_tokens
@@ -1857,6 +1860,9 @@ class RunExecutor:
                     compaction_model=value.model,
                     compaction_provider=value.provider,
                     compaction_credential_kwargs=value.credential_kwargs,
+                    compaction_assembly_metadata=ModelAssemblyMetadata.from_selection(
+                        candidate.model_selection
+                    ),
                     compaction_max_input_tokens=value.effective_input_tokens,
                 ),
                 context_source=context_source,
@@ -2805,10 +2811,7 @@ class RunExecutor:
                 )
             candidate = operation.current_candidate
             selection = candidate.model_selection
-            runtime_model = to_runtime_model(
-                selection.provider,
-                selection.model_identifier,
-            )
+            runtime_model = selection.model_identifier
             if (
                 failure.route_integration != selection.llm_provider_integration_id
                 or failure.route_provider != selection.provider.value
@@ -3433,10 +3436,7 @@ class RunExecutor:
                 if resolved.failure:
                     return Failure(resolved.error)
                 resolved_request = resolved.value
-            compaction_model = to_runtime_model(
-                compaction_candidate.model_selection.provider,
-                compaction_candidate.model_selection.model_identifier,
-            )
+            compaction_model = compaction_candidate.model_selection.model_identifier
             compaction_capabilities = (
                 compaction_candidate.model_selection.normalized_capabilities
             )
@@ -3485,6 +3485,12 @@ class RunExecutor:
                     compaction_credential_kwargs=runtime.credential_kwargs,
                     compaction_max_input_tokens=runtime.effective_input_tokens,
                 )
+            resolved_request = dataclasses.replace(
+                resolved_request,
+                compaction_assembly_metadata=ModelAssemblyMetadata.from_selection(
+                    compaction_candidate.model_selection
+                ),
+            )
             effective_context_window_tokens = (
                 resolved_request.effective_max_input_tokens
             )
@@ -3695,6 +3701,9 @@ class RunExecutor:
                 compaction_model=value.model,
                 compaction_provider=value.provider,
                 compaction_credential_kwargs=value.credential_kwargs,
+                compaction_assembly_metadata=ModelAssemblyMetadata.from_selection(
+                    candidate.model_selection
+                ),
                 compaction_max_input_tokens=value.effective_input_tokens,
             ),
             context_source=context_source,

@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.core.credentials import PROVIDER_SECRET_TYPES, PROVIDERS_WITH_CONFIG
 from azents.core.crypto import CredentialCipher
 from azents.core.deps import get_credential_cipher
-from azents.core.enums import LLMCatalogLowererTarget, LLMCatalogPurpose, LLMProvider
+from azents.core.enums import LLMCatalogPurpose, LLMProvider
 from azents.core.llm_catalog import INTEGRATION_SCOPED_CATALOG_PROVIDERS
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
@@ -112,7 +112,6 @@ class LLMProviderIntegrationService:
                     session,
                     integration_id=integration.id,
                     provider=integration.provider,
-                    lowerer_target=LLMCatalogLowererTarget.LITELLM,
                     purpose=LLMCatalogPurpose.CONVERSATION,
                 )
         return LLMProviderIntegrationOutput.convert_from(integration)
@@ -173,7 +172,6 @@ class LLMProviderIntegrationService:
                             session,
                             integration_id=value.id,
                             provider=value.provider,
-                            lowerer_target=LLMCatalogLowererTarget.LITELLM,
                             purpose=LLMCatalogPurpose.CONVERSATION,
                         )
                 case Failure():

@@ -295,6 +295,8 @@ Operational signals remain operation outcome, timeout phase, retry progression, 
 
 User-visible preservation is primarily verified through real Azents API/worker/persistence/event paths against deterministic provider fixtures. Existing browser E2E covers history, Stop and presented usage/errors where applicable. Focused unit/SDK tests establish byte-level lowering and native proof; they complement rather than replace E2E.
 
+The requester clarified REQ-8 on 2026-09-30 (KST): keep E2E to core real-product flows and place complex condition combinations, native/SDK details, and boundary matrices in unit/contract tests. The table below maps required behavior, not a mandate to expand every supporting conditional permutation into E2E. Use representative core E2E cases and focused lower-level evidence together, retaining existing core product-boundary assertions.
+
 Run package-free bootstrap first, then operation/provider coverage, continuity and execution-control cases, catalog/context/pricing cases, and finally migrated-database E2E. Reuse and re-own existing watchdog/provider/catalog fixtures instead of deleting their acceptance assertions with the old adapter.
 
 | E2E family | Required cases and observable result | Requirements | Supporting deterministic evidence |
@@ -330,6 +332,8 @@ Record a prerequisite snapshot for each run: application commit, Design revision
 ### Evidence and CI policy
 
 Required CI runs deterministic provider E2E, targeted unit/contract tests, fresh and upgrade migrations, generated-client consistency, and package/import absence. It needs no paid provider credentials. A missing required deterministic fixture is a test failure, not a skip. Preserve the existing required E2E ownership and avoid making the cutover green by deleting failing coverage.
+
+REQ-8 requires E2E time strictly below 110% of the comparable main baseline; a slowdown of 10% or more rejects delivery. Compare equivalent runner resources and enabled gated suites, include fixture/setup/teardown and new producer overhead, and preserve baseline plus unchanged-SHA experiment artifacts. Complex conditions remain unit/contract coverage, not additional E2E permutations. Insufficient or incompatible timing evidence is inconclusive, not a passing performance claim. This requester-defined delivery-quality clarification leaves Design revision 1 and material mechanisms M1–M13 unchanged.
 
 Evidence includes command, exact commit/schema/dependency versions, case/provider/operation identity, expected versus observed terminal/usage/history/dispatch count, pass/fail/skip reason, and redacted event or browser artifacts. Source inspection, offline package probes, deterministic Azents E2E and authenticated verification are separately labeled.
 

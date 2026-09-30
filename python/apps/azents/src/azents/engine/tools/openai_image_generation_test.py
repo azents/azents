@@ -5,7 +5,7 @@ import json
 from collections.abc import Callable
 from io import BytesIO
 
-import httpx
+import httpx2
 import pytest
 from openai import AsyncOpenAI
 from PIL import Image
@@ -27,7 +27,7 @@ def _image() -> bytes:
 
 
 def _factory(
-    transport: httpx.MockTransport,
+    transport: httpx2.MockTransport,
     *,
     base_url: str = "https://api.openai.com/v1",
     headers: dict[str, str] | None = None,
@@ -39,7 +39,7 @@ def _factory(
             api_key="private-credential",
             base_url=base_url,
             default_headers=headers,
-            http_client=httpx.AsyncClient(transport=transport),
+            http_client=httpx2.AsyncClient(transport=transport),
             max_retries=0,
         )
 
@@ -61,18 +61,20 @@ async def test_generate_one_image_via_selected_endpoint_without_durable_base64(
     body = _image()
     encoded = base64.b64encode(body).decode()
 
-    def respond(request: httpx.Request) -> httpx.Response:
+    def respond(request: httpx2.Request) -> httpx2.Response:
         assert request.url == f"{base_url}/images/generations"
         assert request.headers["authorization"] == "Bearer private-credential"
         assert request.headers["chatgpt-account-id"] == "account-1"
         payload = json.loads(request.content)
         assert payload == {"model": model, "prompt": "Draw a blue square", "n": 1}
-        return httpx.Response(200, json={"created": 1, "data": [{"b64_json": encoded}]})
+        return httpx2.Response(
+            200, json={"created": 1, "data": [{"b64_json": encoded}]}
+        )
 
     tool = OpenAIImageGenerationExecutor(
         model_identifier=model,
         client_factory=_factory(
-            httpx.MockTransport(respond),
+            httpx2.MockTransport(respond),
             base_url=base_url,
             headers={"ChatGPT-Account-Id": "account-1"},
         ),
@@ -102,15 +104,15 @@ async def test_provider_failures_are_sanitized(
     status_code: int,
     message: str,
 ) -> None:
-    def respond(_request: httpx.Request) -> httpx.Response:
-        return httpx.Response(
+    def respond(_request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(
             status_code,
             json={"error": {"message": "private credential must not leak"}},
         )
 
     tool = OpenAIImageGenerationExecutor(
         model_identifier=OPENAI_IMAGE_DEFAULT_MODEL,
-        client_factory=_factory(httpx.MockTransport(respond)),
+        client_factory=_factory(httpx2.MockTransport(respond)),
         refresh_credential=None,
     ).make_tool()
 
@@ -123,12 +125,12 @@ async def test_provider_failures_are_sanitized(
 async def test_missing_or_invalid_image_fails_closed(
     data: list[dict[str, str | None]],
 ) -> None:
-    def respond(_request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={"created": 1, "data": data})
+    def respond(_request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(200, json={"created": 1, "data": data})
 
     tool = OpenAIImageGenerationExecutor(
         model_identifier=OPENAI_IMAGE_DEFAULT_MODEL,
-        client_factory=_factory(httpx.MockTransport(respond)),
+        client_factory=_factory(httpx2.MockTransport(respond)),
         refresh_credential=None,
     ).make_tool()
 
@@ -139,14 +141,14 @@ async def test_missing_or_invalid_image_fails_closed(
 async def test_tool_schema_hides_credentials_and_rejects_oversized_prompt() -> None:
     calls = 0
 
-    def respond(_request: httpx.Request) -> httpx.Response:
+    def respond(_request: httpx2.Request) -> httpx2.Response:
         nonlocal calls
         calls += 1
-        return httpx.Response(500)
+        return httpx2.Response(500)
 
     tool = OpenAIImageGenerationExecutor(
         model_identifier=OPENAI_IMAGE_DEFAULT_MODEL,
-        client_factory=_factory(httpx.MockTransport(respond)),
+        client_factory=_factory(httpx2.MockTransport(respond)),
         refresh_credential=None,
     ).make_tool()
 
@@ -167,17 +169,19 @@ async def test_subscription_refreshes_once_after_image_unauthorized() -> None:
     requests: list[str] = []
     refresh_count = 0
 
-    def respond(request: httpx.Request) -> httpx.Response:
+    def respond(request: httpx2.Request) -> httpx2.Response:
         requests.append(request.headers["authorization"])
         if request.headers["authorization"] == "Bearer expired-token":
-            return httpx.Response(401, json={"error": {"message": "expired"}})
-        return httpx.Response(200, json={"created": 1, "data": [{"b64_json": encoded}]})
+            return httpx2.Response(401, json={"error": {"message": "expired"}})
+        return httpx2.Response(
+            200, json={"created": 1, "data": [{"b64_json": encoded}]}
+        )
 
     def create() -> AsyncOpenAI:
         return AsyncOpenAI(
             api_key=credential,
             base_url="https://chatgpt.com/backend-api/codex",
-            http_client=httpx.AsyncClient(transport=httpx.MockTransport(respond)),
+            http_client=httpx2.AsyncClient(transport=httpx2.MockTransport(respond)),
             max_retries=0,
         )
 
@@ -202,10 +206,10 @@ async def test_subscription_stops_after_second_unauthorized() -> None:
     refresh_count = 0
     requests = 0
 
-    def respond(_request: httpx.Request) -> httpx.Response:
+    def respond(_request: httpx2.Request) -> httpx2.Response:
         nonlocal requests
         requests += 1
-        return httpx.Response(401, json={"error": {"message": "expired"}})
+        return httpx2.Response(401, json={"error": {"message": "expired"}})
 
     async def refresh() -> None:
         nonlocal refresh_count
@@ -213,7 +217,7 @@ async def test_subscription_stops_after_second_unauthorized() -> None:
 
     tool = OpenAIImageGenerationExecutor(
         model_identifier=OPENAI_IMAGE_DEFAULT_MODEL,
-        client_factory=_factory(httpx.MockTransport(respond)),
+        client_factory=_factory(httpx2.MockTransport(respond)),
         refresh_credential=refresh,
     ).make_tool()
     with pytest.raises(FunctionToolError, match="reconnect"):

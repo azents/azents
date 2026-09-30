@@ -16,7 +16,6 @@ from azents.core.credentials import ApiKeySecrets
 from azents.core.crypto import CredentialCipher
 from azents.core.enums import (
     LLMCatalogEntryVisibility,
-    LLMCatalogLowererTarget,
     LLMCatalogPurpose,
     LLMModelLifecycleStatus,
     LLMProvider,
@@ -151,7 +150,6 @@ async def _publish_flare(
         rdb_session,
         integration_id=integration_id,
         provider=LLMProvider.OPENAI,
-        lowerer_target=LLMCatalogLowererTarget.LITELLM,
         purpose=LLMCatalogPurpose.IMAGE_GENERATION,
     )
     started_at = datetime.datetime.now(datetime.UTC)

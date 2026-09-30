@@ -91,12 +91,6 @@ class LLMCatalogPurpose(enum.StrEnum):
     IMAGE_GENERATION = "image_generation"
 
 
-class LLMCatalogLowererTarget(enum.StrEnum):
-    """Runtime lowerer target used for catalog projection."""
-
-    LITELLM = "litellm"
-
-
 class LLMCatalogAttemptStatus(enum.StrEnum):
     """LLM catalog source/projection attempt status."""
 

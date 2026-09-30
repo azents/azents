@@ -10,7 +10,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import AgentSessionTitleSource
 from azents.core.inference_profile import RequestedInferenceProfile
-from azents.core.llm_mapping import to_runtime_model
 from azents.core.model_operation import (
     ModelOperationCandidateOutcomeStatus,
     ModelOperationChainExhaustedError,
@@ -164,8 +163,7 @@ class SessionTitleRepository:
             if (
                 failure.route_integration != selection.llm_provider_integration_id
                 or failure.route_provider != selection.provider.value
-                or failure.route_model
-                != to_runtime_model(selection.provider, selection.model_identifier)
+                or failure.route_model != selection.model_identifier
             ):
                 return None
             agent = await self.agent_repository.get_by_id(

@@ -1,12 +1,13 @@
 """Testenv-only deterministic model listing fixture."""
 
 from datetime import datetime, timezone
-from typing import Literal
+from typing import Literal, NamedTuple, assert_never
 
 from azents.core.enums import LLMModelDeveloper, LLMProvider
 from azents.core.llm_catalog import (
     ModelBuiltInToolCapabilities,
     ModelCapabilities,
+    ModelCompatibilityCapabilities,
     ModelContextWindow,
     ModelModalities,
     ModelModality,
@@ -33,6 +34,7 @@ DeterministicFixtureVariant = Literal[
     "deterministic-two-integrations",
     "deterministic-failure",
     "deterministic-brave-text-only",
+    "deterministic-provider-core",
 ]
 DETERMINISTIC_FIXTURE_VARIANTS: tuple[DeterministicFixtureVariant, ...] = (
     "deterministic-success",
@@ -44,6 +46,7 @@ DETERMINISTIC_FIXTURE_VARIANTS: tuple[DeterministicFixtureVariant, ...] = (
     "deterministic-two-integrations",
     "deterministic-failure",
     "deterministic-brave-text-only",
+    "deterministic-provider-core",
 )
 
 
@@ -69,6 +72,14 @@ def build_deterministic_listing(
     fetched_at = datetime.now(timezone.utc)
     source = f"testenv_fixture:{variant}"
     match variant:
+        case "deterministic-provider-core":
+            models = _provider_core_candidates(
+                provider=provider,
+                integration_id=integration_id,
+                source=source,
+                fetched_at=fetched_at,
+            )
+            skips = []
         case "deterministic-openrouter":
             if provider != LLMProvider.OPENROUTER:
                 msg = "The OpenRouter fixture requires provider=openrouter."
@@ -211,6 +222,122 @@ def build_deterministic_listing(
         ),
         skips=skips,
     )
+
+
+class _CoreModel(NamedTuple):
+    """Nominal provider-native identity, without cross-provider model aliases."""
+
+    identifier: str
+    developer: LLMModelDeveloper
+    family: str
+
+
+def _provider_core_candidates(
+    *,
+    provider: LLMProvider,
+    integration_id: str,
+    source: str,
+    fetched_at: datetime,
+) -> list[NormalizedModelCandidate]:
+    """Expose conservative native families for the small SDK smoke matrix."""
+    match provider:
+        case LLMProvider.OPENAI | LLMProvider.CHATGPT_OAUTH:
+            identities = [_CoreModel("gpt-5.5", LLMModelDeveloper.OPENAI, "gpt-5.5")]
+        case LLMProvider.XAI | LLMProvider.XAI_OAUTH:
+            identities = [_CoreModel("grok-4", LLMModelDeveloper.XAI, "grok-4")]
+        case LLMProvider.ANTHROPIC:
+            identities = [
+                _CoreModel(
+                    "claude-sonnet-4-6", LLMModelDeveloper.ANTHROPIC, "claude-sonnet"
+                )
+            ]
+        case LLMProvider.GOOGLE_GEMINI:
+            identities = [
+                _CoreModel("gemini-2.5-pro", LLMModelDeveloper.GOOGLE, "gemini"),
+                _CoreModel(
+                    "gemini-3.1-flash-image-preview", LLMModelDeveloper.GOOGLE, "gemini"
+                ),
+            ]
+        case LLMProvider.GOOGLE_VERTEX_AI:
+            identities = [
+                _CoreModel("gemini-2.5-pro", LLMModelDeveloper.GOOGLE, "gemini"),
+                _CoreModel(
+                    "publishers/anthropic/models/claude-sonnet-4-6",
+                    LLMModelDeveloper.ANTHROPIC,
+                    "claude-sonnet",
+                ),
+            ]
+        case LLMProvider.AWS_BEDROCK:
+            identities = [
+                _CoreModel(
+                    "anthropic.claude-3-haiku-20240307-v1:0",
+                    LLMModelDeveloper.ANTHROPIC,
+                    "claude-haiku",
+                ),
+                _CoreModel("amazon.nova-lite-v1:0", LLMModelDeveloper.OTHER, "nova"),
+                _CoreModel(
+                    "mistral.mistral-large-2407-v1:0",
+                    LLMModelDeveloper.MISTRAL,
+                    "mistral-large",
+                ),
+            ]
+        case LLMProvider.OPENROUTER:
+            identities = [
+                _CoreModel(
+                    "anthropic/claude-sonnet-4.6",
+                    LLMModelDeveloper.ANTHROPIC,
+                    "claude-sonnet",
+                )
+            ]
+        case LLMProvider.KIMI_OAUTH:
+            identities = [_CoreModel("kimi-k2.5", LLMModelDeveloper.MOONSHOT, "kimi")]
+        case _:
+            assert_never(provider)
+    return [
+        NormalizedModelCandidate(
+            provider=provider,
+            model_identifier=identity.identifier,
+            model_display_name=f"Core {identity.identifier}",
+            model_developer=identity.developer,
+            model_family=identity.family,
+            normalized_capabilities=ModelCapabilities(
+                context_window=ModelContextWindow(
+                    max_input_tokens=64_000,
+                    max_output_tokens=4_096,
+                ),
+                modalities=ModelModalities(
+                    input=[ModelModality.TEXT],
+                    output=(
+                        [ModelModality.TEXT, ModelModality.IMAGE]
+                        if identity.identifier == "gemini-3.1-flash-image-preview"
+                        else [ModelModality.TEXT]
+                    ),
+                ),
+                tool_calling=ModelToolCallingCapabilities(
+                    supported=identity.identifier != "gemini-3.1-flash-image-preview"
+                ),
+                reasoning=ModelReasoningCapabilities(supported=False),
+                built_in_tools=ModelBuiltInToolCapabilities(supported=[]),
+                compatibility=ModelCompatibilityCapabilities(
+                    provider_family=provider.value,
+                ),
+            ),
+            supported_execution_options=[],
+            model_snapshot={
+                "source": source,
+                "provider": provider.value,
+                "model_identifier": identity.identifier,
+                "fixture_variant": "deterministic-provider-core",
+            },
+            source_metadata={
+                "source": source,
+                "integration_marker": integration_id,
+                "fixture_family": identity.family,
+            },
+            last_refreshed_at=fetched_at,
+        )
+        for identity in identities
+    ]
 
 
 def _candidate(
