@@ -203,6 +203,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Add Agent Workspace File Management Operations Historical Requirements Reconstruction](requirements/file-260628-file-management.md) | file-260628 | 2026-06-28 | - |
 | [External Channel File Transfer Requirements](requirements/files-260723-external-channel-transfer.md) | files-260723 | 2026-07-23 | 2026-07-23 |
 | [Verified Large External File Transfer Requirements](requirements/files-260730-verified-large-file-transfer.md) | files-260730 | 2026-07-30 | 2026-07-30 |
+| [Direct File Transfer and Consistent File Limits Requirements](requirements/files-260929-direct-file-transfer.md) | files-260929 | 2026-09-29 | - |
 | [Filesystem Skill Projection Revisions Historical Requirements Reconstruction](requirements/filesystem-260701-filesystem-skill-projection-revisions.md) | filesystem-260701 | 2026-07-01 | - |
 | [Runtime File Browser Upload Requirements](requirements/fileupload-260917-runtime-file-browser-upload.md) | fileupload-260917 | 2026-09-17 | - |
 | [Fold Turn Eligibility with Failure Veto Historical Requirements Reconstruction](requirements/fold-260712-fold-turn-eligibility-with-failure-veto.md) | fold-260712 | 2026-07-12 | - |
@@ -649,6 +650,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Add Agent Workspace File Management Operations](adr/file-260628-file-management.md)
 - [External Channel File Transfer](adr/files-260723-external-channel-transfer.md)
 - [Verified Large External File Transfer](adr/files-260730-verified-large-file-transfer.md)
+- [Direct File Transfer and Consistent File Limits Decisions](adr/files-260929-direct-file-transfer.md)
 - [Filesystem Skill Projection Revisions](adr/filesystem-260701-filesystem-skill-projection-revisions.md)
 - [Runtime File Browser Direct Object Transfer Decisions](adr/fileupload-260917-runtime-file-browser-upload.md)
 - [Fold Turn Eligibility with Failure Veto](adr/fold-260712-fold-turn-eligibility-with-failure-veto.md)

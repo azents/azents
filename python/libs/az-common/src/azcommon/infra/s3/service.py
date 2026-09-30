@@ -10,6 +10,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import IO, Any
+from urllib.parse import quote
 
 from botocore.exceptions import ClientError as BotoClientError
 from types_aiobotocore_s3.client import S3Client
@@ -18,6 +19,30 @@ _TRANSFER_SHA256_METADATA_KEY = "azents-transfer-sha256"
 _PRODUCT_PUBLICATION_SHA256_METADATA_KEY = "azents-product-publication-sha256"
 _PRODUCT_PUBLICATION_ID_METADATA_KEY = "azents-product-publication-id"
 _PRODUCT_PUBLICATION_MULTIPART_PART_BYTES = 5 * 1024 * 1024
+
+
+def _get_object_presign_params(
+    *,
+    bucket: str,
+    key: str,
+    filename: str | None,
+    content_type: str | None,
+) -> dict[str, str]:
+    """Build allowlisted GET overrides without interpolating raw HTTP headers."""
+    params = {"Bucket": bucket, "Key": key}
+    if filename is not None:
+        if not filename or any(ord(char) < 32 or ord(char) == 127 for char in filename):
+            raise ValueError("Download filename contains invalid characters")
+        params["ResponseContentDisposition"] = (
+            f"attachment; filename*=UTF-8''{quote(filename, safe='')}"
+        )
+    if content_type is not None:
+        if not content_type or any(
+            ord(char) < 32 or ord(char) == 127 for char in content_type
+        ):
+            raise ValueError("Download content type contains invalid characters")
+        params["ResponseContentType"] = content_type
+    return params
 
 
 @dataclass(frozen=True)
@@ -1429,20 +1454,28 @@ class S3Service:
         bucket: str,
         key: str,
         expires_in: datetime.timedelta,
+        *,
+        filename: str | None = None,
+        content_type: str | None = None,
     ) -> str:
         """Create a presigned GET URL.
 
         :param bucket: Object bucket.
         :param key: Object key.
         :param expires_in: URL lifetime.
+        :param filename: Trusted display filename for an attachment download.
+        :param content_type: Trusted media type to return with the download.
         :returns: Presigned download URL.
         """
+        params = _get_object_presign_params(
+            bucket=bucket,
+            key=key,
+            filename=filename,
+            content_type=content_type,
+        )
         return await self.public_s3_client.generate_presigned_url(
             ClientMethod="get_object",
-            Params={
-                "Bucket": bucket,
-                "Key": key,
-            },
+            Params=params,
             ExpiresIn=int(expires_in.total_seconds()),
         )
 
@@ -1452,6 +1485,8 @@ class S3Service:
         identity: S3ObjectIdentity,
         expires_in: datetime.timedelta,
         now: datetime.datetime | None = None,
+        filename: str | None = None,
+        content_type: str | None = None,
     ) -> S3PresignedRequest:
         """Create one short-lived presigned GET request capability."""
         if expires_in <= datetime.timedelta():
@@ -1465,6 +1500,8 @@ class S3Service:
                 identity.bucket,
                 identity.key,
                 expires_in,
+                filename=filename,
+                content_type=content_type,
             ),
             expires_at=current + expires_in,
             headers=MappingProxyType({}),
