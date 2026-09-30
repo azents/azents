@@ -18,6 +18,7 @@ from fastapi import Depends
 from fastapi.dependencies.utils import get_dependant
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.config import Config
 from azents.core.enums import (
     ExchangeFileOrigin,
     ExchangeFileProvenanceKind,
@@ -146,12 +147,14 @@ class _SlackClient:
         *,
         info: SlackFileDownloadInfo | None = None,
         chunks: tuple[bytes, ...] = (b"content",),
+        head_length: int | None = None,
         info_error: Exception | None = None,
         download_error: Exception | None = None,
         stream_error: Exception | None = None,
     ) -> None:
         self.info = info or _file_info()
         self.chunks = chunks
+        self.head_length = head_length
         self.info_error = info_error
         self.download_error = download_error
         self.stream_error = stream_error
@@ -176,7 +179,11 @@ class _SlackClient:
         self, *, bot_token: str, private_url: str, max_bytes: int
     ) -> int:
         del bot_token, private_url
-        size = sum(len(chunk) for chunk in self.chunks)
+        size = (
+            sum(len(chunk) for chunk in self.chunks)
+            if self.head_length is None
+            else self.head_length
+        )
         if size > max_bytes:
             raise SlackProviderFileTooLarge("oversize")
         return size
@@ -232,12 +239,14 @@ class _DiscordClient:
         *,
         info: DiscordAttachmentDownloadInfo | None = None,
         chunks: tuple[bytes, ...] = (b"content",),
+        head_length: int | None = None,
         info_error: Exception | None = None,
         download_error: Exception | None = None,
         stream_error: Exception | None = None,
     ) -> None:
         self.info = info or _discord_file_info()
         self.chunks = chunks
+        self.head_length = head_length
         self.info_error = info_error
         self.download_error = download_error
         self.stream_error = stream_error
@@ -266,7 +275,11 @@ class _DiscordClient:
         self, *, download_url: str, max_bytes: int
     ) -> int:
         del download_url
-        size = sum(len(chunk) for chunk in self.chunks)
+        size = (
+            sum(len(chunk) for chunk in self.chunks)
+            if self.head_length is None
+            else self.head_length
+        )
         if size > max_bytes:
             raise DiscordFileTooLarge("oversize")
         return size
@@ -304,11 +317,9 @@ class _DiscordClient:
 class _SystemSettings:
     def __init__(
         self,
-        inbound_limit: int = 100,
         outbound_file_limit: int = 100,
         outbound_action_limit: int = 100,
     ) -> None:
-        self.inbound_limit = inbound_limit
         self.outbound_file_limit = outbound_file_limit
         self.outbound_action_limit = outbound_action_limit
 
@@ -322,7 +333,6 @@ class _SystemSettings:
             schema_version=1,
             admin_version=0,
             config=ExternalChannelFilesConfig(
-                inbound_max_file_bytes=self.inbound_limit,
                 outbound_max_file_bytes=self.outbound_file_limit,
                 outbound_max_action_bytes=self.outbound_action_limit,
             ),
@@ -538,6 +548,7 @@ def _service(
             SystemSettingsService,
             settings or _SystemSettings(),
         ),
+        config=Config.model_construct(),
         inbound_staging_configuration=(
             staging_configuration
             or ExternalChannelInboundStagingConfiguration(
@@ -856,14 +867,57 @@ async def test_slack_metadata_size_does_not_gate_download_or_revalidation() -> N
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("size", [15, 16, 17])
+async def test_slack_final_length_uses_small_limit_before_provider_staging(
+    size: int,
+) -> None:
+    """Actual provider size, stream admission, and transfer gates share the policy."""
+    storage = _FileStorage()
+    client = _SlackClient(chunks=(b"x" * size,), head_length=size)
+    service = _service(repository=_Repository(_target()), slack_client=client)
+    service.config = Config.model_construct(general_file_maximum_bytes=16)
+    transfer = _TransferService()
+    if size > 16:
+        with pytest.raises(ExternalChannelFileTransferError, match="16 bytes"):
+            await _download(
+                service,
+                transfer=transfer,
+                session_id="session-1",
+                agent_id="agent-1",
+                file=_locator(),
+                path="/workspace/agent/report.csv",
+                overwrite=False,
+                file_storage=cast(FileStorage, storage),
+            )
+        assert transfer.requests == []
+        assert client.stream_opened == 0
+    else:
+        result = await _download(
+            service,
+            transfer=transfer,
+            session_id="session-1",
+            agent_id="agent-1",
+            file=_locator(),
+            path="/workspace/agent/report.csv",
+            overwrite=False,
+            file_storage=cast(FileStorage, storage),
+        )
+        assert result.bytes_written == size
+        assert transfer.requests[0].product_maximum_size == 16
+        assert transfer.requests[0].provider_maximum_size == 16
+        assert transfer.requests[0].source.metadata.size == size
+    assert storage.put_calls == []
+
+
+@pytest.mark.asyncio
 async def test_slack_final_length_limit_and_body_mismatch_never_write() -> None:
     """HEAD size and streamed bytes independently protect Runtime admission."""
     oversize_storage = _FileStorage()
     oversize_service = _service(
         repository=_Repository(_target()),
-        slack_client=_SlackClient(chunks=(b"x" * 101,)),
+        slack_client=_SlackClient(chunks=(b"x",), head_length=128 * 1024 * 1024 + 1),
     )
-    with pytest.raises(ExternalChannelFileTransferError, match="100 bytes"):
+    with pytest.raises(ExternalChannelFileTransferError, match="134217728 bytes"):
         await _download(
             oversize_service,
             session_id="session-1",
@@ -1289,9 +1343,11 @@ async def test_discord_final_length_limit_and_body_mismatch_never_write() -> Non
             _target(provider=ExternalChannelProvider.DISCORD),
         ),
         slack_client=_SlackClient(),
-        discord_client=_DiscordClient(chunks=(b"x" * 101,)),
+        discord_client=_DiscordClient(
+            chunks=(b"x",), head_length=128 * 1024 * 1024 + 1
+        ),
     )
-    with pytest.raises(ExternalChannelFileTransferError, match="100 bytes"):
+    with pytest.raises(ExternalChannelFileTransferError, match="134217728 bytes"):
         await _download(
             oversize_service,
             session_id="session-1",

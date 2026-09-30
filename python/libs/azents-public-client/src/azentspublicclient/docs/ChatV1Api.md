@@ -1454,11 +1454,11 @@ void (empty response body)
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **chat_v1_download_agent_workspace_file**
-> object chat_v1_download_agent_workspace_file(agent_id, path)
+> chat_v1_download_agent_workspace_file(agent_id, path)
 
 Download Agent Workspace File
 
-Download an Agent Workspace file.
+Redirect to one authorized, short-lived Agent Workspace GET capability.
 
 ### Example
 
@@ -1494,9 +1494,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
     try:
         # Download Agent Workspace File
-        api_response = api_instance.chat_v1_download_agent_workspace_file(agent_id, path)
-        print("The response of ChatV1Api->chat_v1_download_agent_workspace_file:\n")
-        pprint(api_response)
+        api_instance.chat_v1_download_agent_workspace_file(agent_id, path)
     except Exception as e:
         print("Exception when calling ChatV1Api->chat_v1_download_agent_workspace_file: %s\n" % e)
 ```
@@ -1513,7 +1511,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-**object**
+void (empty response body)
 
 ### Authorization
 
@@ -1528,17 +1526,17 @@ Name | Type | Description  | Notes
 
 | Status code | Description | Response headers |
 |-------------|-------------|------------------|
-**200** | Successful Response |  -  |
+**302** | Successful Response |  -  |
 **422** | Validation Error |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **chat_v1_download_exchange_file**
-> bytearray chat_v1_download_exchange_file(file_id)
+> chat_v1_download_exchange_file(file_id, disposition=disposition)
 
 Download Exchange File
 
-Download an Exchange file.
+Redirect to an authorized Exchange GET with safe signed response metadata.
 
 ### Example
 
@@ -1570,12 +1568,11 @@ with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.ChatV1Api(api_client)
     file_id = 'file_id_example' # str | 
+    disposition = attachment # str |  (optional) (default to attachment)
 
     try:
         # Download Exchange File
-        api_response = api_instance.chat_v1_download_exchange_file(file_id)
-        print("The response of ChatV1Api->chat_v1_download_exchange_file:\n")
-        pprint(api_response)
+        api_instance.chat_v1_download_exchange_file(file_id, disposition=disposition)
     except Exception as e:
         print("Exception when calling ChatV1Api->chat_v1_download_exchange_file: %s\n" % e)
 ```
@@ -1588,10 +1585,11 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **file_id** | **str**|  | 
+ **disposition** | **str**|  | [optional] [default to attachment]
 
 ### Return type
 
-**bytearray**
+void (empty response body)
 
 ### Authorization
 
@@ -1600,13 +1598,13 @@ Name | Type | Description  | Notes
 ### HTTP request headers
 
  - **Content-Type**: Not defined
- - **Accept**: application/octet-stream, application/json
+ - **Accept**: application/json
 
 ### HTTP response details
 
 | Status code | Description | Response headers |
 |-------------|-------------|------------------|
-**200** | Exchange file bytes |  -  |
+**302** | Successful Response |  -  |
 **422** | Validation Error |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)

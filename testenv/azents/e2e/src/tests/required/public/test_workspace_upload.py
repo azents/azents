@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import time
 from typing import TypedDict
-from urllib.parse import urlparse, urlsplit, urlunsplit
+from urllib.parse import parse_qs, quote, urlparse, urlsplit, urlunsplit
 
 import azentsadminclient
 import azentspublicclient
@@ -274,16 +274,37 @@ def _download_workspace_file(
     setup: AgentSessionSetup,
     path: str,
 ) -> bytes:
-    """Download one committed Workspace file through the public API."""
+    """Require an empty API redirect, then fetch exact bytes directly from S3."""
     response = requests.get(
         f"{server_url}/chat/v1/agents/{setup.agent_id}/workspace/download",
         params={"path": path},
         headers=_headers(setup.access_token),
         timeout=30,
         verify=False,
+        allow_redirects=False,
     )
     response.raise_for_status()
-    return response.content
+    assert response.status_code == 302
+    assert response.content == b""
+    assert response.headers["Cache-Control"] == "no-store"
+    assert response.headers["Referrer-Policy"] == "no-referrer"
+    location = urlsplit(response.headers["Location"])
+    assert location.scheme == "https"
+    assert location.netloc != urlsplit(server_url).netloc
+    signing_query = parse_qs(location.query)
+    remaining_lifetime = (
+        int(signing_query["X-Amz-Expires"][0])
+        if "X-Amz-Expires" in signing_query
+        else int(signing_query["Expires"][0]) - time.time()
+    )
+    assert 0 < remaining_lifetime <= 60
+    downloaded = requests.get(response.headers["Location"], timeout=30, verify=False)
+    assert downloaded.status_code == 200
+    assert downloaded.headers["Content-Type"] == "text/plain"
+    assert downloaded.headers["Content-Disposition"] == (
+        f"attachment; filename*=UTF-8''{quote(path.rsplit('/', 1)[-1], safe='')}"
+    )
+    return downloaded.content
 
 
 def _wait_for_workspace_bytes(

@@ -1218,6 +1218,7 @@ class AgentService:
                 bucket=self.workspace_s3_bucket,
                 key=stored.key,
                 expires_in=datetime.timedelta(hours=1),
+                inline=True,
             )
         width = stored.width if stored.width is not None else 0
         height = stored.height if stored.height is not None else 0

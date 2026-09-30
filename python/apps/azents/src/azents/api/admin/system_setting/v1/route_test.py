@@ -87,16 +87,14 @@ def _detail() -> PlatformGitHubAppDetail:
 def _external_channel_files_resolved(
     *,
     admin_version: int = 0,
-    inbound_max_file_bytes: int = 25 * 1024 * 1024,
     outbound_max_file_bytes: int = 25 * 1024 * 1024,
     outbound_max_action_bytes: int = 100 * 1024 * 1024,
 ) -> ResolvedSystemSetting:
     return ResolvedSystemSetting(
         section=SystemSettingSection.EXTERNAL_CHANNEL_FILES,
-        schema_version=1,
+        schema_version=2,
         admin_version=admin_version,
         config=ExternalChannelFilesConfig(
-            inbound_max_file_bytes=inbound_max_file_bytes,
             outbound_max_file_bytes=outbound_max_file_bytes,
             outbound_max_action_bytes=outbound_max_action_bytes,
         ),
@@ -117,9 +115,8 @@ async def test_get_external_channel_files_returns_effective_bytes() -> None:
 
     assert response == ExternalChannelFilesDetailResponse(
         section="external_channel_files",
-        schema_version=1,
+        schema_version=2,
         admin_version=0,
-        inbound_max_file_bytes=25 * 1024 * 1024,
         outbound_max_file_bytes=25 * 1024 * 1024,
         outbound_max_action_bytes=100 * 1024 * 1024,
     )
@@ -131,7 +128,7 @@ async def test_patch_external_channel_files_activates_partial_update() -> None:
     service = cast(Any, Mock())
     resolved = _external_channel_files_resolved(
         admin_version=4,
-        inbound_max_file_bytes=10 * 1024 * 1024,
+        outbound_max_file_bytes=10 * 1024 * 1024,
     )
     service.mutate = AsyncMock(
         return_value=SystemSettingActivated(
@@ -143,7 +140,7 @@ async def test_patch_external_channel_files_activates_partial_update() -> None:
     response = await patch_external_channel_files_setting(
         ExternalChannelFilesPatchRequest(
             expected_version=3,
-            inbound_max_file_bytes=10 * 1024 * 1024,
+            outbound_max_file_bytes=10 * 1024 * 1024,
         ),
         system_admin=_admin(),
         service=cast(SystemSettingsService, service),
@@ -154,7 +151,7 @@ async def test_patch_external_channel_files_activates_partial_update() -> None:
     mutation = await_call.args[0]
     assert mutation.section is SystemSettingSection.EXTERNAL_CHANNEL_FILES
     assert mutation.expected_version == 3
-    assert mutation.config_patch == {"inbound_max_file_bytes": 10 * 1024 * 1024}
+    assert mutation.config_patch == {"outbound_max_file_bytes": 10 * 1024 * 1024}
     assert mutation.secret_actions == {}
     assert mutation.actor_user_id == "admin-1"
     assert response.admin_version == 4
@@ -166,7 +163,7 @@ async def test_patch_external_channel_files_activates_partial_update() -> None:
         ExternalChannelFilesPatchRequest(expected_version=0),
         ExternalChannelFilesPatchRequest(
             expected_version=0,
-            inbound_max_file_bytes=None,
+            outbound_max_file_bytes=None,
         ),
     ],
 )

@@ -2034,6 +2034,10 @@ def azents_runtime_control_container(
         .with_env("AZ_RUNTIME_CONTROL_START_TIMEOUT_SECONDS", "120")
         .with_env("AZ_RUNTIME_CONTROL_WORKSPACE_S3_BUCKET", s3_bucket_name)
         .with_env("AZ_RUNTIME_CONTROL_WORKSPACE_S3_PREFIX", "v1")
+        .with_env(
+            "AZ_RUNTIME_CONTROL_WORKSPACE_UPLOAD_MAXIMUM_FILE_SIZE",
+            str(E2E_GENERAL_FILE_MAXIMUM_BYTES),
+        )
         .with_env("AZ_RUNTIME_CONTROL_WORKSPACE_S3_ENDPOINT_URL", "http://rustfs:9000")
         .with_env(
             "AZ_RUNTIME_CONTROL_WORKSPACE_S3_PUBLIC_ENDPOINT_URL",
@@ -3110,6 +3114,7 @@ def selenium_container_start(
         .with_name(f"azents-selenium-{random_secret(4)}")
         .with_network(container_network)
         .with_env("SE_NODE_SESSION_TIMEOUT", "120")
+        .with_env("SE_NODE_ENABLE_MANAGED_DOWNLOADS", "true")
         .with_exposed_ports(4444)
         .with_kwargs(shm_size="2g")
     )
@@ -3173,6 +3178,7 @@ def browser_driver(
     port = selenium_container.get_exposed_port(4444)
     options = ChromeOptions()
     options.accept_insecure_certs = True
+    options.enable_downloads = True
     options.add_argument("--headless=new")
     options.add_argument("--window-size=1440,1000")
     driver = webdriver.Remote(

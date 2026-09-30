@@ -95,6 +95,7 @@ class _S3:
         *,
         identity: S3ObjectIdentity,
         expires_in: timedelta,
+        inline: bool,
         now: datetime | None = None,
     ) -> S3PresignedRequest:
         """Return one transient exact-source GET capability."""

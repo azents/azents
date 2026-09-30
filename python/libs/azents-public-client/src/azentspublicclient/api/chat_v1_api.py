@@ -16,8 +16,8 @@ from pydantic import validate_call, Field, StrictFloat, StrictStr, StrictInt
 from typing import Any, Dict, List, Optional, Tuple, Union
 from typing_extensions import Annotated
 
-from pydantic import Field, StrictBytes, StrictStr, field_validator
-from typing import Any, Optional, Tuple, Union
+from pydantic import Field, StrictStr, field_validator
+from typing import Optional
 from typing_extensions import Annotated
 from azentspublicclient.models.agent_project_preset_list_response import AgentProjectPresetListResponse
 from azentspublicclient.models.agent_session_create_request import AgentSessionCreateRequest
@@ -5141,10 +5141,10 @@ class ChatV1Api:
         _content_type: Optional[StrictStr] = None,
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> object:
+    ) -> None:
         """Download Agent Workspace File
 
-        Download an Agent Workspace file.
+        Redirect to one authorized, short-lived Agent Workspace GET capability.
 
         :param agent_id: (required)
         :type agent_id: str
@@ -5182,7 +5182,7 @@ class ChatV1Api:
         )
 
         _response_types_map: Dict[str, Optional[str]] = {
-            '200': "object",
+            '302': None,
             '422': "HTTPValidationError",
         }
         response_data = self.api_client.call_api(
@@ -5213,10 +5213,10 @@ class ChatV1Api:
         _content_type: Optional[StrictStr] = None,
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> ApiResponse[object]:
+    ) -> ApiResponse[None]:
         """Download Agent Workspace File
 
-        Download an Agent Workspace file.
+        Redirect to one authorized, short-lived Agent Workspace GET capability.
 
         :param agent_id: (required)
         :type agent_id: str
@@ -5254,7 +5254,7 @@ class ChatV1Api:
         )
 
         _response_types_map: Dict[str, Optional[str]] = {
-            '200': "object",
+            '302': None,
             '422': "HTTPValidationError",
         }
         response_data = self.api_client.call_api(
@@ -5288,7 +5288,7 @@ class ChatV1Api:
     ) -> RESTResponseType:
         """Download Agent Workspace File
 
-        Download an Agent Workspace file.
+        Redirect to one authorized, short-lived Agent Workspace GET capability.
 
         :param agent_id: (required)
         :type agent_id: str
@@ -5326,7 +5326,7 @@ class ChatV1Api:
         )
 
         _response_types_map: Dict[str, Optional[str]] = {
-            '200': "object",
+            '302': None,
             '422': "HTTPValidationError",
         }
         response_data = self.api_client.call_api(
@@ -5409,6 +5409,7 @@ class ChatV1Api:
     def chat_v1_download_exchange_file(
         self,
         file_id: StrictStr,
+        disposition: Optional[StrictStr] = None,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -5421,13 +5422,15 @@ class ChatV1Api:
         _content_type: Optional[StrictStr] = None,
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> bytearray:
+    ) -> None:
         """Download Exchange File
 
-        Download an Exchange file.
+        Redirect to an authorized Exchange GET with safe signed response metadata.
 
         :param file_id: (required)
         :type file_id: str
+        :param disposition:
+        :type disposition: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -5452,6 +5455,7 @@ class ChatV1Api:
 
         _param = self._chat_v1_download_exchange_file_serialize(
             file_id=file_id,
+            disposition=disposition,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -5459,7 +5463,7 @@ class ChatV1Api:
         )
 
         _response_types_map: Dict[str, Optional[str]] = {
-            '200': "bytearray",
+            '302': None,
             '422': "HTTPValidationError",
         }
         response_data = self.api_client.call_api(
@@ -5477,6 +5481,7 @@ class ChatV1Api:
     def chat_v1_download_exchange_file_with_http_info(
         self,
         file_id: StrictStr,
+        disposition: Optional[StrictStr] = None,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -5489,13 +5494,15 @@ class ChatV1Api:
         _content_type: Optional[StrictStr] = None,
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> ApiResponse[bytearray]:
+    ) -> ApiResponse[None]:
         """Download Exchange File
 
-        Download an Exchange file.
+        Redirect to an authorized Exchange GET with safe signed response metadata.
 
         :param file_id: (required)
         :type file_id: str
+        :param disposition:
+        :type disposition: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -5520,6 +5527,7 @@ class ChatV1Api:
 
         _param = self._chat_v1_download_exchange_file_serialize(
             file_id=file_id,
+            disposition=disposition,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -5527,7 +5535,7 @@ class ChatV1Api:
         )
 
         _response_types_map: Dict[str, Optional[str]] = {
-            '200': "bytearray",
+            '302': None,
             '422': "HTTPValidationError",
         }
         response_data = self.api_client.call_api(
@@ -5545,6 +5553,7 @@ class ChatV1Api:
     def chat_v1_download_exchange_file_without_preload_content(
         self,
         file_id: StrictStr,
+        disposition: Optional[StrictStr] = None,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -5560,10 +5569,12 @@ class ChatV1Api:
     ) -> RESTResponseType:
         """Download Exchange File
 
-        Download an Exchange file.
+        Redirect to an authorized Exchange GET with safe signed response metadata.
 
         :param file_id: (required)
         :type file_id: str
+        :param disposition:
+        :type disposition: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -5588,6 +5599,7 @@ class ChatV1Api:
 
         _param = self._chat_v1_download_exchange_file_serialize(
             file_id=file_id,
+            disposition=disposition,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -5595,7 +5607,7 @@ class ChatV1Api:
         )
 
         _response_types_map: Dict[str, Optional[str]] = {
-            '200': "bytearray",
+            '302': None,
             '422': "HTTPValidationError",
         }
         response_data = self.api_client.call_api(
@@ -5608,6 +5620,7 @@ class ChatV1Api:
     def _chat_v1_download_exchange_file_serialize(
         self,
         file_id,
+        disposition,
         _request_auth,
         _content_type,
         _headers,
@@ -5632,6 +5645,10 @@ class ChatV1Api:
         if file_id is not None:
             _path_params['file_id'] = file_id
         # process the query parameters
+        if disposition is not None:
+            
+            _query_params.append(('disposition', disposition))
+            
         # process the header parameters
         # process the form parameters
         # process the body parameter
@@ -5641,7 +5658,6 @@ class ChatV1Api:
         if 'Accept' not in _header_params:
             _header_params['Accept'] = self.api_client.select_header_accept(
                 [
-                    'application/octet-stream', 
                     'application/json'
                 ]
             )

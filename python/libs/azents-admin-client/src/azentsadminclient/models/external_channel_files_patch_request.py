@@ -28,11 +28,10 @@ class ExternalChannelFilesPatchRequest(BaseModel):
     Optimistic partial update for External Channel file limits.
     """ # noqa: E501
     expected_version: Annotated[int, Field(strict=True, ge=0)]
-    inbound_max_file_bytes: Optional[Annotated[int, Field(le=524288000, strict=True, ge=1)]] = None
     outbound_max_file_bytes: Optional[Annotated[int, Field(le=104857600, strict=True, ge=1)]] = None
     outbound_max_action_bytes: Optional[Annotated[int, Field(le=2097152000, strict=True, ge=1)]] = None
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["expected_version", "inbound_max_file_bytes", "outbound_max_file_bytes", "outbound_max_action_bytes"]
+    __properties: ClassVar[List[str]] = ["expected_version", "outbound_max_file_bytes", "outbound_max_action_bytes"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -80,11 +79,6 @@ class ExternalChannelFilesPatchRequest(BaseModel):
             for _key, _value in self.additional_properties.items():
                 _dict[_key] = _value
 
-        # set to None if inbound_max_file_bytes (nullable) is None
-        # and model_fields_set contains the field
-        if self.inbound_max_file_bytes is None and "inbound_max_file_bytes" in self.model_fields_set:
-            _dict['inbound_max_file_bytes'] = None
-
         # set to None if outbound_max_file_bytes (nullable) is None
         # and model_fields_set contains the field
         if self.outbound_max_file_bytes is None and "outbound_max_file_bytes" in self.model_fields_set:
@@ -108,7 +102,6 @@ class ExternalChannelFilesPatchRequest(BaseModel):
 
         _obj = cls.model_validate({
             "expected_version": obj.get("expected_version"),
-            "inbound_max_file_bytes": obj.get("inbound_max_file_bytes"),
             "outbound_max_file_bytes": obj.get("outbound_max_file_bytes"),
             "outbound_max_action_bytes": obj.get("outbound_max_action_bytes")
         })

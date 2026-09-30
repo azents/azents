@@ -205,6 +205,7 @@ class RuntimeRunnerTransferObjectStore(Protocol):
         *,
         identity: S3ObjectIdentity,
         expires_in: timedelta,
+        inline: bool,
         now: datetime | None = None,
     ) -> S3PresignedRequest:
         """Sign one exact transfer-object GET."""
@@ -592,6 +593,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
                     identity=object_identity,
                     expires_in=expires_in,
                     now=now,
+                    inline=False,
                 )
         except asyncio.CancelledError:
             raise

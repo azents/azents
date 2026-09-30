@@ -9,7 +9,6 @@ Name | Type | Description | Notes
 **section** | **str** |  | 
 **schema_version** | **int** |  | 
 **admin_version** | **int** |  | 
-**inbound_max_file_bytes** | **int** |  | 
 **outbound_max_file_bytes** | **int** |  | 
 **outbound_max_action_bytes** | **int** |  | 
 

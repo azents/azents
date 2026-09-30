@@ -1,11 +1,12 @@
 /**
- * Agent workspace file download proxy route.
+ * Agent Workspace authenticated download redirect route.
  *
- * Server proxies file response so browser never sees public API bearer token directly.
+ * Inject the API token for metadata only; the browser retrieves bytes from S3.
  */
 import { chatV1DownloadAgentWorkspaceFile } from "@azents/public-client";
 import { TRPCError } from "@trpc/server";
 import { type NextRequest, NextResponse } from "next/server";
+import { browserDownloadRedirect } from "@/shared/file-upload/browserDownloadRedirect";
 import { withRouteLogging } from "@/shared/lib/route-logging";
 import {
   createApiClientWithAccessToken,
@@ -13,12 +14,6 @@ import {
 } from "@/trpc/context";
 
 const ROUTE = "/api/chat/agents/[agentId]/workspace/download";
-
-function copyHeaders(source: Headers, target: Headers): void {
-  source.forEach((value, key) => {
-    target.append(key, value);
-  });
-}
 
 async function get(
   request: NextRequest,
@@ -57,7 +52,8 @@ async function get(
     client: createApiClientWithAccessToken(accessToken),
     path: { agent_id: agentId },
     query: { path },
-    parseAs: "stream",
+    redirect: "manual",
+    parseAs: "text",
   });
 
   if (!response) {
@@ -65,32 +61,7 @@ async function get(
       "Agent workspace file download failed without backend response.",
     );
   }
-  if (!response.ok) {
-    return NextResponse.json(
-      { error: "Failed to fetch agent workspace file" },
-      { status: response.status, headers: resHeaders },
-    );
-  }
-
-  const contentType =
-    response.headers.get("content-type") ?? "application/octet-stream";
-  const contentDisposition = response.headers.get("content-disposition");
-  const body = await response.arrayBuffer();
-
-  const headers = new Headers();
-  headers.set("Content-Type", contentType);
-  headers.set("Content-Length", String(body.byteLength));
-
-  if (contentDisposition) {
-    headers.set("Content-Disposition", contentDisposition);
-  }
-
-  copyHeaders(resHeaders, headers);
-
-  return new Response(body, {
-    status: 200,
-    headers,
-  });
+  return browserDownloadRedirect(response, resHeaders);
 }
 
 export const GET = withRouteLogging(ROUTE, get);

@@ -536,7 +536,10 @@ def _sha256(value: bytes) -> str:
 
 
 @pytest.mark.asyncio
-async def test_presigned_get_signs_safe_download_response_metadata() -> None:
+@pytest.mark.parametrize("inline", [False, True])
+async def test_presigned_get_signs_safe_download_response_metadata(
+    inline: bool,
+) -> None:
     """The display metadata is signed for one exact GET object, not a response body."""
     client = _FakeS3Client()
     service = _service(client)
@@ -546,6 +549,7 @@ async def test_presigned_get_signs_safe_download_response_metadata() -> None:
         expires_in=timedelta(seconds=45),
         filename="보고서 / final.txt",
         content_type="text/plain",
+        inline=inline,
     )
 
     assert ticket.method == "GET"
@@ -557,7 +561,7 @@ async def test_presigned_get_signs_safe_download_response_metadata() -> None:
                 "Bucket": "private",
                 "Key": "objects/one",
                 "ResponseContentDisposition": (
-                    "attachment; filename*=UTF-8''"
+                    ("inline" if inline else "attachment") + "; filename*=UTF-8''"
                     "%EB%B3%B4%EA%B3%A0%EC%84%9C%20%2F%20final.txt"
                 ),
                 "ResponseContentType": "text/plain",
@@ -579,12 +583,14 @@ async def test_presigned_get_rejects_header_controls_before_signing() -> None:
             identity=identity,
             expires_in=timedelta(seconds=45),
             filename="unsafe\r\nheader",
+            inline=False,
         )
     with pytest.raises(ValueError, match="content type"):
         await service.get_download_request(
             identity=identity,
             expires_in=timedelta(seconds=45),
             content_type="text/plain\nX-Evil: yes",
+            inline=False,
         )
     assert client.presigned_requests == []
 

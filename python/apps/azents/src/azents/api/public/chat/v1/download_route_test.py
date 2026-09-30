@@ -1,105 +1,67 @@
-"""Public file-download route tests."""
+"""Authenticated metadata-only browser-download redirect route tests."""
 
-from __future__ import annotations
-
-import hashlib
-from collections.abc import AsyncGenerator, AsyncIterator
-from contextlib import asynccontextmanager
-from pathlib import PurePosixPath
+import datetime
 from unittest.mock import AsyncMock, Mock
-from urllib.parse import quote
 
 import pytest
 from azcommon.result import Failure, Success
 from fastapi import HTTPException
+from fastapi.responses import RedirectResponse
 
 from azents.api.public.chat.v1 import (
     download_agent_workspace_file,
     download_exchange_file,
+    read_agent_workspace_path,
 )
-from azents.api.public.file_download import FileDownloadResponse
 from azents.core.auth.deps import CurrentUser
-from azents.repos.exchange_file.data import ExchangeFile
-from azents.services.chat.data import (
-    NotWorkspaceMember,
-    SessionAccessDenied,
-)
+from azents.services.browser_file_download import BrowserFileDownloadTicket
+from azents.services.chat.data import NotWorkspaceMember, SessionAccessDenied
 from azents.services.chat.workspace import (
     AgentWorkspaceFileNotFound,
     AgentWorkspaceFileReadError,
     AgentWorkspaceFileService,
-    WorkspaceFileDownloadStream,
+    AgentWorkspaceFileTooLarge,
 )
 from azents.services.exchange_file import (
-    ExchangeFileDownloadStream,
     ExchangeFileService,
     FileAccessDenied,
     FileExpired,
     FileNotFound,
+    FileTooLarge,
     FileUnavailable,
 )
-from azents.services.file_download_stream import BoundedDownloadStream
 
 _AGENT_ID = "0123456789abcdef0123456789abcdef"
 _CURRENT_USER = CurrentUser(user_id="user-1", session_id="auth-session")
-
-
-async def _make_stream(body: bytes = b"download") -> BoundedDownloadStream:
-    """Create one bounded stream suitable for a response-only route test."""
-
-    @asynccontextmanager
-    async def source() -> AsyncGenerator[AsyncIterator[bytes], None]:
-        async def chunks() -> AsyncIterator[bytes]:
-            yield body
-
-        yield chunks()
-
-    source_context = source()
-    source_iterator = await source_context.__aenter__()
-    return BoundedDownloadStream(
-        source_context=source_context,
-        source_iterator=source_iterator,
-        expected_size=len(body),
-        expected_sha256=hashlib.sha256(body).hexdigest(),
-        maximum_chunk_size=max(1, len(body)),
-    )
+_TICKET = BrowserFileDownloadTicket(
+    url="https://objects.test/file?signature=redacted",
+    expires_at=datetime.datetime(2026, 9, 29, tzinfo=datetime.UTC),
+)
 
 
 @pytest.mark.asyncio
-async def test_workspace_download_route_preserves_stream_headers() -> None:
-    """Workspace route keeps the media type and UTF-8 filename metadata."""
-    stream = await _make_stream()
-    path = PurePosixPath("/workspace/agent/report.txt")
+async def test_workspace_download_returns_uncached_redirect_with_no_file_body() -> None:
     service = Mock(spec=AgentWorkspaceFileService)
-    service.open_download_file = AsyncMock(
-        return_value=Success(
-            WorkspaceFileDownloadStream(
-                path=path,
-                stream=stream,
-                media_type="text/plain",
-            )
-        )
-    )
+    service.create_download_ticket = AsyncMock(return_value=Success(_TICKET))
 
     response = await download_agent_workspace_file(
         agent_id=_AGENT_ID,
-        path=path.as_posix(),
+        path="/workspace/agent/report.txt",
         current_user=_CURRENT_USER,
         workspace_service=service,
     )
 
-    assert isinstance(response, FileDownloadResponse)
-    assert response.download_stream is stream
-    assert response.media_type == "text/plain"
-    assert response.headers["content-disposition"] == (
-        "attachment; filename*=UTF-8''report.txt"
-    )
-    service.open_download_file.assert_awaited_once_with(
+    assert isinstance(response, RedirectResponse)
+    assert response.status_code == 302
+    assert response.body == b""
+    assert response.headers["location"] == _TICKET.url
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["referrer-policy"] == "no-referrer"
+    service.create_download_ticket.assert_awaited_once_with(
         agent_id=_AGENT_ID,
         user_id="user-1",
-        raw_path=path.as_posix(),
+        raw_path="/workspace/agent/report.txt",
     )
-    await stream.aclose()
 
 
 @pytest.mark.asyncio
@@ -110,15 +72,14 @@ async def test_workspace_download_route_preserves_stream_headers() -> None:
         (SessionAccessDenied(), 403),
         (AgentWorkspaceFileNotFound(), 404),
         (AgentWorkspaceFileReadError(detail="transfer failed"), 400),
+        (AgentWorkspaceFileTooLarge(size=134_217_729, limit=134_217_728), 413),
     ],
 )
-async def test_workspace_download_route_maps_authorization_and_read_errors(
-    error: object,
-    status_code: int,
+async def test_workspace_denial_returns_no_redirect(
+    error: object, status_code: int
 ) -> None:
-    """Workspace service errors retain their existing HTTP status semantics."""
     service = Mock(spec=AgentWorkspaceFileService)
-    service.open_download_file = AsyncMock(return_value=Failure(error))
+    service.create_download_ticket = AsyncMock(return_value=Failure(error))
 
     with pytest.raises(HTTPException) as raised:
         await download_agent_workspace_file(
@@ -129,43 +90,79 @@ async def test_workspace_download_route_maps_authorization_and_read_errors(
         )
 
     assert raised.value.status_code == status_code
+    assert raised.value.headers is None
 
 
 @pytest.mark.asyncio
-async def test_exchange_download_route_preserves_stream_headers() -> None:
-    """Exchange route keeps the stored media type and encoded filename."""
-    stream = await _make_stream()
-    file = ExchangeFile.model_construct(
-        filename="보고서.csv",
-        media_type="text/csv",
-    )
-    service = Mock(spec=ExchangeFileService)
-    service.open_download = AsyncMock(
-        return_value=Success(
-            ExchangeFileDownloadStream(
-                file=file,
-                stream=stream,
-            )
+async def test_workspace_download_size_error_describes_general_file_limit() -> None:
+    service = Mock(spec=AgentWorkspaceFileService)
+    service.create_download_ticket = AsyncMock(
+        return_value=Failure(
+            AgentWorkspaceFileTooLarge(size=134_217_729, limit=134_217_728)
         )
     )
+
+    with pytest.raises(HTTPException) as raised:
+        await download_agent_workspace_file(
+            agent_id=_AGENT_ID,
+            path="/workspace/agent/report.txt",
+            current_user=_CURRENT_USER,
+            workspace_service=service,
+        )
+
+    assert raised.value.status_code == 413
+    assert raised.value.detail == "File exceeds 128 MiB."
+    assert raised.value.headers is None
+
+
+@pytest.mark.asyncio
+async def test_workspace_preview_limit_remains_distinct_from_download_limit() -> None:
+    service = Mock(spec=AgentWorkspaceFileService)
+    service.read_path = AsyncMock(
+        return_value=Failure(AgentWorkspaceFileTooLarge(size=65537, limit=65536))
+    )
+
+    with pytest.raises(HTTPException) as raised:
+        await read_agent_workspace_path(
+            agent_id=_AGENT_ID,
+            path="/workspace/agent/report.txt",
+            limit=65536,
+            current_user=_CURRENT_USER,
+            workspace_service=service,
+        )
+
+    assert raised.value.status_code == 413
+    assert raised.value.detail == (
+        "File is too large to preview. Size 65537 bytes exceeds "
+        "the 65536 byte preview limit."
+    )
+    assert raised.value.headers is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("disposition", ["attachment", "inline"])
+async def test_exchange_redirect_delegates_safe_disposition_to_service(
+    disposition: str,
+) -> None:
+    service = Mock(spec=ExchangeFileService)
+    service.create_download_ticket = AsyncMock(return_value=Success(_TICKET))
 
     response = await download_exchange_file(
         file_id="file-1",
         current_user=_CURRENT_USER,
         exchange_file_service=service,
+        disposition="inline" if disposition == "inline" else "attachment",
     )
 
-    assert isinstance(response, FileDownloadResponse)
-    assert response.download_stream is stream
-    assert response.media_type == "text/csv"
-    assert response.headers["content-disposition"] == (
-        f"attachment; filename*=UTF-8''{quote(file.filename)}"
-    )
-    service.open_download.assert_awaited_once_with(
+    assert response.status_code == 302
+    assert response.body == b""
+    assert response.headers["location"] == _TICKET.url
+    assert response.headers["cache-control"] == "no-store"
+    service.create_download_ticket.assert_awaited_once_with(
         file_id="file-1",
         user_id="user-1",
+        inline=disposition == "inline",
     )
-    await stream.aclose()
 
 
 @pytest.mark.asyncio
@@ -176,15 +173,14 @@ async def test_exchange_download_route_preserves_stream_headers() -> None:
         (FileAccessDenied(), 403),
         (FileExpired(), 410),
         (FileUnavailable(), 410),
+        (FileTooLarge(), 413),
     ],
 )
-async def test_exchange_download_route_maps_access_and_storage_errors(
-    error: object,
-    status_code: int,
+async def test_exchange_denial_issues_no_capability(
+    error: object, status_code: int
 ) -> None:
-    """Exchange service errors retain authorization and storage HTTP semantics."""
     service = Mock(spec=ExchangeFileService)
-    service.open_download = AsyncMock(return_value=Failure(error))
+    service.create_download_ticket = AsyncMock(return_value=Failure(error))
 
     with pytest.raises(HTTPException) as raised:
         await download_exchange_file(
@@ -194,3 +190,4 @@ async def test_exchange_download_route_maps_access_and_storage_errors(
         )
 
     assert raised.value.status_code == status_code
+    assert raised.value.headers is None

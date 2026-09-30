@@ -104,6 +104,7 @@ class WorkspaceUploadObjectStoreS3(Protocol):
         *,
         identity: S3ObjectIdentity,
         expires_in: timedelta,
+        inline: bool,
         now: datetime | None = None,
     ) -> S3PresignedRequest: ...
 
@@ -234,6 +235,7 @@ class WorkspaceUploadObjectStore:
             identity=self.source_identity(source_handle),
             expires_in=expires_in,
             now=now,
+            inline=False,
         )
         return WorkspaceUploadDownloadTicket(
             method=request.method,

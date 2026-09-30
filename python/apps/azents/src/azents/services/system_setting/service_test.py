@@ -11,7 +11,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import azents.services.system_setting.service as service_module
 from azents.core.crypto import CredentialCipher
 from azents.core.external_channel_file import (
-    DEFAULT_EXTERNAL_CHANNEL_INBOUND_MAX_FILE_BYTES,
     DEFAULT_EXTERNAL_CHANNEL_OUTBOUND_MAX_ACTION_BYTES,
     DEFAULT_EXTERNAL_CHANNEL_OUTBOUND_MAX_FILE_BYTES,
 )
@@ -170,10 +169,7 @@ async def test_external_channel_file_limits_resolve_defaults_without_storage(
 
     assert resolved.admin_version == 0
     assert isinstance(resolved.config, ExternalChannelFilesConfig)
-    assert (
-        resolved.config.inbound_max_file_bytes
-        == DEFAULT_EXTERNAL_CHANNEL_INBOUND_MAX_FILE_BYTES
-    )
+    assert "inbound_max_file_bytes" not in resolved.config.model_dump()
     assert (
         resolved.config.outbound_max_file_bytes
         == DEFAULT_EXTERNAL_CHANNEL_OUTBOUND_MAX_FILE_BYTES
@@ -210,7 +206,6 @@ async def test_external_channel_file_limits_activate_directly_and_validate_aggre
             section=SystemSettingSection.EXTERNAL_CHANNEL_FILES,
             expected_version=0,
             config_patch={
-                "inbound_max_file_bytes": 10,
                 "outbound_max_file_bytes": 20,
                 "outbound_max_action_bytes": 40,
             },
@@ -222,7 +217,6 @@ async def test_external_channel_file_limits_activate_directly_and_validate_aggre
     assert isinstance(activated, SystemSettingActivated)
     assert activated.current.version == 1
     assert isinstance(activated.resolved.config, ExternalChannelFilesConfig)
-    assert activated.resolved.config.inbound_max_file_bytes == 10
     assert activated.resolved.config.outbound_max_file_bytes == 20
     assert activated.resolved.config.outbound_max_action_bytes == 40
 

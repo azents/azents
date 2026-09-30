@@ -17,6 +17,7 @@ from azentspublicclient.api.workspace_v1_api import WorkspaceV1Api
 from pydantic import TypeAdapter
 
 from support.consts import REPOSITORY_ROOT
+from support.exchange_download import download_fixture_exchange_file
 from support.utils import unique, wait_until
 from tests.required.public.test_agent_execution_persistence import (
     auth_headers,
@@ -517,6 +518,7 @@ class TestProviderImageGeneration:
         public_api_client: azentspublicclient.ApiClient,
         admin_api_client: azentsadminclient.ApiClient,
         azents_public_server_url: str,
+        azents_browser_s3_endpoint_url: str,
         azents_engine_worker_container: object,
         openai_proxy_url: str,
     ) -> None:
@@ -622,14 +624,14 @@ class TestProviderImageGeneration:
         attachment_id = attachment.get("attachment_id")
         assert isinstance(attachment_id, str)
 
-        download = requests.get(
-            f"{azents_public_server_url}/chat/v1/exchange-files/{attachment_id}/download",
-            headers=auth_headers(token),
-            timeout=10,
+        download = download_fixture_exchange_file(
+            server_url=azents_public_server_url,
+            access_token=token,
+            attachment_id=attachment_id,
+            storage_endpoint_url=azents_browser_s3_endpoint_url,
         )
-        download.raise_for_status()
-        assert hashlib.sha256(download.content).hexdigest() == _IMAGE_SHA256
-        assert download.content == _IMAGE_BYTES
+        assert hashlib.sha256(download).hexdigest() == _IMAGE_SHA256
+        assert download == _IMAGE_BYTES
 
         initial_request = _request_for_prompt(
             _proxy_journal(openai_proxy_url),

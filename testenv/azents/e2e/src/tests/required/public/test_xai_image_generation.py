@@ -26,6 +26,7 @@ from azentspublicclient.models.secrets import Secrets
 from pydantic import TypeAdapter
 
 from support.consts import REPOSITORY_ROOT
+from support.exchange_download import download_fixture_exchange_file
 from support.oauth_connections import connect_xai_oauth
 from support.runtime_profiles import (
     create_workspace_runtime_profile,
@@ -455,6 +456,7 @@ def _assert_image_tool_exposure(*, proxy_url: str, expected: bool) -> None:
 def _assert_success_result(
     *,
     server_url: str,
+    storage_endpoint_url: str,
     token: str,
     history: dict[str, object],
     scenario_secrets: tuple[str, ...],
@@ -485,14 +487,14 @@ def _assert_success_result(
     assert attachment.get("size") == len(_IMAGE_BYTES)
     attachment_id = attachment.get("attachment_id")
     assert isinstance(attachment_id, str)
-    download = requests.get(
-        f"{server_url}/chat/v1/exchange-files/{attachment_id}/download",
-        headers=auth_headers(token),
-        timeout=10,
+    download = download_fixture_exchange_file(
+        server_url=server_url,
+        access_token=token,
+        attachment_id=attachment_id,
+        storage_endpoint_url=storage_endpoint_url,
     )
-    download.raise_for_status()
-    assert hashlib.sha256(download.content).hexdigest() == _IMAGE_SHA256
-    assert download.content == _IMAGE_BYTES
+    assert hashlib.sha256(download).hexdigest() == _IMAGE_SHA256
+    assert download == _IMAGE_BYTES
 
 
 def _run_success_scenario(
@@ -500,6 +502,7 @@ def _run_success_scenario(
     public_api_client: azentspublicclient.ApiClient,
     admin_api_client: azentsadminclient.ApiClient,
     server_url: str,
+    storage_endpoint_url: str,
     proxy_url: str,
     provider: LLMProvider,
     access_token: str,
@@ -544,6 +547,7 @@ def _run_success_scenario(
     )
     _assert_success_result(
         server_url=server_url,
+        storage_endpoint_url=storage_endpoint_url,
         token=token,
         history=history,
         scenario_secrets=scenario_secrets,
@@ -563,6 +567,7 @@ class TestXaiImageGeneration:
         public_api_client: azentspublicclient.ApiClient,
         admin_api_client: azentsadminclient.ApiClient,
         azents_public_server_url: str,
+        azents_browser_s3_endpoint_url: str,
         azents_engine_worker_container: object,
         openai_proxy_url: str,
     ) -> None:
@@ -578,6 +583,7 @@ class TestXaiImageGeneration:
             refresh_token=None,
             message=_API_KEY_MESSAGE,
             completed_message=_API_KEY_COMPLETED,
+            storage_endpoint_url=azents_browser_s3_endpoint_url,
         )
         assert imagine == [
             {
@@ -593,6 +599,7 @@ class TestXaiImageGeneration:
         public_api_client: azentspublicclient.ApiClient,
         admin_api_client: azentsadminclient.ApiClient,
         azents_public_server_url: str,
+        azents_browser_s3_endpoint_url: str,
         azents_engine_worker_container: object,
         openai_proxy_url: str,
     ) -> None:
@@ -608,6 +615,7 @@ class TestXaiImageGeneration:
             refresh_token="test-xai-refresh-unused",
             message=_OAUTH_MESSAGE,
             completed_message=_OAUTH_COMPLETED,
+            storage_endpoint_url=azents_browser_s3_endpoint_url,
         )
         assert imagine == [
             {
@@ -623,6 +631,7 @@ class TestXaiImageGeneration:
         public_api_client: azentspublicclient.ApiClient,
         admin_api_client: azentsadminclient.ApiClient,
         azents_public_server_url: str,
+        azents_browser_s3_endpoint_url: str,
         azents_engine_worker_container: object,
         openai_proxy_url: str,
     ) -> None:
@@ -638,6 +647,7 @@ class TestXaiImageGeneration:
             refresh_token="test-xai-refresh-success",
             message=_OAUTH_REFRESH_MESSAGE,
             completed_message=_OAUTH_REFRESH_COMPLETED,
+            storage_endpoint_url=azents_browser_s3_endpoint_url,
         )
         assert imagine == [
             {

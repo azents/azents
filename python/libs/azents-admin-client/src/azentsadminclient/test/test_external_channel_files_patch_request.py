@@ -36,7 +36,6 @@ class TestExternalChannelFilesPatchRequest(unittest.TestCase):
         if include_optional:
             return ExternalChannelFilesPatchRequest(
                 expected_version = 0.0,
-                inbound_max_file_bytes = 1.0,
                 outbound_max_file_bytes = 1.0,
                 outbound_max_action_bytes = 1.0
             )

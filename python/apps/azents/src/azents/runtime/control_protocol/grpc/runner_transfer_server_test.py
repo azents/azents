@@ -209,6 +209,7 @@ class _ObjectStore:
         *,
         identity: S3ObjectIdentity,
         expires_in: timedelta,
+        inline: bool,
         now: datetime | None = None,
     ) -> S3PresignedRequest:
         assert now is not None

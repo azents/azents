@@ -36,6 +36,7 @@ from azentspublicclient.models.toolkit_config_update_request import (
 )
 from testcontainers.core.container import DockerContainer
 
+from support.exchange_download import download_fixture_exchange_file
 from support.utils import (
     model_selection_from_first_candidate,
     single_candidate_model_options,
@@ -103,6 +104,7 @@ def test_brave_five_tools_and_one_call_multi_image_without_runtime(
     public_api_client: azentspublicclient.ApiClient,
     admin_api_client: azentsadminclient.ApiClient,
     azents_public_server_url: str,
+    azents_browser_s3_endpoint_url: str,
     azents_engine_worker_container: DockerContainer,
     openai_proxy_url: str,
 ) -> None:
@@ -399,14 +401,13 @@ def test_brave_five_tools_and_one_call_multi_image_without_runtime(
             assert uri.startswith("exchange://")
             attachment_id = attachment.get("attachment_id")
             assert isinstance(attachment_id, str)
-            downloaded = requests.get(
-                f"{azents_public_server_url}/chat/v1/exchange-files/"
-                f"{attachment_id}/download",
-                headers=headers,
-                timeout=10,
+            downloaded = download_fixture_exchange_file(
+                server_url=azents_public_server_url,
+                access_token=workspace.token,
+                attachment_id=attachment_id,
+                storage_endpoint_url=azents_browser_s3_endpoint_url,
             )
-            downloaded.raise_for_status()
-            assert downloaded.content.startswith(b"\x89PNG\r\n\x1a\n")
+            assert downloaded.startswith(b"\x89PNG\r\n\x1a\n")
 
     assert image_session_id is not None
     assert vision_journal_start is not None

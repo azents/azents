@@ -1,5 +1,6 @@
 """ExchangeFileService tests."""
 
+import base64
 import datetime
 import hashlib
 from collections.abc import AsyncGenerator, Sequence
@@ -13,6 +14,7 @@ import pytest
 from azcommon.infra.s3.service import (
     S3ObjectIdentity,
     S3ObjectMetadata,
+    S3PresignedRequest,
     S3ProductPublicationMetadata,
 )
 from azcommon.result import Failure, Result, Success
@@ -65,6 +67,7 @@ from . import (
     FileExpired,
     FileNotFound,
     FileRetentionOwnerConflict,
+    FileTooLarge,
     FileUnavailable,
     SessionNotFound,
     exchange_object_key_from_uri,
@@ -312,6 +315,8 @@ class _FakeS3Service:
             tuple[S3ObjectIdentity, int, S3ProductPublicationMetadata]
         ] = []
         self.head_calls: list[S3ObjectIdentity] = []
+        self.checksum_sha256: str | None = None
+        self.get_ticket_requests: list[S3PresignedRequest] = []
         self.chunk_sizes: list[int] = []
         self.session_boundary = session_boundary
 
@@ -358,10 +363,41 @@ class _FakeS3Service:
             content_length=len(body),
             content_type=None,
             etag=None,
-            checksum_sha256=None,
+            checksum_sha256=self.checksum_sha256,
             user_metadata={},
             last_modified_at=None,
         )
+
+    async def head_with_checksum(
+        self, identity: S3ObjectIdentity
+    ) -> S3ObjectMetadata | None:
+        """Use immutable metadata without opening an object body."""
+        return await self.head(identity)
+
+    async def get_download_request(
+        self,
+        *,
+        identity: S3ObjectIdentity,
+        expires_in: datetime.timedelta,
+        inline: bool,
+        now: datetime.datetime | None = None,
+        filename: str | None = None,
+        content_type: str | None = None,
+    ) -> S3PresignedRequest:
+        """Record a metadata-only browser capability."""
+        assert self.session_boundary.active == 0
+        assert identity.key in self.objects
+        assert filename is not None
+        assert content_type is not None
+        assert now is not None
+        request = S3PresignedRequest(
+            method="GET",
+            url="https://objects.test/file?signature=redacted",
+            expires_at=now + expires_in,
+            headers={},
+        )
+        self.get_ticket_requests.append(request)
+        return request
 
     async def copy_verified_transfer_object_to_product(
         self,
@@ -430,6 +466,7 @@ class _Config:
 
     workspace_s3 = _WorkspaceS3Config()
     file_lifecycle = _FileLifecycleConfig()
+    general_file_maximum_bytes = 128 * 1024 * 1024
 
 
 class _SessionBoundary:
@@ -1570,8 +1607,11 @@ async def test_download_returns_unavailable_when_object_missing() -> None:
 
 
 @pytest.mark.asyncio
-async def test_open_download_streams_object_after_metadata_check() -> None:
-    """Open Exchange downloads verify object length before yielding bytes."""
+@pytest.mark.parametrize("checksum_format", ["absent", "hex", "base64"])
+async def test_download_ticket_checks_metadata_without_opening_object_body(
+    checksum_format: str,
+) -> None:
+    """Exchange GET issuance verifies size without a response body relay."""
     service, _repository, s3_service = _make_service(
         workspace_user=_make_workspace_user()
     )
@@ -1583,25 +1623,95 @@ async def test_open_download_streams_object_after_metadata_check() -> None:
         body=b"a,b\n1,2\n",
     )
     assert isinstance(created, Success)
+    if checksum_format == "hex":
+        s3_service.checksum_sha256 = created.value.sha256
+    elif checksum_format == "base64":
+        s3_service.checksum_sha256 = base64.b64encode(
+            bytes.fromhex(created.value.sha256)
+        ).decode()
 
-    result = await service.open_download(file_id=created.value.id, user_id="user-1")
+    result = await service.create_download_ticket(
+        file_id=created.value.id, user_id="user-1", inline=False
+    )
 
     assert isinstance(result, Success)
-    assert result.value.file == created.value
-    assert [chunk async for chunk in result.value.stream] == [b"a,b\n1,2\n"]
-    await result.value.stream.complete()
+    assert result.value.url == "https://objects.test/file?signature=redacted"
+    assert len(s3_service.get_ticket_requests) == 1
     assert s3_service.head_calls == [
         S3ObjectIdentity(
             bucket="test-bucket",
             key=created.value.object_key,
         )
     ]
-    assert s3_service.chunk_sizes == [256 * 1024]
+    assert s3_service.chunk_sizes == []
 
 
 @pytest.mark.asyncio
-async def test_open_download_returns_unavailable_when_object_missing() -> None:
-    """Open Exchange downloads reject missing objects before opening a stream."""
+@pytest.mark.parametrize(
+    "checksum", ["b" * 64, base64.b64encode(bytes.fromhex("b" * 64)).decode()]
+)
+async def test_download_ticket_rejects_changed_checksum_before_get(
+    checksum: str,
+) -> None:
+    service, _repository, s3_service = _make_service(
+        workspace_user=_make_workspace_user()
+    )
+    created = await service.create_agent_upload(
+        agent_id="agent-1",
+        user_id="user-1",
+        filename="report.csv",
+        media_type="text/csv",
+        body=b"a,b\n1,2\n",
+    )
+    assert isinstance(created, Success)
+    s3_service.checksum_sha256 = checksum
+
+    result = await service.create_download_ticket(
+        file_id=created.value.id, user_id="user-1", inline=False
+    )
+
+    assert isinstance(result, Failure)
+    assert isinstance(result.error, FileUnavailable)
+    assert s3_service.get_ticket_requests == []
+    assert s3_service.chunk_sizes == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("size", [15, 16, 17])
+async def test_download_ticket_uses_small_limit_before_head_and_presign(
+    size: int,
+) -> None:
+    """Exchange GET admission uses the same injected policy as browser PUT."""
+    service, _repository, s3_service = _make_service(
+        workspace_user=_make_workspace_user()
+    )
+    created = await service.create_agent_upload(
+        agent_id="agent-1",
+        user_id="user-1",
+        filename="report.bin",
+        media_type="application/octet-stream",
+        body=b"x" * size,
+    )
+    assert isinstance(created, Success)
+    service.config.general_file_maximum_bytes = 16
+    result = await service.create_download_ticket(
+        file_id=created.value.id, user_id="user-1", inline=False
+    )
+    if size <= 16:
+        assert isinstance(result, Success)
+        assert len(s3_service.head_calls) == 1
+        assert len(s3_service.get_ticket_requests) == 1
+    else:
+        assert isinstance(result, Failure)
+        assert isinstance(result.error, FileTooLarge)
+        assert s3_service.head_calls == []
+        assert s3_service.get_ticket_requests == []
+    assert s3_service.chunk_sizes == []
+
+
+@pytest.mark.asyncio
+async def test_download_ticket_returns_unavailable_when_object_missing() -> None:
+    """Exchange downloads reject missing objects before issuing a capability."""
     service, _repository, s3_service = _make_service(
         workspace_user=_make_workspace_user()
     )
@@ -1615,7 +1725,9 @@ async def test_open_download_returns_unavailable_when_object_missing() -> None:
     assert isinstance(created, Success)
     s3_service.objects.clear()
 
-    result = await service.open_download(file_id=created.value.id, user_id="user-1")
+    result = await service.create_download_ticket(
+        file_id=created.value.id, user_id="user-1", inline=False
+    )
 
     assert isinstance(result, Failure)
     assert isinstance(result.error, FileUnavailable)

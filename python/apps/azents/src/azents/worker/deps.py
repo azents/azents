@@ -123,7 +123,6 @@ from .config import AgentWorkerConfig
 from .health import HealthServer
 
 _DEFAULT_HEALTH_PORT = 8012
-_DIRECT_RUNTIME_FILE_MAXIMUM_BYTES = 128 * 1024 * 1024
 _RUNTIME_IMAGE_MAXIMUM_BYTES = 20 * 1024 * 1024
 _TRANSFER_CHUNK_BYTES = 256 * 1024
 _TRANSFER_MULTIPART_PART_BYTES = 5 * 1024 * 1024
@@ -324,6 +323,7 @@ def get_worker_external_channel_file_transfer_service(
         discord_client=discord_client,
         exchange_file_service=exchange_file_service,
         system_settings=system_settings,
+        config=config,
         inbound_staging_configuration=(
             create_worker_external_channel_inbound_staging_configuration(
                 config=config,
@@ -412,8 +412,8 @@ def create_worker_transfer_services(
             consumer_lease_renew_interval=_TRANSFER_CONSUMER_RENEW_INTERVAL,
             maximum_chunk_size=_TRANSFER_CHUNK_BYTES,
         ),
-        product_maximum_size=_DIRECT_RUNTIME_FILE_MAXIMUM_BYTES,
-        provider_maximum_size=_DIRECT_RUNTIME_FILE_MAXIMUM_BYTES,
+        product_maximum_size=config.general_file_maximum_bytes,
+        provider_maximum_size=config.general_file_maximum_bytes,
         deadline=_TRANSFER_DEADLINE,
         resource_class="external_channel",
     )
@@ -431,8 +431,8 @@ def create_worker_transfer_services(
             transfer_service=runtime_to_server,
             resolver=resolver,
             exchange_file_service=exchange_file_service,
-            product_maximum_size=_DIRECT_RUNTIME_FILE_MAXIMUM_BYTES,
-            provider_maximum_size=_DIRECT_RUNTIME_FILE_MAXIMUM_BYTES,
+            product_maximum_size=config.general_file_maximum_bytes,
+            provider_maximum_size=config.general_file_maximum_bytes,
             deadline=_TRANSFER_DEADLINE,
         ),
         provider_delivery=provider_delivery,
@@ -442,7 +442,7 @@ def create_worker_transfer_services(
             transfer_object_prefix=object_prefix,
             multipart_copy_threshold=_TRANSFER_MULTIPART_PART_BYTES,
             multipart_part_size=_TRANSFER_MULTIPART_PART_BYTES,
-            maximum_size=_DIRECT_RUNTIME_FILE_MAXIMUM_BYTES,
+            maximum_size=config.general_file_maximum_bytes,
             deadline_after=_TRANSFER_DEADLINE,
         ),
     )

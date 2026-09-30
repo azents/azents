@@ -35,7 +35,6 @@ export interface PlatformGitHubAppDraft {
 }
 
 export interface ExternalChannelFilesDraft {
-  inboundMaxFileMiB: number | string;
   outboundMaxFileMiB: number | string;
   outboundMaxActionMiB: number | string;
 }

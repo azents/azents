@@ -5427,7 +5427,7 @@
           "Chat v1"
         ],
         "summary": "Download Agent Workspace File",
-        "description": "Download an Agent Workspace file.",
+        "description": "Redirect to one authorized, short-lived Agent Workspace GET capability.",
         "operationId": "chat_v1_download_agent_workspace_file",
         "security": [
           {
@@ -5457,13 +5457,8 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
+          "302": {
+            "description": "Successful Response"
           },
           "422": {
             "description": "Validation Error",
@@ -5915,7 +5910,7 @@
           "Chat v1"
         ],
         "summary": "Download Exchange File",
-        "description": "Download an Exchange file.",
+        "description": "Redirect to an authorized Exchange GET with safe signed response metadata.",
         "operationId": "chat_v1_download_exchange_file",
         "security": [
           {
@@ -5931,19 +5926,25 @@
               "type": "string",
               "title": "File Id"
             }
+          },
+          {
+            "name": "disposition",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "attachment",
+                "inline"
+              ],
+              "type": "string",
+              "default": "attachment",
+              "title": "Disposition"
+            }
           }
         ],
         "responses": {
-          "200": {
-            "description": "Exchange file bytes",
-            "content": {
-              "application/octet-stream": {
-                "schema": {
-                  "type": "string",
-                  "format": "binary"
-                }
-              }
-            }
+          "302": {
+            "description": "Successful Response"
           },
           "422": {
             "description": "Validation Error",

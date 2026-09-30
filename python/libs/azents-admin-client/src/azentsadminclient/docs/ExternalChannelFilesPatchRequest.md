@@ -7,7 +7,6 @@ Optimistic partial update for External Channel file limits.
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **expected_version** | **int** |  | 
-**inbound_max_file_bytes** | **int** |  | [optional] 
 **outbound_max_file_bytes** | **int** |  | [optional] 
 **outbound_max_action_bytes** | **int** |  | [optional] 
 

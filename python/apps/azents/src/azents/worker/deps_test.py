@@ -10,6 +10,7 @@ from azents_runtime_control.grpc_transfer_coordinator_client import (
 
 from azents.core.config import Config
 from azents.runtime.transfer.runtime_to_server import RuntimeToServerTransferService
+from azents.services.chat.workspace import get_runtime_workspace_download_service
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.model_file import ModelFileService
 from azents.worker.deps import (
@@ -93,6 +94,36 @@ def test_worker_transfer_services_share_only_the_injected_coordinator() -> None:
     assert services.import_staging is not None
     assert services.import_staging.transfer_object_prefix == "v1/runtime-transfer"
     assert services.import_staging.maximum_size == 128 * 1024 * 1024
+
+
+@pytest.mark.parametrize("maximum_bytes", [16, 1024 * 1024])
+def test_transfer_composition_shares_lowered_general_limit(maximum_bytes: int) -> None:
+    """Worker and Workspace GET share one policy; image budget stays separate."""
+    config = _config()
+    config.general_file_maximum_bytes = maximum_bytes
+    coordinator = _Coordinator()
+    services = create_worker_transfer_services(
+        config=config,
+        coordinator=coordinator,
+        s3_service=_S3Service(),
+        exchange_file_service=_ExchangeFileService(),
+        model_file_service=_ModelFileService(),
+    )
+    assert services.present_file_publication is not None
+    assert services.present_file_publication.product_maximum_size == maximum_bytes
+    assert services.present_file_publication.provider_maximum_size == maximum_bytes
+    assert services.provider_delivery is not None
+    assert services.provider_delivery.product_maximum_size == maximum_bytes
+    assert services.provider_delivery.provider_maximum_size == maximum_bytes
+    assert services.import_staging is not None
+    assert services.import_staging.maximum_size == maximum_bytes
+    assert services.runtime_image_read is not None
+    assert services.runtime_image_read.product_maximum_size == 20 * 1024 * 1024
+    workspace = get_runtime_workspace_download_service(
+        config=config, s3_service=_S3Service(), coordinator=coordinator
+    )
+    assert workspace is not None
+    assert workspace.product_maximum_size == maximum_bytes
 
 
 def test_worker_direct_transfer_policies_preserve_the_image_bound() -> None:

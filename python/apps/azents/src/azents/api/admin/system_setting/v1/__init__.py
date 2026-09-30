@@ -49,7 +49,6 @@ from .data import (
 router = APIRouter()
 
 _EXTERNAL_CHANNEL_FILE_LIMIT_FIELDS = (
-    "inbound_max_file_bytes",
     "outbound_max_file_bytes",
     "outbound_max_action_bytes",
 )

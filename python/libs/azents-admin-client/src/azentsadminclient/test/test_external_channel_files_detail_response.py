@@ -38,7 +38,6 @@ class TestExternalChannelFilesDetailResponse(unittest.TestCase):
                 section = '',
                 schema_version = 56,
                 admin_version = 56,
-                inbound_max_file_bytes = 56,
                 outbound_max_file_bytes = 56,
                 outbound_max_action_bytes = 56
             )
@@ -47,7 +46,6 @@ class TestExternalChannelFilesDetailResponse(unittest.TestCase):
                 section = '',
                 schema_version = 56,
                 admin_version = 56,
-                inbound_max_file_bytes = 56,
                 outbound_max_file_bytes = 56,
                 outbound_max_action_bytes = 56,
         )
