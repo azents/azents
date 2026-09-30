@@ -67,6 +67,31 @@ def test_runtime_provider_kubernetes_default_off_render_contract() -> None:
     assert "mountPath: /var/run/azents/runtime-provider-bootstrap" in rendered
 
 
+def test_runtime_provider_renders_exact_object_storage_service_egress_authority() -> (
+    None
+):
+    """Configured Runner PUT endpoint is named in the Provider role/RBAC list."""
+    rendered = _helm_template(
+        "runtimeProviderKubernetes.enabled=true",
+        "runtimeProviderKubernetes.image.repository=repo/provider",
+        "runtimeProviderKubernetes.image.tag=sha",
+        "runtimeProviderKubernetes.runnerImage.repository=repo/runner",
+        "runtimeProviderKubernetes.runnerImage.tag=sha",
+        "objectStorage.external.publicEndpoint=http://object-store.azents.svc:9000",
+        "runtimeProviderKubernetes.strictNetwork.mandatoryServices.objectStorage.namespace=azents",
+        "runtimeProviderKubernetes.strictNetwork.mandatoryServices.objectStorage.name=object-store",
+        "runtimeProviderKubernetes.strictNetwork.mandatoryServices.objectStorage.endpointHostnames[0]=object-store.azents.svc",
+        "runtimeProviderKubernetes.strictNetwork.mandatoryServices.objectStorage.ports[0]=9000",
+    )
+    assert '\\"role\\":\\"runtime_object_storage\\"' in rendered
+    assert '\\"name\\":\\"object-store\\"' in rendered
+    assert (
+        "- name: AZ_RUNTIME_PROVIDER_OBJECT_STORAGE_ENDPOINT\n"
+        '              value: "http://object-store.azents.svc:9000"'
+    ) in rendered
+    assert 'resourceNames:\n      - "object-store"\n    verbs: ["get"]' in rendered
+
+
 def test_runtime_provider_kubernetes_enabled_render_contract() -> None:
     """Enabled values render provider/runner images and PVC policy env."""
     rendered = _helm_template(

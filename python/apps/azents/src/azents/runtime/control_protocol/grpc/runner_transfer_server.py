@@ -4,13 +4,14 @@
 # ruff: noqa: E501, B904
 
 import asyncio
+import base64
 import hashlib
 import logging
 import secrets
 from collections import deque
 from collections.abc import AsyncIterator, Callable, Mapping
 from contextlib import AbstractAsyncContextManager, suppress
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import StrEnum
 from typing import Any, Protocol, runtime_checkable
 
@@ -19,6 +20,8 @@ from azcommon.infra.s3.service import (
     S3CompletedPart,
     S3MultipartUpload,
     S3ObjectIdentity,
+    S3ObjectMetadata,
+    S3PresignedRequest,
     S3TransferCancelled,
     S3TransferCleanupRequired,
     S3TransferObjectMetadata,
@@ -53,6 +56,7 @@ from azents.runtime.transfer.data import (
     RuntimeTransferOutcome,
     RuntimeTransferRecord,
     RuntimeTransferSourceTransport,
+    RuntimeTransferUploadTransport,
     cancellation_settlement,
 )
 from azents.runtime.transfer.object_store import runtime_transfer_object_identity
@@ -194,6 +198,24 @@ class _StreamLeaseKeeper:
 
 class RuntimeRunnerTransferObjectStore(Protocol):
     """Trusted object-store operations needed for bounded Runner transfers."""
+
+    async def get_upload_request(
+        self,
+        *,
+        identity: S3ObjectIdentity,
+        content_type: str | None,
+        checksum_sha256: str,
+        expires_in: timedelta,
+        now: datetime | None = None,
+    ) -> S3PresignedRequest:
+        """Sign one exact checksum-bound PUT."""
+        ...
+
+    async def head_with_checksum(
+        self, identity: S3ObjectIdentity
+    ) -> S3ObjectMetadata | None:
+        """Read trusted S3 size and checksum."""
+        ...
 
     async def verify_transfer_object(
         self,
@@ -554,6 +576,395 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
         )
         return response
 
+    async def _authorize_direct_upload(
+        self,
+        identity: pb.TransferIdentity,
+        dispatch_id: str,
+        credential: RuntimeRunnerCredential,
+        context: GrpcAbortContext,
+    ) -> RuntimeTransferRecord:
+        """Fence an exact direct-only attempt and current dispatch."""
+        record = await self._authorize_upload(identity, credential, context)
+        if (
+            record.dispatch_id != dispatch_id
+            or record.admission.upload_transport
+            is not RuntimeTransferUploadTransport.DIRECT_OBJECT
+            or record.object is None
+            or record.object.size != record.admission.expected_size
+        ):
+            await context.abort(
+                grpc.StatusCode.FAILED_PRECONDITION, "Direct upload is unavailable"
+            )
+            raise AssertionError("unreachable")
+        return record
+
+    async def ClaimDirectObjectUpload(
+        self,
+        request: pb.DirectObjectUploadClaimRequest,
+        context: grpc.aio.ServicerContext[
+            pb.DirectObjectUploadClaimRequest, pb.DirectObjectUploadClaimResponse
+        ],
+    ) -> pb.DirectObjectUploadClaimResponse:
+        """Reserve the ingress durably before issuing an exact checksum-bound PUT."""
+        credential = await self._auth.authenticate(context)
+        if not await self._runner_authenticator.authorize_runner(credential):
+            await context.abort(grpc.StatusCode.UNAUTHENTICATED, "Runner unauthorized")
+            raise AssertionError("unreachable")
+        if (
+            not request.HasField("identity")
+            or not request.dispatch_id
+            or not request.claim_id
+            or len(request.expected_sha256) != 64
+            or any(c not in "0123456789abcdef" for c in request.expected_sha256)
+        ):
+            await context.abort(grpc.StatusCode.INVALID_ARGUMENT, "Invalid PUT claim")
+            raise AssertionError("unreachable")
+        record = await self._authorize_direct_upload(
+            request.identity, request.dispatch_id, credential, context
+        )
+        if request.expected_size != record.admission.expected_size or (
+            record.admission.expected_sha256 is not None
+            and request.expected_sha256 != record.admission.expected_sha256
+        ):
+            await context.abort(
+                grpc.StatusCode.FAILED_PRECONDITION, "PUT manifest differs"
+            )
+            raise AssertionError("unreachable")
+        claimed = await self._state_store.claim_direct_object(
+            request.identity.transfer_id,
+            attempt_id=request.identity.attempt_id,
+            runtime_id=request.identity.runtime_id,
+            desired_generation=credential.desired_generation,
+            accepted_runner_generation=request.identity.runner_generation,
+            claim_id=request.claim_id,
+            owner_replica_id=self._owner_replica_id,
+            upload=True,
+        )
+        if claimed is None:
+            await context.abort(grpc.StatusCode.ALREADY_EXISTS, "PUT claim unavailable")
+            raise AssertionError("unreachable")
+        now = self._now()
+        if claimed.direct_ingress_handle is None:
+            lifetime = min(
+                300,
+                int(
+                    (
+                        min(claimed.admission.deadline_at, claimed.logical_expires_at)
+                        - now
+                    ).total_seconds()
+                ),
+            )
+            if lifetime <= 0:
+                await context.abort(grpc.StatusCode.DEADLINE_EXCEEDED, "PUT expired")
+                raise AssertionError("unreachable")
+            reserved = await self._state_store.reserve_direct_ingress(
+                claimed.admission.transfer_id,
+                attempt_id=claimed.admission.attempt_id,
+                accepted_runner_generation=request.identity.runner_generation,
+                expected_revision=claimed.revision,
+                claim_id=request.claim_id,
+                owner_replica_id=self._owner_replica_id,
+                ingress_handle=f"{secrets.token_hex(24)}:ingress",
+                expires_at=now + timedelta(seconds=lifetime),
+                sha256=request.expected_sha256,
+            )
+            if reserved is None:
+                await context.abort(grpc.StatusCode.FAILED_PRECONDITION, "PUT fenced")
+                raise AssertionError("unreachable")
+            claimed = reserved
+        if (
+            claimed.direct_ingress_sha256 != request.expected_sha256
+            or claimed.direct_ingress_expires_at is None
+            or claimed.direct_ingress_expires_at <= now
+        ):
+            await context.abort(
+                grpc.StatusCode.FAILED_PRECONDITION, "PUT grant expired"
+            )
+            raise AssertionError("unreachable")
+        assert claimed.direct_ingress_handle is not None
+        remaining_seconds = int(
+            (claimed.direct_ingress_expires_at - now).total_seconds()
+        )
+        if remaining_seconds < 1:
+            await context.abort(grpc.StatusCode.DEADLINE_EXCEEDED, "PUT grant expired")
+            raise AssertionError("unreachable")
+        await self._check_direct_upload_stream(claimed, credential, context)
+        try:
+            ticket = await self._object_store.get_upload_request(
+                identity=self._object_identity(claimed.direct_ingress_handle),
+                content_type=None,
+                checksum_sha256=request.expected_sha256,
+                expires_in=timedelta(seconds=remaining_seconds),
+                now=now,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            await context.abort(grpc.StatusCode.FAILED_PRECONDITION, "PUT unavailable")
+            raise AssertionError("unreachable")
+        current = await self._state_store.get(claimed.admission.transfer_id)
+        if (
+            current is None
+            or current.phase.value != "streaming"
+            or current.direct_ingress_handle != claimed.direct_ingress_handle
+            or current.direct_ingress_sha256 != request.expected_sha256
+        ):
+            await context.abort(grpc.StatusCode.FAILED_PRECONDITION, "PUT fenced")
+            raise AssertionError("unreachable")
+        await self._check_direct_upload_stream(current, credential, context)
+        response = pb.DirectObjectUploadClaimResponse(
+            method=ticket.method,
+            url=ticket.url,
+            expires_at=_timestamp(ticket.expires_at),
+            expected_size=request.expected_size,
+            expected_sha256=request.expected_sha256,
+        )
+        response.headers.extend(
+            pb.DirectObjectDownloadHeader(name=name, value=value)
+            for name, value in ticket.headers.items()
+        )
+        return response
+
+    async def RenewDirectObjectUpload(
+        self,
+        request: pb.DirectObjectUploadRenewRequest,
+        context: grpc.aio.ServicerContext[
+            pb.DirectObjectUploadRenewRequest, pb.DirectObjectUploadRenewResponse
+        ],
+    ) -> pb.DirectObjectUploadRenewResponse:
+        """Renew an owned lease without issuing or extending a PUT capability."""
+        credential = await self._auth.authenticate(context)
+        if not await self._runner_authenticator.authorize_runner(credential):
+            await context.abort(grpc.StatusCode.UNAUTHENTICATED, "Runner unauthorized")
+            raise AssertionError("unreachable")
+        if (
+            not request.HasField("identity")
+            or not request.claim_id
+            or not request.dispatch_id
+        ):
+            await context.abort(grpc.StatusCode.INVALID_ARGUMENT, "Invalid PUT renewal")
+            raise AssertionError("unreachable")
+        record = await self._authorize_direct_upload(
+            request.identity, request.dispatch_id, credential, context
+        )
+        if (
+            record.phase.value != "streaming"
+            or record.stream_claim_id != request.claim_id
+            or record.stream_owner_replica_id != self._owner_replica_id
+            or record.direct_ingress_handle is None
+        ):
+            await context.abort(grpc.StatusCode.FAILED_PRECONDITION, "PUT fenced")
+            raise AssertionError("unreachable")
+        renewed = await self._state_store.renew_stream_lease(
+            record.admission.transfer_id,
+            attempt_id=record.admission.attempt_id,
+            accepted_runner_generation=request.identity.runner_generation,
+            expected_revision=record.revision,
+            claim_id=request.claim_id,
+            owner_replica_id=self._owner_replica_id,
+        )
+        if renewed is None:
+            await context.abort(grpc.StatusCode.FAILED_PRECONDITION, "PUT lease fenced")
+            raise AssertionError("unreachable")
+        return pb.DirectObjectUploadRenewResponse()
+
+    async def CompleteDirectObjectUpload(
+        self,
+        request: pb.DirectObjectUploadCompleteRequest,
+        context: grpc.aio.ServicerContext[
+            pb.DirectObjectUploadCompleteRequest, pb.UploadTransferResult
+        ],
+    ) -> pb.UploadTransferResult:
+        """Verify native checksum evidence and publish a separate immutable copy."""
+        credential = await self._auth.authenticate(context)
+        if not await self._runner_authenticator.authorize_runner(credential):
+            await context.abort(grpc.StatusCode.UNAUTHENTICATED, "Runner unauthorized")
+            raise AssertionError("unreachable")
+        if (
+            not request.HasField("identity")
+            or not request.dispatch_id
+            or not request.claim_id
+            or len(request.sha256) != 64
+            or any(c not in "0123456789abcdef" for c in request.sha256)
+        ):
+            await context.abort(
+                grpc.StatusCode.INVALID_ARGUMENT, "Invalid PUT completion"
+            )
+            raise AssertionError("unreachable")
+        record = await self._authorize_direct_upload(
+            request.identity, request.dispatch_id, credential, context
+        )
+        if (
+            record.phase.value != "streaming"
+            or record.stream_claim_id != request.claim_id
+            or record.stream_owner_replica_id != self._owner_replica_id
+            or record.direct_ingress_handle is None
+            or record.direct_ingress_sha256 != request.sha256
+            or record.admission.expected_size != request.actual_size
+            or record.stream_lease_expires_at is None
+            or record.stream_lease_expires_at <= self._now()
+        ):
+            await context.abort(
+                grpc.StatusCode.FAILED_PRECONDITION, "PUT completion fenced"
+            )
+            raise AssertionError("unreachable")
+        assert record.object is not None
+        ingress = self._object_identity(record.direct_ingress_handle)
+        final = self._object_identity(record.object.key)
+        latest = await self._check_direct_upload_stream(record, credential, context)
+        keeper = self._start_lease_keeper(latest, credential)
+        try:
+            copied = await self._verify_and_copy_direct_upload(
+                request=request,
+                context=context,
+                credential=credential,
+                record=latest,
+                ingress=ingress,
+                final=final,
+            )
+        finally:
+            await keeper.stop()
+        if (
+            copied.metadata.content_length != request.actual_size
+            or copied.sha256 != request.sha256
+        ):
+            await context.abort(grpc.StatusCode.DATA_LOSS, "PUT copy integrity failed")
+            raise AssertionError("unreachable")
+        current = await self._state_store.get(record.admission.transfer_id)
+        if current is None:
+            await context.abort(grpc.StatusCode.FAILED_PRECONDITION, "PUT fenced")
+            raise AssertionError("unreachable")
+        latest = await self._check_direct_upload_stream(current, credential, context)
+        verifying = await self._state_store.begin_verification(
+            latest.admission.transfer_id,
+            attempt_id=latest.admission.attempt_id,
+            runtime_id=latest.admission.runtime_id,
+            desired_generation=latest.admission.desired_generation,
+            accepted_runner_generation=request.identity.runner_generation,
+            claim_id=request.claim_id,
+            expected_revision=latest.revision,
+        )
+        if verifying is None:
+            await context.abort(grpc.StatusCode.FAILED_PRECONDITION, "PUT fenced")
+            raise AssertionError("unreachable")
+        available = await self._state_store.publish_available(
+            verifying.admission.transfer_id,
+            attempt_id=verifying.admission.attempt_id,
+            runtime_id=verifying.admission.runtime_id,
+            desired_generation=verifying.admission.desired_generation,
+            accepted_runner_generation=request.identity.runner_generation,
+            claim_id=request.claim_id,
+            expected_revision=verifying.revision,
+            actual_size=request.actual_size,
+            actual_sha256=request.sha256,
+        )
+        if available is None:
+            await context.abort(grpc.StatusCode.FAILED_PRECONDITION, "PUT fenced")
+            raise AssertionError("unreachable")
+        committed = await self._state_store.commit_upload_response(
+            available.admission.transfer_id,
+            attempt_id=available.admission.attempt_id,
+            runtime_id=available.admission.runtime_id,
+            desired_generation=available.admission.desired_generation,
+            accepted_runner_generation=request.identity.runner_generation,
+            claim_id=request.claim_id,
+            expected_revision=available.revision,
+            actual_size=request.actual_size,
+            actual_sha256=request.sha256,
+        )
+        if committed is None:
+            await context.abort(grpc.StatusCode.FAILED_PRECONDITION, "PUT fenced")
+            raise AssertionError("unreachable")
+        return pb.UploadTransferResult(
+            status=pb.UPLOAD_TRANSFER_STATUS_SUCCEEDED,
+            actual_size=request.actual_size,
+            sha256=request.sha256,
+        )
+
+    async def _verify_and_copy_direct_upload(
+        self,
+        *,
+        request: pb.DirectObjectUploadCompleteRequest,
+        context: _GrpcStreamContext,
+        credential: RuntimeRunnerCredential,
+        record: RuntimeTransferRecord,
+        ingress: S3ObjectIdentity,
+        final: S3ObjectIdentity,
+    ) -> S3VerifiedObject:
+        """Keep the owner lease alive from HEAD through immutable copy."""
+        try:
+            metadata = await self._object_store.head_with_checksum(ingress)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            await context.abort(grpc.StatusCode.FAILED_PRECONDITION, "PUT HEAD failed")
+            raise AssertionError("unreachable")
+        if (
+            metadata is None
+            or metadata.content_length != request.actual_size
+            or metadata.checksum_sha256
+            != base64.b64encode(bytes.fromhex(request.sha256)).decode("ascii")
+        ):
+            await context.abort(grpc.StatusCode.DATA_LOSS, "PUT integrity failed")
+            raise AssertionError("unreachable")
+        current = await self._state_store.get(record.admission.transfer_id)
+        if current is None:
+            await context.abort(grpc.StatusCode.FAILED_PRECONDITION, "PUT fenced")
+            raise AssertionError("unreachable")
+        latest = await self._check_direct_upload_stream(current, credential, context)
+        pending = await self._state_store.record_completed_object_cleanup(
+            latest.admission.transfer_id,
+            attempt_id=latest.admission.attempt_id,
+            expected_revision=latest.revision,
+            status=RuntimeTransferCleanupStatus.PENDING,
+            cleanup_failure=None,
+            multipart_cleanup_required=False,
+            completed_object_cleanup_required=True,
+        )
+        if pending is None:
+            await context.abort(grpc.StatusCode.FAILED_PRECONDITION, "PUT fenced")
+            raise AssertionError("unreachable")
+        try:
+            return await self._object_store.copy_immutable(
+                source=ingress,
+                destination=final,
+                expected_size=request.actual_size,
+                transfer_metadata=S3TransferObjectMetadata(
+                    sha256=request.sha256, content_type=None
+                ),
+                multipart_copy_threshold=self._multipart_part_bytes,
+                multipart_part_size=self._multipart_part_bytes,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            await context.abort(grpc.StatusCode.FAILED_PRECONDITION, "PUT copy failed")
+            raise AssertionError("unreachable")
+
+    async def _check_direct_upload_stream(
+        self,
+        record: RuntimeTransferRecord,
+        credential: RuntimeRunnerCredential,
+        context: _GrpcStreamContext,
+    ) -> RuntimeTransferRecord:
+        """Map direct-RPC cancellation and deadline fences to gRPC statuses."""
+        try:
+            current = await self._check_stream(record, credential, context)
+        except _TransferCancelled:
+            await context.abort(grpc.StatusCode.CANCELLED, "PUT cancelled")
+            raise AssertionError("unreachable")
+        except _TransferExpired:
+            await context.abort(grpc.StatusCode.DEADLINE_EXCEEDED, "PUT expired")
+            raise AssertionError("unreachable")
+        if (
+            current.phase.value != "streaming"
+            or current.stream_lease_expires_at is None
+            or current.stream_lease_expires_at <= self._now()
+        ):
+            await context.abort(grpc.StatusCode.FAILED_PRECONDITION, "PUT lease fenced")
+            raise AssertionError("unreachable")
+        return current
+
     async def DownloadTransfer(
         self,
         request: pb.DownloadTransferRequest,
@@ -812,6 +1223,15 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
             )
             raise AssertionError("unreachable")
         record = await self._authorize_upload(first.open.identity, credential, context)
+        if (
+            record.admission.upload_transport
+            is RuntimeTransferUploadTransport.DIRECT_OBJECT
+        ):
+            await context.abort(
+                grpc.StatusCode.FAILED_PRECONDITION,
+                "Direct-only attempts cannot use the byte relay",
+            )
+            raise AssertionError("unreachable")
         if self._uploads.locked():
             await context.abort(
                 grpc.StatusCode.RESOURCE_EXHAUSTED,

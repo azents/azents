@@ -248,6 +248,190 @@ Global___DirectObjectDownloadClaimResponse: _TypeAlias = (
 )
 
 @_typing.final
+class DirectObjectUploadClaimRequest(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    IDENTITY_FIELD_NUMBER: _builtins.int
+    DISPATCH_ID_FIELD_NUMBER: _builtins.int
+    CLAIM_ID_FIELD_NUMBER: _builtins.int
+    EXPECTED_SIZE_FIELD_NUMBER: _builtins.int
+    EXPECTED_SHA256_FIELD_NUMBER: _builtins.int
+    dispatch_id: _builtins.str
+    claim_id: _builtins.str
+    expected_size: _builtins.int
+    expected_sha256: _builtins.str
+    @_builtins.property
+    def identity(self) -> Global___TransferIdentity: ...
+    def __init__(
+        self,
+        *,
+        identity: Global___TransferIdentity | None = ...,
+        dispatch_id: _builtins.str = ...,
+        claim_id: _builtins.str = ...,
+        expected_size: _builtins.int = ...,
+        expected_sha256: _builtins.str = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _typing.Literal["identity", b"identity"]
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal[
+        "claim_id",
+        b"claim_id",
+        "dispatch_id",
+        b"dispatch_id",
+        "expected_sha256",
+        b"expected_sha256",
+        "expected_size",
+        b"expected_size",
+        "identity",
+        b"identity",
+    ]
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___DirectObjectUploadClaimRequest: _TypeAlias = DirectObjectUploadClaimRequest
+
+@_typing.final
+class DirectObjectUploadClaimResponse(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    METHOD_FIELD_NUMBER: _builtins.int
+    URL_FIELD_NUMBER: _builtins.int
+    EXPIRES_AT_FIELD_NUMBER: _builtins.int
+    HEADERS_FIELD_NUMBER: _builtins.int
+    EXPECTED_SIZE_FIELD_NUMBER: _builtins.int
+    EXPECTED_SHA256_FIELD_NUMBER: _builtins.int
+    method: _builtins.str
+    url: _builtins.str
+    expected_size: _builtins.int
+    expected_sha256: _builtins.str
+    @_builtins.property
+    def expires_at(self) -> _timestamp_pb2.Timestamp: ...
+    @_builtins.property
+    def headers(
+        self,
+    ) -> _containers.RepeatedCompositeFieldContainer[
+        Global___DirectObjectDownloadHeader
+    ]: ...
+    def __init__(
+        self,
+        *,
+        method: _builtins.str = ...,
+        url: _builtins.str = ...,
+        expires_at: _timestamp_pb2.Timestamp | None = ...,
+        headers: _abc.Iterable[Global___DirectObjectDownloadHeader] | None = ...,
+        expected_size: _builtins.int = ...,
+        expected_sha256: _builtins.str = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _typing.Literal["expires_at", b"expires_at"]
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal[
+        "expected_sha256",
+        b"expected_sha256",
+        "expected_size",
+        b"expected_size",
+        "expires_at",
+        b"expires_at",
+        "headers",
+        b"headers",
+        "method",
+        b"method",
+        "url",
+        b"url",
+    ]
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___DirectObjectUploadClaimResponse: _TypeAlias = DirectObjectUploadClaimResponse
+
+@_typing.final
+class DirectObjectUploadRenewRequest(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    IDENTITY_FIELD_NUMBER: _builtins.int
+    DISPATCH_ID_FIELD_NUMBER: _builtins.int
+    CLAIM_ID_FIELD_NUMBER: _builtins.int
+    dispatch_id: _builtins.str
+    claim_id: _builtins.str
+    @_builtins.property
+    def identity(self) -> Global___TransferIdentity: ...
+    def __init__(
+        self,
+        *,
+        identity: Global___TransferIdentity | None = ...,
+        dispatch_id: _builtins.str = ...,
+        claim_id: _builtins.str = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _typing.Literal["identity", b"identity"]
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal[
+        "claim_id", b"claim_id", "dispatch_id", b"dispatch_id", "identity", b"identity"
+    ]
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___DirectObjectUploadRenewRequest: _TypeAlias = DirectObjectUploadRenewRequest
+
+@_typing.final
+class DirectObjectUploadRenewResponse(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    def __init__(
+        self,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _Never
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___DirectObjectUploadRenewResponse: _TypeAlias = DirectObjectUploadRenewResponse
+
+@_typing.final
+class DirectObjectUploadCompleteRequest(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    IDENTITY_FIELD_NUMBER: _builtins.int
+    DISPATCH_ID_FIELD_NUMBER: _builtins.int
+    CLAIM_ID_FIELD_NUMBER: _builtins.int
+    ACTUAL_SIZE_FIELD_NUMBER: _builtins.int
+    SHA256_FIELD_NUMBER: _builtins.int
+    dispatch_id: _builtins.str
+    claim_id: _builtins.str
+    actual_size: _builtins.int
+    sha256: _builtins.str
+    @_builtins.property
+    def identity(self) -> Global___TransferIdentity: ...
+    def __init__(
+        self,
+        *,
+        identity: Global___TransferIdentity | None = ...,
+        dispatch_id: _builtins.str = ...,
+        claim_id: _builtins.str = ...,
+        actual_size: _builtins.int = ...,
+        sha256: _builtins.str = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _typing.Literal["identity", b"identity"]
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal[
+        "actual_size",
+        b"actual_size",
+        "claim_id",
+        b"claim_id",
+        "dispatch_id",
+        b"dispatch_id",
+        "identity",
+        b"identity",
+        "sha256",
+        b"sha256",
+    ]
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___DirectObjectUploadCompleteRequest: _TypeAlias = (
+    DirectObjectUploadCompleteRequest
+)
+
+@_typing.final
 class DownloadTransferComplete(_message.Message):
     DESCRIPTOR: _descriptor.Descriptor
 

@@ -9,6 +9,7 @@ from collections.abc import Callable
 from datetime import datetime
 
 from azents.runtime.transfer.data import (
+    DIRECT_INGRESS_CLEANUP_GRACE,
     RUNTIME_TRANSFER_MAXIMUM_CLEANUP_FAILURE_ATTEMPTS,
     RuntimeTransferAdmission,
     RuntimeTransferCancellationReason,
@@ -28,6 +29,7 @@ from azents.runtime.transfer.data import (
     RuntimeTransferProgress,
     RuntimeTransferRecord,
     RuntimeTransferSourceTransport,
+    RuntimeTransferUploadTransport,
     cancellation_settlement,
     logical_expiry,
     terminal_expiry,
@@ -395,8 +397,9 @@ class InMemoryRuntimeTransferStateStore:
         accepted_runner_generation: int,
         claim_id: str,
         owner_replica_id: str,
+        upload: bool = False,
     ) -> RuntimeTransferRecord | None:
-        """Claim or reuse one exact direct-object download claim."""
+        """Claim or renew one exact direct-object upload or download."""
         now = self._now()
         async with self.lock:
             self._expire(now)
@@ -404,9 +407,21 @@ class InMemoryRuntimeTransferStateStore:
             if (
                 record is None
                 or self.current_attempts.get(transfer_id) != attempt_id
-                or record.admission.source_transport
-                is not RuntimeTransferSourceTransport.DIRECT_OBJECT
-                or record.admission.direction is not RuntimeTransferDirection.DOWNLOAD
+                or (
+                    (
+                        record.admission.upload_transport
+                        is not RuntimeTransferUploadTransport.DIRECT_OBJECT
+                        or record.admission.direction
+                        is not RuntimeTransferDirection.UPLOAD
+                    )
+                    if upload
+                    else (
+                        record.admission.source_transport
+                        is not RuntimeTransferSourceTransport.DIRECT_OBJECT
+                        or record.admission.direction
+                        is not RuntimeTransferDirection.DOWNLOAD
+                    )
+                )
                 or record.admission.runtime_id != runtime_id
                 or record.admission.desired_generation != desired_generation
                 or record.accepted_runner_generation != accepted_runner_generation
@@ -746,6 +761,90 @@ class InMemoryRuntimeTransferStateStore:
                 )
             )
 
+    async def reserve_direct_ingress(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        accepted_runner_generation: int,
+        expected_revision: int,
+        claim_id: str,
+        owner_replica_id: str,
+        ingress_handle: str,
+        expires_at: datetime,
+        sha256: str,
+    ) -> RuntimeTransferRecord | None:
+        """Own the mutable PUT target before issuing any write capability."""
+        now = self._now()
+        async with self.lock:
+            record = self._active(
+                transfer_id,
+                attempt_id,
+                expected_revision,
+                RuntimeTransferPhase.STREAMING,
+                now,
+                accepted_runner_generation=accepted_runner_generation,
+                claim_id=claim_id,
+            )
+            if (
+                record is None
+                or record.admission.upload_transport
+                is not RuntimeTransferUploadTransport.DIRECT_OBJECT
+                or record.stream_owner_replica_id != owner_replica_id
+                or record.direct_ingress_handle is not None
+                or (record.object is not None and ingress_handle == record.object.key)
+                or expires_at <= now
+                or expires_at > record.admission.deadline_at
+                or (
+                    record.admission.expected_sha256 is not None
+                    and sha256 != record.admission.expected_sha256
+                )
+            ):
+                return None
+            return self._put(
+                dataclasses.replace(
+                    record,
+                    revision=record.revision + 1,
+                    updated_at=now,
+                    direct_ingress_handle=ingress_handle,
+                    direct_ingress_expires_at=expires_at,
+                    direct_ingress_sha256=sha256,
+                )
+            )
+
+    async def clear_direct_ingress(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        expected_revision: int,
+    ) -> RuntimeTransferRecord | None:
+        """Clear terminal ingress evidence after the PUT deadline and grace."""
+        now = self._now()
+        async with self.lock:
+            self._expire(now)
+            record = self._exact(transfer_id, attempt_id)
+            if (
+                record is None
+                or record.revision != expected_revision
+                or record.phase is not RuntimeTransferPhase.TERMINAL
+                or record.direct_ingress_expires_at is None
+                or now
+                < max(record.direct_ingress_expires_at, record.admission.deadline_at)
+                + DIRECT_INGRESS_CLEANUP_GRACE
+            ):
+                return None
+            return self._put(
+                dataclasses.replace(
+                    record,
+                    revision=record.revision + 1,
+                    updated_at=now,
+                    direct_ingress_handle=None,
+                    direct_ingress_expires_at=None,
+                    direct_ingress_sha256=None,
+                )
+            )
+
     async def list_stale_stream_claims(
         self, *, cursor: str | None, limit: int
     ) -> RuntimeTransferPage:
@@ -902,10 +1001,21 @@ class InMemoryRuntimeTransferStateStore:
                 accepted_runner_generation=accepted_runner_generation,
                 claim_id=claim_id,
             )
-            if record is None or not phase_transition_allowed(
-                record.admission.direction,
-                record.phase,
-                RuntimeTransferPhase.VERIFYING,
+            if (
+                record is None
+                or (
+                    record.admission.upload_transport
+                    is RuntimeTransferUploadTransport.DIRECT_OBJECT
+                    and (
+                        record.stream_lease_expires_at is None
+                        or record.stream_lease_expires_at <= now
+                    )
+                )
+                or not phase_transition_allowed(
+                    record.admission.direction,
+                    record.phase,
+                    RuntimeTransferPhase.VERIFYING,
+                )
             ):
                 return None
             return self._put(
@@ -1037,7 +1147,11 @@ class InMemoryRuntimeTransferStateStore:
                     revision=record.revision + 1,
                     updated_at=now,
                     upload_response_committed_at=now,
-                    cleanup_status=RuntimeTransferCleanupStatus.COMPLETE,
+                    cleanup_status=(
+                        RuntimeTransferCleanupStatus.PENDING
+                        if record.direct_ingress_handle is not None
+                        else RuntimeTransferCleanupStatus.COMPLETE
+                    ),
                     cleanup_failure=None,
                     completed_object_cleanup_required=False,
                 )

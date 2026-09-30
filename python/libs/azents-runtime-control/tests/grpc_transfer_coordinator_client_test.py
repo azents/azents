@@ -18,7 +18,9 @@ from azents_runtime_control.grpc_transfer_coordinator_client import (
     CoordinatorDispatchStatus,
     CoordinatorDispatchTransferRequest,
     CoordinatorExpectedManifest,
+    CoordinatorUploadTransport,
     GrpcRuntimeTransferCoordinatorClient,
+    admit_transfer_request_to_message,
     coordinator_identity_from_message,
     coordinator_identity_to_message,
     coordinator_request_sha256,
@@ -27,6 +29,30 @@ from azents_runtime_control.proto import runtime_transfer_coordinator_pb2
 from azents_runtime_control.transfer import CoordinatorTransferIdentity
 
 _NOW = datetime(2026, 7, 25, 12, 0, tzinfo=UTC)
+
+
+def test_admit_message_keeps_direct_upload_transport_in_authenticated_request() -> None:
+    """The trusted coordinator receives a typed direct PUT admission choice."""
+    request = CoordinatorAdmitTransferRequest(
+        identity=dataclasses.replace(_identity(), direction="upload"),
+        lease_id="lease-1",
+        runtime_path="/workspace/file.txt",
+        overwrite=False,
+        conflict_precondition=None,
+        expected_manifest=CoordinatorExpectedManifest(size=3, sha256=None),
+        product_maximum_size=10,
+        provider_maximum_size=10,
+        deadline_at=_NOW + timedelta(minutes=5),
+        source_expires_at=None,
+        resource_class="file",
+        upload_transport=CoordinatorUploadTransport.DIRECT_OBJECT,
+    )
+    encoded = admit_transfer_request_to_message(request)
+    assert encoded.upload_transport == (
+        runtime_transfer_coordinator_pb2.COORDINATOR_UPLOAD_TRANSPORT_DIRECT_OBJECT
+    )
+    with pytest.raises(ValueError, match="UPLOAD direction"):
+        dataclasses.replace(request, identity=_identity())
 
 
 @dataclasses.dataclass

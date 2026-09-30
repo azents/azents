@@ -24,6 +24,7 @@ from azents_runtime_control.runner import RuntimeRunnerState as SharedRunnerStat
 from azents_runtime_control.runner_transfer import (
     RunnerTransferResult,
     RunnerTransferSourceTransport,
+    RunnerTransferUploadTransport,
 )
 from azents_runtime_control.runtime_configuration import (
     RuntimeConfigurationEvidence,
@@ -315,6 +316,35 @@ def test_transfer_intent_envelope_rejects_unknown_source_transport() -> None:
     payload["source_transport"] = "unknown"
 
     with pytest.raises(ValueError, match="source transport"):
+        _runner_transfer_intent(dataclasses.replace(envelope, payload=payload))
+
+
+def test_transfer_intent_envelope_encodes_direct_upload_without_url() -> None:
+    """Only the transport discriminator enters the durable Runner intent."""
+    envelope = _transfer_envelope()
+    payload = dict(envelope.payload)
+    payload["direction"] = "upload"
+    payload["upload_transport"] = RunnerTransferUploadTransport.DIRECT_OBJECT.value
+
+    message = _runner_transfer_intent(dataclasses.replace(envelope, payload=payload))
+
+    assert message.upload_transport == (
+        runtime_runner_control_pb2.RUNNER_TRANSFER_UPLOAD_TRANSPORT_DIRECT_OBJECT
+    )
+    assert "url" not in str(payload)
+
+
+def test_transfer_intent_envelope_rejects_invalid_direct_upload() -> None:
+    """Malformed or download-directed Runner PUT never reaches dispatch."""
+    envelope = _transfer_envelope()
+    payload = dict(envelope.payload)
+    payload["upload_transport"] = RunnerTransferUploadTransport.DIRECT_OBJECT.value
+    payload["direction"] = "download"
+    with pytest.raises(ValueError, match="UPLOAD direction"):
+        _runner_transfer_intent(dataclasses.replace(envelope, payload=payload))
+    payload["direction"] = "upload"
+    payload["upload_transport"] = "unknown"
+    with pytest.raises(ValueError, match="upload transport"):
         _runner_transfer_intent(dataclasses.replace(envelope, payload=payload))
 
 

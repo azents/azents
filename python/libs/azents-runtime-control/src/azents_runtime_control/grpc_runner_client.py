@@ -61,6 +61,7 @@ from azents_runtime_control.runner_transfer import (
     RunnerTransferOutcome,
     RunnerTransferResult,
     RunnerTransferSourceTransport,
+    RunnerTransferUploadTransport,
 )
 from azents_runtime_control.runtime_configuration import (
     RuntimeConfigurationEvidence,
@@ -2052,6 +2053,7 @@ def runner_transfer_intent_from_message(
             else None
         ),
         source_transport=_transfer_source_transport(message.source_transport),
+        upload_transport=_transfer_upload_transport(message.upload_transport),
     )
 
 
@@ -2471,6 +2473,22 @@ def _transfer_source_transport(
         ),
         runtime_runner_control_pb2.RUNNER_TRANSFER_SOURCE_TRANSPORT_DIRECT_OBJECT: (
             RunnerTransferSourceTransport.DIRECT_OBJECT
+        ),
+    }[value]
+
+
+def _transfer_upload_transport(
+    value: runtime_runner_control_pb2.RunnerTransferUploadTransport.ValueType,
+) -> RunnerTransferUploadTransport:
+    return {
+        runtime_runner_control_pb2.RUNNER_TRANSFER_UPLOAD_TRANSPORT_UNSPECIFIED: (
+            RunnerTransferUploadTransport.CONTROL_STREAM
+        ),
+        runtime_runner_control_pb2.RUNNER_TRANSFER_UPLOAD_TRANSPORT_CONTROL_STREAM: (
+            RunnerTransferUploadTransport.CONTROL_STREAM
+        ),
+        runtime_runner_control_pb2.RUNNER_TRANSFER_UPLOAD_TRANSPORT_DIRECT_OBJECT: (
+            RunnerTransferUploadTransport.DIRECT_OBJECT
         ),
     }[value]
 

@@ -35,6 +35,7 @@ from azents_runtime_control.runtime_stream_session import (
     RunnerSessionOffer,
 )
 from azents_runtime_control.runtime_web_capacity import CapacityProfile
+from botocore.config import Config as BotoConfig
 from kubernetes_asyncio.client.api.authentication_v1_api import AuthenticationV1Api
 from kubernetes_asyncio.client.api_client import ApiClient
 from kubernetes_asyncio.config import load_incluster_config
@@ -752,6 +753,7 @@ async def runtime_control_server_lifespan(
         object_store=transfer_s3,
         bucket=settings.runtime_control_workspace_s3_bucket,
         object_prefix=_transfer_object_prefix(settings),
+        clock=clock,
     )
     transfer_coordinator = RuntimeTransferCoordinator(
         state_store=transfer_state,
@@ -1606,7 +1608,11 @@ async def _runtime_transfer_s3_service(
     secret_access_key = settings.runtime_control_workspace_s3_secret_access_key
     if (access_key_id is None) != (secret_access_key is None):
         raise ValueError("Runtime Control S3 credentials must be configured together")
-    base_client_kwargs: dict[str, Any] = {}
+    # Botocore may default S3 presigning to SigV2 on custom endpoints. Runner
+    # PUT capabilities need SigV4 (including the checksum-bound signed header).
+    base_client_kwargs: dict[str, Any] = {
+        "config": BotoConfig(signature_version="s3v4"),
+    }
     if access_key_id is not None and secret_access_key is not None:
         base_client_kwargs["aws_access_key_id"] = access_key_id
         base_client_kwargs["aws_secret_access_key"] = secret_access_key

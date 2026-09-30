@@ -3,10 +3,12 @@
 # ruff: noqa: E501
 
 import asyncio
+import base64
 import hashlib
 import logging
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Literal, NoReturn
 
@@ -17,6 +19,7 @@ from azcommon.infra.s3.service import (
     S3MultipartUpload,
     S3ObjectIdentity,
     S3ObjectMetadata,
+    S3PresignedRequest,
     S3TransferObjectMetadata,
     S3VerifiedObject,
 )
@@ -52,6 +55,7 @@ from azents.runtime.transfer.data import (
     RuntimeTransferOutcome,
     RuntimeTransferPhase,
     RuntimeTransferRecord,
+    RuntimeTransferUploadTransport,
 )
 from azents.runtime.transfer.memory import InMemoryRuntimeTransferStateStore
 from azents.testing.grpc import (
@@ -197,6 +201,22 @@ class _ObjectStore:
         self.abort_error_message = "abort failed"
         self.complete_error = False
         self.verify_error = False
+
+    async def get_upload_request(
+        self,
+        *,
+        identity: S3ObjectIdentity,
+        content_type: str | None,
+        checksum_sha256: str,
+        expires_in: timedelta,
+        now: datetime | None = None,
+    ) -> S3PresignedRequest:
+        raise AssertionError("direct upload is not configured")
+
+    async def head_with_checksum(
+        self, identity: S3ObjectIdentity
+    ) -> S3ObjectMetadata | None:
+        raise AssertionError("direct upload is not configured")
 
     async def verify_transfer_object(
         self,
@@ -1089,6 +1109,9 @@ async def _harness(
     desired_generation: int = 1,
     connection_registrations: int = 1,
     clock: Callable[[], datetime] | None = None,
+    upload_transport: RuntimeTransferUploadTransport = (
+        RuntimeTransferUploadTransport.CONTROL_STREAM
+    ),
 ) -> _Harness:
     clock = clock or (lambda: _NOW)
     state = InMemoryRuntimeTransferStateStore(
@@ -1096,7 +1119,10 @@ async def _harness(
         clock=clock,
     )
     admitted = await state.admit(
-        _admission(direction, size, sha256, desired_generation),
+        replace(
+            _admission(direction, size, sha256, desired_generation),
+            upload_transport=upload_transport,
+        ),
         lease_id="lease-1",
     )
     assert admitted is not None
@@ -1255,3 +1281,244 @@ def _config(*, maximum_bytes: int = 100) -> RuntimeTransferConfig:
         terminal_ttl=timedelta(minutes=5),
         list_page_size=10,
     )
+
+
+@pytest.mark.asyncio
+async def test_direct_put_claim_reserves_ingress_and_promotes_distinct_immutable_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A signed URL never points at the immutable published object."""
+    harness = await _harness(
+        chunks=[],
+        direction=RuntimeTransferDirection.UPLOAD,
+        upload_transport=RuntimeTransferUploadTransport.DIRECT_OBJECT,
+    )
+    signed: list[S3ObjectIdentity] = []
+
+    async def sign(
+        *,
+        identity: S3ObjectIdentity,
+        content_type: str | None,
+        checksum_sha256: str,
+        expires_in: timedelta,
+        now: datetime | None = None,
+    ) -> S3PresignedRequest:
+        assert content_type is None
+        assert checksum_sha256 == _DIGEST
+        assert now is not None
+        signed.append(identity)
+        return S3PresignedRequest(
+            method="PUT",
+            url="https://object.example/ingress?signature=secret",
+            expires_at=now + expires_in,
+            headers={
+                "x-amz-checksum-sha256": base64.b64encode(
+                    bytes.fromhex(_DIGEST)
+                ).decode()
+            },
+        )
+
+    async def head(identity: S3ObjectIdentity) -> S3ObjectMetadata:
+        assert identity == signed[0]
+        return replace(
+            _verified_object(identity, size=3, sha256=_DIGEST).metadata,
+            checksum_sha256=base64.b64encode(bytes.fromhex(_DIGEST)).decode(),
+        )
+
+    monkeypatch.setattr(harness.object_store, "get_upload_request", sign)
+    monkeypatch.setattr(harness.object_store, "head_with_checksum", head)
+    claim = pb.DirectObjectUploadClaimRequest(
+        identity=_upload_identity(),
+        dispatch_id="dispatch-1",
+        claim_id="claim-1",
+        expected_size=3,
+        expected_sha256=_DIGEST,
+    )
+    ticket = await harness.servicer.ClaimDirectObjectUpload(claim, _Context())
+    assert ticket.method == "PUT"
+    reserved = await harness.state.get("transfer-1")
+    assert reserved is not None and reserved.object is not None
+    assert reserved.direct_ingress_handle is not None
+    assert signed[0].key != reserved.object.key
+    assert "secret" not in repr(reserved)
+    with pytest.raises(_Abort) as rejected:
+        await harness.servicer.UploadTransfer(_upload_frames(b"abc"), _Context())
+    assert rejected.value.code is grpc.StatusCode.FAILED_PRECONDITION
+    assert harness.object_store.multipart_creates == 0
+
+    completed = await harness.servicer.CompleteDirectObjectUpload(
+        pb.DirectObjectUploadCompleteRequest(
+            identity=_upload_identity(),
+            dispatch_id="dispatch-1",
+            claim_id="claim-1",
+            actual_size=3,
+            sha256=_DIGEST,
+        ),
+        _Context(),
+    )
+    assert completed.status == pb.UPLOAD_TRANSFER_STATUS_SUCCEEDED
+    available = await harness.state.get("transfer-1")
+    assert available is not None
+    assert available.phase is RuntimeTransferPhase.AVAILABLE
+    assert available.object is not None
+    assert available.object.sha256 == _DIGEST
+    assert available.cleanup_status is RuntimeTransferCleanupStatus.PENDING
+    assert harness.object_store.copy_calls == [
+        (signed[0], S3ObjectIdentity("transfer-bucket", available.object.key))
+    ]
+
+
+@pytest.mark.asyncio
+async def test_direct_put_renews_lease_while_head_is_pending(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """HEAD is protected by the same owner lease as immutable copying."""
+    clock = _Clock(_NOW)
+    harness = await _harness(
+        chunks=[],
+        direction=RuntimeTransferDirection.UPLOAD,
+        upload_transport=RuntimeTransferUploadTransport.DIRECT_OBJECT,
+        clock=clock,
+    )
+    monkeypatch.setattr(transfer_server_module, "STREAM_OWNER_RENEWAL_SECONDS", 0.01)
+
+    async def sign(**kwargs: object) -> S3PresignedRequest:
+        del kwargs
+        return S3PresignedRequest(
+            method="PUT",
+            url="https://object.example/ingress?signature=secret",
+            expires_at=_NOW + timedelta(minutes=1),
+            headers={},
+        )
+
+    async def head(identity: S3ObjectIdentity) -> S3ObjectMetadata:
+        clock.now += timedelta(seconds=20)
+
+        async def renewed() -> None:
+            while True:
+                record = await harness.state.get("transfer-1")
+                assert record is not None
+                if (
+                    record.stream_lease_expires_at is not None
+                    and record.stream_lease_expires_at > _NOW + timedelta(seconds=30)
+                ):
+                    return
+                await asyncio.sleep(0.01)
+
+        await asyncio.wait_for(renewed(), timeout=1)
+        return replace(
+            _verified_object(identity, size=3, sha256=_DIGEST).metadata,
+            checksum_sha256=base64.b64encode(bytes.fromhex(_DIGEST)).decode(),
+        )
+
+    monkeypatch.setattr(harness.object_store, "get_upload_request", sign)
+    monkeypatch.setattr(harness.object_store, "head_with_checksum", head)
+    await harness.servicer.ClaimDirectObjectUpload(
+        pb.DirectObjectUploadClaimRequest(
+            identity=_upload_identity(),
+            dispatch_id="dispatch-1",
+            claim_id="claim-1",
+            expected_size=3,
+            expected_sha256=_DIGEST,
+        ),
+        _Context(),
+    )
+    completed = await harness.servicer.CompleteDirectObjectUpload(
+        pb.DirectObjectUploadCompleteRequest(
+            identity=_upload_identity(),
+            dispatch_id="dispatch-1",
+            claim_id="claim-1",
+            actual_size=3,
+            sha256=_DIGEST,
+        ),
+        _Context(),
+    )
+    assert completed.status == pb.UPLOAD_TRANSFER_STATUS_SUCCEEDED
+
+
+@pytest.mark.asyncio
+async def test_direct_put_claim_fences_cancellation_during_signing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A cancelled claim retains cleanup evidence but does not return the URL."""
+    harness = await _harness(
+        chunks=[],
+        direction=RuntimeTransferDirection.UPLOAD,
+        upload_transport=RuntimeTransferUploadTransport.DIRECT_OBJECT,
+    )
+
+    async def sign(**kwargs: object) -> S3PresignedRequest:
+        del kwargs
+        record = await harness.state.get("transfer-1")
+        assert record is not None and record.direct_ingress_handle is not None
+        cancelled = await harness.state.request_cancellation(
+            "transfer-1",
+            attempt_id="attempt-1",
+            expected_revision=record.revision,
+            reason=RuntimeTransferCancellationReason.CALLER,
+        )
+        assert cancelled is not None
+        return S3PresignedRequest(
+            method="PUT",
+            url="https://object.example/ingress?signature=secret",
+            expires_at=_NOW + timedelta(minutes=1),
+            headers={},
+        )
+
+    monkeypatch.setattr(harness.object_store, "get_upload_request", sign)
+    with pytest.raises(_Abort) as rejected:
+        await harness.servicer.ClaimDirectObjectUpload(
+            pb.DirectObjectUploadClaimRequest(
+                identity=_upload_identity(),
+                dispatch_id="dispatch-1",
+                claim_id="claim-1",
+                expected_size=3,
+                expected_sha256=_DIGEST,
+            ),
+            _Context(),
+        )
+    assert rejected.value.code is grpc.StatusCode.CANCELLED
+    record = await harness.state.get("transfer-1")
+    assert record is not None and record.direct_ingress_handle is not None
+
+
+@pytest.mark.asyncio
+async def test_direct_put_fences_bad_manifest_dispatch_and_generation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    harness = await _harness(
+        chunks=[],
+        direction=RuntimeTransferDirection.UPLOAD,
+        upload_transport=RuntimeTransferUploadTransport.DIRECT_OBJECT,
+    )
+    calls: list[object] = []
+
+    async def sign(**kwargs: object) -> S3PresignedRequest:
+        calls.append(kwargs)
+        raise AssertionError("unauthorized claim signed a PUT")
+
+    monkeypatch.setattr(harness.object_store, "get_upload_request", sign)
+    for dispatch_id, digest, generation in (
+        ("bad-dispatch", _DIGEST, 1),
+        ("dispatch-1", "f" * 64, 1),
+        ("dispatch-1", _DIGEST, 2),
+    ):
+        with pytest.raises(_Abort):
+            await harness.servicer.ClaimDirectObjectUpload(
+                pb.DirectObjectUploadClaimRequest(
+                    identity=pb.TransferIdentity(
+                        transfer_id="transfer-1",
+                        attempt_id="attempt-1",
+                        runtime_id="runtime-1",
+                        runner_generation=generation,
+                    ),
+                    dispatch_id=dispatch_id,
+                    claim_id="claim-1",
+                    expected_size=3,
+                    expected_sha256=digest,
+                ),
+                _Context(),
+            )
+    assert calls == []
+    record = await harness.state.get("transfer-1")
+    assert record is not None and record.direct_ingress_handle is None

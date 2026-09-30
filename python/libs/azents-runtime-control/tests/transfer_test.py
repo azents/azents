@@ -36,6 +36,9 @@ def test_runner_transfer_schema_is_directional_and_bounded() -> None:
         "DownloadTransfer",
         "UploadTransfer",
         "ClaimDirectObjectDownload",
+        "ClaimDirectObjectUpload",
+        "RenewDirectObjectUpload",
+        "CompleteDirectObjectUpload",
     )
     bytes_fields = [
         field.full_name

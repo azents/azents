@@ -19,6 +19,13 @@ class RunnerTransferSourceTransport(StrEnum):
     DIRECT_OBJECT = "direct_object"
 
 
+class RunnerTransferUploadTransport(StrEnum):
+    """Physical destination transport selected for a Runner upload."""
+
+    CONTROL_STREAM = "control_stream"
+    DIRECT_OBJECT = "direct_object"
+
+
 class RunnerTransferCancelReason(StrEnum):
     """Reason a Runner transfer task must stop."""
 
@@ -98,11 +105,21 @@ class RunnerTransferIntent:
     source_transport: RunnerTransferSourceTransport = (
         RunnerTransferSourceTransport.TRANSFER_OBJECT
     )
+    upload_transport: RunnerTransferUploadTransport = (
+        RunnerTransferUploadTransport.CONTROL_STREAM
+    )
 
     def __post_init__(self) -> None:
         """Validate bounded opaque overwrite-precondition transport."""
         if not isinstance(self.source_transport, RunnerTransferSourceTransport):
             raise ValueError("source_transport is invalid")
+        if not isinstance(self.upload_transport, RunnerTransferUploadTransport):
+            raise ValueError("upload_transport is invalid")
+        if (
+            self.upload_transport is RunnerTransferUploadTransport.DIRECT_OBJECT
+            and self.direction is not RunnerTransferDirection.UPLOAD
+        ):
+            raise ValueError("direct object upload requires UPLOAD direction")
         if (
             self.source_transport is RunnerTransferSourceTransport.DIRECT_OBJECT
             and self.direction is not RunnerTransferDirection.DOWNLOAD

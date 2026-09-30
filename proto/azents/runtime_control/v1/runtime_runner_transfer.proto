@@ -11,6 +11,12 @@ service RuntimeRunnerTransfer {
       returns (UploadTransferResult);
   rpc ClaimDirectObjectDownload(DirectObjectDownloadClaimRequest)
       returns (DirectObjectDownloadClaimResponse);
+  rpc ClaimDirectObjectUpload(DirectObjectUploadClaimRequest)
+      returns (DirectObjectUploadClaimResponse);
+  rpc RenewDirectObjectUpload(DirectObjectUploadRenewRequest)
+      returns (DirectObjectUploadRenewResponse);
+  rpc CompleteDirectObjectUpload(DirectObjectUploadCompleteRequest)
+      returns (UploadTransferResult);
 }
 
 enum TransferDirection {
@@ -58,6 +64,39 @@ message DirectObjectDownloadClaimResponse {
   repeated DirectObjectDownloadHeader headers = 4;
   uint64 expected_size = 5;
   string expected_sha256 = 6;
+}
+
+message DirectObjectUploadClaimRequest {
+  TransferIdentity identity = 1;
+  string dispatch_id = 2;
+  string claim_id = 3;
+  uint64 expected_size = 4;
+  string expected_sha256 = 5;
+}
+
+message DirectObjectUploadClaimResponse {
+  string method = 1;
+  string url = 2;
+  google.protobuf.Timestamp expires_at = 3;
+  repeated DirectObjectDownloadHeader headers = 4;
+  uint64 expected_size = 5;
+  string expected_sha256 = 6;
+}
+
+message DirectObjectUploadRenewRequest {
+  TransferIdentity identity = 1;
+  string dispatch_id = 2;
+  string claim_id = 3;
+}
+
+message DirectObjectUploadRenewResponse {}
+
+message DirectObjectUploadCompleteRequest {
+  TransferIdentity identity = 1;
+  string dispatch_id = 2;
+  string claim_id = 3;
+  uint64 actual_size = 4;
+  string sha256 = 5;
 }
 
 message DownloadTransferComplete {

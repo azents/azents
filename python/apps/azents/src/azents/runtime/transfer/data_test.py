@@ -1,5 +1,6 @@
 """Pure Runtime transfer domain tests."""
 
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -15,6 +16,7 @@ from azents.runtime.transfer.data import (
     RuntimeTransferPhase,
     RuntimeTransferProgress,
     RuntimeTransferRecord,
+    RuntimeTransferUploadTransport,
     logical_expiry,
     validate_admission_time,
 )
@@ -58,6 +60,37 @@ def test_logical_expiry_uses_one_hour_or_source_ceiling() -> None:
         minutes=10
     )
     assert logical_expiry(_NOW, _NOW + timedelta(hours=2)) == _NOW + timedelta(hours=1)
+
+
+def test_direct_upload_transport_requires_upload_direction() -> None:
+    """An exact-attempt Runner PUT cannot be admitted as a download."""
+    admission = replace(
+        _admission(),
+        upload_transport=RuntimeTransferUploadTransport.DIRECT_OBJECT,
+    )
+    assert admission.direction is RuntimeTransferDirection.UPLOAD
+    with pytest.raises(ValueError, match="UPLOAD direction"):
+        replace(admission, direction=RuntimeTransferDirection.DOWNLOAD)
+    with pytest.raises(ValueError, match="upload_transport"):
+        replace(admission, upload_transport="direct_object")  # type: ignore[arg-type]
+
+
+def test_direct_upload_admission_has_a_128_mib_upper_bound() -> None:
+    """Only direct-only attempts gain the new upper bound before cutover."""
+    direct = replace(
+        _admission(),
+        upload_transport=RuntimeTransferUploadTransport.DIRECT_OBJECT,
+        product_maximum_size=129 * 1024 * 1024,
+        provider_maximum_size=129 * 1024 * 1024,
+    )
+    assert replace(direct, expected_size=128 * 1024 * 1024)
+    with pytest.raises(ValueError, match="128 MiB"):
+        replace(direct, expected_size=128 * 1024 * 1024 + 1)
+    assert replace(
+        direct,
+        upload_transport=RuntimeTransferUploadTransport.CONTROL_STREAM,
+        expected_size=128 * 1024 * 1024 + 1,
+    )
 
 
 def test_admission_rejects_expired_source_and_invalid_hash() -> None:

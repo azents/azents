@@ -176,6 +176,91 @@ def test_no_network_runtime_is_platform_only_without_dns() -> None:
     assert _cidr_blocks(result.runtime_policy.spec.egress) == set()
 
 
+@pytest.mark.parametrize(
+    ("network_access", "proxy_ip", "proxy_hostname"),
+    (
+        (
+            RuntimeDirectNetworkAccess(
+                mode=RuntimeNetworkMode.DIRECT,
+                allowed_cidrs=(),
+                denied_cidrs=(),
+            ),
+            None,
+            None,
+        ),
+        (
+            RuntimeProxyRequiredNetworkAccess(
+                mode=RuntimeNetworkMode.PROXY_REQUIRED,
+                allowed_cidrs=("203.0.113.0/24",),
+                denied_cidrs=("203.0.113.128/25",),
+                domain_policy=RuntimeProxyDomainPolicy(
+                    mode=RuntimeProxyDomainMode.ALLOWLIST,
+                    allowed_domains=("*.example.com",),
+                    denied_domains=("blocked.example.com",),
+                ),
+            ),
+            "10.96.0.30",
+            "runtime-proxy.azents-runtime.svc",
+        ),
+        (RuntimeNoNetworkAccess(mode=RuntimeNetworkMode.NO_NETWORK), None, None),
+    ),
+)
+def test_exact_private_object_store_service_is_platform_egress_in_every_mode(
+    network_access: (
+        RuntimeDirectNetworkAccess
+        | RuntimeProxyRequiredNetworkAccess
+        | RuntimeNoNetworkAccess
+    ),
+    proxy_ip: str | None,
+    proxy_hostname: str | None,
+) -> None:
+    """The Provider grants only its observed Service/port, even without internet."""
+    value = _inputs(network_access)
+    storage = dataclasses.replace(
+        value.mandatory_services[0],
+        reference=MandatoryServiceReference(
+            role="runtime_object_storage",
+            namespace="azents",
+            name="object-store",
+            endpoint_hostnames=("object-store.azents.svc",),
+            ports=(9000,),
+        ),
+        cluster_ip="10.96.0.20",
+        selector={"app": "object-store"},
+        target_ports=(9000,),
+    )
+    value = dataclasses.replace(
+        value, mandatory_services=(*value.mandatory_services, storage)
+    )
+    result = build_runtime_network_inputs(
+        value, proxy_service_ip=proxy_ip, proxy_hostname=proxy_hostname
+    )
+    object_rules = tuple(
+        rule
+        for rule in result.runtime_policy.spec.egress
+        if rule.ports == (NetworkPolicyPort(protocol="TCP", port=9000),)
+    )
+    assert len(object_rules) == 1
+    assert object_rules[0].peers[0].pod_selector == LabelSelector(
+        match_labels={"app": "object-store"}, match_expressions=()
+    )
+    validate_endpoint_authority(
+        endpoint_from_url("http://object-store.azents.svc:9000", default_port=None),
+        value.mandatory_services,
+        role="runtime_object_storage",
+    )
+    with pytest.raises(InvalidMandatoryService):
+        validate_endpoint_authority(
+            endpoint_from_url("http://external.example:9000", default_port=None),
+            value.mandatory_services,
+            role="runtime_object_storage",
+        )
+    if network_access.mode is not RuntimeNetworkMode.DIRECT:
+        assert _host_alias("10.96.0.20", "object-store.azents.svc") in (
+            result.host_aliases
+        )
+
+
 def test_proxy_policies_select_matching_roles_and_destination_boundary() -> None:
     result = build_proxy_network_inputs(_inputs(_proxy_access()))
 

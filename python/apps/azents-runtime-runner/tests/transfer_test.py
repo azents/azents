@@ -18,6 +18,7 @@ from aiohttp import web
 from aiohttp.test_utils import TestServer
 from azents_runtime_control.grpc_runner_transfer_client import (
     RunnerDirectObjectTicket,
+    RunnerDirectUploadTicket,
     RunnerDownloadChunk,
     RunnerDownloadComplete,
     RunnerUploadComplete,
@@ -33,6 +34,7 @@ from azents_runtime_control.runner_transfer import (
     RunnerTransferOutcome,
     RunnerTransferResult,
     RunnerTransferSourceTransport,
+    RunnerTransferUploadTransport,
 )
 from azents_runtime_control.transfer import (
     RUNNER_TRANSFER_CAPABILITY,
@@ -123,6 +125,40 @@ class _Transfer:
         del identity, dispatch_id, claim_id, timeout
         raise AssertionError("direct object claim is not configured")
 
+    async def claim_direct_upload(
+        self,
+        identity: RunnerTransferIdentity,
+        *,
+        dispatch_id: str,
+        claim_id: str,
+        size: int,
+        sha256: str,
+        timeout: float,
+    ) -> RunnerDirectUploadTicket:
+        raise AssertionError("direct upload is not configured")
+
+    async def renew_direct_upload(
+        self,
+        identity: RunnerTransferIdentity,
+        *,
+        dispatch_id: str,
+        claim_id: str,
+        timeout: float,
+    ) -> None:
+        raise AssertionError("direct upload is not configured")
+
+    async def complete_direct_upload(
+        self,
+        identity: RunnerTransferIdentity,
+        *,
+        dispatch_id: str,
+        claim_id: str,
+        size: int,
+        sha256: str,
+        timeout: float,
+    ) -> RunnerUploadResult:
+        raise AssertionError("direct upload is not configured")
+
     async def upload(
         self,
         identity: RunnerTransferIdentity,
@@ -183,6 +219,9 @@ def _intent(
     source_transport: RunnerTransferSourceTransport = (
         RunnerTransferSourceTransport.TRANSFER_OBJECT
     ),
+    upload_transport: RunnerTransferUploadTransport = (
+        RunnerTransferUploadTransport.CONTROL_STREAM
+    ),
 ) -> RunnerTransferIntent:
     return RunnerTransferIntent(
         identity=RunnerTransferIdentity(
@@ -208,6 +247,7 @@ def _intent(
         dispatch_id=dispatch_id,
         conflict_precondition=conflict_precondition,
         source_transport=source_transport,
+        upload_transport=upload_transport,
     )
 
 
@@ -2136,3 +2176,109 @@ async def test_post_publication_cancellation_waits_for_successful_result_enqueue
     assert committed_result.outcome is RunnerTransferOutcome.SUCCEEDED
     assert committed_result.destination_committed is True
     await manager.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("response_body_bytes", [0, 4097])
+async def test_direct_upload_puts_snapshot_without_control_byte_relay(
+    tmpfs_path: Path,
+    response_body_bytes: int,
+) -> None:
+    """Original-file mutation during PUT cannot alter the bounded snapshot."""
+    data = b"direct upload snapshot"
+    source = tmpfs_path / "source.bin"
+    source.write_bytes(data)
+    digest = hashlib.sha256(data).hexdigest()
+    observed: list[bytes] = []
+    app = web.Application()
+
+    async def ingress(request: web.Request) -> web.Response:
+        assert request.headers["content-length"] == str(len(data))
+        assert request.headers["x-amz-checksum-sha256"]
+        source.write_bytes(b"mutated original after snapshot")
+        observed.append(await request.read())
+        return web.Response(status=200, body=b"x" * response_body_bytes)
+
+    app.router.add_put("/ingress", ingress)
+    server = TestServer(app)
+    await server.start_server()
+
+    class _DirectUploadTransfer(_Transfer):
+        def __init__(self) -> None:
+            super().__init__()
+            self.claims = 0
+            self.completions = 0
+
+        async def claim_direct_upload(
+            self,
+            identity: RunnerTransferIdentity,
+            *,
+            dispatch_id: str,
+            claim_id: str,
+            size: int,
+            sha256: str,
+            timeout: float,
+        ) -> RunnerDirectUploadTicket:
+            assert identity.runtime_id == "runtime-1"
+            assert dispatch_id == "dispatch-1"
+            assert claim_id and timeout > 0
+            assert size == len(data) and sha256 == digest
+            self.claims += 1
+            return RunnerDirectUploadTicket(
+                method="PUT",
+                url=str(server.make_url("/ingress")),
+                expires_at=datetime.now(UTC) + timedelta(seconds=30),
+                headers={"x-amz-checksum-sha256": "signed-checksum"},
+                expected_size=size,
+                expected_sha256=sha256,
+            )
+
+        async def complete_direct_upload(
+            self,
+            identity: RunnerTransferIdentity,
+            *,
+            dispatch_id: str,
+            claim_id: str,
+            size: int,
+            sha256: str,
+            timeout: float,
+        ) -> RunnerUploadResult:
+            assert observed == [data]
+            assert claim_id and timeout > 0
+            assert size == len(data) and sha256 == digest
+            self.completions += 1
+            return RunnerUploadResult(actual_size=size, sha256=sha256)
+
+    try:
+        control = _Control()
+        transfer = _DirectUploadTransfer()
+        manager = RunnerTransferManager(
+            control=control,
+            transfer=transfer,
+            accepted_generation=lambda: 1,
+            workspace=_UNRESTRICTED_WORKSPACE,
+            http_proxy=None,
+        )
+        await manager.handle_intent(
+            _intent(
+                source,
+                direction=RunnerTransferDirection.UPLOAD,
+                data=data,
+                upload_transport=RunnerTransferUploadTransport.DIRECT_OBJECT,
+            )
+        )
+        result = await _result(control)
+        if response_body_bytes:
+            assert result.outcome is RunnerTransferOutcome.FAILED
+            assert result.failure is RunnerTransferFailure.STREAM_FAILED
+            assert transfer.completions == 0
+        else:
+            assert result.outcome is RunnerTransferOutcome.SUCCEEDED
+            assert result.sha256 == digest
+            assert transfer.completions == 1
+        assert transfer.claims == 1
+        assert transfer.upload_calls == 0
+        assert observed == [data]
+        await manager.close()
+    finally:
+        await server.close()
