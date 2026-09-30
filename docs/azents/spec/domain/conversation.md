@@ -138,7 +138,7 @@ api_routes:
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ticket
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ws
-last_verified_at: 2026-09-29
+last_verified_at: 2026-09-30
 spec_version: 174
 ---
 
@@ -1205,14 +1205,19 @@ Composer execution-option controls are separate from static model capabilities a
 Fast and Ultrafast share the registry-owned `processing_speed` exclusive group. Supported saved
 model snapshots may advertise both IDs, while enabled preferences select at most one. Normal is
 the empty group selection, not a persisted option ID. Both desktop and mobile model pickers use
-one single-choice control offering Normal and the selected model's supported members, with
-qualitative API-cost or ChatGPT-usage guidance from the returned definitions. Group selection
+one single-choice control offering Normal and the selected model's supported members. Processing
+speed uses the same text-row and right-side check-mark presentation as model and effort choices:
+a labeled list card on mobile and a summary row with a flyout on desktop. Choices show concise
+labels; descriptions and qualitative cost hints remain available in the returned definitions for
+other consumers. Single-choice semantics and arrow-key selection remain accessible. Group selection
 replaces only that group's enabled member; group-less boolean controls remain independent.
 Selection edits the shared draft profile without a network write or save loading state. The existing
 pending-profile highlight and Send/Confirm flow apply the complete displayed profile. New-session
 composers retain the choice locally until first input admission. Switching the draft model retains
 only enabled options supported by the new model without choosing another premium member.
-Read-only composers do not expose writable options. Unknown, duplicate, unsupported, or
+Message editing preserves the original message's inference profile, disables execution-option
+changes, and does not offer or execute a transcript-free model-only Apply, including when the
+edited text is cleared. Read-only composers do not expose writable options. Unknown, duplicate, unsupported, or
 conflicting explicit enabled lists are rejected before persistence or provider invocation.
 
 Applied Session intent, mailbox-requested intent, original Run intent, and prepared inference state

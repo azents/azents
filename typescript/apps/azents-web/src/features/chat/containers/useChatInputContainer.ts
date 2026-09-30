@@ -203,7 +203,7 @@ interface RankedInputAction {
   ranges: number[];
 }
 
-type DesktopProfileSection = "model" | "effort";
+type DesktopProfileSection = "model" | "effort" | `execution:${string}`;
 
 interface DesktopProfileFocusTarget {
   section: DesktopProfileSection;
@@ -535,9 +535,8 @@ function useChatInputContainerImplementation({
   const [scrollToContextUsageOnOpen, setScrollToContextUsageOnOpen] =
     useState(false);
   const contextUsageDetailsRef = useRef<HTMLDivElement>(null);
-  const [desktopProfileSection, setDesktopProfileSection] = useState<
-    "model" | "effort" | null
-  >(null);
+  const [desktopProfileSection, setDesktopProfileSection] =
+    useState<DesktopProfileSection | null>(null);
   const [desktopProfileFocusTarget, setDesktopProfileFocusTarget] =
     useState<DesktopProfileFocusTarget | null>(null);
   const [sendErrorVisible, setSendErrorVisible] = useState(false);
@@ -555,12 +554,16 @@ function useChatInputContainerImplementation({
   const desktopProfileDialogId = useId();
   const desktopProfileModelPanelId = useId();
   const desktopProfileEffortPanelId = useId();
+  const desktopProfileExecutionPanelId = useId();
   const profileTriggerRef = useRef<HTMLButtonElement>(null);
   const desktopProfileSectionRefs = useRef(
     new Map<DesktopProfileSection, HTMLButtonElement>(),
   );
   const desktopModelOptionRefs = useRef(new Map<number, HTMLButtonElement>());
   const desktopEffortOptionRefs = useRef(new Map<number, HTMLButtonElement>());
+  const executionOptionRefs = useRef(
+    new Map<string, Map<number, HTMLButtonElement>>(),
+  );
   const selectedModelOption = modelOptionForTarget(
     selectableModelOptions,
     inferenceProfile.model_target_label,
@@ -671,6 +674,9 @@ function useChatInputContainerImplementation({
   }, [inferenceProfile, onInferenceProfileChange]);
 
   useEffect(() => {
+    if (editingMessageId !== null) {
+      return;
+    }
     const identityChanged = profileIdentityRef.current !== profileIdentity;
     const matchesEffectiveBaseline =
       effectiveAppliedComposerProfile.model_target_label ===
@@ -689,7 +695,12 @@ function useChatInputContainerImplementation({
       profileDirtyRef.current = false;
       setInferenceProfile(effectiveAppliedComposerProfile);
     }
-  }, [effectiveAppliedComposerProfile, inferenceProfile, profileIdentity]);
+  }, [
+    editingMessageId,
+    effectiveAppliedComposerProfile,
+    inferenceProfile,
+    profileIdentity,
+  ]);
 
   useEffect(() => {
     if (selectedAction === null) {
@@ -806,6 +817,7 @@ function useChatInputContainerImplementation({
 
       const hasAttachedFiles = pendingFiles.length > 0;
       if (
+        editingMessageId === null &&
         hasPendingInferenceProfileChange &&
         !trimmed &&
         !hasAttachedFiles &&
@@ -894,6 +906,7 @@ function useChatInputContainerImplementation({
     selectedAction,
     inferenceProfile,
     isUploading,
+    editingMessageId,
     editSendDisabled,
     inputDisabled,
     pendingFiles,
@@ -1143,8 +1156,21 @@ function useChatInputContainerImplementation({
   }, [isMobile, profilePickerOpened, scrollToContextUsageOnOpen]);
 
   const desktopProfileSections = useMemo<DesktopProfileSection[]>(
-    () => (selectableEfforts.length > 0 ? ["model", "effort"] : ["model"]),
-    [selectableEfforts.length],
+    () => [
+      ...(inferenceProfileSelectionEnabled
+        ? selectableEfforts.length > 0
+          ? (["model", "effort"] satisfies DesktopProfileSection[])
+          : (["model"] satisfies DesktopProfileSection[])
+        : []),
+      ...selectableExecutionOptionGroups.map<DesktopProfileSection>(
+        (group) => `execution:${group.id}`,
+      ),
+    ],
+    [
+      inferenceProfileSelectionEnabled,
+      selectableEfforts.length,
+      selectableExecutionOptionGroups,
+    ],
   );
 
   const focusDesktopProfileSection = useCallback(
@@ -1184,9 +1210,17 @@ function useChatInputContainerImplementation({
             ? desktopModelOptionRefs.current.get(
                 desktopProfileFocusTarget.optionIndex,
               )
-            : desktopEffortOptionRefs.current.get(
-                desktopProfileFocusTarget.optionIndex,
-              );
+            : desktopProfileFocusTarget.section === "effort"
+              ? desktopEffortOptionRefs.current.get(
+                  desktopProfileFocusTarget.optionIndex,
+                )
+              : executionOptionRefs.current
+                  .get(
+                    desktopProfileFocusTarget.section.slice(
+                      "execution:".length,
+                    ),
+                  )
+                  ?.get(desktopProfileFocusTarget.optionIndex);
       if (target) {
         target.focus();
         setDesktopProfileFocusTarget(null);
@@ -1215,19 +1249,31 @@ function useChatInputContainerImplementation({
                   option.label === inferenceProfile.model_target_label,
               ),
             )
-          : Math.max(
-              0,
-              selectableEfforts.findIndex(
-                (effort) => effort === inferenceProfile.reasoning_effort,
-              ),
-            );
+          : section === "effort"
+            ? Math.max(
+                0,
+                selectableEfforts.findIndex(
+                  (effort) => effort === inferenceProfile.reasoning_effort,
+                ),
+              )
+            : (selectableExecutionOptionGroups
+                .find(
+                  (group) => group.id === section.slice("execution:".length),
+                )
+                ?.definitions.findIndex((definition) =>
+                  inferenceProfile.enabled_execution_options.includes(
+                    definition.id,
+                  ),
+                ) ?? -1) + 1;
       focusDesktopProfileOption(section, selectedIndex);
     },
     [
       focusDesktopProfileOption,
       inferenceProfile.model_target_label,
       inferenceProfile.reasoning_effort,
+      inferenceProfile.enabled_execution_options,
       selectableEfforts,
+      selectableExecutionOptionGroups,
       selectableModelOptions,
     ],
   );
@@ -1278,10 +1324,17 @@ function useChatInputContainerImplementation({
       index: number,
       event: React.KeyboardEvent<HTMLButtonElement>,
     ): void => {
+      const executionGroup = selectableExecutionOptionGroups.find(
+        (group) => section === `execution:${group.id}`,
+      );
       const count =
         section === "model"
           ? selectableModelOptions.length
-          : selectableEfforts.length;
+          : section === "effort"
+            ? selectableEfforts.length
+            : executionGroup === void 0
+              ? 0
+              : executionGroup.definitions.length + 1;
       if (count === 0) {
         return;
       }
@@ -1289,7 +1342,10 @@ function useChatInputContainerImplementation({
         event.key === "ArrowDown" ||
         event.key === "ArrowUp" ||
         event.key === "Home" ||
-        event.key === "End"
+        event.key === "End" ||
+        (isMobile &&
+          executionGroup !== void 0 &&
+          (event.key === "ArrowLeft" || event.key === "ArrowRight"))
       ) {
         event.preventDefault();
         const nextIndex =
@@ -1297,11 +1353,31 @@ function useChatInputContainerImplementation({
             ? 0
             : event.key === "End"
               ? count - 1
-              : (index + (event.key === "ArrowDown" ? 1 : -1) + count) % count;
-        focusDesktopProfileOption(section, nextIndex);
+              : (index +
+                  (event.key === "ArrowDown" || event.key === "ArrowRight"
+                    ? 1
+                    : -1) +
+                  count) %
+                count;
+        if (executionGroup !== void 0) {
+          const selectedId =
+            nextIndex === 0
+              ? ""
+              : executionGroup.definitions.at(nextIndex - 1)?.id;
+          if (selectedId === void 0) {
+            return;
+          }
+          handleExecutionOptionGroupChange(executionGroup.id, selectedId);
+          executionOptionRefs.current
+            .get(executionGroup.id)
+            ?.get(nextIndex)
+            ?.focus();
+        } else {
+          focusDesktopProfileOption(section, nextIndex);
+        }
         return;
       }
-      if (event.key === "ArrowLeft" || event.key === "Escape") {
+      if (!isMobile && (event.key === "ArrowLeft" || event.key === "Escape")) {
         event.preventDefault();
         setDesktopProfileSection(null);
         focusDesktopProfileSection(section);
@@ -1310,7 +1386,10 @@ function useChatInputContainerImplementation({
     [
       focusDesktopProfileOption,
       focusDesktopProfileSection,
+      handleExecutionOptionGroupChange,
+      isMobile,
       selectableEfforts.length,
+      selectableExecutionOptionGroups,
       selectableModelOptions.length,
     ],
   );
@@ -1336,18 +1415,20 @@ function useChatInputContainerImplementation({
       event.preventDefault();
       setProfilePickerOpened(true);
       setDesktopProfileSection(null);
-      focusDesktopProfileSection(
-        event.key === "ArrowUp" && selectableEfforts.length > 0
-          ? "effort"
-          : "model",
-      );
+      const section =
+        event.key === "ArrowUp"
+          ? desktopProfileSections.at(-1)
+          : desktopProfileSections.at(0);
+      if (section !== void 0) {
+        focusDesktopProfileSection(section);
+      }
     },
     [
       closeDesktopProfilePicker,
       focusDesktopProfileSection,
+      desktopProfileSections,
       isMobile,
       profilePickerOpened,
-      selectableEfforts.length,
     ],
   );
 
@@ -1399,10 +1480,12 @@ function useChatInputContainerImplementation({
     desktopProfileDialogId,
     desktopProfileModelPanelId,
     desktopProfileEffortPanelId,
+    desktopProfileExecutionPanelId,
     profileTriggerRef,
     desktopProfileSectionRefs,
     desktopModelOptionRefs,
     desktopEffortOptionRefs,
+    executionOptionRefs,
     selectableEfforts,
     selectedModelLabel,
     selectedEffortLabel,

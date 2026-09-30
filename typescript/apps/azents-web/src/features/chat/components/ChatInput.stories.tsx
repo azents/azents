@@ -216,6 +216,14 @@ export default meta;
 
 type Story = StoryObj<typeof meta>;
 
+async function openProcessingSpeedSection(document: Document): Promise<void> {
+  const page = within(document.body);
+  const section = page.queryByRole("button", { name: /^Processing speed/ });
+  if (section !== null) {
+    await userEvent.click(section);
+  }
+}
+
 const baseArgs = {
   agentId: "story-agent-001",
   sessionId: "story-session-001",
@@ -311,6 +319,7 @@ export const ExclusiveProcessingSpeed = {
     const canvas = within(canvasElement);
     const page = within(canvasElement.ownerDocument.body);
     await userEvent.click(canvas.getByRole("button", { name: "Model" }));
+    await openProcessingSpeedSection(canvasElement.ownerDocument);
     const fast = await page.findByRole("radio", {
       name: "Fast",
     });
@@ -376,9 +385,7 @@ export const MobileExecutionOptionDraft = {
       reasoning_effort: null,
       enabled_execution_options: ["ultrafast"],
     });
-    await expect(
-      page.getAllByText("Additional OpenAI API cost may apply.")[0],
-    ).toBeVisible();
+    await expectProcessingSpeedLayout(canvasElement.ownerDocument);
     await expect(args.onApplyInferenceProfile).not.toHaveBeenCalled();
     await userEvent.click(page.getByRole("radio", { name: "Normal" }));
     await expect(option).not.toBeChecked();
@@ -388,6 +395,181 @@ export const MobileExecutionOptionDraft = {
       enabled_execution_options: [],
     });
     await expect(args.onApplyInferenceProfile).not.toHaveBeenCalled();
+  },
+} satisfies Story;
+
+const fastOnlySubscriptionOptions = selectableModelOptions.map<
+  AgentResponse["selectable_model_options"][number]
+>((option) => ({
+  ...option,
+  candidates: option.candidates.map((candidate) => ({
+    ...candidate,
+    model_selection: {
+      ...candidate.model_selection,
+      provider: "chatgpt_oauth",
+      supported_execution_options: option.label === "Default" ? ["fast"] : [],
+    },
+  })),
+  execution_option_definitions: option.execution_option_definitions
+    .filter((definition) => definition.id === "fast")
+    .map((definition) => ({
+      ...definition,
+      cost_hint: "Additional ChatGPT usage or credits may apply.",
+    })),
+}));
+
+async function expectProcessingSpeedLayout(document: Document): Promise<void> {
+  const page = within(document.body);
+  await openProcessingSpeedSection(document);
+  const group = await page.findByRole("radiogroup", {
+    name: "Processing speed",
+  });
+  const groupBounds = group.getBoundingClientRect();
+  await expect(group.scrollWidth).toBeLessThanOrEqual(group.clientWidth);
+  let checkedCount = 0;
+  for (const radio of within(group).getAllByRole("radio")) {
+    const radioBounds = radio.getBoundingClientRect();
+    await expect(radioBounds.left).toBeGreaterThanOrEqual(groupBounds.left);
+    await expect(radioBounds.right).toBeLessThanOrEqual(groupBounds.right);
+    const label = radio.querySelector(".mantine-Text-root");
+    if (label === null) {
+      throw new Error("Expected a text-only speed choice");
+    }
+    await expect(
+      label.getBoundingClientRect().left - radioBounds.left,
+    ).toBeGreaterThan(0);
+    if (radio.getAttribute("aria-checked") === "true") {
+      checkedCount += 1;
+      await expect(radio.querySelector("svg")).not.toBeNull();
+    } else {
+      await expect(radio.querySelector("svg")).toBeNull();
+    }
+  }
+  await expect(checkedCount).toBe(1);
+  await expect(group.querySelector("input")).toBeNull();
+  await expect(group.textContent).not.toContain("Request faster processing");
+  await expect(group.textContent).not.toContain("Request ultrafast processing");
+  await expect(group.textContent).not.toContain("Additional");
+}
+
+export const MobileProcessingSpeedFastOnly = {
+  args: {
+    ...baseArgs,
+    isMobile: true,
+    contextUsageEnabled: false,
+    sessionId: "mobile-processing-speed-fast-only",
+    selectableModelOptions: fastOnlySubscriptionOptions,
+    appliedInferenceProfile: {
+      model_target_label: "Default",
+      reasoning_effort: "high",
+      enabled_execution_options: ["fast"],
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const page = within(canvasElement.ownerDocument.body);
+    await userEvent.click(page.getByRole("button", { name: "Model" }));
+    await expect(page.getByRole("radio", { name: "Fast" })).toBeChecked();
+    await expect(page.queryByRole("radio", { name: "Ultrafast" })).toBeNull();
+    await expectProcessingSpeedLayout(canvasElement.ownerDocument);
+  },
+} satisfies Story;
+
+export const MobileProcessingSpeedAllOptions = {
+  args: {
+    ...baseArgs,
+    isMobile: true,
+    contextUsageEnabled: false,
+    sessionId: "mobile-processing-speed-all-options",
+    appliedInferenceProfile: {
+      model_target_label: "Default",
+      reasoning_effort: "high",
+      enabled_execution_options: ["ultrafast"],
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const page = within(canvasElement.ownerDocument.body);
+    await userEvent.click(page.getByRole("button", { name: "Model" }));
+    await expect(page.getByRole("radio", { name: "Ultrafast" })).toBeChecked();
+    await expectProcessingSpeedLayout(canvasElement.ownerDocument);
+  },
+} satisfies Story;
+
+export const DesktopProcessingSpeedLayout = {
+  args: {
+    ...baseArgs,
+    contextUsageEnabled: false,
+    sessionId: "desktop-processing-speed-layout",
+    appliedInferenceProfile: {
+      model_target_label: "Default",
+      reasoning_effort: "high",
+      enabled_execution_options: ["fast"],
+    },
+    onInferenceProfileChange: fn(),
+  },
+  play: async ({ canvasElement, args }) => {
+    const page = within(canvasElement.ownerDocument.body);
+    await userEvent.click(page.getByRole("button", { name: "Model" }));
+    await expectProcessingSpeedLayout(canvasElement.ownerDocument);
+    const fast = page.getByRole("radio", { name: "Fast" });
+    const ultrafast = page.getByRole("radio", { name: "Ultrafast" });
+    await expect(fast).toBeChecked();
+    fast.focus();
+    await userEvent.keyboard("{ArrowDown}");
+    await expect(ultrafast).toBeChecked();
+    await expect(fast).not.toBeChecked();
+    await expect(args.onInferenceProfileChange).toHaveBeenLastCalledWith({
+      model_target_label: "Default",
+      reasoning_effort: "high",
+      enabled_execution_options: ["ultrafast"],
+    });
+    await userEvent.keyboard("{ArrowLeft}");
+    await waitFor(async () => {
+      await expect(
+        page.getByRole("button", { name: /^Processing speed/ }),
+      ).toHaveFocus();
+    });
+    await userEvent.keyboard("{ArrowRight}");
+    await waitFor(async () => {
+      await expect(
+        page.getByRole("radio", { name: "Ultrafast" }),
+      ).toHaveFocus();
+    });
+  },
+} satisfies Story;
+
+export const EditingProcessingSpeedLayout = {
+  args: {
+    ...baseArgs,
+    contextUsageEnabled: false,
+    sessionId: "editing-processing-speed-layout",
+    editingMessageId: "editing-processing-speed-message",
+    editingInitialValue: "Keep the original processing speed",
+    editingInferenceProfile: {
+      model_target_label: "Default",
+      reasoning_effort: "high",
+      enabled_execution_options: ["fast"],
+    },
+    onInferenceProfileChange: fn(),
+    onApplyInferenceProfile: fn(() => Promise.resolve(true)),
+  },
+  play: async ({ canvasElement, args }) => {
+    const page = within(canvasElement.ownerDocument.body);
+    await userEvent.click(page.getByRole("button", { name: "Model" }));
+    await expectProcessingSpeedLayout(canvasElement.ownerDocument);
+    await expect(page.getByRole("radio", { name: "Fast" })).toBeChecked();
+    for (const radio of page.getAllByRole("radio")) {
+      await expect(radio).toBeDisabled();
+    }
+    await userEvent.click(page.getByRole("button", { name: "Model" }));
+    const input = within(canvasElement).getByRole("textbox");
+    await userEvent.clear(input);
+    await expect(
+      page.queryByRole("button", { name: "Apply model change" }),
+    ).toBeNull();
+    await userEvent.click(page.getByRole("button", { name: "Send" }));
+    await userEvent.type(input, "{Enter}");
+    await expect(args.onApplyInferenceProfile).not.toHaveBeenCalled();
+    await expect(args.onSendInput).not.toHaveBeenCalled();
   },
 } satisfies Story;
 
@@ -406,6 +588,7 @@ export const UltrafastBeforeFirstMessage = {
     const canvas = within(canvasElement);
     const page = within(canvasElement.ownerDocument.body);
     await userEvent.click(canvas.getByRole("button", { name: "Model" }));
+    await openProcessingSpeedSection(canvasElement.ownerDocument);
     await expect(page.getByRole("radio", { name: "Normal" })).toBeChecked();
     await userEvent.click(page.getByRole("radio", { name: "Ultrafast" }));
     await userEvent.click(canvas.getByRole("button", { name: "Model" }));
@@ -437,6 +620,7 @@ export const RestoredUltrafast = {
     const canvas = within(canvasElement);
     const page = within(canvasElement.ownerDocument.body);
     await userEvent.click(canvas.getByRole("button", { name: "Model" }));
+    await openProcessingSpeedSection(canvasElement.ownerDocument);
     await expect(page.getByRole("radio", { name: "Ultrafast" })).toBeChecked();
     await expect(page.getByRole("radio", { name: "Normal" })).not.toBeChecked();
     await expect(page.getByRole("radio", { name: "Fast" })).not.toBeChecked();
@@ -470,15 +654,11 @@ export const UltrafastOnlySubscription = {
     const canvas = within(canvasElement);
     const page = within(canvasElement.ownerDocument.body);
     await userEvent.click(canvas.getByRole("button", { name: "Model" }));
+    await openProcessingSpeedSection(canvasElement.ownerDocument);
     await expect(page.getByRole("radio", { name: "Normal" })).toBeChecked();
     await expect(page.queryByRole("radio", { name: "Fast" })).toBeNull();
     await userEvent.click(page.getByRole("radio", { name: "Ultrafast" }));
-    await expect(
-      page.getByText("Additional ChatGPT usage or credits may apply."),
-    ).toBeVisible();
-    await expect(
-      page.queryByText("Additional OpenAI API cost may apply."),
-    ).toBeNull();
+    await expectProcessingSpeedLayout(canvasElement.ownerDocument);
   },
 } satisfies Story;
 
@@ -492,6 +672,7 @@ export const KeyboardProcessingSpeed = {
     const canvas = within(canvasElement);
     const page = within(canvasElement.ownerDocument.body);
     await userEvent.click(canvas.getByRole("button", { name: "Model" }));
+    await openProcessingSpeedSection(canvasElement.ownerDocument);
     const normal = page.getByRole("radio", { name: "Normal" });
     normal.focus();
     await userEvent.keyboard("{ArrowDown}{ArrowDown}");
@@ -549,6 +730,7 @@ export const RejectedUltrafastSaveRetainsPendingDraft = {
     const canvas = within(canvasElement);
     const page = within(canvasElement.ownerDocument.body);
     await userEvent.click(canvas.getByRole("button", { name: "Model" }));
+    await openProcessingSpeedSection(canvasElement.ownerDocument);
     await userEvent.click(page.getByRole("radio", { name: "Ultrafast" }));
     await userEvent.click(canvas.getByRole("button", { name: "Model" }));
     const apply = canvas.getByRole("button", { name: "Apply model change" });
@@ -560,6 +742,7 @@ export const RejectedUltrafastSaveRetainsPendingDraft = {
     });
     await expect(apply).toBeVisible();
     await userEvent.click(canvas.getByRole("button", { name: "Model" }));
+    await openProcessingSpeedSection(canvasElement.ownerDocument);
     await expect(page.getByRole("radio", { name: "Ultrafast" })).toBeChecked();
     await userEvent.click(page.getByRole("radio", { name: "Normal" }));
     await expect(

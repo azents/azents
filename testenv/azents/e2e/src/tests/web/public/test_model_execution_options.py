@@ -4,6 +4,7 @@ import azentsadminclient
 import azentspublicclient
 import pytest
 import requests
+from selenium.common.exceptions import StaleElementReferenceException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.remote.webdriver import WebDriver
@@ -159,13 +160,58 @@ def _select_reasoning_effort(driver: WebDriver, effort: str) -> None:
         )
     )
     effort_button.click()
+    _wait(driver).until(
+        lambda current: (
+            current.find_element(
+                By.XPATH,
+                "//*[@role='group' and @aria-label='Reasoning effort']"
+                f"//button[normalize-space()={effort!r}]",
+            ).get_attribute("aria-pressed")
+            == "true"
+        )
+    )
 
 
 def _speed_radio(driver: WebDriver, option: str) -> WebElement:
     """Locate the real group-aware speed control by its canonical option ID."""
-    return _wait(driver).until(
-        ec.presence_of_element_located(
-            (By.CSS_SELECTOR, f"input[type='radio'][value='{option}']")
+    selector = f"[role='radio'][data-execution-option-id='{option}']"
+    if not driver.find_elements(By.CSS_SELECTOR, selector):
+        if not driver.find_elements(
+            By.CSS_SELECTOR, "[role='dialog'][aria-label='Model']"
+        ):
+            _wait(driver).until(
+                ec.element_to_be_clickable(
+                    (By.CSS_SELECTOR, "button[aria-label='Model']")
+                )
+            ).click()
+        _wait(driver).until(
+            ec.element_to_be_clickable(
+                (
+                    By.XPATH,
+                    "//*[@role='dialog' and @aria-label='Model']"
+                    "//button[.//*[normalize-space()='Processing speed']]",
+                )
+            )
+        ).click()
+    return _wait(driver).until(ec.element_to_be_clickable((By.CSS_SELECTOR, selector)))
+
+
+def _assert_speed_checked(driver: WebDriver, option: str, checked: bool) -> None:
+    """Wait for the current row's ARIA state across reactive picker updates."""
+    _speed_radio(driver, option)
+    selector = f"[role='radio'][data-execution-option-id='{option}']"
+    expected = "true" if checked else "false"
+    WebDriverWait(
+        driver,
+        20,
+        poll_frequency=0.1,
+        ignored_exceptions=(StaleElementReferenceException,),
+    ).until(
+        lambda current: (
+            current.find_element(By.CSS_SELECTOR, selector).get_attribute(
+                "aria-checked"
+            )
+            == expected
         )
     )
 
@@ -225,14 +271,13 @@ def test_existing_session_speed_choice_saves_complete_displayed_profile(
     model_trigger = _wait(browser_driver).until(
         ec.element_to_be_clickable((By.CSS_SELECTOR, "button[aria-label='Model']"))
     )
-    model_trigger.click()
     selected_speed = _speed_radio(browser_driver, option)
-    assert not selected_speed.is_selected()
+    _assert_speed_checked(browser_driver, option, False)
     selected_speed.send_keys(Keys.SPACE)
-    assert selected_speed.is_selected()
-    assert not _speed_radio(browser_driver, "").is_selected()
+    _assert_speed_checked(browser_driver, option, True)
+    _assert_speed_checked(browser_driver, "", False)
     if option == "ultrafast":
-        assert not _speed_radio(browser_driver, "fast").is_selected()
+        _assert_speed_checked(browser_driver, "fast", False)
     assert _history(azents_public_server_url, token, session_id) == before_history
     assert _journal(mock_openai_url) == before_journal
     model_trigger.click()
@@ -254,7 +299,8 @@ def test_existing_session_speed_choice_saves_complete_displayed_profile(
     _wait(browser_driver).until(
         ec.element_to_be_clickable((By.CSS_SELECTOR, "button[aria-label='Model']"))
     ).click()
-    assert _speed_radio(browser_driver, option).is_selected()
+    _speed_radio(browser_driver, option)
+    _assert_speed_checked(browser_driver, option, True)
     assert _history(azents_public_server_url, token, session_id) == before_history
     assert _journal(mock_openai_url) == before_journal
 
@@ -348,14 +394,16 @@ def test_before_first_message_ultrafast_submit_reaches_provider(
             sheet,
         )
     )
-    fast = sheet.find_element(By.CSS_SELECTOR, "input[type='radio'][value='fast']")
+    fast = sheet.find_element(
+        By.CSS_SELECTOR, "[role='radio'][data-execution-option-id='fast']"
+    )
     fast.send_keys(Keys.SPACE)
     ultrafast = sheet.find_element(
-        By.CSS_SELECTOR, "input[type='radio'][value='ultrafast']"
+        By.CSS_SELECTOR, "[role='radio'][data-execution-option-id='ultrafast']"
     )
     ultrafast.send_keys(Keys.SPACE)
-    assert ultrafast.is_selected()
-    assert not fast.is_selected()
+    _assert_speed_checked(browser_driver, "ultrafast", True)
+    _assert_speed_checked(browser_driver, "fast", False)
     _wait(browser_driver).until(
         ec.element_to_be_clickable((By.CSS_SELECTOR, "button[aria-label='Done']"))
     ).click()
