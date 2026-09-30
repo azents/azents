@@ -123,8 +123,8 @@ from .config import AgentWorkerConfig
 from .health import HealthServer
 
 _DEFAULT_HEALTH_PORT = 8012
-_TRANSFER_MAXIMUM_FILE_BYTES = 8 * 1024 * 1024
-_DIRECT_INBOUND_RUNTIME_FILE_MAXIMUM_BYTES = 128 * 1024 * 1024
+_DIRECT_RUNTIME_FILE_MAXIMUM_BYTES = 128 * 1024 * 1024
+_RUNTIME_IMAGE_MAXIMUM_BYTES = 20 * 1024 * 1024
 _TRANSFER_CHUNK_BYTES = 256 * 1024
 _TRANSFER_MULTIPART_PART_BYTES = 5 * 1024 * 1024
 _TRANSFER_STATUS_POLL_INTERVAL = datetime.timedelta(milliseconds=250)
@@ -412,8 +412,8 @@ def create_worker_transfer_services(
             consumer_lease_renew_interval=_TRANSFER_CONSUMER_RENEW_INTERVAL,
             maximum_chunk_size=_TRANSFER_CHUNK_BYTES,
         ),
-        product_maximum_size=_TRANSFER_MAXIMUM_FILE_BYTES,
-        provider_maximum_size=_TRANSFER_MAXIMUM_FILE_BYTES,
+        product_maximum_size=_DIRECT_RUNTIME_FILE_MAXIMUM_BYTES,
+        provider_maximum_size=_DIRECT_RUNTIME_FILE_MAXIMUM_BYTES,
         deadline=_TRANSFER_DEADLINE,
         resource_class="external_channel",
     )
@@ -424,15 +424,15 @@ def create_worker_transfer_services(
             resolver=resolver,
             s3_service=s3_service,
             model_file_service=model_file_service,
-            product_maximum_size=_TRANSFER_MAXIMUM_FILE_BYTES,
+            product_maximum_size=_RUNTIME_IMAGE_MAXIMUM_BYTES,
             deadline=_TRANSFER_DEADLINE,
         ),
         present_file_publication=PresentFilePublicationService(
             transfer_service=runtime_to_server,
             resolver=resolver,
             exchange_file_service=exchange_file_service,
-            product_maximum_size=_TRANSFER_MAXIMUM_FILE_BYTES,
-            provider_maximum_size=_TRANSFER_MAXIMUM_FILE_BYTES,
+            product_maximum_size=_DIRECT_RUNTIME_FILE_MAXIMUM_BYTES,
+            provider_maximum_size=_DIRECT_RUNTIME_FILE_MAXIMUM_BYTES,
             deadline=_TRANSFER_DEADLINE,
         ),
         provider_delivery=provider_delivery,
@@ -442,7 +442,7 @@ def create_worker_transfer_services(
             transfer_object_prefix=object_prefix,
             multipart_copy_threshold=_TRANSFER_MULTIPART_PART_BYTES,
             multipart_part_size=_TRANSFER_MULTIPART_PART_BYTES,
-            maximum_size=_DIRECT_INBOUND_RUNTIME_FILE_MAXIMUM_BYTES,
+            maximum_size=_DIRECT_RUNTIME_FILE_MAXIMUM_BYTES,
             deadline_after=_TRANSFER_DEADLINE,
         ),
     )

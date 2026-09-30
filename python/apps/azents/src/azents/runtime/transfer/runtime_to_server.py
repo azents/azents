@@ -30,6 +30,7 @@ from azents_runtime_control.grpc_transfer_coordinator_client import (
     CoordinatorTransferOutcome,
     CoordinatorTransferPhase,
     CoordinatorTransferStatus,
+    CoordinatorUploadTransport,
 )
 from azents_runtime_control.transfer import CoordinatorTransferIdentity
 
@@ -433,6 +434,7 @@ class RuntimeToServerTransferService:
                     source_expires_at=None,
                     resource_class=request.resource_class,
                     source_transport=CoordinatorSourceTransport.TRANSFER_OBJECT,
+                    upload_transport=CoordinatorUploadTransport.DIRECT_OBJECT,
                 )
             )
             revision = admitted.status.revision

@@ -2,7 +2,7 @@
 
 import asyncio
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import AsyncIterator
 
@@ -25,9 +25,11 @@ from azents_runtime_control.grpc_transfer_coordinator_client import (
     CoordinatorOpaqueObjectHandle,
     CoordinatorPreparationCleanupState,
     CoordinatorSettleTransferRequest,
+    CoordinatorSourceTransport,
     CoordinatorTransferOutcome,
     CoordinatorTransferPhase,
     CoordinatorTransferStatus,
+    CoordinatorUploadTransport,
 )
 from azents_runtime_control.transfer import CoordinatorTransferIdentity
 
@@ -55,6 +57,7 @@ class _Coordinator:
 
     def __post_init__(self) -> None:
         self.calls: list[tuple[str, str]] = []
+        self.admissions: list[CoordinatorAdmitTransferRequest] = []
         self.sizes: dict[str, int] = {}
         self.ack_attempted: set[str] = set()
         self.claimed: set[str] = set()
@@ -66,6 +69,7 @@ class _Coordinator:
         request: CoordinatorAdmitTransferRequest,
     ) -> CoordinatorAdmitTransferResult:
         self.calls.append(("admit", request.identity.transfer_id))
+        self.admissions.append(request)
         self.sizes[request.identity.transfer_id] = request.expected_manifest.size or 0
         if (
             len([call for call in self.calls if call[0] == "admit"]) == 2
@@ -341,6 +345,55 @@ def _source(path: str, size: int) -> RuntimeToProviderSource:
 
 
 @pytest.mark.asyncio
+async def test_generic_file_capacity_does_not_replace_the_action_aggregate() -> None:
+    """Feature preflight owns action totals; the data plane bounds each file."""
+    maximum_size = 128 * 1024 * 1024
+    coordinator = _Coordinator()
+    service = _service(coordinator, _ObjectStore((b"", b"")))
+    request = replace(
+        _request(
+            _source("/workspace/agent/first.bin", maximum_size),
+            _source("/workspace/agent/second.bin", maximum_size),
+        ),
+        product_maximum_size=maximum_size,
+        provider_maximum_size=maximum_size,
+    )
+
+    batch = await service.prepare(request)
+
+    assert len(coordinator.admissions) == 2
+    assert all(
+        admitted.expected_manifest.size == maximum_size
+        and admitted.upload_transport is CoordinatorUploadTransport.DIRECT_OBJECT
+        for admitted in coordinator.admissions
+    )
+    await batch.close()
+    await batch.abandon_or_cancel()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "limit_field", ("product_maximum_size", "provider_maximum_size")
+)
+async def test_per_file_limit_rejects_before_any_runtime_admission(
+    limit_field: str,
+) -> None:
+    """Either file limit rejects oversize metadata before transfer side effects."""
+    coordinator = _Coordinator()
+    service = _service(coordinator, _ObjectStore((b"",)))
+    request = _request(_source("/workspace/agent/oversize.bin", 11))
+    if limit_field == "product_maximum_size":
+        request = replace(request, product_maximum_size=10)
+    else:
+        request = replace(request, provider_maximum_size=10)
+
+    with pytest.raises(ValueError, match="per-file maximum"):
+        await service.prepare(request)
+
+    assert coordinator.admissions == []
+
+
+@pytest.mark.asyncio
 async def test_batch_holds_all_claims_until_provider_completion() -> None:
     first = b"first"
     second = b"second"
@@ -357,6 +410,12 @@ async def test_batch_holds_all_claims_until_provider_completion() -> None:
     assert b"".join([chunk async for chunk in batch.iter_source_chunks(0)]) == first
     assert b"".join([chunk async for chunk in batch.iter_source_chunks(1)]) == second
     assert not [call for call in coordinator.calls if call[0] == "ack"]
+    assert len(coordinator.admissions) == 2
+    assert all(
+        admitted.upload_transport is CoordinatorUploadTransport.DIRECT_OBJECT
+        and admitted.source_transport is CoordinatorSourceTransport.TRANSFER_OBJECT
+        for admitted in coordinator.admissions
+    )
 
     evidence = await batch.provider_completed()
     await batch.acknowledge_and_settle()

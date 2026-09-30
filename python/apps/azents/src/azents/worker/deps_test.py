@@ -95,6 +95,26 @@ def test_worker_transfer_services_share_only_the_injected_coordinator() -> None:
     assert services.import_staging.maximum_size == 128 * 1024 * 1024
 
 
+def test_worker_direct_transfer_policies_preserve_the_image_bound() -> None:
+    """Generic transfer capacity must not replace the image/model policy."""
+    services = create_worker_transfer_services(
+        config=_config(),
+        coordinator=_Coordinator(),
+        s3_service=_S3Service(),
+        exchange_file_service=_ExchangeFileService(),
+        model_file_service=_ModelFileService(),
+    )
+
+    assert services.present_file_publication is not None
+    assert services.present_file_publication.product_maximum_size == 128 * 1024 * 1024
+    assert services.present_file_publication.provider_maximum_size == 128 * 1024 * 1024
+    assert services.provider_delivery is not None
+    assert services.provider_delivery.product_maximum_size == 128 * 1024 * 1024
+    assert services.provider_delivery.provider_maximum_size == 128 * 1024 * 1024
+    assert services.runtime_image_read is not None
+    assert services.runtime_image_read.product_maximum_size == 20 * 1024 * 1024
+
+
 def test_external_channel_staging_requires_the_worker_coordinator() -> None:
     """Inbound provider bytes cannot stage without Worker Coordinator trust."""
     with pytest.raises(RuntimeError, match="Coordinator is required"):
