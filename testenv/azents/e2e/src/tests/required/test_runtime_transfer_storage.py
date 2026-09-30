@@ -1,8 +1,6 @@
 """Real RustFS coverage for bounded Runtime transfer S3 primitives."""
 
-import asyncio
 import hashlib
-import tempfile
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import timedelta
@@ -71,53 +69,6 @@ async def test_rustfs_workspace_upload_readiness(
 
 
 @pytest.mark.asyncio
-async def test_rustfs_download_capability_expires_without_application_relay(
-    rustfs_container: DockerContainer,
-    rustfs_access_key: str,
-    rustfs_secret_key: str,
-    s3_bucket_name: str,
-) -> None:
-    """Real storage rejects an expired capability while the private object remains."""
-    identity = S3ObjectIdentity(bucket=s3_bucket_name, key=_key("expired-download"))
-    body = b"bounded browser authority"
-    async with _service(
-        rustfs_container=rustfs_container,
-        access_key=rustfs_access_key,
-        secret_key=rustfs_secret_key,
-    ) as service:
-        try:
-            await service.upload(identity.bucket, identity.key, body)
-            ticket = await service.get_download_request(
-                identity=identity,
-                expires_in=timedelta(seconds=2),
-                filename="bounded.txt",
-                content_type="text/plain",
-                inline=False,
-            )
-            try:
-                before = requests.get(ticket.url, timeout=10)
-            except requests.RequestException as error:
-                raise AssertionError(
-                    f"Storage direct GET transport failed: {type(error).__name__}."
-                ) from None
-            assert before.status_code == 200
-            assert before.content == body
-            # Elapsed time is the actual storage-enforced TTL contract.
-            await asyncio.sleep(3)
-            try:
-                expired = requests.get(ticket.url, timeout=10)
-            except requests.RequestException as error:
-                raise AssertionError(
-                    f"Expired direct GET transport failed: {type(error).__name__}."
-                ) from None
-            assert expired.status_code == 403
-            assert expired.content != body
-            assert await service.head(identity) is not None
-        finally:
-            await service.delete(identity.bucket, identity.key)
-
-
-@pytest.mark.asyncio
 async def test_rustfs_presigned_put_finalize_and_get_round_trip(
     rustfs_container: DockerContainer,
     rustfs_access_key: str,
@@ -183,82 +134,6 @@ async def test_rustfs_presigned_put_finalize_and_get_round_trip(
                 "attachment; filename*=UTF-8''report%20%C3%BC.txt"
             )
             assert download_response.headers["Content-Type"] == "text/plain"
-        finally:
-            await service.delete(ingress.bucket, ingress.key)
-            await service.delete(source.bucket, source.key)
-
-
-@pytest.mark.asyncio
-async def test_rustfs_signed_put_copy_and_get_without_buffering_body(
-    rustfs_container: DockerContainer,
-    rustfs_access_key: str,
-    rustfs_secret_key: str,
-    s3_bucket_name: str,
-) -> None:
-    """Exercise streaming/checksum/copy with a small deterministic body."""
-    expected_size = 32 * 1024
-    chunk = bytes(range(256)) * 16
-    checksum = hashlib.sha256()
-    ingress = S3ObjectIdentity(bucket=s3_bucket_name, key=_key("bounded-ingress"))
-    source = S3ObjectIdentity(bucket=s3_bucket_name, key=_key("bounded-source"))
-    async with _service(
-        rustfs_container=rustfs_container,
-        access_key=rustfs_access_key,
-        secret_key=rustfs_secret_key,
-    ) as service:
-        try:
-            with tempfile.TemporaryFile() as body:
-                for _ in range(expected_size // len(chunk)):
-                    body.write(chunk)
-                    checksum.update(chunk)
-                body.seek(0)
-                upload_request = await service.get_upload_request(
-                    identity=ingress,
-                    content_type="application/octet-stream",
-                    content_length=expected_size,
-                    checksum_sha256=checksum.hexdigest(),
-                    expires_in=timedelta(minutes=5),
-                )
-                upload_response = requests.put(
-                    upload_request.url,
-                    headers=dict(upload_request.headers),
-                    data=body,
-                    timeout=(10, 120),
-                )
-                assert upload_response.status_code == 200
-
-            uploaded = await service.head_with_checksum(ingress)
-            assert uploaded is not None
-            assert uploaded.content_length == expected_size
-            assert uploaded.checksum_sha256 is not None
-            finalized = await service.copy_immutable(
-                source=ingress,
-                destination=source,
-                expected_size=expected_size,
-                transfer_metadata=S3TransferObjectMetadata(
-                    sha256=checksum.hexdigest(),
-                    content_type="application/octet-stream",
-                ),
-                multipart_copy_threshold=32 * 1024 * 1024,
-                multipart_part_size=16 * 1024 * 1024,
-            )
-            assert finalized.metadata.content_length == expected_size
-            assert finalized.sha256 == checksum.hexdigest()
-
-            ticket = await service.get_download_request(
-                identity=source,
-                expires_in=timedelta(minutes=5),
-                inline=False,
-            )
-            downloaded = hashlib.sha256()
-            received = 0
-            with requests.get(ticket.url, stream=True, timeout=(10, 120)) as response:
-                assert response.status_code == 200
-                for part in response.iter_content(chunk_size=1024 * 1024):
-                    received += len(part)
-                    downloaded.update(part)
-            assert received == expected_size
-            assert downloaded.hexdigest() == checksum.hexdigest()
         finally:
             await service.delete(ingress.bucket, ingress.key)
             await service.delete(source.bucket, source.key)

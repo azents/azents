@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from io import BytesIO
 from types import SimpleNamespace
 from typing import Any, NamedTuple
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from azcommon.infra.s3.service import (
@@ -300,12 +300,24 @@ class _FakeExchangeFileRepository(ExchangeFileRepository):
         return expired
 
 
+class _DownloadRequestArguments(NamedTuple):
+    """Exact metadata passed to the test-owned GET signer."""
+
+    identity: S3ObjectIdentity
+    expires_in: datetime.timedelta
+    inline: bool
+    now: datetime.datetime
+    filename: str
+    content_type: str
+
+
 class _FakeS3Service:
     """S3 service for tests."""
 
     def __init__(self, session_boundary: "_SessionBoundary") -> None:
         self.objects: dict[str, bytes] = {}
         self.fail_delete = False
+        self.delete_calls: list[S3ObjectIdentity] = []
         self.raise_after_upload = False
         self.uploaded_keys: list[str] = []
         self.product_copy_calls: list[
@@ -317,6 +329,7 @@ class _FakeS3Service:
         self.head_calls: list[S3ObjectIdentity] = []
         self.checksum_sha256: str | None = None
         self.get_ticket_requests: list[S3PresignedRequest] = []
+        self.get_ticket_arguments: list[_DownloadRequestArguments] = []
         self.chunk_sizes: list[int] = []
         self.session_boundary = session_boundary
 
@@ -344,7 +357,7 @@ class _FakeS3Service:
 
     async def delete(self, bucket: str, key: str) -> None:
         """Delete object."""
-        del bucket
+        self.delete_calls.append(S3ObjectIdentity(bucket=bucket, key=key))
         assert self.session_boundary.active == 0
         if self.fail_delete:
             msg = "delete failed"
@@ -390,6 +403,16 @@ class _FakeS3Service:
         assert filename is not None
         assert content_type is not None
         assert now is not None
+        self.get_ticket_arguments.append(
+            _DownloadRequestArguments(
+                identity=identity,
+                expires_in=expires_in,
+                inline=inline,
+                now=now,
+                filename=filename,
+                content_type=content_type,
+            )
+        )
         request = S3PresignedRequest(
             method="GET",
             url="https://objects.test/file?signature=redacted",
@@ -1648,6 +1671,87 @@ async def test_download_ticket_checks_metadata_without_opening_object_body(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
+    ("media_type", "expected_inline"),
+    [("image/png", True), ("text/html", False)],
+)
+async def test_download_ticket_enforces_inline_allowlist_and_forwards_unicode_name(
+    media_type: str, expected_inline: bool
+) -> None:
+    """Only safe image media can be inline; signer metadata keeps Unicode names."""
+    service, _repository, s3_service = _make_service(
+        workspace_user=_make_workspace_user()
+    )
+    filename = "보고서 ü.txt"
+    if media_type == "image/png":
+        image = BytesIO()
+        Image.new("RGB", (1, 1), color="blue").save(image, format="PNG")
+        body = image.getvalue()
+    else:
+        body = b"<html>report</html>"
+    created = await service.create_agent_upload(
+        agent_id="agent-1",
+        user_id="user-1",
+        filename=filename,
+        media_type=media_type,
+        body=body,
+    )
+    assert isinstance(created, Success)
+
+    result = await service.create_download_ticket(
+        file_id=created.value.id, user_id="user-1", inline=True
+    )
+
+    assert isinstance(result, Success)
+    assert len(s3_service.get_ticket_arguments) == 1
+    arguments = s3_service.get_ticket_arguments[0]
+    assert arguments.inline is expected_inline
+    assert arguments.filename == filename
+    assert arguments.content_type == media_type
+    assert arguments.identity.key == created.value.object_key
+    assert s3_service.chunk_sizes == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("remaining_seconds", [30, 120])
+async def test_download_ticket_lifetime_is_capped_by_minute_and_product_expiry(
+    remaining_seconds: int,
+) -> None:
+    """GET authority cannot outlive either one minute or the existing product."""
+    service, repository, s3_service = _make_service(
+        workspace_user=_make_workspace_user()
+    )
+    created = await service.create_agent_upload(
+        agent_id="agent-1",
+        user_id="user-1",
+        filename="report.txt",
+        media_type="text/plain",
+        body=b"report",
+    )
+    assert isinstance(created, Success)
+    now = datetime.datetime.now(datetime.UTC)
+    product_expiry = now + datetime.timedelta(seconds=remaining_seconds)
+    repository.files[created.value.id] = created.value.model_copy(
+        update={"expires_at": product_expiry}
+    )
+    with patch("azents.services.exchange_file.datetime", wraps=datetime) as clock:
+        clock.datetime.now.return_value = now
+        result = await service.create_download_ticket(
+            file_id=created.value.id, user_id="user-1", inline=False
+        )
+
+    assert isinstance(result, Success)
+    lifetime = datetime.timedelta(seconds=min(60, remaining_seconds))
+    assert len(s3_service.get_ticket_arguments) == 1
+    arguments = s3_service.get_ticket_arguments[0]
+    assert arguments.now == now
+    assert arguments.expires_in == lifetime
+    assert result.value.expires_at == now + lifetime
+    assert result.value.expires_at <= product_expiry
+    assert s3_service.chunk_sizes == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
     "checksum", ["b" * 64, base64.b64encode(bytes.fromhex("b" * 64)).decode()]
 )
 async def test_download_ticket_rejects_changed_checksum_before_get(
@@ -1706,6 +1810,55 @@ async def test_download_ticket_uses_small_limit_before_head_and_presign(
         assert isinstance(result.error, FileTooLarge)
         assert s3_service.head_calls == []
         assert s3_service.get_ticket_requests == []
+    assert s3_service.chunk_sizes == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("denial", "error_type"),
+    [
+        ("membership-denied", FileAccessDenied),
+        ("deleted", FileNotFound),
+        ("expired", FileExpired),
+    ],
+)
+async def test_download_ticket_denials_prevent_head_and_presign(
+    denial: str,
+    error_type: type[FileAccessDenied | FileNotFound | FileExpired],
+) -> None:
+    """Unavailable authority never examines storage or signs a GET capability."""
+    workspace_user = _make_workspace_user()
+    service, repository, s3_service = _make_service(workspace_user=workspace_user)
+    created = await service.create_agent_upload(
+        agent_id="agent-1",
+        user_id="user-1",
+        filename="report.bin",
+        media_type="application/octet-stream",
+        body=b"x",
+    )
+    assert isinstance(created, Success)
+    if denial == "deleted":
+        repository.files.pop(created.value.id)
+    elif denial == "expired":
+        repository.files[created.value.id] = created.value.model_copy(
+            update={"expires_at": _NOW - datetime.timedelta(seconds=1)}
+        )
+    with patch.object(
+        service.workspace_user_repository,
+        "get_by_workspace_and_user",
+        new_callable=AsyncMock,
+        return_value=None if denial == "membership-denied" else workspace_user,
+    ):
+        result = await service.create_download_ticket(
+            file_id=created.value.id, user_id="user-1", inline=False
+        )
+
+    assert isinstance(result, Failure)
+    assert isinstance(result.error, error_type)
+    assert created.value.object_key in s3_service.objects
+    assert s3_service.head_calls == []
+    assert s3_service.get_ticket_requests == []
+    assert s3_service.get_ticket_arguments == []
     assert s3_service.chunk_sizes == []
 
 
@@ -1874,6 +2027,44 @@ async def test_delete_removes_object_and_metadata() -> None:
     assert isinstance(result, Success)
     assert created.value.object_key not in s3_service.objects
     assert created.value.id not in repository.files
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("requester_id", ["other-user", "user-1"])
+async def test_delete_denies_non_member_or_revoked_member_without_storage_io(
+    requester_id: str,
+) -> None:
+    """Unauthorized deletion retains the file and blob without storage cleanup."""
+    service, repository, s3_service = _make_service(
+        workspace_user=_make_workspace_user()
+    )
+    created = await service.create_agent_upload(
+        agent_id="agent-1",
+        user_id="user-1",
+        filename="report.bin",
+        media_type="application/octet-stream",
+        body=b"x",
+    )
+    assert isinstance(created, Success)
+    original_file = repository.files[created.value.id]
+    original_objects = s3_service.objects.copy()
+
+    with patch.object(
+        service.workspace_user_repository,
+        "get_by_workspace_and_user",
+        new_callable=AsyncMock,
+        return_value=None,
+    ):
+        result = await service.delete(file_id=created.value.id, user_id=requester_id)
+
+    assert result == Failure(FileAccessDenied())
+    assert repository.files[created.value.id] == original_file
+    assert s3_service.objects == original_objects
+    assert s3_service.delete_calls == []
+    assert s3_service.product_cleanup_calls == []
+    assert s3_service.head_calls == []
+    assert s3_service.get_ticket_requests == []
+    assert s3_service.chunk_sizes == []
 
 
 @pytest.mark.asyncio

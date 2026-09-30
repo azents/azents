@@ -53,26 +53,28 @@ Manual-only runbook, blocked placeholder, removed-feature residue check, legacy 
 
 ## Direct File Transfer Evidence
 
-Required file journeys exercise Chat metadata admission/direct PUT/finalize, Exchange
-attachment-ID authorized `302` download, access denial and deletion, Workspace
-upload/download, verified Runner transfers, Tool-result materialization, and real
-RustFS checksum/copy/expiry behavior with small deterministic bodies. API, Worker,
-and Workspace fixtures inject a lowered 1 MiB general-file limit; boundary journeys
-retain ordinary below-limit uploads, one inclusive-limit storage/model journey, and
-above-limit metadata rejection without transferring 128 MiB. Unit tests use a
-16-byte limit for 15/16/17-byte boundaries. The completed
+Required file smoke tests retain the pre-transfer upload/auth/size, Exchange
+download/delete, image/file model-input, Workspace, and Runner journeys, adapted to
+metadata prepare/direct PUT/finalize and authorized empty `302` GET. The original
+five real RustFS primitive tests retain provider compatibility with small bodies.
+The stack-added checksum/publication/retry/owner/manifest matrix, ticket-expiry wait,
+streamed-copy duplicate, and dedicated native-browser file journeys are not recurring
+required E2E.
+
+Fast route/ASGI, mock-service, shared-S3, frontend transport/hash, and component tests
+own those boundaries: JSON-only manifests, invalid bodies, authorization before
+storage I/O, immutable/idempotent publication, native checksum/signature parameters,
+GET TTL/disposition/cache/referrer, streaming cleanup, and Worker progress/cancellation.
+Configured file-size boundaries use 15/16/17-byte unit bodies and metadata-only
+128 MiB schema probes; model-budget checks keep available attachment metadata without
+reading an ineligible original. API, Worker, and Workspace fixtures retain the lowering-
+only 1 MiB testenv limit. The completed
 128 MiB acceptance evidence is preserved in the
 [large-file validation report](../../design/direct-file-transfer-large-file-validation-report-2026-09-30.md),
 not executed in routine regression CI.
-File-only integrity and authorization journeys create fresh user/Workspace/Agent
-authority without starting a Runtime, initializing the primary Session, or
-submitting an initial model input. Metadata validation needs only an authenticated user. Journeys that
-exercise model input or Runner/Workspace behavior retain the full Runtime and Session
-lifecycle. Failed-publication cases keep isolated Workspaces; the three download
-disposition/media cases retain independent attachments within one authority setup.
-One native browser journey covers both Chat and Workspace Web redirects with exact
-downloaded bytes/hash and safe filename preservation, sharing its login and Runtime
-without replacing either native download. RustFS fixture CORS remains PUT-only:
+The bounded native-browser acceptance evidence remains in that report rather than
+being duplicated in routine CI. Unit/component checks establish the native link and
+redirect contract, not proof of browser-saved bytes. RustFS fixture CORS remains PUT-only:
 download navigation and inline images are not cross-origin fetch APIs.
 
 Evidence records safe statuses, byte counts, hashes, and synthetic filenames; it omits
@@ -248,14 +250,8 @@ Always-on required CI does not depend on external credentials.
   snapshot before the predecessor and ancestor candidates, allowing a completed
   current publication to replace a cancelled predecessor publication without adding
   a workflow dependency. Snapshot availability is never a workflow dependency or wait condition:
-  a missing, late, cancelled, or failed publication preserves the existing local
-  Buildx/cache build path. Snapshot pulls run in parallel. After both the existing
-  snapshot and prerequisite-image preparation branches complete, unresolved final
-  images that attempted an exact-current-SHA pull get one immediate retry of that
-  same immutable tag. Ready images are not pulled again; compatibility checks remain
-  enforced, and both attempt records are retained. There is no publication wait,
-  sleep, or new producer dependency; a second miss keeps the local build fallback.
-  The direct
+  a missing, late, cancelled, or failed publication immediately preserves the
+  existing local Buildx/cache build path. Snapshot pulls run in parallel. The direct
   snapshot attempt starts immediately after checkout and overlaps uv installation,
   Python setup, dependency synchronization, and plan download. A durable status
   handoff joins the attempt before ancestor fallback and Buildx selection; an
@@ -584,10 +580,9 @@ Local/PR environment without live substrate does not fake live PASS. Instead, se
 
 ## Changelog
 
-- **2026-09-30** (spec_version 74) — Removed unnecessary Runtime/model initialization
-  from file-only validation, consolidated duplicate file/browser preparation while
-  preserving distinct transfer assertions, and retried late exact-current snapshots
-  once after existing parallel preparation.
+- **2026-09-30** (spec_version 74) — Moved stack-added heavy file-transfer matrices
+  and native-browser journeys out of required E2E into fast unit/component ownership,
+  preserving pre-stack real-storage and product smoke boundaries.
 
 - **2026-09-30** (spec_version 73) — Replaced recurring heavyweight file journeys
   with lowered, injected limits and small protocol bodies; retained one-time
