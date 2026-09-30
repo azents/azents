@@ -29,7 +29,7 @@ code_paths:
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
 last_verified_at: 2026-09-30
-spec_version: 73
+spec_version: 74
 ---
 
 # E2E Primary Test Strategy
@@ -58,13 +58,21 @@ attachment-ID authorized `302` download, access denial and deletion, Workspace
 upload/download, verified Runner transfers, Tool-result materialization, and real
 RustFS checksum/copy/expiry behavior with small deterministic bodies. API, Worker,
 and Workspace fixtures inject a lowered 1 MiB general-file limit; boundary journeys
-exercise below-limit, inclusive-limit, and above-limit behavior without transferring
-128 MiB. Unit tests use a 16-byte limit for 15/16/17-byte boundaries. The completed
+retain ordinary below-limit uploads, one inclusive-limit storage/model journey, and
+above-limit metadata rejection without transferring 128 MiB. Unit tests use a
+16-byte limit for 15/16/17-byte boundaries. The completed
 128 MiB acceptance evidence is preserved in the
 [large-file validation report](../../design/direct-file-transfer-large-file-validation-report-2026-09-30.md),
 not executed in routine regression CI.
-Native browser journeys cover Chat and Workspace Web redirects with exact downloaded
-bytes/hash and safe filename preservation. RustFS fixture CORS remains PUT-only:
+File-only integrity and authorization journeys create fresh user/Workspace/Agent
+authority without starting a Runtime, initializing the primary Session, or
+submitting an initial model input. Metadata validation needs only an authenticated user. Journeys that
+exercise model input or Runner/Workspace behavior retain the full Runtime and Session
+lifecycle. Failed-publication cases keep isolated Workspaces; the three download
+disposition/media cases retain independent attachments within one authority setup.
+One native browser journey covers both Chat and Workspace Web redirects with exact
+downloaded bytes/hash and safe filename preservation, sharing its login and Runtime
+without replacing either native download. RustFS fixture CORS remains PUT-only:
 download navigation and inline images are not cross-origin fetch APIs.
 
 Evidence records safe statuses, byte counts, hashes, and synthetic filenames; it omits
@@ -240,8 +248,14 @@ Always-on required CI does not depend on external credentials.
   snapshot before the predecessor and ancestor candidates, allowing a completed
   current publication to replace a cancelled predecessor publication without adding
   a workflow dependency. Snapshot availability is never a workflow dependency or wait condition:
-  a missing, late, cancelled, or failed publication immediately preserves the
-  existing local Buildx/cache build path. Snapshot pulls run in parallel. The direct
+  a missing, late, cancelled, or failed publication preserves the existing local
+  Buildx/cache build path. Snapshot pulls run in parallel. After both the existing
+  snapshot and prerequisite-image preparation branches complete, unresolved final
+  images that attempted an exact-current-SHA pull get one immediate retry of that
+  same immutable tag. Ready images are not pulled again; compatibility checks remain
+  enforced, and both attempt records are retained. There is no publication wait,
+  sleep, or new producer dependency; a second miss keeps the local build fallback.
+  The direct
   snapshot attempt starts immediately after checkout and overlaps uv installation,
   Python setup, dependency synchronization, and plan download. A durable status
   handoff joins the attempt before ancestor fallback and Buildx selection; an
@@ -569,6 +583,11 @@ External substrate features such as Agent Runtime Provider are recorded in two l
 Local/PR environment without live substrate does not fake live PASS. Instead, separate prerequisite snapshot state and deterministic evidence in PR body and design QA record. If primary E2E substrate such as Browser runner or Docker/testcontainers is unavailable and product path cannot be executed, do not replace it with PASS. Track scenario, blocker category, observed error, expected verification target, and next action in GitHub Issue, and leave blocked evidence plus issue link in design QA record.
 
 ## Changelog
+
+- **2026-09-30** (spec_version 74) — Removed unnecessary Runtime/model initialization
+  from file-only validation, consolidated duplicate file/browser preparation while
+  preserving distinct transfer assertions, and retried late exact-current snapshots
+  once after existing parallel preparation.
 
 - **2026-09-30** (spec_version 73) — Replaced recurring heavyweight file journeys
   with lowered, injected limits and small protocol bodies; retained one-time

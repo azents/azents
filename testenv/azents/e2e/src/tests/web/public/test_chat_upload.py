@@ -13,12 +13,14 @@ import requests
 from azentspublicclient.models.upload_response import UploadResponse
 from pydantic import BaseModel, ConfigDict
 from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.remote.file_detector import LocalFileDetector
 from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.support import expected_conditions as ec
 from selenium.webdriver.support.ui import WebDriverWait
 from testcontainers.core.container import DockerContainer
 
+from support.browser_workspace_download import assert_workspace_native_browser_download
 from support.utils import create_agent_session_setup
 from tests.web.public.test_workspace_settings_web import _login_main_web
 
@@ -138,11 +140,13 @@ def test_chat_composer_uploads_real_file_directly_then_publishes_attachment(
     azents_main_web_url: str,
     azents_admin_gateway_container: DockerContainer,
     azents_public_server_url: str,
+    azents_workspace_upload_gateway_url: str,
     public_api_client: azentspublicclient.ApiClient,
     admin_api_client: azentsadminclient.ApiClient,
+    runtime_workspace_path: str,
     tmp_path: Path,
 ) -> None:
-    """Native browser PUT and GET preserve bytes without an API/Web body relay."""
+    """Chat PUT/GET and Workspace GET preserve bytes in one native browser."""
     setup = create_agent_session_setup(
         public_api_client, admin_api_client, azents_public_server_url
     )
@@ -284,3 +288,15 @@ def test_chat_composer_uploads_real_file_directly_then_publishes_attachment(
             ).model_dump_json(indent=2),
             encoding="utf-8",
         )
+    browser_driver.switch_to.active_element.send_keys(Keys.ESCAPE)
+    wait.until(ec.invisibility_of_element_located((By.CSS_SELECTOR, "[role='dialog']")))
+    assert_workspace_native_browser_download(
+        setup=setup,
+        browser_driver=browser_driver,
+        azents_main_web_url=azents_main_web_url,
+        azents_admin_gateway_container=azents_admin_gateway_container,
+        azents_public_server_url=azents_public_server_url,
+        azents_workspace_upload_gateway_url=azents_workspace_upload_gateway_url,
+        runtime_workspace_path=runtime_workspace_path,
+        tmp_path=tmp_path,
+    )

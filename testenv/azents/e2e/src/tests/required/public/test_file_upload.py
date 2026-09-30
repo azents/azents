@@ -30,7 +30,9 @@ from support.consts import E2E_GENERAL_FILE_MAXIMUM_BYTES
 from support.utils import (
     PNG_1X1,
     AgentSessionSetup,
+    AgentSetup,
     create_agent_session_setup,
+    create_agent_setup,
     create_chat_session_with_agent,
     create_second_user_token,
     unique,
@@ -39,6 +41,7 @@ from support.utils import (
 
 _UPLOAD_PROMPT = "Describe uploaded image and file"
 _CHAT_UPLOAD_MAX_BYTES = E2E_GENERAL_FILE_MAXIMUM_BYTES
+_NONEXISTENT_AGENT_ID = "00000000000000000000000000000000"
 _JSON_OBJECT = TypeAdapter(dict[str, object])
 _JSON_OBJECT_LIST = TypeAdapter(list[dict[str, object]])
 
@@ -301,7 +304,7 @@ class TestFileUpload:
         azents_public_server_url: str,
     ) -> None:
         """A successful file upload returns URI, media type, and size."""
-        token, _, agent_id = create_chat_session_with_agent(
+        setup = create_agent_setup(
             public_api_client,
             admin_api_client,
             azents_public_server_url,
@@ -310,8 +313,8 @@ class TestFileUpload:
         content = PNG_1X1
         response = upload_file(
             azents_public_server_url,
-            token,
-            agent_id,
+            setup.access_token,
+            setup.agent_id,
             filename="photo.png",
             content=content,
         )
@@ -348,16 +351,12 @@ class TestFileUpload:
         azents_public_server_url: str,
     ) -> None:
         """Uploading to a nonexistent Agent returns 404."""
-        token, _, _ = create_chat_session_with_agent(
-            public_api_client,
-            admin_api_client,
-            azents_public_server_url,
-        )
+        token = create_second_user_token(public_api_client, admin_api_client)
 
         response = upload_file(
             azents_public_server_url,
             token,
-            "00000000000000000000000000000000",
+            _NONEXISTENT_AGENT_ID,
             filename="test.txt",
             content=b"hello",
             media_type="text/plain",
@@ -371,7 +370,7 @@ class TestFileUpload:
         azents_public_server_url: str,
     ) -> None:
         """Uploading to another user's Agent returns 403."""
-        _, _, agent_id = create_chat_session_with_agent(
+        setup = create_agent_setup(
             public_api_client,
             admin_api_client,
             azents_public_server_url,
@@ -382,7 +381,7 @@ class TestFileUpload:
         response = upload_file(
             azents_public_server_url,
             other_token,
-            agent_id,
+            setup.agent_id,
             filename="test.txt",
             content=b"hello",
             media_type="text/plain",
@@ -406,14 +405,10 @@ class TestFileUpload:
         expected_status: int,
     ) -> None:
         """Configured and schema bounds reject metadata before any object PUT."""
-        token, _, agent_id = create_chat_session_with_agent(
-            public_api_client,
-            admin_api_client,
-            azents_public_server_url,
-        )
+        token = create_second_user_token(public_api_client, admin_api_client)
 
         response = requests.post(
-            f"{azents_public_server_url}/chat/v1/agents/{agent_id}/uploads",
+            f"{azents_public_server_url}/chat/v1/agents/{_NONEXISTENT_AGENT_ID}/uploads",
             headers=_headers(token),
             json={
                 "filename": "large.bin",
@@ -430,6 +425,18 @@ class TestFileUpload:
 # ---------------------------------------------------------------------------
 # Exchange Files
 # ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def chat_upload_actor(
+    public_api_client: azentspublicclient.ApiClient,
+    admin_api_client: azentsadminclient.ApiClient,
+    azents_public_server_url: str,
+) -> AgentSetup:
+    """Keep each unfinalized-upload assertion in its own fresh Workspace."""
+    return create_agent_setup(
+        public_api_client, admin_api_client, azents_public_server_url
+    )
 
 
 @pytest.fixture
@@ -467,7 +474,7 @@ def chat_upload_s3(
 
 def _prepare_chat_upload(
     server_url: str,
-    setup: AgentSessionSetup,
+    setup: AgentSetup,
     content: bytes,
 ) -> ChatUploadPrepareResponse:
     """Authorize metadata only; preparation never exposes an attachment."""
@@ -490,7 +497,7 @@ def _prepare_chat_upload(
 
 def _finalize_chat_upload(
     server_url: str,
-    setup: AgentSessionSetup,
+    setup: AgentSetup,
     upload_id: str,
 ) -> requests.Response:
     """Finalize using current user authority without sending file bytes."""
@@ -533,8 +540,8 @@ class TestDirectChatUpload:
 
     @pytest.mark.parametrize(
         "size",
-        [_CHAT_UPLOAD_MAX_BYTES - 1, _CHAT_UPLOAD_MAX_BYTES],
-        ids=["below-configured-limit", "at-configured-limit"],
+        [_CHAT_UPLOAD_MAX_BYTES],
+        ids=["at-configured-limit"],
     )
     def test_configured_boundary_native_checksum_and_idempotent_publication(
         self,
@@ -694,14 +701,14 @@ class TestDirectChatUpload:
         self,
         failure: str,
         azents_public_server_url: str,
-        chat_upload_setup: AgentSessionSetup,
+        chat_upload_actor: AgentSetup,
         chat_upload_s3: S3Client,
         s3_bucket_name: str,
     ) -> None:
         """Signature/native digest rejection leaves no attachment or source."""
         content = b"checksum-bound direct upload"
         ticket = _prepare_chat_upload(
-            azents_public_server_url, chat_upload_setup, content
+            azents_public_server_url, chat_upload_actor, content
         )
         headers = dict(ticket.put_headers)
         uploaded_content = content
@@ -721,7 +728,7 @@ class TestDirectChatUpload:
         )
         assert rejected.status_code in {400, 403}
         failed = _finalize_chat_upload(
-            azents_public_server_url, chat_upload_setup, ticket.upload_id
+            azents_public_server_url, chat_upload_actor, ticket.upload_id
         )
         assert failed.status_code == 400
         _assert_no_chat_publication(chat_upload_s3, s3_bucket_name, ticket)
@@ -735,7 +742,7 @@ class TestDirectChatUpload:
         )
         assert retried.status_code == 200
         finalized = _finalize_chat_upload(
-            azents_public_server_url, chat_upload_setup, ticket.upload_id
+            azents_public_server_url, chat_upload_actor, ticket.upload_id
         )
         assert finalized.status_code == 200
         assert finalized.json()["size"] == len(content)
@@ -745,14 +752,14 @@ class TestDirectChatUpload:
         azents_public_server_url: str,
         public_api_client: azentspublicclient.ApiClient,
         admin_api_client: azentsadminclient.ApiClient,
-        chat_upload_setup: AgentSessionSetup,
+        chat_upload_actor: AgentSetup,
         chat_upload_s3: S3Client,
         s3_bucket_name: str,
     ) -> None:
         """A PUT capability never gives another API caller publication authority."""
         content = b"owner-scoped direct upload"
         ticket = _prepare_chat_upload(
-            azents_public_server_url, chat_upload_setup, content
+            azents_public_server_url, chat_upload_actor, content
         )
         uploaded = requests.put(
             ticket.put_url,
@@ -765,7 +772,7 @@ class TestDirectChatUpload:
         assert uploaded.status_code == 200
         other_token = create_second_user_token(public_api_client, admin_api_client)
         finalize_url = (
-            f"{azents_public_server_url}/chat/v1/agents/{chat_upload_setup.agent_id}"
+            f"{azents_public_server_url}/chat/v1/agents/{chat_upload_actor.agent_id}"
             f"/uploads/{ticket.upload_id}/finalize"
         )
         denied = requests.post(finalize_url, headers=_headers(other_token), timeout=10)
@@ -774,7 +781,7 @@ class TestDirectChatUpload:
         anonymous = requests.post(finalize_url, timeout=10)
         assert anonymous.status_code == 401
         published = _finalize_chat_upload(
-            azents_public_server_url, chat_upload_setup, ticket.upload_id
+            azents_public_server_url, chat_upload_actor, ticket.upload_id
         )
         assert published.status_code == 200
         denied_replay = requests.post(
@@ -782,7 +789,7 @@ class TestDirectChatUpload:
         )
         assert denied_replay.status_code == 403
         replay = _finalize_chat_upload(
-            azents_public_server_url, chat_upload_setup, ticket.upload_id
+            azents_public_server_url, chat_upload_actor, ticket.upload_id
         )
         assert replay.status_code == 200
         assert replay.json() == published.json()
@@ -790,11 +797,13 @@ class TestDirectChatUpload:
     def test_chat_upload_api_rejects_multipart_and_missing_manifest(
         self,
         azents_public_server_url: str,
-        chat_upload_setup: AgentSessionSetup,
+        public_api_client: azentspublicclient.ApiClient,
+        admin_api_client: azentsadminclient.ApiClient,
     ) -> None:
         """There is no legacy body relay or checksum-free preparation fallback."""
-        base = f"{azents_public_server_url}/chat/v1/agents/{chat_upload_setup.agent_id}"
-        headers = _headers(chat_upload_setup.access_token)
+        token = create_second_user_token(public_api_client, admin_api_client)
+        base = f"{azents_public_server_url}/chat/v1/agents/{_NONEXISTENT_AGENT_ID}"
+        headers = _headers(token)
         legacy = requests.post(
             f"{base}/upload",
             files={"file": ("legacy.txt", b"body", "text/plain")},
@@ -821,75 +830,69 @@ class TestDirectChatUpload:
 class TestExchangeFiles:
     """Exercise the current attachment-ID download and delete contracts."""
 
-    @pytest.mark.parametrize(
-        ("filename", "media_type", "content", "requested_inline", "effective_inline"),
-        [
-            ("download ü.txt", "text/plain", b"download exact bytes", False, False),
-            ("image.png", "image/png", PNG_1X1, True, True),
-            ("page.html", "text/html", b"<p>attachment only</p>", True, False),
-        ],
-        ids=["unicode-attachment", "safe-inline-image", "html-attachment"],
-    )
     def test_upload_then_download_exchange_file(
         self,
         public_api_client: azentspublicclient.ApiClient,
         admin_api_client: azentsadminclient.ApiClient,
         azents_public_server_url: str,
-        filename: str,
-        media_type: str,
-        content: bytes,
-        requested_inline: bool,
-        effective_inline: bool,
     ) -> None:
         """Authorize metadata only; direct storage GET preserves safe response data."""
-        token, _, agent_id = create_chat_session_with_agent(
+        setup = create_agent_setup(
             public_api_client,
             admin_api_client,
             azents_public_server_url,
         )
-
-        upload_response = upload_file(
-            azents_public_server_url,
-            token,
-            agent_id,
-            filename=filename,
-            content=content,
-            media_type=media_type,
-        )
-        assert upload_response.status_code == 200
-        uploaded = UploadResponse.model_validate(upload_response.json())
-        assert _exchange_uri_is_file_location(uploaded.uri)
-        download = requests.get(
-            f"{azents_public_server_url}/chat/v1/exchange-files/"
-            f"{uploaded.attachment_id}/download",
-            params={"disposition": "inline" if requested_inline else "attachment"},
-            headers=_headers(token),
-            timeout=30,
-            allow_redirects=False,
-        )
-        assert download.status_code == 302
-        assert download.content == b""
-        assert download.headers["Cache-Control"] == "no-store"
-        assert download.headers["Referrer-Policy"] == "no-referrer"
-        assert (
-            urlsplit(download.headers["Location"]).netloc
-            != urlsplit(azents_public_server_url).netloc
-        )
-        try:
-            direct = requests.get(
-                download.headers["Location"], timeout=30, verify=False
+        cases = [
+            ("download ü.txt", "text/plain", b"download exact bytes", False, False),
+            ("image.png", "image/png", PNG_1X1, True, True),
+            ("page.html", "text/html", b"<p>attachment only</p>", True, False),
+        ]
+        attachment_ids: set[str] = set()
+        for filename, media_type, content, requested_inline, effective_inline in cases:
+            upload_response = upload_file(
+                azents_public_server_url,
+                setup.access_token,
+                setup.agent_id,
+                filename=filename,
+                content=content,
+                media_type=media_type,
             )
-        except requests.RequestException as error:
-            raise AssertionError(
-                f"Exchange direct GET transport failed: {type(error).__name__}."
-            ) from None
-        assert direct.status_code == 200
-        assert direct.content == content
-        assert direct.headers["Content-Type"] == media_type
-        assert direct.headers["Content-Disposition"] == (
-            f"{'inline' if effective_inline else 'attachment'}; "
-            f"filename*=UTF-8''{quote(filename, safe='')}"
-        )
+            assert upload_response.status_code == 200
+            uploaded = UploadResponse.model_validate(upload_response.json())
+            assert _exchange_uri_is_file_location(uploaded.uri)
+            assert uploaded.attachment_id not in attachment_ids
+            attachment_ids.add(uploaded.attachment_id)
+            download = requests.get(
+                f"{azents_public_server_url}/chat/v1/exchange-files/"
+                f"{uploaded.attachment_id}/download",
+                params={"disposition": "inline" if requested_inline else "attachment"},
+                headers=_headers(setup.access_token),
+                timeout=30,
+                allow_redirects=False,
+            )
+            assert download.status_code == 302
+            assert download.content == b""
+            assert download.headers["Cache-Control"] == "no-store"
+            assert download.headers["Referrer-Policy"] == "no-referrer"
+            assert (
+                urlsplit(download.headers["Location"]).netloc
+                != urlsplit(azents_public_server_url).netloc
+            )
+            try:
+                direct = requests.get(
+                    download.headers["Location"], timeout=30, verify=False
+                )
+            except requests.RequestException as error:
+                raise AssertionError(
+                    f"Exchange direct GET transport failed: {type(error).__name__}."
+                ) from None
+            assert direct.status_code == 200
+            assert direct.content == content
+            assert direct.headers["Content-Type"] == media_type
+            assert direct.headers["Content-Disposition"] == (
+                f"{'inline' if effective_inline else 'attachment'}; "
+                f"filename*=UTF-8''{quote(filename, safe='')}"
+            )
 
     def test_download_and_delete_denials_issue_no_capability(
         self,
@@ -898,9 +901,11 @@ class TestExchangeFiles:
         azents_public_server_url: str,
     ) -> None:
         """Authentication and current requester authority precede object access."""
-        token, _, agent_id = create_chat_session_with_agent(
+        setup = create_agent_setup(
             public_api_client, admin_api_client, azents_public_server_url
         )
+        token = setup.access_token
+        agent_id = setup.agent_id
         response = upload_file(
             azents_public_server_url,
             token,
@@ -937,11 +942,13 @@ class TestExchangeFiles:
         azents_public_server_url: str,
     ) -> None:
         """An uploaded Exchange file can be deleted."""
-        token, _, agent_id = create_chat_session_with_agent(
+        setup = create_agent_setup(
             public_api_client,
             admin_api_client,
             azents_public_server_url,
         )
+        token = setup.access_token
+        agent_id = setup.agent_id
 
         content = b"delete me"
         upload_response = upload_file(

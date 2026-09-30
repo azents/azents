@@ -99,13 +99,19 @@ class TwoMemberTeamSession:
 
 
 @dataclass(frozen=True)
-class AgentSessionSetup:
-    """Public-API-created Workspace, Agent, and primary Team Session."""
+class AgentSetup:
+    """Public-API-created Workspace and Agent without starting its Runtime."""
 
     access_token: str
     email: str
     workspace_handle: str
     agent_id: str
+
+
+@dataclass(frozen=True)
+class AgentSessionSetup(AgentSetup):
+    """Public-API-created Workspace, Agent, and primary Team Session."""
+
     session_id: str
 
 
@@ -494,12 +500,12 @@ def create_chat_session_with_agent(
     )
 
 
-def create_agent_session_setup(
+def create_agent_setup(
     public_api_client: azentspublicclient.ApiClient,
     admin_api_client: azentsadminclient.ApiClient,
     server_url: str,
-) -> AgentSessionSetup:
-    """Create one Workspace, Agent, Runtime, and initialized primary Session."""
+) -> AgentSetup:
+    """Create fresh Agent authority without Runtime, Session, or model execution."""
     uniq = unique()
     email = f"file-test-{uniq}@example.com"
     token, _, _ = authenticate_user(public_api_client, admin_api_client, email=email)
@@ -554,15 +560,34 @@ def create_agent_session_setup(
         ),
         _headers={"Authorization": f"Bearer {token}"},
     )
-    start_and_wait_for_agent_runtime(
-        public_api_client,
-        token=token,
+    return AgentSetup(
+        access_token=token,
+        email=email,
         workspace_handle=handle,
         agent_id=agent.id,
     )
 
+
+def create_agent_session_setup(
+    public_api_client: azentspublicclient.ApiClient,
+    admin_api_client: azentsadminclient.ApiClient,
+    server_url: str,
+) -> AgentSessionSetup:
+    """Create one Workspace, Agent, Runtime, and initialized primary Session."""
+    setup = create_agent_setup(public_api_client, admin_api_client, server_url)
+    token = setup.access_token
+    handle = setup.workspace_handle
+    # Preserve the initial input's existing correlation with the Workspace suffix.
+    uniq = handle.removeprefix("ws-file-")
+    start_and_wait_for_agent_runtime(
+        public_api_client,
+        token=token,
+        workspace_handle=handle,
+        agent_id=setup.agent_id,
+    )
+
     session_response = http_requests.get(
-        f"{server_url}/chat/v1/agents/{agent.id}/team-primary-session",
+        f"{server_url}/chat/v1/agents/{setup.agent_id}/team-primary-session",
         headers={"Authorization": f"Bearer {token}"},
         timeout=10,
     )
@@ -581,7 +606,7 @@ def create_agent_session_setup(
             "Content-Type": "application/json",
         },
         json={
-            "agent_id": agent.id,
+            "agent_id": setup.agent_id,
             "client_request_id": f"e2e-utils-init-{uniq}",
             "message": "init",
             "inference_profile": {
@@ -596,9 +621,9 @@ def create_agent_session_setup(
 
     return AgentSessionSetup(
         access_token=token,
-        email=email,
+        email=setup.email,
         workspace_handle=handle,
-        agent_id=agent.id,
+        agent_id=setup.agent_id,
         session_id=session_id,
     )
 

@@ -469,6 +469,82 @@ def prepare_e2e_snapshot_images(
     )
 
 
+def retry_unprepared_current_snapshots(
+    *,
+    preparation: SnapshotPreparation,
+    base_sha: str,
+    current_sha: str | None,
+    environment: dict[str, str],
+    command_runner: CommandRunner,
+) -> SnapshotPreparation:
+    """Retry missing exact-current images once after existing parallel setup."""
+    if (
+        current_sha is None
+        or not preparation.login_completed
+        or preparation.all_images_prepared
+    ):
+        return preparation
+    images = _IMAGE_BUILD_PROFILES[environment[_IMAGE_BUILD_PROFILE_ENV]]
+    retry_requests = [
+        SnapshotPullRequest(
+            image=image,
+            environment_variable=image.environment_variable,
+            pathspecs=image.pathspecs,
+            purpose="final",
+            candidate_shas=(current_sha,),
+            compatibility_base_sha=(
+                None
+                if environment.get(image.changed_environment_variable) == "true"
+                else base_sha
+            ),
+        )
+        for image in images
+        if any(
+            pull.image == image.image
+            and pull.purpose == "final"
+            and not pull.completed
+            and pull.failure_stage == "pull"
+            and f"{_REGISTRY}/{_OWNER}/{image.package}:sha-{current_sha}"
+            in pull.attempted_sources
+            for pull in preparation.pulls
+        )
+    ]
+    if not retry_requests:
+        return preparation
+    with ThreadPoolExecutor(max_workers=len(retry_requests)) as executor:
+        retry_pulls = tuple(
+            executor.map(
+                lambda request: _pull_snapshot(
+                    request,
+                    command_runner=command_runner,
+                ),
+                retry_requests,
+            )
+        )
+    prepared_environment = dict(preparation.environment)
+    prepared_environment.update(
+        {
+            pull.environment_variable: request.image.local_tag
+            for request, pull in zip(retry_requests, retry_pulls, strict=True)
+            if pull.completed
+        }
+    )
+    return SnapshotPreparation(
+        environment=prepared_environment,
+        pulls=preparation.pulls + retry_pulls,
+        login_completed=preparation.login_completed,
+        all_images_prepared=all(
+            image.environment_variable in prepared_environment for image in images
+        ),
+        fallback_required=preparation.fallback_required
+        and any(
+            environment.get(image.changed_environment_variable) == "false"
+            and image.environment_variable not in prepared_environment
+            for image in images
+        ),
+    )
+
+
 def _write_github_environment(path: Path, environment: dict[str, str]) -> None:
     with path.open("a", encoding="utf-8") as output:
         for name, value in sorted(environment.items()):
@@ -610,6 +686,13 @@ def main() -> None:
         prerequisite_pulls = (
             () if prerequisite_future is None else prerequisite_future.result()
         )
+    preparation = retry_unprepared_current_snapshots(
+        preparation=preparation,
+        base_sha=base_sha,
+        current_sha=os.environ.get("AZENTS_E2E_CURRENT_SHA") or None,
+        environment=dict(os.environ),
+        command_runner=_run_command,
+    )
     _write_github_environment(args.github_env, preparation.environment)
     _write_github_output(args.github_output, preparation)
     _write_observability(

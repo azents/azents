@@ -1,12 +1,10 @@
-"""Native Workspace downloads across Web, API, Runner, and private storage."""
+"""Assert native Workspace downloads within an authenticated browser journey."""
 
 import hashlib
 import os
 from pathlib import Path
 from urllib.parse import quote, urlsplit, urlunsplit
 
-import azentsadminclient
-import azentspublicclient
 import requests
 from azentspublicclient.models.workspace_upload_create_response import (
     WorkspaceUploadCreateResponse,
@@ -16,12 +14,12 @@ from azentspublicclient.models.workspace_upload_status_response import (
     WorkspaceUploadStatusResponse,
 )
 from pydantic import BaseModel
+from selenium.webdriver.common.by import By
 from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.support.ui import WebDriverWait
 from testcontainers.core.container import DockerContainer
 
-from support.utils import create_agent_session_setup, wait_until
-from tests.web.public.test_workspace_settings_web import _login_main_web
+from support.utils import AgentSessionSetup, wait_until
 
 
 class _WorkspaceDownloadEvidence(BaseModel):
@@ -34,21 +32,18 @@ class _WorkspaceDownloadEvidence(BaseModel):
     browser_sha256: str
 
 
-def test_workspace_native_browser_get_uses_empty_web_redirect_and_exact_bytes(
+def assert_workspace_native_browser_download(
+    *,
+    setup: AgentSessionSetup,
     browser_driver: WebDriver,
     azents_main_web_url: str,
     azents_admin_gateway_container: DockerContainer,
     azents_public_server_url: str,
     azents_workspace_upload_gateway_url: str,
-    public_api_client: azentspublicclient.ApiClient,
-    admin_api_client: azentsadminclient.ApiClient,
     runtime_workspace_path: str,
     tmp_path: Path,
 ) -> None:
-    """Publish a Runtime file, then navigate to its authenticated direct GET."""
-    setup = create_agent_session_setup(
-        public_api_client, admin_api_client, azents_public_server_url
-    )
+    """Publish a Runtime file and verify its Web redirect and native GET bytes."""
     headers = {"Authorization": f"Bearer {setup.access_token}"}
     content = b"Native Workspace browser direct GET.\n\x00exact bytes\n"
     digest = hashlib.sha256(content).hexdigest()
@@ -123,11 +118,6 @@ def test_workspace_native_browser_get_uses_empty_web_redirect_and_exact_bytes(
     assert terminal.actual_size == len(content)
     assert terminal.sha256 == digest
 
-    _login_main_web(browser_driver, base_url=azents_main_web_url, email=setup.email)
-    browser_driver.get(
-        f"{azents_main_web_url}/w/{setup.workspace_handle}/agents/{setup.agent_id}"
-        f"/sessions/{setup.session_id}"
-    )
     entry_path = (
         f"/api/chat/agents/{setup.agent_id}/workspace/download"
         f"?path={quote(terminal.destination_path, safe='')}"
@@ -153,10 +143,20 @@ def test_workspace_native_browser_get_uses_empty_web_redirect_and_exact_bytes(
         != urlsplit(azents_main_web_url).netloc
     )
 
-    # Native browser navigation follows the capability without cross-origin fetch.
+    # A separate real click gives each download its own browser user activation.
     browser_driver.execute_script(
-        "window.location.assign(arguments[0]);", f"{azents_main_web_url}{entry_path}"
+        """
+        const link = document.createElement("a");
+        link.id = "e2e-workspace-download";
+        link.href = arguments[0];
+        link.download = "";
+        link.textContent = "Download Workspace file";
+        link.style.cssText = "position:fixed;top:8px;right:8px;z-index:9999";
+        document.body.appendChild(link);
+        """,
+        f"{azents_main_web_url}{entry_path}",
     )
+    browser_driver.find_element(By.ID, "e2e-workspace-download").click()
     WebDriverWait(browser_driver, 90, poll_frequency=0.2).until(
         lambda driver: filename in driver.get_downloadable_files()
     )
