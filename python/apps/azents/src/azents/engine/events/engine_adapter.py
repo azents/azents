@@ -26,6 +26,7 @@ from azents.core.image_generation_config import (
     decode_image_generation_model_config,
 )
 from azents.core.model_operation import ModelOperationKind
+from azents.core.model_pricing import ModelPricing, normalize_model_pricing
 from azents.core.openai_client_config import openai_responses_client_config
 from azents.core.tools import TurnContext
 from azents.core.xai import resolve_xai_api_base_url
@@ -225,6 +226,7 @@ from azents.services.chatgpt_oauth.runtime import (
 )
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.model_file import ModelFileService
+from azents.services.model_metadata import ModelMetadataService
 from azents.services.terminal_finalization import TerminalRunFinalizationCoordinator
 from azents.services.xai_imagine import XaiImagineClient
 from azents.services.xai_oauth.data import (
@@ -366,6 +368,7 @@ class AgentEngineAdapter:
         LLMProviderIntegrationRepository,
         Depends(get_llm_provider_integration_repository),
     ]
+    metadata_service: Annotated[ModelMetadataService, Depends(ModelMetadataService)]
     xai_imagine_client_factory: Annotated[
         XaiImagineClientFactory,
         Depends(_xai_imagine_client_factory),
@@ -703,6 +706,15 @@ class AgentEngineAdapter:
                 request.inference_state.model_selection
                 if request.inference_state is not None
                 else None
+            )
+            output_normalizer.pricing = await _capture_model_pricing(
+                metadata_service=self.metadata_service,
+                provider=request.provider,
+                model_identifier=(
+                    model_selection.model_identifier
+                    if model_selection is not None
+                    else model
+                ),
             )
             model_family = (
                 model_selection.model_family if model_selection is not None else None
@@ -1077,6 +1089,16 @@ class AgentEngineAdapter:
             except Exception:
                 await on_turn_end("error")
                 raise
+            requested_service_tier = (
+                native_request.options.get("service_tier")
+                if isinstance(native_request, OpenAIResponsesRequest)
+                else native_request.kwargs.get("service_tier")
+            )
+            output_normalizer.service_tier = (
+                requested_service_tier
+                if isinstance(requested_service_tier, str)
+                else None
+            )
             return PreparedModelCall(
                 native_request=native_request,
                 inference_state=request.inference_state,
@@ -1178,6 +1200,7 @@ class AgentEngineAdapter:
             output_normalizer = OpenAIResponsesOutputNormalizer(
                 provider=provider,
                 model=request.model,
+                pricing=None,
                 operation="sampling",
                 integration=integration_id,
                 requested_service_tier=resolve_openai_service_tier(
@@ -1195,6 +1218,7 @@ class AgentEngineAdapter:
             output_normalizer = LiteLLMResponsesOutputNormalizer(
                 provider=provider,
                 model=request.model,
+                pricing=None,
                 operation="sampling",
                 integration=integration_id,
             )
@@ -1332,6 +1356,54 @@ def _cancel_run_task(
         run_task.cancel(USER_STOP_CANCEL_MESSAGE)
         return
     run_task.cancel()
+
+
+async def _capture_model_pricing(
+    *,
+    metadata_service: ModelMetadataService,
+    provider: LLMProvider,
+    model_identifier: str,
+) -> ModelPricing:
+    """Capture validated price authority before one physical model dispatch.
+
+    :param metadata_service: injected local validated-source reader
+    :param provider: authoritative selected provider identity
+    :param model_identifier: exact semantic model selection
+    :returns: immutable source pricing, including explicit unavailable evidence
+    """
+    snapshot = await metadata_service.capture()
+    metadata = metadata_service.lookup(
+        snapshot,
+        provider=provider,
+        model_identifier=model_identifier,
+    )
+    return normalize_model_pricing(
+        provider=provider,
+        model_identifier=model_identifier,
+        source_snapshot_id=snapshot.id if snapshot is not None else None,
+        source_hash=snapshot.source_hash if snapshot is not None else None,
+        source_model_key=(metadata.source_model_key if metadata is not None else None),
+        metadata=metadata.metadata if metadata is not None else None,
+    )
+
+
+async def _current_model_input_transcript(
+    session: AsyncSession,
+    session_id: str,
+    *,
+    session_repo: SessionHeadRepository,
+    transcript_repo: TranscriptRepository,
+) -> list[Event]:
+    """Return model input transcript based on current event session head."""
+    session_state = await session_repo.get_by_id(session, session_id)
+    head_event_id = (
+        session_state.model_input_head_event_id if session_state is not None else None
+    )
+    return await transcript_repo.list_for_model_input(
+        session,
+        session_id,
+        head_event_id=head_event_id,
+    )
 
 
 async def _emit_phase_change(

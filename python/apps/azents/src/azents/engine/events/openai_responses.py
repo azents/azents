@@ -4,7 +4,6 @@ import asyncio
 import dataclasses
 import json
 import logging
-import math
 from collections.abc import (
     AsyncIterable,
     AsyncIterator,
@@ -13,7 +12,6 @@ from collections.abc import (
     Mapping,
     Sequence,
 )
-from types import SimpleNamespace
 from typing import (
     Any,
     Literal,
@@ -24,8 +22,6 @@ from typing import (
     runtime_checkable,
 )
 
-from litellm import completion_cost, model_cost
-from litellm.types.llms.openai import ResponsesAPIResponse
 from openai import (
     APIError,
     APIStatusError,
@@ -76,6 +72,7 @@ from azents.core.chatgpt_oauth import CHATGPT_OAUTH_BACKEND_BASE_URL
 from azents.core.enums import LLMModelDeveloper, LLMProvider
 from azents.core.llm_catalog import ModelCapabilities
 from azents.core.model_execution_options import ModelExecutionOptionId
+from azents.core.model_pricing import ModelPricing
 from azents.core.openai_client_config import (
     OpenAIResponsesClientConfig,
     openai_credential_headers,
@@ -83,6 +80,7 @@ from azents.core.openai_client_config import (
 )
 from azents.core.type_guards import is_string_object_dict
 from azents.engine.events.file_parts import ModelFileResolver
+from azents.engine.events.model_usage_pricing import apply_model_usage_pricing
 from azents.engine.events.protocols import (
     CompletedAdapterOutput,
     ContentDeltaProjection,
@@ -1124,6 +1122,7 @@ class OpenAIResponsesOutputNormalizer:
         *,
         provider: str,
         model: str,
+        pricing: ModelPricing | None,
         operation: ModelStreamCallKind,
         integration: str | None,
         requested_service_tier: str | None,
@@ -1131,12 +1130,14 @@ class OpenAIResponsesOutputNormalizer:
         """Configure OpenAI-native artifact and failure ownership."""
         self.provider: str = provider
         self.model: str = model
+        self.pricing: ModelPricing | None = pricing
+        self.service_tier: str | None = requested_service_tier
         self.operation: ModelStreamCallKind = operation
         self.integration: str | None = integration
-        self.requested_service_tier = requested_service_tier
         self._canonical = _OpenAIResponsesCanonicalNormalizer(
             provider=provider,
             model=model,
+            pricing=None,
             operation=operation,
             integration=integration,
         )
@@ -1185,6 +1186,8 @@ class _OpenAIResponsesOutputStream:
         session_id: str,
     ) -> None:
         self.normalizer = normalizer
+        self.pricing = normalizer.pricing
+        self.service_tier = normalizer.service_tier
         self._session_id = session_id
         self._tool_refs: dict[int, tuple[str, str]] = {}
         self._custom_tool_inputs: dict[int, _CustomToolInputStreamState] = {}
@@ -1439,8 +1442,11 @@ class _OpenAIResponsesOutputStream:
         usage = (
             _normalize_openai_usage(
                 response,
+                provider=self.normalizer.provider,
                 model=self.normalizer.model,
-                requested_service_tier=self.normalizer.requested_service_tier,
+                pricing=self.pricing,
+                requested_service_tier=self.service_tier,
+                completed_output_items=self._completed_output_items,
             )
             if response is not None
             else None
@@ -1741,17 +1747,20 @@ def _canonical_provider_tool_status(
 def _normalize_openai_usage(
     response: Response,
     *,
+    provider: str,
     model: str,
+    pricing: ModelPricing | None,
     requested_service_tier: str | None,
+    completed_output_items: Sequence[dict[str, object]],
 ) -> TokenUsagePayload | None:
-    """Normalize SDK usage and estimate content-free public-map pricing."""
+    """Normalize SDK counters and apply the dispatch's captured source prices."""
     usage = response.usage
     if usage is None:
         return None
     raw_usage = _sdk_model_dump(usage)
     input_details = raw_usage.get("input_tokens_details")
     output_details = raw_usage.get("output_tokens_details")
-    return TokenUsagePayload(
+    normalized = TokenUsagePayload(
         prompt_tokens=usage.input_tokens,
         completion_tokens=usage.output_tokens,
         total_tokens=usage.total_tokens,
@@ -1765,12 +1774,30 @@ def _normalize_openai_usage(
             output_details,
             "reasoning_tokens",
         ),
-        cost_usd=_estimate_openai_cost(
-            response,
-            model=model,
-            requested_service_tier=requested_service_tier,
-        ),
+        cost_usd=None,
         raw_hidden_params=None,
+    )
+    output_item_types = (
+        [item.type for item in response.output]
+        if response.output
+        else [
+            item_type
+            for raw_item in completed_output_items
+            if isinstance(item_type := raw_item.get("type"), str)
+        ]
+    )
+    return apply_model_usage_pricing(
+        normalized,
+        provider=provider,
+        model_identifier=model,
+        pricing=pricing,
+        service_tier=(
+            response.service_tier
+            if response.service_tier not in {None, "auto"}
+            else requested_service_tier
+        ),
+        output_item_types=output_item_types,
+        reported_charge=None,
     )
 
 
@@ -1782,73 +1809,6 @@ def _optional_usage_detail(details: object, field: str) -> int | None:
     if not isinstance(value, int) or isinstance(value, bool):
         return None
     return value
-
-
-def _estimate_openai_cost(
-    response: Response,
-    *,
-    model: str,
-    requested_service_tier: str | None,
-) -> float | None:
-    """Estimate cost through LiteLLM using only usage and pricing metadata."""
-    actual_tier = response.service_tier
-    if actual_tier == "ultrafast" or (
-        actual_tier in {None, "", "auto"} and requested_service_tier == "ultrafast"
-    ):
-        return None
-    if actual_tier and actual_tier not in {
-        "auto",
-        "default",
-        "flex",
-        "priority",
-        "fast",
-    }:
-        return None
-    pricing_model = model.removeprefix("openai/")
-    pricing = model_cost.get(pricing_model) or model_cost.get(f"openai/{pricing_model}")
-    if pricing is None:
-        return None
-    service_tier = (
-        "priority" if response.service_tier == "fast" else response.service_tier
-    )
-    if service_tier in {"priority", "flex"} and not _has_tier_pricing(
-        pricing, service_tier=service_tier
-    ):
-        return None
-    minimal_response = ResponsesAPIResponse.model_construct(
-        model=model,
-        usage=_sdk_model_dump(response.usage),
-        output=[SimpleNamespace(type=item.type) for item in response.output],
-    )
-    try:
-        cost = completion_cost(
-            completion_response=minimal_response,
-            model=model,
-            call_type="responses",
-            custom_llm_provider="openai",
-            service_tier=service_tier,
-        )
-    except ValueError:
-        return None
-    if not isinstance(cost, int | float) or isinstance(cost, bool):
-        return None
-    normalized = float(cost)
-    if not math.isfinite(normalized) or normalized < 0:
-        return None
-    return normalized
-
-
-def _has_tier_pricing(pricing: Mapping[str, object], *, service_tier: str) -> bool:
-    """Return whether both premium token price directions are available."""
-    return all(
-        isinstance(pricing.get(key), int | float)
-        and not isinstance(pricing.get(key), bool)
-        for key in (
-            f"input_cost_per_token_{service_tier}",
-            f"cache_read_input_token_cost_{service_tier}",
-            f"output_cost_per_token_{service_tier}",
-        )
-    )
 
 
 async def call_openai_responses_text(
@@ -1893,6 +1853,7 @@ async def call_openai_responses_text(
     normalizer = OpenAIResponsesOutputNormalizer(
         provider=provider.value,
         model=model,
+        pricing=None,
         operation=call_context.call_kind,
         integration=call_context.provider_integration_id,
         requested_service_tier=None,

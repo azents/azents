@@ -29,6 +29,7 @@ from azents.engine.events.types import (
     ExternalChannelMessagePayload,
     FileOutputPart,
     InputTextPart,
+    ModelCostProvenance,
     NativeArtifact,
     ProviderToolCallPayload,
     ProviderToolReference,
@@ -605,6 +606,48 @@ def test_event_token_usage_requires_raw_payload() -> None:
                 "total_tokens": 15,
             }
         )
+
+
+def test_historical_usage_does_not_acquire_cost_authority() -> None:
+    """An old unlabeled amount remains unlabeled after schema addition."""
+    usage = TokenUsagePayload.model_validate(
+        {
+            "prompt_tokens": 10,
+            "completion_tokens": 5,
+            "total_tokens": 15,
+            "raw": {},
+            "cost_usd": 0.25,
+        }
+    )
+    assert usage.cost_usd == 0.25
+    assert usage.cost_provenance is None
+
+
+def test_snapshot_cost_provenance_roundtrips_without_raw_response_data() -> None:
+    """Known estimated authority travels with usage, not output or secrets."""
+    provenance = ModelCostProvenance(
+        method="estimated",
+        provider="openai",
+        model_identifier="model",
+        service_tier="priority",
+        source_snapshot_id="source-id",
+        source_hash="source-hash",
+        source_model_key="openai/model",
+        estimator_version="1",
+    )
+    usage = TokenUsagePayload(
+        prompt_tokens=10,
+        completion_tokens=5,
+        total_tokens=15,
+        raw={},
+        cost_usd=0.25,
+        cost_provenance=provenance,
+    )
+    restored = TokenUsagePayload.model_validate_json(usage.model_dump_json())
+    assert restored.cost_provenance == provenance
+    assert restored.cost_usd == 0.25
+    assert restored.raw == {}
+    assert restored.raw_hidden_params is None
 
 
 def test_scheduled_task_payloads_are_closed_protocol_variants() -> None:

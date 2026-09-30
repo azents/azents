@@ -89,6 +89,7 @@ from azents.services.session_title import (
     title_context_from_initial_prompt,
     title_output_contract_incompatibility,
 )
+from azents.testing.model_metadata import make_test_model_metadata_service
 from azents.testing.model_selection import make_test_model_settings
 from azents.testing.model_stream import make_test_model_stream_watchdog
 from azents.testing.types import is_string_object_dict
@@ -745,6 +746,7 @@ class TestSessionTitleHelpers:
     ) -> None:
         """Model call failures are logged by the title service and not re-raised."""
         service = SessionTitleService(
+            model_metadata_service=make_test_model_metadata_service(snapshot=None),
             session_title_repository=_session_title_repository(
                 strict_json_schema=None,
                 session_manager=_session_manager,
@@ -835,6 +837,7 @@ class TestSessionTitleHelpers:
     ) -> None:
         """Standalone title generation does not retry unclassified outcomes."""
         service = SessionTitleService(
+            model_metadata_service=make_test_model_metadata_service(snapshot=None),
             session_title_repository=_session_title_repository(
                 strict_json_schema=None,
                 session_manager=_session_manager,
@@ -911,6 +914,7 @@ class TestSessionTitleHelpers:
 
         title_repository = MutableTitleRepository()
         service = SessionTitleService(
+            model_metadata_service=make_test_model_metadata_service(snapshot=None),
             session_title_repository=SessionTitleRepository(
                 agent_repository=_AgentRepository(),
                 agent_session_repository=title_repository,
@@ -1022,6 +1026,7 @@ class TestSessionTitleHelpers:
 
         repository = WinningRepository()
         service = SessionTitleService(
+            model_metadata_service=make_test_model_metadata_service(snapshot=None),
             session_title_repository=SessionTitleRepository(
                 agent_repository=_AgentRepository(),
                 agent_session_repository=repository,
@@ -1139,6 +1144,7 @@ class TestSessionTitleHelpers:
             session_title_module, "generate_session_title_with_model", generate_title
         )
         service = SessionTitleService(
+            model_metadata_service=make_test_model_metadata_service(snapshot=None),
             session_title_repository=SessionTitleRepository(
                 agent_repository=_AgentRepository(),
                 agent_session_repository=WinningRepository(),
@@ -1389,6 +1395,7 @@ def _title_service(
     max_retries: int = 0,
 ) -> SessionTitleService:
     return SessionTitleService(
+        model_metadata_service=make_test_model_metadata_service(snapshot=None),
         session_title_repository=_session_title_repository(
             strict_json_schema=strict_json_schema,
             session_manager=_session_manager,

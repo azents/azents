@@ -153,6 +153,7 @@ from azents.services.session_git_worktree import (
 )
 from azents.services.session_resource_authority import SessionExecutionOwner
 from azents.services.turn_action import TurnActionCapabilityRegistry
+from azents.testing.model_metadata import make_test_model_metadata_service
 from azents.testing.model_selection import (
     make_test_model_selection,
     make_test_model_settings,
@@ -1791,6 +1792,9 @@ class _UserStopFinalizer:
 
 def _run_executor(**kwargs: Any) -> RunExecutor:  # noqa: ANN401
     """Construct a RunExecutor from test-owned dependency doubles."""
+    kwargs.setdefault(
+        "model_metadata_service", make_test_model_metadata_service(snapshot=None)
+    )
     return RunExecutor(**kwargs)
 
 

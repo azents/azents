@@ -205,6 +205,7 @@ from azents.services.model_candidate_selection import (
     select_model_operation_candidate,
 )
 from azents.services.model_file import ModelFileService
+from azents.services.model_metadata import ModelMetadataService
 from azents.services.session_git_worktree import (
     GitWorktreeActionExecutionResult,
     SessionGitWorktreeService,
@@ -494,6 +495,9 @@ class RunExecutor:
     ]
     model_candidate_health_repository: Annotated[
         ModelCandidateHealthRepository, Depends(ModelCandidateHealthRepository)
+    ]
+    model_metadata_service: Annotated[
+        ModelMetadataService, Depends(ModelMetadataService)
     ]
     toolkit_registry: Annotated[
         dict[str, ToolkitProvider[Any]], Depends(get_toolkit_registry)
@@ -1294,6 +1298,7 @@ class RunExecutor:
                 ),
                 agent_repository=self.agent_repository,
                 integration_repository=self.integration_repository,
+                model_metadata_service=self.model_metadata_service,
                 session_manager=self.session_manager,
                 exchange_file_service=self.exchange_file_service,
                 model_file_service=self.model_file_service,
@@ -1830,6 +1835,7 @@ class RunExecutor:
                 selection=candidate.model_selection,
                 settings=candidate.settings,
                 integration_repository=self.integration_repository,
+                model_metadata_service=self.model_metadata_service,
                 session_manager=self.session_manager,
             )
             if runtime.failure:
@@ -3262,6 +3268,7 @@ class RunExecutor:
                     requested_profile=selected.profile,
                     agent_repository=self.agent_repository,
                     integration_repository=self.integration_repository,
+                    model_metadata_service=self.model_metadata_service,
                     session_manager=self.session_manager,
                     exchange_file_service=self.exchange_file_service,
                     model_file_service=self.model_file_service,
@@ -3287,6 +3294,7 @@ class RunExecutor:
                         ),
                         agent_repository=self.agent_repository,
                         integration_repository=self.integration_repository,
+                        model_metadata_service=self.model_metadata_service,
                         session_manager=self.session_manager,
                         exchange_file_service=self.exchange_file_service,
                         model_file_service=self.model_file_service,
@@ -3308,6 +3316,7 @@ class RunExecutor:
                     ),
                     agent_repository=self.agent_repository,
                     integration_repository=self.integration_repository,
+                    model_metadata_service=self.model_metadata_service,
                     session_manager=self.session_manager,
                     exchange_file_service=self.exchange_file_service,
                     model_file_service=self.model_file_service,
@@ -3327,10 +3336,19 @@ class RunExecutor:
                 compaction_candidate.model_selection.normalized_capabilities
             )
             compaction_context_window = compaction_capabilities.context_window
+            source_snapshot = await self.model_metadata_service.capture_for_context(
+                capability_maximums=[compaction_context_window.max_input_tokens]
+            )
             compaction_input_tokens = resolve_model_input_tokens(
                 compaction_context_window.default_input_tokens,
                 compaction_context_window.max_input_tokens,
-                compaction_model,
+                self.model_metadata_service.maximum_input_tokens(
+                    source_snapshot,
+                    provider=compaction_candidate.model_selection.provider,
+                    model_identifier=(
+                        compaction_candidate.model_selection.model_identifier
+                    ),
+                ),
                 compaction_candidate.settings.context_window_tokens,
             ).effective_input_tokens
             if (
@@ -3348,6 +3366,7 @@ class RunExecutor:
                     selection=compaction_candidate.model_selection,
                     settings=compaction_candidate.settings,
                     integration_repository=self.integration_repository,
+                    model_metadata_service=self.model_metadata_service,
                     session_manager=self.session_manager,
                 )
                 if compaction_runtime.failure:
@@ -3553,6 +3572,7 @@ class RunExecutor:
             selection=candidate.model_selection,
             settings=candidate.settings,
             integration_repository=self.integration_repository,
+            model_metadata_service=self.model_metadata_service,
             session_manager=self.session_manager,
         )
         if runtime.failure:

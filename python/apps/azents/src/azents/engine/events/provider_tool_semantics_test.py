@@ -22,6 +22,7 @@ class _ResponsesOutputNormalizer(ResponsesOutputNormalizer):
 def _normalizer() -> _ResponsesOutputNormalizer:
     """Create a provider-neutral Responses normalizer."""
     return _ResponsesOutputNormalizer(
+        pricing=None,
         provider="openai",
         model="gpt-5.1",
         operation="sampling",

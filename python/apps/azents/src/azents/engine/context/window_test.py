@@ -62,7 +62,7 @@ class TestResolveModelInputTokens:
         result = resolve_model_input_tokens(
             None,
             64_000,
-            "unknown/provider-model",
+            None,
             None,
         )
 
@@ -75,7 +75,7 @@ class TestResolveModelInputTokens:
         result = resolve_model_input_tokens(
             272_000,
             872_000,
-            "unknown/provider-model",
+            None,
             None,
         )
 
@@ -88,7 +88,7 @@ class TestResolveModelInputTokens:
         result = resolve_model_input_tokens(
             272_000,
             872_000,
-            "unknown/provider-model",
+            None,
             500_000,
         )
 
@@ -99,7 +99,7 @@ class TestResolveModelInputTokens:
         result = resolve_model_input_tokens(
             272_000,
             872_000,
-            "unknown/provider-model",
+            None,
             1_000_000,
         )
 
@@ -110,50 +110,66 @@ class TestResolveModelInputTokens:
         result = resolve_model_input_tokens(
             200_000,
             128_000,
-            "unknown/provider-model",
+            None,
             None,
         )
 
         assert result.default_input_tokens == 128_000
         assert result.effective_input_tokens == 128_000
 
-    def test_preserves_known_default_when_litellm_maximum_is_smaller(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
+    def test_preserves_known_default_when_source_maximum_is_smaller(self) -> None:
         """Fallback metadata cannot reduce a provider-authoritative default."""
-        monkeypatch.setattr(
-            "azents.engine.context.window.litellm.get_model_info",
-            lambda _: {"max_input_tokens": 128_000},
-        )
-
         result = resolve_model_input_tokens(
             272_000,
             None,
-            "provider/model",
+            128_000,
             None,
         )
 
         assert result.default_input_tokens == 272_000
         assert result.max_input_tokens == 272_000
 
-    def test_falls_back_when_capability_missing(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        """Return the stable fallback when capability and LiteLLM values are absent."""
-        monkeypatch.setattr(
-            "azents.engine.context.window.litellm.get_model_info",
-            lambda _: {},
-        )
-
+    def test_falls_back_when_capability_and_source_are_missing(self) -> None:
+        """Return the stable fallback only when all metadata is absent."""
         result = resolve_model_input_tokens(
             None,
             None,
-            "unknown/provider-model",
+            None,
             None,
         )
 
         assert result.default_input_tokens == 128_000
         assert result.max_input_tokens == 128_000
+        assert result.effective_input_tokens == 128_000
+
+    def test_default_only_does_not_apply_smaller_fallback(self) -> None:
+        """A provider default alone is its maximum instead of the 128k fallback."""
+        result = resolve_model_input_tokens(272_000, None, None, None)
+        assert result.default_input_tokens == 272_000
+        assert result.max_input_tokens == 272_000
+        assert result.effective_input_tokens == 272_000
+
+    def test_source_maximum_fills_missing_maximum_without_changing_default(
+        self,
+    ) -> None:
+        """Captured source data supplies the ceiling, not different saved intent."""
+        result = resolve_model_input_tokens(128_000, None, 1_000_000, 700_000)
+        assert result.default_input_tokens == 128_000
+        assert result.max_input_tokens == 1_000_000
+        assert result.effective_input_tokens == 700_000
+
+    def test_normalized_maximum_wins_over_source(self) -> None:
+        """The retained source cannot upgrade an authoritative saved maximum."""
+        result = resolve_model_input_tokens(None, 128_000, 1_000_000, 900_000)
+        assert result.default_input_tokens == 128_000
+        assert result.max_input_tokens == 128_000
+        assert result.effective_input_tokens == 128_000
+
+    @pytest.mark.parametrize("source_maximum", [None, 0, -10, True, False])
+    def test_invalid_or_absent_source_maximum_remains_unknown(
+        self,
+        source_maximum: int | None,
+    ) -> None:
+        """Nonpositive or boolean source values never become token limits."""
+        result = resolve_model_input_tokens(None, None, source_maximum, None)
         assert result.effective_input_tokens == 128_000

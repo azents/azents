@@ -22,7 +22,6 @@ from azents.core.enums import (
 )
 from azents.core.inference_profile import SessionInferenceState
 from azents.core.llm_catalog import ModelReasoningEffort
-from azents.core.llm_mapping import to_runtime_model
 from azents.core.model_execution_options import validate_execution_options
 from azents.core.tools import (
     PublishEventFn,
@@ -63,6 +62,7 @@ from azents.repos.subagent_coordination.repository import (
 )
 from azents.services.agent_mailbox import AgentMailboxService
 from azents.services.mailbox import MailboxService
+from azents.services.model_metadata import ModelMetadataService
 from azents.services.session_resource_authority import (
     SessionExecutionOwner,
     accepts_execution_owner,
@@ -199,6 +199,7 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
         self,
         *,
         session_manager: SessionManager[AsyncSession],
+        model_metadata_service: ModelMetadataService,
         agent_session_repository: AgentSessionRepository,
         agent_run_repository: AgentRunRepository,
         event_transcript_repository: EventTranscriptRepository,
@@ -211,6 +212,7 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
         subagent_settings: SubagentSettings,
     ) -> None:
         self.session_manager = session_manager
+        self.model_metadata_service = model_metadata_service
         self.agent_session_repository = agent_session_repository
         self.agent_run_repository = agent_run_repository
         self.event_transcript_repository = event_transcript_repository
@@ -368,7 +370,7 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
                         "Current Session has no prepared inference state"
                     )
                 current_agent = await self._current_agent(session)
-                profile = self._derive_spawn_inference_profile(
+                profile = await self._derive_spawn_inference_profile(
                     agent=current_agent,
                     parent_state=parent_session.inference_state,
                     fork_selection=fork_selection,
@@ -452,7 +454,7 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
             description=self._spawn_agent_description(),
         )
 
-    def _derive_spawn_inference_profile(
+    async def _derive_spawn_inference_profile(
         self,
         *,
         agent: Agent,
@@ -533,10 +535,6 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
                 parent_state.effective_auto_compaction_threshold_tokens
             )
         else:
-            main_model = to_runtime_model(
-                selection.provider,
-                selection.model_identifier,
-            )
             lightweight_option = next(
                 (
                     option
@@ -548,20 +546,30 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
             if lightweight_option is None:
                 raise FunctionToolError("Agent lightweight model target was not found")
             lightweight = lightweight_option.candidates[0].model_selection
-            lightweight_model = to_runtime_model(
-                lightweight.provider,
-                lightweight.model_identifier,
+            source_snapshot = await self.model_metadata_service.capture_for_context(
+                capability_maximums=[
+                    selection.normalized_capabilities.context_window.max_input_tokens,
+                    lightweight.normalized_capabilities.context_window.max_input_tokens,
+                ]
             )
             compaction_input_tokens = resolve_model_input_tokens(
                 lightweight.normalized_capabilities.context_window.default_input_tokens,
                 lightweight.normalized_capabilities.context_window.max_input_tokens,
-                lightweight_model,
+                self.model_metadata_service.maximum_input_tokens(
+                    source_snapshot,
+                    provider=lightweight.provider,
+                    model_identifier=lightweight.model_identifier,
+                ),
                 lightweight_option.candidates[0].settings.context_window_tokens,
             )
             main_input_tokens = resolve_model_input_tokens(
                 selection.normalized_capabilities.context_window.default_input_tokens,
                 selection.normalized_capabilities.context_window.max_input_tokens,
-                main_model,
+                self.model_metadata_service.maximum_input_tokens(
+                    source_snapshot,
+                    provider=selection.provider,
+                    model_identifier=selection.model_identifier,
+                ),
                 settings.context_window_tokens,
             )
             context_window = compute_effective_context_window_tokens(
@@ -1022,11 +1030,13 @@ class SubagentToolkitProvider(ToolkitProvider[SubagentToolkitConfig]):
         self,
         *,
         session_manager: SessionManager[AsyncSession],
+        model_metadata_service: ModelMetadataService,
         broker: SessionBroker,
         mailbox_item_service: MailboxService,
         agent_repository: AgentRepository,
     ) -> None:
         self.session_manager = session_manager
+        self.model_metadata_service = model_metadata_service
         self.broker = broker
         self.mailbox_item_service = mailbox_item_service
         self.agent_repository = agent_repository
@@ -1051,6 +1061,7 @@ class SubagentToolkitProvider(ToolkitProvider[SubagentToolkitConfig]):
         )
         toolkit = SubagentToolkit(
             session_manager=self.session_manager,
+            model_metadata_service=self.model_metadata_service,
             agent_session_repository=agent_session_repository,
             agent_run_repository=agent_run_repository,
             event_transcript_repository=EventTranscriptRepository(),

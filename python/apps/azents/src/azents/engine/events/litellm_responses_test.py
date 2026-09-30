@@ -3650,6 +3650,7 @@ class TestLiteLLMResponsesOutputNormalizer:
     def test_processes_live_deltas_before_stream_completion(self) -> None:
         """Return text and reasoning projections one native event at a time."""
         normalizer = LiteLLMResponsesOutputNormalizer(
+            pricing=None,
             provider="openai",
             model="gpt-5.1",
             operation="sampling",
@@ -3687,6 +3688,7 @@ class TestLiteLLMResponsesOutputNormalizer:
     def test_projects_provider_tool_lifecycle(self) -> None:
         """Translate LiteLLM hosted-tool stages to canonical snapshots."""
         output_stream = LiteLLMResponsesOutputNormalizer(
+            pricing=None,
             provider="openai",
             model="gpt-5.1",
             operation="sampling",
@@ -3733,6 +3735,7 @@ class TestLiteLLMResponsesOutputNormalizer:
     def test_projects_generic_provider_tool_output_items(self) -> None:
         """Treat generic output-item completion as a hosted-tool terminal state."""
         output_stream = LiteLLMResponsesOutputNormalizer(
+            pricing=None,
             provider="openai",
             model="gpt-5.1",
             operation="sampling",
@@ -3804,6 +3807,7 @@ class TestLiteLLMResponsesOutputNormalizer:
     def test_interrupt_preserves_received_partial_assistant_text(self) -> None:
         """Create one incomplete assistant event from received text deltas."""
         normalizer = LiteLLMResponsesOutputNormalizer(
+            pricing=None,
             provider="openai",
             model="gpt-5.1",
             operation="sampling",
@@ -3844,6 +3848,7 @@ class TestLiteLLMResponsesOutputNormalizer:
     def test_withholds_tool_call_until_stream_completion(self) -> None:
         """Do not expose a completed tool call as durable output mid-stream."""
         normalizer = LiteLLMResponsesOutputNormalizer(
+            pricing=None,
             provider="openai",
             model="gpt-5.1",
             operation="sampling",
@@ -3880,6 +3885,7 @@ class TestLiteLLMResponsesOutputNormalizer:
     def test_rejects_completed_output_item_without_terminal_event(self) -> None:
         """Do not treat output-item completion as response completion."""
         normalizer = LiteLLMResponsesOutputNormalizer(
+            pricing=None,
             provider="openai",
             model="gpt-5.1",
             operation="sampling",
@@ -3910,6 +3916,7 @@ class TestLiteLLMResponsesOutputNormalizer:
     def test_rejects_empty_stream_without_terminal_event(self) -> None:
         """Reject EOF when no native response terminal event was observed."""
         normalizer = LiteLLMResponsesOutputNormalizer(
+            pricing=None,
             provider="openai",
             model="gpt-5.1",
             operation="sampling",
@@ -3982,6 +3989,7 @@ class TestLiteLLMResponsesOutputNormalizer:
     ) -> None:
         """Convert native unsuccessful terminal outcomes to model errors."""
         normalizer = LiteLLMResponsesOutputNormalizer(
+            pricing=None,
             provider="openai",
             model="gpt-5.1",
             operation="sampling",
@@ -4054,6 +4062,7 @@ class TestLiteLLMResponsesOutputNormalizer:
     ) -> None:
         """Unclassified terminal events bypass provider-failure recovery."""
         normalizer = LiteLLMResponsesOutputNormalizer(
+            pricing=None,
             provider="openai",
             model="gpt-5.1",
             operation="sampling",
@@ -4067,6 +4076,7 @@ class TestLiteLLMResponsesOutputNormalizer:
     def test_interrupt_does_not_mask_unsuccessful_terminal_event(self) -> None:
         """Keep provider failure authoritative over later cancellation."""
         normalizer = LiteLLMResponsesOutputNormalizer(
+            pricing=None,
             provider="openai",
             model="gpt-5.1",
             operation="sampling",
@@ -4094,6 +4104,7 @@ class TestLiteLLMResponsesOutputNormalizer:
     def test_bounds_unclassified_terminal_details(self) -> None:
         """Keep internal provider diagnostics bounded and scalar-only."""
         normalizer = LiteLLMResponsesOutputNormalizer(
+            pricing=None,
             provider="openai",
             model="gpt-5.1",
             operation="sampling",
@@ -4119,6 +4130,7 @@ class TestLiteLLMResponsesOutputNormalizer:
     def test_accepts_explicitly_completed_reasoning_only_response(self) -> None:
         """Keep explicit completed reasoning-only output in current scope."""
         normalizer = LiteLLMResponsesOutputNormalizer(
+            pricing=None,
             provider="openai",
             model="gpt-5.1",
             operation="sampling",
@@ -4163,6 +4175,7 @@ class TestLiteLLMResponsesOutputNormalizer:
     ) -> None:
         """Continue only when a completed response explicitly sets end_turn false."""
         normalizer = LiteLLMResponsesOutputNormalizer(
+            pricing=None,
             provider="openai",
             model="gpt-5.1",
             operation="sampling",
@@ -4196,6 +4209,7 @@ class TestLiteLLMResponsesOutputNormalizer:
     def test_missing_end_turn_does_not_request_follow_up(self) -> None:
         """Keep existing completion behavior when the provider omits end_turn."""
         normalizer = LiteLLMResponsesOutputNormalizer(
+            pricing=None,
             provider="openai",
             model="gpt-5.1",
             operation="sampling",
@@ -4241,6 +4255,7 @@ class TestLiteLLMResponsesOutputNormalizer:
     ) -> None:
         """Let an exact dialect signal override the standard tool continuation."""
         normalizer = LiteLLMResponsesOutputNormalizer(
+            pricing=None,
             provider="xai_oauth",
             model="xai/grok-4.5",
             operation="sampling",
@@ -4275,6 +4290,7 @@ class TestLiteLLMResponsesOutputNormalizer:
     def test_normalizes_completed_output_items(self) -> None:
         """Convert completed response output item to event."""
         normalizer = LiteLLMResponsesOutputNormalizer(
+            pricing=None,
             provider="openai",
             model="gpt-5.1",
             operation="sampling",
@@ -4378,6 +4394,7 @@ class TestLiteLLMResponsesOutputNormalizer:
     def test_skips_terminal_image_failures_before_success(self) -> None:
         """Materialize only the successful image after terminal failed calls."""
         normalizer = LiteLLMResponsesOutputNormalizer(
+            pricing=None,
             provider="openai",
             model="gpt-5.6-luna",
             operation="sampling",
@@ -4450,6 +4467,7 @@ class TestLiteLLMResponsesOutputNormalizer:
     def test_normalizes_chat_usage_shape(self) -> None:
         """Keep LiteLLM chat-style usage details as event usage too."""
         normalizer = LiteLLMResponsesOutputNormalizer(
+            pricing=None,
             provider="openai",
             model="gpt-5.1",
             operation="sampling",
@@ -4497,6 +4515,7 @@ class TestLiteLLMResponsesOutputNormalizer:
     def test_preserves_cache_creation_tokens_from_raw_usage(self) -> None:
         """Cache write token counts are retained for post-hoc cost normalization."""
         normalizer = LiteLLMResponsesOutputNormalizer(
+            pricing=None,
             provider="anthropic",
             model="claude-sonnet-4.5",
             operation="sampling",
@@ -4538,8 +4557,9 @@ class TestLiteLLMResponsesOutputNormalizer:
         }
 
     def test_normalizes_cache_creation_and_cost_usage(self) -> None:
-        """Cache write/cost fields are preserved as event usage with raw."""
+        """A library cost scalar is raw evidence, not a provider charge."""
         normalizer = LiteLLMResponsesOutputNormalizer(
+            pricing=None,
             provider="openai",
             model="gpt-5.1",
             operation="sampling",
@@ -4569,7 +4589,8 @@ class TestLiteLLMResponsesOutputNormalizer:
 
         assert output.usage is not None
         assert output.usage.cache_creation_tokens == 12
-        assert output.usage.cost_usd == 0.001
+        assert output.usage.cost_usd is None
+        assert output.usage.cost_provenance is None
         assert output.usage.raw == {
             "input_tokens": 20,
             "output_tokens": 4,
@@ -4579,8 +4600,9 @@ class TestLiteLLMResponsesOutputNormalizer:
         }
 
     def test_normalizes_hidden_params_cost_usage(self) -> None:
-        """LiteLLM hidden params are preserved for cache hit analysis."""
+        """Historical diagnostics do not authorize a library estimate."""
         normalizer = LiteLLMResponsesOutputNormalizer(
+            pricing=None,
             provider="openai",
             model="gpt-5.1",
             operation="sampling",
@@ -4612,18 +4634,55 @@ class TestLiteLLMResponsesOutputNormalizer:
         )
 
         assert output.usage is not None
-        assert output.usage.cost_usd == 0.002
+        assert output.usage.cost_usd is None
+        assert output.usage.cost_provenance is None
         assert output.usage.raw_hidden_params == {
             "response_cost": 0.002,
             "cache_hit": True,
             "model_id": "gpt-5.1",
         }
 
+    def test_native_openrouter_charge_survives_absent_source(self) -> None:
+        """The explicit native usage.cost field is separate from estimation."""
+        normalizer = LiteLLMResponsesOutputNormalizer(
+            pricing=None,
+            provider="openrouter",
+            model="publisher/model",
+            operation="sampling",
+            integration=None,
+        )
+        output = normalizer.normalize(
+            "session-1",
+            [
+                NativeEvent(
+                    type="ResponseCompletedEvent",
+                    item={
+                        "response": {
+                            "usage": {
+                                "input_tokens": 20,
+                                "output_tokens": 4,
+                                "total_tokens": 24,
+                                "cost": 0.001,
+                            },
+                            "_hidden_params": {"response_cost": 0.009},
+                            "output": [],
+                        }
+                    },
+                )
+            ],
+        )
+        assert output.usage is not None
+        assert output.usage.cost_usd == 0.001
+        assert output.usage.cost_provenance is not None
+        assert output.usage.cost_provenance.method == "provider_reported"
+        assert output.usage.cost_provenance.source_snapshot_id is None
+
     def test_normalizes_output_item_done_when_completed_response_has_no_output(
         self,
     ) -> None:
         """Convert completed item from ChatGPT OAuth stream to durable message."""
         normalizer = LiteLLMResponsesOutputNormalizer(
+            pricing=None,
             provider="openai",
             model="gpt-5.1",
             operation="sampling",
@@ -4673,6 +4732,7 @@ class TestLiteLLMResponsesOutputNormalizer:
     def test_normalizes_tool_call_from_output_item_done(self, event_type: str) -> None:
         """Leave completed function_call from ChatGPT OAuth stream as durable."""
         normalizer = LiteLLMResponsesOutputNormalizer(
+            pricing=None,
             provider="openai",
             model="gpt-5.1",
             operation="sampling",
@@ -4710,6 +4770,7 @@ class TestLiteLLMResponsesOutputNormalizer:
     def test_prefers_completed_response_output_over_output_item_done(self) -> None:
         """Do not duplicate output_item.done when completed response output exists."""
         normalizer = LiteLLMResponsesOutputNormalizer(
+            pricing=None,
             provider="openai",
             model="gpt-5.1",
             operation="sampling",
@@ -4762,6 +4823,7 @@ class TestLiteLLMResponsesOutputNormalizer:
     def test_normalizes_reasoning_text_and_summary_separately(self) -> None:
         """Do not mix reasoning content and summary in event payload."""
         normalizer = LiteLLMResponsesOutputNormalizer(
+            pricing=None,
             provider="openai",
             model="gpt-5.1",
             operation="sampling",
@@ -4827,6 +4889,7 @@ class TestLiteLLMResponsesOutputNormalizer:
     ) -> None:
         """Repair call_id/name on function call arguments delta."""
         normalizer = LiteLLMResponsesOutputNormalizer(
+            pricing=None,
             provider="openai",
             model="gpt-5.1",
             operation="sampling",
@@ -4866,6 +4929,7 @@ class TestLiteLLMResponsesOutputNormalizer:
     def test_response_prefixed_text_delta_projects_content(self) -> None:
         """Convert text delta containing OpenAI SDK class name to projection too."""
         normalizer = LiteLLMResponsesOutputNormalizer(
+            pricing=None,
             provider="openai",
             model="gpt-5.1",
             operation="sampling",

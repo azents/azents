@@ -58,6 +58,7 @@ from azents.repos.session_title.data import SessionTitleGenerationSnapshot
 from azents.services.external_channel.thread_title import (
     ExternalChannelThreadTitleService,
 )
+from azents.services.model_metadata import ModelMetadataService
 
 logger = logging.getLogger(__name__)
 _TITLE_MAX_CHARS = 50
@@ -271,6 +272,9 @@ class SessionTitleService:
     session_title_repository: Annotated[
         SessionTitleRepository, Depends(SessionTitleRepository)
     ]
+    model_metadata_service: Annotated[
+        ModelMetadataService, Depends(ModelMetadataService)
+    ]
     chatgpt_oauth_runtime_repository: Annotated[
         ChatGPTOAuthRuntimeRepository, Depends(ChatGPTOAuthRuntimeRepository)
     ]
@@ -346,6 +350,7 @@ class SessionTitleService:
                     self.chatgpt_oauth_runtime_repository.integration_repository
                 ),
                 session_manager=(self.chatgpt_oauth_runtime_repository.session_manager),
+                model_metadata_service=self.model_metadata_service,
             )
             if resolved_runtime.failure:
                 return None

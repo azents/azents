@@ -26,7 +26,6 @@ from azents.core.enums import (
     WorkspaceUserRole,
 )
 from azents.core.llm_catalog import ModelReasoningEffort
-from azents.core.llm_mapping import to_runtime_model
 from azents.core.s3.deps import get_s3_service
 from azents.engine.context.window import (
     EffectiveContextWindow,
@@ -47,8 +46,10 @@ from azents.repos.agent_operations import (
     AgentOperationWorkspaceMismatch,
     AgentRuntimeProfileSelectionChange,
 )
+from azents.repos.llm_catalog.data import LiteLLMSourceSnapshot
 from azents.services.image_generation_catalog import ImageGenerationCatalogService
 from azents.services.llm_catalog import ModelCatalogReadService
+from azents.services.model_metadata import ModelMetadataService
 from azents.services.model_options import (
     NormalizedSelectableModelOptions,
     normalize_selectable_model_options,
@@ -179,6 +180,9 @@ class AgentService:
         Depends(AgentOperationsRepository),
     ]
     model_catalog_read_service: Annotated[ModelCatalogReadService, Depends()]
+    model_metadata_service: Annotated[
+        ModelMetadataService, Depends(ModelMetadataService)
+    ]
     image_generation_catalog_service: Annotated[
         ImageGenerationCatalogService, Depends()
     ]
@@ -397,7 +401,13 @@ class AgentService:
                 return Failure(RuntimeProfileSelectionInvalid(code=code))
             case _:
                 assert_never(create_result)
-        return Success(await self._build_output(agent, can_manage=True))
+        return Success(
+            await self._build_output(
+                agent,
+                can_manage=True,
+                source_snapshot=await self._capture_context_source([agent]),
+            )
+        )
 
     async def list_by_workspace(
         self,
@@ -419,10 +429,12 @@ class AgentService:
                 workspace_user_id=workspace_user_id,
                 agent_ids=[agent.id for agent in result.items],
             )
+        source_snapshot = await self._capture_context_source(result.items)
         items = [
             await self._build_output(
                 agent,
                 can_manage=agent.id in managed_agent_ids,
+                source_snapshot=source_snapshot,
             )
             for agent in result.items
         ]
@@ -453,7 +465,13 @@ class AgentService:
             )
         if agent.type == AgentType.PRIVATE and not can_manage:
             return Failure(PrivateAgentAccessDenied(agent_id=agent_id))
-        return Success(await self._build_output(agent, can_manage=can_manage))
+        return Success(
+            await self._build_output(
+                agent,
+                can_manage=can_manage,
+                source_snapshot=await self._capture_context_source([agent]),
+            )
+        )
 
     async def update_by_id(
         self,
@@ -631,7 +649,13 @@ class AgentService:
                             source_version=value.updated_at.isoformat(),
                         )
                     )
-                return Success(await self._build_output(value, can_manage=True))
+                return Success(
+                    await self._build_output(
+                        value,
+                        can_manage=True,
+                        source_snapshot=await self._capture_context_source([value]),
+                    )
+                )
             case Failure(error):
                 match error:
                     case AgentOperationNotFound():
@@ -940,7 +964,13 @@ class AgentService:
                         return Failure(NotAdmin(agent_id=agent_id))
                     case _:
                         assert_never(error)
-        return Success(await self._build_output(updated_agent, can_manage=True))
+        return Success(
+            await self._build_output(
+                updated_agent,
+                can_manage=True,
+                source_snapshot=await self._capture_context_source([updated_agent]),
+            )
+        )
 
     async def remove_avatar(
         self,
@@ -980,17 +1010,45 @@ class AgentService:
                         return Failure(NotAdmin(agent_id=agent_id))
                     case _:
                         assert_never(error)
-        return Success(await self._build_output(updated_agent, can_manage=True))
+        return Success(
+            await self._build_output(
+                updated_agent,
+                can_manage=True,
+                source_snapshot=await self._capture_context_source([updated_agent]),
+            )
+        )
+
+    async def _capture_context_source(
+        self, agents: list[Agent]
+    ) -> LiteLLMSourceSnapshot | None:
+        """Share one local source read across models and Agents needing fallback."""
+        capability_maximums: list[int | None] = []
+        for agent in agents:
+            selected_labels = {agent.main_model_label, agent.lightweight_model_label}
+            for option in agent.selectable_model_options:
+                if option.label in selected_labels:
+                    capabilities = option.candidates[
+                        0
+                    ].model_selection.normalized_capabilities
+                    capability_maximums.append(
+                        capabilities.context_window.max_input_tokens
+                    )
+        return await self.model_metadata_service.capture_for_context(
+            capability_maximums=capability_maximums
+        )
 
     async def _build_output(
         self,
         agent: Agent,
         *,
         can_manage: bool,
+        source_snapshot: LiteLLMSourceSnapshot | None,
     ) -> AgentOutput:
         """Convert `Agent` domain model to output."""
         avatar = await self._resolve_avatar(agent.avatar)
-        context_window = self._compute_effective_context_window(agent)
+        context_window = self._compute_effective_context_window(
+            agent, source_snapshot=source_snapshot
+        )
         runtime_profile_available = False
         runtime_profile_reason = "runtime_profile_unconfigured"
         infrastructure_terminal_enabled: bool | None = None
@@ -1054,6 +1112,8 @@ class AgentService:
     def _compute_effective_context_window(
         self,
         agent: Agent,
+        *,
+        source_snapshot: LiteLLMSourceSnapshot | None,
     ) -> EffectiveContextWindow | None:
         """Calculate effective context window using same criteria as Runtime."""
         option_by_label = {
@@ -1069,18 +1129,20 @@ class AgentService:
         main_input_tokens = resolve_model_input_tokens(
             main_candidate.model_selection.normalized_capabilities.context_window.default_input_tokens,
             main_candidate.model_selection.normalized_capabilities.context_window.max_input_tokens,
-            to_runtime_model(
-                main_candidate.model_selection.provider,
-                main_candidate.model_selection.model_identifier,
+            self.model_metadata_service.maximum_input_tokens(
+                source_snapshot,
+                provider=main_candidate.model_selection.provider,
+                model_identifier=main_candidate.model_selection.model_identifier,
             ),
             main_candidate.settings.context_window_tokens,
         )
         compaction_input_tokens = resolve_model_input_tokens(
             lightweight_candidate.model_selection.normalized_capabilities.context_window.default_input_tokens,
             lightweight_candidate.model_selection.normalized_capabilities.context_window.max_input_tokens,
-            to_runtime_model(
-                lightweight_candidate.model_selection.provider,
-                lightweight_candidate.model_selection.model_identifier,
+            self.model_metadata_service.maximum_input_tokens(
+                source_snapshot,
+                provider=lightweight_candidate.model_selection.provider,
+                model_identifier=lightweight_candidate.model_selection.model_identifier,
             ),
             lightweight_candidate.settings.context_window_tokens,
         )
