@@ -2,7 +2,7 @@
 
 import datetime
 import uuid
-from typing import cast
+from typing import NamedTuple
 from unittest.mock import AsyncMock
 
 import pytest
@@ -42,7 +42,7 @@ from .runtime import (
 _TEST_KEY = Fernet.generate_key().decode()
 
 
-class _SessionManager:
+class _SessionManager(SessionManager[AsyncSession]):
     """Expose single test DB session as context manager."""
 
     def __init__(self, session: AsyncSession) -> None:
@@ -72,11 +72,16 @@ async def _create_workspace(session: AsyncSession) -> str:
     return workspace_id
 
 
+class _CreatedIntegration(NamedTuple):
+    repository: LLMProviderIntegrationRepository
+    integration_id: str
+
+
 async def _create_integration(
     session: AsyncSession,
     *,
     expires_at: datetime.datetime,
-) -> tuple[LLMProviderIntegrationRepository, str]:
+) -> _CreatedIntegration:
     """Create xAI OAuth integration for tests."""
     repo = LLMProviderIntegrationRepository(CredentialCipher(_TEST_KEY))
     workspace_id = await _create_workspace(session)
@@ -99,7 +104,7 @@ async def _create_integration(
             ),
         ),
     )
-    return repo, integration.id
+    return _CreatedIntegration(repository=repo, integration_id=integration.id)
 
 
 class TestEnsureRuntimeTokens:
@@ -158,9 +163,7 @@ class TestEnsureRuntimeTokens:
         result = await ensure_runtime_tokens(
             integration=integration,
             integration_repository=repo,
-            session_manager=cast(
-                SessionManager[AsyncSession], _SessionManager(rdb_session)
-            ),
+            session_manager=_SessionManager(rdb_session),
         )
 
         assert isinstance(result, Success)
@@ -187,9 +190,7 @@ class TestEnsureRuntimeTokens:
         result = await ensure_runtime_tokens(
             integration=integration,
             integration_repository=repo,
-            session_manager=cast(
-                SessionManager[AsyncSession], _SessionManager(rdb_session)
-            ),
+            session_manager=_SessionManager(rdb_session),
         )
 
         assert isinstance(result, Success)
@@ -215,9 +216,7 @@ class TestEnsureRuntimeTokens:
         result = await ensure_runtime_tokens(
             integration=integration,
             integration_repository=repo,
-            session_manager=cast(
-                SessionManager[AsyncSession], _SessionManager(rdb_session)
-            ),
+            session_manager=_SessionManager(rdb_session),
         )
 
         assert isinstance(result, Success)
@@ -260,9 +259,7 @@ class TestEnsureRuntimeTokens:
         result = await refresh_runtime_tokens(
             integration=integration,
             integration_repository=repo,
-            session_manager=cast(
-                SessionManager[AsyncSession], _SessionManager(rdb_session)
-            ),
+            session_manager=_SessionManager(rdb_session),
         )
 
         assert isinstance(result, Success)
@@ -306,9 +303,7 @@ class TestEnsureRuntimeTokens:
         result = await ensure_runtime_tokens(
             integration=integration,
             integration_repository=repo,
-            session_manager=cast(
-                SessionManager[AsyncSession], _SessionManager(rdb_session)
-            ),
+            session_manager=_SessionManager(rdb_session),
         )
 
         assert isinstance(result, Success)
@@ -344,9 +339,7 @@ class TestEnsureRuntimeTokens:
         result = await ensure_runtime_tokens(
             integration=integration,
             integration_repository=repo,
-            session_manager=cast(
-                SessionManager[AsyncSession], _SessionManager(rdb_session)
-            ),
+            session_manager=_SessionManager(rdb_session),
         )
         updated = await repo.get_by_id(rdb_session, integration_id)
 
@@ -385,9 +378,7 @@ class TestEnsureRuntimeTokens:
         first = await ensure_runtime_tokens(
             integration=integration,
             integration_repository=repo,
-            session_manager=cast(
-                SessionManager[AsyncSession], _SessionManager(rdb_session)
-            ),
+            session_manager=_SessionManager(rdb_session),
         )
         after_failure = await repo.get_by_id_with_secrets(rdb_session, integration_id)
         assert isinstance(first, Failure)
@@ -421,9 +412,7 @@ class TestEnsureRuntimeTokens:
         second = await ensure_runtime_tokens(
             integration=after_failure,
             integration_repository=repo,
-            session_manager=cast(
-                SessionManager[AsyncSession], _SessionManager(rdb_session)
-            ),
+            session_manager=_SessionManager(rdb_session),
         )
 
         assert isinstance(second, Success)

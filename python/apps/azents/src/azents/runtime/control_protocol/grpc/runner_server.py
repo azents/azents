@@ -518,6 +518,7 @@ class RuntimeRunnerControlGrpcServicer(
                 except ValueError:
                     _LOGGER.warning(
                         "Runtime Runner system metrics rejected",
+                        exc_info=True,
                         extra={
                             "runtime_id": runtime_id,
                             "runner_generation": generation,

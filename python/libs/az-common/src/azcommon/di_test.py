@@ -219,3 +219,43 @@ async def test_fastapi_resolves_shared_container_without_overrides(
             "websocket.close",
         ]
         assert messages[1]["text"] == "resolved"
+
+
+@pytest.mark.asyncio
+async def test_container_runs_coroutine_task_with_resolved_dependency() -> None:
+    """Runtime awaitable narrowing preserves coroutine task injection."""
+    seen: list[object] = []
+    resource = object()
+
+    def dependency() -> object:
+        return resource
+
+    async def task(value: Annotated[object, Depends(dependency)]) -> None:
+        seen.append(value)
+
+    async with Container() as container:
+        await container.run(task)
+
+    assert seen == [resource]
+
+
+@pytest.mark.asyncio
+async def test_container_runs_class_task_through_declared_protocol() -> None:
+    """A runtime-checkable runnable retains the resolved class dependency."""
+    seen: list[object] = []
+    resource = object()
+
+    def dependency() -> object:
+        return resource
+
+    class Task:
+        def __init__(self, value: Annotated[object, Depends(dependency)]) -> None:
+            self.value = value
+
+        async def run(self) -> None:
+            seen.append(self.value)
+
+    async with Container() as container:
+        await container.run(Task)
+
+    assert seen == [resource]

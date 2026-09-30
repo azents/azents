@@ -18,9 +18,9 @@ from typing import (
     ParamSpec,
     Protocol,
     TypeVar,
-    cast,
     get_args,
     overload,
+    runtime_checkable,
 )
 
 from fastapi import Depends, params
@@ -72,6 +72,7 @@ DependencyOverridesProvider = (
 )
 
 
+@runtime_checkable
 class Runnable(Protocol):
     async def run(self) -> None: ...
 
@@ -100,14 +101,15 @@ async def solve_offline_dependencies(
         uses_scopes_cache = {}
     sub_dependant: Dependant
     for sub_dependant in dependant.dependencies:
-        sub_dependant.call = cast(Callable[..., Any], sub_dependant.call)
         call = sub_dependant.call
+        if call is None:
+            raise TypeError("Dependency callable is missing.")
         use_sub_dependant = sub_dependant
         if (
             dependency_overrides_provider
             and dependency_overrides_provider.dependency_overrides
         ):
-            original_call = sub_dependant.call
+            original_call = call
             call = dependency_overrides_provider.dependency_overrides.get(
                 original_call, original_call
             )
@@ -141,20 +143,16 @@ async def solve_offline_dependencies(
         elif _is_gen_callable(use_sub_dependant.call) or _is_async_gen_callable(
             use_sub_dependant.call
         ):
-            # FastAPI's private helper resolves generator dependencies, but its
-            # annotation does not express the awaited result precisely.
-            solved = await cast(
-                Coroutine[Any, Any, Any],
-                _solve_generator(
-                    dependant=use_sub_dependant, stack=stack, sub_values=sub_values
-                ),
+            solved = await _solve_generator(
+                dependant=use_sub_dependant, stack=stack, sub_values=sub_values
             )
         elif _is_coroutine_callable(use_sub_dependant.call):
-            async_call = cast(Callable[..., Awaitable[Any]], call)
-            solved = await async_call(**sub_values)
+            pending = call(**sub_values)
+            if not inspect.isawaitable(pending):
+                raise TypeError("Async dependency did not return an awaitable.")
+            solved = await pending
         else:
-            sync_call = cast(Callable[..., Any], call)
-            solved = await run_in_threadpool(sync_call, **sub_values)
+            solved = await run_in_threadpool(call, **sub_values)
         if sub_dependant.name is not None:
             values[sub_dependant.name] = solved
         if sub_dependant_cache_key not in dependency_cache:
@@ -363,8 +361,10 @@ class Container:
         result = func(*bound.args, **bound.kwargs)
         if inspect.iscoroutine(result):
             await result
+        elif isinstance(result, Runnable):
+            await result.run()
         else:
-            await cast(Runnable, result).run()
+            raise TypeError("Dependency task did not produce an async runnable.")
 
 
 def get_container(connection: HTTPConnection) -> Container:
