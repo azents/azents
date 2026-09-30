@@ -205,9 +205,8 @@ class InMemoryRuntimeTerminalCoordinationStore:
             assert record is not None
             if record.admission.user_id != user_id:
                 return _result(RuntimeTerminalMutationStatus.STALE_RUNTIME_AUTHORITY)
-            generation = (
-                1 if record.attachment is None else record.attachment.generation + 1
-            )
+            # Record revisions survive detach and lease repair, unlike attachments.
+            generation = record.revision
             attachment = RuntimeTerminalAttachment(
                 generation=generation,
                 user_id=user_id,

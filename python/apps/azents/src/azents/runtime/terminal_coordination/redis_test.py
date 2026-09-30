@@ -1,15 +1,22 @@
 """Redis Runtime Terminal coordination codec tests."""
 
+import asyncio
+import dataclasses
 import inspect
 import json
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from azents_runtime_control.runner_terminal import RunnerTerminalTerminationReason
+from redis.asyncio import Redis
 
 from azents.core.runtime_connection_generation import (
     MAX_RUNTIME_CONNECTION_GENERATION,
 )
-from azents.runtime.terminal_coordination.data import RuntimeTerminalAdmission
+from azents.runtime.terminal_coordination.data import (
+    RuntimeTerminalAdmission,
+    RuntimeTerminalMutationStatus,
+)
 from azents.runtime.terminal_coordination.redis import (
     RedisRuntimeTerminalCoordinationStore,
     _initial_record,  # Private test seam.
@@ -81,3 +88,85 @@ def test_terminal_record_rejects_noncanonical_runner_generation(
 
     with pytest.raises(ValueError, match="connection-generation string"):
         _record_from_json(json.dumps(payload))
+
+
+@pytest.mark.parametrize("pointer_kind", ["session", "session-final"])
+async def test_stale_session_pointer_cleanup_preserves_concurrent_replacement(
+    redis_url: str, monkeypatch: pytest.MonkeyPatch, pointer_kind: str
+) -> None:
+    """Real Redis cleanup cannot delete a replacement after an old record expires."""
+    prefix = f"terminal-pointer-race:{pointer_kind}"
+    async with Redis.from_url(redis_url) as client:
+        store = RedisRuntimeTerminalCoordinationStore(client, key_prefix=prefix)
+        original = await store.admit_or_get(_admission(), admitted_at=_NOW)
+        assert original.status is RuntimeTerminalMutationStatus.APPLIED
+        pointer = f"{prefix}:{pointer_kind}:session-1"
+        active_pointer = f"{prefix}:session:session-1"
+        old_record = f"{prefix}:terminal:terminal-1"
+        if pointer_kind == "session-final":
+            await client.delete(active_pointer)
+            await client.set(pointer, "terminal-1", ex=60)
+        # Redis expiration is deterministic; no shortened wall-clock sleep is needed.
+        await client.pexpire(old_record, 0)
+        observed_missing = asyncio.Event()
+        resume_cleanup = asyncio.Event()
+        real_exists = client.exists
+
+        async def paused_exists(*names: str) -> int:
+            result = await real_exists(*names)
+            if names == (old_record,):
+                assert result == 0
+                observed_missing.set()
+                await resume_cleanup.wait()
+            return result
+
+        monkeypatch.setattr(client, "exists", paused_exists)
+        lookup = asyncio.create_task(
+            store.get_session_terminal("session-1", current_time=_NOW)
+        )
+        try:
+            await asyncio.wait_for(observed_missing.wait(), timeout=5)
+            replacement = await store.admit_or_get(
+                dataclasses.replace(_admission(), terminal_id="terminal-2"),
+                admitted_at=_NOW,
+            )
+            assert replacement.value is not None
+            assert replacement.value.admission.terminal_id == "terminal-2"
+            if pointer_kind == "session-final":
+                await store.request_termination(
+                    "terminal-2",
+                    reason=RunnerTerminalTerminationReason.PROCESS_EXIT,
+                    requested_at=_NOW,
+                )
+                finalized = await store.finalize_terminal(
+                    "terminal-2",
+                    reason=RunnerTerminalTerminationReason.PROCESS_EXIT,
+                    exit_code=0,
+                    finalized_at=_NOW,
+                    runner_stream_generation=None,
+                    final_ttl_seconds=60,
+                )
+                assert finalized.status is RuntimeTerminalMutationStatus.APPLIED
+            resume_cleanup.set()
+            result = await asyncio.wait_for(lookup, timeout=5)
+            assert result is not None
+            assert result.admission.terminal_id == "terminal-2"
+            assert await client.get(pointer) == b"terminal-2"
+            latest = await store.get_session_terminal("session-1", current_time=_NOW)
+            assert latest is not None and latest.admission.terminal_id == "terminal-2"
+            if pointer_kind == "session":
+                subsequent = await store.admit_or_get(
+                    dataclasses.replace(_admission(), terminal_id="terminal-3"),
+                    admitted_at=_NOW,
+                )
+                assert subsequent.value is not None
+                assert subsequent.value.admission.terminal_id == "terminal-2"
+                assert not await client.exists(f"{prefix}:terminal:terminal-3")
+        finally:
+            resume_cleanup.set()
+            if not lookup.done():
+                lookup.cancel()
+            await asyncio.gather(lookup, return_exceptions=True)
+            keys = [key async for key in client.scan_iter(match=f"{prefix}:*")]
+            if keys:
+                await client.delete(*keys)

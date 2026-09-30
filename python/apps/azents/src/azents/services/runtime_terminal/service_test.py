@@ -1,11 +1,14 @@
 """Public Runtime Terminal service tests."""
 
+import asyncio
+import time
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 import pytest
 from azents_runtime_control.runner_terminal import RunnerTerminalTerminationReason
 
+from azents.api.public.terminal.v1 import _receive_loop, _SocketProgress
 from azents.runtime.terminal_coordination.data import RuntimeTerminalRecord
 from azents.runtime.terminal_coordination.memory import (
     InMemoryRuntimeTerminalCoordinationStore,
@@ -33,6 +36,28 @@ _RESOURCE = RuntimeTerminalResource(
 )
 
 
+class _InputWebSocket:
+    """Present one real browser binary frame to the public receive boundary."""
+
+    async def accept(self, subprotocol: str | None = None) -> None:
+        raise AssertionError("The socket is already accepted")
+
+    async def close(self, code: int = 1000, reason: str | None = None) -> None:
+        raise AssertionError("Receive does not close the socket")
+
+    async def send_text(self, data: str) -> None:
+        raise AssertionError("Receive does not send text")
+
+    async def send_bytes(self, data: bytes) -> None:
+        raise AssertionError("Receive does not send binary data")
+
+    async def receive(self) -> dict[str, object]:
+        return {
+            "type": "websocket.receive",
+            "bytes": bytes((1, 1)) + (1).to_bytes(8, "big") + b"stale\n",
+        }
+
+
 class _Resolver:
     def __init__(self, authority: RuntimeTerminalAuthority) -> None:
         self.authority = authority
@@ -49,7 +74,7 @@ class _Resolver:
         assert user_id == self.authority.user_id
         assert authentication_session_id == self.authority.authentication_session_id
         assert resource == self.authority.resource
-        assert resolved_at == _NOW
+        assert resolved_at >= _NOW
         self.calls += 1
         return self.authority
 
@@ -136,6 +161,75 @@ async def test_ticket_is_resource_bound_and_consumable_once() -> None:
     assert second.ticket is not None
     with pytest.raises(RuntimeTerminalAdmissionError):
         await service.consume_ticket(ticket=second.ticket, resource=other)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("release", ["detach", "repair"])
+async def test_delayed_browser_input_and_cleanup_preserve_replacement(
+    release: str,
+) -> None:
+    """Production WebSocket input and old close cannot affect the new browser."""
+    service, coordination, dispatcher, _resolver = _service(_authority())
+    now = _NOW
+    service.clock = lambda: now
+    ticket = await service.issue_ticket(
+        user_id="user-1",
+        authentication_session_id="auth-session-1",
+        resource=_RESOURCE,
+    )
+    assert ticket.ticket is not None
+    admission = await service.consume_ticket(ticket=ticket.ticket, resource=_RESOURCE)
+    request = RuntimeTerminalAttachRequest(
+        columns=120, rows=40, last_output_sequence=None
+    )
+    old = await service.attach(admission, request)
+    if release == "detach":
+        # Simulate coordination cleanup while the original socket is still alive.
+        await coordination.detach_browser(
+            old.accepted.terminal_id,
+            attachment_generation=old.accepted.attachment_generation,
+            detached_at=_NOW,
+            grace_seconds=120,
+        )
+    else:
+        now += timedelta(seconds=46)
+        await coordination.repair_expired(current_time=now, limit=10)
+    replacement_ticket = await service.issue_ticket(
+        user_id="user-1",
+        authentication_session_id="auth-session-1",
+        resource=_RESOURCE,
+    )
+    assert replacement_ticket.ticket is not None
+    replacement_admission = await service.consume_ticket(
+        ticket=replacement_ticket.ticket, resource=_RESOURCE
+    )
+    replacement = await service.attach(replacement_admission, request)
+    assert (
+        replacement.accepted.attachment_generation > old.accepted.attachment_generation
+    )
+    assert await service.revalidate(admission) is None
+    try:
+        with pytest.raises(RuntimeTerminalAdmissionError):
+            await _receive_loop(
+                _InputWebSocket(),
+                old,
+                _SocketProgress(
+                    highest_output_sent=0,
+                    highest_output_acknowledged=0,
+                    output_acknowledged_at=time.monotonic(),
+                    changed=asyncio.Event(),
+                ),
+            )
+    finally:
+        # This is the same delayed finally cleanup used by the public socket route.
+        await old.close()
+    record = await coordination.get_session_terminal("session-1", current_time=now)
+    assert record is not None and record.attachment is not None
+    assert record.attachment.generation == replacement.accepted.attachment_generation
+    assert record.pending_inputs == ()
+    await replacement.input(sequence=1, data=b"fresh\n")
+    assert dispatcher.opened == [("terminal-1", 120, 40)]
+    await replacement.close()
 
 
 @pytest.mark.asyncio

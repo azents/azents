@@ -6,6 +6,7 @@ import json
 from urllib.parse import parse_qs
 
 import httpx
+import pytest
 from azcommon.result import Failure, Success
 
 from azents.core.xai_oauth import (
@@ -14,7 +15,7 @@ from azents.core.xai_oauth import (
     XaiOAuthConnectionMethod,
 )
 
-from .client import XaiOAuthClient
+from .client import XaiOAuthClient, _token_set_from_response
 from .data import (
     ProviderEntitlementDenied,
     ProviderPending,
@@ -36,8 +37,100 @@ def _make_client(transport: httpx.AsyncBaseTransport) -> XaiOAuthClient:
     return XaiOAuthClient(httpx.AsyncClient(transport=transport))
 
 
+@pytest.mark.parametrize(
+    "field",
+    ["access_token", "refresh_token", "id_token", "expires_in"],
+)
+def test_malformed_token_fields_have_safe_reasons(field: str) -> None:
+    """Credential-shaped validation inputs never become diagnostic text."""
+    marker = "SYNTHETIC_TOKEN_SENTINEL"
+    body: dict[str, object] = {
+        "access_token": "synthetic-access",
+        "refresh_token": "synthetic-refresh",
+        "expires_in": 3600,
+    }
+    body[field] = [marker] if field != "expires_in" else marker
+    result = _token_set_from_response(
+        httpx.Response(200, json=body), XaiOAuthConnectionMethod.DEVICE
+    )
+    assert isinstance(result, Failure)
+    assert result.error.reason == "Provider response was invalid"
+    assert marker not in result.error.reason
+
+
+@pytest.mark.parametrize("expires_in", [float("inf"), 10**100])
+def test_unrepresentable_expiry_has_safe_reason(expires_in: float | int) -> None:
+    """Unrepresentable provider expiries stay inside the classified failure path."""
+    # Use JSON text because HTTPX's JSON serializer rejects infinity.
+    response = httpx.Response(
+        200,
+        text=json.dumps(
+            {
+                "access_token": "synthetic-access",
+                "refresh_token": "synthetic-refresh",
+                "expires_in": expires_in,
+            }
+        ),
+    )
+    result = _token_set_from_response(response, XaiOAuthConnectionMethod.DEVICE)
+    assert isinstance(result, Failure)
+    assert result.error.reason == "Provider response was invalid"
+
+
 class TestXaiOAuthClient:
     """XaiOAuthClient tests."""
+
+    @pytest.mark.parametrize("operation", ["device", "poll", "refresh"])
+    async def test_transport_errors_never_serialize_request_values(
+        self, operation: str
+    ) -> None:
+        """Every OAuth HTTP path discards exception messages and sensitive URLs."""
+        marker = "SYNTHETIC_TRANSPORT_SENTINEL"
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            raise httpx.ConnectError(
+                f"https://provider.invalid/?token={marker}", request=request
+            )
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+            client = XaiOAuthClient(http)
+            if operation == "device":
+                result = await client.request_device_user_code()
+            elif operation == "poll":
+                result = await client.poll_device_tokens(
+                    device_code=marker,
+                    connection_method=XaiOAuthConnectionMethod.DEVICE,
+                )
+            else:
+                result = await client.refresh_tokens(
+                    refresh_token=marker,
+                    connection_method=XaiOAuthConnectionMethod.DEVICE,
+                )
+        assert isinstance(result, Failure)
+        assert isinstance(result.error, ProviderUnavailable)
+        assert result.error.reason == "xAI OAuth transport failed"
+        assert marker not in result.error.reason
+
+    @pytest.mark.parametrize("field", ["device_code", "user_code", "expires_in"])
+    async def test_device_validation_never_serializes_provider_values(
+        self, field: str
+    ) -> None:
+        """Malformed device grants have fixed safe diagnostics."""
+        body: dict[str, object] = {
+            "device_code": "synthetic-device",
+            "user_code": "synthetic-user",
+            "verification_uri": "https://provider.invalid/device",
+            "expires_in": 900,
+        }
+        body[field] = ["SYNTHETIC_DEVICE_SENTINEL"]
+
+        async def handler(_request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json=body)
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+            result = await XaiOAuthClient(http).request_device_user_code()
+        assert isinstance(result, Failure)
+        assert result.error.reason == "Provider response was invalid"
 
     async def test_request_device_user_code(self) -> None:
         """Parse Device user-code response with the public Grok CLI client."""
