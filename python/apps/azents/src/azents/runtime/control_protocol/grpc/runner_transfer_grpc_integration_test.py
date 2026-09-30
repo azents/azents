@@ -184,6 +184,21 @@ class _ObjectStore:
         self.upload_part_blocked = asyncio.Event()
         self.resume_upload_part = asyncio.Event()
 
+    async def get_download_request(
+        self,
+        *,
+        identity: S3ObjectIdentity,
+        expires_in: timedelta,
+        now: datetime | None = None,
+    ) -> S3PresignedRequest:
+        assert now is not None
+        return S3PresignedRequest(
+            method="GET",
+            url=f"https://storage.example/{identity.bucket}/{identity.key}",
+            expires_at=now + expires_in,
+            headers={},
+        )
+
     async def get_upload_request(
         self,
         *,

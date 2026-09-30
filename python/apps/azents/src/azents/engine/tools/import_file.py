@@ -10,6 +10,7 @@ from typing import assert_never
 from azcommon.infra.s3.service import S3Service, S3TransferCleanupRequired
 from azcommon.uuid import uuid7
 from azents_runtime_control.grpc_transfer_coordinator_client import (
+    CoordinatorSourceTransport,
     CoordinatorTransferFailure,
 )
 from pydantic import BaseModel, Field
@@ -172,6 +173,7 @@ def make_import_file_tool(
             await transfer_service.transfer(
                 ServerToRuntimeTransferRequest(
                     source=source,
+                    source_transport=CoordinatorSourceTransport.DIRECT_OBJECT,
                     target=target,
                     agent_id=authority.agent_id,
                     session_id=authority.session_id,

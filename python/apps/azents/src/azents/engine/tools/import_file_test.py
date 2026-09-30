@@ -9,6 +9,7 @@ import pytest
 from azcommon.infra.s3.service import S3Service, S3TransferCleanupRequired
 from azcommon.result import Failure, Success
 from azents_runtime_control.grpc_transfer_coordinator_client import (
+    CoordinatorSourceTransport,
     CoordinatorTransferFailure,
 )
 
@@ -233,6 +234,7 @@ async def test_import_file_stages_large_exchange_without_legacy_body_delivery() 
     assert storage.put_calls == []
     request = transfer_service.requests[0]
     assert request.destination == "/tmp/agent/imports/report.csv"
+    assert request.source_transport is CoordinatorSourceTransport.DIRECT_OBJECT
     assert request.target == ServerToRuntimeTarget("runtime-1", 2)
     assert isinstance(request.source, ManagedServerToRuntimeSource)
     assert request.source.metadata.size == 4 * 1024 * 1024 + 1

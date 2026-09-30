@@ -92,6 +92,7 @@ def test_worker_transfer_services_share_only_the_injected_coordinator() -> None:
     assert services.provider_delivery.batch_service.coordinator is coordinator
     assert services.import_staging is not None
     assert services.import_staging.transfer_object_prefix == "v1/runtime-transfer"
+    assert services.import_staging.maximum_size == 128 * 1024 * 1024
 
 
 def test_external_channel_staging_requires_the_worker_coordinator() -> None:

@@ -135,9 +135,13 @@ class RuntimeTransferCoordinator:
         """
         if object_handle != object_handle_for(record):
             return None
-        if (
-            record.admission.direction is RuntimeTransferDirection.DOWNLOAD
-            and sha256 is None
+        if record.admission.direction is RuntimeTransferDirection.DOWNLOAD and (
+            sha256 is None
+            or (
+                record.admission.source_transport
+                is RuntimeTransferSourceTransport.DIRECT_OBJECT
+                and record.admission.source_handle is not None
+            )
         ):
             return None
         return await self._state_store.mark_ready(
@@ -1224,8 +1228,11 @@ def _intent_envelope(
             "expected_sha256": (
                 (
                     record.admission.expected_sha256
-                    if record.admission.source_transport
-                    is RuntimeTransferSourceTransport.DIRECT_OBJECT
+                    if (
+                        record.admission.source_transport
+                        is RuntimeTransferSourceTransport.DIRECT_OBJECT
+                        and record.admission.source_handle is not None
+                    )
                     else (None if record.object is None else record.object.sha256)
                 )
                 if record.admission.direction is RuntimeTransferDirection.DOWNLOAD

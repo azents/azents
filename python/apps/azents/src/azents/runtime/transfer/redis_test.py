@@ -23,6 +23,7 @@ from azents.runtime.transfer.data import (
     RuntimeTransferPhase,
     RuntimeTransferProgress,
     RuntimeTransferRecord,
+    RuntimeTransferSourceTransport,
     RuntimeTransferUploadTransport,
     terminal_expiry,
 )
@@ -114,6 +115,32 @@ def _json_payload(record: RuntimeTransferRecord) -> dict[str, object]:
     )
     assert isinstance(value, dict)
     return {str(key): item for key, item in value.items()}
+
+
+def test_attempt_owned_direct_download_roundtrips_late_bound_manifest() -> None:
+    """Persist source mode and verified object digest across Redis recovery."""
+    original = _record()
+    record = replace(
+        original,
+        admission=replace(
+            original.admission,
+            direction=RuntimeTransferDirection.DOWNLOAD,
+            source_transport=RuntimeTransferSourceTransport.DIRECT_OBJECT,
+            expected_sha256=None,
+        ),
+    )
+    decoded = _decode_record_envelope(
+        _encode_record_envelope(
+            _RedisTransferRecordEnvelope(record=record, admission_released=True)
+        )
+    ).record
+    assert decoded.admission.source_handle is None
+    assert decoded.admission.expected_sha256 is None
+    assert decoded.object == RuntimeTransferObject("object-key", 3, _DIGEST)
+    assert (
+        decoded.admission.source_transport
+        is RuntimeTransferSourceTransport.DIRECT_OBJECT
+    )
 
 
 def _record_value(payload: dict[str, object]) -> dict[str, object]:

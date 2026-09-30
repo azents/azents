@@ -76,6 +76,13 @@ class CoordinatorUploadTransport(StrEnum):
     DIRECT_OBJECT = "direct_object"
 
 
+class CoordinatorSourceTransport(StrEnum):
+    """Trusted physical source for one Runner download."""
+
+    TRANSFER_OBJECT = "transfer_object"
+    DIRECT_OBJECT = "direct_object"
+
+
 class CoordinatorTransferPhase(StrEnum):
     """Trusted coordinator transfer lifecycle phase."""
 
@@ -246,6 +253,7 @@ class CoordinatorAdmitTransferRequest:
     deadline_at: datetime
     source_expires_at: datetime | None
     resource_class: str
+    source_transport: CoordinatorSourceTransport
     upload_transport: CoordinatorUploadTransport = (
         CoordinatorUploadTransport.CONTROL_STREAM
     )
@@ -257,6 +265,13 @@ class CoordinatorAdmitTransferRequest:
         _bounded(self.resource_class, "resource_class", 64)
         if not isinstance(self.upload_transport, CoordinatorUploadTransport):
             raise ValueError("upload_transport is invalid")
+        if not isinstance(self.source_transport, CoordinatorSourceTransport):
+            raise ValueError("source_transport is invalid")
+        if (
+            self.source_transport is CoordinatorSourceTransport.DIRECT_OBJECT
+            and self.identity.direction != CoordinatorTransferDirection.DOWNLOAD.value
+        ):
+            raise ValueError("direct object source requires DOWNLOAD direction")
         if (
             self.upload_transport is CoordinatorUploadTransport.DIRECT_OBJECT
             and self.identity.direction != CoordinatorTransferDirection.UPLOAD.value
@@ -1228,6 +1243,7 @@ def admit_transfer_request_to_message(
         deadline_at=_timestamp_message(value.deadline_at),
         resource_class=value.resource_class,
         upload_transport=_UPLOAD_TRANSPORT_TO_PROTO[value.upload_transport],
+        source_transport=_SOURCE_TRANSPORT_TO_PROTO[value.source_transport],
     )
     message.identity.CopyFrom(coordinator_identity_to_message(value.identity))
     if value.overwrite is not None:
@@ -1525,6 +1541,14 @@ _UPLOAD_TRANSPORT_TO_PROTO = {
     ),
     CoordinatorUploadTransport.DIRECT_OBJECT: (
         runtime_transfer_coordinator_pb2.COORDINATOR_UPLOAD_TRANSPORT_DIRECT_OBJECT
+    ),
+}
+_SOURCE_TRANSPORT_TO_PROTO = {
+    CoordinatorSourceTransport.TRANSFER_OBJECT: (
+        runtime_transfer_coordinator_pb2.COORDINATOR_SOURCE_TRANSPORT_TRANSFER_OBJECT
+    ),
+    CoordinatorSourceTransport.DIRECT_OBJECT: (
+        runtime_transfer_coordinator_pb2.COORDINATOR_SOURCE_TRANSPORT_DIRECT_OBJECT
     ),
 }
 _PHASE_FROM_PROTO = {

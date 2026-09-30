@@ -24,6 +24,7 @@ from azents_runtime_control.grpc_transfer_coordinator_client import (
     CoordinatorPreparationCleanupState,
     CoordinatorPromotePreparationCleanupRequest,
     CoordinatorRegisterPreparationCleanupRequest,
+    CoordinatorSourceTransport,
     CoordinatorTransferDirection,
     CoordinatorTransferFailure,
     CoordinatorTransferOutcome,
@@ -442,6 +443,7 @@ def _request(source: Source) -> ServerToRuntimeTransferRequest:
         product_maximum_size=10,
         provider_maximum_size=10,
         deadline_at=_NOW + timedelta(minutes=1),
+        source_transport=CoordinatorSourceTransport.TRANSFER_OBJECT,
     )
 
 
@@ -482,6 +484,49 @@ async def test_transfer_admits_before_source_prepare_and_terminal_success() -> N
     assert admit.expected_manifest.size == 3
     assert admit.expected_manifest.sha256 == "a" * 64
     assert "exchange://safe" not in str(admit)
+
+
+@pytest.mark.asyncio
+async def test_direct_attempt_binds_provider_digest_only_after_preparation() -> None:
+    """A late-digest source selects direct GET without inventing an admission hash."""
+    source = Source(
+        ServerToRuntimeSourceMetadata(
+            "external-channel://safe",
+            "external_channel",
+            "file",
+            "application/octet-stream",
+            3,
+            None,
+            None,
+        ),
+        PreparedServerToRuntimeObject(_HANDLE, 3, "a" * 64),
+    )
+    coordinator = Coordinator([])
+    service = ServerToRuntimeTransferService(
+        coordinator=coordinator,
+        clock=lambda: _NOW,
+        status_poll_interval=timedelta(milliseconds=1),
+    )
+
+    await service.start(
+        dataclasses.replace(
+            _request(source),
+            source_transport=CoordinatorSourceTransport.DIRECT_OBJECT,
+        )
+    )
+
+    admitted = coordinator.admit_request
+    assert admitted is not None
+    assert admitted.source_transport is CoordinatorSourceTransport.DIRECT_OBJECT
+    assert admitted.expected_manifest.sha256 is None
+    ready = next(request for name, request in coordinator.calls if name == "ready")
+    assert isinstance(ready, CoordinatorMarkTransferReadyRequest)
+    assert ready.object_manifest.sha256 == "a" * 64
+    assert [name for name, _ in coordinator.calls] == [
+        "admit",
+        "ready",
+        "dispatch",
+    ]
 
 
 @pytest.mark.asyncio

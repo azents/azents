@@ -32,6 +32,7 @@ from azents.runtime.transfer.data import (
     RuntimeTransferObject,
     RuntimeTransferOutcome,
     RuntimeTransferRecord,
+    RuntimeTransferSourceTransport,
 )
 from azents.runtime.transfer.data import (
     RuntimeTransferFailure as StateTransferFailure,
@@ -105,6 +106,77 @@ async def test_download_success_marks_committed_settles_and_appends_final() -> N
     assert replies[0].event.final is True
     assert replies[0].event.payload["success"] is True
     assert record.stream_claim_id is not None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("source_handle", "expected_sha256"),
+    ((None, None), (None, _DIGEST), ("workspace-source", _DIGEST)),
+)
+async def test_direct_download_success_uses_the_authoritative_source_manifest(
+    source_handle: str | None,
+    expected_sha256: str | None,
+) -> None:
+    """Owned late-digest and retained Workspace sources settle the same exact claim."""
+    cleanup = _Cleanup()
+    harness = await _harness(RuntimeTransferDirection.DOWNLOAD, cleanup=cleanup)
+    streaming = await harness.claim_direct_object(
+        source_handle=source_handle, expected_sha256=expected_sha256
+    )
+
+    await harness.coordinator.handle(
+        _result(
+            direction=RunnerTransferDirection.DOWNLOAD,
+            outcome=RunnerTransferOutcome.SUCCEEDED,
+            committed=True,
+            failure=None,
+        ),
+        request_id="runner-result-1",
+    )
+
+    settled = await harness.state.get("transfer-1")
+    assert settled is not None
+    assert settled.terminal_outcome is RuntimeTransferOutcome.SUCCEEDED
+    assert settled.actual_sha256 == _DIGEST
+    assert settled.stream_claim_id == streaming.stream_claim_id
+    replies = await harness.control.read_replies(
+        reply_stream_id="reply-1", after_cursor=None, limit=10
+    )
+    assert len(replies) == 1
+    assert replies[0].event.final
+    assert replies[0].event.payload["success"] is True
+    if source_handle is None:
+        assert len(cleanup.records) == 1
+        assert cleanup.records[0].completed_object_cleanup_required
+
+
+@pytest.mark.asyncio
+async def test_owned_direct_download_cannot_publish_a_different_result_digest() -> None:
+    """A nullable admission digest never weakens the READY-bound manifest."""
+    harness = await _harness(RuntimeTransferDirection.DOWNLOAD)
+    await harness.claim_direct_object(source_handle=None, expected_sha256=None)
+
+    await harness.coordinator.handle(
+        _result(
+            direction=RunnerTransferDirection.DOWNLOAD,
+            outcome=RunnerTransferOutcome.SUCCEEDED,
+            committed=True,
+            failure=None,
+            sha256="b" * 64,
+        ),
+        request_id="runner-result-1",
+    )
+
+    current = await harness.state.get("transfer-1")
+    assert current is not None
+    assert current.phase.value == "streaming"
+    assert current.terminal_outcome is None
+    assert (
+        await harness.control.read_replies(
+            reply_stream_id="reply-1", after_cursor=None, limit=10
+        )
+        == []
+    )
 
 
 @pytest.mark.asyncio
@@ -466,6 +538,71 @@ class _Harness:
             object=RuntimeTransferObject("object-1", 3, _DIGEST),
         )
         assert ready is not None
+        enqueued = await self._dispatch(ready)
+        streaming = await self.state.claim_stream(
+            "transfer-1",
+            attempt_id="attempt-1",
+            runtime_id="runtime-1",
+            desired_generation=1,
+            accepted_runner_generation=1,
+            expected_revision=enqueued.revision,
+            claim_id="claim-1",
+            owner_replica_id="replica-1",
+        )
+        assert streaming is not None
+        return streaming
+
+    async def claim_direct_object(
+        self,
+        *,
+        source_handle: str | None,
+        expected_sha256: str | None,
+    ) -> RuntimeTransferRecord:
+        admitted = await self.state.admit(
+            replace(
+                _admission(self.direction),
+                source_transport=RuntimeTransferSourceTransport.DIRECT_OBJECT,
+                source_handle=source_handle,
+                expected_sha256=expected_sha256,
+            ),
+            lease_id="lease-1",
+        )
+        assert admitted is not None
+        if source_handle is None:
+            ready = await self.state.mark_ready(
+                "transfer-1",
+                attempt_id="attempt-1",
+                runtime_id="runtime-1",
+                desired_generation=1,
+                expected_revision=admitted.revision,
+                object=RuntimeTransferObject("object-1", 3, _DIGEST),
+            )
+        else:
+            ready = await self.state.mark_ready_direct(
+                "transfer-1",
+                attempt_id="attempt-1",
+                runtime_id="runtime-1",
+                desired_generation=1,
+                expected_revision=admitted.revision,
+                source_handle=source_handle,
+                size=3,
+                sha256=_DIGEST,
+            )
+        assert ready is not None
+        await self._dispatch(ready)
+        streaming = await self.state.claim_direct_object(
+            "transfer-1",
+            attempt_id="attempt-1",
+            runtime_id="runtime-1",
+            desired_generation=1,
+            accepted_runner_generation=1,
+            claim_id="claim-1",
+            owner_replica_id="replica-1",
+        )
+        assert streaming is not None
+        return streaming
+
+    async def _dispatch(self, ready: RuntimeTransferRecord) -> RuntimeTransferRecord:
         bound = await self.state.bind_dispatch(
             "transfer-1",
             attempt_id="attempt-1",
@@ -493,18 +630,7 @@ class _Harness:
             dispatch_id="dispatch-1",
         )
         assert enqueued is not None
-        streaming = await self.state.claim_stream(
-            "transfer-1",
-            attempt_id="attempt-1",
-            runtime_id="runtime-1",
-            desired_generation=1,
-            accepted_runner_generation=1,
-            expected_revision=enqueued.revision,
-            claim_id="claim-1",
-            owner_replica_id="replica-1",
-        )
-        assert streaming is not None
-        return streaming
+        return enqueued
 
 
 async def _harness(

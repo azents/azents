@@ -28,6 +28,7 @@ from azents.runtime.transfer.data import (
     RuntimeTransferFailure,
     RuntimeTransferOutcome,
     RuntimeTransferRecord,
+    RuntimeTransferSourceTransport,
     cancellation_settlement,
 )
 from azents.runtime.transfer.store import RuntimeTransferStateStore
@@ -144,12 +145,19 @@ class RuntimeRunnerTransferResultCoordinator:
             ):
                 return
             claim_id = record.stream_claim_id
-            if record.admission.source_transport.value == "direct_object":
+            if (
+                record.admission.source_transport
+                is RuntimeTransferSourceTransport.DIRECT_OBJECT
+            ):
+                expected_sha256 = (
+                    record.admission.expected_sha256
+                    if record.admission.source_handle is not None
+                    else (None if record.object is None else record.object.sha256)
+                )
                 if (
-                    record.object is not None
-                    or record.phase.value != "streaming"
+                    record.phase.value != "streaming"
                     or record.admission.expected_size != result.actual_size
-                    or record.admission.expected_sha256 != result.sha256
+                    or expected_sha256 != result.sha256
                 ):
                     return
                 verifying = await self._state_store.begin_verification(

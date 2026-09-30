@@ -9,7 +9,7 @@ tags: [files, runtime, implementation, plan]
 - Authority: [files-260929/REQ](../requirements/files-260929-direct-file-transfer.md), [files-260929/ADR](../adr/files-260929-direct-file-transfer.md), [files-260929/DESIGN](../design/files-260929-direct-file-transfer.md), approved revision `1` with exact IDs `M1`–`M8`.
 - Design delta: `None`.
 - Independent reviewer for **every** integrated phase: `/root/files-260929-reviewer` (one read-only reviewer, requested only by the primary agent after its integrated checks pass).
-- Primary agent: `/root`; owns implementation, integration, validation, review resolutions, phase progression, and PRs. No independent implementation delegation is planned.
+- Primary agent: `/root`; owns implementation, integration, validation, review resolutions, phase progression, and PRs. Bounded implementation helpers may own non-overlapping phase paths; the primary agent runs the integrated gates and requests the single assigned review.
 - Delivery: seven sequential, reviewable stacked PRs; phase `n+1` starts only after phase `n` PR is open. Create all PRs before monitoring the stack's CI. Do not merge without an explicit merge request.
 
 ## Phase and Interface Map

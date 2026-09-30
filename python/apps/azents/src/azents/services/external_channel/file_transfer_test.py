@@ -11,6 +11,7 @@ import pytest
 from azcommon.infra.s3.service import S3TransferCleanupRequired
 from azcommon.result import Failure, Success
 from azents_runtime_control.grpc_transfer_coordinator_client import (
+    CoordinatorSourceTransport,
     CoordinatorTransferFailure,
 )
 from fastapi import Depends
@@ -681,6 +682,7 @@ async def test_download_materializes_only_selected_current_provider_file() -> No
     assert storage.put_calls == []
     request = transfer.requests[0]
     assert request.destination == "/workspace/agent/report.csv"
+    assert request.source_transport is CoordinatorSourceTransport.DIRECT_OBJECT
     assert request.source.metadata.size == 7
 
 
