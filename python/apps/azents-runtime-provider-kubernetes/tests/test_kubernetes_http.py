@@ -3,7 +3,7 @@
 import dataclasses
 from collections import deque
 from collections.abc import Coroutine, Mapping, Sequence
-from typing import Any
+from typing import Any, assert_never
 
 import pytest
 from kubernetes_asyncio import client
@@ -773,6 +773,193 @@ async def test_core_resource_methods_use_exact_namespaced_paths() -> None:
         ("GET", "/api/v1/namespaces/azents-runtime/secrets/runtime-proxy"),
         ("POST", "/api/v1/namespaces/azents-runtime/secrets"),
     ]
+
+
+@dataclasses.dataclass(frozen=True)
+class CompleteResourceCase:
+    """A complete desired resource reconciled through generated SDK operations."""
+
+    resource: ServiceResource | ConfigMapResource | SecretResource
+    manifest: JsonObject
+    path: str
+
+    async def apply(self, api: KubernetesHttpApi) -> None:
+        match self.resource:
+            case ServiceResource():
+                await api.apply_service(self.resource)
+            case ConfigMapResource():
+                await api.apply_config_map(self.resource)
+            case SecretResource():
+                await api.apply_secret(self.resource)
+            case _:
+                assert_never(self.resource)
+
+
+@pytest.fixture(params=("Service", "ConfigMap", "Secret"))
+def complete_resource_case(request: pytest.FixtureRequest) -> CompleteResourceCase:
+    metadata = ObjectMeta(
+        name="runtime-proxy",
+        namespace="azents-runtime",
+        labels={"azents/runtime-id": "runtime-1"},
+        annotations={"azents/policy-digest": "desired"},
+    )
+    match request.param:
+        case "Service":
+            service = ServiceResource(
+                metadata=metadata,
+                spec=ServiceSpec(
+                    service_type="ClusterIP",
+                    cluster_ip="10.96.0.7",
+                    selector={"azents/resource-role": "proxy"},
+                    ports=(
+                        ServicePort(
+                            name="proxy",
+                            protocol="TCP",
+                            port=8080,
+                            target_port=8080,
+                        ),
+                    ),
+                ),
+            )
+            return CompleteResourceCase(
+                service,
+                service_manifest(service),
+                "/api/v1/namespaces/azents-runtime/services/runtime-proxy",
+            )
+        case "ConfigMap":
+            config_map = ConfigMapResource(
+                metadata=metadata, data={"policy.json": "{}"}, immutable=None
+            )
+            return CompleteResourceCase(
+                config_map,
+                config_map_manifest(config_map),
+                "/api/v1/namespaces/azents-runtime/configmaps/runtime-proxy",
+            )
+        case "Secret":
+            secret = SecretResource(
+                metadata=metadata,
+                data={"ca.crt": b"public"},
+                secret_type="Opaque",
+                immutable=None,
+            )
+            return CompleteResourceCase(
+                secret,
+                secret_manifest(secret),
+                "/api/v1/namespaces/azents-runtime/secrets/runtime-proxy",
+            )
+        case _:
+            raise AssertionError(f"Unsupported complete resource: {request.param}")
+
+
+@pytest.mark.asyncio
+async def test_complete_resource_replacement_removes_omitted_fields(
+    complete_resource_case: CompleteResourceCase,
+) -> None:
+    desired = complete_resource_case.manifest
+    existing = {
+        **desired,
+        "metadata": {
+            **desired["metadata"],
+            "labels": {**desired["metadata"]["labels"], "legacy-label": "obsolete"},
+            "annotations": {
+                **desired["metadata"]["annotations"],
+                "legacy-annotation": "obsolete",
+            },
+            "resourceVersion": "42",
+        },
+    }
+    if "data" in desired:
+        existing["data"] = {**desired["data"], "obsolete-key": "c3RhbGU="}
+    else:
+        existing["spec"] = {
+            **desired["spec"],
+            "selector": {**desired["spec"]["selector"], "obsolete-selector": "old"},
+        }
+    api = RecordingKubernetesHttpApi((existing, {}))
+
+    await complete_resource_case.apply(api)
+
+    assert [(item.method, item.path) for item in api.requests] == [
+        ("GET", complete_resource_case.path),
+        ("PUT", complete_resource_case.path),
+    ]
+    assert api.requests[1].json == {
+        **desired,
+        "metadata": {**desired["metadata"], "resourceVersion": "42"},
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("exhausted", (False, True))
+async def test_complete_resource_replacement_rereads_and_bounds_conflicts(
+    complete_resource_case: CompleteResourceCase, exhausted: bool
+) -> None:
+    desired = complete_resource_case.manifest
+    first = {
+        **desired,
+        "metadata": {**desired["metadata"], "resourceVersion": "42"},
+    }
+    second = {
+        **desired,
+        "metadata": {**desired["metadata"], "resourceVersion": "43"},
+    }
+    conflict = KubernetesApiRequestError(
+        method="PUT",
+        path=complete_resource_case.path,
+        status=409,
+        reason="Conflict",
+        body="resource version changed",
+    )
+    api = RecordingKubernetesHttpApi(
+        (first, conflict, second, conflict if exhausted else {})
+    )
+
+    if exhausted:
+        with pytest.raises(KubernetesApiRequestError) as caught:
+            await complete_resource_case.apply(api)
+        assert caught.value.status == 409
+    else:
+        await complete_resource_case.apply(api)
+
+    assert [(item.method, item.path) for item in api.requests] == [
+        ("GET", complete_resource_case.path),
+        ("PUT", complete_resource_case.path),
+        ("GET", complete_resource_case.path),
+        ("PUT", complete_resource_case.path),
+    ]
+    for index, version in ((1, "42"), (3, "43")):
+        assert api.requests[index].json == {
+            **desired,
+            "metadata": {**desired["metadata"], "resourceVersion": version},
+        }
+
+
+@pytest.mark.asyncio
+async def test_complete_resource_creation_conflict_rereads_then_replaces(
+    complete_resource_case: CompleteResourceCase,
+) -> None:
+    desired = complete_resource_case.manifest
+    existing = {
+        **desired,
+        "metadata": {**desired["metadata"], "resourceVersion": "42"},
+    }
+    conflict = KubernetesApiRequestError(
+        method="POST",
+        path=complete_resource_case.path.rsplit("/", 1)[0],
+        status=409,
+        reason="Conflict",
+        body="resource already exists",
+    )
+    api = RecordingKubernetesHttpApi((None, conflict, existing, {}))
+
+    await complete_resource_case.apply(api)
+
+    assert [item.method for item in api.requests] == ["GET", "POST", "GET", "PUT"]
+    assert api.requests[1].json == desired
+    assert api.requests[3].json == {
+        **desired,
+        "metadata": {**desired["metadata"], "resourceVersion": "42"},
+    }
 
 
 @pytest.mark.asyncio
