@@ -45,7 +45,7 @@ interface UploadResponse {
 }
 
 const DEFAULT_DEPENDENCIES: BrowserFileUploadDependencies = {
-  fetch: globalThis.fetch,
+  fetch: (input, init): Promise<Response> => globalThis.fetch(input, init),
   startFileHash,
 };
 
