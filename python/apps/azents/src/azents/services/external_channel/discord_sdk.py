@@ -32,6 +32,10 @@ class DiscordSDKResourceUnavailable(DiscordSDKError):
     """Discord no longer exposes the requested resource."""
 
 
+class DiscordSDKMessageUnavailable(DiscordSDKResourceUnavailable):
+    """Discord confirmed that the requested message no longer exists."""
+
+
 class DiscordSDKRateLimited(DiscordSDKError):
     """Discord rejected waiting beyond the configured rate-limit boundary."""
 
@@ -1383,8 +1387,6 @@ def _sdk_error(error: BaseException) -> DiscordSDKError:
         return error
     if isinstance(error, discord.Forbidden):
         return DiscordSDKPermissionDenied()
-    if isinstance(error, discord.NotFound):
-        return DiscordSDKResourceUnavailable()
     if isinstance(error, discord.RateLimited):
         return DiscordSDKRateLimited(max(1, min(int(error.retry_after), 300)))
     if isinstance(error, discord.HTTPException):
@@ -1393,6 +1395,8 @@ def _sdk_error(error: BaseException) -> DiscordSDKError:
         if error.status == 403:
             return DiscordSDKPermissionDenied()
         if error.status == 404:
+            if error.code == 10008:
+                return DiscordSDKMessageUnavailable()
             return DiscordSDKResourceUnavailable()
         if error.status == 429:
             return DiscordSDKRateLimited(1)

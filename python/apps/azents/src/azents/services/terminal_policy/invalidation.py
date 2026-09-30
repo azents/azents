@@ -1,38 +1,25 @@
 """Terminal policy source invalidation boundary."""
 
-import dataclasses
-import enum
-from typing import Annotated, Protocol
+from typing import Annotated
 
+from azcommon import di
 from fastapi import Depends
 
+from azents.runtime import deps as runtime_deps
+from azents.services.terminal_policy.invalidation_contracts import (
+    TerminalPolicyInvalidationPublisher,
+    TerminalPolicySourceInvalidation,
+    TerminalPolicySourceScope,
+)
 
-class TerminalPolicySourceScope(enum.StrEnum):
-    """Durable policy source that can revoke active Terminals."""
-
-    INFRASTRUCTURE_PROFILE = "infrastructure_profile"
-    WORKSPACE_PROFILE = "workspace_profile"
-    AGENT = "agent"
-
-
-@dataclasses.dataclass(frozen=True)
-class TerminalPolicySourceInvalidation:
-    """Content-free exact policy source invalidation."""
-
-    scope: TerminalPolicySourceScope
-    source_id: str
-    source_version: str
-
-
-class TerminalPolicyInvalidationPublisher(Protocol):
-    """Publish committed policy-source changes to volatile coordination."""
-
-    async def publish_terminal_policy_invalidation(
-        self,
-        invalidation: TerminalPolicySourceInvalidation,
-    ) -> None:
-        """Publish one committed source version without Terminal content."""
-        ...
+__all__ = [
+    "NoopTerminalPolicyInvalidationPublisher",
+    "TerminalPolicyInvalidationPublisher",
+    "TerminalPolicyInvalidationPublisherDependency",
+    "TerminalPolicySourceInvalidation",
+    "TerminalPolicySourceScope",
+    "get_terminal_policy_invalidation_publisher",
+]
 
 
 class NoopTerminalPolicyInvalidationPublisher:
@@ -46,9 +33,20 @@ class NoopTerminalPolicyInvalidationPublisher:
         del invalidation
 
 
-def get_terminal_policy_invalidation_publisher() -> TerminalPolicyInvalidationPublisher:
-    """Return the default policy invalidation publisher dependency."""
-    return NoopTerminalPolicyInvalidationPublisher()
+async def get_terminal_policy_invalidation_publisher(
+    container: Annotated[di.Container, Depends(di.get_container)],
+    publisher: Annotated[
+        TerminalPolicyInvalidationPublisher,
+        Depends(runtime_deps.get_runtime_terminal_policy_invalidation_publisher),
+    ],
+) -> TerminalPolicyInvalidationPublisher:
+    """Return the publisher composed by the request's ordinary dependency graph."""
+    binding = container.dependency_overrides.get(
+        get_terminal_policy_invalidation_publisher
+    )
+    if binding is None or binding is get_terminal_policy_invalidation_publisher:
+        raise RuntimeError("Terminal policy invalidation binding is missing.")
+    return publisher
 
 
 TerminalPolicyInvalidationPublisherDependency = Annotated[

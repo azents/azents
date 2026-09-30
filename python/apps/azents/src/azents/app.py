@@ -15,14 +15,22 @@ from starlette.types import Lifespan
 from azents.api import admin, internal, public, testenv
 from azents.consts import PROJECT_ROOT
 from azents.core.config import Config
+from azents.core.deps import AppContextBinding, get_appctx
 from azents.process_lifecycle import create_container, preload_process_services
+from azents.runtime import deps as runtime_deps
 from azents.services.external_channel.ingress_recovery import (
     ExternalChannelIngressRecoveryService,
 )
 from azents.services.runtime_provider_bootstrap.runner import (
     RuntimeProviderBootstrapRunner,
 )
+from azents.services.runtime_terminal.invalidation import (
+    get_runtime_terminal_invalidation_publisher,
+)
 from azents.services.system_bootstrap.service import SystemBootstrapService
+from azents.services.terminal_policy.invalidation import (
+    get_terminal_policy_invalidation_publisher,
+)
 from azents.utils.appctx import AppContext
 from azents.utils.fastapi.route import as_route_mounter, generate_short_operation_id
 
@@ -106,8 +114,8 @@ def _create_internal_sub_app(parent: FastAPI) -> FastAPI:
     """Configure the ``/internal`` sub-app.
 
     OpenAPI, Swagger, and ReDoc are disabled so the routes are not exposed in
-    the public spec. Dependency overrides are shared with the parent app so the
-    same config and DI container are resolved.
+    the public spec. Application bindings and explicit dependency overrides
+    are shared with the parent app.
     """
     sub_app = FastAPI(
         title="Azents Internal API",
@@ -117,6 +125,8 @@ def _create_internal_sub_app(parent: FastAPI) -> FastAPI:
         redoc_url=None,
         generate_unique_id_function=generate_short_operation_id,
     )
+    sub_app.state.appctx_binding = parent.state.appctx_binding
+    sub_app.state.di_container = parent.state.di_container
     sub_app.dependency_overrides = parent.dependency_overrides
     internal.mount(as_route_mounter(sub_app))
     return sub_app
@@ -220,8 +230,29 @@ def _create_fastapi_instance(
         openapi_url="/docs/openapi.json",
         generate_unique_id_function=generate_short_operation_id,
     )
-    app.dependency_overrides.update(container.dependency_overrides)
-    app.dependency_overrides[di.get_container] = lambda: container
+    app.state.appctx_binding = AppContextBinding(appctx)
+    app.state.di_container = container
+    production_publishers = {
+        get_runtime_terminal_invalidation_publisher: (
+            runtime_deps.get_runtime_terminal_invalidation_publisher
+        ),
+        get_terminal_policy_invalidation_publisher: (
+            runtime_deps.get_runtime_terminal_policy_invalidation_publisher
+        ),
+    }
+    app.dependency_overrides.update(
+        {
+            dependency: override
+            for dependency, override in container.dependency_overrides.items()
+            if dependency is not di.get_container
+            and not (
+                dependency is get_appctx
+                and isinstance(override, AppContextBinding)
+                and override.appctx is appctx
+            )
+            and override is not production_publishers.get(dependency)
+        }
+    )
 
     return app
 

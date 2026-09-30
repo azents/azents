@@ -17,11 +17,11 @@ from azents.runtime.terminal_coordination.data import (
 from azents.runtime.terminal_coordination.store import (
     RuntimeTerminalCoordinationStore,
 )
-from azents.services.runtime_terminal.invalidation import (
+from azents.services.runtime_terminal.invalidation_contracts import (
     RuntimeTerminalInvalidationPublisher,
 )
 from azents.services.runtime_terminal.service import RuntimeTerminalControlDispatcher
-from azents.services.terminal_policy.invalidation import (
+from azents.services.terminal_policy.invalidation_contracts import (
     TerminalPolicyInvalidationPublisher,
     TerminalPolicySourceInvalidation,
     TerminalPolicySourceScope,

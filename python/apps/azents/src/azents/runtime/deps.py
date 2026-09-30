@@ -48,10 +48,10 @@ from azents.runtime.terminal_integration import (
     CoordinatedRuntimeTerminalInvalidationPublisher,
     RuntimeTerminalPolicyInvalidationPublisher,
 )
-from azents.services.runtime_terminal.invalidation import (
+from azents.services.runtime_terminal.invalidation_contracts import (
     RuntimeTerminalInvalidationPublisher,
 )
-from azents.services.terminal_policy.invalidation import (
+from azents.services.terminal_policy.invalidation_contracts import (
     TerminalPolicyInvalidationPublisher,
 )
 from azents.utils.appctx import AppContext
