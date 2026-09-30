@@ -70,13 +70,13 @@ from azents.core.model_execution_options import (
     ModelExecutionOptionId,
     validate_supported_execution_options,
 )
+from azents.core.openai_client_config import openai_responses_client_config
 from azents.core.openrouter import OPENROUTER_API_BASE_URL
 from azents.core.xai import resolve_xai_api_base_url
 from azents.core.xai_oauth import (
     XAI_MODELS_CLIENT_VERSION,
     resolve_xai_usage_base_url,
 )
-from azents.engine.events.openai_responses import openai_responses_client_config
 from azents.repos.llm_provider_integration.data import (
     LLMProviderIntegrationWithSecrets,
 )

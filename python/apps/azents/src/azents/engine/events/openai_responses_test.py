@@ -58,6 +58,7 @@ from azents.core.enums import (
 )
 from azents.core.llm_catalog import ModelCapabilities
 from azents.core.model_execution_options import ModelExecutionOptionId
+from azents.core.openai_client_config import openai_responses_client_config
 from azents.engine.events.file_parts import ModelFileLoweringContent
 from azents.engine.events.litellm_responses import LiteLLMResponsesLowerer
 from azents.engine.events.openai_responses import (
@@ -69,7 +70,6 @@ from azents.engine.events.openai_responses import (
     OpenAIResponsesWebSocketConnection,
     OpenAISDKResponsesClient,
     create_openai_responses_client,
-    openai_responses_client_config,
     openai_responses_websocket_endpoint_eligible,
 )
 from azents.engine.events.protocols import (

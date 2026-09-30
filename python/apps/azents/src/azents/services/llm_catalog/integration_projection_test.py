@@ -580,7 +580,6 @@ async def test_deterministic_integration_sync_does_not_require_source_authority(
                 source_loader=LiteLLMSourceLoader(
                     http_client=client,
                     source_url="https://catalog.example.test/models.json",
-                    litellm_version="1.91.3",
                 ),
             ),
         ).sync_integration_catalog(
@@ -722,7 +721,6 @@ async def test_xai_oauth_sync_refreshes_before_listing(
                 source_loader=LiteLLMSourceLoader(
                     http_client=client,
                     source_url="https://catalog.example.test/models.json",
-                    litellm_version="1.91.3",
                 ),
             ),
         ).sync_integration_catalog(
@@ -837,7 +835,6 @@ async def test_xai_failure_preserves_last_successful_snapshot(
                 source_loader=LiteLLMSourceLoader(
                     http_client=client,
                     source_url="https://catalog.example.test/models.json",
-                    litellm_version="1.91.3",
                 ),
             ),
         )

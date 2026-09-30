@@ -1208,7 +1208,7 @@ class LiteLLMSourceSnapshotRepository:
         source_url: str,
         source_hash: str,
         model_count: int,
-        litellm_version: str,
+        litellm_version: str | None,
         payload: dict[str, Any],
     ) -> LiteLLMSourceSnapshot:
         """Store a validated remote snapshot and promote matching legacy content."""
@@ -1230,7 +1230,6 @@ class LiteLLMSourceSnapshotRepository:
                     "source_key": source_key,
                     "source_url": source_url,
                     "model_count": model_count,
-                    "litellm_version": litellm_version,
                     "loaded_source": "remote",
                     "payload": payload,
                     "created_at": sa.func.now(),

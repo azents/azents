@@ -10,7 +10,7 @@ import pytest
 from openai import AsyncOpenAI
 from PIL import Image
 
-from azents.engine.events.openai_responses import OpenAIResponsesClientConfig
+from azents.core.openai_client_config import OpenAIResponsesClientConfig
 from azents.engine.run.types import FunctionToolError, FunctionToolResult
 from azents.engine.tools.openai_image_generation import (
     OPENAI_IMAGE_DEFAULT_MODEL,

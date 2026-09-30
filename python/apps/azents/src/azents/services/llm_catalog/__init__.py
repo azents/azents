@@ -3,18 +3,15 @@
 import dataclasses
 import datetime
 import hashlib
-import importlib.metadata
 import json
+import os
 import re
 from collections.abc import AsyncIterator
-from importlib.resources import files
 from typing import Annotated, Any, assert_never
 
 import httpx
-import litellm
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
-from litellm.types.utils import ProviderSpecificModelInfo
 from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -80,6 +77,7 @@ from azents.services.kimi_oauth.data import (
 from azents.services.kimi_oauth.runtime import (
     ensure_runtime_tokens as ensure_kimi_runtime_tokens,
 )
+from azents.services.llm_catalog.source_metadata import SourceReasoningMetadata
 from azents.services.model_listing.data import (
     ModelListingOutput,
     NormalizedModelCandidate,
@@ -116,7 +114,6 @@ _LITELLM_SOURCE_MIN_REMOVAL_COUNT = 50
 _LITELLM_SOURCE_MIN_REMOVAL_RATIO = 0.02
 _LITELLM_PAYLOAD_ADAPTER = TypeAdapter(dict[str, dict[str, Any]])
 _LITELLM_ALIAS_LIST_ADAPTER = TypeAdapter(list[str])
-_PROVIDER_MODEL_INFO_ADAPTER = TypeAdapter(ProviderSpecificModelInfo)
 
 
 async def _get_litellm_source_http_client() -> AsyncIterator[httpx.AsyncClient]:
@@ -127,37 +124,25 @@ async def _get_litellm_source_http_client() -> AsyncIterator[httpx.AsyncClient]:
 
 def _get_litellm_source_url() -> str:
     """Return the configured LiteLLM model metadata URL."""
-    return litellm.model_cost_map_url
-
-
-def _get_litellm_version() -> str:
-    """Return the installed LiteLLM package version."""
-    return importlib.metadata.version("litellm")
+    return os.environ.get(
+        "LITELLM_MODEL_COST_MAP_URL",
+        "https://raw.githubusercontent.com/BerriAI/litellm/main/"
+        "model_prices_and_context_window.json",
+    )
 
 
 @dataclasses.dataclass(frozen=True)
 class LiteLLMSourceLoader:
-    """Load remote and package-bundled LiteLLM model metadata."""
+    """Load the retained public metadata without an executable package."""
 
     http_client: Annotated[httpx.AsyncClient, Depends(_get_litellm_source_http_client)]
     source_url: Annotated[str, Depends(_get_litellm_source_url)]
-    litellm_version: Annotated[str, Depends(_get_litellm_version)]
 
     async def fetch_remote(self) -> dict[str, dict[str, Any]]:
         """Fetch and decode the configured remote model metadata."""
         response = await self.http_client.get(self.source_url)
         response.raise_for_status()
         payload = _LITELLM_PAYLOAD_ADAPTER.validate_python(response.json())
-        return _expand_litellm_source_aliases(payload)
-
-    def load_bundled_fallback(self) -> dict[str, dict[str, Any]]:
-        """Load and decode LiteLLM's package-bundled fallback metadata."""
-        content = (
-            files("litellm")
-            .joinpath("model_prices_and_context_window_backup.json")
-            .read_text(encoding="utf-8")
-        )
-        payload = _LITELLM_PAYLOAD_ADAPTER.validate_json(content)
         return _expand_litellm_source_aliases(payload)
 
 
@@ -616,7 +601,7 @@ class LiteLLMSourceSyncService:
             )
             raise LiteLLMSourceSyncError(
                 "The remote LiteLLM model catalog could not be ingested."
-            ) from exc
+            ) from None
 
         source_hash = _source_payload_hash(payload)
         rejection_message: str | None = None
@@ -682,7 +667,7 @@ class LiteLLMSourceSyncService:
                     source_url=self.source_loader.source_url,
                     source_hash=source_hash,
                     model_count=len(payload),
-                    litellm_version=self.source_loader.litellm_version,
+                    litellm_version=None,
                     payload=payload,
                 )
                 await self.snapshot_repository.mark_attempt_succeeded(
@@ -727,37 +712,14 @@ class LiteLLMSourceSyncService:
             | ValidationError
         ),
     ) -> None:
-        """Record remote failure and bundled fallback provenance."""
-        fallback_payload: dict[str, dict[str, Any]] | None = None
-        fallback_failure: str | None = None
-        try:
-            fallback_payload = self.source_loader.load_bundled_fallback()
-        except (
-            OSError,
-            json.JSONDecodeError,
-            UnicodeDecodeError,
-            ValidationError,
-        ) as exc:
-            fallback_failure = str(exc)
-
+        """Record a safe remote failure without consulting package resources."""
+        failure_message = "The remote LiteLLM model catalog could not be ingested."
         diagnostics: dict[str, Any] = {
-            "source_kind": "bundled_fallback",
+            "source_kind": "remote",
             "source_url": self.source_loader.source_url,
-            "fetch_failure_reason": str(error),
-            "litellm_version": self.source_loader.litellm_version,
+            "fetch_failure_reason": failure_message,
+            "litellm_version": None,
         }
-        if fallback_payload is not None:
-            diagnostics.update(
-                {
-                    "fallback_content_hash": _source_payload_hash(fallback_payload),
-                    "fallback_model_count": len(fallback_payload),
-                    "fallback_provider_counts": _source_provider_counts(
-                        fallback_payload
-                    ),
-                }
-            )
-        if fallback_failure is not None:
-            diagnostics["fallback_failure_reason"] = fallback_failure
 
         async with self.session_manager() as session:
             await self.snapshot_repository.mark_attempt_failed(
@@ -765,7 +727,7 @@ class LiteLLMSourceSyncService:
                 attempt_id=attempt_id,
                 finished_at=_utcnow(),
                 failure_code=type(error).__name__,
-                failure_message=str(error),
+                failure_message=failure_message,
                 action_hint=(
                     "Retry after the configured LiteLLM source becomes available."
                 ),
@@ -1990,7 +1952,7 @@ def _capabilities_from_litellm_metadata(
     provider: LLMProvider,
     model_identifier: str,
 ) -> ModelCapabilities:
-    provider_info = _PROVIDER_MODEL_INFO_ADAPTER.validate_python(metadata)
+    provider_info = SourceReasoningMetadata.model_validate(metadata)
     return ModelCapabilities(
         context_window=ModelContextWindow(
             max_input_tokens=_positive_int(metadata.get("max_input_tokens")),
@@ -2006,7 +1968,7 @@ def _capabilities_from_litellm_metadata(
             strict_json_schema=metadata.get("supports_response_schema"),
         ),
         reasoning=ModelReasoningCapabilities(
-            supported=provider_info.get("supports_reasoning") is True,
+            supported=provider_info.supports_reasoning is True,
             effort_levels=_reasoning_effort_levels(provider_info),
         ),
         built_in_tools=ModelBuiltInToolCapabilities(
@@ -2024,25 +1986,25 @@ def _capabilities_from_litellm_metadata(
 
 
 def _reasoning_effort_levels(
-    model_info: ProviderSpecificModelInfo,
+    model_info: SourceReasoningMetadata,
 ) -> list[ModelReasoningEffort]:
     """Reconstruct ordered explicit efforts from LiteLLM capability flags."""
-    if model_info.get("supports_reasoning") is not True:
+    if model_info.supports_reasoning is not True:
         return []
 
     efforts: list[ModelReasoningEffort] = []
-    if model_info.get("supports_none_reasoning_effort") is True:
+    if model_info.supports_none_reasoning_effort is True:
         efforts.append(ModelReasoningEffort.NONE)
-    if model_info.get("supports_minimal_reasoning_effort") is True:
+    if model_info.supports_minimal_reasoning_effort is True:
         efforts.append(ModelReasoningEffort.MINIMAL)
 
-    if model_info.get("supports_low_reasoning_effort") is not False:
+    if model_info.supports_low_reasoning_effort is not False:
         efforts.append(ModelReasoningEffort.LOW)
     efforts.extend((ModelReasoningEffort.MEDIUM, ModelReasoningEffort.HIGH))
 
-    if model_info.get("supports_xhigh_reasoning_effort") is True:
+    if model_info.supports_xhigh_reasoning_effort is True:
         efforts.append(ModelReasoningEffort.XHIGH)
-    if model_info.get("supports_max_reasoning_effort") is True:
+    if model_info.supports_max_reasoning_effort is True:
         efforts.append(ModelReasoningEffort.MAX)
     return efforts
 

@@ -6,12 +6,14 @@ spec_type: domain
 domain: model-catalog
 code_paths:
   - python/apps/azents/src/azents/core/model_execution_options.py
+  - python/apps/azents/src/azents/core/openai_client_config.py
   - python/apps/azents/src/azents/core/agent.py
   - python/apps/azents/src/azents/core/llm_catalog.py
   - python/apps/azents/src/azents/core/llm_catalog_sync.py
   - python/apps/azents/src/azents/core/image_generation_catalog.py
   - python/apps/azents/src/azents/core/image_generation_config.py
   - python/apps/azents/src/azents/services/llm_catalog/__init__.py
+  - python/apps/azents/src/azents/services/llm_catalog/source_metadata.py
   - python/apps/azents/src/azents/services/image_generation_catalog/**
   - python/apps/azents/src/azents/services/llm_provider_integration/__init__.py
   - python/apps/azents/src/azents/services/chatgpt_oauth/__init__.py
@@ -40,7 +42,7 @@ code_paths:
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
   - typescript/apps/azents-web/src/trpc/routers/workspace-model-settings.ts
   - typescript/apps/azents-admin-web/src/features/model-catalog/containers/useModelCatalogPageContainer.ts
-last_verified_at: 2026-09-29
+last_verified_at: 2026-09-30
 spec_version: 27
 ---
 
@@ -154,18 +156,16 @@ estimation without promising entitlement, billing multipliers, or latency.
 
 ## Source snapshots and sync attempts
 
-LiteLLM is the current lowerer target projection source. System synchronization
+The public LiteLLM JSON dataset is the current projection metadata source. Catalog ingestion and reasoning-field validation use Azents-owned code without importing the executable LiteLLM package. System synchronization
 fetches the configured `LITELLM_MODEL_COST_MAP_URL` through an explicit source
 ingestion boundary, validates the JSON object, expands LiteLLM model aliases, and
 records a source-only sync attempt before any system projection is replaced. A
 successful attempt stores or
 promotes a content-addressed snapshot with `remote` provenance, source URL, fetch
-time, content hash, model count, LiteLLM package version, and payload.
+time, content hash, model count, optional historical LiteLLM package version, and payload. New source collection records no installed package version. Recollecting an existing content hash preserves its snapshot ID and historical package-version evidence; that value does not describe a package installed for the new collection.
 
 The latest validated remote DB snapshot is authoritative. A transport failure,
-malformed payload, or bundled package fallback records a failed source attempt with
-the fallback count, hash, package version, and failure reason but does not publish
-the fallback as source authority. An unexplained reduction of at least 50 models
+malformed payload records a failed source attempt with bounded failure diagnostics and leaves the last successful snapshot authoritative. The loader does not read package-bundled fallback data or publish an alternate source. An unexplained reduction of at least 50 models
 and at least two percent from the current authoritative snapshot is quarantined in
 the same way. Source attempt diagnostics record the complete added and removed
 model identifier sets plus provider-level count changes before publication.
@@ -190,7 +190,7 @@ OpenRouter integration catalogs fetch the authenticated account-visible text-out
 
 xAI API-key integration catalogs call the configured developer API through the installed OpenAI-compatible SDK. xAI OAuth integration catalogs refresh the stored OAuth credential when required and then call the authenticated Grok CLI proxy model endpoint with the pinned CLI request identity. Each response is authoritative only for that integration, so API-key and OAuth integrations may publish different model sets. Every valid provider-listed model remains selectable without a LiteLLM match. Provider-supplied context window, reasoning-effort, backend-search, and Responses-backend values take precedence; an exact `xai/<model>` LiteLLM entry or expanded alias may fill omitted capability fields and bounded pricing metadata. Missing source authority and exact-match misses remain diagnostic and leave unknown capabilities disabled.
 
-Reasoning capabilities are projected from LiteLLM's canonical provider model metadata schema. Explicit effort levels are reconstructed in the deterministic order `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`. The optional `none`, `minimal`, `xhigh`, and `max` levels follow their corresponding LiteLLM support flags. Every model marked as reasoning-capable receives the baseline `low`, `medium`, and `high` levels, except that an explicit `supports_low_reasoning_effort: false` removes `low`. A model with no projected effort levels allows no explicit effort override; an empty list is not interpreted as unrestricted support.
+Reasoning capabilities are projected from the retained JSON source's consumed support flags through an Azents-owned typed schema. Explicit effort levels are reconstructed in the deterministic order `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`. The optional `none`, `minimal`, `xhigh`, and `max` levels follow their corresponding source support flags. Every model marked as reasoning-capable receives the baseline `low`, `medium`, and `high` levels, except that an explicit `supports_low_reasoning_effort: false` removes `low`. A model with no projected effort levels allows no explicit effort override; an empty list is not interpreted as unrestricted support.
 
 Built-in tool capability projection is filtered through the implemented configurable registry. The current registry contains `web_search` and `image_generation`; unimplemented identifiers such as `web_fetch` are not advertised. Normalized support represents an effective selectable capability rather than only a provider-hosted feature. OpenAI API-key and ChatGPT OAuth GPT-6, GPT-5, GPT-4.1, GPT-4o, and o3 chat models expose client-executed image generation when function calling is not denied; trusted supported-tool lists can additionally establish support for another OpenAI model. Provider metadata that disables the hosted image tool does not disable this client tool. Other providers honor trusted `supports_image_generation: true | false` metadata before supported-tool lists. Selectable xAI API-key and xAI OAuth entries use chat mode plus function-calling support for client-executed Imagine. Generic image output modality alone is not evidence of image-tool support. Account credential validity, quota, and image-service entitlement remain runtime concerns. A future built-in tool becomes selectable only after capability projection, validation, runtime execution ownership, UI presentation, and deterministic coverage exist together.
 
