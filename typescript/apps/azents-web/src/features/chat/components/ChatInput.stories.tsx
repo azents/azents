@@ -797,6 +797,66 @@ export const SelectedActionChip = {
   },
 } satisfies Story;
 
+export const FailedActionWithTodo = {
+  args: {
+    ...baseArgs,
+    sessionId: "story-session-failed-action-with-todo",
+    todo,
+    onSendInput: fn(() => Promise.resolve(false)),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await userEvent.type(canvas.getByRole("textbox"), "/");
+    await userEvent.click(canvas.getByRole("option", { name: /compact/i }));
+    await userEvent.click(canvas.getByRole("button", { name: "Send" }));
+    await expect(args.onSendInput).toHaveBeenCalled();
+    const error = await canvas.findByText(
+      "Compact action failed. Edit it or try again.",
+    );
+    const previewText = args.goal?.objective ?? todo.items[0]?.content ?? "";
+    const preview = canvas.getByText(previewText).closest("button");
+    if (preview === null) {
+      throw new Error("Expected the Goal/Todo preview tab");
+    }
+    await expect(error).toBeVisible();
+    await waitFor(() =>
+      expect(error.getBoundingClientRect().bottom).toBeLessThanOrEqual(
+        preview.getBoundingClientRect().top,
+      ),
+    );
+    await expect(canvas.getByText("/compact")).toBeVisible();
+  },
+} satisfies Story;
+
+export const MobileFailedActionWithTodo = {
+  ...FailedActionWithTodo,
+  args: {
+    ...FailedActionWithTodo.args,
+    sessionId: "story-session-mobile-failed-action-with-todo",
+    isMobile: true,
+  },
+  decorators: [
+    (Story) => (
+      <StorybookCanvas maxWidth={rem(390)}>
+        <Story />
+      </StorybookCanvas>
+    ),
+  ],
+} satisfies Story;
+
+export const MobileFailedActionWithGoal = {
+  ...MobileFailedActionWithTodo,
+  args: {
+    ...MobileFailedActionWithTodo.args,
+    sessionId: "story-session-mobile-failed-action-with-goal",
+    goal: {
+      objective: "Finish checking the release evidence",
+      status: "active",
+    },
+    todo: { items: [] },
+  },
+} satisfies Story;
+
 export const SelectedActionPreservesMessage = {
   args: {
     ...baseArgs,
