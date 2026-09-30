@@ -526,7 +526,7 @@ class KubernetesHttpApi(KubernetesApi):
 
     async def apply_service(self, service: ServiceResource) -> None:
         await self._apply(
-            self.services, service.metadata, service_manifest(service), replace=False
+            self.services, service.metadata, service_manifest(service), replace=True
         )
 
     async def delete_service(self, name: str, namespace: str) -> None:
@@ -551,7 +551,7 @@ class KubernetesHttpApi(KubernetesApi):
             self.config_maps,
             config_map.metadata,
             config_map_manifest(config_map),
-            replace=False,
+            replace=True,
         )
 
     async def delete_config_map(self, name: str, namespace: str) -> None:
@@ -571,7 +571,7 @@ class KubernetesHttpApi(KubernetesApi):
 
     async def apply_secret(self, secret: SecretResource) -> None:
         await self._apply(
-            self.secrets, secret.metadata, secret_manifest(secret), replace=False
+            self.secrets, secret.metadata, secret_manifest(secret), replace=True
         )
 
     async def delete_secret(self, name: str, namespace: str) -> None:
