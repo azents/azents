@@ -52,8 +52,8 @@ code_paths:
   - python/apps/azents/src/azents/utils/logging.py
   - python/apps/azents/src/azents/services/session_git_worktree/**
   - python/apps/azents/src/azents/services/chat/workspace.py
-  - python/apps/azents/src/azents/services/file_download_stream.py
-  - python/apps/azents/src/azents/api/public/file_download.py
+  - python/apps/azents/src/azents/services/browser_file_download.py
+  - python/apps/azents/src/azents/core/file_transfer.py
   - python/apps/azents/src/azents/runtime/control_server.py
   - python/apps/azents/src/cli/devserver.py
   - python/apps/azents/src/cli/runtime_control_server.py
@@ -79,8 +79,8 @@ code_paths:
   - testenv/azents/e2e/src/tests/web/public/test_runtime_capability_web.py
   - testenv/azents/e2e/src/tests/web/public/test_runtime_web_gateway.py
   - infra/charts/azents/**
-last_verified_at: 2026-09-17
-spec_version: 89
+last_verified_at: 2026-09-30
+spec_version: 90
 ---
 
 # Agent Runtime Control
@@ -344,37 +344,40 @@ file metadata. Existing object and multipart cleanup responsibilities use opaque
 internal handles that are not exposed as storage authority.
 
 `RuntimeRunnerTransfer` is a distinct authenticated Runner gRPC service terminated by
-Runtime Control. `DownloadTransfer` streams ordered bounded raw frames from the
-Control-owned immutable attempt object to the Runner and ends with the verified byte
-count and SHA-256. `UploadTransfer` accepts an open frame, ordered bounded raw frames,
-and one completion frame. Control streams the frames into its attempt object, verifies
-the actual byte count and SHA-256, and only then makes the object available to a trusted
-consumer. Workspace Upload additionally exposes `ClaimDirectObjectDownload`: an exact
-attempt claim returns a transient read capability for the verified Workspace source,
-without placing its URL in the Runner Control intent or durable transfer state.
+Runtime Control. Complete-file feature callers use its metadata-only direct-object
+methods. `ClaimDirectObjectDownload` returns a transient presigned GET for the verified
+immutable attempt source. `ClaimDirectObjectUpload` binds the independently calculated
+Runner manifest to a transient presigned PUT; `RenewDirectObjectUpload` maintains the
+same active claim, and `CompleteDirectObjectUpload` verifies native storage evidence,
+copies ingress into an immutable owned object, and commits the verified result.
+The retained `DownloadTransfer`/`UploadTransfer` body RPCs are explicit transport
+surfaces, not fallbacks for these direct-object feature operations.
 
 The Runner receives only transfer/attempt identity, direction, Runtime path, expected
 manifest, deadline, operation correlation, and generation-scoped dispatch authority in
-the ordinary intent. For the direct Workspace Upload transport, the authenticated claim
+the ordinary intent. For direct inbound transfers, the authenticated claim
 RPC returns a short-lived presigned GET URL and bounded non-secret headers only after
 revalidating the exact attempt and current Runner generation. The URL is retained only
-by the active Runner HTTP client; credentials, bucket listing authority, writable
-object authority, and reusable storage handles are never given to the Runner. Runtime
-Control remains the byte relay only for the existing transfer-object gRPC paths; direct
-Workspace downloads stream from the configured S3-compatible endpoint into the Runner's
-local staging file.
+by the active Runner HTTP client; credentials, bucket listing authority, and reusable
+storage handles are never given to the Runner. An upload claim permits only the exact
+bound ingress write. General `import_file`, `run_tool_to_file` parts,
+`download_external_file`, and Workspace Upload use Runner direct GET.
+`present_file`, Runtime-file `channel_action`, `read_image`, and Workspace browser
+download preparation use Runner direct PUT. Worker and Control do not relay those
+complete-file bodies. Each eligible general file is bounded by the shared 128 MiB
+policy; image/model/provider semantic limits remain independently authoritative.
 
 Each attempt is admitted before any bytes move and is fenced by Runtime desired
 generation, accepted Runner generation, dispatch ID, deadline, and state revision.
 Ordered offsets, maximum sizes, expected and actual manifests, cancellation, and
 terminal state are checked at the Control boundary. A malformed, stale, duplicate, or
 cross-attempt frame fails that attempt without exposing another object. A direct
-Workspace claim is idempotent only for the same active attempt, dispatch, Runner
+object claim is idempotent only for the same active attempt, dispatch, Runner
 generation, claim identity, and owner; repeated claims renew the bounded stream lease
 while the HTTP body is active. Ordinary Runner control operations remain independently
 available while a transfer stream is active.
 
-For downloads, including direct Workspace downloads, the Runner writes to a randomly
+For inbound downloads, the Runner writes to a randomly
 named temporary file in the destination directory and commits the requested destination
 only after complete verification. An admitted overwrite atomically replaces the
 destination; failed and cancelled attempts remove their temporary file and leave the
@@ -387,20 +390,22 @@ only for the current dispatch and cannot be replaced by a late result.
 Verified objects are claimed by trusted consumers through short leases. A consumer
 receives an opaque handle and bounded async stream, acknowledges only after its
 product/provider publication succeeds, and abandons or settles a failed claim. The
-Workspace HTTP response consumer keeps the lease renewed while its single-use object
-iterator is consumed, verifies exact EOF against the trusted size and SHA-256, and
-acknowledges plus settles only after the final ASGI body send returns successfully.
-Source failure, lease loss, deadline expiry, disconnect, or cancellation before that
-commit point abandons and cancels the attempt; a later cancellation cannot reverse a
-committed response. Cleanup removes terminal objects and incomplete multipart
+Workspace browser-download consumer verifies object metadata and hands off a presigned
+GET valid for at most one minute. API and Next return empty authorized `302` responses;
+neither observes browser EOF. Successful settlement means ticket handoff, and the
+immutable source remains protected through capability/deadline expiry plus read grace.
+Source failure, lease loss, deadline expiry, or cancellation before handoff fails the
+attempt. Cleanup removes terminal objects and incomplete multipart
 preparations according to their bounded retention policy. A provider mutation is
 attempted at most once: no transfer or provider call is replayed after mutation starts
 or its outcome is unknown.
 
 Every attempt has a non-extendable logical expiration no later than one hour after
 admission. Runtime Control rejects every access after that deadline even when the
-physical object remains. Settlement immediately attempts exact object deletion or
-multipart abort. The bounded repair loop also scans one page of completed objects and
+physical object remains. Settlement attempts exact object deletion or multipart abort
+after any outstanding direct capability and bounded read grace no longer protect the
+object; it cannot delete a still-writable ingress or still-readable browser source.
+The bounded repair loop also scans one page of completed objects and
 one page of incomplete multipart uploads under the Control-owned transfer prefix,
 independently of the selected transfer-state backend. Storage-reported objects and
 uploads at least one hour old are deleted or aborted without recreating transfer state.
@@ -841,7 +846,8 @@ Runner is operation-only. It handles operations inside an already provisioned Ru
 
 - process start/write operations used by model-visible `exec_command` and `write_stdin`
 - file stat/list/read/write/grep
-- file upload/download body streams
+- direct-object file transfer intents, claim/renew/complete metadata, and bounded
+  explicit transport RPCs
 - Git repository/worktree operations used by operation TurnAction execution and cleanup
 - operation heartbeat/progress/final events
 
@@ -1100,6 +1106,10 @@ Required deterministic coverage:
 Live/provider evidence belongs in the testenv prerequisite system and must redact tokens, credential ids, auth headers, rendered secrets, and raw Runtime tokens.
 
 ## Changelog
+
+- **2026-09-30** (spec_version 90) — Promoted exact-attempt direct GET/PUT feature
+  paths, manifest-bound upload claims and immutable completion, authorized browser
+  ticket handoff, shared general-file policy, and capability-aware cleanup timing.
 
 - **2026-09-17 (spec_version=89)** — Added Workspace Upload's direct S3-compatible
   Runner download path: exact authenticated source claims, transient presigned GET

@@ -17,24 +17,24 @@ Design documents are accumulated records and are not listed individually in this
 |---|---|---|---|---|
 | [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-09-29 | 84 |
 | [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-09-30 | 174 |
-| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-09-29 | 81 |
+| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-09-30 | 81 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-08-23 | 15 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-09-26 | 8 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-09-29 | 27 |
-| [Runtime Provider](spec/domain/runtime-provider.md) | runtime-provider | - | 2026-09-18 | 33 |
+| [Runtime Provider](spec/domain/runtime-provider.md) | runtime-provider | - | 2026-09-30 | 34 |
 | [Scheduled Task Domain Spec](spec/domain/scheduled-task.md) | scheduled-task | - | 2026-09-15 | 12 |
-| [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-09-15 | 6 |
-| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-09-26 | 120 |
+| [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-09-30 | 7 |
+| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-09-30 | 121 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-09-16 | 22 |
-| [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-09-19 | 89 |
+| [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-09-30 | 90 |
 
 ## Living Specs — Flow
 
 | Title | Owner | Last Verified At | Spec Version |
 |---|---|---|---|
-| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-09-30 | 187 |
-| [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-09-17 | 89 |
-| [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-09-16 | 39 |
+| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-09-30 | 188 |
+| [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-09-30 | 90 |
+| [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-09-30 | 40 |
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-09-15 | 52 |
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-09-29 | 27 |
 | [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-09-13 | 41 |
@@ -42,7 +42,7 @@ Design documents are accumulated records and are not listed individually in this
 | [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-09-30 | 63 |
 | [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-09-12 | 45 |
 | [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-09-13 | 63 |
-| [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-09-25 | 51 |
+| [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-09-30 | 52 |
 | [Kimi OAuth Flow](spec/flow/kimi-oauth.md) | @Hardtack | 2026-09-23 | 3 |
 | [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-09-26 | 7 |
 | [OpenRouter API Key Provider Flow](spec/flow/openrouter-api-key.md) | @Hardtack | 2026-09-15 | 4 |
@@ -50,7 +50,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Public Release Publication](spec/flow/public-release.md) | @Hardtack | 2026-09-18 | 3 |
 | [Run Resume](spec/flow/run-resume.md) | @Hardtack | 2026-09-13 | 37 |
 | [Session Context Inspector](spec/flow/session-context-inspector.md) | @Hardtack | 2026-09-29 | 23 |
-| [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-09-29 | 71 |
+| [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-09-30 | 72 |
 | [xAI API Key Provider Flow](spec/flow/xai-api-key.md) | @Hardtack | 2026-09-15 | 4 |
 | [xAI OAuth Flow](spec/flow/xai-oauth.md) | @Hardtack | 2026-09-25 | 9 |
 
@@ -203,7 +203,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Add Agent Workspace File Management Operations Historical Requirements Reconstruction](requirements/file-260628-file-management.md) | file-260628 | 2026-06-28 | - |
 | [External Channel File Transfer Requirements](requirements/files-260723-external-channel-transfer.md) | files-260723 | 2026-07-23 | 2026-07-23 |
 | [Verified Large External File Transfer Requirements](requirements/files-260730-verified-large-file-transfer.md) | files-260730 | 2026-07-30 | 2026-07-30 |
-| [Direct File Transfer and Consistent File Limits Requirements](requirements/files-260929-direct-file-transfer.md) | files-260929 | 2026-09-29 | - |
+| [Direct File Transfer and Consistent File Limits Requirements](requirements/files-260929-direct-file-transfer.md) | files-260929 | 2026-09-29 | 2026-09-30 |
 | [Filesystem Skill Projection Revisions Historical Requirements Reconstruction](requirements/filesystem-260701-filesystem-skill-projection-revisions.md) | filesystem-260701 | 2026-07-01 | - |
 | [Runtime File Browser Upload Requirements](requirements/fileupload-260917-runtime-file-browser-upload.md) | fileupload-260917 | 2026-09-17 | - |
 | [Fold Turn Eligibility with Failure Veto Historical Requirements Reconstruction](requirements/fold-260712-fold-turn-eligibility-with-failure-veto.md) | fold-260712 | 2026-07-12 | - |

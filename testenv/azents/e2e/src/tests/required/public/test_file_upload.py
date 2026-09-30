@@ -8,7 +8,7 @@ import hashlib
 import json
 import time
 from collections.abc import Iterator
-from urllib.parse import unquote, urlsplit
+from urllib.parse import quote, unquote, urlsplit
 
 import azentsadminclient
 import azentspublicclient
@@ -19,6 +19,7 @@ from azentspublicclient.api.chat_v1_api import ChatV1Api
 from azentspublicclient.models.chat_upload_prepare_response import (
     ChatUploadPrepareResponse,
 )
+from azentspublicclient.models.upload_response import UploadResponse
 from pydantic import TypeAdapter, ValidationError
 from testcontainers.core.container import DockerContainer
 from types_boto3_s3.client import S3Client
@@ -30,7 +31,6 @@ from support.utils import (
     PNG_1X1,
     AgentSessionSetup,
     create_agent_session_setup,
-    create_chat_session,
     create_chat_session_with_agent,
     create_second_user_token,
     unique,
@@ -818,125 +818,117 @@ class TestDirectChatUpload:
         assert missing_digest.status_code == 422
 
 
-@pytest.mark.skip(reason="Session-scoped Exchange file listing API is not available.")
 class TestExchangeFiles:
-    """Test the Exchange file API."""
+    """Exercise the current attachment-ID download and delete contracts."""
 
-    def test_list_exchange_files_empty(
-        self,
-        public_api_client: azentspublicclient.ApiClient,
-        admin_api_client: azentsadminclient.ApiClient,
-        azents_public_server_url: str,
-    ) -> None:
-        """A session without files returns an empty list."""
-        token, session_id, _ = create_chat_session_with_agent(
-            public_api_client,
-            admin_api_client,
-            azents_public_server_url,
-        )
-
-        response = requests.get(
-            f"{azents_public_server_url}/chat/v1/sessions/{session_id}/exchange-files",
-            headers={"Authorization": f"Bearer {token}"},
-            timeout=10,
-        )
-        assert response.status_code == 200
-        body = response.json()
-        assert body["items"] == []
-
-    def test_list_exchange_files_without_auth_returns_401(
-        self,
-        azents_public_server_url: str,
-    ) -> None:
-        """Listing Exchange files without authentication returns 401."""
-        response = requests.get(
-            f"{azents_public_server_url}/chat/v1/sessions/{unique()}/exchange-files",
-            timeout=10,
-        )
-        assert response.status_code == 401
-
-    def test_list_exchange_files_other_users_session_returns_403(
-        self,
-        public_api_client: azentspublicclient.ApiClient,
-        admin_api_client: azentsadminclient.ApiClient,
-        azents_public_server_url: str,
-    ) -> None:
-        """Listing another user's Exchange files returns 403."""
-        _, session_id = create_chat_session(
-            public_api_client, admin_api_client, azents_public_server_url
-        )
-
-        other_token = create_second_user_token(public_api_client, admin_api_client)
-
-        response = requests.get(
-            f"{azents_public_server_url}/chat/v1/sessions/{session_id}/exchange-files",
-            headers={"Authorization": f"Bearer {other_token}"},
-            timeout=10,
-        )
-        assert response.status_code == 403
-
-    def test_upload_then_list_exchange_files(
-        self,
-        public_api_client: azentspublicclient.ApiClient,
-        admin_api_client: azentsadminclient.ApiClient,
-        azents_public_server_url: str,
-    ) -> None:
-        """A file upload appears in the Exchange file list."""
-        token, session_id, agent_id = create_chat_session_with_agent(
-            public_api_client,
-            admin_api_client,
-            azents_public_server_url,
-        )
-
-        content = b"hello session data"
-        upload_response = upload_file(
-            azents_public_server_url,
-            token,
-            agent_id,
-            filename="test.txt",
-            content=content,
-            media_type="text/plain",
-        )
-        assert upload_response.status_code == 200
-
-        list_response = requests.get(
-            f"{azents_public_server_url}/chat/v1/sessions/{session_id}/exchange-files",
-            headers={"Authorization": f"Bearer {token}"},
-            timeout=10,
-        )
-        assert list_response.status_code == 200
-        items = list_response.json()["items"]
-        assert len(items) >= 1
-        assert any(item["media_type"] == "text/plain" for item in items)
-
+    @pytest.mark.parametrize(
+        ("filename", "media_type", "content", "requested_inline", "effective_inline"),
+        [
+            ("download ü.txt", "text/plain", b"download exact bytes", False, False),
+            ("image.png", "image/png", PNG_1X1, True, True),
+            ("page.html", "text/html", b"<p>attachment only</p>", True, False),
+        ],
+        ids=["unicode-attachment", "safe-inline-image", "html-attachment"],
+    )
     def test_upload_then_download_exchange_file(
         self,
         public_api_client: azentspublicclient.ApiClient,
         admin_api_client: azentsadminclient.ApiClient,
         azents_public_server_url: str,
+        filename: str,
+        media_type: str,
+        content: bytes,
+        requested_inline: bool,
+        effective_inline: bool,
     ) -> None:
-        """An uploaded Exchange file can be downloaded."""
+        """Authorize metadata only; direct storage GET preserves safe response data."""
         token, _, agent_id = create_chat_session_with_agent(
             public_api_client,
             admin_api_client,
             azents_public_server_url,
         )
 
-        content = b"download test content"
         upload_response = upload_file(
             azents_public_server_url,
             token,
             agent_id,
-            filename="download.txt",
+            filename=filename,
             content=content,
-            media_type="text/plain",
+            media_type=media_type,
         )
         assert upload_response.status_code == 200
-        uri = upload_response.json()["uri"]
-        assert _exchange_uri_is_file_location(uri)
-        pytest.skip(
-            "Download API still requires exchange_file_id, not opaque Exchange URI."
+        uploaded = UploadResponse.model_validate(upload_response.json())
+        assert _exchange_uri_is_file_location(uploaded.uri)
+        download = requests.get(
+            f"{azents_public_server_url}/chat/v1/exchange-files/"
+            f"{uploaded.attachment_id}/download",
+            params={"disposition": "inline" if requested_inline else "attachment"},
+            headers=_headers(token),
+            timeout=30,
+            allow_redirects=False,
         )
+        assert download.status_code == 302
+        assert download.content == b""
+        assert download.headers["Cache-Control"] == "no-store"
+        assert download.headers["Referrer-Policy"] == "no-referrer"
+        assert (
+            urlsplit(download.headers["Location"]).netloc
+            != urlsplit(azents_public_server_url).netloc
+        )
+        try:
+            direct = requests.get(
+                download.headers["Location"], timeout=30, verify=False
+            )
+        except requests.RequestException as error:
+            raise AssertionError(
+                f"Exchange direct GET transport failed: {type(error).__name__}."
+            ) from None
+        assert direct.status_code == 200
+        assert direct.content == content
+        assert direct.headers["Content-Type"] == media_type
+        assert direct.headers["Content-Disposition"] == (
+            f"{'inline' if effective_inline else 'attachment'}; "
+            f"filename*=UTF-8''{quote(filename, safe='')}"
+        )
+
+    def test_download_and_delete_denials_issue_no_capability(
+        self,
+        public_api_client: azentspublicclient.ApiClient,
+        admin_api_client: azentsadminclient.ApiClient,
+        azents_public_server_url: str,
+    ) -> None:
+        """Authentication and current requester authority precede object access."""
+        token, _, agent_id = create_chat_session_with_agent(
+            public_api_client, admin_api_client, azents_public_server_url
+        )
+        response = upload_file(
+            azents_public_server_url,
+            token,
+            agent_id,
+            filename="private.txt",
+            content=b"private bytes",
+            media_type="text/plain",
+        )
+        assert response.status_code == 200
+        uploaded = UploadResponse.model_validate(response.json())
+        other_token = create_second_user_token(public_api_client, admin_api_client)
+        endpoint = (
+            f"{azents_public_server_url}/chat/v1/exchange-files/"
+            f"{uploaded.attachment_id}"
+        )
+        for headers, expected in [({}, 401), (_headers(other_token), 403)]:
+            denied = requests.get(
+                f"{endpoint}/download",
+                headers=headers,
+                timeout=10,
+                allow_redirects=False,
+            )
+            assert denied.status_code == expected
+            assert "Location" not in denied.headers
+            deletion = requests.delete(
+                endpoint, headers=headers, timeout=10, allow_redirects=False
+            )
+            assert deletion.status_code == expected
 
     def test_upload_then_delete_exchange_file(
         self,
@@ -961,11 +953,22 @@ class TestExchangeFiles:
             media_type="text/plain",
         )
         assert upload_response.status_code == 200
-        uri = upload_response.json()["uri"]
-        assert _exchange_uri_is_file_location(uri)
-        pytest.skip(
-            "Delete API still requires exchange_file_id, not opaque Exchange URI."
+        uploaded = UploadResponse.model_validate(upload_response.json())
+        assert _exchange_uri_is_file_location(uploaded.uri)
+        endpoint = (
+            f"{azents_public_server_url}/chat/v1/exchange-files/"
+            f"{uploaded.attachment_id}"
         )
+        deleted = requests.delete(endpoint, headers=_headers(token), timeout=10)
+        assert deleted.status_code == 204
+        unavailable = requests.get(
+            f"{endpoint}/download",
+            headers=_headers(token),
+            timeout=10,
+            allow_redirects=False,
+        )
+        assert unavailable.status_code == 404
+        assert "Location" not in unavailable.headers
 
 
 class TestUploadMessagePath:

@@ -28,8 +28,8 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
-last_verified_at: 2026-09-29
-spec_version: 71
+last_verified_at: 2026-09-30
+spec_version: 72
 ---
 
 # E2E Primary Test Strategy
@@ -50,6 +50,24 @@ This spec defines boundaries connecting azents feature design, E2E location, fix
 | `testenv/azents/support/`   | Promote only helpers confirmed to be repeatedly used in E2E/fixture/prerequisite.                            | Do not preemptively commonize.                                                                      |
 
 Manual-only runbook, blocked placeholder, removed-feature residue check, legacy TC markdown, `run-tc`, verifier, and markdown bash fallback are not part of event azents verification path. Primary evidence for product behavior QA is E2E result, and it is not separated into long-term catalog files.
+
+## Direct File Transfer Evidence
+
+Required file journeys exercise Chat metadata admission/direct PUT/finalize, Exchange
+attachment-ID authorized `302` download, access denial and deletion, Workspace
+upload/download, verified Runner transfers, Tool-result materialization, and real
+RustFS checksum/copy/expiry behavior, including a streamed 128 MiB storage round trip.
+Native browser journeys cover Chat and Workspace Web redirects with exact downloaded
+bytes/hash and safe filename preservation. RustFS fixture CORS remains PUT-only:
+download navigation and inline images are not cross-origin fetch APIs.
+
+Evidence records safe statuses, byte counts, hashes, and synthetic filenames; it omits
+capability URLs/query values, signed headers, object keys, credentials, and cookies.
+Capability issuance is not download completion: only browser-saved bytes establish
+browser completion. An existing strict network restriction E2E proves control-plane
+admission/configuration only, not packet-level direct-storage reachability in a deployed
+`proxy_required` or `no_network` Runtime. Operator rollout readiness and optional live
+provider prerequisites must remain explicit rather than being inferred from local tests.
 
 ## Deterministic Provider Boundaries
 
@@ -545,6 +563,9 @@ External substrate features such as Agent Runtime Provider are recorded in two l
 Local/PR environment without live substrate does not fake live PASS. Instead, separate prerequisite snapshot state and deterministic evidence in PR body and design QA record. If primary E2E substrate such as Browser runner or Docker/testcontainers is unavailable and product path cannot be executed, do not replace it with PASS. Track scenario, blocker category, observed error, expected verification target, and next action in GitHub Issue, and leave blocked evidence plus issue link in design QA record.
 
 ## Changelog
+
+- **2026-09-30** (spec_version 72) — Added real-storage/native-browser direct-file
+  evidence boundaries, capability-safe artifacts, and strict-network proof limitations.
 
 - **2026-09-29 (spec_version 71)** — Isolated explicit inference-profile response
   barriers from the fast-watchdog fixture without changing default timeout tests.

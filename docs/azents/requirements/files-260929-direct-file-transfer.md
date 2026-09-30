@@ -2,6 +2,7 @@
 title: "Direct File Transfer and Consistent File Limits Requirements"
 created: 2026-09-29
 updated: 2026-09-29
+implemented: 2026-09-30
 tags: [files, runtime, chat, external-channel, transfer]
 document_role: primary
 document_type: requirements

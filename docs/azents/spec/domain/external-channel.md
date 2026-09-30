@@ -98,7 +98,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/approval-requests/{access_request_id}
-last_verified_at: 2026-09-29
+last_verified_at: 2026-09-30
 spec_version: 81
 ---
 
@@ -376,11 +376,14 @@ effects are not replayed.
   unavailable, and `download_external_file` accepts no caller-selected size.
 - The trusted provider adapter refreshes current identity and authorization metadata,
   uses only the authenticated final download URL's HTTP `Content-Length` as the
-  declared transfer size and policy input, streams and counts the response body, and
+  declared transfer size and shared 128 MiB policy input, streams and counts the response body, and
   stages an immutable verified object before Runtime delivery. The GET response
   declaration and body must match that size exactly; excess bytes terminate streaming
   and an early end fails without a Runtime destination commit. Provider URLs and bytes
-  remain outside durable External Channel state.
+  remain outside durable External Channel state. Runner delivery uses the verified
+  immutable object's exact-attempt direct GET. Runtime outbound sources use direct
+  PUT before the trusted provider-native stream; effective outbound per-file and
+  aggregate settings remain separate from generic ingress policy.
 - Selected setup replay or configured binding acceptance atomically commits the
   Binding, real Session, initial Channel Work, and first content-free ingress item.
   Provider history, per-message mailbox admission, cursor advancement, and the running
@@ -655,6 +658,9 @@ already admitted for immediate one-attempt delivery. No cross-I/O lock, provider
 history, queue, retry, or fallback target is part of this boundary.
 
 ## Changelog
+
+- **2026-09-30** (spec_version 81) — Aligned provider ingress with shared 128 MiB
+  eligibility and direct Runner GET/PUT, retaining trusted staging and outbound policy.
 
 - **2026-09-14** (spec_version 80) — Omitted unavailable provider controls and
   explanatory status text from normal end-user account-linking surfaces while

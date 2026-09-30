@@ -1,5 +1,6 @@
 """Real RustFS coverage for bounded Runtime transfer S3 primitives."""
 
+import asyncio
 import hashlib
 import tempfile
 from collections.abc import AsyncIterator
@@ -67,6 +68,53 @@ async def test_rustfs_workspace_upload_readiness(
             bucket=s3_bucket_name,
             probe_prefix=_key("workspace-upload-readiness"),
         )
+
+
+@pytest.mark.asyncio
+async def test_rustfs_download_capability_expires_without_application_relay(
+    rustfs_container: DockerContainer,
+    rustfs_access_key: str,
+    rustfs_secret_key: str,
+    s3_bucket_name: str,
+) -> None:
+    """Real storage rejects an expired capability while the private object remains."""
+    identity = S3ObjectIdentity(bucket=s3_bucket_name, key=_key("expired-download"))
+    body = b"bounded browser authority"
+    async with _service(
+        rustfs_container=rustfs_container,
+        access_key=rustfs_access_key,
+        secret_key=rustfs_secret_key,
+    ) as service:
+        try:
+            await service.upload(identity.bucket, identity.key, body)
+            ticket = await service.get_download_request(
+                identity=identity,
+                expires_in=timedelta(seconds=2),
+                filename="bounded.txt",
+                content_type="text/plain",
+                inline=False,
+            )
+            try:
+                before = requests.get(ticket.url, timeout=10)
+            except requests.RequestException as error:
+                raise AssertionError(
+                    f"Storage direct GET transport failed: {type(error).__name__}."
+                ) from None
+            assert before.status_code == 200
+            assert before.content == body
+            # Elapsed time is the actual storage-enforced TTL contract.
+            await asyncio.sleep(3)
+            try:
+                expired = requests.get(ticket.url, timeout=10)
+            except requests.RequestException as error:
+                raise AssertionError(
+                    f"Expired direct GET transport failed: {type(error).__name__}."
+                ) from None
+            assert expired.status_code == 403
+            assert expired.content != body
+            assert await service.head(identity) is not None
+        finally:
+            await service.delete(identity.bucket, identity.key)
 
 
 @pytest.mark.asyncio
