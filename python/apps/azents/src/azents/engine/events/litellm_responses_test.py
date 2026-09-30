@@ -246,19 +246,25 @@ class TestLiteLLMResponsesLowerer:
 
         assert "service_tier" not in request.kwargs
 
-    def test_non_openai_provider_rejects_fast(self) -> None:
-        """Fail closed if invalid Fast intent crosses runtime validation."""
+    @pytest.mark.parametrize(
+        "option_id",
+        [ModelExecutionOptionId.FAST, ModelExecutionOptionId.ULTRAFAST],
+    )
+    def test_non_openai_provider_rejects_speed_options(
+        self, option_id: ModelExecutionOptionId
+    ) -> None:
+        """Fail closed if unsupported speed intent crosses runtime validation."""
         lowerer = LiteLLMResponsesLowerer(
             provider="anthropic",
             model="claude-sonnet",
             provider_id=LLMProvider.ANTHROPIC,
-            supported_execution_options=[ModelExecutionOptionId.FAST],
-            enabled_execution_options=[ModelExecutionOptionId.FAST],
+            supported_execution_options=[option_id],
+            enabled_execution_options=[option_id],
         )
 
         with pytest.raises(
             ValueError,
-            match="Fast execution is not supported by this provider",
+            match="Execution option is not supported by this provider",
         ):
             lowerer.lower([], model="claude-sonnet")
 
