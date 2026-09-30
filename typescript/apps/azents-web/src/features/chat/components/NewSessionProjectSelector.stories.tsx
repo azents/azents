@@ -101,6 +101,35 @@ export const MixedWorkspaces = {
   },
 } satisfies Story;
 
+export const WorkspaceModeAndRemoval = {
+  args: {
+    ...MixedWorkspaces.args,
+    onSetWorkspaceItemKind: fn(),
+    onRemoveWorkspaceItem: fn(),
+  },
+  play: async ({ args, canvasElement }) => {
+    const canvas = within(canvasElement);
+    const page = within(canvasElement.ownerDocument.body);
+    const repositorySelect = canvas.getAllByLabelText("Workspace item type")[0];
+    const worktreeRemove = canvas.getAllByRole("button", {
+      name: "Remove workspace item",
+    })[1];
+    if (!repositorySelect || !worktreeRemove) {
+      throw new Error("Expected repository and worktree row controls");
+    }
+    await userEvent.click(repositorySelect);
+    await userEvent.click(page.getByRole("option", { name: "New worktree" }));
+    await expect(args.onSetWorkspaceItemKind).toHaveBeenCalledWith(
+      "existing-azents",
+      "git_worktree",
+    );
+    await userEvent.click(worktreeRemove);
+    await expect(args.onRemoveWorkspaceItem).toHaveBeenCalledWith(
+      "worktree-api",
+    );
+  },
+} satisfies Story;
+
 export const WorktreeLoadingBranches = {
   args: {
     workspaceItems: [

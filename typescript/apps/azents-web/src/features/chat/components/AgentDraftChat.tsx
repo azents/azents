@@ -81,77 +81,91 @@ export function AgentDraftChat(
         flexDirection: "column",
       }}
     >
-      <AgentSettingsHeader
-        agent={agent}
-        controls={
-          <Group gap="xs" wrap="nowrap">
-            <NewSessionScopeSelector
-              value={sessionScope}
-              onChange={onSessionScopeChange}
-            />
-            {subscriptionUsage === null ? null : (
-              <ComposerSubscriptionUsagePopoverWithBoundary
-                compact
-                {...subscriptionUsage}
+      <Box style={{ flexShrink: 0 }}>
+        <AgentSettingsHeader
+          agent={agent}
+          controls={
+            <Group gap="xs" wrap="nowrap">
+              <NewSessionScopeSelector
+                value={sessionScope}
+                onChange={onSessionScopeChange}
               />
+              {subscriptionUsage === null ? null : (
+                <ComposerSubscriptionUsagePopoverWithBoundary
+                  compact
+                  {...subscriptionUsage}
+                />
+              )}
+            </Group>
+          }
+        />
+      </Box>
+      <Box
+        role="region"
+        aria-label={t("startConversation")}
+        flex={1}
+        mih={0}
+        style={{ display: "flex", flexDirection: "column", overflowY: "auto" }}
+      >
+        <Center px="md" py="lg" style={{ flex: "1 0 auto" }}>
+          <Stack align="center" gap="sm">
+            <IconMessageCircle size={48} color="var(--mantine-color-dimmed)" />
+            <Text fw={600} size="lg" ta="center">
+              {agent.name}
+            </Text>
+            <Text c="dimmed" size="sm" ta="center">
+              {t("startConversation")}
+            </Text>
+          </Stack>
+        </Center>
+        <Box px="md" pt="sm" style={{ flexShrink: 0 }}>
+          <Box maw={rem(920)} mx="auto">
+            {agent.runtime_capability === "managed" ? (
+              <NewSessionProjectSelector
+                activeWorktreeItemId={activeWorktreeItemId}
+                gitRefPreviewState={gitRefPreviewState}
+                projectPresetState={projectPresetState}
+                workspaceItems={workspaceItems}
+                onActivateWorktreeItem={onActivateWorktreeItem}
+                onAddPresetProject={onAddPresetProject}
+                onOpenProjectPicker={onOpenProjectPicker}
+                onSetWorkspaceItemKind={onSetWorkspaceItemKind}
+                onRemoveWorkspaceItem={onRemoveWorkspaceItem}
+                onSetWorktreeStartingRef={onSetWorktreeStartingRef}
+              />
+            ) : (
+              <Alert
+                color={
+                  agent.runtime_capability === "removing" ? "yellow" : "blue"
+                }
+                mb="sm"
+                title={
+                  agent.runtime_capability === "removing"
+                    ? t("runtimeRemovingProjectTitle")
+                    : t("runtimeFreeProjectTitle")
+                }
+              >
+                <Text size="sm">
+                  {agent.runtime_capability === "removing"
+                    ? t("runtimeRemovingProjectDescription")
+                    : t.rich("runtimeFreeProjectDescription", {
+                        runtimeLink: (chunks) => (
+                          <Anchor
+                            component={Link}
+                            href={`/w/${handle}/agents/${agent.id}/settings/runtime`}
+                          >
+                            {chunks}
+                          </Anchor>
+                        ),
+                      })}
+                </Text>
+              </Alert>
             )}
-          </Group>
-        }
-      />
-      <Center flex={1} mih={0} px="md">
-        <Stack align="center" gap="sm">
-          <IconMessageCircle size={48} color="var(--mantine-color-dimmed)" />
-          <Text fw={600} size="lg" ta="center">
-            {agent.name}
-          </Text>
-          <Text c="dimmed" size="sm" ta="center">
-            {t("startConversation")}
-          </Text>
-        </Stack>
-      </Center>
-      <Box px="md" py="sm" style={{ flexShrink: 0 }}>
+          </Box>
+        </Box>
+      </Box>
+      <Box px="md" pb="sm" style={{ flexShrink: 0 }}>
         <Box maw={rem(920)} mx="auto">
-          {agent.runtime_capability === "managed" ? (
-            <NewSessionProjectSelector
-              activeWorktreeItemId={activeWorktreeItemId}
-              gitRefPreviewState={gitRefPreviewState}
-              projectPresetState={projectPresetState}
-              workspaceItems={workspaceItems}
-              onActivateWorktreeItem={onActivateWorktreeItem}
-              onAddPresetProject={onAddPresetProject}
-              onOpenProjectPicker={onOpenProjectPicker}
-              onSetWorkspaceItemKind={onSetWorkspaceItemKind}
-              onRemoveWorkspaceItem={onRemoveWorkspaceItem}
-              onSetWorktreeStartingRef={onSetWorktreeStartingRef}
-            />
-          ) : (
-            <Alert
-              color={
-                agent.runtime_capability === "removing" ? "yellow" : "blue"
-              }
-              mb="sm"
-              title={
-                agent.runtime_capability === "removing"
-                  ? t("runtimeRemovingProjectTitle")
-                  : t("runtimeFreeProjectTitle")
-              }
-            >
-              <Text size="sm">
-                {agent.runtime_capability === "removing"
-                  ? t("runtimeRemovingProjectDescription")
-                  : t.rich("runtimeFreeProjectDescription", {
-                      runtimeLink: (chunks) => (
-                        <Anchor
-                          component={Link}
-                          href={`/w/${handle}/agents/${agent.id}/settings/runtime`}
-                        >
-                          {chunks}
-                        </Anchor>
-                      ),
-                    })}
-              </Text>
-            </Alert>
-          )}
           <ChatInput
             agentId={agent.id}
             sessionId={null}

@@ -5,6 +5,7 @@
 import {
   ActionIcon,
   Badge,
+  Box,
   Button,
   Group,
   Loader,
@@ -27,6 +28,7 @@ import {
   IconTrash,
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
+import styles from "./NewSessionProjectSelector.module.css";
 import type {
   GitRefPreviewState,
   NewSessionWorkspaceItemKind,
@@ -256,7 +258,7 @@ function WorkspaceKindSelect({
       ]}
       size="xs"
       value={value}
-      w={{ base: rem(132), sm: rem(168) }}
+      className={styles.workspaceKindSelect}
       onChange={(nextValue) => {
         if (isWorkspaceItemKind(nextValue)) {
           onSetWorkspaceItemKind(itemId, nextValue);
@@ -283,7 +285,7 @@ function ExistingProjectRow({
   const t = useTranslations("chat");
   return (
     <Paper p="xs" radius="md" withBorder>
-      <Group gap="sm" wrap="nowrap" align="center">
+      <Box className={styles.workspaceRow}>
         <ThemeIcon variant="light" color="blue" size="sm">
           <IconFolder size={iconSize()} />
         </ThemeIcon>
@@ -300,6 +302,7 @@ function ExistingProjectRow({
         />
         <ActionIcon
           aria-label={t("removeWorkspaceItem")}
+          className={styles.removeButton}
           color="red"
           size="sm"
           variant="subtle"
@@ -307,7 +310,7 @@ function ExistingProjectRow({
         >
           <IconTrash size={iconSize()} />
         </ActionIcon>
-      </Group>
+      </Box>
     </Paper>
   );
 }
@@ -355,7 +358,7 @@ function GitWorktreeRow({
       onClick={() => onActivateWorktreeItem(item.id)}
     >
       <Stack gap="xs">
-        <Group gap="sm" wrap="nowrap" align="center">
+        <Box className={styles.workspaceRow}>
           <ThemeIcon variant="light" color="grape" size="sm">
             <IconGitBranch size={iconSize()} />
           </ThemeIcon>
@@ -372,6 +375,7 @@ function GitWorktreeRow({
           />
           <ActionIcon
             aria-label={t("removeWorkspaceItem")}
+            className={styles.removeButton}
             color="red"
             size="sm"
             variant="subtle"
@@ -379,7 +383,7 @@ function GitWorktreeRow({
           >
             <IconTrash size={iconSize()} />
           </ActionIcon>
-        </Group>
+        </Box>
         <Group gap="xs" wrap="nowrap" align="flex-end">
           <Select
             data={gitRefOptions}

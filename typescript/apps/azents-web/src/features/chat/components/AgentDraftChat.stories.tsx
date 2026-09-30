@@ -1,5 +1,5 @@
 import { Box, rem } from "@mantine/core";
-import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
+import { expect, within } from "storybook/test";
 import { AgentDraftChat } from "./AgentDraftChat";
 import type { AgentDraftChatContainerOutput } from "../containers/useAgentDraftChatContainer";
 import type { AgentModelSelection, AgentResponse } from "@azents/public-client";
@@ -176,11 +176,9 @@ const meta = {
   component: AgentDraftChat,
   decorators: [
     (Story) => (
-      <StorybookCanvas maxWidth={rem(1120)}>
-        <Box h="100dvh">
-          <Story />
-        </Box>
-      </StorybookCanvas>
+      <Box h="100dvh" maw={rem(1120)} mx="auto" style={{ display: "flex" }}>
+        <Story />
+      </Box>
     ),
   ],
   args,
@@ -243,5 +241,123 @@ export const ProjectPresetError = {
       type: "ERROR",
       message: "Project presets could not be loaded.",
     },
+  },
+} satisfies Story;
+
+export const MobileWorkspaceSetup = {
+  args: {
+    ...ManagedProjectSetup.args,
+    isMobile: true,
+    agent: {
+      ...ManagedProjectSetup.args.agent,
+      name: "Azents Dev",
+    },
+    workspaceItems: [
+      {
+        id: "project-dev-workspace",
+        type: "existing_project",
+        path: "/workspace/agent/dev-workspace",
+      },
+      {
+        id: "project-home",
+        type: "existing_project",
+        path: "/workspace/agent/home",
+      },
+      {
+        id: "worktree-azents",
+        type: "git_worktree",
+        sourceProjectPath: "/workspace/agent/azents",
+        startingRef: "refs/heads/main",
+      },
+    ],
+    activeWorktreeItemId: "worktree-azents",
+  },
+  play: async ({ canvasElement }) => {
+    await assertDraftLayout(canvasElement);
+  },
+} satisfies Story;
+
+async function assertDraftLayout(canvasElement: HTMLElement): Promise<void> {
+  const canvas = within(canvasElement);
+  const setup = canvas.getByRole("region", {
+    name: "Send a message to start the conversation",
+  });
+  const composer = canvas.getByRole("textbox");
+  const illustration = setup.querySelector(".tabler-icon-message-circle");
+  if (illustration === null) {
+    throw new Error("Expected the draft conversation illustration");
+  }
+  await canvasElement.ownerDocument.fonts.ready;
+  const setupBounds = setup.getBoundingClientRect();
+  const composerBounds = composer.getBoundingClientRect();
+  await expect(illustration.getBoundingClientRect().top).toBeGreaterThanOrEqual(
+    setupBounds.top,
+  );
+  await expect(setupBounds.bottom).toBeLessThanOrEqual(composerBounds.top);
+  await expect(composerBounds.bottom).toBeLessThanOrEqual(
+    canvasElement.ownerDocument.documentElement.clientHeight,
+  );
+  await expect(setup.scrollWidth).toBeLessThanOrEqual(setup.clientWidth);
+
+  setup.scrollTop = setup.scrollHeight;
+  if (setup.scrollHeight > setup.clientHeight) {
+    await expect(setup.scrollTop).toBeGreaterThan(0);
+  }
+  await expect(composer.getBoundingClientRect().top).toBe(composerBounds.top);
+  await expect(composer.getBoundingClientRect().bottom).toBe(
+    composerBounds.bottom,
+  );
+
+  const context = canvasElement.ownerDocument
+    .createElement("canvas")
+    .getContext("2d");
+  if (context === null) {
+    throw new Error("Expected a canvas text measurement context");
+  }
+  for (const select of canvas.getAllByLabelText("Workspace item type")) {
+    if (!(select instanceof HTMLInputElement)) {
+      throw new Error("Expected a workspace type input");
+    }
+    const style = getComputedStyle(select);
+    context.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+    const availableWidth =
+      select.clientWidth -
+      Number.parseFloat(style.paddingLeft) -
+      Number.parseFloat(style.paddingRight);
+    await expect(context.measureText(select.value).width).toBeLessThanOrEqual(
+      availableWidth,
+    );
+  }
+  setup.scrollTop = 0;
+}
+
+export const ShortViewportWorkspaceSetup = {
+  args: MobileWorkspaceSetup.args,
+  decorators: [
+    (Story) => (
+      <Box h={rem(320)} w="100%" style={{ display: "flex" }}>
+        <Story />
+      </Box>
+    ),
+  ],
+  play: async ({ canvasElement }) => {
+    await assertDraftLayout(canvasElement);
+  },
+} satisfies Story;
+
+export const ManyWorkspaces = {
+  args: {
+    ...MobileWorkspaceSetup.args,
+    workspaceItems: [
+      ...MobileWorkspaceSetup.args.workspaceItems,
+      ...Array.from({ length: 6 }, (_, index) => ({
+        id: `extra-project-${index}`,
+        type: "existing_project" as const,
+        path: `/workspace/agent/a-long-repository-name-for-mobile-overflow-${index}`,
+      })),
+    ],
+  },
+  play: async ({ canvasElement }) => {
+    await assertDraftLayout(canvasElement);
   },
 } satisfies Story;

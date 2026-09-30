@@ -1,0 +1,27 @@
+.workspaceRow {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: var(--mantine-spacing-sm);
+}
+
+.workspaceKindSelect {
+  width: 10.5rem;
+}
+
+@media (max-width: $mantine-breakpoint-sm) {
+  .workspaceRow {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  .workspaceKindSelect {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    width: 100%;
+  }
+
+  .removeButton {
+    grid-column: 3;
+    grid-row: 1;
+  }
+}
