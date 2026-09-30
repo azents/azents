@@ -304,6 +304,28 @@ class KubernetesHttpApi(KubernetesApi):
                 event_type = str(event.get("type") or "")
                 if event_type == "BOOKMARK":
                     continue
+                if event_type == "ERROR":
+                    status = _required_object(event.get("object"), "watch Status")
+                    code = _required_int(status.get("code"), "watch Status code")
+                    if status.get("kind") != "Status" or not 400 <= code <= 599:
+                        raise RuntimeError("Kubernetes watch Status is malformed")
+                    reason = _optional_string(
+                        status.get("reason"), "watch Status reason"
+                    )
+                    message = _optional_string(
+                        status.get("message"), "watch Status message"
+                    )
+                    raise KubernetesApiRequestError(
+                        method="GET",
+                        path=f"/api/v1/namespaces/{namespace}/pods",
+                        status=code,
+                        reason=reason,
+                        body=(
+                            message
+                            if message is not None
+                            else "Kubernetes Pod watch returned a Status error"
+                        ),
+                    )
                 pod = _optional_object(event.get("object"), "watch object")
                 if pod is None:
                     continue

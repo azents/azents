@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+import aiohttp
 import grpc
 from azents_runtime_control.grpc_provider_client import (
     PROVIDER_AUTH_METHOD_KUBERNETES_SERVICE_ACCOUNT,
@@ -40,7 +41,10 @@ from azents_runtime_provider_kubernetes.kubernetes_api import (
     NetworkPolicyPeer,
     NetworkPolicyPort,
 )
-from azents_runtime_provider_kubernetes.kubernetes_http import KubernetesHttpApi
+from azents_runtime_provider_kubernetes.kubernetes_http import (
+    KubernetesApiRequestError,
+    KubernetesHttpApi,
+)
 from azents_runtime_provider_kubernetes.leader import (
     KubernetesLeaderElector,
     LeaderElectionConfig,
@@ -275,7 +279,7 @@ async def _report_pod_watch_events(
             grpc.aio.AioRpcError,
         ):
             raise
-        except Exception:
+        except aiohttp.ClientError, KubernetesApiRequestError:
             _LOGGER.warning(
                 "Runtime Provider Pod watch disconnected; reconnecting",
                 exc_info=True,
