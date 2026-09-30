@@ -9,6 +9,7 @@ from fastapi import HTTPException
 from fastapi.responses import RedirectResponse
 
 from azents.api.public.chat.v1 import (
+    delete_exchange_file,
     download_agent_workspace_file,
     download_exchange_file,
     read_agent_workspace_path,
@@ -163,6 +164,7 @@ async def test_exchange_redirect_delegates_safe_disposition_to_service(
         user_id="user-1",
         inline=disposition == "inline",
     )
+    assert response.headers["referrer-policy"] == "no-referrer"
 
 
 @pytest.mark.asyncio
@@ -190,4 +192,26 @@ async def test_exchange_denial_issues_no_capability(
         )
 
     assert raised.value.status_code == status_code
+    assert raised.value.headers is None
+
+
+@pytest.mark.asyncio
+async def test_exchange_delete_denial_forwards_requester_and_bounds_error() -> None:
+    """DELETE forwards authenticated identity and returns no storage diagnostics."""
+    current_user = CurrentUser(user_id="other-user", session_id="auth-session")
+    service = Mock(spec=ExchangeFileService)
+    service.delete = AsyncMock(return_value=Failure(FileAccessDenied()))
+
+    with pytest.raises(HTTPException) as raised:
+        await delete_exchange_file(
+            file_id="file-1",
+            current_user=current_user,
+            exchange_file_service=service,
+        )
+
+    service.delete.assert_awaited_once_with(
+        file_id="file-1", user_id=current_user.user_id
+    )
+    assert raised.value.status_code == 403
+    assert raised.value.detail == "File access denied."
     assert raised.value.headers is None

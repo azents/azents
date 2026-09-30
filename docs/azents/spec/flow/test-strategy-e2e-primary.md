@@ -29,7 +29,7 @@ code_paths:
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
 last_verified_at: 2026-09-30
-spec_version: 73
+spec_version: 74
 ---
 
 # E2E Primary Test Strategy
@@ -53,18 +53,28 @@ Manual-only runbook, blocked placeholder, removed-feature residue check, legacy 
 
 ## Direct File Transfer Evidence
 
-Required file journeys exercise Chat metadata admission/direct PUT/finalize, Exchange
-attachment-ID authorized `302` download, access denial and deletion, Workspace
-upload/download, verified Runner transfers, Tool-result materialization, and real
-RustFS checksum/copy/expiry behavior with small deterministic bodies. API, Worker,
-and Workspace fixtures inject a lowered 1 MiB general-file limit; boundary journeys
-exercise below-limit, inclusive-limit, and above-limit behavior without transferring
-128 MiB. Unit tests use a 16-byte limit for 15/16/17-byte boundaries. The completed
+Required file smoke tests retain the pre-transfer upload/auth/size, Exchange
+download/delete, image/file model-input, Workspace, and Runner journeys, adapted to
+metadata prepare/direct PUT/finalize and authorized empty `302` GET. The original
+five real RustFS primitive tests retain provider compatibility with small bodies.
+The stack-added checksum/publication/retry/owner/manifest matrix, ticket-expiry wait,
+streamed-copy duplicate, and dedicated native-browser file journeys are not recurring
+required E2E.
+
+Fast route/ASGI, mock-service, shared-S3, frontend transport/hash, and component tests
+own those boundaries: JSON-only manifests, invalid bodies, authorization before
+storage I/O, immutable/idempotent publication, native checksum/signature parameters,
+GET TTL/disposition/cache/referrer, streaming cleanup, and Worker progress/cancellation.
+Configured file-size boundaries use 15/16/17-byte unit bodies and metadata-only
+128 MiB schema probes; model-budget checks keep available attachment metadata without
+reading an ineligible original. API, Worker, and Workspace fixtures retain the lowering-
+only 1 MiB testenv limit. The completed
 128 MiB acceptance evidence is preserved in the
 [large-file validation report](../../design/direct-file-transfer-large-file-validation-report-2026-09-30.md),
 not executed in routine regression CI.
-Native browser journeys cover Chat and Workspace Web redirects with exact downloaded
-bytes/hash and safe filename preservation. RustFS fixture CORS remains PUT-only:
+The bounded native-browser acceptance evidence remains in that report rather than
+being duplicated in routine CI. Unit/component checks establish the native link and
+redirect contract, not proof of browser-saved bytes. RustFS fixture CORS remains PUT-only:
 download navigation and inline images are not cross-origin fetch APIs.
 
 Evidence records safe statuses, byte counts, hashes, and synthetic filenames; it omits
@@ -569,6 +579,10 @@ External substrate features such as Agent Runtime Provider are recorded in two l
 Local/PR environment without live substrate does not fake live PASS. Instead, separate prerequisite snapshot state and deterministic evidence in PR body and design QA record. If primary E2E substrate such as Browser runner or Docker/testcontainers is unavailable and product path cannot be executed, do not replace it with PASS. Track scenario, blocker category, observed error, expected verification target, and next action in GitHub Issue, and leave blocked evidence plus issue link in design QA record.
 
 ## Changelog
+
+- **2026-09-30** (spec_version 74) — Moved stack-added heavy file-transfer matrices
+  and native-browser journeys out of required E2E into fast unit/component ownership,
+  preserving pre-stack real-storage and product smoke boundaries.
 
 - **2026-09-30** (spec_version 73) — Replaced recurring heavyweight file journeys
   with lowered, injected limits and small protocol bodies; retained one-time

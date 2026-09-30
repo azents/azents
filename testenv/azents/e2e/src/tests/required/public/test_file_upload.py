@@ -3,34 +3,23 @@
 Verify uploads and Exchange file listing, download, and deletion.
 """
 
-import base64
 import hashlib
 import json
 import time
-from collections.abc import Iterator
-from urllib.parse import quote, unquote, urlsplit
+from urllib.parse import quote, urlsplit
 
 import azentsadminclient
 import azentspublicclient
-import boto3
-import pytest
 import requests
 from azentspublicclient.api.chat_v1_api import ChatV1Api
-from azentspublicclient.models.chat_upload_prepare_response import (
-    ChatUploadPrepareResponse,
-)
 from azentspublicclient.models.upload_response import UploadResponse
 from pydantic import TypeAdapter, ValidationError
-from testcontainers.core.container import DockerContainer
-from types_boto3_s3.client import S3Client
 from websockets.sync.client import connect as ws_connect
 from websockets.sync.connection import Connection
 
 from support.consts import E2E_GENERAL_FILE_MAXIMUM_BYTES
 from support.utils import (
     PNG_1X1,
-    AgentSessionSetup,
-    create_agent_session_setup,
     create_chat_session_with_agent,
     create_second_user_token,
     unique,
@@ -39,6 +28,7 @@ from support.utils import (
 
 _UPLOAD_PROMPT = "Describe uploaded image and file"
 _CHAT_UPLOAD_MAX_BYTES = E2E_GENERAL_FILE_MAXIMUM_BYTES
+_NONEXISTENT_AGENT_ID = "00000000000000000000000000000000"
 _JSON_OBJECT = TypeAdapter(dict[str, object])
 _JSON_OBJECT_LIST = TypeAdapter(list[dict[str, object]])
 
@@ -179,19 +169,6 @@ def _assert_file_payload_is_blob_free(payload: object, *, label: str) -> None:
 def _mock_openai_journal_payload(mock_openai_url: str) -> object:
     """Return the AIMock request journal payload."""
     return requests.get(f"{mock_openai_url}/v1/_requests", timeout=10).json()
-
-
-def _scenario_model_requests(payload: object, *, prompt: str) -> list[str]:
-    """Select only provider request bodies belonging to this unique scenario."""
-    bodies: list[str] = []
-    for entry in _object_items(payload, label="model request journal"):
-        body = json.dumps(
-            _object_item(entry.get("body"), label="model request body"),
-            ensure_ascii=False,
-        )
-        if prompt in body:
-            bodies.append(body)
-    return bodies
 
 
 def _reset_mock_openai(mock_openai_url: str) -> None:
@@ -349,15 +326,13 @@ class TestFileUpload:
     ) -> None:
         """Uploading to a nonexistent Agent returns 404."""
         token, _, _ = create_chat_session_with_agent(
-            public_api_client,
-            admin_api_client,
-            azents_public_server_url,
+            public_api_client, admin_api_client, azents_public_server_url
         )
 
         response = upload_file(
             azents_public_server_url,
             token,
-            "00000000000000000000000000000000",
+            _NONEXISTENT_AGENT_ID,
             filename="test.txt",
             content=b"hello",
             media_type="text/plain",
@@ -389,27 +364,15 @@ class TestFileUpload:
         )
         assert response.status_code == 403
 
-    @pytest.mark.parametrize(
-        ("size", "expected_status"),
-        [
-            (_CHAT_UPLOAD_MAX_BYTES + 1, 400),
-            (128 * 1024 * 1024 + 1, 422),
-        ],
-        ids=["configured-limit-exceeded", "schema-ceiling-exceeded"],
-    )
     def test_upload_exceeding_size_limit_rejects_metadata(
         self,
         public_api_client: azentspublicclient.ApiClient,
         admin_api_client: azentsadminclient.ApiClient,
         azents_public_server_url: str,
-        size: int,
-        expected_status: int,
     ) -> None:
-        """Configured and schema bounds reject metadata before any object PUT."""
+        """The current upload limit rejects metadata before any object PUT."""
         token, _, agent_id = create_chat_session_with_agent(
-            public_api_client,
-            admin_api_client,
-            azents_public_server_url,
+            public_api_client, admin_api_client, azents_public_server_url
         )
 
         response = requests.post(
@@ -418,12 +381,12 @@ class TestFileUpload:
             json={
                 "filename": "large.bin",
                 "media_type": "application/octet-stream",
-                "size": size,
+                "size": _CHAT_UPLOAD_MAX_BYTES + 1,
                 "sha256": hashlib.sha256(b"oversized metadata only").hexdigest(),
             },
             timeout=10,
         )
-        assert response.status_code == expected_status
+        assert response.status_code == 400
         assert "put_url" not in response.json()
 
 
@@ -432,414 +395,14 @@ class TestFileUpload:
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture
-def chat_upload_setup(
-    public_api_client: azentspublicclient.ApiClient,
-    admin_api_client: azentsadminclient.ApiClient,
-    azents_public_server_url: str,
-) -> AgentSessionSetup:
-    """Create upload authority through the ordinary user-facing APIs."""
-    return create_agent_session_setup(
-        public_api_client, admin_api_client, azents_public_server_url
-    )
-
-
-@pytest.fixture
-def chat_upload_s3(
-    rustfs_container: DockerContainer,
-    rustfs_access_key: str,
-    rustfs_secret_key: str,
-) -> Iterator[S3Client]:
-    """Observe native S3 integrity without writing product or fixture state."""
-    host = rustfs_container.get_container_host_ip()
-    port = rustfs_container.get_exposed_port(9000)
-    client: S3Client = boto3.client(
-        "s3",
-        endpoint_url=f"http://{host}:{port}",
-        aws_access_key_id=rustfs_access_key,
-        aws_secret_access_key=rustfs_secret_key,
-    )
-    try:
-        yield client
-    finally:
-        client.close()
-
-
-def _prepare_chat_upload(
-    server_url: str,
-    setup: AgentSessionSetup,
-    content: bytes,
-) -> ChatUploadPrepareResponse:
-    """Authorize metadata only; preparation never exposes an attachment."""
-    response = requests.post(
-        f"{server_url}/chat/v1/agents/{setup.agent_id}/uploads",
-        headers=_headers(setup.access_token),
-        json={
-            "filename": "direct-upload.bin",
-            "media_type": "application/octet-stream",
-            "size": len(content),
-            "sha256": hashlib.sha256(content).hexdigest(),
-        },
-        timeout=10,
-    )
-    assert response.status_code == 200
-    payload = _object_item(response.json(), label="Chat upload preparation")
-    assert set(payload) == {"upload_id", "put_url", "put_headers", "expires_at"}
-    return ChatUploadPrepareResponse.model_validate(payload)
-
-
-def _finalize_chat_upload(
-    server_url: str,
-    setup: AgentSessionSetup,
-    upload_id: str,
-) -> requests.Response:
-    """Finalize using current user authority without sending file bytes."""
-    return requests.post(
-        f"{server_url}/chat/v1/agents/{setup.agent_id}/uploads/{upload_id}/finalize",
-        headers=_headers(setup.access_token),
-        timeout=180,
-    )
-
-
-def _chat_ingress_key(ticket: ChatUploadPrepareResponse, bucket: str) -> str:
-    """Read the exact signed fixture object identity for read-only S3 evidence."""
-    prefix = f"/{bucket}/"
-    path = unquote(urlsplit(ticket.put_url).path)
-    assert path.startswith(prefix)
-    key = path.removeprefix(prefix)
-    assert key.startswith("exchange-uploads/")
-    assert key.endswith(f"/{ticket.upload_id}/ingress")
-    return key
-
-
-def _assert_no_chat_publication(
-    s3: S3Client, bucket: str, ticket: ChatUploadPrepareResponse
-) -> None:
-    """An unfinalized operation creates no source or Exchange publication."""
-    ingress_key = _chat_ingress_key(ticket, bucket)
-    workspace_id = ingress_key.split("/")[1]
-    publications = s3.list_objects_v2(
-        Bucket=bucket, Prefix=f"exchange/{workspace_id}/files/"
-    )
-    assert not publications.get("Contents")
-    objects = s3.list_objects_v2(
-        Bucket=bucket, Prefix=ingress_key.removesuffix("ingress")
-    )
-    assert all(entry["Key"] == ingress_key for entry in objects.get("Contents", []))
-
-
-class TestDirectChatUpload:
-    """Exercise real RustFS checksum and immutable Exchange publication."""
-
-    @pytest.mark.parametrize(
-        "size",
-        [_CHAT_UPLOAD_MAX_BYTES - 1, _CHAT_UPLOAD_MAX_BYTES],
-        ids=["below-configured-limit", "at-configured-limit"],
-    )
-    def test_configured_boundary_native_checksum_and_idempotent_publication(
-        self,
-        azents_public_server_url: str,
-        chat_upload_setup: AgentSessionSetup,
-        chat_upload_s3: S3Client,
-        s3_bucket_name: str,
-        mock_openai_url: str,
-        size: int,
-    ) -> None:
-        """Small injected limits exercise real checksum/copy/publication bounds."""
-        content = b"x" * size
-        digest = hashlib.sha256(content).hexdigest()
-        checksum = base64.b64encode(bytes.fromhex(digest)).decode("ascii")
-        ticket = _prepare_chat_upload(
-            azents_public_server_url, chat_upload_setup, content
-        )
-        assert ticket.put_headers["x-amz-checksum-sha256"] == checksum
-        assert "content-length" not in ticket.put_headers
-        assert "uploadId=" not in ticket.put_url
-        _assert_no_chat_publication(chat_upload_s3, s3_bucket_name, ticket)
-        missing_body = _finalize_chat_upload(
-            azents_public_server_url, chat_upload_setup, ticket.upload_id
-        )
-        assert missing_body.status_code == 400
-        _assert_no_chat_publication(chat_upload_s3, s3_bucket_name, ticket)
-
-        uploaded = requests.put(
-            ticket.put_url,
-            headers=ticket.put_headers,
-            data=content,
-            timeout=180,
-            verify=False,
-            allow_redirects=False,
-        )
-        assert uploaded.status_code == 200
-        ingress_key = _chat_ingress_key(ticket, s3_bucket_name)
-        ingress = chat_upload_s3.head_object(
-            Bucket=s3_bucket_name, Key=ingress_key, ChecksumMode="ENABLED"
-        )
-        assert ingress["ContentLength"] == size
-        assert ingress["ChecksumSHA256"] == checksum
-        _assert_no_chat_publication(chat_upload_s3, s3_bucket_name, ticket)
-
-        finalized = _finalize_chat_upload(
-            azents_public_server_url, chat_upload_setup, ticket.upload_id
-        )
-        assert finalized.status_code == 200
-        published = _object_item(finalized.json(), label="Chat upload publication")
-        assert published["size"] == size
-        assert _exchange_uri_is_file_location(published["uri"])
-        assert published["media_type"] == "application/octet-stream"
-        assert not {"put_url", "put_headers", "expires_at", "file_part"} & set(
-            published
-        )
-        repeated = _finalize_chat_upload(
-            azents_public_server_url, chat_upload_setup, ticket.upload_id
-        )
-        assert repeated.status_code == 200
-        assert repeated.json() == published
-
-        workspace_id = ingress_key.split("/")[1]
-        source_key = ingress_key.removesuffix("ingress") + "source"
-        source = chat_upload_s3.head_object(
-            Bucket=s3_bucket_name, Key=source_key, ChecksumMode="ENABLED"
-        )
-        assert source["ContentLength"] == size
-        assert source["Metadata"]["azents-transfer-sha256"] == digest
-        original_key = (
-            f"exchange/{workspace_id}/files/{published['attachment_id']}/original"
-        )
-        original = chat_upload_s3.get_object(
-            Bucket=s3_bucket_name, Key=original_key, ChecksumMode="ENABLED"
-        )
-        assert original["ContentLength"] == size
-        assert original["Metadata"]["azents-product-publication-sha256"] == digest
-        assert (
-            original["Metadata"]["azents-product-publication-id"]
-            == published["attachment_id"]
-        )
-        observed_digest = hashlib.sha256()
-        observed_size = 0
-        body = original["Body"]
-        try:
-            for chunk in body.iter_chunks(chunk_size=1024 * 1024):
-                observed_digest.update(chunk)
-                observed_size += len(chunk)
-        finally:
-            body.close()
-        assert observed_size == size
-        assert observed_digest.hexdigest() == digest
-        publications = chat_upload_s3.list_objects_v2(
-            Bucket=s3_bucket_name, Prefix=f"exchange/{workspace_id}/files/"
-        )
-        assert [entry["Key"] for entry in publications.get("Contents", [])] == [
-            original_key
-        ]
-        multipart = chat_upload_s3.list_multipart_uploads(
-            Bucket=s3_bucket_name, Prefix=ingress_key.removesuffix("ingress")
-        )
-        assert not multipart.get("Uploads")
-        prompt = f"Inspect the large direct attachment {ticket.upload_id}."
-        submitted = requests.post(
-            f"{azents_public_server_url}/chat/v1/sessions/"
-            f"{chat_upload_setup.session_id}/inputs",
-            headers=_headers(chat_upload_setup.access_token),
-            json={
-                "agent_id": chat_upload_setup.agent_id,
-                "client_request_id": f"large-upload-{unique()}",
-                "message": prompt,
-                "inference_profile": {
-                    "model_target_label": "default",
-                    "reasoning_effort": None,
-                    "enabled_execution_options": [],
-                },
-                "attachments": [published["uri"]],
-            },
-            timeout=10,
-        )
-        submitted.raise_for_status()
-        message = _wait_for_rest_message(
-            azents_public_server_url,
-            chat_upload_setup.access_token,
-            chat_upload_setup.session_id,
-            prompt,
-        )
-        attachments = _object_items(
-            message["attachments"], label="large user-message attachments"
-        )
-        assert len(attachments) == 1
-        assert attachments[0]["uri"] == published["uri"]
-        assert attachments[0]["size"] == size
-        deadline = time.monotonic() + 90
-        warning = (
-            f"{size} bytes > 1000000 bytes. This file was not stored as model input."
-        )
-        while time.monotonic() < deadline:
-            scenario_requests = _scenario_model_requests(
-                _mock_openai_journal_payload(mock_openai_url), prompt=prompt
-            )
-            if any(warning in request for request in scenario_requests):
-                break
-            time.sleep(0.5)
-        else:
-            raise AssertionError(
-                "Large attachment model-input warning was not observed."
-            )
-        _assert_file_payload_is_blob_free(message, label="large user message")
-        for request in scenario_requests:
-            assert len(request) < 1024 * 1024
-            _assert_file_payload_is_blob_free(request, label="large model input")
-
-    @pytest.mark.parametrize(
-        "failure", ["missing_checksum", "wrong_checksum", "wrong_body"]
-    )
-    def test_invalid_put_never_publishes_and_same_operation_can_retry(
-        self,
-        failure: str,
-        azents_public_server_url: str,
-        chat_upload_setup: AgentSessionSetup,
-        chat_upload_s3: S3Client,
-        s3_bucket_name: str,
-    ) -> None:
-        """Signature/native digest rejection leaves no attachment or source."""
-        content = b"checksum-bound direct upload"
-        ticket = _prepare_chat_upload(
-            azents_public_server_url, chat_upload_setup, content
-        )
-        headers = dict(ticket.put_headers)
-        uploaded_content = content
-        if failure == "missing_checksum":
-            del headers["x-amz-checksum-sha256"]
-        elif failure == "wrong_checksum":
-            headers["x-amz-checksum-sha256"] = base64.b64encode(b"\x00" * 32).decode()
-        else:
-            uploaded_content = b"z" * len(content)
-        rejected = requests.put(
-            ticket.put_url,
-            headers=headers,
-            data=uploaded_content,
-            timeout=30,
-            verify=False,
-            allow_redirects=False,
-        )
-        assert rejected.status_code in {400, 403}
-        failed = _finalize_chat_upload(
-            azents_public_server_url, chat_upload_setup, ticket.upload_id
-        )
-        assert failed.status_code == 400
-        _assert_no_chat_publication(chat_upload_s3, s3_bucket_name, ticket)
-        retried = requests.put(
-            ticket.put_url,
-            headers=ticket.put_headers,
-            data=content,
-            timeout=30,
-            verify=False,
-            allow_redirects=False,
-        )
-        assert retried.status_code == 200
-        finalized = _finalize_chat_upload(
-            azents_public_server_url, chat_upload_setup, ticket.upload_id
-        )
-        assert finalized.status_code == 200
-        assert finalized.json()["size"] == len(content)
-
-    def test_finalize_rechecks_current_owner_before_and_after_publication(
-        self,
-        azents_public_server_url: str,
-        public_api_client: azentspublicclient.ApiClient,
-        admin_api_client: azentsadminclient.ApiClient,
-        chat_upload_setup: AgentSessionSetup,
-        chat_upload_s3: S3Client,
-        s3_bucket_name: str,
-    ) -> None:
-        """A PUT capability never gives another API caller publication authority."""
-        content = b"owner-scoped direct upload"
-        ticket = _prepare_chat_upload(
-            azents_public_server_url, chat_upload_setup, content
-        )
-        uploaded = requests.put(
-            ticket.put_url,
-            headers=ticket.put_headers,
-            data=content,
-            timeout=30,
-            verify=False,
-            allow_redirects=False,
-        )
-        assert uploaded.status_code == 200
-        other_token = create_second_user_token(public_api_client, admin_api_client)
-        finalize_url = (
-            f"{azents_public_server_url}/chat/v1/agents/{chat_upload_setup.agent_id}"
-            f"/uploads/{ticket.upload_id}/finalize"
-        )
-        denied = requests.post(finalize_url, headers=_headers(other_token), timeout=10)
-        assert denied.status_code == 403
-        _assert_no_chat_publication(chat_upload_s3, s3_bucket_name, ticket)
-        anonymous = requests.post(finalize_url, timeout=10)
-        assert anonymous.status_code == 401
-        published = _finalize_chat_upload(
-            azents_public_server_url, chat_upload_setup, ticket.upload_id
-        )
-        assert published.status_code == 200
-        denied_replay = requests.post(
-            finalize_url, headers=_headers(other_token), timeout=10
-        )
-        assert denied_replay.status_code == 403
-        replay = _finalize_chat_upload(
-            azents_public_server_url, chat_upload_setup, ticket.upload_id
-        )
-        assert replay.status_code == 200
-        assert replay.json() == published.json()
-
-    def test_chat_upload_api_rejects_multipart_and_missing_manifest(
-        self,
-        azents_public_server_url: str,
-        chat_upload_setup: AgentSessionSetup,
-    ) -> None:
-        """There is no legacy body relay or checksum-free preparation fallback."""
-        base = f"{azents_public_server_url}/chat/v1/agents/{chat_upload_setup.agent_id}"
-        headers = _headers(chat_upload_setup.access_token)
-        legacy = requests.post(
-            f"{base}/upload",
-            files={"file": ("legacy.txt", b"body", "text/plain")},
-            headers=headers,
-            timeout=10,
-        )
-        assert legacy.status_code == 404
-        multipart = requests.post(
-            f"{base}/uploads",
-            files={"file": ("legacy.txt", b"body", "text/plain")},
-            headers=headers,
-            timeout=10,
-        )
-        assert multipart.status_code == 422
-        missing_digest = requests.post(
-            f"{base}/uploads",
-            json={"filename": "test.txt", "media_type": "text/plain", "size": 4},
-            headers=headers,
-            timeout=10,
-        )
-        assert missing_digest.status_code == 422
-
-
 class TestExchangeFiles:
     """Exercise the current attachment-ID download and delete contracts."""
 
-    @pytest.mark.parametrize(
-        ("filename", "media_type", "content", "requested_inline", "effective_inline"),
-        [
-            ("download ü.txt", "text/plain", b"download exact bytes", False, False),
-            ("image.png", "image/png", PNG_1X1, True, True),
-            ("page.html", "text/html", b"<p>attachment only</p>", True, False),
-        ],
-        ids=["unicode-attachment", "safe-inline-image", "html-attachment"],
-    )
     def test_upload_then_download_exchange_file(
         self,
         public_api_client: azentspublicclient.ApiClient,
         admin_api_client: azentsadminclient.ApiClient,
         azents_public_server_url: str,
-        filename: str,
-        media_type: str,
-        content: bytes,
-        requested_inline: bool,
-        effective_inline: bool,
     ) -> None:
         """Authorize metadata only; direct storage GET preserves safe response data."""
         token, _, agent_id = create_chat_session_with_agent(
@@ -847,14 +410,15 @@ class TestExchangeFiles:
             admin_api_client,
             azents_public_server_url,
         )
-
+        filename = "download.txt"
+        content = b"download test content"
         upload_response = upload_file(
             azents_public_server_url,
             token,
             agent_id,
             filename=filename,
             content=content,
-            media_type=media_type,
+            media_type="text/plain",
         )
         assert upload_response.status_code == 200
         uploaded = UploadResponse.model_validate(upload_response.json())
@@ -862,7 +426,7 @@ class TestExchangeFiles:
         download = requests.get(
             f"{azents_public_server_url}/chat/v1/exchange-files/"
             f"{uploaded.attachment_id}/download",
-            params={"disposition": "inline" if requested_inline else "attachment"},
+            params={"disposition": "attachment"},
             headers=_headers(token),
             timeout=30,
             allow_redirects=False,
@@ -885,50 +449,10 @@ class TestExchangeFiles:
             ) from None
         assert direct.status_code == 200
         assert direct.content == content
-        assert direct.headers["Content-Type"] == media_type
+        assert direct.headers["Content-Type"] == "text/plain"
         assert direct.headers["Content-Disposition"] == (
-            f"{'inline' if effective_inline else 'attachment'}; "
-            f"filename*=UTF-8''{quote(filename, safe='')}"
+            f"attachment; filename*=UTF-8''{quote(filename, safe='')}"
         )
-
-    def test_download_and_delete_denials_issue_no_capability(
-        self,
-        public_api_client: azentspublicclient.ApiClient,
-        admin_api_client: azentsadminclient.ApiClient,
-        azents_public_server_url: str,
-    ) -> None:
-        """Authentication and current requester authority precede object access."""
-        token, _, agent_id = create_chat_session_with_agent(
-            public_api_client, admin_api_client, azents_public_server_url
-        )
-        response = upload_file(
-            azents_public_server_url,
-            token,
-            agent_id,
-            filename="private.txt",
-            content=b"private bytes",
-            media_type="text/plain",
-        )
-        assert response.status_code == 200
-        uploaded = UploadResponse.model_validate(response.json())
-        other_token = create_second_user_token(public_api_client, admin_api_client)
-        endpoint = (
-            f"{azents_public_server_url}/chat/v1/exchange-files/"
-            f"{uploaded.attachment_id}"
-        )
-        for headers, expected in [({}, 401), (_headers(other_token), 403)]:
-            denied = requests.get(
-                f"{endpoint}/download",
-                headers=headers,
-                timeout=10,
-                allow_redirects=False,
-            )
-            assert denied.status_code == expected
-            assert "Location" not in denied.headers
-            deletion = requests.delete(
-                endpoint, headers=headers, timeout=10, allow_redirects=False
-            )
-            assert deletion.status_code == expected
 
     def test_upload_then_delete_exchange_file(
         self,

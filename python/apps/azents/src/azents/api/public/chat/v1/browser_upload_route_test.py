@@ -6,8 +6,10 @@ from unittest.mock import Mock
 import pytest
 from azcommon.infra.s3.service import S3PresignedRequest
 from azcommon.result import Failure, Success
-from fastapi import HTTPException, Response
+from fastapi import APIRouter, FastAPI, HTTPException, Response
 from fastapi.openapi.utils import get_openapi
+from fastapi.routing import APIRoute
+from httpx import ASGITransport, AsyncClient
 from pydantic import ValidationError
 
 from azents.api.public.chat.v1 import (
@@ -16,7 +18,7 @@ from azents.api.public.chat.v1 import (
     router,
 )
 from azents.api.public.chat.v1.data import ChatUploadPrepareRequest
-from azents.core.auth.deps import CurrentUser
+from azents.core.auth.deps import CurrentUser, get_current_user
 from azents.core.enums import ExchangeFileOrigin, ExchangeFileStatus
 from azents.core.exchange_upload import ExchangeUploadError
 from azents.repos.exchange_file.data import ExchangeFile
@@ -65,6 +67,7 @@ def test_chat_upload_routes_expose_only_json_control_and_no_raw_body() -> None:
     """Prepare is JSON-only; finalize has no upload body or storage selectors."""
     openapi = get_openapi(title="test", version="1", routes=router.routes)
     prepare = openapi["paths"]["/agents/{agent_id}/uploads"]["post"]
+    assert "/agents/{agent_id}/upload" not in openapi["paths"]
     finalize = openapi["paths"]["/agents/{agent_id}/uploads/{upload_id}/finalize"][
         "post"
     ]
@@ -92,6 +95,59 @@ def test_chat_upload_routes_expose_only_json_control_and_no_raw_body() -> None:
     for operation in (prepare, finalize):
         assert all(parameter["in"] == "path" for parameter in operation["parameters"])
         assert set(operation["responses"]["200"]["content"]) == {"application/json"}
+
+
+def _http_app(service: Mock) -> FastAPI:
+    """Use the real router with isolated authenticated-user/service boundaries."""
+    app = FastAPI()
+    upload_router = APIRouter(
+        routes=[
+            route
+            for route in router.routes
+            if isinstance(route, APIRoute)
+            and route.endpoint
+            in {prepare_file_upload_for_agent, finalize_file_upload_for_agent}
+        ]
+    )
+    app.include_router(upload_router)
+    app.dependency_overrides[get_current_user] = _current_user
+    app.dependency_overrides[ExchangeFileService] = lambda: service
+    return app
+
+
+@pytest.mark.parametrize(("path", "status"), [("upload", 404), ("uploads", 422)])
+async def test_multipart_http_requests_do_not_reach_upload_service(
+    path: str, status: int
+) -> None:
+    """A tiny ASGI request preserves the removed real-server multipart checks."""
+    service = Mock(spec=ExchangeFileService)
+    async with AsyncClient(
+        transport=ASGITransport(app=_http_app(service)), base_url="https://api.test"
+    ) as client:
+        response = await client.post(
+            f"/agents/{_AGENT_ID}/{path}",
+            files={"file": ("legacy.txt", b"body", "text/plain")},
+        )
+    assert response.status_code == status
+    assert "put_url" not in response.text
+    service.prepare_agent_browser_upload.assert_not_awaited()
+    service.finalize_agent_browser_upload.assert_not_awaited()
+
+
+async def test_missing_manifest_http_request_does_not_reach_upload_service() -> None:
+    """Missing checksum validation precedes all upload/storage operations."""
+    service = Mock(spec=ExchangeFileService)
+    async with AsyncClient(
+        transport=ASGITransport(app=_http_app(service)), base_url="https://api.test"
+    ) as client:
+        response = await client.post(
+            f"/agents/{_AGENT_ID}/uploads",
+            json={"filename": "report.txt", "media_type": "text/plain", "size": 4},
+        )
+    assert response.status_code == 422
+    assert "put_url" not in response.text
+    service.prepare_agent_browser_upload.assert_not_awaited()
+    service.finalize_agent_browser_upload.assert_not_awaited()
 
 
 async def test_prepare_forwards_requester_and_returns_transient_ticket() -> None:
