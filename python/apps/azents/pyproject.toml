@@ -20,8 +20,8 @@ dependencies = [
     "aioboto3==15.5.0",
     # Auth & Security
     "bcrypt==5.0.0",
-    "pyjwt==2.14.0",
-    "cryptography==50.0.1",
+    "pyjwt==2.15.0",
+    "cryptography==50.0.2",
     # Utilities
     "pytz==2026.3.post1",
     "tzdata==2026.3",
@@ -44,7 +44,7 @@ dependencies = [
     "httpx2==2.12.0",
     # Local dependencies
     "az-common",
-    "litellm==1.91.3",
+    "litellm==1.93.2",
     "openai[realtime]==2.54.0",
     "Pillow==12.3.0",
     "redis==8.1.0",
