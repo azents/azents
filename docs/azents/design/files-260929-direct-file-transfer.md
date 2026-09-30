@@ -2,6 +2,7 @@
 title: "Direct File Transfer and Consistent File Limits Design"
 created: 2026-09-29
 updated: 2026-09-29
+implemented: 2026-09-30
 tags: [files, runtime, chat, external-channel, transfer, architecture]
 document_role: primary
 document_type: design
@@ -14,7 +15,7 @@ snapshot_id: files-260929
 - Requirements: [files-260929/REQ](../requirements/files-260929-direct-file-transfer.md)
 - Decisions: [files-260929/ADR](../adr/files-260929-direct-file-transfer.md)
 - Design reference: `files-260929/DESIGN`
-- Design revision: `1` (draft; approval pending)
+- Design revision: `1` (approved on 2026-09-29; implementation verified on 2026-09-30)
 
 ## Primary Outcome and Current Gaps
 

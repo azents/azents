@@ -51,8 +51,8 @@ api_routes:
   - /system/v1/settings/file-lifecycle
   - /system/v1/settings/file-lifecycle/archive-retention/preview
   - /system/v1/settings/file-lifecycle/retention-applications/{application_id}
-last_verified_at: 2026-09-15
-spec_version: 6
+last_verified_at: 2026-09-30
+spec_version: 7
 ---
 
 # System Settings
@@ -218,17 +218,20 @@ when its OAuth Section is ready and its callback URL is configured.
 
 ## External Channel Files Section
 
-`external_channel_files` is schema version 1, has no secret or environment-bound fields,
+`external_channel_files` is schema version 2, has no secret or environment-bound fields,
 and activates directly. Its positive bounded integer configuration is:
 
 | Field | Default | Configured maximum |
 | --- | ---: | ---: |
-| `inbound_max_file_bytes` | 500 MiB | 500 MiB |
 | `outbound_max_file_bytes` | 25 MiB | 100 MiB |
 | `outbound_max_action_bytes` | 100 MiB | 2,000 MiB |
 
 The outbound aggregate must be at least the outbound per-file limit. Runtime stream chunk
-size is not administrator-configurable.
+size is not administrator-configurable. Inbound generic eligibility uses the shared
+128 MiB policy and has no independent Admin setting. Migration `43a0fbdc96fe` removes
+the obsolete inbound key from active and candidate configurations, preserves outbound
+values, increments active versions, and invalidates stale validation evidence. Admin
+API, generated clients, and Web expose only the two outbound settings.
 
 The dedicated Admin GET returns effective byte values, schema version, and Admin version
 without effective generation or secret state. PATCH accepts an optimistic partial byte
@@ -331,6 +334,9 @@ page resumes the application returned by the settings endpoint.
   [`../flow/file-exchange-storage.md`](../flow/file-exchange-storage.md).
 
 ## Changelog
+
+- **2026-09-30** — v7. Retired the persisted inbound file limit in schema version 2,
+  preserved outbound policy, and documented the shared 128 MiB ingress authority.
 
 - **2026-09-13** — v6. Added direct-activation Slack and Discord identity OAuth
   Sections, redacted Admin cards, explicit secret actions, callback projections,

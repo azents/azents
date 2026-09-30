@@ -105,7 +105,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
   - typescript/apps/azents-web/messages/*/chat.json
 last_verified_at: 2026-09-30
-spec_version: 187
+spec_version: 188
 ---
 
 # Agent Execution Loop
@@ -964,18 +964,26 @@ path contracts without describing these behaviors as process or infrastructure i
 
 An active root External Channel binding may additionally expose
 `download_external_file` and file-bearing `channel_action`. The download Tool accepts one
-provider-neutral opaque locator, the exact visible attachment byte size, and one Runtime
-destination; it performs ownership and capability checks before provider access and
-writes only a selected file whose current metadata, HTTP declaration, and received bytes
-match that size within the 500 MiB inbound product ceiling.
+provider-neutral opaque locator and one Runtime destination; it performs ownership and
+capability checks before provider access. Advisory provider size is not caller authority.
+The authenticated final URL's HTTP Content-Length and counted bytes must agree within
+the shared 128 MiB general-file policy. Trusted staging produces an immutable object
+that the current Runner receives through exact-attempt direct GET.
 `channel_action.files` accepts up to 20 absolute Runtime paths, requires conversational
 text, and preflights all sources before the action commit. Runtime sources use the
-trusted provider-delivery service, which performs one verified Runtime upload per source
+trusted provider-delivery service, which performs one verified Runner direct PUT per source
 and exposes only bounded provider-native streams. Runtime transfer services are always
 registered; their target waits for Runtime readiness only when the file-bearing Tool
 executes. Exchange sources retain their authority-resolved bounded stream path. The Agent
 never receives Slack credentials, private URLs, storage identity, or provider transfer
 procedures.
+
+General `import_file` sources and `run_tool_to_file` output parts use the same 128 MiB
+eligibility and exact-attempt direct GET; managed S3 sources use native copy while
+already-held bytes retain bounded trusted staging. `present_file` publishes a verified
+direct PUT object by native copy. `read_image` uses direct PUT but retains its distinct
+image-input size/normalization policy. Ordinary control messages carry metadata rather
+than complete-file bodies, and a failed direct operation has no relay fallback.
 
 GPT-compatible prepared calls may expose `apply_patch` in exactly one selected wire dialect:
 `json_function` with structured `base_path` and patch fields, or `plaintext_custom` with one strict
@@ -1540,6 +1548,9 @@ projections retain the dedicated kind, and the UI labels it with a channel/messa
 icon.
 
 ## Changelog
+
+- **2026-09-30** (spec_version 188) — Aligned builtin complete-file consumers with
+  direct Runner GET/PUT and shared 128 MiB eligibility, preserving model/provider bounds.
 
 - **2026-09-30** (spec_version 187) — Applied existing tree-ordered execution
   admission to both completed-run idle eligibility transactions while preserving

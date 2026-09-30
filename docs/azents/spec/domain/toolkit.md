@@ -72,8 +72,8 @@ code_paths:
   - typescript/apps/azents-web/src/trpc/routers/toolkit.ts
 api_routes:
   - /toolkit/v1
-last_verified_at: 2026-09-26
-spec_version: 120
+last_verified_at: 2026-09-30
+spec_version: 121
 ---
 
 # Toolkit
@@ -519,6 +519,15 @@ Memory Read and Memory Write are resolved as separate auto-bound capabilities. M
   contract. ([`core/runtime_profile.py`](../../../../python/apps/azents/src/azents/core/runtime_profile.py), [`services/agent_runtime`](../../../../python/apps/azents/src/azents/services/agent_runtime))
 - Runtime file tools guide the LLM-facing path surface for durable working files under the current Runner-reported Agent Workspace and temporary files under `/tmp/**`. Static tool schemas name the Agent Workspace generically, while the dynamic Runtime prompt renders the exact current root. User upload is copied to Runtime by `import_file` using `exchange://{object_key}` file-location URI, and internal artifact is copied with `artifact://{storage_key}` file-location URI. `/tmp/**` destination import warns that result can disappear after Runtime restart and returns original URI for reimport. `present_file` exports only files under the current durable Agent Workspace as user-visible `exchange://{object_key}` attachment.
 - Runtime transfer, publication, and provider-delivery services are required parts of the Runtime Toolkit rather than optional capabilities. Toolkit context construction never waits for Runner readiness. The Runtime static prompt selects the applied configuration when a ready current-generation Runner is already serving it; otherwise it selects the desired configuration used for a permitted start/wait path. A blocked or malformed future desired slot does not replace the authority of an already-ready applied Runtime. When neither path supplies a usable configuration document, the prompt leaves Runtime operations unavailable.
+- General Runtime file movement uses shared 128 MiB eligibility: `import_file`,
+  `run_tool_to_file` parts, and `download_external_file` receive exact-attempt direct
+  GET capabilities after trusted source verification; `present_file`, Runtime-file
+  `channel_action`, and `read_image` use manifest-bound Runner direct PUT and verified
+  immutable completion. Managed S3 sources use native copy, while already-held Tool
+  bytes and provider ingress retain bounded trusted staging. Control messages carry
+  metadata, not complete-file bodies, with no feature relay fallback. `read_image`
+  keeps its separate image-input policy and external-service delivery keeps its
+  outbound per-file/aggregate limits. URLs and signed headers are request-local.
 - Each ordinary Runtime-backed Tool resolves a bounded exact target only when it executes and may request start/wait according to that operation contract. A prompt-bound target must still match the captured applied or desired sequence, digest, and target generation. An already-ready target requires the retained applied configuration, a ready positive Runner generation, and current Runner-reported Workspace evidence; Provider connection/resource observation and a future desired mismatch are not data-plane fences. Starting or replacing compute still requires the desired configuration and Provider lifecycle authority. The returned operation target freezes Runtime ID, Runtime capability version, target generation, Runner generation, configuration sequence and digest, and Workspace path. Runner loss, terminal deletion, capability change, supersession, or drift fails the Tool rather than executing against a substituted Runtime. Skill filesystem projection is non-starting and succeeds only from an immediately qualified current target.
 - `read` file tool interprets both `offset` and `limit` as decoded text character counts. It reads fixed-size byte ranges from the Runtime and applies strict incremental decoding from the start of the file, so a storage boundary cannot split a multibyte character into a false decode failure. The decoder retains only the bounded requested text plus one continuation character. Invalid source bytes encountered while locating the offset or decoding that bounded range return an explicit encoding error; an unread suffix is not validated. Result range metadata and continuation offsets use the same character unit as the input schema.
 - `grep` file tool accepts both file path and directory path. Directory path searches recursively by default. Built-in heavy-directory excludes such as `.git`, `node_modules`, `.next`, and build/cache directories are applied by default. `exclude` adds caller-provided exclude patterns on top of those defaults; `disable_default_excludes: true` explicitly scans paths that the defaults would skip. Grep also enforces searched-file and scanned-byte safety caps so sparse matches across very large workspaces do not monopolize Runtime operation time.
@@ -1032,6 +1041,9 @@ the immutable `azents://` VFS. The Skill is projected for eligible root Runs
 without requiring a separate Toolkit setup row.
 
 ## Changelog
+
+- **2026-09-30** (spec_version 121) — Promoted builtin file consumers to exact-attempt
+  direct GET/PUT under shared general-file eligibility, preserving semantic limits.
 
 - **2026-09-25** (spec_version 120) — Enabled ownership-gated OAuth connect
   and reconnect from saved-Agent Toolkit cards, with popup callback validation

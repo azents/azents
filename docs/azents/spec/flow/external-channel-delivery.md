@@ -225,7 +225,10 @@ Slack leaves channel and message empty and resolves the provider file ID through
 configured App. Discord requires channel, message, and attachment identity and calls the
 provider directly with those coordinates. The download path validates current Agent,
 Session, connected binding, route, configured credentials, capability, and the
-displayed declared size before streaming. Transient Gateway/Socket health is not an
+authenticated final URL's HTTP Content-Length before streaming. Generic eligibility
+is bounded by the shared 128 MiB policy; displayed provider size is advisory. The
+staged verified immutable source reaches the Runner through exact-attempt direct GET.
+Transient Gateway/Socket health is not an
 outbound authorization input. Provider credentials and permissions are authoritative. It
 does not query Session event history to recover provider coordinates and retains no
 fallback for the replaced shorter key shape.
@@ -242,7 +245,9 @@ kind, source reference, filename, media type, and expected size remain in the cu
 Tool effect only; External Channel does not persist a file-delivery record.
 
 After commit, every Runtime manifest creates one metadata-only Runtime transfer attempt
-through the existing trusted transfer coordinator.
+through the existing trusted transfer coordinator and a manifest-bound Runner direct
+PUT. Control verifies the native size/checksum and finalizes an immutable object before
+provider consumption; it does not relay the Runner upload body.
 The trusted provider-delivery service resolves the current Runtime when the file-bearing
 Tool executes, claims the verified transfer object, resolves its opaque object handle only
 inside trusted backend code, and exposes only a bounded async byte stream to Slack. The ordered batch retains every Runtime consumer claim
@@ -610,6 +615,9 @@ outbox, compensation, canonical rollback, or fallback target. Recovery of an
 already-committed terminal result does not replay provider publication.
 
 ## Changelog
+
+- **2026-09-30** (spec_version 63) — Documented HTTP-authoritative 128 MiB ingress,
+  direct Runner GET/PUT, and the unchanged trusted provider-delivery boundary.
 
 - **2026-09-12** (spec_version 61) — Fenced Agent-owned Channel Work and
   provider effect admission/settlement by Session owner generation while retaining

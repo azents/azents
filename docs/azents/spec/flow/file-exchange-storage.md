@@ -33,8 +33,11 @@ code_paths:
   - python/apps/azents/src/azents/services/archived_session_purge.py
   - python/apps/azents/src/azents/services/uploads/**
   - python/apps/azents/src/azents/services/chat/workspace.py
-  - python/apps/azents/src/azents/services/file_download_stream.py
-  - python/apps/azents/src/azents/api/public/file_download.py
+  - python/apps/azents/src/azents/core/file_transfer.py
+  - python/apps/azents/src/azents/core/exchange_upload.py
+  - python/apps/azents/src/azents/services/browser_file_download.py
+  - python/apps/azents/src/azents/rdb/models/exchange_upload_operation.py
+  - python/apps/azents/src/azents/engine/run/resolve.py
   - python/apps/azents/src/azents/engine/events/file_parts.py
   - python/apps/azents/src/azents/engine/events/fork_context.py
   - python/apps/azents/src/azents/engine/events/model_file_parts.py
@@ -50,6 +53,9 @@ code_paths:
   - python/apps/azents/src/azents/engine/tools/read_image.py
   - python/apps/azents/src/azents/engine/tools/run_tool_to_file.py
   - typescript/apps/azents-web/src/shared/file-upload/useFileUpload.ts
+  - typescript/apps/azents-web/src/shared/file-upload/browserDownloadRedirect.ts
+  - typescript/apps/azents-web/src/app/(app)/api/chat/exchange-files/**
+  - typescript/apps/azents-web/src/app/(app)/api/chat/agents/*/workspace/download/**
   - typescript/apps/azents-web/src/features/chat/containers/AttachmentPreviewBarContainer.tsx
   - typescript/apps/azents-web/src/features/chat/components/AttachmentPreviewBar.tsx
   - typescript/apps/azents-web/src/features/chat/components/FileAttachmentList.tsx
@@ -60,8 +66,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ToolActivityGroup.tsx
   - typescript/apps/azents-web/src/features/chat/components/ToolCallCard.tsx
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
-last_verified_at: 2026-09-25
-spec_version: 51
+last_verified_at: 2026-09-30
+spec_version: 53
 ---
 
 # File Exchange Storage
@@ -102,16 +108,57 @@ Session/Run authority.
 
 ## Flows
 
+### Effective general-file policy
+
+The application injects one positive `Config.general_file_maximum_bytes` value into
+Exchange upload/download, Workspace download, Worker import/presentation/provider
+transfer, and External Channel ingress consumers. Its default and hard ceiling remain
+128 MiB. `AZ_TESTENV_GENERAL_FILE_MAXIMUM_BYTES` may only lower that value when the
+explicit testenv API gate is enabled; invalid values or an ungated override fail
+configuration validation. This setting is not an Admin or persisted product policy.
+Workspace Upload's separate Runtime Control fixture limit is configured consistently
+for lowered-limit E2E. Main Web and the Chat metadata schema retain their 128 MiB
+ceiling; API admission enforces the injected effective value. Image, model-input,
+provider-specific, and transport limits remain independently enforced.
+
 ### User upload to chat
 
-1. azents-web `useFileUpload` sends multipart upload to chat API.
-2. API verifies workspace/session access, file size, and media type. One upload is
-   limited to 20 MiB; the API returns `413` above that boundary, and Main Web
-   applies the same byte limit before upload while presenting it as a 20 MB limit.
+1. azents-web `useFileUpload` computes SHA-256 in a worker and prepares a
+   requester-scoped upload through a JSON metadata API. One file is limited to
+   the shared 128 MiB general-file policy in both Main Web and API admission.
+2. The API authorizes the uploader and current Workspace/Agent scope, binds exact size,
+   SHA-256, filename, and media type, and returns a transient checksum-bound PUT
+   capability. The browser sends the bytes directly to private S3-compatible storage.
+   API and Next routes carry metadata only and provide no multipart/body-relay fallback.
+   Finalize verifies native size/checksum evidence, copies ingress into an immutable
+   product object, and atomically commits attachment metadata after reauthorization.
 3. Successful upload creates only the user-facing Exchange attachment. The upload response does not expose a client-owned FilePart.
-4. Input acceptance stores and claims the attachment URI. Before the FIFO input is promoted, the worker resolves the claimed attachment outside the database lock, creates a ModelFile, and includes its FilePart in the promoted user message. Deferred action inputs skip this preparation, and a stale, failed, or cancelled promotion marks newly created ModelFiles deleted for lifecycle cleanup.
-5. Attachment and FilePart snapshots remain independent in the durable user event. The Attachment supports preview, download, and runtime import, while the FilePart supplies rich model input without requiring the Agent to call `import_file`.
+4. Input acceptance stores and claims the attachment URI for the resolved Session
+   root. Before FIFO promotion, the worker resolves trusted attachment metadata outside
+   the database lock and checks the separate model-input budget: 1,000,000 bytes for
+   non-images and 20 MiB for image processing. An over-budget attachment remains
+   available for download/import with a bounded model-input warning, without opening
+   its complete original or creating a ModelFile. An eligible attachment may create a
+   ModelFile and FilePart using the existing normalization. Deferred action inputs skip
+   this preparation, and stale, failed, or cancelled promotion marks any newly created
+   ModelFiles deleted for lifecycle cleanup.
+5. Attachment and any materialized FilePart remain independent snapshots in the
+   durable user event. The Attachment supports preview, download, and Runtime import;
+   an eligible FilePart supplies rich model input without requiring `import_file`.
 6. Exchange attachment has `status`, `expires_at`, and `expired_at` metadata. Scheduler-owned cleanup marks Exchange files past expiration time as `expired` and attempts blob deletion. Resolver, download API, lowerer, and UI treat expired/unavailable as normal history state based on DB availability.
+
+The durable upload operation contains bounded ownership, manifest, deadline, state,
+publication identity, and cleanup responsibility; it never persists the signed capability.
+Prepare and finalize remain uploader/Agent-authorized; root/session claiming occurs at
+input acceptance rather than upload preparation. Repeated finalize recovers the same
+publication, including uncertain metadata commits, rather than publishing twice.
+Browser cancellation aborts local hashing/network work and removes pending state on
+remove, clear, or unmount. Abandoned operations expire into durable scheduler cleanup.
+Chat upload exposes prepare/finalize; Workspace Upload's server status/cancel lifecycle
+remains separate.
+Expiry, authorization loss, and failures retain durable cleanup obligations.
+Retained operation records give scheduler repair enough authority to remove unowned
+ingress/prepared objects without deleting an already committed attachment.
 
 An ExchangeFile created for a concrete session is bound immediately to that session's root
 `SessionAgent` retention unit. Files uploaded before a new root exists remain unbound until the first
@@ -126,7 +173,7 @@ not.
 ### Agent imports user or internal file
 
 `import_file` tool uses resolver registry by scheme. Supported schemes are `exchange://{object_key}`, `artifact://{storage_key}`, and canonical `azents://` paths present in the current AgentRun projection. URI is storage location, not entity reference. Do not put business logic that extracts entity id from URI string. Default destination is `/tmp/agent/imports/`, and default destination collisions are deduped with numeric suffix. If explicit destination already exists, fail by default and overwrite only when `overwrite=true`.
-Sources larger than the configured Runtime transfer limit fail before admission, and
+Sources larger than the shared 128 MiB general-file limit fail before admission, and
 the tool reports the size-limit rejection without presenting it as a destination-path
 failure.
 Temporary coordinator admission pressure is retried until capacity becomes available or
@@ -153,6 +200,9 @@ bytes.
 Runtime file. Both resolve an authority-checked source manifest and use the common
 Server-to-Runtime transfer service; an existing managed S3 object is copied into the
 Control-owned immutable transfer object without an application-memory body relay.
+The current Runner then claims an exact-attempt presigned GET, streams into local
+staging, verifies exact length and SHA-256, and atomically publishes the destination.
+Worker and Runtime Control do not relay the complete-file body.
 Original file bytes are not attached directly to the LLM prompt.
 
 `azents://` materializes one immutable managed file from the current run projection.
@@ -193,13 +243,14 @@ cancellation failure creates no Runtime output bundle.
 destination from the current active External Channel binding. The service refreshes
 provider identity and authorization metadata, then uses only the authenticated final
 download URL's HTTP `Content-Length` as the declared transfer size and per-file policy
-input (at most 500 MiB). Provider metadata size remains advisory display data and does
+input (at most 128 MiB under the shared general-file policy). Provider metadata size remains advisory display data and does
 not gate download or authority revalidation. The common Server-to-Runtime source
 requires the GET response `Content-Length` and incrementally counted body size to match
 that declared size, aborting on excess bytes and failing on an early end before any
-Runtime destination commit. Runtime admission does not reject an independent valid file
-for active-file or aggregate-byte pressure; delivery chunks wait in FIFO-per-file
-round-robin order. The Tool result retains only Runtime path, filename, media type, and
+Runtime destination commit. Verified provider ingress remains trusted staging; the
+Runner receives the immutable object through its exact-attempt direct GET rather than
+a Control body stream. Runtime admission does not impose an unrelated lower per-file
+capacity gate. The Tool result retains only Runtime path, filename, media type, and
 verified byte count.
 
 A file-bearing `channel_action` accepts absolute Runtime paths and `exchange://` URIs.
@@ -285,21 +336,36 @@ database cascade erase the last cleanup reference before external deletion succe
 
 `present_file` publishes only files under the current Runner-reported Agent Workspace as a
 public Exchange attachment. Files outside the allowed path are rejected. It uses one
-Runtime-to-server upload transfer, then publishes the verified immutable transfer
+Runtime-to-server direct PUT transfer, then publishes the verified immutable transfer
 object through a native object-store copy. Product metadata is committed only after
 that copy succeeds; a failed, cancelled, changed, oversized, or unverified Runtime
 source never becomes an ExchangeFile. The published attachment appears in the chat UI
 attachment list and can be retrieved through the download endpoint.
 
-Public Exchange downloads keep the existing requester authorization and expiration
-checks, then verify the stored object length with an S3 HEAD before opening a
-response-scoped bounded iterator. The HTTP response stream counts and hashes each
-chunk, accepts an empty object only when its stored size and SHA-256 match, and
-closes the object body on EOF, source error, disconnect, cancellation, or response
-cleanup. The existing byte-returning `download()` method remains the boundary for
-internal Agent and External Channel consumers; only the public HTTP route uses the
-stream handle. Missing, expired, unauthorized, and unavailable files retain their
-existing status mapping and filename/media-type headers.
+Public Exchange downloads authorize the current requester and retention scope, reject
+expired or over-128 MiB files, and verify S3 HEAD size plus SHA-256 when storage supplies
+checksum evidence. They recheck authority and object identity after storage I/O before
+issuing a request-local GET capability whose lifetime is at most one minute and no later
+than product expiry. The API returns an empty `302`; Next forwards the authorized
+Location without following it. Both use `Cache-Control: no-store` and
+`Referrer-Policy: no-referrer`. The browser owns GET and download completion.
+Storage response overrides provide safe filenames and content types; inline disposition
+is permitted only for the explicit safe image-media allowlist. Other downloads use
+attachment disposition. Signed URLs are absent from durable state and logs.
+
+Workspace downloads first authorize the current Runtime path and manifest and perform
+one verified Runner direct PUT. A trusted consumer then issues the bounded browser GET.
+Settlement records capability handoff, not browser EOF; object cleanup retains the source
+through the capability/deadline read grace. API and Next never stream the body.
+Workspace text previews retain their separate bounded read policy and return `413` with
+preview-limit guidance when oversized. Download eligibility does not enlarge preview,
+`read_image`, model-input, or provider-outbound semantic limits.
+
+Existing attachments above 128 MiB keep their metadata and retention lifecycle; they
+are not deleted by the policy cutover but become ineligible for general transfer/download.
+The byte-returning Exchange `download()` remains an internal authorized consumer boundary,
+not the public browser transport. Missing, expired, unauthorized, and unavailable files
+retain their existing status mapping.
 
 Runtime Transfer state is optional volatile coordination. If its in-memory or Redis
 implementation restarts empty, an earlier upload handle cannot be revived from an S3
@@ -358,7 +424,7 @@ later `import_file` must explicitly copy them into the new Runtime.
 
 - One Composer draft retains at most five selected attachments. Selecting more
   files adds only the remaining available slots. Every selected file is limited
-  to 20 MiB before upload, matching the Public API boundary.
+  to 128 MiB before upload, matching the shared general-file admission boundary.
 - Composer attachments and user-originated sent attachments, including images, render as fixed-width compact tiles in a non-wrapping horizontal strip. Input-buffer projections use the same compact presentation.
 - A selected attachment whose upload fails remains removable and expands into a
   bounded error tile with a wrapping filename plus localized failure reason and any
@@ -385,6 +451,14 @@ later `import_file` must explicitly copy them into the new Runtime.
 - Tool execution follows [`agent-execution-loop.md`](agent-execution-loop.md).
 
 ## Changelog
+
+- **2026-09-30** (spec_version 53) — Made the general-file limit injectable across
+  consumers for small boundary tests with a lowering-only gated testenv override;
+  retained the production 128 MiB default and independent semantic limits.
+
+- **2026-09-30** (spec_version 52) — Promoted verified Chat direct PUT, Runner direct
+  GET/PUT consumers, authorized browser GET redirects, shared 128 MiB eligibility,
+  retained semantic bounds, and capability-safe publication/cleanup contracts.
 
 - **2026-09-25** — v51. Documented bounded Brave proxy-thumbnail
   materialization as multiple model and visible attachment parts in one result.

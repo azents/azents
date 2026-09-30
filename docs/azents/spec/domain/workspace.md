@@ -130,8 +130,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/agents
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/channel-defaults
-last_verified_at: 2026-09-19
-spec_version: 89
+last_verified_at: 2026-09-30
+spec_version: 90
 ---
 
 # Workspace & Membership
@@ -515,6 +515,19 @@ actions menu, and files selected by that picker retain that directory as their
 destination; the global browser toolbar does not expose a separate upload or
 destination-selection action. A conflict does not overwrite the existing file
 implicitly, and cancellation does not publish a partial destination.
+
+### Agent Workspace browser download
+
+A Workspace file download authorizes the requester and current Runtime path, applies
+the shared 128 MiB general-file policy, and prepares one verified Runner direct PUT
+object. The API issues a request-local presigned GET with safe filename/content-type
+overrides and at most a one-minute lifetime. API and Next return empty `302` responses
+with `no-store` and `no-referrer` rather than following GET or relaying the body.
+The browser owns native navigation/download. Transfer settlement records ticket handoff,
+not browser EOF, and cleanup protects the source through the bounded capability read
+grace. Text preview remains a separate bounded read and returns `413` with preview-limit
+guidance above that limit. Workspace Upload retains its existing direct PUT/GET,
+authorization, conflict, cancellation, integrity, and durable cleanup contract.
 
 ### Session working-folder lifecycle
 
@@ -921,6 +934,9 @@ stateDiagram-v2
 - **Agent Project Catalog** — Agent-scoped path candidate/status projection table used by Project browser and new-session preview UI. It is not the canonical session Project binding.
 
 ## Changelog
+
+- **2026-09-30** (spec_version 90) — Documented authorized Workspace browser GET
+  handoff after verified Runner direct PUT, shared 128 MiB eligibility, and distinct preview bounds.
 
 - **2026-09-19 (spec_version=89)** — Added the repository coverage for
   requester authorization and aligned the concrete-session upload UI with its

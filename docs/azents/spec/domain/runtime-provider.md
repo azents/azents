@@ -54,8 +54,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/workspace/components/RuntimeConfigurationStatus.tsx
   - testenv/azents/e2e/src/tests/conftest.py
   - testenv/azents/e2e/src/tests/required/public/test_workspace_upload.py
-last_verified_at: 2026-09-18
-spec_version: 33
+last_verified_at: 2026-09-30
+spec_version: 34
 ---
 
 # Runtime Provider
@@ -241,14 +241,17 @@ A Workspace Runtime Profile is the complete customer choice. It selects one infr
 and may add only the Workspace policy supported by that contract. Workspace Policy v1 remains a
 direct-only CIDR restriction. Policy v2 composes the hierarchy `direct` → `proxy_required` →
 `no_network`, intersects inherited CIDR authority, and narrows proxy domain authority without
-restoring a parent denial. Required Runtime Control and transfer communication remains Platform
-protected. Workspace Upload object-storage endpoints are deployment/operator configuration rather
-than Workspace Runtime Profile network authority. Trusted operations use the primary object-storage
-endpoint; an optional public endpoint overrides presigned browser- and Runner-reachable URLs, and
-the primary endpoint is reused when no override is supplied. Kubernetes Runtime network enforcement
-applies the selected network mode, mandatory Runtime Service routes, inherited CIDR limits, and
-configured egress rules without projecting object-storage-specific routes or host aliases. Docker
-rejects Workspace network policy.
+restoring a parent denial. Required Runtime Control, transfer, and direct object-storage
+communication remains Platform protected. Object-storage endpoints are deployment/operator
+configuration rather than Workspace Runtime Profile network authority. Trusted operations
+use the primary endpoint; an optional public endpoint overrides presigned browser- and
+Runner-reachable URLs, otherwise the primary endpoint is reused. Kubernetes deployment
+may declare the exact `runtime_object_storage` mandatory Service, endpoint hostnames,
+and ports through `runtimeProviderKubernetes.networkEnforcement.mandatoryServices.objectStorage`.
+The Provider validates the configured endpoint against observed Service routes before
+direct-transfer execution and projects required routes/host mappings in strict modes.
+Missing or mismatched required routes fail closed rather than broadening customer egress.
+Docker rejects Workspace network policy.
 
 The complete resolved configuration travels through the canonical Runtime configuration envelope.
 The Provider reports exact configuration evidence for the current desired generation. Applied state
@@ -328,14 +331,17 @@ Runtime Control uses its server ServiceAccount to create Kubernetes TokenReview 
 
 The active chart has no Provider credential or shared Runtime Control authentication values, credential bootstrap Job, staging/final Provider credential Secret, credential volume, or authentication-bootstrap Secret RBAC. The logical-Runtime CA Secret is execution-policy material owned by strict proxy enforcement, not Provider or Runtime Control authentication state. Runtime Control TLS remains mandatory and separate from Provider authentication. Admin Provider policy cannot mutate cluster RBAC, chart-level NetworkPolicy, RuntimeClass, arbitrary Secret contents, or other deployment-owned security controls.
 
-Workspace Upload uses the configured object-storage endpoint for trusted operations and
+Direct file transfer uses the configured object-storage endpoint for trusted operations and
 presigned URLs. An optional public endpoint may override the URL used for browser- and
 Runner-reachable requests; when it is omitted, the primary endpoint is reused. Runtime Control
 readiness proves bucket access, checksum-aware metadata, presigned PUT/GET signing, endpoint
 reachability, and immutable native-copy support; failed prerequisites keep the feature unavailable
 without a byte-relay fallback. The Docker Provider's public gateway CA is mounted into the
 Provider process by the deployment/test fixture so the managed Runner can verify the same HTTPS
-endpoint used by browser-direct Workspace Upload.
+endpoint used by browser-direct uploads and Runner GET/PUT. Browser PUT CORS is an
+operator prerequisite; browser navigation/download and native image viewing do not
+require GET CORS. Runtime storage reachability and signing/readiness do not prove a
+deployed strict-mode packet path; the operator must verify that path before activation.
 
 Authentication rollout does not render, own, select, delete, rename, or recreate Runtime PersistentVolumeClaims or PersistentVolumes. Credential-driven Runtime Pod replacement reuses the existing PVC; only the established explicit Runtime reset or terminal-delete operations may invoke PVC deletion.
 
@@ -345,6 +351,9 @@ network controls, and infrastructure access are operator responsibilities outsid
 Admin Profile editing cannot mutate those deployment boundaries.
 
 ## Version history
+
+- **34 (2026-09-30):** Promoted direct-file storage readiness and Platform-owned
+  object-storage Service routes/host mappings, preserving strict customer-network authority.
 
 - **33 (2026-09-18):** Clarified that Workspace Upload object-storage endpoints
   are deployment/operator configuration outside Kubernetes Runtime network authority,

@@ -47,8 +47,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/workspace/**
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
   - infra/charts/azents/**
-last_verified_at: 2026-09-16
-spec_version: 39
+last_verified_at: 2026-09-30
+spec_version: 40
 ---
 
 # Agent Runtime Persistence
@@ -373,7 +373,10 @@ Direct mode keeps the complete Runtime NetworkPolicy inside the effective CIDR b
 Proxy-required mode removes Runtime DNS and direct customer egress, creates one Runtime-dedicated
 proxy Service/Pod/policy ConfigMap/logical-Runtime CA, exposes only the public CA certificate to the
 Runner, and constrains proxy egress by the inherited Provider CIDR boundary and effective domain
-policy. No-network mode preserves only Runtime Control and transfer communication. Strict modes use
+policy. No-network mode preserves Platform-owned Runtime Control, transfer, and
+configured direct object-storage communication. The exact storage Service route is
+deployment-owned rather than customer egress authority; missing or mismatched endpoint
+readiness fails closed. Strict modes use
 observed mandatory Service ClusterIPs as exact host mappings rather than DNS. The Pod Profile
 separately controls Agent Workspace PVC capacity. Expansions may apply to the existing PVC; shrink
 remains deferred until an explicit reset or terminal deletion recreates storage.
@@ -457,6 +460,9 @@ Required checks:
   database writes.
 
 ## Changelog
+
+- **2026-09-30** (spec_version 40) — Included the exact Platform object-storage route
+  in strict-mode direct-transfer prerequisites without changing Workspace persistence.
 
 - **2026-09-15 (spec_version=39)** — Replaced Session endpoint, request, and cycle
   persistence with one Agent-and-port service row, exposure deadline, revision, and
