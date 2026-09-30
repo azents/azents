@@ -10,7 +10,6 @@ import {
   Group,
   Paper,
   Popover,
-  Radio,
   rem,
   Stack,
   Switch,
@@ -122,10 +121,12 @@ function ChatInputView({
     desktopProfileDialogId,
     desktopProfileModelPanelId,
     desktopProfileEffortPanelId,
+    desktopProfileExecutionPanelId,
     profileTriggerRef,
     desktopProfileSectionRefs,
     desktopModelOptionRefs,
     desktopEffortOptionRefs,
+    executionOptionRefs,
     selectableEfforts,
     selectedModelLabel,
     selectedEffortLabel,
@@ -306,59 +307,111 @@ function ChatInputView({
       );
     });
   const groupedExecutionOptionControls = selectableExecutionOptionGroups.map(
-    (group) => (
-      <Radio.Group
-        key={group.id}
-        name={`${messageInputId}-${group.id}`}
-        label={
-          group.id === "processing_speed"
-            ? t("composerProfile.processingSpeed")
-            : t("composerProfile.executionOptions")
-        }
-        value={
-          group.definitions.find((definition) =>
-            inferenceProfile.enabled_execution_options.includes(definition.id),
-          )?.id ?? ""
-        }
-        onChange={(selectedId) =>
-          handleExecutionOptionGroupChange(group.id, selectedId)
-        }
-      >
-        <Stack gap="sm" py="xs" px="xs">
-          <Radio
-            value=""
-            label={
-              group.id === "processing_speed"
-                ? t("composerProfile.normalSpeed")
-                : t("composerProfile.noExecutionOption")
-            }
-            disabled={
-              inputDisabled || editSendDisabled || editingMessageId !== null
-            }
-          />
-          {group.definitions.map((definition) => (
-            <Radio
-              key={definition.id}
-              value={definition.id}
-              label={definition.label}
-              description={
-                <Stack gap={rem(2)}>
-                  <Text component="span" size="xs" c="dimmed">
-                    {definition.description}
-                  </Text>
-                  <Text component="span" size="xs" c="dimmed">
-                    {definition.cost_hint}
-                  </Text>
-                </Stack>
-              }
-              disabled={
-                inputDisabled || editSendDisabled || editingMessageId !== null
-              }
-            />
-          ))}
-        </Stack>
-      </Radio.Group>
-    ),
+    (group) => {
+      const title =
+        group.id === "processing_speed"
+          ? t("composerProfile.processingSpeed")
+          : t("composerProfile.executionOptions");
+      const choices = [
+        {
+          id: "",
+          label:
+            group.id === "processing_speed"
+              ? t("composerProfile.normalSpeed")
+              : t("composerProfile.noExecutionOption"),
+        },
+        ...group.definitions,
+      ];
+      const selectedId =
+        group.definitions.find((definition) =>
+          inferenceProfile.enabled_execution_options.includes(definition.id),
+        )?.id ?? "";
+      return {
+        id: group.id,
+        title,
+        selectedLabel: choices.find((choice) => choice.id === selectedId)
+          ?.label,
+        rows: (
+          <Stack
+            gap={isMobile ? 0 : rem(2)}
+            role="radiogroup"
+            aria-label={title}
+          >
+            {choices.map((choice, index) => {
+              const selected = choice.id === selectedId;
+              return (
+                <UnstyledButton
+                  key={choice.id}
+                  ref={(node) => {
+                    let refs = executionOptionRefs.current.get(group.id);
+                    if (refs === void 0) {
+                      refs = new Map<number, HTMLButtonElement>();
+                      executionOptionRefs.current.set(group.id, refs);
+                    }
+                    if (node === null) {
+                      refs.delete(index);
+                    } else {
+                      refs.set(index, node);
+                    }
+                  }}
+                  role="radio"
+                  aria-label={choice.label}
+                  aria-checked={selected}
+                  data-execution-option-id={choice.id}
+                  tabIndex={selected ? 0 : -1}
+                  disabled={
+                    inputDisabled ||
+                    editSendDisabled ||
+                    editingMessageId !== null
+                  }
+                  onClick={() =>
+                    handleExecutionOptionGroupChange(group.id, choice.id)
+                  }
+                  onKeyDown={(event) =>
+                    handleDesktopProfileOptionKeyDown(
+                      `execution:${group.id}`,
+                      index,
+                      event,
+                    )
+                  }
+                  style={{
+                    background: selected
+                      ? "var(--mantine-color-default-hover)"
+                      : isMobile
+                        ? "var(--mantine-color-body)"
+                        : "transparent",
+                    borderTop:
+                      isMobile && index > 0
+                        ? `${rem(1)} solid var(--mantine-color-default-border)`
+                        : "none",
+                    borderRadius: isMobile ? 0 : rem(8),
+                    padding: isMobile
+                      ? `${rem(9)} ${rem(12)}`
+                      : `${rem(8)} ${rem(10)}`,
+                    textAlign: "left",
+                    width: "100%",
+                  }}
+                >
+                  <Group gap="sm" justify="space-between" wrap="nowrap">
+                    <Text size="sm" fw={isMobile ? 600 : 500} lh={rem(18)}>
+                      {choice.label}
+                    </Text>
+                    {selected ? (
+                      <IconCheck
+                        aria-hidden="true"
+                        size={16}
+                        color="var(--mantine-color-blue-6)"
+                        style={{ flexShrink: 0 }}
+                      />
+                    ) : null}
+                  </Group>
+                </UnstyledButton>
+              );
+            })}
+          </Stack>
+        ),
+      };
+    },
   );
   const contextUsageTrigger = contextUsageEnabled ? (
     <TokenUsageIndicator usage={contextUsage} onOpen={handleOpenContextUsage} />
@@ -495,25 +548,34 @@ function ChatInputView({
         </>
       ) : null}
       {selectableExecutionOptions.length > 0 ? (
-        <Stack gap="xs">
-          <Divider />
-          <Text size="xs" c="dimmed" fw={600}>
-            {t("composerProfile.executionOptions")}
-          </Text>
-          <Stack
-            gap={0}
-            role="group"
-            aria-label={t("composerProfile.executionOptions")}
-            style={{
-              border: `${rem(1)} solid var(--mantine-color-default-border)`,
-              borderRadius: rem(12),
-              overflow: "hidden",
-            }}
-          >
-            {groupedExecutionOptionControls}
-            {executionOptionControls}
-          </Stack>
-        </Stack>
+        <>
+          {groupedExecutionOptionControls.map((group) => (
+            <Stack key={group.id} gap={rem(6)}>
+              <Text size="sm" fw={600}>
+                {group.title}
+              </Text>
+              <Stack
+                gap={0}
+                style={{
+                  border: `${rem(1)} solid var(--mantine-color-default-border)`,
+                  borderRadius: rem(12),
+                  overflow: "hidden",
+                }}
+              >
+                {group.rows}
+              </Stack>
+            </Stack>
+          ))}
+          {executionOptionControls.length > 0 ? (
+            <Stack gap="xs">
+              <Divider />
+              <Text size="xs" c="dimmed" fw={600}>
+                {t("composerProfile.executionOptions")}
+              </Text>
+              {executionOptionControls}
+            </Stack>
+          ) : null}
+        </>
       ) : null}
       {contextUsageEnabled ? (
         <Box ref={contextUsageDetailsRef}>
@@ -642,13 +704,67 @@ function ChatInputView({
               )}
             </>
           ) : null}
-          {selectableExecutionOptions.length > 0 ? (
+          {groupedExecutionOptionControls.map((group) => (
+            <UnstyledButton
+              key={group.id}
+              ref={(node) => {
+                if (node === null) {
+                  desktopProfileSectionRefs.current.delete(
+                    `execution:${group.id}`,
+                  );
+                } else {
+                  desktopProfileSectionRefs.current.set(
+                    `execution:${group.id}`,
+                    node,
+                  );
+                }
+              }}
+              onMouseEnter={() =>
+                setDesktopProfileSection(`execution:${group.id}`)
+              }
+              onClick={() => setDesktopProfileSection(`execution:${group.id}`)}
+              onKeyDown={(event) =>
+                handleDesktopProfileSectionKeyDown(
+                  `execution:${group.id}`,
+                  event,
+                )
+              }
+              aria-expanded={desktopProfileSection === `execution:${group.id}`}
+              aria-controls={`${desktopProfileExecutionPanelId}-${group.id}`}
+              aria-haspopup="true"
+              style={{
+                background:
+                  desktopProfileSection === `execution:${group.id}`
+                    ? "var(--mantine-color-default-hover)"
+                    : "transparent",
+                borderRadius: rem(8),
+                padding: `${rem(8)} ${rem(10)}`,
+                width: "100%",
+              }}
+            >
+              <Group justify="space-between" gap="md" wrap="nowrap">
+                <Text size="sm" fw={500}>
+                  {group.title}
+                </Text>
+                <Group gap={rem(6)} wrap="nowrap">
+                  <Text size="sm" c="dimmed">
+                    {group.selectedLabel}
+                  </Text>
+                  <IconChevronRight
+                    aria-hidden="true"
+                    size={16}
+                    color="var(--mantine-color-dimmed)"
+                  />
+                </Group>
+              </Group>
+            </UnstyledButton>
+          ))}
+          {executionOptionControls.length > 0 ? (
             <>
               <Divider my="xs" />
               <Text size="xs" c="dimmed" fw={600} px="xs">
                 {t("composerProfile.executionOptions")}
               </Text>
-              {groupedExecutionOptionControls}
               {executionOptionControls}
             </>
           ) : null}
@@ -722,9 +838,28 @@ function ChatInputView({
             </Stack>
           </Paper>
         )}
+      {groupedExecutionOptionControls.map((group) =>
+        desktopProfileSection === `execution:${group.id}` ? (
+          <Paper
+            key={group.id}
+            id={`${desktopProfileExecutionPanelId}-${group.id}`}
+            withBorder
+            radius={rem(12)}
+            shadow="md"
+            p={rem(6)}
+            w={rem(220)}
+          >
+            <Text size="xs" c="dimmed" fw={600} px={rem(8)} py={rem(4)}>
+              {group.title}
+            </Text>
+            {group.rows}
+          </Paper>
+        ) : null,
+      )}
     </Group>
   );
   const modelOnlyApplyAvailable =
+    editingMessageId === null &&
     hasPendingInferenceProfileChange &&
     !inputValue.trim() &&
     pendingFiles.length === 0 &&
