@@ -27,6 +27,7 @@ class ModelExecutionOptionId(str, Enum):
     allowed enum values
     """
     FAST = 'fast'
+    ULTRAFAST = 'ultrafast'
 
     @classmethod
     def from_json(cls, json_str: str) -> Self:

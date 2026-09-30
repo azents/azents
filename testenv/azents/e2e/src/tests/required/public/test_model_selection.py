@@ -742,14 +742,17 @@ class TestModelSelectionReadiness:
             message="Stored catalog entries did not become readable",
         )
         listing.raise_for_status()
-        entries = listing.json()["entries"]
+        entries = {
+            entry["provider_model_identifier"]: entry
+            for entry in listing.json()["entries"]
+        }
         main_selection = {
             "llm_provider_integration_id": integration_id,
-            "model_identifier": entries[0]["provider_model_identifier"],
+            "model_identifier": entries["gpt-5.5"]["provider_model_identifier"],
         }
         lightweight_selection = {
             "llm_provider_integration_id": integration_id,
-            "model_identifier": entries[1]["provider_model_identifier"],
+            "model_identifier": entries["gpt-5.5-mini"]["provider_model_identifier"],
         }
 
         default_option = {

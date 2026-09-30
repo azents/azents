@@ -106,6 +106,7 @@ from azents.engine.events.protocols import (
 from azents.engine.events.provider_output import ProviderOutputMaterializer
 from azents.engine.events.provider_tool_rendering import render_provider_tool_semantic
 from azents.engine.events.responses_continuation import ResponsesContinuationPlanner
+from azents.engine.events.responses_lowering import resolve_openai_service_tier
 from azents.engine.events.system_prompt import build_system_prompt
 from azents.engine.events.tool_invocation import (
     ClientToolInvoker,
@@ -1207,6 +1208,15 @@ class AgentEngineAdapter:
                 model=request.model,
                 operation="sampling",
                 integration=integration_id,
+                requested_service_tier=resolve_openai_service_tier(
+                    provider=request.provider,
+                    supported=(
+                        request.inference_state.model_selection.supported_execution_options
+                        if request.inference_state is not None
+                        else []
+                    ),
+                    enabled=request.enabled_execution_options,
+                ),
             )
         else:
             model_adapter = LiteLLMResponsesModelAdapter(ResponsesContinuationPlanner())

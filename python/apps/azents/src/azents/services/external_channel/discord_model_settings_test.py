@@ -2,6 +2,9 @@
 
 import datetime
 
+import pytest
+
+from azents.core.enums import LLMProvider
 from azents.core.external_model_settings import (
     ExternalModelApplied,
     ExternalModelDraft,
@@ -19,14 +22,17 @@ from azents.core.external_model_settings import (
 from azents.core.inference_profile import RequestedInferenceProfile
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.core.model_execution_options import (
-    ModelExecutionOptionDefinition,
     ModelExecutionOptionId,
+    list_model_execution_option_definitions,
 )
 from azents.services.external_channel.discord_model_settings import (
     discord_model_apply_response,
     discord_model_editor_response,
     discord_model_editor_result_response,
     discord_model_entry_presentation,
+)
+from azents.services.external_channel.discord_settings import (
+    _updated_model_selection,
 )
 from azents.services.external_channel.discord_settings_scope import (
     parse_discord_model_settings_custom_id,
@@ -45,15 +51,9 @@ def _option(*, option_id: str, label: str) -> ExternalModelOption:
             ModelReasoningEffort.LOW,
             ModelReasoningEffort.HIGH,
         ],
-        execution_options=[
-            ModelExecutionOptionDefinition(
-                id=ModelExecutionOptionId.FAST,
-                label="Fast",
-                description="Use faster processing.",
-                cost_hint="Additional cost may apply.",
-                control="boolean",
-            )
-        ],
+        execution_options=list_model_execution_option_definitions(
+            provider=LLMProvider.OPENAI,
+        ),
     )
 
 
@@ -161,7 +161,7 @@ def test_editor_keeps_selected_capabilities_visible_across_other_pages() -> None
     reasoning_select = _components(rows[1])[0]
     assert reasoning_select["placeholder"] == "Reasoning effort"
     execution_select = _components(rows[2])[0]
-    assert execution_select["min_values"] == 0
+    assert execution_select["min_values"] == 1
     assert execution_select["max_values"] == 1
     controls = _components(rows[3])
     assert [control["label"] for control in controls] == [
@@ -233,3 +233,87 @@ def test_saved_result_distinguishes_notice_failure_without_resending() -> None:
     assert "was saved" in str(data["content"])
     assert "could not post" in str(data["content"])
     assert data["components"] == []
+
+
+@pytest.mark.parametrize(
+    "enabled,selected_value",
+    [
+        ([], "__normal__:processing_speed"),
+        ([ModelExecutionOptionId.FAST], "fast"),
+        ([ModelExecutionOptionId.ULTRAFAST], "ultrafast"),
+    ],
+)
+def test_exclusive_speed_view_selection_roundtrip(
+    enabled: list[ModelExecutionOptionId],
+    selected_value: str,
+) -> None:
+    """Render and decode each explicit state without touching other settings."""
+    editor = _editor()
+    editor = editor.model_copy(
+        update={
+            "draft": editor.draft.model_copy(
+                update={
+                    "selection": editor.draft.selection.model_copy(
+                        update={"enabled_execution_options": enabled}
+                    )
+                }
+            )
+        }
+    )
+    response = discord_model_editor_response(editor=editor, secret="secret")
+    execution = _components(_rows(response)[2])[0]
+    assert execution["min_values"] == execution["max_values"] == 1
+    options = execution["options"]
+    assert isinstance(options, list)
+    assert [option["label"] for option in options] == ["Normal", "Fast", "Ultrafast"]
+    assert [option["value"] for option in options if option["default"]] == [
+        selected_value
+    ]
+    custom_id = execution["custom_id"]
+    assert isinstance(custom_id, str)
+    scope = parse_discord_model_settings_custom_id(custom_id=custom_id, secret="secret")
+    selection = _updated_model_selection(
+        scope=scope,
+        selected_values=(selected_value,),
+        current=ExternalModelEditorReady(editor=editor),
+    )
+    assert selection.enabled_execution_options == enabled
+    assert selection.option_id == editor.draft.selection.option_id
+    assert selection.reasoning_effort == editor.draft.selection.reasoning_effort
+    assert editor.draft.expected_generation == 4
+    assert editor.draft.owner_interaction_key == "provider-interaction-1"
+    assert "Additional OpenAI API cost" in str(_data(response)["content"])
+    if enabled == [ModelExecutionOptionId.ULTRAFAST]:
+        assert "unavailable" in str(_data(response)["content"]).lower()
+
+
+@pytest.mark.parametrize(
+    "selected_values",
+    [
+        ("fast", "ultrafast"),
+        ("fast", "fast"),
+        ("__normal__:processing_speed", "ultrafast"),
+        ("__normal__:unknown",),
+        ("__normal__:",),
+        ("unknown",),
+        (),
+    ],
+)
+def test_forged_execution_selection_is_rejected(
+    selected_values: tuple[str, ...],
+) -> None:
+    """Never resolve conflicting input by silently picking one speed."""
+    editor = _editor()
+    response = discord_model_editor_response(editor=editor, secret="secret")
+    custom_id = _components(_rows(response)[2])[0]["custom_id"]
+    assert isinstance(custom_id, str)
+    scope = parse_discord_model_settings_custom_id(custom_id=custom_id, secret="secret")
+    with pytest.raises(ValueError, match="Discord model selection is invalid"):
+        _updated_model_selection(
+            scope=scope,
+            selected_values=selected_values,
+            current=ExternalModelEditorReady(editor=editor),
+        )
+    assert editor.draft.selection.enabled_execution_options == [
+        ModelExecutionOptionId.FAST
+    ]

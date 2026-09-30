@@ -116,7 +116,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack
 last_verified_at: 2026-09-29
-spec_version: 83
+spec_version: 84
 ---
 
 # Agent Domain Spec
@@ -630,7 +630,7 @@ until completion.
 
 ## 3. Runtime Resolve
 
-Every inference-bearing input has a requested inference profile: an Agent-owned `model_target_label`, nullable `reasoning_effort`, and an explicit `enabled_execution_options` list. Execution options are immediately switchable preferences, separate from static abilities and model-scoped built-in tool settings. Saved model selections advertise `supported_execution_options`; the public selectable-option response separately projects definition text and provider-specific qualitative cost hints for the composer. Fast (`fast`) is the first option and starts disabled. Null effort means the selected model or provider default, not the Agent-level reasoning parameter. Normal user configuration and composer input always select a concrete effort when the selected model advertises explicit effort levels; `Default` is not a user-facing option. Agent settings place `Default reasoning effort` beside the default model control, and effort choices are rendered as raw lowercase enum values without localization. Models with an empty explicit effort list hide the control and use null. The request source is `explicit_input`, `session_last_used`, `agent_default`, `retry_original`, `parent_run`, or `spawn_override`.
+Every inference-bearing input has a requested inference profile: an Agent-owned `model_target_label`, nullable `reasoning_effort`, and an explicit `enabled_execution_options` list. Execution options are immediately switchable preferences, separate from static abilities and model-scoped built-in tool settings. Saved model selections advertise `supported_execution_options`; the public selectable-option response separately projects definition text, registry-owned exclusivity metadata, and provider-specific qualitative cost hints for the composer. Fast (`fast`) and Ultrafast (`ultrafast`) share the `processing_speed` group: support may include both, enabled intent includes at most one, and Normal is the empty selection. Saved support remains authoritative until the existing model refresh/reselection path updates it. Null effort means the selected model or provider default, not the Agent-level reasoning parameter. Normal user configuration and composer input always select a concrete effort when the selected model advertises explicit effort levels; `Default` is not a user-facing option. Agent settings place `Default reasoning effort` beside the default model control, and effort choices are rendered as raw lowercase enum values without localization. Models with an empty explicit effort list hide the control and use null. The request source is `explicit_input`, `session_last_used`, `agent_default`, `retry_original`, `parent_run`, or `spawn_override`.
 
 Before an inference-bearing FIFO head is atomically prepared, runtime resolution:
 
@@ -642,7 +642,7 @@ Before an inference-bearing FIFO head is atomically prepared, runtime resolution
 6. Computes the prepared turn's effective context window from the selected foreground option's capped input limit and the lightweight option's capped input limit, then derives the automatic compaction threshold.
 7. Validates remaining Agent model parameters, applies the requested effort, and materializes user attachments.
 
-Preparation also validates enabled execution-option IDs against the implemented registry and selected saved model support. Unknown, duplicate, or unsupported explicit selections fail before provider invocation rather than silently dropping the preference. Composer draft model switching may intersect choices with the new model's support; that client normalization does not replace server validation. Implicit inherited choices on an explicitly changed subagent target retain only supported options, while same-target and full-history inheritance preserve the prepared choice. Auxiliary title and compaction calls do not inherit premium sampling options.
+Preparation also validates enabled execution-option IDs against the implemented registry and selected saved model support. Unknown, duplicate, unsupported, or group-conflicting explicit selections fail before provider invocation rather than silently dropping the preference. Composer draft model switching may intersect choices with the new model's support without selecting another premium member; that client normalization does not replace server validation. Implicit inherited choices on an explicitly changed subagent target retain only supported options, while same-target and full-history inheritance preserve the prepared choice. Auxiliary title and compaction calls do not inherit premium sampling options.
 
 Successful preparation atomically stores the full selected `AgentModelSelection`, selected `SelectableModelSettings`, enabled execution options, resolved effort, effective limits, and resolution timestamp on `AgentSession` with the canonical input effects and buffer deletion. The Session snapshot is immutable for the active model-call attempt. After an automatic model-call failure and retry backoff, the next attempt freshly resolves the current Session-applied profile against the current Agent option mapping and replaces that snapshot before provider invocation. Recovery performs the same refresh before resuming a persisted retry. A later prepared profile may also update the snapshot at an ordinary turn boundary within the same active `AgentRun`, forcing model/tool context to rebuild before the next model call. Resolution failures consume the failed FIFO head, preserve the previously committed Session snapshot, append a terminal typed user-safe error, and are never retried.
 
@@ -711,6 +711,8 @@ Following contracts do not exist in current system.
 
 ## 8. Change History
 
+- **2026-09-29** (spec_version 84) — Added registry-owned exclusive processing
+  speeds while preserving saved support, inference snapshots, and inheritance.
 - **2026-09-29** (spec_version 83) — Corrected OpenAI API-key and ChatGPT OAuth
   image-generation execution ownership to the auto-bound client Images tool.
 - **2026-09-24** (spec_version 82) — Preserved compatible token caps and all shared built-in tool choices when replacing an Agent candidate model, including across provider integrations.

@@ -39,7 +39,8 @@ class TestModelExecutionOptionDefinition(unittest.TestCase):
                 label = '0',
                 description = '0',
                 cost_hint = '0',
-                control = 'boolean'
+                control = 'boolean',
+                exclusive_group = '0'
             )
         else:
             return ModelExecutionOptionDefinition(
@@ -48,6 +49,7 @@ class TestModelExecutionOptionDefinition(unittest.TestCase):
                 description = '0',
                 cost_hint = '0',
                 control = 'boolean',
+                exclusive_group = '0',
         )
         """
 

@@ -12,7 +12,10 @@ from openai.types.responses.response_includable import ResponseIncludable
 
 from azents.core.enums import EventKind, LLMModelDeveloper, LLMProvider
 from azents.core.llm_catalog import ModelCapabilities
-from azents.core.model_execution_options import ModelExecutionOptionId
+from azents.core.model_execution_options import (
+    ModelExecutionOptionId,
+    validate_execution_options,
+)
 from azents.core.type_guards import is_string_object_dict
 from azents.engine.events.external_channel_rendering import (
     render_external_channel_message,
@@ -170,24 +173,30 @@ def _uses_input_message_instructions(
     )
 
 
-def _openai_service_tier(
+def resolve_openai_service_tier(
     *,
     provider: LLMProvider | None,
     supported: Sequence[ModelExecutionOptionId],
     enabled: Sequence[ModelExecutionOptionId],
 ) -> str | None:
-    """Translate bounded Fast intent to the provider Responses service tier."""
-    fast_supported = ModelExecutionOptionId.FAST in supported
-    fast_enabled = ModelExecutionOptionId.FAST in enabled
-    if fast_enabled and not fast_supported:
-        raise ValueError("Enabled execution option is not supported by the model.")
-    if provider not in {LLMProvider.OPENAI, LLMProvider.CHATGPT_OAUTH}:
-        if fast_supported or fast_enabled:
-            raise ValueError("Fast execution is not supported by this provider.")
+    """Translate validated speed intent to the native Responses service tier."""
+    if provider is None:
+        if supported or enabled:
+            raise ValueError("Execution options require an explicit provider.")
         return None
-    if fast_enabled:
+    validated = validate_execution_options(
+        provider=provider,
+        supported=supported,
+        enabled=enabled,
+    )
+    if ModelExecutionOptionId.ULTRAFAST in validated:
+        return "ultrafast"
+    if ModelExecutionOptionId.FAST in validated:
         return "priority"
-    if provider is LLMProvider.OPENAI and fast_supported:
+    if provider is LLMProvider.OPENAI and any(
+        option in supported
+        for option in (ModelExecutionOptionId.FAST, ModelExecutionOptionId.ULTRAFAST)
+    ):
         return "default"
     return None
 
@@ -409,7 +418,7 @@ class ResponsesRequestLowerer:
         if self._reasoning_effort is not None:
             kwargs["reasoning"] = {"effort": self._reasoning_effort, "summary": "auto"}
         kwargs.update(self._extra_kwargs)
-        service_tier = _openai_service_tier(
+        service_tier = resolve_openai_service_tier(
             provider=self._provider_id,
             supported=self._supported_execution_options,
             enabled=self._enabled_execution_options,

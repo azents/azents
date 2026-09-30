@@ -1170,12 +1170,14 @@ class OpenAIResponsesOutputNormalizer:
         model: str,
         operation: ModelStreamCallKind,
         integration: str | None,
+        requested_service_tier: str | None,
     ) -> None:
         """Configure OpenAI-native artifact and failure ownership."""
         self.provider: str = provider
         self.model: str = model
         self.operation: ModelStreamCallKind = operation
         self.integration: str | None = integration
+        self.requested_service_tier = requested_service_tier
         self._canonical = _OpenAIResponsesCanonicalNormalizer(
             provider=provider,
             model=model,
@@ -1479,7 +1481,11 @@ class _OpenAIResponsesOutputStream:
             self._completed_output_items,
         )
         usage = (
-            _normalize_openai_usage(response, model=self.normalizer.model)
+            _normalize_openai_usage(
+                response,
+                model=self.normalizer.model,
+                requested_service_tier=self.normalizer.requested_service_tier,
+            )
             if response is not None
             else None
         )
@@ -1780,6 +1786,7 @@ def _normalize_openai_usage(
     response: Response,
     *,
     model: str,
+    requested_service_tier: str | None,
 ) -> TokenUsagePayload | None:
     """Normalize SDK usage and estimate content-free public-map pricing."""
     usage = response.usage
@@ -1802,7 +1809,11 @@ def _normalize_openai_usage(
             output_details,
             "reasoning_tokens",
         ),
-        cost_usd=_estimate_openai_cost(response, model=model),
+        cost_usd=_estimate_openai_cost(
+            response,
+            model=model,
+            requested_service_tier=requested_service_tier,
+        ),
         raw_hidden_params=None,
     )
 
@@ -1817,8 +1828,26 @@ def _optional_usage_detail(details: object, field: str) -> int | None:
     return value
 
 
-def _estimate_openai_cost(response: Response, *, model: str) -> float | None:
+def _estimate_openai_cost(
+    response: Response,
+    *,
+    model: str,
+    requested_service_tier: str | None,
+) -> float | None:
     """Estimate cost through LiteLLM using only usage and pricing metadata."""
+    actual_tier = response.service_tier
+    if actual_tier == "ultrafast" or (
+        actual_tier in {None, "", "auto"} and requested_service_tier == "ultrafast"
+    ):
+        return None
+    if actual_tier and actual_tier not in {
+        "auto",
+        "default",
+        "flex",
+        "priority",
+        "fast",
+    }:
+        return None
     pricing_model = model.removeprefix("openai/")
     pricing = model_cost.get(pricing_model) or model_cost.get(f"openai/{pricing_model}")
     if pricing is None:
@@ -1826,7 +1855,9 @@ def _estimate_openai_cost(response: Response, *, model: str) -> float | None:
     service_tier = (
         "priority" if response.service_tier == "fast" else response.service_tier
     )
-    if service_tier == "priority" and not _has_priority_pricing(pricing):
+    if service_tier in {"priority", "flex"} and not _has_tier_pricing(
+        pricing, service_tier=service_tier
+    ):
         return None
     minimal_response = ResponsesAPIResponse.model_construct(
         model=model,
@@ -1851,15 +1882,15 @@ def _estimate_openai_cost(response: Response, *, model: str) -> float | None:
     return normalized
 
 
-def _has_priority_pricing(pricing: Mapping[str, object]) -> bool:
+def _has_tier_pricing(pricing: Mapping[str, object], *, service_tier: str) -> bool:
     """Return whether both premium token price directions are available."""
     return all(
         isinstance(pricing.get(key), int | float)
         and not isinstance(pricing.get(key), bool)
         for key in (
-            "input_cost_per_token_priority",
-            "cache_read_input_token_cost_priority",
-            "output_cost_per_token_priority",
+            f"input_cost_per_token_{service_tier}",
+            f"cache_read_input_token_cost_{service_tier}",
+            f"output_cost_per_token_{service_tier}",
         )
     )
 
@@ -1908,6 +1939,7 @@ async def call_openai_responses_text(
         model=model,
         operation=call_context.call_kind,
         integration=call_context.provider_integration_id,
+        requested_service_tier=None,
     )
     stream = normalizer.start(call_context.session_id or "bounded-operation")
     try:

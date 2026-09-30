@@ -5,6 +5,7 @@
 import { ActionIcon, Box, Group, rem, Stack, Text } from "@mantine/core";
 import { useTranslations } from "next-intl";
 import { memo, useMemo } from "react";
+import { processingSpeedIntent } from "../executionOptions";
 import type { ChatLiveRunState, TokenUsageSummary } from "../types";
 import type { AppliedInferenceProfile } from "@azents/public-client";
 
@@ -138,6 +139,7 @@ export const TokenUsageDetails = memo(function TokenUsageDetails({
       ),
     [usage?.effectiveAutoCompactionThresholdTokens, usage?.totalTokens],
   );
+  const speedIntent = processingSpeedIntent(inferenceProfile);
 
   const profileSummary =
     inferenceProfile === null
@@ -166,13 +168,9 @@ export const TokenUsageDetails = memo(function TokenUsageDetails({
       </Stack>
       <Stack gap={rem(4)}>
         <UsageRow
-          label={t("fast")}
+          label={t("processingSpeedIntent")}
           value={
-            inferenceProfile === null
-              ? "—"
-              : inferenceProfile.enabled_execution_options.includes("fast")
-                ? t("fastEnabled")
-                : t("fastDisabled")
+            speedIntent === null ? "—" : t(`processingSpeed.${speedIntent}`)
           }
         />
         <UsageRow

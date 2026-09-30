@@ -138,8 +138,8 @@ api_routes:
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ticket
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ws
-last_verified_at: 2026-09-25
-spec_version: 173
+last_verified_at: 2026-09-29
+spec_version: 174
 ---
 
 # Conversation & Events
@@ -412,8 +412,9 @@ it opens the desktop model popover or mobile model bottom sheet and automaticall
 durable or active-run context-window details. Root-session pickers render model and reasoning-effort
 controls above those details. Read-only subagent pickers render only the context-window details, so the
 context ring remains inspectable without exposing an inference-profile mutation path. The details show
-whether Fast was on or off for the represented completed model turn from that turn marker's applied
-inference profile; they do not substitute the current composer preference.
+the Normal, Fast, or Ultrafast processing-speed intent for the represented completed model turn
+from that turn marker's applied inference profile. Missing provenance remains unavailable, and
+the displayed intent is not a verified provider-served tier or the current composer preference.
 
 Each session may have a user-facing `title`. `PATCH /chat/v1/sessions/{session_id}/title`
 sets or clears a manual title after workspace membership validation. The request body uses `{ "title":
@@ -1201,14 +1202,18 @@ increments `applied_profile_generation`, including an equal-value replacement. A
 idempotency replay does not invoke the setter and does not increment the generation.
 
 Composer execution-option controls are separate from static model capabilities and built-in tools.
-The first boolean option, Fast, is off by default and appears only for supported selected model
-snapshots with qualitative API-cost or ChatGPT-usage guidance. Options appear inside the existing
-model picker rather than as extra composer toolbar buttons. Desktop uses switches; mobile uses
-independently selectable rows styled like model-selection rows, with a checkmark when selected.
-Toggling edits the shared draft profile without a network write or save loading state. The existing
+Fast and Ultrafast share the registry-owned `processing_speed` exclusive group. Supported saved
+model snapshots may advertise both IDs, while enabled preferences select at most one. Normal is
+the empty group selection, not a persisted option ID. Both desktop and mobile model pickers use
+one single-choice control offering Normal and the selected model's supported members, with
+qualitative API-cost or ChatGPT-usage guidance from the returned definitions. Group selection
+replaces only that group's enabled member; group-less boolean controls remain independent.
+Selection edits the shared draft profile without a network write or save loading state. The existing
 pending-profile highlight and Send/Confirm flow apply the complete displayed profile. New-session
 composers retain the choice locally until first input admission. Switching the draft model retains
-only enabled options supported by the new model. Read-only composers do not expose writable options.
+only enabled options supported by the new model without choosing another premium member.
+Read-only composers do not expose writable options. Unknown, duplicate, unsupported, or
+conflicting explicit enabled lists are rejected before persistence or provider invocation.
 
 Applied Session intent, mailbox-requested intent, original Run intent, and prepared inference state
 retain enabled IDs independently. Requested/applied provenance survives REST, live events, history,
@@ -1409,6 +1414,8 @@ presentations.
 
 ## 13. Changelog
 
+- **2026-09-29** — v174. Added registry-derived exclusive Normal/Fast/Ultrafast
+  composer selection and immutable processing-speed intent in usage details.
 - **2026-09-25** — v173. Added ordered multi-thumbnail Brave client-tool
   results with separate model-file and Exchange attachment parts in one call.
 - **2026-09-15** — v172. Removed Session-owned Runtime Web endpoint, request, and

@@ -3,6 +3,10 @@
 from dataclasses import replace
 
 from azents.core.external_model_settings import ExternalModelEditor
+from azents.services.external_channel.model_execution_controls import (
+    execution_control_groups,
+    normal_execution_value,
+)
 from azents.services.external_channel.slack_events import SlackInteractionView
 from azents.services.external_channel.slack_native_protocol import (
     SlackNativeScope,
@@ -196,22 +200,35 @@ def model_editor_view(
             }
         )
     if selected.execution_options:
-        execution: dict[str, object] = {
-            "type": "checkboxes",
-            "action_id": "azents_model_execution",
-            "options": [
+        for group, definitions in execution_control_groups(
+            selected.execution_options
+        ).items():
+            options = [_option(item.label, item.id.value) for item in definitions]
+            initial = [
                 _option(item.label, item.id.value)
-                for item in selected.execution_options
-            ],
-        }
-        initial = [
-            _option(item.label, item.id.value)
-            for item in selected.execution_options
-            if item.id in selection.enabled_execution_options
-        ]
-        if initial:
-            execution["initial_options"] = initial
-        blocks.append({"type": "actions", "elements": [execution]})
+                for item in definitions
+                if item.id in selection.enabled_execution_options
+            ]
+            execution: dict[str, object] = {
+                "type": "static_select" if group is not None else "checkboxes",
+                "action_id": "azents_model_execution",
+                "options": options,
+            }
+            if group is not None:
+                normal = _option("Normal", normal_execution_value(group))
+                execution["options"] = [normal, *options]
+                execution["initial_option"] = initial[0] if initial else normal
+                blocks.append(
+                    {
+                        "type": "section",
+                        "text": _text(f"Draft {group.replace('_', ' ')}"),
+                        "accessory": execution,
+                    }
+                )
+            else:
+                if initial:
+                    execution["initial_options"] = initial
+                blocks.append({"type": "actions", "elements": [execution]})
         for item in selected.execution_options:
             blocks.append(
                 {

@@ -40,6 +40,18 @@ _PROVIDER_TOOL_LIVE_ITEM_ID = "search_provider_tool_live"
 _PROVIDER_TOOL_LIVE_BARRIER_PATH = "/v1/_provider_tool_live_barrier"
 _PROVIDER_TOOL_LIVE_BARRIER_RELEASE_PATH = f"{_PROVIDER_TOOL_LIVE_BARRIER_PATH}/release"
 _PROVIDER_TOOL_LIVE_BARRIER_TIMEOUT_SECONDS = 60.0
+_INFERENCE_PROFILE_PREFIX = "Ultrafast E2E "
+_INFERENCE_PROFILE_BARRIER_PATH = "/v1/_inference_profile_barrier"
+_INFERENCE_PROFILE_TIERS: dict[str, str | None] = {
+    "served-ultrafast": "ultrafast",
+    "missing-tier": None,
+    "served-default": "default",
+    "served-priority": "priority",
+    "retry": "ultrafast",
+    "rejected": None,
+    "prepared": "ultrafast",
+    "queued": "default",
+}
 _COMPACTION_SYSTEM_PREFIX = (
     "You are a context compaction engine for a long-running agent."
 )
@@ -974,6 +986,24 @@ class _ProviderToolLiveBarrier:
 
 
 _PROVIDER_TOOL_LIVE_BARRIER = _ProviderToolLiveBarrier()
+_INFERENCE_PROFILE_BARRIER = _ProviderToolLiveBarrier()
+
+
+def inference_profile_scenario(user_text: str | None) -> str | None:
+    """Recognize only explicitly named synthetic inference-profile requests."""
+    if user_text is None or not user_text.startswith(_INFERENCE_PROFILE_PREFIX):
+        return None
+    scenario = user_text.removeprefix(_INFERENCE_PROFILE_PREFIX).split(" ", 1)[0]
+    return scenario if scenario in _INFERENCE_PROFILE_TIERS else None
+
+
+def is_inference_profile_title_request(request: dict[str, object]) -> bool:
+    """Recognize the independent title operation for a synthetic profile input."""
+    serialized = json.dumps(request, ensure_ascii=False)
+    return (
+        _SESSION_TITLE_SYSTEM_MARKER in serialized
+        and _INFERENCE_PROFILE_PREFIX in serialized
+    )
 
 
 class _ExternalChannelQuietWorkBarrier:
@@ -1164,6 +1194,9 @@ class _Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         """Return a local journal, deterministic usage, or proxied response."""
+        if self.path == _INFERENCE_PROFILE_BARRIER_PATH:
+            self._write_json(200, _INFERENCE_PROFILE_BARRIER.evidence())
+            return
         if urlsplit(self.path).path == _OPENAI_MODEL_LIST_PATH:
             self._write_json(200, image_generation_model_list_payload())
             return
@@ -1199,6 +1232,14 @@ class _Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         """Handle deterministic image, hosted-tool, and OAuth boundaries."""
+        if self.path == _INFERENCE_PROFILE_BARRIER_PATH:
+            _INFERENCE_PROFILE_BARRIER.arm()
+            self._write_json(201, _INFERENCE_PROFILE_BARRIER.evidence())
+            return
+        if self.path == f"{_INFERENCE_PROFILE_BARRIER_PATH}/release":
+            _INFERENCE_PROFILE_BARRIER.release()
+            self._write_json(200, _INFERENCE_PROFILE_BARRIER.evidence())
+            return
         if self.path == _PROVIDER_TOOL_LIVE_BARRIER_PATH:
             _PROVIDER_TOOL_LIVE_BARRIER.arm()
             self._write_json(201, _PROVIDER_TOOL_LIVE_BARRIER.evidence())
@@ -1254,6 +1295,15 @@ class _Handler(BaseHTTPRequestHandler):
         request = _object(request_value)
         user_text = _last_user_text(request)
         compaction_request = _is_semantic_compaction_request(request)
+        if self.path == "/v1/responses" and is_inference_profile_title_request(request):
+            with _State.lock:
+                _State.requests.append(request)
+            self._write_text_response(
+                request,
+                '{"title":"Synthetic inference profile"}',
+                response_id="resp_inference_profile_title",
+            )
+            return
         if is_external_channel_slack_response_mode_title_request(request):
             self._write_text_response(
                 request,
@@ -1277,6 +1327,7 @@ class _Handler(BaseHTTPRequestHandler):
         }
         if (
             user_text in captured_prompts
+            or inference_profile_scenario(user_text) is not None
             or compaction_request
             or request_has_tool_output(request, "call_brave_e2e_images")
             or (
@@ -1286,6 +1337,51 @@ class _Handler(BaseHTTPRequestHandler):
         ):
             with _State.lock:
                 _State.requests.append(request)
+        profile_scenario = inference_profile_scenario(user_text)
+        if self.path == "/v1/responses" and profile_scenario is not None:
+            if profile_scenario == "rejected":
+                self._write_json(
+                    403,
+                    {
+                        "error": {
+                            "message": "Synthetic Ultrafast entitlement rejected.",
+                            "type": "permission_error",
+                            "code": "ultrafast_unavailable",
+                        }
+                    },
+                )
+                return
+            if profile_scenario == "retry":
+                with _State.lock:
+                    attempts = sum(
+                        _last_user_text(item) == user_text for item in _State.requests
+                    )
+                if attempts == 1:
+                    self._write_json(
+                        429,
+                        {
+                            "error": {
+                                "message": "Synthetic Ultrafast transient rejection.",
+                                "type": "rate_limit_error",
+                                "code": "rate_limit",
+                            }
+                        },
+                    )
+                    return
+            if (
+                profile_scenario == "prepared"
+                and not _INFERENCE_PROFILE_BARRIER.wait_for_release()
+            ):
+                self._write_json(
+                    409, {"error": {"message": "Inference barrier was not released."}}
+                )
+                return
+            self._write_text_response(
+                request,
+                f"INFERENCE_PROFILE_COMPLETED {profile_scenario}",
+                response_id=f"resp_inference_profile_{profile_scenario}",
+            )
+            return
         if self.path == "/v1/responses" and user_text in {
             _PROMPT,
             _EXPLICIT_IMAGE_PROMPT,
@@ -3491,7 +3587,7 @@ class _Handler(BaseHTTPRequestHandler):
         output: list[dict[str, object]],
     ) -> dict[str, object]:
         """Build one completed Responses payload."""
-        return {
+        response: dict[str, object] = {
             "id": response_id,
             "object": "response",
             "created_at": time.time(),
@@ -3512,6 +3608,13 @@ class _Handler(BaseHTTPRequestHandler):
                 "output_tokens_details": {"reasoning_tokens": 0},
             },
         }
+
+        scenario = inference_profile_scenario(_last_user_text(request))
+        if scenario is not None:
+            tier = _INFERENCE_PROFILE_TIERS[scenario]
+            if tier is not None:
+                response["service_tier"] = tier
+        return response
 
     def _write_sse(self, events: list[dict[str, object]]) -> None:
         """Write deterministic Responses server-sent events."""

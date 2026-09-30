@@ -21,6 +21,10 @@ from azents.core.llm_catalog import ModelReasoningEffort
 from azents.services.external_channel.discord_settings_scope import (
     build_discord_model_settings_custom_id,
 )
+from azents.services.external_channel.model_execution_controls import (
+    execution_control_groups,
+    normal_execution_value,
+)
 
 _MODEL_PAGE_SIZE = 10
 
@@ -78,6 +82,11 @@ def discord_model_editor_response(
         f"Draft model: **{_draft_model_label(editor)}**\n"
         f"{editor.effect_notice}"
     )
+    if editor.selected_option.execution_options:
+        description += "\n" + "\n".join(
+            f"{option.label}: {option.description} {option.cost_hint}"
+            for option in editor.selected_option.execution_options
+        )
     if status is not None:
         description = f"{status}\n\n{description}"
     return {
@@ -281,19 +290,22 @@ def _editor_rows(
         execution_options = selected_option.execution_options
         if execution_options:
             enabled = set(draft.selection.enabled_execution_options)
-            rows.append(
-                _select_row(
-                    custom_id=build_discord_model_settings_custom_id(
-                        secret=secret,
-                        action="select_execution",
-                        draft_id=draft.id,
-                        offset=page.offset,
-                        selection_fingerprint=None,
-                    ),
-                    placeholder="Execution options",
-                    min_values=0,
-                    max_values=len(execution_options),
-                    options=[
+            for group, definitions in execution_control_groups(
+                execution_options
+            ).items():
+                choices: list[dict[str, object]] = []
+                if group is not None:
+                    choices.append(
+                        {
+                            "label": "Normal",
+                            "value": normal_execution_value(group),
+                            "default": not any(
+                                option.id in enabled for option in definitions
+                            ),
+                        }
+                    )
+                choices.extend(
+                    [
                         {
                             "label": _discord_text(option.label, 100),
                             "description": _discord_text(
@@ -303,10 +315,26 @@ def _editor_rows(
                             "value": option.id.value,
                             "default": option.id in enabled,
                         }
-                        for option in execution_options
-                    ],
+                        for option in definitions
+                    ]
                 )
-            )
+                rows.append(
+                    _select_row(
+                        custom_id=build_discord_model_settings_custom_id(
+                            secret=secret,
+                            action="select_execution",
+                            draft_id=draft.id,
+                            offset=page.offset,
+                            selection_fingerprint=None,
+                        ),
+                        placeholder=group.replace("_", " ").title()
+                        if group is not None
+                        else "Execution options",
+                        min_values=1 if group is not None else 0,
+                        max_values=1 if group is not None else len(definitions),
+                        options=choices,
+                    )
+                )
     controls: list[dict[str, object]] = []
     if page.total_count > page.limit:
         controls.append(

@@ -10,6 +10,7 @@ import {
   Group,
   Paper,
   Popover,
+  Radio,
   rem,
   Stack,
   Switch,
@@ -87,6 +88,7 @@ function ChatInputView({
     contextUsageActiveRun,
     onApplyInferenceProfile,
     selectableExecutionOptions,
+    selectableExecutionOptionGroups,
     isUploading,
     pendingFiles,
     goal,
@@ -149,6 +151,7 @@ function ChatInputView({
     handleModelChange,
     handleEffortChange,
     handleExecutionOptionToggle,
+    handleExecutionOptionGroupChange,
     handleOpenContextUsage,
     handleProfilePickerEnterTransitionEnd,
     handleDesktopProfileSectionKeyDown,
@@ -222,8 +225,9 @@ function ChatInputView({
       </Group>
     </Button>
   );
-  const executionOptionControls = selectableExecutionOptions.map(
-    (definition, index) => {
+  const executionOptionControls = selectableExecutionOptions
+    .filter((definition) => definition.exclusive_group === null)
+    .map((definition, index) => {
       const selected = inferenceProfile.enabled_execution_options.includes(
         definition.id,
       );
@@ -300,7 +304,61 @@ function ChatInputView({
           />
         </Group>
       );
-    },
+    });
+  const groupedExecutionOptionControls = selectableExecutionOptionGroups.map(
+    (group) => (
+      <Radio.Group
+        key={group.id}
+        name={`${messageInputId}-${group.id}`}
+        label={
+          group.id === "processing_speed"
+            ? t("composerProfile.processingSpeed")
+            : t("composerProfile.executionOptions")
+        }
+        value={
+          group.definitions.find((definition) =>
+            inferenceProfile.enabled_execution_options.includes(definition.id),
+          )?.id ?? ""
+        }
+        onChange={(selectedId) =>
+          handleExecutionOptionGroupChange(group.id, selectedId)
+        }
+      >
+        <Stack gap="sm" py="xs" px="xs">
+          <Radio
+            value=""
+            label={
+              group.id === "processing_speed"
+                ? t("composerProfile.normalSpeed")
+                : t("composerProfile.noExecutionOption")
+            }
+            disabled={
+              inputDisabled || editSendDisabled || editingMessageId !== null
+            }
+          />
+          {group.definitions.map((definition) => (
+            <Radio
+              key={definition.id}
+              value={definition.id}
+              label={definition.label}
+              description={
+                <Stack gap={rem(2)}>
+                  <Text component="span" size="xs" c="dimmed">
+                    {definition.description}
+                  </Text>
+                  <Text component="span" size="xs" c="dimmed">
+                    {definition.cost_hint}
+                  </Text>
+                </Stack>
+              }
+              disabled={
+                inputDisabled || editSendDisabled || editingMessageId !== null
+              }
+            />
+          ))}
+        </Stack>
+      </Radio.Group>
+    ),
   );
   const contextUsageTrigger = contextUsageEnabled ? (
     <TokenUsageIndicator usage={contextUsage} onOpen={handleOpenContextUsage} />
@@ -452,6 +510,7 @@ function ChatInputView({
               overflow: "hidden",
             }}
           >
+            {groupedExecutionOptionControls}
             {executionOptionControls}
           </Stack>
         </Stack>
@@ -589,6 +648,7 @@ function ChatInputView({
               <Text size="xs" c="dimmed" fw={600} px="xs">
                 {t("composerProfile.executionOptions")}
               </Text>
+              {groupedExecutionOptionControls}
               {executionOptionControls}
             </>
           ) : null}

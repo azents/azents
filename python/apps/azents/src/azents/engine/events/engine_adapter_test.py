@@ -1424,21 +1424,36 @@ async def test_client_tool_adapter_profile_selects_json_on_openrouter() -> None:
     assert "Send one plaintext batch update request." not in instructions
 
 
-async def test_selected_model_execution_options_reach_openai_lowering() -> None:
-    """Lower prepared Fast intent from the selected model snapshot."""
+@pytest.mark.parametrize(
+    ("enabled", "service_tier"),
+    [
+        (ModelExecutionOptionId.FAST, "priority"),
+        (ModelExecutionOptionId.ULTRAFAST, "ultrafast"),
+    ],
+)
+@pytest.mark.parametrize("provider", [LLMProvider.OPENAI, LLMProvider.CHATGPT_OAUTH])
+async def test_selected_model_execution_options_reach_openai_lowering(
+    enabled: ModelExecutionOptionId,
+    service_tier: str,
+    provider: LLMProvider,
+) -> None:
+    """Lower prepared speed intent from each selected authentication snapshot."""
     prepared = await _prepare_profiled_model_call(
         model_identifier="gpt-5.5",
         model_developer=LLMModelDeveloper.OPENAI,
         model_family="gpt-5",
         request_model_developer=LLMModelDeveloper.OPENAI,
-        provider=LLMProvider.OPENAI,
-        supported_execution_options=[ModelExecutionOptionId.FAST],
-        enabled_execution_options=[ModelExecutionOptionId.FAST],
+        provider=provider,
+        supported_execution_options=[
+            ModelExecutionOptionId.FAST,
+            ModelExecutionOptionId.ULTRAFAST,
+        ],
+        enabled_execution_options=[enabled],
     )
 
     native_request = prepared.native_request
     assert isinstance(native_request, OpenAIResponsesRequest)
-    assert native_request.options["service_tier"] == "priority"
+    assert native_request.options["service_tier"] == service_tier
 
 
 async def test_tool_search_activation_updates_the_next_prepared_call() -> None:

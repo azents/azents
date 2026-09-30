@@ -135,6 +135,28 @@ def build_deterministic_listing(
                     count=1,
                 )
             ]
+            if (
+                variant == "deterministic-model-settings"
+                and provider == LLMProvider.OPENAI
+            ):
+                models.extend(
+                    [
+                        _candidate(
+                            provider=provider,
+                            identifier=identifier,
+                            display_name=display_name,
+                            family=identifier,
+                            integration_id=integration_id,
+                            source=source,
+                            fetched_at=fetched_at,
+                            lightweight=False,
+                        )
+                        for identifier, display_name in (
+                            ("gpt-6-astra", "GPT 6 Astra Deterministic"),
+                            ("gpt-5.6-sol", "GPT 5.6 Sol Deterministic"),
+                        )
+                    ]
+                )
         case "deterministic-brave-text-only":
             models = [
                 _candidate(
@@ -278,9 +300,13 @@ def _candidate(
             ),
         ),
         supported_execution_options=(
-            [ModelExecutionOptionId.FAST]
+            (
+                [ModelExecutionOptionId.FAST, ModelExecutionOptionId.ULTRAFAST]
+                if identifier in {"gpt-6-astra", "gpt-5.6-sol"}
+                else [ModelExecutionOptionId.FAST]
+            )
             if provider == LLMProvider.OPENAI
-            and identifier == "gpt-5.5"
+            and identifier in {"gpt-5.5", "gpt-6-astra", "gpt-5.6-sol"}
             and not lightweight
             else []
         ),

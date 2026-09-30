@@ -14,6 +14,7 @@ from azents.core.enums import (
     ExternalChannelInteractionType,
     ExternalChannelProvider,
     ExternalChannelTransport,
+    LLMProvider,
 )
 from azents.core.external_account_link import (
     ExternalAccountLinkState,
@@ -129,6 +130,7 @@ def _control(action: NativeAction) -> SlackNativeControl:
         option_id=None,
         reasoning_effort=None,
         execution_options=None,
+        execution_group=None,
         view_id="V1",
         view_hash="hash-1",
     )
@@ -909,3 +911,174 @@ def test_slash_command_display_name_uses_signed_user_name_field() -> None:
     )
     assert callback.principal_create().display_name == "Command nickname"
     assert callback.actor_user_id == "U1"
+
+
+def _execution_element(view: SlackInteractionView) -> dict[str, object]:
+    for block in view.blocks:
+        accessory = block.get("accessory")
+        if (
+            isinstance(accessory, dict)
+            and accessory.get("action_id") == "azents_model_execution"
+        ):
+            return accessory
+    raise AssertionError("Execution option choice is missing.")
+
+
+def _execution_payload(selected: dict[str, object]) -> dict[str, object]:
+    payload = _model_payload()
+    payload["type"] = "block_actions"
+    payload["actions"] = [{"action_id": "azents_model_execution", **selected}]
+    return payload
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider", [LLMProvider.OPENAI, LLMProvider.CHATGPT_OAUTH])
+@pytest.mark.parametrize(
+    "enabled,selected_value",
+    [
+        ([], "__normal__:processing_speed"),
+        ([ModelExecutionOptionId.FAST], "fast"),
+        ([ModelExecutionOptionId.ULTRAFAST], "ultrafast"),
+    ],
+)
+async def test_exclusive_speed_native_view_payload_draft_roundtrip(
+    provider: LLMProvider,
+    enabled: list[ModelExecutionOptionId],
+    selected_value: str,
+) -> None:
+    """Exercise native rendering, ingress decoding and the actual draft handler."""
+    editor = _editor()
+    definitions = list_model_execution_option_definitions(provider=provider)
+    editor = editor.model_copy(
+        update={
+            "selected_option": editor.selected_option.model_copy(
+                update={"execution_options": definitions}
+            ),
+            "draft": editor.draft.model_copy(
+                update={
+                    "selection": editor.draft.selection.model_copy(
+                        update={"enabled_execution_options": enabled}
+                    )
+                }
+            ),
+        }
+    )
+    view = model_editor_view(editor, scope=_scope(), secret=_SECRET, notice=None)
+    execution = _execution_element(view)
+    assert execution["type"] == "static_select"
+    assert execution["options"] == [
+        {"text": {"type": "plain_text", "text": label, "emoji": False}, "value": value}
+        for label, value in [
+            ("Normal", "__normal__:processing_speed"),
+            ("Fast", "fast"),
+            ("Ultrafast", "ultrafast"),
+        ]
+    ]
+    selected_option = execution["initial_option"]
+    assert isinstance(selected_option, dict)
+    assert selected_option["value"] == selected_value
+    callback = parse_slack_interaction_payload(
+        payload=_execution_payload({"selected_option": selected_option}),
+        provider_interaction_key="interaction-1",
+        received_at=_NOW,
+    )
+    control = callback.native_control
+    assert control is not None
+    assert control.execution_options == enabled
+    assert control.execution_group == ("processing_speed" if not enabled else None)
+    assert "__normal__" not in json.dumps(callback.projection)
+    service = _service()
+    assert isinstance(service.models, AsyncMock)
+    previous = editor.model_copy(
+        update={
+            "draft": editor.draft.model_copy(
+                update={
+                    "selection": editor.draft.selection.model_copy(
+                        update={
+                            "enabled_execution_options": [
+                                ModelExecutionOptionId.FAST
+                                if enabled != [ModelExecutionOptionId.FAST]
+                                else ModelExecutionOptionId.ULTRAFAST
+                            ]
+                        }
+                    )
+                }
+            )
+        }
+    )
+    service.models.page_options.return_value = ExternalModelEditorReady(editor=previous)
+    service.models.update_draft.return_value = ExternalModelEditorReady(editor=editor)
+    await service.process(actor=_actor(), scope=_scope(), control=control, now=_NOW)
+    service.models.update_draft.assert_awaited_once()
+    selection = service.models.update_draft.await_args.kwargs["selection"]
+    assert selection.enabled_execution_options == enabled
+    assert selection.option_id == previous.draft.selection.option_id
+    assert selection.reasoning_effort == previous.draft.selection.reasoning_effort
+    assert previous.draft.expected_generation == 2
+    service.models.apply_draft.assert_not_awaited()
+    for definition in definitions:
+        assert definition.cost_hint in repr(view.blocks)
+    if provider is LLMProvider.OPENAI:
+        assert "OpenAI API cost" in repr(view.blocks)
+    else:
+        assert "ChatGPT usage or credits" in repr(view.blocks)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "selected",
+    [
+        {"selected_options": [{"value": "fast"}, {"value": "ultrafast"}]},
+        {"selected_options": [{"value": "fast"}, {"value": "fast"}]},
+        {"selected_option": {"value": "__normal__:unknown"}},
+    ],
+)
+async def test_forged_execution_payload_never_updates_or_applies(
+    selected: dict[str, object],
+) -> None:
+    """Validate control metadata against authoritative selected definitions."""
+    callback = parse_slack_interaction_payload(
+        payload=_execution_payload(selected),
+        provider_interaction_key="interaction-1",
+        received_at=_NOW,
+    )
+    assert callback.native_control is not None
+    service = _service()
+    assert isinstance(service.models, AsyncMock)
+    service.models.page_options.return_value = ExternalModelEditorReady(
+        editor=_editor()
+    )
+    view = await service.process(
+        actor=_actor(), scope=_scope(), control=callback.native_control, now=_NOW
+    )
+    assert "invalid" in repr(view.blocks)
+    service.models.update_draft.assert_not_awaited()
+    service.models.apply_draft.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "selected",
+    [
+        {
+            "selected_options": [
+                {"value": "__normal__:processing_speed"},
+                {"value": "ultrafast"},
+            ]
+        },
+        {
+            "selected_option": {"value": "fast"},
+            "selected_options": [{"value": "ultrafast"}],
+        },
+        {"selected_option": {"value": "unknown"}},
+        {},
+    ],
+)
+def test_malformed_execution_payload_is_rejected_at_ingress(
+    selected: dict[str, object],
+) -> None:
+    with pytest.raises(SlackHTTPInvalidPayload):
+        parse_slack_interaction_payload(
+            payload=_execution_payload(selected),
+            provider_interaction_key="interaction-1",
+            received_at=_NOW,
+        )

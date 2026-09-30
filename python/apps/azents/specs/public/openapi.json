@@ -28781,6 +28781,19 @@
             "type": "string",
             "const": "boolean",
             "title": "Control"
+          },
+          "exclusive_group": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exclusive Group",
+            "description": "Registry-owned group allowing at most one enabled option"
           }
         },
         "additionalProperties": false,
@@ -28790,7 +28803,8 @@
           "label",
           "description",
           "cost_hint",
-          "control"
+          "control",
+          "exclusive_group"
         ],
         "title": "ModelExecutionOptionDefinition",
         "description": "Public metadata for one model execution option."
@@ -28798,7 +28812,8 @@
       "ModelExecutionOptionId": {
         "type": "string",
         "enum": [
-          "fast"
+          "fast",
+          "ultrafast"
         ],
         "title": "ModelExecutionOptionId",
         "description": "Stable identifier for a directly selectable model execution option."

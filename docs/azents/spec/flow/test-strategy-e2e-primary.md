@@ -28,8 +28,8 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
-last_verified_at: 2026-09-24
-spec_version: 70
+last_verified_at: 2026-09-29
+spec_version: 71
 ---
 
 # E2E Primary Test Strategy
@@ -88,6 +88,15 @@ callback URLs, raw payloads, visible message bodies, attachment names, attachmen
 bytes, or transient provider URLs. Production Discord remains on its real secure REST
 and Gateway endpoints; `http`/`ws` are permitted only for the explicit deterministic
 test origin with an explicit insecure-Gateway opt-in.
+
+The prepared inference-profile response barrier uses a function-scoped ordinary
+model-stream Worker fixture so public-API coordination is not mistaken for a
+watchdog timeout. It stops the original Worker without removing it, starts one
+replacement with bounded ordinary stream deadlines, and waits for readiness.
+Reached, queued input, explicit release, and durable turn markers establish
+ordering. Teardown removes the replacement and restores the same original Worker,
+its readiness, and log capture. Public/Admin services, database, bootstrap state,
+and the default fast-watchdog policy remain unchanged.
 
 ## Local Bootstrap and Fixture Flow
 
@@ -537,6 +546,8 @@ Local/PR environment without live substrate does not fake live PASS. Instead, se
 
 ## Changelog
 
+- **2026-09-29 (spec_version 71)** — Isolated explicit inference-profile response
+  barriers from the fast-watchdog fixture without changing default timeout tests.
 - **2026-09-24 (spec_version 70)** — Documented preservation of the
   exact-current snapshot SHA when parallel setup observability is appended.
 - **2026-09-21 (spec_version 67)** — Preferred compatible exact-current-SHA

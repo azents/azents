@@ -47,6 +47,7 @@ from support.container_logs import (
     emit_container_logs,
     read_container_logs,
 )
+from support.model_stream_fixture_policy import ordinary_model_stream_environment
 from support.runtime_provider_auth import (
     RuntimeProviderAuthenticationError,
     issue_runtime_provider_credential,
@@ -1254,6 +1255,70 @@ def _configure_azents_server_container(
     )
 
 
+def _create_engine_worker_container(
+    *,
+    image: str,
+    network: Network,
+    postgres_container: PostgresContainer,
+    rustfs_access_key: str,
+    rustfs_secret_key: str,
+    s3_bucket_name: str,
+    auth_jwt_secret_key: str,
+    credential_encryption_key: str,
+    system_bootstrap_setup_token: str,
+) -> DockerContainer:
+    """Build one worker from the same declared core-service configuration."""
+    base_container = (
+        DockerContainer(
+            image=image,
+            docker_client_kw={"timeout": _DOCKER_CLIENT_TIMEOUT_SECONDS},
+        )
+        .with_name(f"azents-engine-worker-{random_secret(4)}")
+        .with_network_aliases("azents-engine-worker")
+        .with_command(["python", "src/cli/engineworker.py"])
+        .with_exposed_ports(8012)
+        .with_volume_mapping("/var/run/docker.sock", "/var/run/docker.sock", "rw")
+    )
+    return (
+        _configure_azents_server_container(
+            base_container,
+            network,
+            postgres_container,
+            rustfs_access_key,
+            rustfs_secret_key,
+            s3_bucket_name,
+            auth_jwt_secret_key,
+            credential_encryption_key,
+            system_bootstrap_setup_token,
+        )
+        .with_env("AZ_WORKER_HEALTH_PORT", "8012")
+        .with_env("AZ_AGENT_HOME_DOCKER_NETWORK", network.name)
+        .with_env("AZ_RUNTIME_TRANSFER_COORDINATOR_ENDPOINT", "runtime-control:8030")
+        .with_env("AZ_RUNTIME_TRANSFER_COORDINATOR_ALLOW_INSECURE", "true")
+    )
+
+
+def _wait_for_engine_worker_ready(container: DockerContainer) -> None:
+    """Wait for the worker's authoritative readyz boundary."""
+    base_url = (
+        f"http://{container.get_container_host_ip()}:{container.get_exposed_port(8012)}"
+    )
+    wrapped = container.get_wrapped_container()
+    deadline = time.monotonic() + 60
+    while time.monotonic() < deadline:
+        wrapped.reload()
+        if wrapped.status in {"exited", "dead"}:
+            pytest.fail("azents-engine-worker exited before readiness")
+        try:
+            response = requests.get(f"{base_url}/readyz", timeout=2)
+            if response.status_code == 200:
+                return
+        except requests.exceptions.RequestException:
+            pass
+        time.sleep(0.1)
+    pytest.fail("azents-engine-worker did not reach readiness")
+
+
 def _wait_for_tcp_ready(
     container: DockerContainer,
     port: int,
@@ -1612,34 +1677,17 @@ def azents_core_service_containers(
             "ro",
         )
     )
-    engine_base_container = (
-        DockerContainer(
-            image=azents_server_image,
-            docker_client_kw={"timeout": _DOCKER_CLIENT_TIMEOUT_SECONDS},
-        )
-        .with_name(f"azents-engine-worker-{random_secret(4)}")
-        .with_network_aliases("azents-engine-worker")
-        .with_command(["python", "src/cli/engineworker.py"])
-        .with_exposed_ports(8012)
-        .with_volume_mapping("/var/run/docker.sock", "/var/run/docker.sock", "rw")
+    engine_container = _create_engine_worker_container(
+        image=azents_server_image,
+        network=container_network,
+        postgres_container=postgres_container,
+        rustfs_access_key=rustfs_access_key,
+        rustfs_secret_key=rustfs_secret_key,
+        s3_bucket_name=s3_bucket_name,
+        auth_jwt_secret_key=auth_jwt_secret_key,
+        credential_encryption_key=credential_encryption_key,
+        system_bootstrap_setup_token=system_bootstrap_setup_token,
     )
-    engine_container = _configure_azents_server_container(
-        engine_base_container,
-        container_network,
-        postgres_container,
-        rustfs_access_key,
-        rustfs_secret_key,
-        s3_bucket_name,
-        auth_jwt_secret_key,
-        credential_encryption_key,
-        system_bootstrap_setup_token,
-    )
-    engine_container = engine_container.with_env(
-        "AZ_WORKER_HEALTH_PORT", "8012"
-    ).with_env("AZ_AGENT_HOME_DOCKER_NETWORK", container_network.name)
-    engine_container = engine_container.with_env(
-        "AZ_RUNTIME_TRANSFER_COORDINATOR_ENDPOINT", "runtime-control:8030"
-    ).with_env("AZ_RUNTIME_TRANSFER_COORDINATOR_ALLOW_INSECURE", "true")
 
     containers = _CoreServiceContainers(
         public=public_container,
@@ -1752,6 +1800,50 @@ def azents_engine_worker_container(
 ) -> DockerContainer:
     """WebSocket session runtime process azents Engine Worker container."""
     return azents_core_service_containers.engine
+
+
+@pytest.fixture
+def ordinary_model_stream_worker(
+    azents_engine_worker_container: DockerContainer,
+    container_network: Network,
+    postgres_container: PostgresContainer,
+    rustfs_access_key: str,
+    rustfs_secret_key: str,
+    s3_bucket_name: str,
+    azents_server_image: str,
+    auth_jwt_secret_key: str,
+    credential_encryption_key: str,
+    system_bootstrap_setup_token: str,
+) -> Generator[DockerContainer, None, None]:
+    """Isolate one explicit barrier from the fast-watchdog fixture policy."""
+    replacement = _create_engine_worker_container(
+        image=azents_server_image,
+        network=container_network,
+        postgres_container=postgres_container,
+        rustfs_access_key=rustfs_access_key,
+        rustfs_secret_key=rustfs_secret_key,
+        s3_bucket_name=s3_bucket_name,
+        auth_jwt_secret_key=auth_jwt_secret_key,
+        credential_encryption_key=credential_encryption_key,
+        system_bootstrap_setup_token=system_bootstrap_setup_token,
+    )
+    for key, value in ordinary_model_stream_environment().items():
+        replacement.with_env(key, value)
+    original = azents_engine_worker_container.get_wrapped_container()
+    # Keep the original container and all cached core/bootstrap state intact.
+    original.stop(timeout=10)
+    try:
+        with replacement:
+            _register_server_log_capture("azents-engine-worker", replacement)
+            _wait_for_engine_worker_ready(replacement)
+            yield replacement
+    finally:
+        _unregister_server_log_capture("azents-engine-worker")
+        original.start()
+        _register_server_log_capture(
+            "azents-engine-worker", azents_engine_worker_container
+        )
+        _wait_for_engine_worker_ready(azents_engine_worker_container)
 
 
 @pytest.fixture

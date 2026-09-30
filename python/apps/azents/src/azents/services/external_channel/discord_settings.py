@@ -31,7 +31,6 @@ from azents.core.external_model_settings import (
     ExternalModelEditorReady,
     ExternalModelTargetContext,
 )
-from azents.core.model_execution_options import ModelExecutionOptionId
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.external_channel.data import ExternalChannelInteraction
@@ -69,6 +68,10 @@ from azents.services.external_channel.discord_settings_scope import (
 )
 from azents.services.external_channel.ingestion_replay import (
     external_channel_replay_deadline,
+)
+from azents.services.external_channel.model_execution_controls import (
+    decode_execution_control,
+    update_execution_control,
 )
 from azents.services.external_channel.model_settings import ExternalModelSettingsService
 from azents.services.external_channel.participation import (
@@ -1161,9 +1164,13 @@ def _updated_model_selection(
         )
     if scope.action == "select_execution":
         try:
-            execution_options = [
-                ModelExecutionOptionId(value) for value in selected_values
-            ]
+            control = decode_execution_control(selected_values)
+            execution_options = update_execution_control(
+                definitions=current.editor.selected_option.execution_options,
+                current=existing.enabled_execution_options,
+                selected=control.enabled,
+                cleared_group=control.cleared_group,
+            )
         except ValueError as error:
             raise ValueError("Discord model selection is invalid.") from error
         return ExternalModelDraftSelection(
