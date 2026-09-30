@@ -63,6 +63,11 @@ def test_failed_report_emits_active_server_logs_to_terminal_reporter(
     )
     item = cast(pytest.Item, SimpleNamespace(config=config, stash={}))
     monkeypatch.setattr(e2e_conftest, "_SERVER_LOG_CAPTURES", {})
+    monkeypatch.setattr(
+        e2e_conftest,
+        "_runtime_container_diagnostics",
+        lambda: ("fake Runtime evidence",),
+    )
     e2e_conftest._register_server_log_capture(  # pyright: ignore[reportPrivateUsage]
         "azents-public-server",
         _Container(b"public stdout", b"public stderr"),
@@ -81,4 +86,5 @@ def test_failed_report_emits_active_server_logs_to_terminal_reporter(
     assert lines == [
         "=== azents-public-server logs ===",
         "public stdoutpublic stderr",
+        "fake Runtime evidence",
     ]

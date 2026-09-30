@@ -18,6 +18,7 @@ from fastapi import Depends
 from fastapi.dependencies.utils import get_dependant
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.config import Config
 from azents.core.enums import (
     ExchangeFileOrigin,
     ExchangeFileProvenanceKind,
@@ -547,6 +548,7 @@ def _service(
             SystemSettingsService,
             settings or _SystemSettings(),
         ),
+        config=Config.model_construct(),
         inbound_staging_configuration=(
             staging_configuration
             or ExternalChannelInboundStagingConfiguration(
@@ -861,6 +863,49 @@ async def test_slack_metadata_size_does_not_gate_download_or_revalidation() -> N
     source = transfer.requests[0].source
     assert isinstance(source, DeferredProviderServerToRuntimeSource)
     assert await source.revalidate_authority()
+    assert storage.put_calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("size", [15, 16, 17])
+async def test_slack_final_length_uses_small_limit_before_provider_staging(
+    size: int,
+) -> None:
+    """Actual provider size, stream admission, and transfer gates share the policy."""
+    storage = _FileStorage()
+    client = _SlackClient(chunks=(b"x" * size,), head_length=size)
+    service = _service(repository=_Repository(_target()), slack_client=client)
+    service.config = Config.model_construct(general_file_maximum_bytes=16)
+    transfer = _TransferService()
+    if size > 16:
+        with pytest.raises(ExternalChannelFileTransferError, match="16 bytes"):
+            await _download(
+                service,
+                transfer=transfer,
+                session_id="session-1",
+                agent_id="agent-1",
+                file=_locator(),
+                path="/workspace/agent/report.csv",
+                overwrite=False,
+                file_storage=cast(FileStorage, storage),
+            )
+        assert transfer.requests == []
+        assert client.stream_opened == 0
+    else:
+        result = await _download(
+            service,
+            transfer=transfer,
+            session_id="session-1",
+            agent_id="agent-1",
+            file=_locator(),
+            path="/workspace/agent/report.csv",
+            overwrite=False,
+            file_storage=cast(FileStorage, storage),
+        )
+        assert result.bytes_written == size
+        assert transfer.requests[0].product_maximum_size == 16
+        assert transfer.requests[0].provider_maximum_size == 16
+        assert transfer.requests[0].source.metadata.size == size
     assert storage.put_calls == []
 
 

@@ -1673,7 +1673,7 @@ class ExchangeFileService:
             return Failure(file.error)
         if file.value.status == ExchangeFileStatus.EXPIRED:
             return Failure(FileExpired())
-        if file.value.size_bytes > GENERAL_FILE_MAXIMUM_BYTES:
+        if file.value.size_bytes > self.config.general_file_maximum_bytes:
             return Failure(FileTooLarge())
 
         identity = S3ObjectIdentity(

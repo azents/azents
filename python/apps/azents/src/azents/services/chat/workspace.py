@@ -5,7 +5,7 @@ import mimetypes
 import posixpath
 from datetime import UTC, datetime, timedelta
 from pathlib import PurePosixPath
-from typing import Literal, NamedTuple, Protocol, TypeVar, assert_never
+from typing import Annotated, Literal, NamedTuple, Protocol, TypeVar, assert_never
 
 from azcommon.infra.s3.service import S3Service
 from azcommon.result import Failure, Result, Success
@@ -21,7 +21,6 @@ from azents.core.enums import (
     RuntimeDesiredState,
     RuntimeProviderObservedState,
 )
-from azents.core.file_transfer import GENERAL_FILE_MAXIMUM_BYTES
 from azents.core.s3.deps import get_s3_service
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
@@ -91,7 +90,6 @@ _RUNNER_OPERATION_CLIENT_DEP = Depends(get_runtime_runner_operation_client)
 _RUNTIME_TARGET_RESOLVER_DEP = Depends(AgentRuntimeService)
 _SESSION_MANAGER_DEP = Depends(get_session_manager)
 _DEFAULT_RUNNER_FILE_OPERATION_TIMEOUT = timedelta(seconds=120)
-_WORKSPACE_DOWNLOAD_MAXIMUM_FILE_BYTES = GENERAL_FILE_MAXIMUM_BYTES
 _WORKSPACE_DOWNLOAD_DEADLINE = timedelta(minutes=5)
 _WORKSPACE_DOWNLOAD_STATUS_POLL_INTERVAL = timedelta(milliseconds=250)
 _WORKSPACE_DOWNLOAD_CONSUMER_RENEW_INTERVAL = timedelta(seconds=10)
@@ -123,7 +121,7 @@ def get_runtime_workspace_download_service(
             object_prefix=_transfer_object_prefix(config),
         ),
         s3_service=s3_service,
-        product_maximum_size=_WORKSPACE_DOWNLOAD_MAXIMUM_FILE_BYTES,
+        product_maximum_size=config.general_file_maximum_bytes,
         deadline=_WORKSPACE_DOWNLOAD_DEADLINE,
         clock=_utc_now,
     )
@@ -646,6 +644,8 @@ class AgentWorkspaceFileService:
         runtime_workspace_download_service: RuntimeWorkspaceDownloadService | None = (
             _RUNTIME_WORKSPACE_DOWNLOAD_SERVICE_DEP
         ),
+        *,
+        config: Annotated[Config, Depends(get_config)],
     ) -> None:
         self._agent_repository = agent_repository
         self._workspace_user_repository = workspace_user_repository
@@ -654,6 +654,7 @@ class AgentWorkspaceFileService:
         self._session_manager = session_manager
         self._runner_file_operation_timeout = runner_file_operation_timeout
         self._runtime_workspace_download_service = runtime_workspace_download_service
+        self.config = config
 
     async def get_workspace(
         self,
@@ -1328,10 +1329,10 @@ class AgentWorkspaceFileService:
                     detail="Agent Workspace download requires a regular file."
                 )
             )
-        if stat.size_bytes > GENERAL_FILE_MAXIMUM_BYTES:
+        if stat.size_bytes > self.config.general_file_maximum_bytes:
             return Failure(
                 AgentWorkspaceFileTooLarge(
-                    size=stat.size_bytes, limit=GENERAL_FILE_MAXIMUM_BYTES
+                    size=stat.size_bytes, limit=self.config.general_file_maximum_bytes
                 )
             )
         service = self._runtime_workspace_download_service

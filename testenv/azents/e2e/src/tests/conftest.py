@@ -1942,6 +1942,10 @@ def azents_runtime_control_container(
         .with_env("AZ_RUNTIME_CONTROL_START_TIMEOUT_SECONDS", "120")
         .with_env("AZ_RUNTIME_CONTROL_WORKSPACE_S3_BUCKET", s3_bucket_name)
         .with_env("AZ_RUNTIME_CONTROL_WORKSPACE_S3_PREFIX", "v1")
+        .with_env(
+            "AZ_RUNTIME_CONTROL_WORKSPACE_UPLOAD_MAXIMUM_FILE_SIZE",
+            str(E2E_GENERAL_FILE_MAXIMUM_BYTES),
+        )
         .with_env("AZ_RUNTIME_CONTROL_WORKSPACE_S3_ENDPOINT_URL", "http://rustfs:9000")
         .with_env(
             "AZ_RUNTIME_CONTROL_WORKSPACE_S3_PUBLIC_ENDPOINT_URL",

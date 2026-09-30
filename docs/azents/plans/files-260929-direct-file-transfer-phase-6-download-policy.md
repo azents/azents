@@ -1,13 +1,14 @@
 ---
 title: "Direct File Transfer Phase 6: Browser GET and Common Policy"
 created: 2026-09-29
+updated: 2026-09-30
 tags: [files, runtime, browser, implementation, plan]
 ---
 
 # Phase Execution Plan
 
 - Phase: `6/7 Browser GET and common policy`.
-- Branch/base: `azents/files-260929-6-download-policy` → `azents/files-260929-5-chat-upload` (PR #1963, commit `8f0f301c1`).
+- Branch/base: `azents/files-260929-6-download-policy` → `azents/files-260929-5-chat-upload` (PR #1963, current correction `fc1a884c7`).
 - PR boundary: authorize Workspace and Exchange downloads, issue narrowly scoped signed GET redirects without API/Web body relay, retain Workspace temporary objects through ticket expiry plus bounded read grace, and activate one shared 128 MiB policy while retiring the independent external inbound Admin setting.
 - Inputs: phases 1–5 signed response metadata, exact-attempt Runner direct PUT/GET, immutable verification, transfer cleanup and orphan recovery, verified Chat upload, and unchanged feature authorization.
 - Approved Design mechanisms: `M1`, `M5`, `M6`, `M7`, `M8` of [files-260929/DESIGN](../design/files-260929-direct-file-transfer.md), approved revision `1`.
@@ -31,6 +32,14 @@ tags: [files, runtime, browser, implementation, plan]
 - Final validation: root executes backend Ruff/format/ty and full application tests, affected shared/coordination suites, complete TypeScript format/lint/typecheck/build and Web/Admin tests, full E2E static gates and focused real Workspace/Exchange/browser redirect journeys. Evidence records sizes/hashes, status, filename/type, body direction and cleanup without tokens, signed URLs or physical keys.
 - Scope-drift check: verify forward M1/M5–M8 coverage and reverse material authority; retain model/image and outbound provider settings. A new material mechanism returns to feature design; local details remain root-owned.
 - Context checkpoint: Phase 5 PR #1963 is open and all commit hooks passed. Phase 6 begins from a clean worktree. Existing transfer cleanup already protects direct PUT-owned sources until operation/ticket deadline plus five-minute grace; GET issuance must explicitly fit that window and test it. Phase 7 owns integrated all-surface journeys, deployment/network and retained-size/custom-setting inventory, final Living Spec promotion, implementation dates and temporary plan deletion. Required live rollout inventories remain prerequisites, not presumed deployment evidence.
+
+## CI Repair Execution — September 30, 2026
+
+- Root owns the full stack's corrective delivery under the existing M1/M5–M8 authority; `Design delta: None`. Phase 5's validated follow-up supplies the lowering-only testenv Config and small Chat/storage boundaries.
+- `/root/direct-get-core` owns the already-reviewed effective-limit wiring and matching tests in Workspace download, Exchange GET, External Channel ingress, and Worker composition. `/root` owns the exact-origin fixture Exchange GET helper, its Docker-free tests, affected Brave/provider/xAI journeys, consistent Runtime Control fixture upload cap, diagnostic-test isolation, root validation and GitHub/stack operations.
+- Keep production default/ceiling 128 MiB and image/model/provider limits independent. Verify the authorized empty API 302 before a storage GET, match only the explicitly observed fixture HTTPS origin, never forward API credentials or follow a second redirect, and suppress capability-bearing transport exception context. Product TLS and PUT-only CORS remain unchanged.
+- Root validation: complete backend/static gates; all Docker-free E2E support tests; focused configured-boundary, Workspace, image/Brave, storage and native-browser journeys. Preserve earlier full package/frontend evidence only for byte-identical sources and equivalent fixtures. Freeze before root requests `/root/files-260929-reviewer` read-only review.
+- Commit the reviewed Phase 6 correction, synchronize the dependent Phase 7 through the repository rebase script, preserve its approved plan deletion, and assert the final tree is byte-identical to the already-verified final implementation. Use captured remote tips for lease-protected pushes and monitor all seven PRs until CI is green. No PR merge, deployment, live inventory mutation or implemented-snapshot rewrite.
 
 ## Verified phase checkpoint
 

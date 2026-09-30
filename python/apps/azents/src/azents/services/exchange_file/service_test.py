@@ -67,6 +67,7 @@ from . import (
     FileExpired,
     FileNotFound,
     FileRetentionOwnerConflict,
+    FileTooLarge,
     FileUnavailable,
     SessionNotFound,
     exchange_object_key_from_uri,
@@ -465,6 +466,7 @@ class _Config:
 
     workspace_s3 = _WorkspaceS3Config()
     file_lifecycle = _FileLifecycleConfig()
+    general_file_maximum_bytes = 128 * 1024 * 1024
 
 
 class _SessionBoundary:
@@ -1671,6 +1673,39 @@ async def test_download_ticket_rejects_changed_checksum_before_get(
     assert isinstance(result, Failure)
     assert isinstance(result.error, FileUnavailable)
     assert s3_service.get_ticket_requests == []
+    assert s3_service.chunk_sizes == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("size", [15, 16, 17])
+async def test_download_ticket_uses_small_limit_before_head_and_presign(
+    size: int,
+) -> None:
+    """Exchange GET admission uses the same injected policy as browser PUT."""
+    service, _repository, s3_service = _make_service(
+        workspace_user=_make_workspace_user()
+    )
+    created = await service.create_agent_upload(
+        agent_id="agent-1",
+        user_id="user-1",
+        filename="report.bin",
+        media_type="application/octet-stream",
+        body=b"x" * size,
+    )
+    assert isinstance(created, Success)
+    service.config.general_file_maximum_bytes = 16
+    result = await service.create_download_ticket(
+        file_id=created.value.id, user_id="user-1", inline=False
+    )
+    if size <= 16:
+        assert isinstance(result, Success)
+        assert len(s3_service.head_calls) == 1
+        assert len(s3_service.get_ticket_requests) == 1
+    else:
+        assert isinstance(result, Failure)
+        assert isinstance(result.error, FileTooLarge)
+        assert s3_service.head_calls == []
+        assert s3_service.get_ticket_requests == []
     assert s3_service.chunk_sizes == []
 
 

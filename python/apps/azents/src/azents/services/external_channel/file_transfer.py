@@ -19,6 +19,8 @@ from fastapi import Depends
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.config import Config
+from azents.core.deps import get_config
 from azents.core.enums import ExternalChannelProvider
 from azents.core.external_channel_file import (
     EXTERNAL_CHANNEL_FILE_STREAM_CHUNK_BYTES,
@@ -30,7 +32,6 @@ from azents.core.external_channel_file import (
 )
 from azents.core.external_channel_file_system_setting import ExternalChannelFilesConfig
 from azents.core.external_channel_provider import ExternalChannelCapabilitySnapshot
-from azents.core.file_transfer import GENERAL_FILE_MAXIMUM_BYTES
 from azents.core.system_setting import SystemSettingSection
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
@@ -266,6 +267,7 @@ class ExternalChannelFileTransferService:
         SystemSettingsService,
         Depends(SystemSettingsService),
     ]
+    config: Annotated[Config, Depends(get_config)]
     inbound_staging_configuration: Annotated[
         ExternalChannelInboundStagingConfiguration | None,
         Depends(get_unconfigured_external_channel_inbound_staging_configuration),
@@ -332,7 +334,7 @@ class ExternalChannelFileTransferService:
                 "Runtime file transfer service is unavailable."
             )
         credentials = self.credentials_codec.decrypt(target.encrypted_credentials)
-        limit = GENERAL_FILE_MAXIMUM_BYTES
+        limit = self.config.general_file_maximum_bytes
         match target.provider:
             case ExternalChannelProvider.SLACK:
                 return await self._download_slack(
