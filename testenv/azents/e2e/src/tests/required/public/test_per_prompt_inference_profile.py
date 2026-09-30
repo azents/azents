@@ -96,6 +96,7 @@ def _setup_profile_agent(
     *,
     user_email: str | None = None,
     workspace_handle: str | None = None,
+    speed_targets: bool = False,
 ) -> ProfileAgentSetup:
     """Create a workspace and Agent with deterministic Quality/Fast targets."""
     uniq = unique()
@@ -139,7 +140,10 @@ def _setup_profile_agent(
             label="catalog entries",
         )
         identifiers = {entry.get("provider_model_identifier") for entry in entries}
-        if {"gpt-5.5", "gpt-5.5-mini"}.issubset(identifiers):
+        expected_identifiers = {"gpt-5.5", "gpt-5.5-mini"}
+        if speed_targets:
+            expected_identifiers.update({"gpt-6-astra", "gpt-5.6-sol"})
+        if expected_identifiers.issubset(identifiers):
             return entries
         return None
 
@@ -228,6 +232,35 @@ def _setup_profile_agent(
         "lightweight_model_label": "Fast",
         "runtime_profile_id": runtime_profile_id,
     }
+    if speed_targets:
+        options = _objects(
+            agent_payload["selectable_model_options"], label="Agent model options"
+        )
+        for label, identifier in (
+            ("Astra", "gpt-6-astra"),
+            ("Sol", "gpt-5.6-sol"),
+        ):
+            assert by_identifier[identifier].get("supported_execution_options") == [
+                "fast",
+                "ultrafast",
+            ]
+            options.append(
+                {
+                    "label": label,
+                    "candidates": [
+                        {
+                            "model_selection": selection(identifier),
+                            "settings": {
+                                "context_window_tokens": 32_000,
+                                "max_output_tokens": 4_000,
+                                "builtin_tools": [],
+                            },
+                        }
+                    ],
+                    "subagent_enabled": True,
+                }
+            )
+        agent_payload["selectable_model_options"] = options
     created = _response_object(
         requests.post(
             f"{server_url}/agent/v1/workspaces/{handle}/agents",
@@ -276,6 +309,19 @@ def _setup_profile_agent(
     )
     assert fast_selection.get("supported_execution_options") == []
     assert created_options["Fast"].get("execution_option_definitions") == []
+    if speed_targets:
+        for label in ("Astra", "Sol"):
+            definitions = _objects(
+                created_options[label].get("execution_option_definitions"),
+                label=f"{label} execution option definitions",
+            )
+            assert {definition["id"] for definition in definitions} == {
+                "fast",
+                "ultrafast",
+            }
+            for definition in definitions:
+                assert definition["exclusive_group"] == "processing_speed"
+                assert _string(definition.get("cost_hint"), label="option cost hint")
     start_and_wait_for_agent_runtime(
         public_api_client,
         token=token,
@@ -772,6 +818,7 @@ def profile_agent_setup(
         public_api_client,
         admin_api_client,
         azents_public_server_url,
+        speed_targets=True,
     )
 
 
@@ -1031,6 +1078,347 @@ class TestPerPromptInferenceProfile:
         for body in requests_:
             assert body.get("model") == "gpt-5.5"
             assert body.get("service_tier") == "priority"
+
+    @pytest.mark.parametrize(
+        ("target", "model_id", "display_name", "scenario", "options", "tier", "priced"),
+        [
+            (
+                "Astra",
+                "gpt-6-astra",
+                "GPT 6 Astra Deterministic",
+                "served-ultrafast",
+                ["ultrafast"],
+                "ultrafast",
+                False,
+            ),
+            (
+                "Sol",
+                "gpt-5.6-sol",
+                "GPT 5.6 Sol Deterministic",
+                "served-ultrafast",
+                ["ultrafast"],
+                "ultrafast",
+                False,
+            ),
+            (
+                "Astra",
+                "gpt-6-astra",
+                "GPT 6 Astra Deterministic",
+                "missing-tier",
+                ["ultrafast"],
+                "ultrafast",
+                False,
+            ),
+            (
+                "Quality",
+                "gpt-5.5",
+                "GPT 5.5 Deterministic",
+                "served-default",
+                [],
+                "default",
+                True,
+            ),
+            (
+                "Quality",
+                "gpt-5.5",
+                "GPT 5.5 Deterministic",
+                "served-priority",
+                ["fast"],
+                "priority",
+                True,
+            ),
+        ],
+    )
+    def test_explicit_speed_submit_preserves_output_and_actual_tier_cost(
+        self,
+        azents_public_server_url: str,
+        openai_proxy_url: str,
+        profile_agent_setup: ProfileAgentSetup,
+        target: str,
+        model_id: str,
+        display_name: str,
+        scenario: str,
+        options: list[str],
+        tier: str,
+        priced: bool,
+    ) -> None:
+        """Keep successful output and tokens when actual premium cost is unknown."""
+        token, agent_id, _ = profile_agent_setup
+        session_id = _create_profile_session(
+            server_url=azents_public_server_url, token=token, agent_id=agent_id
+        )
+        message = f"Ultrafast E2E {scenario} {unique()}"
+        _write_profile(
+            server_url=azents_public_server_url,
+            token=token,
+            agent_id=agent_id,
+            session_id=session_id,
+            message=message,
+            target=target,
+            effort="high",
+            enabled_execution_options=options,
+        )
+        event = _wait_for_input_event(
+            server_url=azents_public_server_url,
+            token=token,
+            session_id=session_id,
+            message=message,
+        )
+        assert _object(event["payload"], label="input payload")[
+            "requested_inference_profile"
+        ] == {
+            "model_target_label": target,
+            "reasoning_effort": "high",
+            "enabled_execution_options": options,
+        }
+        _wait_for_proxy_service_tier(
+            openai_proxy_url=openai_proxy_url,
+            message=message,
+            model_id=model_id,
+            expected_tier=tier,
+        )
+        marker = _wait_for_turn_provenance(
+            server_url=azents_public_server_url,
+            token=token,
+            session_id=session_id,
+            target=target,
+            effort="high",
+            enabled_execution_options=options,
+            display_name=display_name,
+            effective_context_window_tokens=32_000,
+        )
+        usage = _object(marker["usage"], label="turn usage")
+        assert usage["prompt_tokens"] == 1
+        assert usage["completion_tokens"] == 1
+        if priced:
+            assert isinstance(usage["cost_usd"], (int, float))
+            assert usage["cost_usd"] > 0
+        else:
+            # REST history omits null payload fields; unavailable is not zero.
+            assert usage.get("cost_usd") is None
+        history = _history(azents_public_server_url, token, session_id)
+        assert f"INFERENCE_PROFILE_COMPLETED {scenario}" in json.dumps(history)
+        assert not any(item.get("kind") == "system_error" for item in history)
+        if target == "Astra" and scenario == "served-ultrafast":
+
+            def auxiliary_title_request() -> dict[str, object] | None:
+                response = requests.get(
+                    f"{openai_proxy_url}/v1/_image_generation_requests", timeout=10
+                )
+                response.raise_for_status()
+                for body in _objects(response.json(), label="provider journal"):
+                    serialized = json.dumps(body)
+                    if (
+                        message in serialized
+                        and "Create a brief title from the request" in serialized
+                    ):
+                        return body
+                return None
+
+            auxiliary = wait_until(
+                auxiliary_title_request,
+                timeout=30,
+                interval=0.2,
+                message="Independent title request was not observed",
+            )
+            assert auxiliary is not None
+            assert auxiliary.get("service_tier") not in {"priority", "ultrafast"}
+
+    @pytest.mark.parametrize("scenario", ["retry", "rejected"])
+    def test_ultrafast_provider_errors_never_downgrade(
+        self,
+        azents_public_server_url: str,
+        openai_proxy_url: str,
+        profile_agent_setup: ProfileAgentSetup,
+        scenario: str,
+    ) -> None:
+        """Retry transient errors unchanged and expose entitlement rejection."""
+        token, agent_id, _ = profile_agent_setup
+        session_id = _create_profile_session(
+            server_url=azents_public_server_url, token=token, agent_id=agent_id
+        )
+        message = f"Ultrafast E2E {scenario} {unique()}"
+        _write_profile(
+            server_url=azents_public_server_url,
+            token=token,
+            agent_id=agent_id,
+            session_id=session_id,
+            message=message,
+            target="Astra",
+            effort="high",
+            enabled_execution_options=["ultrafast"],
+        )
+        _wait_for_input_event(
+            server_url=azents_public_server_url,
+            token=token,
+            session_id=session_id,
+            message=message,
+        )
+        matches = _wait_for_matching_proxy_requests(
+            openai_proxy_url=openai_proxy_url,
+            message=message,
+            model_id="gpt-6-astra",
+            minimum_count=2 if scenario == "retry" else 1,
+        )
+        for body in matches:
+            assert body["service_tier"] == "ultrafast"
+        if scenario == "retry":
+            _wait_for_turn_provenance(
+                server_url=azents_public_server_url,
+                token=token,
+                session_id=session_id,
+                target="Astra",
+                effort="high",
+                enabled_execution_options=["ultrafast"],
+                display_name="GPT 6 Astra Deterministic",
+                effective_context_window_tokens=32_000,
+            )
+        else:
+
+            def failed_history() -> list[dict[str, object]] | None:
+                history = _history(azents_public_server_url, token, session_id)
+                return (
+                    history
+                    if any(item.get("kind") == "system_error" for item in history)
+                    else None
+                )
+
+            history = wait_until(
+                failed_history,
+                timeout=120,
+                interval=0.5,
+                message="Provider entitlement rejection did not become visible",
+            )
+            assert history is not None
+            assert "INFERENCE_PROFILE_COMPLETED" not in json.dumps(history)
+        journal = _objects(
+            requests.get(
+                f"{openai_proxy_url}/v1/_image_generation_requests", timeout=10
+            ).json(),
+            label="provider journal",
+        )
+        matching = [
+            body
+            for body in journal
+            if message in json.dumps(body)
+            and "Create a brief title from the request" not in json.dumps(body)
+        ]
+        assert matching
+        assert all(body.get("model") == "gpt-6-astra" for body in matching)
+        assert all(body.get("service_tier") == "ultrafast" for body in matching)
+
+    def test_prepared_ultrafast_is_immutable_while_standard_input_queues(
+        self,
+        azents_public_server_url: str,
+        openai_proxy_url: str,
+        profile_agent_setup: ProfileAgentSetup,
+        ordinary_model_stream_worker: object,
+    ) -> None:
+        """Use an explicit provider barrier instead of racing profile preparation."""
+        del ordinary_model_stream_worker
+        token, agent_id, _ = profile_agent_setup
+        session_id = _create_profile_session(
+            server_url=azents_public_server_url, token=token, agent_id=agent_id
+        )
+        barrier_url = f"{openai_proxy_url}/v1/_inference_profile_barrier"
+        requests.post(barrier_url, timeout=10).raise_for_status()
+        prepared_message = f"Ultrafast E2E prepared {unique()}"
+        queued_message = f"Ultrafast E2E queued {unique()}"
+        try:
+            _write_profile(
+                server_url=azents_public_server_url,
+                token=token,
+                agent_id=agent_id,
+                session_id=session_id,
+                message=prepared_message,
+                target="Astra",
+                effort="high",
+                enabled_execution_options=["ultrafast"],
+            )
+            wait_until(
+                lambda: requests.get(barrier_url, timeout=10).json()["reached"],
+                timeout=30,
+                interval=0.1,
+                message="Prepared provider request did not reach the barrier",
+            )
+            _write_profile(
+                server_url=azents_public_server_url,
+                token=token,
+                agent_id=agent_id,
+                session_id=session_id,
+                message=queued_message,
+                target="Astra",
+                effort="high",
+                enabled_execution_options=[],
+            )
+            _wait_for_proxy_service_tier(
+                openai_proxy_url=openai_proxy_url,
+                message=prepared_message,
+                model_id="gpt-6-astra",
+                expected_tier="ultrafast",
+            )
+        finally:
+            requests.post(f"{barrier_url}/release", timeout=10).raise_for_status()
+        for options in (["ultrafast"], []):
+            _wait_for_turn_provenance(
+                server_url=azents_public_server_url,
+                token=token,
+                session_id=session_id,
+                target="Astra",
+                effort="high",
+                enabled_execution_options=options,
+                display_name="GPT 6 Astra Deterministic",
+                effective_context_window_tokens=32_000,
+            )
+        _wait_for_proxy_service_tier(
+            openai_proxy_url=openai_proxy_url,
+            message=queued_message,
+            model_id="gpt-6-astra",
+            expected_tier="default",
+        )
+
+    @pytest.mark.parametrize(
+        "options",
+        [
+            ["fast", "ultrafast"],
+            ["ultrafast", "fast"],
+            ["ultrafast", "ultrafast"],
+            ["unknown-speed"],
+        ],
+    )
+    def test_invalid_speed_submit_is_atomic(
+        self,
+        azents_public_server_url: str,
+        openai_proxy_url: str,
+        profile_agent_setup: ProfileAgentSetup,
+        options: list[str],
+    ) -> None:
+        """Reject forged option lists before input persistence or provider dispatch."""
+        token, agent_id, _ = profile_agent_setup
+        session_id = _create_profile_session(
+            server_url=azents_public_server_url, token=token, agent_id=agent_id
+        )
+        journal_url = f"{openai_proxy_url}/v1/_image_generation_requests"
+        before_journal = requests.get(journal_url, timeout=10).json()
+        before_history = _history(azents_public_server_url, token, session_id)
+        response = requests.post(
+            f"{azents_public_server_url}/chat/v1/sessions/{session_id}/inputs",
+            headers=_headers(token),
+            json={
+                "agent_id": agent_id,
+                "client_request_id": unique(),
+                "message": f"Ultrafast E2E served-ultrafast invalid {unique()}",
+                "inference_profile": {
+                    "model_target_label": "Astra",
+                    "reasoning_effort": "high",
+                    "enabled_execution_options": options,
+                },
+            },
+            timeout=10,
+        )
+        assert response.status_code == 422, response.text
+        assert _history(azents_public_server_url, token, session_id) == before_history
+        assert requests.get(journal_url, timeout=10).json() == before_journal
 
     def test_subagent_spawn_override_continuation(
         self,

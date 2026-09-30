@@ -615,9 +615,12 @@
     "reasoning": "Raisonnement",
     "modelIdentity": "{model} · {provider}",
     "unknownProvenance": "La provenance de l’exécution n’est pas encore disponible.",
-    "fast": "Fast",
-    "fastEnabled": "Activé",
-    "fastDisabled": "Désactivé"
+    "processingSpeedIntent": "Vitesse de traitement sélectionnée",
+    "processingSpeed": {
+      "normal": "Normale",
+      "fast": "Fast",
+      "ultrafast": "Ultrafast"
+    }
   },
   "editMessage": "Modifier",
   "senderUnavailable": "Expéditeur indisponible",
@@ -836,6 +839,9 @@
     "disabled": "désactivé",
     "executionOptionAriaLabel": "{label}, {state}. {costHint}",
     "executionOptions": "Options d’exécution",
+    "processingSpeed": "Vitesse de traitement",
+    "normalSpeed": "Normale",
+    "noExecutionOption": "Aucune",
     "fallbackBadge": "Fallback"
   },
   "inferenceProvenance": {

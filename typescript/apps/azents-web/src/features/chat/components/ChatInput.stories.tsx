@@ -33,7 +33,7 @@ const reasoningModel: AgentModelSelection = {
     parameters: {},
     compatibility: {},
   },
-  supported_execution_options: ["fast"],
+  supported_execution_options: ["fast", "ultrafast"],
   model_snapshot: {},
   source_metadata: null,
   last_refreshed_at: "2026-05-14T00:00:00Z",
@@ -108,9 +108,18 @@ const selectableModelOptions: AgentResponse["selectable_model_options"] = [
       {
         id: "fast",
         label: "Fast",
-        description: "Use faster processing for this model.",
-        cost_hint: "Higher usage",
+        description: "Request faster processing for supported models.",
+        cost_hint: "Additional OpenAI API cost may apply.",
         control: "boolean",
+        exclusive_group: "processing_speed",
+      },
+      {
+        id: "ultrafast",
+        label: "Ultrafast",
+        description: "Request ultrafast processing for supported models.",
+        cost_hint: "Additional OpenAI API cost may apply.",
+        control: "boolean",
+        exclusive_group: "processing_speed",
       },
     ],
   },
@@ -291,7 +300,7 @@ export const ActiveFallback = {
   },
 } satisfies Story;
 
-export const ExecutionOptionToggle = {
+export const ExclusiveProcessingSpeed = {
   args: {
     ...baseArgs,
     sessionId: "option-confirm",
@@ -302,15 +311,28 @@ export const ExecutionOptionToggle = {
     const canvas = within(canvasElement);
     const page = within(canvasElement.ownerDocument.body);
     await userEvent.click(canvas.getByRole("button", { name: "Model" }));
-    const toggle = await page.findByRole("switch", {
+    const fast = await page.findByRole("radio", {
       name: "Fast",
     });
-    await userEvent.click(toggle);
-    await expect(toggle).toBeChecked();
+    const ultrafast = page.getByRole("radio", { name: "Ultrafast" });
+    const normal = page.getByRole("radio", { name: "Normal" });
+    await expect(normal).toBeChecked();
+    await expect(page.queryByRole("switch", { name: "Fast" })).toBeNull();
+    await userEvent.click(fast);
+    await expect(fast).toBeChecked();
     await expect(args.onInferenceProfileChange).toHaveBeenLastCalledWith({
       model_target_label: "Default",
       reasoning_effort: null,
       enabled_execution_options: ["fast"],
+    });
+    await userEvent.click(ultrafast);
+    await expect(ultrafast).toBeChecked();
+    await expect(fast).not.toBeChecked();
+    await expect(normal).not.toBeChecked();
+    await expect(args.onInferenceProfileChange).toHaveBeenLastCalledWith({
+      model_target_label: "Default",
+      reasoning_effort: null,
+      enabled_execution_options: ["ultrafast"],
     });
     await expect(args.onApplyInferenceProfile).not.toHaveBeenCalled();
     await userEvent.click(canvas.getByRole("button", { name: "Model" }));
@@ -320,7 +342,7 @@ export const ExecutionOptionToggle = {
     await expect(args.onApplyInferenceProfile).toHaveBeenCalledWith({
       model_target_label: "Default",
       reasoning_effort: null,
-      enabled_execution_options: ["fast"],
+      enabled_execution_options: ["ultrafast"],
     });
   },
 } satisfies Story;
@@ -331,20 +353,218 @@ export const MobileExecutionOptionDraft = {
     isMobile: true,
     sessionId: "mobile-option-draft",
     onApplyInferenceProfile: fn(() => Promise.resolve(true)),
+    onInferenceProfileChange: fn(),
+  },
+  decorators: [
+    (Story) => (
+      <StorybookCanvas maxWidth={rem(390)}>
+        <Story />
+      </StorybookCanvas>
+    ),
+  ],
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    const page = within(canvasElement.ownerDocument.body);
+    await userEvent.click(canvas.getByRole("button", { name: "Model" }));
+    const option = await page.findByRole("radio", {
+      name: "Ultrafast",
+    });
+    await userEvent.click(option);
+    await expect(option).toBeChecked();
+    await expect(args.onInferenceProfileChange).toHaveBeenLastCalledWith({
+      model_target_label: "Default",
+      reasoning_effort: null,
+      enabled_execution_options: ["ultrafast"],
+    });
+    await expect(
+      page.getAllByText("Additional OpenAI API cost may apply.")[0],
+    ).toBeVisible();
+    await expect(args.onApplyInferenceProfile).not.toHaveBeenCalled();
+    await userEvent.click(page.getByRole("radio", { name: "Normal" }));
+    await expect(option).not.toBeChecked();
+    await expect(args.onInferenceProfileChange).toHaveBeenLastCalledWith({
+      model_target_label: "Default",
+      reasoning_effort: null,
+      enabled_execution_options: [],
+    });
+    await expect(args.onApplyInferenceProfile).not.toHaveBeenCalled();
+  },
+} satisfies Story;
+
+export const UltrafastBeforeFirstMessage = {
+  args: {
+    ...baseArgs,
+    sessionId: null,
+    defaultInferenceProfile: {
+      model_target_label: "Default",
+      reasoning_effort: "high",
+      enabled_execution_options: [],
+    },
+    onSendInput: fn(() => Promise.resolve(true)),
   },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement);
     const page = within(canvasElement.ownerDocument.body);
     await userEvent.click(canvas.getByRole("button", { name: "Model" }));
-    const option = await page.findByRole("checkbox", {
-      name: "Fast",
+    await expect(page.getByRole("radio", { name: "Normal" })).toBeChecked();
+    await userEvent.click(page.getByRole("radio", { name: "Ultrafast" }));
+    await userEvent.click(canvas.getByRole("button", { name: "Model" }));
+    await userEvent.type(canvas.getByRole("textbox"), "Use the selected speed");
+    await userEvent.click(canvas.getByRole("button", { name: "Send" }));
+    await expect(args.onSendInput).toHaveBeenCalledWith(
+      "Use the selected speed",
+      null,
+      {
+        model_target_label: "Default",
+        reasoning_effort: "high",
+        enabled_execution_options: ["ultrafast"],
+      },
+    );
+  },
+} satisfies Story;
+
+export const RestoredUltrafast = {
+  args: {
+    ...baseArgs,
+    sessionId: "restored-ultrafast",
+    appliedInferenceProfile: {
+      model_target_label: "Default",
+      reasoning_effort: "high",
+      enabled_execution_options: ["ultrafast"],
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const page = within(canvasElement.ownerDocument.body);
+    await userEvent.click(canvas.getByRole("button", { name: "Model" }));
+    await expect(page.getByRole("radio", { name: "Ultrafast" })).toBeChecked();
+    await expect(page.getByRole("radio", { name: "Normal" })).not.toBeChecked();
+    await expect(page.getByRole("radio", { name: "Fast" })).not.toBeChecked();
+  },
+} satisfies Story;
+
+export const UltrafastOnlySubscription = {
+  args: {
+    ...baseArgs,
+    sessionId: "ultrafast-only-subscription",
+    selectableModelOptions: selectableModelOptions.map((option) => ({
+      ...option,
+      candidates: option.candidates.map((candidate) => ({
+        ...candidate,
+        model_selection: {
+          ...candidate.model_selection,
+          provider: "chatgpt_oauth",
+          supported_execution_options:
+            option.label === "Default" ? ["ultrafast"] : [],
+        },
+      })),
+      execution_option_definitions: option.execution_option_definitions
+        .filter((definition) => definition.id === "ultrafast")
+        .map((definition) => ({
+          ...definition,
+          cost_hint: "Additional ChatGPT usage or credits may apply.",
+        })),
+    })),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const page = within(canvasElement.ownerDocument.body);
+    await userEvent.click(canvas.getByRole("button", { name: "Model" }));
+    await expect(page.getByRole("radio", { name: "Normal" })).toBeChecked();
+    await expect(page.queryByRole("radio", { name: "Fast" })).toBeNull();
+    await userEvent.click(page.getByRole("radio", { name: "Ultrafast" }));
+    await expect(
+      page.getByText("Additional ChatGPT usage or credits may apply."),
+    ).toBeVisible();
+    await expect(
+      page.queryByText("Additional OpenAI API cost may apply."),
+    ).toBeNull();
+  },
+} satisfies Story;
+
+export const KeyboardProcessingSpeed = {
+  args: {
+    ...baseArgs,
+    sessionId: "keyboard-processing-speed",
+    onInferenceProfileChange: fn(),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    const page = within(canvasElement.ownerDocument.body);
+    await userEvent.click(canvas.getByRole("button", { name: "Model" }));
+    const normal = page.getByRole("radio", { name: "Normal" });
+    normal.focus();
+    await userEvent.keyboard("{ArrowDown}{ArrowDown}");
+    await expect(page.getByRole("radio", { name: "Ultrafast" })).toBeChecked();
+    await expect(page.getByRole("radio", { name: "Ultrafast" })).toHaveFocus();
+    await expect(args.onInferenceProfileChange).toHaveBeenLastCalledWith({
+      model_target_label: "Default",
+      reasoning_effort: null,
+      enabled_execution_options: ["ultrafast"],
     });
-    await userEvent.click(option);
-    await expect(option).toHaveAttribute("aria-checked", "true");
-    await expect(args.onApplyInferenceProfile).not.toHaveBeenCalled();
-    await userEvent.click(option);
-    await expect(option).toHaveAttribute("aria-checked", "false");
-    await expect(args.onApplyInferenceProfile).not.toHaveBeenCalled();
+    await userEvent.keyboard("{ArrowDown}");
+    await expect(normal).toBeChecked();
+  },
+} satisfies Story;
+
+export const ModelSwitchClearsUnsupportedUltrafast = {
+  args: {
+    ...baseArgs,
+    sessionId: "ultrafast-model-switch",
+    appliedInferenceProfile: {
+      model_target_label: "Default",
+      reasoning_effort: "high",
+      enabled_execution_options: ["ultrafast"],
+    },
+    onInferenceProfileChange: fn(),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    const page = within(canvasElement.ownerDocument.body);
+    await userEvent.click(canvas.getByRole("button", { name: "Model" }));
+    await userEvent.click(
+      page.getByRole("button", { name: /Fast gpt-5\.5-mini/ }),
+    );
+    await expect(args.onInferenceProfileChange).toHaveBeenLastCalledWith({
+      model_target_label: "Fast",
+      reasoning_effort: null,
+      enabled_execution_options: [],
+    });
+    await expect(page.queryByRole("radio", { name: "Ultrafast" })).toBeNull();
+  },
+} satisfies Story;
+
+export const RejectedUltrafastSaveRetainsPendingDraft = {
+  args: {
+    ...baseArgs,
+    sessionId: "rejected-ultrafast-save",
+    appliedInferenceProfile: {
+      model_target_label: "Default",
+      reasoning_effort: null,
+      enabled_execution_options: [],
+    },
+    onApplyInferenceProfile: fn(() => Promise.resolve(false)),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    const page = within(canvasElement.ownerDocument.body);
+    await userEvent.click(canvas.getByRole("button", { name: "Model" }));
+    await userEvent.click(page.getByRole("radio", { name: "Ultrafast" }));
+    await userEvent.click(canvas.getByRole("button", { name: "Model" }));
+    const apply = canvas.getByRole("button", { name: "Apply model change" });
+    await userEvent.click(apply);
+    await expect(args.onApplyInferenceProfile).toHaveBeenCalledWith({
+      model_target_label: "Default",
+      reasoning_effort: null,
+      enabled_execution_options: ["ultrafast"],
+    });
+    await expect(apply).toBeVisible();
+    await userEvent.click(canvas.getByRole("button", { name: "Model" }));
+    await expect(page.getByRole("radio", { name: "Ultrafast" })).toBeChecked();
+    await userEvent.click(page.getByRole("radio", { name: "Normal" }));
+    await expect(
+      canvas.queryByRole("button", { name: "Apply model change" }),
+    ).toBeNull();
   },
 } satisfies Story;
 

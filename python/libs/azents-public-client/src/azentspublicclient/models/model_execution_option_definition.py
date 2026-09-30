@@ -18,7 +18,7 @@ import re  # noqa: F401
 import json
 
 from pydantic import BaseModel, ConfigDict, Field, StrictStr, field_validator
-from typing import Any, ClassVar, Dict, List
+from typing import Any, ClassVar, Dict, List, Optional
 from typing_extensions import Annotated
 from azentspublicclient.models.model_execution_option_id import ModelExecutionOptionId
 from typing import Optional, Set
@@ -33,8 +33,9 @@ class ModelExecutionOptionDefinition(BaseModel):
     description: Annotated[str, Field(min_length=1, strict=True)]
     cost_hint: Annotated[str, Field(min_length=1, strict=True)]
     control: StrictStr
+    exclusive_group: Optional[Annotated[str, Field(min_length=1, strict=True)]]
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["id", "label", "description", "cost_hint", "control"]
+    __properties: ClassVar[List[str]] = ["id", "label", "description", "cost_hint", "control", "exclusive_group"]
 
     @field_validator('control')
     def control_validate_enum(cls, value):
@@ -89,6 +90,11 @@ class ModelExecutionOptionDefinition(BaseModel):
             for _key, _value in self.additional_properties.items():
                 _dict[_key] = _value
 
+        # set to None if exclusive_group (nullable) is None
+        # and model_fields_set contains the field
+        if self.exclusive_group is None and "exclusive_group" in self.model_fields_set:
+            _dict['exclusive_group'] = None
+
         return _dict
 
     @classmethod
@@ -105,7 +111,8 @@ class ModelExecutionOptionDefinition(BaseModel):
             "label": obj.get("label"),
             "description": obj.get("description"),
             "cost_hint": obj.get("cost_hint"),
-            "control": obj.get("control")
+            "control": obj.get("control"),
+            "exclusive_group": obj.get("exclusive_group")
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

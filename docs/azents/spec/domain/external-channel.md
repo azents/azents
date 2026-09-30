@@ -98,8 +98,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/approval-requests/{access_request_id}
-last_verified_at: 2026-09-15
-spec_version: 80
+last_verified_at: 2026-09-29
+spec_version: 81
 ---
 
 # External Channel
@@ -603,6 +603,18 @@ participant disclosure. Slack uses private modals for model controls; Discord us
 ephemeral interaction responses for model controls. A provider or delivery path that
 cannot guarantee privacy omits personalization and never falls back to a public
 message, DM, or separate web conversation-settings page.
+
+Existing private model controls consume the public code-owned execution-option
+`exclusive_group` metadata. Discord uses a single-choice select and Slack uses a
+single-choice `static_select` for grouped options, including a control-local Normal
+sentinel that clears only that group. Fast and Ultrafast are mutually exclusive;
+ungrouped options retain independent controls. The actual draft handlers resolve
+the selected group from authoritative definitions, preserve unrelated options,
+and reject duplicates, conflicts, unknown groups, and mixed Normal/member payloads.
+Only the existing canonical enabled-option list is persisted. Provider-specific
+premium hints remain visible, including unavailable Ultrafast cost estimation.
+Draft ownership, expiry, authorization, profile generation, Apply and cancel
+boundaries are unchanged.
 
 Main Web exposes `/account/external-accounts` for the current User's platform-wide
 links, `/account/external-accounts/connect/{provider}` for authenticated provider

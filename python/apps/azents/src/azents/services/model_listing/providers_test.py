@@ -24,7 +24,11 @@ from azents.core.credentials import (
 )
 from azents.core.enums import LLMModelDeveloper, LLMProvider
 from azents.core.llm_catalog import ModelModality, ModelReasoningEffort
-from azents.core.model_execution_options import ModelExecutionOptionId
+from azents.core.model_execution_options import (
+    ModelExecutionOptionId,
+    list_model_execution_option_definitions,
+    validate_execution_options,
+)
 from azents.repos.llm_provider_integration.data import (
     LLMProviderIntegrationWithSecrets,
 )
@@ -897,3 +901,178 @@ async def test_list_openrouter_models_projects_account_metadata_without_allowlis
     assert "benchmarks" not in known.source_metadata
     assert unknown.model_developer == LLMModelDeveloper.OTHER
     assert unknown.normalized_capabilities.modalities.input == [ModelModality.TEXT]
+
+
+@pytest.mark.parametrize(
+    ("model_id", "expected"),
+    [
+        (
+            "gpt-6-astra",
+            [ModelExecutionOptionId.FAST, ModelExecutionOptionId.ULTRAFAST],
+        ),
+        (
+            "gpt-5.6-sol",
+            [ModelExecutionOptionId.FAST, ModelExecutionOptionId.ULTRAFAST],
+        ),
+        ("gpt-5.6-terra", [ModelExecutionOptionId.FAST]),
+        ("gpt-5.6-luna", [ModelExecutionOptionId.FAST]),
+        ("gpt-5.5", [ModelExecutionOptionId.FAST]),
+        ("gpt-6-astra-2026-09-30", []),
+        ("gpt-6-astra-preview", []),
+        ("gpt-5.6-sol-preview", []),
+        ("openai/gpt-6-astra", []),
+        ("ft:gpt-6-astra:test", []),
+        ("gpt-6", []),
+        ("unknown", []),
+    ],
+)
+def test_openai_execution_support_uses_exact_reviewed_identifiers(
+    model_id: str,
+    expected: list[ModelExecutionOptionId],
+) -> None:
+    """Reviewed support does not imply alias support or preview entitlement."""
+    assert providers._openai_supported_execution_options(model_id) == expected
+
+
+@pytest.mark.parametrize(
+    ("metadata", "expected"),
+    [
+        (
+            {"service_tiers": ["priority", "ultrafast"]},
+            [ModelExecutionOptionId.FAST, ModelExecutionOptionId.ULTRAFAST],
+        ),
+        (
+            {"service_tiers": [{"id": "fast"}, {"id": "ultrafast"}]},
+            [ModelExecutionOptionId.FAST, ModelExecutionOptionId.ULTRAFAST],
+        ),
+        (
+            {"service_tiers": ["ultrafast", {"id": "priority"}, "priority"]},
+            [ModelExecutionOptionId.FAST, ModelExecutionOptionId.ULTRAFAST],
+        ),
+        ({"service_tiers": ["ultrafast"]}, [ModelExecutionOptionId.ULTRAFAST]),
+        ({"service_tiers": [{"id": "ultrafast"}]}, [ModelExecutionOptionId.ULTRAFAST]),
+        (
+            {"service_tiers": ["ultrafast", {"id": "ultrafast"}]},
+            [ModelExecutionOptionId.ULTRAFAST],
+        ),
+        ({"service_tiers": ["fast"]}, [ModelExecutionOptionId.FAST]),
+        ({}, []),
+        ({"service_tiers": []}, []),
+        ({"service_tiers": None}, []),
+        ({"service_tiers": "ultrafast"}, []),
+        ({"service_tiers": {"id": "ultrafast"}}, []),
+        ({"service_tiers": [None, 1, [], {}]}, []),
+        ({"service_tiers": [{"id": None}, {"id": 1}, {"id": ["ultrafast"]}]}, []),
+        (
+            {
+                "service_tiers": [
+                    "UltraFast",
+                    " ultrafast",
+                    "ultrafast ",
+                    "ultrafast-preview",
+                    {"name": "Ultrafast"},
+                    {"value": "ultrafast"},
+                ]
+            },
+            [],
+        ),
+        (
+            {
+                "default_service_tier": "ultrafast",
+                "speed": "ultrafast",
+                "plan": "pro",
+                "slug": "gpt-6-astra",
+            },
+            [],
+        ),
+        (
+            {"service_tiers": [None, {"id": 1}, {"id": "ultrafast"}]},
+            [ModelExecutionOptionId.ULTRAFAST],
+        ),
+    ],
+)
+def test_chatgpt_execution_support_requires_independent_exact_tier_ids(
+    metadata: dict[str, object],
+    expected: list[ModelExecutionOptionId],
+) -> None:
+    """Account metadata is support authority, not a global model or plan policy."""
+    assert providers._chatgpt_supported_execution_options(metadata) == expected
+
+
+class _ServiceTierChatGPTClient:
+    """Serve synthetic account metadata through the existing listing boundary."""
+
+    metadata: dict[str, object]
+
+    def __init__(self, *, timeout: float) -> None:
+        assert timeout == 20.0
+
+    async def __aenter__(self) -> "_ServiceTierChatGPTClient":
+        return self
+
+    async def __aexit__(self, *args: object) -> None:
+        del args
+
+    async def get(
+        self,
+        url: str,
+        *,
+        params: dict[str, str],
+        headers: dict[str, str],
+    ) -> httpx.Response:
+        assert url == f"{CHATGPT_OAUTH_BACKEND_BASE_URL}/models"
+        assert params == {"client_version": CHATGPT_MODEL_CATALOG_CLIENT_VERSION}
+        assert headers["ChatGPT-Account-Id"] == "account-id"
+        return httpx.Response(
+            status_code=200,
+            request=httpx.Request("GET", url),
+            json={
+                "models": [
+                    {
+                        "slug": "account-visible-model",
+                        "display_name": "Account Visible Model",
+                        "visibility": "list",
+                        "supported_in_api": True,
+                        **self.metadata,
+                    }
+                ]
+            },
+        )
+
+
+@pytest.mark.parametrize(
+    ("metadata", "expected"),
+    [
+        (
+            {"service_tiers": [{"id": "ultrafast"}, {"id": "priority"}]},
+            [ModelExecutionOptionId.FAST, ModelExecutionOptionId.ULTRAFAST],
+        ),
+        ({"service_tiers": ["ultrafast"]}, [ModelExecutionOptionId.ULTRAFAST]),
+        ({}, []),
+        ({"service_tiers": [{"id": None}]}, []),
+    ],
+)
+async def test_chatgpt_listing_support_is_not_enabled_preference(
+    monkeypatch: pytest.MonkeyPatch,
+    metadata: dict[str, object],
+    expected: list[ModelExecutionOptionId],
+) -> None:
+    """Project both/only/absent support through the authenticated listing adapter."""
+    _ServiceTierChatGPTClient.metadata = metadata
+    monkeypatch.setattr(httpx, "AsyncClient", _ServiceTierChatGPTClient)
+    result = await providers.list_chatgpt_models_for_integration(_chatgpt_integration())
+    [candidate] = result.models
+    assert candidate.supported_execution_options == expected
+    assert result.summary.returned_count == 1
+    definitions = list_model_execution_option_definitions(
+        provider=LLMProvider.CHATGPT_OAUTH,
+        supported=candidate.supported_execution_options,
+    )
+    assert [definition.id for definition in definitions] == expected
+    if len(expected) == 2:
+        with pytest.raises(ValueError, match="exclusive"):
+            validate_execution_options(
+                provider=LLMProvider.CHATGPT_OAUTH,
+                supported=candidate.supported_execution_options,
+                enabled=expected,
+            )

@@ -11,6 +11,7 @@ Name | Type | Description | Notes
 **description** | **str** |  | 
 **cost_hint** | **str** |  | 
 **control** | **str** |  | 
+**exclusive_group** | **str** |  | 
 
 ## Example
 

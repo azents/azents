@@ -40,8 +40,8 @@ code_paths:
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
   - typescript/apps/azents-web/src/trpc/routers/workspace-model-settings.ts
   - typescript/apps/azents-admin-web/src/features/model-catalog/containers/useModelCatalogPageContainer.ts
-last_verified_at: 2026-09-25
-spec_version: 26
+last_verified_at: 2026-09-29
+spec_version: 27
 ---
 
 # Model Catalog Domain Spec
@@ -119,19 +119,26 @@ tools. A code-owned definition registry assigns stable option IDs and boolean
 control semantics. Catalog entries and saved `AgentModelSelection` snapshots carry
 `supported_execution_options` independently of normalized capabilities; inference
 profiles carry the user's `enabled_execution_options` independently of support.
-The first option is `fast`.
+Fast (`fast`) and Ultrafast (`ultrafast`) belong to the code-owned
+`processing_speed` exclusivity group. A model may support both members, but an
+enabled profile may contain at most one. Normal is the empty group selection,
+not another persisted option ID. Support-list validation is separate from enabled
+preference validation, so enumerating both supported definitions is valid.
 
 OpenAI API support is projected from reviewed exact model identifiers grounded in
-the provider's Fast pricing documentation. Unreviewed aliases, suffix variants,
+the provider's documentation. Ultrafast is reviewed for the exact `gpt-6-astra`
+and preview-access `gpt-5.6-sol` IDs. Unreviewed aliases, suffix variants,
 fine-tuned models, and other OpenAI-compatible providers do not acquire support
 through a prefix match. ChatGPT OAuth support comes from the connected account's
-current `service_tiers` declarations for `priority` or `fast`; missing or empty
-metadata does not advertise Fast. Support is not an account-entitlement, quota,
+current `service_tiers` declarations: `priority` or `fast` advertises Fast, and
+exact `ultrafast` independently advertises Ultrafast. Missing, empty, malformed,
+or unrelated declarations do not advertise an option. Support is not an account-entitlement, quota,
 regional-availability, cost, or latency guarantee.
 
 Public response projections expose code-owned option definitions separately from
 persisted IDs, including display text, a qualitative provider-specific cost hint,
-and the `"boolean"` control discriminator. Agent public selectable-option responses
+the `"boolean"` control discriminator, and required nullable `exclusive_group`
+relationship metadata. Agent public selectable-option responses
 include these definitions for the composer. Definition metadata is not written into
 saved model selection JSON and does not become a second support authority.
 
@@ -140,7 +147,10 @@ Existing catalog rows and historical saved selections without this field start w
 no supported execution options. Catalog synchronization followed by model
 reselection creates a support-aware Agent snapshot; reads and execution do not
 upgrade old snapshots from raw metadata or refetch provider catalogs. Newly enabling
-Fast always requires explicit user intent and never changes built-in tool settings.
+Fast or Ultrafast always requires explicit user intent and never changes built-in
+tool settings. API-key hints describe additional API cost; OAuth hints describe
+additional ChatGPT usage/credits. Ultrafast hints disclose unavailable cost
+estimation without promising entitlement, billing multipliers, or latency.
 
 ## Source snapshots and sync attempts
 

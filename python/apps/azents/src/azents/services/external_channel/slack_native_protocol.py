@@ -10,6 +10,9 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.core.model_execution_options import ModelExecutionOptionId
+from azents.services.external_channel.model_execution_controls import (
+    decode_execution_control,
+)
 
 NativeAction = Literal[
     "azents_model_open",
@@ -79,6 +82,7 @@ class SlackNativeControl(BaseModel):
     option_id: str | None = Field(max_length=64)
     reasoning_effort: ModelReasoningEffort | None
     execution_options: list[ModelExecutionOptionId] | None
+    execution_group: str | None
     view_id: str | None = Field(max_length=255)
     view_hash: str | None = Field(max_length=255)
 
@@ -126,6 +130,19 @@ def decode_native_control(
     selected = item.selected_option.value if item and item.selected_option else None
     if action in {"azents_model_select", "azents_model_effort"} and selected is None:
         raise ValueError("Slack model selection is missing.")
+    execution = None
+    if action == "azents_model_execution":
+        if item is None or (
+            item.selected_option is not None and item.selected_options is not None
+        ):
+            raise ValueError("Slack execution option selection is invalid.")
+        if selected is not None:
+            values = [selected]
+        elif item.selected_options is not None:
+            values = [option.value for option in item.selected_options]
+        else:
+            raise ValueError("Slack execution option selection is missing.")
+        execution = decode_execution_control(values)
     return SlackNativeControl.model_validate(
         {
             "action": action,
@@ -136,11 +153,10 @@ def decode_native_control(
                 if action == "azents_model_effort" and selected != "default"
                 else None
             ),
-            "execution_options": (
-                [option.value for option in item.selected_options or []]
-                if item is not None and action == "azents_model_execution"
-                else None
-            ),
+            "execution_options": (execution.enabled if execution is not None else None),
+            "execution_group": execution.cleared_group
+            if execution is not None
+            else None,
             "view_id": view.id if view else None,
             "view_hash": view.hash if view else None,
         }

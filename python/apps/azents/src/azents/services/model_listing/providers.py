@@ -66,7 +66,10 @@ from azents.core.llm_catalog import (
     ModelReasoningEffort,
     ModelToolCallingCapabilities,
 )
-from azents.core.model_execution_options import ModelExecutionOptionId
+from azents.core.model_execution_options import (
+    ModelExecutionOptionId,
+    validate_supported_execution_options,
+)
 from azents.core.openrouter import OPENROUTER_API_BASE_URL
 from azents.core.xai import resolve_xai_api_base_url
 from azents.core.xai_oauth import (
@@ -125,14 +128,22 @@ _OPENAI_FAST_MODEL_IDS = frozenset(
     }
 )
 
+_OPENAI_ULTRAFAST_MODEL_IDS = frozenset({"gpt-6-astra", "gpt-5.6-sol"})
+
 
 def _openai_supported_execution_options(
     model_id: str,
 ) -> list[ModelExecutionOptionId]:
     """Return options for an exact reviewed OpenAI model identifier."""
+    supported: list[ModelExecutionOptionId] = []
     if model_id in _OPENAI_FAST_MODEL_IDS:
-        return [ModelExecutionOptionId.FAST]
-    return []
+        supported.append(ModelExecutionOptionId.FAST)
+    if model_id in _OPENAI_ULTRAFAST_MODEL_IDS:
+        supported.append(ModelExecutionOptionId.ULTRAFAST)
+    return validate_supported_execution_options(
+        provider=LLMProvider.OPENAI,
+        supported=supported,
+    )
 
 
 def _chatgpt_supported_execution_options(
@@ -150,9 +161,15 @@ def _chatgpt_supported_execution_options(
             tier_id = value.get("id")
             if isinstance(tier_id, str):
                 tiers.add(tier_id)
+    supported: list[ModelExecutionOptionId] = []
     if {"priority", "fast"} & tiers:
-        return [ModelExecutionOptionId.FAST]
-    return []
+        supported.append(ModelExecutionOptionId.FAST)
+    if "ultrafast" in tiers:
+        supported.append(ModelExecutionOptionId.ULTRAFAST)
+    return validate_supported_execution_options(
+        provider=LLMProvider.CHATGPT_OAUTH,
+        supported=supported,
+    )
 
 
 _BEDROCK_MODEL_SUMMARY_ADAPTER = TypeAdapter[dict[str, object]](dict[str, object])

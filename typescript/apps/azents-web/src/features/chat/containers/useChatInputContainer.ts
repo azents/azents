@@ -17,8 +17,10 @@ import {
 import { isRecord, isString } from "@/shared/lib/unknown-value";
 import {
   executionOptionDefinitionsForModel,
+  executionOptionGroups,
   normalizeComposerProfile,
   normalizeEnabledExecutionOptions,
+  selectExecutionOptionInGroup,
   supportedExecutionOptionIds,
 } from "../executionOptions";
 import { resolveAppliedInferenceProfile } from "../inferenceProfileBaseline";
@@ -579,6 +581,10 @@ function useChatInputContainerImplementation({
           ),
     [selectedModelOption, supportedExecutionOptions],
   );
+  const selectableExecutionOptionGroups = useMemo(
+    () => executionOptionGroups(selectableExecutionOptions),
+    [selectableExecutionOptions],
+  );
   const selectableEfforts = useMemo(
     () =>
       effortLevelsForTarget(
@@ -1049,7 +1055,10 @@ function useChatInputContainerImplementation({
         inputDisabled ||
         editSendDisabled ||
         editingMessageId !== null ||
-        !supportedExecutionOptions.includes(optionId)
+        !selectableExecutionOptions.some(
+          (definition) =>
+            definition.id === optionId && definition.exclusive_group === null,
+        )
       ) {
         return;
       }
@@ -1072,7 +1081,32 @@ function useChatInputContainerImplementation({
       editingMessageId,
       inferenceProfile,
       inputDisabled,
+      selectableExecutionOptions,
       supportedExecutionOptions,
+      updateInferenceProfile,
+    ],
+  );
+
+  const handleExecutionOptionGroupChange = useCallback(
+    (groupId: string, selectedId: string): void => {
+      if (inputDisabled || editSendDisabled || editingMessageId !== null) {
+        return;
+      }
+      updateInferenceProfile(
+        selectExecutionOptionInGroup(
+          inferenceProfile,
+          selectableExecutionOptions,
+          groupId,
+          selectedId,
+        ),
+      );
+    },
+    [
+      editSendDisabled,
+      editingMessageId,
+      inferenceProfile,
+      inputDisabled,
+      selectableExecutionOptions,
       updateInferenceProfile,
     ],
   );
@@ -1330,6 +1364,7 @@ function useChatInputContainerImplementation({
     contextUsageActiveRun,
     onApplyInferenceProfile,
     selectableExecutionOptions,
+    selectableExecutionOptionGroups,
     isUploading,
     pendingFiles,
     goal,
@@ -1394,6 +1429,7 @@ function useChatInputContainerImplementation({
     handleModelChange,
     handleEffortChange,
     handleExecutionOptionToggle,
+    handleExecutionOptionGroupChange,
     handleOpenContextUsage,
     handleProfilePickerEnterTransitionEnd,
     desktopProfileSections,

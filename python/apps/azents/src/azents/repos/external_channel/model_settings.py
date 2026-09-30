@@ -10,7 +10,7 @@ from typing import Annotated, NamedTuple, Protocol, TypeVar, runtime_checkable
 import sqlalchemy as sa
 from azcommon.uuid import uuid7
 from fastapi import Depends
-from pydantic import TypeAdapter
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -51,7 +51,6 @@ from azents.core.inference_profile import (
 )
 from azents.core.model_execution_options import (
     MODEL_EXECUTION_OPTION_DEFINITIONS,
-    ModelExecutionOptionDefinition,
     ModelExecutionOptionId,
     list_model_execution_option_definitions,
 )
@@ -96,6 +95,15 @@ T = TypeVar("T")
 @runtime_checkable
 class _HasSqlstate(Protocol):
     sqlstate: object
+
+
+class _SavedExecutionOptionDisplay(BaseModel):
+    """Saved support identity and provider-specific presentation copy."""
+
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    id: ModelExecutionOptionId
+    cost_hint: str = Field(min_length=1)
 
 
 @dataclass(frozen=True)
@@ -1081,6 +1089,14 @@ class ExternalModelSettingsRepository:
 
     @staticmethod
     def _public_option(value: dict[str, object]) -> ExternalModelOption:
+        saved_execution = TypeAdapter(
+            list[_SavedExecutionOptionDisplay]
+        ).validate_python(value.get("execution_options"))
+        supported_ids = [option.id for option in saved_execution]
+        if len(supported_ids) != len(set(supported_ids)):
+            raise ValueError("Supported execution options must be unique.")
+        if set(supported_ids) - MODEL_EXECUTION_OPTION_DEFINITIONS.keys():
+            raise ValueError("Unknown supported execution option.")
         return ExternalModelOption(
             option_id=ExternalModelSettingsRepository._option_id(value),
             label=ExternalModelSettingsRepository._required_string(value, "label"),
@@ -1091,9 +1107,14 @@ class ExternalModelSettingsRepository:
             reasoning_efforts=TypeAdapter(list[str]).validate_python(
                 value.get("reasoning_efforts")
             ),
-            execution_options=TypeAdapter(
-                list[ModelExecutionOptionDefinition]
-            ).validate_python(value.get("execution_options")),
+            execution_options=[
+                MODEL_EXECUTION_OPTION_DEFINITIONS[option.id].model_copy(
+                    update={"cost_hint": option.cost_hint}
+                )
+                for option in sorted(
+                    saved_execution, key=lambda option: option.id.value
+                )
+            ],
         )
 
     @staticmethod

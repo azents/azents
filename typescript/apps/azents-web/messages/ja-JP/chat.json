@@ -615,9 +615,12 @@
     "reasoning": "推論",
     "modelIdentity": "{model} · {provider}",
     "unknownProvenance": "実行の出所情報はまだ利用できません。",
-    "fast": "Fast",
-    "fastEnabled": "オン",
-    "fastDisabled": "オフ"
+    "processingSpeedIntent": "選択した処理速度",
+    "processingSpeed": {
+      "normal": "通常",
+      "fast": "Fast",
+      "ultrafast": "Ultrafast"
+    }
   },
   "editMessage": "編集",
   "senderUnavailable": "送信者を確認できません",
@@ -836,6 +839,9 @@
     "disabled": "オフ",
     "executionOptionAriaLabel": "{label}、{state}。{costHint}",
     "executionOptions": "実行オプション",
+    "processingSpeed": "処理速度",
+    "normalSpeed": "通常",
+    "noExecutionOption": "選択なし",
     "fallbackBadge": "Fallback"
   },
   "inferenceProvenance": {

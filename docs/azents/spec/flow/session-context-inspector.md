@@ -5,8 +5,8 @@ created: 2026-05-30
 spec_type: flow
 owner: "@Hardtack"
 touches_domains: [agent, conversation]
-last_verified_at: 2026-09-13
-spec_version: 22
+last_verified_at: 2026-09-29
+spec_version: 23
 code_paths:
   - python/apps/azents/src/azents/services/agent/**
   - python/apps/azents/src/azents/api/public/agent/**
@@ -79,10 +79,16 @@ Latest usage comes from event `TurnMarkerPayload.usage`. Usage is value returned
 
 For OpenAI API-key and ChatGPT OAuth turns, token fields and raw usage come directly from the official
 OpenAI SDK completed `ResponseUsage`; raw usage does not contain synthetic LiteLLM hidden parameters.
-Their `cost_usd` is a content-free LiteLLM public price-map estimate. Unsupported pricing or a
+Their `cost_usd` is a content-free LiteLLM public price-map estimate using the actual response tier.
+Actual Ultrafast and unknown premium tiers leave cost unavailable; an Ultrafast request with
+missing, empty, or `auto` actual tier also cannot be priced as Standard. This does not fail
+successful output or remove provider token usage. REST history omits unavailable cost fields,
+while live transport may retain an explicit null. Unsupported pricing or a
 pricing-calculator `ValueError` leaves cost absent while preserving provider token usage. Unexpected
 calculator defects remain visible through the ordinary internal-error path. ChatGPT OAuth cost is an
-API-pricing estimate rather than subscription billing.
+API-pricing estimate rather than subscription billing. Usage details show Normal, Fast, or
+Ultrafast from the immutable applied profile as processing-speed intent, not a verified served
+tier; absent provenance stays unavailable.
 
 Chat tab header finds the most recent `turn_marker` usage from the loaded/live chat timeline and shows it in the token usage indicator. When clicked, the popup shows total, prompt, completion, cache read/write, and reasoning token counts. New markers also carry an immutable allowlisted snapshot of the exact Session inference state and applied candidate route: requested target label, raw nullable reasoning effort, operation kind, candidate ordinal and `primary | fallback` role, provider/integration/model identity, public model display name, effective context window, and effective automatic-compaction threshold. The popup renders this durable snapshot after terminal cleanup and reload. Historical markers without the snapshot or route remain valid; a matching active live Run may temporarily provide its applied profile, otherwise provenance and effective limits render as unavailable. Readers never substitute the current Session, Agent default, current candidate chain, or Composer selection.
 
@@ -156,6 +162,8 @@ cd typescript && corepack pnpm --filter @azents/web typecheck
 
 ## Changelog
 
+- **2026-09-29** — v23. Added processing-speed intent and unavailable Ultrafast
+  pricing without substituting Standard estimates or losing token usage.
 - **2026-09-13** — v22. Added immutable actual-candidate route details, including candidate role
   and ordinal, without deriving historical provenance from current Agent configuration.
 - **2026-09-12** — v21. Embedded the unchanged Context inspector in the unified

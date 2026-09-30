@@ -22,6 +22,7 @@ from azents.core.enums import LLMProvider
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.core.model_execution_options import (
     ModelExecutionOptionId,
+    validate_enabled_execution_options,
     validate_execution_options,
 )
 
@@ -34,10 +35,8 @@ PublicReasoningEffort = Annotated[
 def _canonical_enabled_execution_options(
     enabled: list[ModelExecutionOptionId],
 ) -> list[ModelExecutionOptionId]:
-    """Validate unique option IDs and return canonical ordering."""
-    if len(enabled) != len(set(enabled)):
-        raise ValueError("Enabled execution options must be unique.")
-    return sorted(enabled, key=lambda option: option.value)
+    """Validate every profile's preference shape with the shared registry."""
+    return validate_enabled_execution_options(enabled=enabled)
 
 
 def default_historical_execution_options(data: object) -> object:

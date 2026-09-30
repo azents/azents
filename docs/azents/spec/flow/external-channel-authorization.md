@@ -43,8 +43,8 @@ api_routes:
   - /external-channel/v1/approval-requests/{access_request_id}
   - /external-channel/v1/approval-requests/{access_request_id}/decision
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channel-access
-last_verified_at: 2026-09-13
-spec_version: 26
+last_verified_at: 2026-09-29
+spec_version: 27
 ---
 
 # External Channel Authorization
@@ -259,6 +259,12 @@ account, unlink, archive, and connection writes share row or transaction fences.
 Native lock acquisition is nonblocking and the complete DB-only operation has a
 bounded retry; exhaustion returns a retryable busy result without mutation or
 provider I/O. An observed applied-profile generation rejects stale and ABA drafts.
+
+Execution-option group metadata does not grant model or integration authority.
+Private model handlers validate exclusive selections against the bounded selected
+option definitions and the shared registry before applying a profile mutation.
+Normal clears only the identified supported group; forged conflicts and unknown
+groups do not change the previously applied profile or authorization context.
 
 ## Revocation
 

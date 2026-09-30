@@ -15,12 +15,12 @@ Design documents are accumulated records and are not listed individually in this
 
 | Title | Domain | Owner | Last Verified At | Spec Version |
 |---|---|---|---|---|
-| [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-09-29 | 83 |
-| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-09-25 | 173 |
-| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-09-15 | 80 |
+| [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-09-29 | 84 |
+| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-09-29 | 174 |
+| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-09-29 | 81 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-08-23 | 15 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-09-26 | 8 |
-| [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-09-25 | 26 |
+| [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-09-29 | 27 |
 | [Runtime Provider](spec/domain/runtime-provider.md) | runtime-provider | - | 2026-09-18 | 33 |
 | [Scheduled Task Domain Spec](spec/domain/scheduled-task.md) | scheduled-task | - | 2026-09-15 | 12 |
 | [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-09-15 | 6 |
@@ -32,13 +32,13 @@ Design documents are accumulated records and are not listed individually in this
 
 | Title | Owner | Last Verified At | Spec Version |
 |---|---|---|---|
-| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-09-27 | 185 |
+| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-09-29 | 186 |
 | [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-09-17 | 89 |
 | [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-09-16 | 39 |
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-09-15 | 52 |
-| [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-09-25 | 26 |
+| [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-09-29 | 27 |
 | [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-09-13 | 41 |
-| [External Channel Authorization](spec/flow/external-channel-authorization.md) | @Hardtack | 2026-09-13 | 26 |
+| [External Channel Authorization](spec/flow/external-channel-authorization.md) | @Hardtack | 2026-09-29 | 27 |
 | [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-09-12 | 62 |
 | [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-09-12 | 45 |
 | [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-09-13 | 63 |
@@ -49,8 +49,8 @@ Design documents are accumulated records and are not listed individually in this
 | [Periodic Execution Flow Spec](spec/flow/periodic-execution.md) | - | 2026-09-15 | 20 |
 | [Public Release Publication](spec/flow/public-release.md) | @Hardtack | 2026-09-18 | 3 |
 | [Run Resume](spec/flow/run-resume.md) | @Hardtack | 2026-09-13 | 37 |
-| [Session Context Inspector](spec/flow/session-context-inspector.md) | @Hardtack | 2026-09-13 | 22 |
-| [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-09-24 | 70 |
+| [Session Context Inspector](spec/flow/session-context-inspector.md) | @Hardtack | 2026-09-29 | 23 |
+| [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-09-29 | 71 |
 | [xAI API Key Provider Flow](spec/flow/xai-api-key.md) | @Hardtack | 2026-09-15 | 4 |
 | [xAI OAuth Flow](spec/flow/xai-oauth.md) | @Hardtack | 2026-09-25 | 9 |
 
@@ -480,6 +480,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Continue FIFO Processing After Failed TurnActions Historical Requirements Reconstruction](requirements/turn-260708-turn-action-fifo-continuation.md) | turn-260708 | 2026-07-08 | - |
 | [Expose Typed Actionable Profile Resolution Failures Historical Requirements Reconstruction](requirements/typed-260710-typed-profile-resolution-failures.md) | typed-260710 | 2026-07-10 | - |
 | [Unified Python Type Quality Gate Requirements](requirements/typing-260805-ty-quality-gate.md) | typing-260805 | 2026-08-05 | 2026-08-05 |
+| [Ultrafast Model Execution Requirements](requirements/ultrafast-260930-ultrafast-execution.md) | ultrafast-260930 | 2026-09-30 | 2026-09-30 |
 | [Unified OAuth Authentication Flow Historical Requirements Reconstruction](requirements/unified-260327-unified-oauth.md) | unified-260327 | 2026-03-27 | 2026-03-27 |
 | [Unify Subagent Communication Through Mailbox Activity Historical Requirements Reconstruction](requirements/unify-260719-unify-subagent-communication-through-mailbox-activity.md) | unify-260719 | 2026-07-19 | - |
 | [Suppress Unread Indicators While Sessions Run Historical Requirements Reconstruction](requirements/unread-260721-unread-indicators-while-sessions.md) | unread-260721 | 2026-07-21 | - |
@@ -925,6 +926,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Continue FIFO Processing After Failed TurnActions](adr/turn-260708-turn-action-fifo-continuation.md)
 - [Expose Typed Actionable Profile Resolution Failures](adr/typed-260710-typed-profile-resolution-failures.md)
 - [Unified Python Type Quality Gate](adr/typing-260805-ty-quality-gate.md)
+- [Ultrafast Model Execution Decisions](adr/ultrafast-260930-ultrafast-execution.md)
 - [Unified OAuth Authentication Flow Historical Decision Reconstruction](adr/unified-260327-unified-oauth.md)
 - [Unify Subagent Communication Through Mailbox Activity](adr/unify-260719-unify-subagent-communication-through-mailbox-activity.md)
 - [Suppress Unread Indicators While Sessions Run](adr/unread-260721-unread-indicators-while-sessions.md)

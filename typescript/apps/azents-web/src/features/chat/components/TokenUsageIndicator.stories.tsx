@@ -54,7 +54,45 @@ export const ActiveRun = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await expect(canvas.getByText("Fast")).toBeInTheDocument();
-    await expect(canvas.getByText("On")).toBeInTheDocument();
+    await expect(
+      canvas.getByText("Selected processing speed"),
+    ).toBeInTheDocument();
+  },
+} satisfies Story;
+
+export const ActiveUltrafastIntent = {
+  args: {
+    activeRun: {
+      ...activeRun,
+      inferenceProfile: {
+        ...activeRun.inferenceProfile,
+        enabled_execution_options: ["ultrafast"],
+      },
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByText("Ultrafast")).toBeInTheDocument();
+    await expect(canvas.queryByText("Normal")).toBeNull();
+  },
+} satisfies Story;
+
+export const HistoricalUltrafastWithDifferentActiveIntent = {
+  args: {
+    activeRun,
+    usage: {
+      ...meta.args.usage,
+      runId: "historical-ultrafast",
+      inferenceProfile: {
+        ...activeRun.inferenceProfile,
+        enabled_execution_options: ["ultrafast"],
+      },
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByText("Ultrafast")).toBeInTheDocument();
+    await expect(canvas.queryByText("Fast")).toBeNull();
   },
 } satisfies Story;
 
@@ -97,11 +135,24 @@ export const HistoricalRunUnavailable = {
       reasoningTokens: 1_100,
     },
   },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      canvas.getByText("Run provenance is not available yet."),
+    ).toBeInTheDocument();
+    await expect(canvas.queryByText("Normal")).toBeNull();
+    await expect(canvas.queryByText("Fast")).toBeNull();
+    await expect(canvas.queryByText("Ultrafast")).toBeNull();
+  },
 } satisfies Story;
 
 export const NoUsageYet = {
   args: {
     usage: null,
     activeRun: null,
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.queryByText("Normal")).toBeNull();
   },
 } satisfies Story;

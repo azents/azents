@@ -28,6 +28,9 @@ from azents.services.external_account_oauth_system_setting.data import (
 from azents.services.external_account_oauth_system_setting.service import (
     ExternalAccountOAuthSystemSettingService,
 )
+from azents.services.external_channel.model_execution_controls import (
+    update_execution_control,
+)
 from azents.services.external_channel.model_settings import ExternalModelSettingsService
 from azents.services.external_channel.participation import (
     ExternalChannelParticipationSettings,
@@ -289,6 +292,22 @@ class SlackNativeSettingsService:
             "azents_model_execution",
         }:
             previous = result.editor.draft.selection
+            execution_options = previous.enabled_execution_options
+            if control.action == "azents_model_execution":
+                try:
+                    if control.execution_options is None:
+                        raise ValueError("Slack execution option selection is missing.")
+                    execution_options = update_execution_control(
+                        definitions=result.editor.selected_option.execution_options,
+                        current=previous.enabled_execution_options,
+                        selected=control.execution_options,
+                        cleared_group=control.execution_group,
+                    )
+                except ValueError:
+                    return private_notice(
+                        "That execution option selection is invalid. "
+                        "Nothing was saved. Reopen settings."
+                    )
             selection = ExternalModelDraftSelection(
                 option_id=control.option_id
                 if control.action == "azents_model_select" and control.option_id
@@ -296,10 +315,7 @@ class SlackNativeSettingsService:
                 reasoning_effort=control.reasoning_effort
                 if control.action == "azents_model_effort"
                 else previous.reasoning_effort,
-                enabled_execution_options=control.execution_options
-                if control.action == "azents_model_execution"
-                and control.execution_options is not None
-                else previous.enabled_execution_options,
+                enabled_execution_options=execution_options,
             )
             result = await self.models.update_draft(
                 actor=model_actor,

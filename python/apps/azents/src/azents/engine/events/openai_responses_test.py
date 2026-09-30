@@ -6,11 +6,13 @@ import json
 import logging
 from collections.abc import AsyncIterator
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
 from litellm.types.llms.openai import ResponsesAPIResponse
 from openai import AsyncOpenAI, AuthenticationError, BadRequestError, OpenAIError, omit
+from openai.resources.responses.responses import AsyncResponsesConnection
 from openai.types.responses import (
     Response,
     ResponseCompletedEvent,
@@ -154,6 +156,30 @@ def _event(content: str = "hello") -> Event:
             [ModelExecutionOptionId.FAST],
             "priority",
         ),
+        (
+            LLMProvider.OPENAI,
+            [ModelExecutionOptionId.ULTRAFAST],
+            [],
+            "default",
+        ),
+        (
+            LLMProvider.CHATGPT_OAUTH,
+            [ModelExecutionOptionId.ULTRAFAST],
+            [],
+            None,
+        ),
+        (
+            LLMProvider.OPENAI,
+            [ModelExecutionOptionId.FAST, ModelExecutionOptionId.ULTRAFAST],
+            [ModelExecutionOptionId.ULTRAFAST],
+            "ultrafast",
+        ),
+        (
+            LLMProvider.CHATGPT_OAUTH,
+            [ModelExecutionOptionId.FAST, ModelExecutionOptionId.ULTRAFAST],
+            [ModelExecutionOptionId.ULTRAFAST],
+            "ultrafast",
+        ),
     ],
 )
 def test_openai_lowerer_maps_bounded_fast_service_tier(
@@ -192,6 +218,27 @@ def test_openai_lowerer_rejects_unbounded_service_tier_kwarg() -> None:
             provider_id=LLMProvider.OPENAI,
             kwargs={"service_tier": "priority"},
         )
+
+
+@pytest.mark.parametrize(
+    "lowerer_type", [OpenAIResponsesLowerer, LiteLLMResponsesLowerer]
+)
+@pytest.mark.parametrize("provider", [LLMProvider.OPENAI, LLMProvider.CHATGPT_OAUTH])
+def test_responses_lowerers_reject_conflicting_speed_preferences(
+    lowerer_type: type[OpenAIResponsesLowerer] | type[LiteLLMResponsesLowerer],
+    provider: LLMProvider,
+) -> None:
+    """Reject conflicts before either Responses adapter can invoke a provider."""
+    options = [ModelExecutionOptionId.FAST, ModelExecutionOptionId.ULTRAFAST]
+    lowerer = lowerer_type(
+        provider=provider.value,
+        model="gpt-6-astra",
+        provider_id=provider,
+        supported_execution_options=options,
+        enabled_execution_options=options,
+    )
+    with pytest.raises(ValueError):
+        lowerer.lower([_event()], model="gpt-6-astra")
 
 
 def test_openai_lowerer_rejects_enabled_unsupported_fast() -> None:
@@ -1225,7 +1272,78 @@ async def test_sdk_websocket_connect_forwards_bounded_receive_limit(
     await client.close()
 
 
-async def test_adapter_preserves_omission_null_and_stop_extension() -> None:
+async def test_pinned_sdk_http_serializes_and_parses_ultrafast() -> None:
+    """Exercise the official SDK with synthetic HTTP bytes and no provider I/O."""
+    captured: dict[str, object] = {}
+    response = _response().model_dump(mode="json")
+    response["service_tier"] = "ultrafast"
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        captured.update(json.loads(request.content))
+        return httpx.Response(200, request=request, json=response)
+
+    sdk = AsyncOpenAI(
+        api_key="synthetic-test-key",
+        max_retries=0,
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handle)),
+    )
+    client = OpenAISDKResponsesClient(sdk, websocket_headers=None)
+    parsed = await client.create_response(
+        model="gpt-6-astra",
+        input="synthetic",
+        service_tier="ultrafast",
+    )
+    assert captured["service_tier"] == "ultrafast"
+    assert isinstance(parsed, Response)
+    assert parsed.service_tier == "ultrafast"
+    await client.close()
+
+
+async def test_pinned_sdk_websocket_serializes_and_parses_ultrafast(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Use the SDK's real create resource and parser with a synthetic socket."""
+    socket = AsyncMock()
+    connection = AsyncResponsesConnection(socket, max_retries=0)
+
+    class Manager:
+        async def enter(self) -> AsyncResponsesConnection:
+            return connection
+
+    def connect(**kwargs: object) -> Manager:
+        del kwargs
+        return Manager()
+
+    sdk = AsyncOpenAI(api_key="synthetic-test-key")
+    monkeypatch.setattr(sdk.responses, "connect", connect)
+    client = OpenAISDKResponsesClient(sdk, websocket_headers=None)
+    wrapper = await client.connect_websocket()
+    await wrapper.create_response(
+        model="gpt-6-astra",
+        input="synthetic",
+        service_tier="ultrafast",
+        store=False,
+    )
+    sent = json.loads(socket.send.call_args.args[0])
+    assert sent["type"] == "response.create"
+    assert sent["service_tier"] == "ultrafast"
+    response = _response().model_dump(mode="json")
+    response["service_tier"] = "ultrafast"
+    parsed = connection.parse_event(
+        json.dumps(
+            {"type": "response.completed", "sequence_number": 1, "response": response}
+        )
+    )
+    assert isinstance(parsed, ResponseCompletedEvent)
+    assert parsed.response.service_tier == "ultrafast"
+    await wrapper.close()
+    await client.close()
+
+
+@pytest.mark.parametrize("service_tier", ["priority", "ultrafast"])
+async def test_adapter_preserves_omission_null_and_stop_extension(
+    service_tier: str,
+) -> None:
     """Dispatch sends SDK omission sentinels and preserves explicit null."""
     stream = _FakeStream([_completed_event()])
     client = _FakeClient(stream)
@@ -1248,7 +1366,7 @@ async def test_adapter_preserves_omission_null_and_stop_extension() -> None:
         tools=[],
         options={
             "instructions": None,
-            "service_tier": "priority",
+            "service_tier": service_tier,
             "stop": ["END"],
         },
     )
@@ -1278,7 +1396,7 @@ async def test_adapter_preserves_omission_null_and_stop_extension() -> None:
     assert call["store"] is omit
     assert call["tools"] is omit
     assert call["previous_response_id"] is omit
-    assert call["service_tier"] == "priority"
+    assert call["service_tier"] == service_tier
     assert call["extra_body"] == {"stop": ["END"]}
     assert stream.closed is True
     await adapter.close()
@@ -1464,7 +1582,10 @@ async def test_adapter_maps_sdk_status_error_without_duplicate_adapter_log(
     await adapter.close()
 
 
-async def test_websocket_reuses_one_connection_for_sequential_responses() -> None:
+@pytest.mark.parametrize("service_tier", ["priority", "ultrafast"])
+async def test_websocket_reuses_one_connection_for_sequential_responses(
+    service_tier: str,
+) -> None:
     """Eligible sequential turns reuse one execution-owned WebSocket."""
     connection = _FakeWebSocketConnection(
         [_completed_event(_response(text="first")), _completed_event()]
@@ -1491,7 +1612,7 @@ async def test_websocket_reuses_one_connection_for_sequential_responses() -> Non
         model="gpt-5.1-codex",
         input=[{"role": "user", "content": "first"}],
         tools=[],
-        options={"service_tier": "priority", "store": False},
+        options={"service_tier": service_tier, "store": False},
     )
     second = first.model_copy(update={"input": [{"role": "user", "content": "second"}]})
 
@@ -1516,8 +1637,8 @@ async def test_websocket_reuses_one_connection_for_sequential_responses() -> Non
 
     assert len(first_events) == 1
     assert len(second_events) == 1
-    assert connection.calls[0]["service_tier"] == "priority"
-    assert connection.calls[1]["service_tier"] == "priority"
+    assert connection.calls[0]["service_tier"] == service_tier
+    assert connection.calls[1]["service_tier"] == service_tier
     assert client.connect_count == 1
     assert client.http_calls == []
     assert len(connection.calls) == 2
@@ -2320,6 +2441,7 @@ def test_typed_normalizer_admits_completed_custom_tool_call() -> None:
         model="gpt-5.1-codex",
         operation="sampling",
         integration=None,
+        requested_service_tier=None,
     ).start("session-1")
 
     added = output.process_event(
@@ -2421,6 +2543,7 @@ def test_typed_normalizer_maps_end_turn_false_to_follow_up() -> None:
         model="gpt-5.1-codex",
         operation="sampling",
         integration=None,
+        requested_service_tier=None,
     ).start("session-1")
 
     output.process_event(_completed_event(response))
@@ -2447,6 +2570,7 @@ def test_typed_normalizer_allows_end_turn_true_with_function_call() -> None:
         model="gpt-5.1-codex",
         operation="sampling",
         integration=None,
+        requested_service_tier=None,
     ).start("session-1")
 
     output.process_event(_completed_event(response))
@@ -2470,6 +2594,7 @@ def test_typed_normalizer_rejects_inconsistent_custom_tool_input() -> None:
         model="gpt-5.1-codex",
         operation="sampling",
         integration=None,
+        requested_service_tier=None,
     ).start("session-1")
     output.process_event(
         ResponseCustomToolCallInputDoneEvent(
@@ -2502,6 +2627,7 @@ def test_typed_normalizer_preserves_reasoning_stream_identity() -> None:
         model="gpt-5.1-codex",
         operation="sampling",
         integration=None,
+        requested_service_tier=None,
     ).start("session-1")
 
     projected = output.process_event(
@@ -2545,6 +2671,7 @@ def test_typed_completed_message_does_not_replay_output_index() -> None:
         model="gpt-5.1-codex",
         operation="sampling",
         integration=None,
+        requested_service_tier=None,
     ).start("session-1")
     output.process_event(
         ResponseOutputItemDoneEvent(
@@ -2588,6 +2715,7 @@ def test_typed_normalizer_requires_exact_completed_wire_type(
         model="gpt-5.1-codex",
         operation="sampling",
         integration=None,
+        requested_service_tier=None,
     )
     output = normalizer.start("session-1")
     mismatched = ResponseCompletedEvent.model_construct(
@@ -2628,6 +2756,7 @@ def test_typed_normalizer_builds_openai_artifact_usage_and_cost(
         model="gpt-5.1-codex",
         operation="sampling",
         integration=None,
+        requested_service_tier=None,
     )
     output = normalizer.start("session-1")
     output.process_event(
@@ -2700,6 +2829,7 @@ def test_typed_normalizer_normalizes_fast_tier_for_priority_pricing(
         model="gpt-5.1-codex",
         operation="sampling",
         integration=None,
+        requested_service_tier=None,
     ).start("session-1")
     output.process_event(
         _completed_event(_response().model_copy(update={"service_tier": "fast"}))
@@ -2730,6 +2860,7 @@ def test_typed_normalizer_omits_cost_without_priority_pricing(
         model="gpt-5.1-codex",
         operation="sampling",
         integration=None,
+        requested_service_tier=None,
     ).start("session-1")
     output.process_event(
         _completed_event(_response().model_copy(update={"service_tier": "priority"}))
@@ -2748,6 +2879,7 @@ def test_typed_normalizer_projects_provider_tool_lifecycle() -> None:
         model="gpt-5.1-codex",
         operation="sampling",
         integration=None,
+        requested_service_tier=None,
     ).start("session-1")
 
     running = output.process_event(
@@ -2801,6 +2933,7 @@ def test_typed_normalizer_extracts_transient_generated_image() -> None:
         model="gpt-5.1-codex",
         operation="sampling",
         integration=None,
+        requested_service_tier=None,
     ).normalize_completed_output(
         "session-1",
         {
@@ -2837,6 +2970,7 @@ def test_typed_normalizer_skips_failed_image_before_success() -> None:
         model="gpt-5.6-luna",
         operation="sampling",
         integration=None,
+        requested_service_tier=None,
     ).normalize_completed_output(
         "session-1",
         {
@@ -2896,6 +3030,7 @@ def test_typed_stream_extracts_transient_generated_image() -> None:
         model="gpt-5.1-codex",
         operation="sampling",
         integration=None,
+        requested_service_tier=None,
     ).start("session-1")
 
     output.process_event(
@@ -2930,6 +3065,7 @@ def test_typed_normalizer_projects_generic_provider_tool_output_items() -> None:
         model="gpt-5.1-codex",
         operation="sampling",
         integration=None,
+        requested_service_tier=None,
     ).start("session-1")
     action = ActionSearch(
         type="search",
@@ -3027,6 +3163,7 @@ def test_typed_normalizer_accepts_omitted_usage_details(
         model="gpt-5.1-codex",
         operation="sampling",
         integration=None,
+        requested_service_tier=None,
     ).start("session-1")
     output.process_event(_completed_event(response))
 
@@ -3049,6 +3186,7 @@ def test_unclassified_typed_terminal_error_is_internal() -> None:
         model="gpt-5.1-codex",
         operation="sampling",
         integration=None,
+        requested_service_tier=None,
     )
     output = normalizer.start("session-1")
 
@@ -3077,6 +3215,7 @@ def test_typed_failed_event_classifies_invalid_prompt() -> None:
         model="gpt-5.6-terra",
         operation="sampling",
         integration=None,
+        requested_service_tier=None,
     )
     output = normalizer.start("session-1")
     output.process_event(
@@ -3105,6 +3244,7 @@ def test_typed_failed_event_classifies_rate_limit() -> None:
         model="gpt-5.6-terra",
         operation="sampling",
         integration=None,
+        requested_service_tier=None,
     )
     output = normalizer.start("session-1")
     output.process_event(
@@ -3134,6 +3274,7 @@ def test_typed_failed_event_preserves_http_status_code() -> None:
         model="gpt-5.6-terra",
         operation="sampling",
         integration=None,
+        requested_service_tier=None,
     )
     output = normalizer.start("session-1")
     output.process_event(
@@ -3192,6 +3333,107 @@ def test_cross_adapter_artifacts_use_canonical_fallback() -> None:
     assert lite_request.input == [{"role": "assistant", "content": "canonical text"}]
 
 
+@pytest.mark.parametrize(
+    ("requested_tier", "actual_tier"),
+    [
+        (None, "ultrafast"),
+        ("priority", "ultrafast"),
+        ("ultrafast", "ultrafast"),
+        ("ultrafast", None),
+        ("ultrafast", ""),
+        ("ultrafast", "auto"),
+        ("ultrafast", "future-premium"),
+        (None, "future-premium"),
+    ],
+)
+def test_unknown_premium_pricing_never_uses_standard_rates(
+    monkeypatch: pytest.MonkeyPatch,
+    requested_tier: str | None,
+    actual_tier: str | None,
+) -> None:
+    """Keep output and usage while bypassing unsupported or uncertain pricing."""
+    _patch_standard_openai_pricing(monkeypatch)
+
+    def unexpected_pricing(**kwargs: object) -> float:
+        del kwargs
+        raise AssertionError("Unknown premium pricing must not invoke the calculator.")
+
+    monkeypatch.setattr(
+        "azents.engine.events.openai_responses.completion_cost", unexpected_pricing
+    )
+    output = OpenAIResponsesOutputNormalizer(
+        provider="openai",
+        model="gpt-5.1-codex",
+        operation="sampling",
+        integration=None,
+        requested_service_tier=requested_tier,
+    ).start("session-1")
+    output.process_event(
+        _completed_event(_response().model_copy(update={"service_tier": actual_tier}))
+    )
+    completed = output.complete()
+    assert completed.events
+    assert completed.usage is not None
+    assert completed.usage.total_tokens == 15
+    assert completed.usage.cost_usd is None
+
+
+@pytest.mark.parametrize(
+    ("actual_tier", "pricing_tier"),
+    [
+        ("default", "default"),
+        ("priority", "priority"),
+        ("fast", "priority"),
+        ("flex", "flex"),
+    ],
+)
+def test_ultrafast_request_cost_uses_supported_actual_response_tier(
+    monkeypatch: pytest.MonkeyPatch,
+    actual_tier: str,
+    pricing_tier: str,
+) -> None:
+    """An explicit served tier, not the requested tier, owns valid estimation."""
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        "azents.engine.events.openai_responses.model_cost",
+        {
+            "gpt-5.1-codex": {
+                "input_cost_per_token": 0.1,
+                "cache_read_input_token_cost": 0.01,
+                "output_cost_per_token": 0.2,
+                "input_cost_per_token_priority": 0.1,
+                "cache_read_input_token_cost_priority": 0.01,
+                "output_cost_per_token_priority": 0.2,
+                "input_cost_per_token_flex": 0.1,
+                "cache_read_input_token_cost_flex": 0.01,
+                "output_cost_per_token_flex": 0.2,
+            }
+        },
+    )
+
+    def completion_cost(**kwargs: object) -> float:
+        captured.update(kwargs)
+        return 0.25
+
+    monkeypatch.setattr(
+        "azents.engine.events.openai_responses.completion_cost", completion_cost
+    )
+    output = OpenAIResponsesOutputNormalizer(
+        provider="openai",
+        model="gpt-5.1-codex",
+        operation="sampling",
+        integration=None,
+        requested_service_tier="ultrafast",
+    ).start("session-1")
+    output.process_event(
+        _completed_event(_response().model_copy(update={"service_tier": actual_tier}))
+    )
+    completed = output.complete()
+    assert captured["service_tier"] == pricing_tier
+    assert completed.usage is not None
+    assert completed.usage.cost_usd == 0.25
+
+
 def test_pricing_failure_preserves_successful_usage(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -3211,6 +3453,7 @@ def test_pricing_failure_preserves_successful_usage(
         model="gpt-5.1-codex",
         operation="sampling",
         integration=None,
+        requested_service_tier=None,
     ).start("session-1")
     output.process_event(_completed_event())
 
@@ -3239,6 +3482,7 @@ def test_unmapped_pricing_skips_litellm_cost_calculation(
         model="unmapped-openai-model",
         operation="sampling",
         integration=None,
+        requested_service_tier=None,
     ).start("session-1")
     output.process_event(_completed_event())
 
@@ -3267,6 +3511,7 @@ def test_unexpected_pricing_failure_propagates(
         model="gpt-5.1-codex",
         operation="sampling",
         integration=None,
+        requested_service_tier=None,
     ).start("session-1")
     output.process_event(_completed_event())
 

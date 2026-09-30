@@ -1107,6 +1107,7 @@ async def test_private_view_delivery_failure_has_no_public_fallback() -> None:
         option_id=None,
         reasoning_effort=None,
         execution_options=None,
+        execution_group=None,
         view_id=None,
         view_hash=None,
     )

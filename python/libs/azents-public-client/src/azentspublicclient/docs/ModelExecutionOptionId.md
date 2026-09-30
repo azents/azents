@@ -6,6 +6,8 @@ Stable identifier for a directly selectable model execution option.
 
 * `FAST` (value: `'fast'`)
 
+* `ULTRAFAST` (value: `'ultrafast'`)
+
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
 
 

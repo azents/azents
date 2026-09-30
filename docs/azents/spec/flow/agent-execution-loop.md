@@ -104,8 +104,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/toolCallActionPresentation.ts
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
   - typescript/apps/azents-web/messages/*/chat.json
-last_verified_at: 2026-09-27
-spec_version: 185
+last_verified_at: 2026-09-29
+spec_version: 186
 ---
 
 # Agent Execution Loop
@@ -674,7 +674,15 @@ is forwarded as a provider-hosted image tool or placed in model-visible argument
 OpenAI SDK completion usage maps directly into the existing turn-marker token fields. Its raw usage is
 the SDK usage object serialized to plain JSON and does not synthesize LiteLLM hidden parameters.
 `cost_usd` is a content-free estimate from LiteLLM's public pricing function using provider usage,
-model, service tier, and required output-type metadata only. Unsupported or unmapped prices, a
+model, actual response service tier, and required output-type metadata only. Actual Ultrafast
+and unmapped premium tiers bypass the calculator because the current dependency would
+otherwise use Standard price keys. A missing, empty, or `auto` actual tier on an
+Ultrafast request also leaves cost unavailable. The requested tier is carried from
+the same validated native lowering authority as immutable attempt-local context,
+not a persisted speed field or actual-tier authority. Explicit supported
+Standard/Priority/Flex response tiers retain delegated estimation with required
+premium price-key checks; the `fast` response alias maps to Priority.
+Unsupported or unmapped prices, a
 pricing-calculator `ValueError`, negative values, and non-finite values leave cost unset without
 failing completed output. Unexpected calculator defects propagate through the ordinary internal-error
 path instead of being reclassified as missing pricing. ChatGPT OAuth cost is an API price-map estimate,

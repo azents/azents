@@ -13,6 +13,7 @@ import * as Sentry from "@sentry/nextjs";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { trpc } from "@/trpc/client";
 import { continuationMetadata } from "../continuationPresentation";
+import { executionOptionIdsFromValue } from "../executionOptions";
 import {
   externalChannelPromptRole,
   externalChannelReferenceMappingsMetadata,
@@ -75,7 +76,6 @@ import type {
   ChatEventResponse,
   ChatWriteResponse,
   LiveEventListResponse,
-  ModelExecutionOptionId,
   ModelReasoningEffort,
   PendingMailboxEnvelope,
   RequestedInferenceProfile,
@@ -269,15 +269,6 @@ function reasoningEffortFromValue(value: unknown): string | null {
   return typeof value === "string" ? value : null;
 }
 
-function executionOptionIdsFromValue(value: unknown): ModelExecutionOptionId[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  return value.filter(
-    (item): item is ModelExecutionOptionId => item === "fast",
-  );
-}
-
 function requestedInferenceProfileFromValue(
   value: unknown,
 ): RequestedInferenceProfile | null {
@@ -290,15 +281,19 @@ function requestedInferenceProfileFromValue(
   }
   const effortValue = value.reasoning_effort;
   const reasoningEffort = reasoningEffortFromValue(effortValue);
-  if (effortValue != null && reasoningEffort === null) {
+  const enabledExecutionOptions = executionOptionIdsFromValue(
+    value.enabled_execution_options,
+  );
+  if (
+    (effortValue != null && reasoningEffort === null) ||
+    enabledExecutionOptions === null
+  ) {
     return null;
   }
   return {
     model_target_label: modelTargetLabel,
     reasoning_effort: reasoningEffort,
-    enabled_execution_options: executionOptionIdsFromValue(
-      value.enabled_execution_options,
-    ),
+    enabled_execution_options: enabledExecutionOptions,
   };
 }
 
@@ -322,6 +317,9 @@ function appliedInferenceProfileFromValue(
   const hasReasoningEffort = "reasoning_effort" in value;
   const effortValue = value.reasoning_effort;
   const reasoningEffort = reasoningEffortFromValue(effortValue);
+  const enabledExecutionOptions = executionOptionIdsFromValue(
+    value.enabled_execution_options,
+  );
   if (
     modelTargetLabel === null ||
     modelTargetLabel.length === 0 ||
@@ -329,7 +327,8 @@ function appliedInferenceProfileFromValue(
       modelDisplayName !== null &&
       (typeof modelDisplayName !== "string" ||
         modelDisplayName.length === 0)) ||
-    (hasReasoningEffort && effortValue !== null && reasoningEffort === null)
+    (hasReasoningEffort && effortValue !== null && reasoningEffort === null) ||
+    enabledExecutionOptions === null
   ) {
     return null;
   }
@@ -338,9 +337,7 @@ function appliedInferenceProfileFromValue(
     model_display_name:
       typeof modelDisplayName === "string" ? modelDisplayName : null,
     reasoning_effort: reasoningEffort,
-    enabled_execution_options: executionOptionIdsFromValue(
-      value.enabled_execution_options,
-    ),
+    enabled_execution_options: enabledExecutionOptions,
   };
 }
 

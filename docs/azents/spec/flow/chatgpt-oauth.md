@@ -29,8 +29,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/llm-settings/**
   - typescript/apps/azents-web/src/shared/subscription-usage/**
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
-last_verified_at: 2026-09-25
-spec_version: 26
+last_verified_at: 2026-09-29
+spec_version: 27
 ---
 
 # ChatGPT OAuth Flow
@@ -225,32 +225,42 @@ Rules:
   price-map estimate based only on content-free usage metadata and represents API pricing rather than
   ChatGPT subscription billing; missing or invalid pricing leaves the estimate unset.
 
-## Fast execution option
+## Processing-speed execution options
 
-Fast is a directly switchable model execution option, separate from model abilities,
-reasoning effort, and built-in tools. Account model catalog projection advertises
-`fast` only when the current `service_tiers` metadata declares `priority` or `fast`.
-Missing or empty declarations are unsupported. The saved model selection carries the
+Fast and Ultrafast are directly switchable model execution options, separate from
+model abilities, reasoning effort, and built-in tools. Account model catalog
+projection independently advertises `fast` for `priority`/`fast` declarations and
+`ultrafast` for exact `ultrafast` declarations in current `service_tiers` metadata.
+Missing, empty, malformed, or unrelated declarations are unsupported. A model may
+support both speeds; registry-owned exclusivity forbids enabling both. The saved model selection carries the
 supported-option snapshot; runtime does not discover or infer support from model names
 or historical raw metadata.
 
-Composer-enabled Fast survives requested, Session-applied, and prepared inference
-snapshots. Sampling sends `service_tier: priority` through the same official Responses
-SDK HTTP or WebSocket path. Fast-off omits that field following Codex backend standard
+Composer-enabled Fast or Ultrafast survives requested, Session-applied, and prepared
+inference snapshots. Sampling sends `service_tier: priority` for Fast or
+`service_tier: ultrafast` for Ultrafast through the same official Responses SDK
+HTTP or WebSocket path without changing dependencies. Normal omits that field following Codex backend standard
 routing, while the separate OpenAI API-key path explicitly requests `default` for
 supported models so a premium project default does not override an off selection.
 Neither path changes the chosen model, effort, tool set, or authentication identity.
 Auxiliary compaction and title calls retain their independent all-off behavior.
 
-Fast starts off and its composer explanation describes additional ChatGPT usage or
-credits rather than API billing or a fixed multiplier. A rejected attempt retains its
+Both premium options start off. The exclusive Normal/Fast/Ultrafast control derives
+its relationship from public option definitions and stores only enabled IDs. Its
+explanation describes additional ChatGPT usage or credits rather than API billing
+or a fixed multiplier; Ultrafast also discloses unavailable cost estimates. A rejected attempt retains its
 prepared settings, while the next automatic retry attempt freshly resolves the current
-Session-applied model, effort, and Fast preference after backoff. The application does
-not quietly remove Fast or substitute a model outside that explicit Session intent.
+Session-applied model, effort, and speed preference after backoff. The application does
+not quietly remove a premium preference or substitute a model outside that explicit Session intent.
 Provider-side downgrades and entitlement limits remain provider behavior, not a
 latency guarantee. Cost estimation uses the returned actual tier and leaves unknown
 premium pricing unset instead of substituting standard prices; any displayed estimate
 is still an API-price estimate, not subscription credits or verified ChatGPT billing.
+With the current calculator, actual Ultrafast always leaves cost unavailable.
+A missing, empty, or `auto` tier on an Ultrafast request also leaves cost unavailable;
+an explicitly returned supported Standard/Priority tier uses that actual tier's
+existing pricing path. Requested tier is immutable attempt-local uncertainty context,
+not another persisted preference or a claim about the served tier.
 
 ## Subscription Usage
 
