@@ -788,7 +788,6 @@ function ChatInputView({
             withBorder
             radius="md"
             p="xs"
-            mb={todoPreviewVisible ? rem(22) : 0}
             style={{
               maxHeight: `min(40dvh, ${rem(320)})`,
               overflowY: "auto",
@@ -883,6 +882,7 @@ function ChatInputView({
           radius={rem(12)}
           px="xs"
           py={rem(6)}
+          mt={todoPreviewVisible ? rem(22) : 0}
           style={{
             position: "relative",
             border: `${rem(1)} solid var(--mantine-color-default-border)`,

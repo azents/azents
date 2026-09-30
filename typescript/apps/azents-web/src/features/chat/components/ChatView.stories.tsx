@@ -1,5 +1,5 @@
 import { Box, rem } from "@mantine/core";
-import { expect, fn, userEvent, within } from "storybook/test";
+import { expect, fn, userEvent, waitFor, within } from "storybook/test";
 import {
   completedToolCall,
   createChatMessage,
@@ -876,6 +876,56 @@ export const LongMobileConversation = {
       throw new Error("Expected the Chat scroll viewport");
     }
     await expect(getComputedStyle(viewport).overscrollBehavior).toBe("contain");
+  },
+} satisfies Story;
+
+export const LatestErrorWithTodo = {
+  args: {
+    ...baseArgs,
+    messages: [
+      ...longConversationMessages,
+      createChatMessage({
+        id: "latest-command-error",
+        role: "error",
+        content:
+          "Compaction failed: the selected model is temporarily unavailable. Please try again after checking the model settings.",
+      }),
+    ],
+    todo: {
+      items: [
+        {
+          content: "Check the release evidence before publishing",
+          status: "in_progress",
+        },
+      ],
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const viewport = canvasElement.querySelector("[data-chat-scroll-viewport]");
+    const preview = canvas
+      .getByText("Check the release evidence before publishing")
+      .closest("button");
+    if (!(viewport instanceof HTMLElement) || preview === null) {
+      throw new Error("Expected the chat viewport and Todo preview");
+    }
+    await waitFor(() =>
+      expect(viewport.getBoundingClientRect().bottom).toBeLessThanOrEqual(
+        preview.getBoundingClientRect().top,
+      ),
+    );
+    const error = canvas.getByText(
+      "Compaction failed: the selected model is temporarily unavailable. Please try again after checking the model settings.",
+    );
+    await waitFor(async () => {
+      const errorRect = error.getBoundingClientRect();
+      await expect(errorRect.top).toBeGreaterThanOrEqual(
+        viewport.getBoundingClientRect().top,
+      );
+      await expect(errorRect.bottom).toBeLessThanOrEqual(
+        preview.getBoundingClientRect().top,
+      );
+    });
   },
 } satisfies Story;
 
