@@ -10,7 +10,7 @@ from fastapi import FastAPI
 
 import cli.devserver as devserver
 from azents.core.config import Config
-from azents.core.deps import get_appctx
+from azents.core.deps import AppContextBinding
 from azents.core.enums import JobRuntimeBackend
 from azents.process_lifecycle import create_container
 from azents.utils.appctx import AppContext
@@ -36,8 +36,11 @@ def test_non_reload_api_apps_share_root_appcontext_and_container() -> None:
     assert isinstance(public, FastAPI)
     assert isinstance(admin, FastAPI)
     for app in (public, admin):
-        assert app.dependency_overrides[get_appctx]() is appctx
-        assert app.dependency_overrides[di.get_container]() is container
+        binding = app.state.appctx_binding
+        assert isinstance(binding, AppContextBinding)
+        assert binding.appctx is appctx
+        assert app.state.di_container is container
+        assert app.dependency_overrides == {}
 
 
 def test_reload_api_targets_create_one_root_inside_each_child_process() -> None:

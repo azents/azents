@@ -47,8 +47,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/external_channel/work_state.py
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - typescript/apps/azents-web/src/features/session-channels/**
-last_verified_at: 2026-09-12
-spec_version: 62
+last_verified_at: 2026-09-30
+spec_version: 63
 ---
 
 # External Channel Delivery and Channel Work
@@ -385,6 +385,11 @@ Session title and Agent execution.
   place even when tasks changed, or creates one notification-suppressed standalone
   Tracker when none exists.
   A message-only Action delivers the reply without changing Tracker presentation.
+  A confirmed `message_not_found` failure when updating a Tracker retires that
+  missing host identity while retaining the failed outcome and canonical Work.
+  The next ordinary progress Action creates a notification-suppressed standalone
+  replacement. Permission, rate-limit, ambiguous, and stale-revision outcomes
+  retain their existing identity and recovery boundaries.
   When an explicitly supplied ordered task snapshot differs from the canonical
   pre-transition tasks and the Action also contains a conversational message, Tracker
   relocation runs before the reply: it removes the previous host first:
@@ -609,6 +614,9 @@ already-committed terminal result does not replay provider publication.
 - **2026-09-12** (spec_version 61) — Fenced Agent-owned Channel Work and
   provider effect admission/settlement by Session owner generation while retaining
   transaction-free provider I/O and no ambiguous replay.
+- **2026-09-30** (spec_version 63) — Clarified confirmed missing Tracker update
+  recovery through the next ordinary progress Action without hiding failed
+  delivery outcomes or changing authority and revision fencing.
 - **2026-09-12** (spec_version 62) — Added the single-shot post-commit external
   model-change notice, immutable actor audit, separate delivery outcome, and
   no-replay/no-fallback failure boundary.

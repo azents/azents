@@ -1,8 +1,10 @@
 """Common dependency injection."""
 
+from dataclasses import dataclass
 from typing import Annotated
 
 from fastapi import Depends
+from starlette.requests import HTTPConnection
 
 from azents.core.crypto import CredentialCipher
 from azents.utils.appctx import AppContext
@@ -17,12 +19,26 @@ from .config import (
 )
 
 
-def get_appctx() -> AppContext[Config]:
-    """Placeholder dependency that returns AppContext.
+@dataclass(frozen=True)
+class AppContextBinding:
+    """Typed reference to the application's existing resource owner."""
 
-    The actual AppContext is injected by dependency_overrides in app.py.
-    """
-    raise NotImplementedError("get_appctx was not provided")
+    appctx: AppContext[Config]
+
+    def __call__(self) -> AppContext[Config]:
+        """Supply the same context to offline dependency composition."""
+        return self.appctx
+
+
+def get_appctx(connection: HTTPConnection) -> AppContext[Config]:
+    """Return the application-owned context for HTTP and WebSocket requests."""
+    try:
+        binding = connection.app.state.appctx_binding
+    except AttributeError as error:
+        raise RuntimeError("Application context binding is missing.") from error
+    if not isinstance(binding, AppContextBinding):
+        raise RuntimeError("Application context binding is invalid.")
+    return binding.appctx
 
 
 def get_config(appctx: Annotated[AppContext[Config], Depends(get_appctx)]) -> Config:

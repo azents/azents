@@ -6,7 +6,7 @@ from typing import AsyncIterator
 from azcommon import di
 
 from azents.core.config import Config
-from azents.core.deps import get_appctx
+from azents.core.deps import AppContextBinding, get_appctx
 from azents.job_runtime.deps import get_job_runtime
 from azents.runtime import deps as runtime_deps
 from azents.services.runtime_terminal.invalidation import (
@@ -37,7 +37,7 @@ async def preload_process_services(container: di.Container) -> None:
 def create_container(appctx: AppContext[Config]) -> di.Container:
     """Create the application dependency container."""
     overrides: di.DependencyOverrides = {
-        get_appctx: lambda: appctx,
+        get_appctx: AppContextBinding(appctx),
         get_runtime_terminal_invalidation_publisher: (
             runtime_deps.get_runtime_terminal_invalidation_publisher
         ),

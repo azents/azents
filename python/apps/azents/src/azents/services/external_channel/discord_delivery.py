@@ -23,6 +23,7 @@ from azents.services.external_channel.discord_sdk import (
     DiscordSDKError,
     DiscordSDKMessage,
     DiscordSDKMessageForwardingSession,
+    DiscordSDKMessageUnavailable,
     DiscordSDKPermissionDenied,
     DiscordSDKRateLimited,
     DiscordSDKRequestRejected,
@@ -667,12 +668,19 @@ def _sdk_delivery_failure(error: DiscordSDKError) -> DiscordDeliveryResult:
             error_kind="permission_denied",
             error_summary="Discord denied access to the target conversation.",
         )
-    if isinstance(error, DiscordSDKResourceUnavailable):
+    if isinstance(error, DiscordSDKMessageUnavailable):
         return DiscordDeliveryResult(
             status="failed",
             provider_message_key=None,
             error_kind="message_not_found",
             error_summary="Discord no longer exposes the target message.",
+        )
+    if isinstance(error, DiscordSDKResourceUnavailable):
+        return DiscordDeliveryResult(
+            status="failed",
+            provider_message_key=None,
+            error_kind="resource_unavailable",
+            error_summary="Discord no longer exposes the target resource.",
         )
     if isinstance(error, DiscordSDKRateLimited):
         return DiscordDeliveryResult(
@@ -712,8 +720,8 @@ def _response_failure(response: httpx.Response) -> DiscordDeliveryResult | None:
         return DiscordDeliveryResult(
             status="failed",
             provider_message_key=None,
-            error_kind="message_not_found",
-            error_summary="Discord no longer exposes the target message.",
+            error_kind="resource_unavailable",
+            error_summary="Discord no longer exposes the target resource.",
         )
     if response.status_code == 429:
         return DiscordDeliveryResult(

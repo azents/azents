@@ -10,6 +10,9 @@ import time
 import urllib.error
 import urllib.request
 from base64 import b64encode, urlsafe_b64encode
+from collections import OrderedDict
+from collections.abc import Callable
+from hashlib import sha256
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import ClassVar, NamedTuple, Protocol, runtime_checkable
@@ -202,10 +205,12 @@ _EXTERNAL_CHANNEL_QUIET_WORK_MARKER = "Discord quiet work presence E2E"
 _EXTERNAL_CHANNEL_QUIET_WORK_SETUP_MARKER = "Discord quiet work setup E2E"
 _EXTERNAL_CHANNEL_SEARCH_CALL_ID = "call_external_channel_tool_search"
 _EXTERNAL_CHANNEL_PROGRESS_CALL_ID = "call_external_channel_progress"
+_EXTERNAL_CHANNEL_PROGRESS_REFERENCE_TOKENS = ("@User UREVIEWER", "#e2e")
 _EXTERNAL_CHANNEL_FINISH_CALL_ID = "call_external_channel_finish"
 _EXTERNAL_CHANNEL_OUTCOME_PROGRESS_CALL_ID = "call_external_channel_outcome_progress"
 _EXTERNAL_CHANNEL_FAILURE_PROGRESS_CALL_ID = "call_external_channel_failure_progress"
 _EXTERNAL_CHANNEL_REQUEST_INPUT_CALL_ID = "call_external_channel_request_input"
+_EXTERNAL_CHANNEL_HELD_PROGRESS_CALL_ID = "call_external_channel_held_progress"
 _EXTERNAL_CHANNEL_PROGRESS_CALL_IDS = frozenset(
     {
         _EXTERNAL_CHANNEL_PROGRESS_CALL_ID,
@@ -225,7 +230,6 @@ _EXTERNAL_CHANNEL_QUIET_WORK_BARRIER_PATH = "/v1/_external_channel_quiet_work_ba
 _EXTERNAL_CHANNEL_QUIET_WORK_BARRIER_RELEASE_PATH = (
     f"{_EXTERNAL_CHANNEL_QUIET_WORK_BARRIER_PATH}/release"
 )
-_EXTERNAL_CHANNEL_QUIET_WORK_BARRIER_TIMEOUT_SECONDS = 60.0
 _EXTERNAL_CHANNEL_QUIET_WORK_BARRIER_BINDING = re.compile(r"[A-Za-z0-9_-]{1,256}")
 _EXTERNAL_CHANNEL_TURN_BINDING = re.compile(r"Binding: ([A-Za-z0-9_-]+)")
 _EXTERNAL_CHANNEL_COMPACTION_BINDING = re.compile(r"### Binding `([^`]+)`")
@@ -1006,15 +1010,294 @@ def is_inference_profile_title_request(request: dict[str, object]) -> bool:
     )
 
 
+class _ExternalChannelResponseContext(NamedTuple):
+    """Safe association for one locally emitted Responses tool call."""
+
+    binding: str
+    turn: str
+    flow: str
+    call_id: str
+    stage: str
+    released_outcome: bool = False
+    reference_tokens: tuple[str, ...] = ()
+
+
+class _ExternalChannelStaleResponseContext(ValueError):
+    """A prepared matcher belongs to a retired fixture generation."""
+
+
+class _ExternalChannelResponseRegistry:
+    """Restore exact sparse continuations without retaining message bodies."""
+
+    def __init__(self, *, limit: int = 2048) -> None:
+        self._limit = limit
+        self._lock = threading.RLock()
+        self._generation = 0
+        self._serial = 0
+        self._responses: OrderedDict[str, _ExternalChannelResponseContext] = (
+            OrderedDict()
+        )
+        self._identities: OrderedDict[tuple[str, str, str, str], str] = OrderedDict()
+        self._aliases: OrderedDict[tuple[str, str], _ExternalChannelResponseContext] = (
+            OrderedDict()
+        )
+        self._used_stages: set[tuple[str, str]] = set()
+        self._released_outcomes: OrderedDict[str, None] = OrderedDict()
+
+    def clear(self, *, reset_state: Callable[[], None] | None = None) -> None:
+        """Invalidate all associations, including in-flight previous responses."""
+        with self._lock:
+            self._generation += 1
+            self._responses.clear()
+            self._identities.clear()
+            self._aliases.clear()
+            self._released_outcomes.clear()
+            if reset_state is not None:
+                reset_state()
+
+    def run_if_current(
+        self, request: dict[str, object], dispatch: Callable[[], None]
+    ) -> bool:
+        """Serialize all scoped state mutations with generation retirement."""
+        with self._lock:
+            if request.get("_external_channel_fixture_generation") != self._generation:
+                return False
+            dispatch()
+            return True
+
+    def released_outcome_replay(self, request: dict[str, object]) -> bool:
+        """Recognize a previously chosen rich outcome, including delayed retries."""
+        with self._lock:
+            if request.get("_external_channel_fixture_generation") != self._generation:
+                return False
+            key = request.get("_external_channel_fixture_request_key")
+            if isinstance(key, str) and key in self._released_outcomes:
+                return True
+            context = self._responses.get(str(request.get("previous_response_id")))
+            return (
+                context is not None
+                and context.released_outcome
+                and context.turn == request.get("_external_channel_fixture_turn")
+                and context.binding == external_channel_binding(request)
+            )
+
+    def remember_released_outcome(self, request: dict[str, object]) -> None:
+        """Retain only a safe request fingerprint, never response/body contents."""
+        with self._lock:
+            key = request.get("_external_channel_fixture_request_key")
+            if isinstance(key, str):
+                self._released_outcomes[key] = None
+                while len(self._released_outcomes) > self._limit:
+                    self._released_outcomes.popitem(last=False)
+            previous = str(request.get("previous_response_id"))
+            context = self._responses.get(previous)
+            if (
+                context is not None
+                and context.turn == request.get("_external_channel_fixture_turn")
+                and context.binding == external_channel_binding(request)
+            ):
+                self._responses[previous] = context._replace(released_outcome=True)
+
+    def prepare(self, request: dict[str, object]) -> dict[str, object]:
+        """Build a local matcher view; never alter the upstream request."""
+        input_value = request.get("input")
+        if not isinstance(input_value, list):
+            return request
+        items = _list(input_value)
+        latest_text = _last_user_text(request)
+        human_binding = latest_external_channel_human_binding(request)
+        binding = human_binding or external_channel_binding(request)
+        with self._lock:
+            generation = self._generation
+            context = self._responses.get(str(request.get("previous_response_id")))
+            if latest_text is None:
+                if (
+                    context is None
+                    or len(items) != 1
+                    or any(
+                        isinstance(item, dict) and item.get("role") == "user"
+                        for item in items
+                    )
+                    or not any(
+                        isinstance(item, dict)
+                        and item.get("type") == "function_call_output"
+                        and item.get("call_id") == context.call_id
+                        for item in items
+                    )
+                ):
+                    return request
+                binding = context.binding
+                flow = context.flow
+                turn = context.turn
+                reference_tokens = context.reference_tokens
+                references = "\n".join(reference_tokens)
+                marker = {
+                    "setup": _EXTERNAL_CHANNEL_QUIET_WORK_SETUP_MARKER,
+                    "progress": _EXTERNAL_CHANNEL_PROGRESS_MARKER,
+                    "resume": "",
+                }[flow]
+                items = [
+                    {
+                        "role": "user",
+                        "content": (
+                            "Message Type: EXTERNAL_CHANNEL_TURN\n"
+                            f"Binding: {binding}\n\n{marker}\n{references}"
+                        ),
+                    },
+                    *items,
+                ]
+            elif binding is not None:
+                flow = (
+                    "setup"
+                    if is_external_channel_quiet_work_setup_request(request)
+                    else (
+                        "resume"
+                        if _EXTERNAL_CHANNEL_PROGRESS_SEQUENCES.is_awaiting(binding)
+                        else "progress"
+                    )
+                )
+                turn = sha256(latest_text.encode()).hexdigest()[:24]
+                reference_tokens = tuple(
+                    token
+                    for token in _EXTERNAL_CHANNEL_PROGRESS_REFERENCE_TOKENS
+                    if human_binding == binding and token in latest_text
+                )
+            else:
+                return request
+            latest_user_index = max(
+                (
+                    index
+                    for index, item in enumerate(items)
+                    if isinstance(item, dict) and item.get("role") == "user"
+                ),
+                default=-1,
+            )
+            normalized: list[object] = []
+            observed_stages: list[str] = []
+            for index, item in enumerate(items):
+                if not isinstance(item, dict):
+                    normalized.append(item)
+                    continue
+                raw_call_id = item.get("call_id", item.get("tool_call_id"))
+                alias = self._aliases.get((str(binding), str(raw_call_id)))
+                if (
+                    alias is not None
+                    and alias.binding == binding
+                    and (
+                        item.get("type") == "function_call_output"
+                        or item.get("role") == "tool"
+                    )
+                ):
+                    key = "tool_call_id" if item.get("role") == "tool" else "call_id"
+                    normalized.append({**item, key: alias.stage})
+                    if index > latest_user_index and alias.turn == turn:
+                        observed_stages.append(alias.stage)
+                else:
+                    normalized.append(item)
+        return {
+            **request,
+            "input": normalized,
+            "_external_channel_fixture_turn": turn,
+            "_external_channel_fixture_flow": flow,
+            "_external_channel_fixture_reference_tokens": reference_tokens,
+            "_external_channel_fixture_generation": generation,
+            "_external_channel_fixture_observed_stages": observed_stages,
+            "_external_channel_fixture_request_key": sha256(
+                json.dumps(request, sort_keys=True, ensure_ascii=False).encode()
+            ).hexdigest(),
+        }
+
+    def issue(
+        self,
+        request: dict[str, object],
+        stage: str,
+        *,
+        arguments: dict[str, object] | None = None,
+    ) -> tuple[str, str, str] | None:
+        """Give new logical calls distinct identities and keep retries stable."""
+        known_stages = _EXTERNAL_CHANNEL_PROGRESS_CALL_IDS | {
+            _EXTERNAL_CHANNEL_SEARCH_CALL_ID,
+            _EXTERNAL_CHANNEL_QUIET_WORK_SETUP_SEARCH_CALL_ID,
+            _EXTERNAL_CHANNEL_QUIET_WORK_SETUP_FINISH_CALL_ID,
+            _EXTERNAL_CHANNEL_HELD_PROGRESS_CALL_ID,
+        }
+        binding = latest_external_channel_human_binding(
+            request
+        ) or external_channel_binding(request)
+        turn = request.get("_external_channel_fixture_turn")
+        flow = request.get("_external_channel_fixture_flow")
+        if (
+            stage not in known_stages
+            or binding is None
+            or not isinstance(turn, str)
+            or not isinstance(flow, str)
+        ):
+            return None
+        with self._lock:
+            if request.get("_external_channel_fixture_generation") != self._generation:
+                raise _ExternalChannelStaleResponseContext(
+                    "External Channel fixture generation was retired."
+                )
+            semantics = (
+                sha256(
+                    json.dumps(arguments, sort_keys=True, ensure_ascii=False).encode()
+                ).hexdigest()
+                if arguments is not None
+                else ""
+            )
+            key = (binding, turn, stage, semantics)
+            call_id = self._identities.get(key)
+            if call_id is None or stage == _EXTERNAL_CHANNEL_HELD_PROGRESS_CALL_ID:
+                self._serial += 1
+                call_id = (
+                    stage
+                    if (binding, stage) not in self._used_stages
+                    and len(self._used_stages) < self._limit
+                    else f"{stage}_{self._generation}_{self._serial}"
+                )
+                if call_id == stage:
+                    self._used_stages.add((binding, stage))
+                self._identities[key] = call_id
+            suffix = sha256(
+                f"{self._generation}:{binding}:{turn}:{call_id}".encode()
+            ).hexdigest()[:24]
+            response_id = f"resp_external_channel_{suffix}"
+            item_id = f"fc_external_channel_{suffix}"
+            canonical_stage = (
+                _EXTERNAL_CHANNEL_PROGRESS_CALL_ID
+                if stage == _EXTERNAL_CHANNEL_HELD_PROGRESS_CALL_ID
+                and flow == "progress"
+                else stage
+            )
+            tokens = request.get("_external_channel_fixture_reference_tokens")
+            reference_tokens = tuple(
+                token
+                for token in _EXTERNAL_CHANNEL_PROGRESS_REFERENCE_TOKENS
+                if isinstance(tokens, tuple) and token in tokens
+            )
+            context = _ExternalChannelResponseContext(
+                binding,
+                turn,
+                flow,
+                call_id,
+                canonical_stage,
+                reference_tokens=reference_tokens,
+            )
+            self._responses[response_id] = context
+            self._aliases[(binding, call_id)] = context
+            for mapping in (self._responses, self._identities, self._aliases):
+                while len(mapping) > self._limit:
+                    mapping.popitem(last=False)
+            return call_id, response_id, item_id
+
+
+_EXTERNAL_CHANNEL_RESPONSES = _ExternalChannelResponseRegistry()
+
+
 class _ExternalChannelQuietWorkBarrier:
     """Coordinate Discord quiet-work progress with a deterministic E2E boundary."""
 
-    def __init__(
-        self,
-        *,
-        timeout_seconds: float = _EXTERNAL_CHANNEL_QUIET_WORK_BARRIER_TIMEOUT_SECONDS,
-    ) -> None:
-        self._timeout_seconds = timeout_seconds
+    def __init__(self) -> None:
         self._lock = threading.Lock()
         self._armed = False
         self._binding: str | None = None
@@ -1048,6 +1331,17 @@ class _ExternalChannelQuietWorkBarrier:
             "timed_out": timed_out,
         }
 
+    def clear(self) -> None:
+        """Retire a journal's Work boundary without leaving old latches active."""
+        with self._lock:
+            self._armed = False
+            self._binding = None
+            self._generation += 1
+            self._progress_issued = False
+            self._timed_out = False
+            self._reached = threading.Event()
+            self._released = threading.Event()
+
     def is_armed_for(self, binding: str | None) -> bool:
         """Return whether this deterministic boundary covers one Binding."""
         with self._lock:
@@ -1069,13 +1363,17 @@ class _ExternalChannelQuietWorkBarrier:
                 and self._progress_issued
             )
 
-    def take_progress_issued(self, binding: str) -> bool:
-        """Consume one scoped issued-progress continuation boundary."""
+    def complete_progress_boundary(self, binding: str) -> bool:
+        """Consume the pending stage only after an explicit barrier release."""
         with self._lock:
-            if not self._armed or self._binding != binding or not self._progress_issued:
-                return False
-            self._progress_issued = False
-            return True
+            if (
+                self._binding == binding
+                and self._released.is_set()
+                and self._progress_issued
+            ):
+                self._progress_issued = False
+                return True
+            return False
 
     def release(self) -> None:
         """Release the current quiet-work continuation."""
@@ -1087,21 +1385,13 @@ class _ExternalChannelQuietWorkBarrier:
         """Wait until the model continuation reaches the held boundary."""
         return self._reached.wait(timeout=timeout)
 
-    def wait_for_release(self, binding: str) -> bool:
-        """Hold the next continuation action until release or bounded timeout."""
+    def hold(self, binding: str) -> bool:
+        """Hold Work progression, never the HTTP/model inference attempt."""
         with self._lock:
-            if not self._armed or self._binding != binding:
-                return True
-            generation = self._generation
-            reached = self._reached
-            released_event = self._released
-        reached.set()
-        released = released_event.wait(timeout=self._timeout_seconds)
-        if not released:
-            with self._lock:
-                if generation == self._generation:
-                    self._timed_out = True
-        return released
+            if not self._armed or self._binding != binding or self._released.is_set():
+                return False
+            self._reached.set()
+            return True
 
 
 _EXTERNAL_CHANNEL_QUIET_WORK_BARRIER = _ExternalChannelQuietWorkBarrier()
@@ -1151,6 +1441,12 @@ class _ExternalChannelProgressSequenceRegistry:
 
 
 _EXTERNAL_CHANNEL_PROGRESS_SEQUENCES = _ExternalChannelProgressSequenceRegistry()
+
+
+def _reset_external_channel_progress_state() -> None:
+    """Reset scoped Work state while the response generation is locked."""
+    _EXTERNAL_CHANNEL_PROGRESS_SEQUENCES.clear_all()
+    _EXTERNAL_CHANNEL_QUIET_WORK_BARRIER.clear()
 
 
 def _external_channel_quiet_work_barrier_binding(body: bytes) -> str | None:
@@ -1225,7 +1521,9 @@ class _Handler(BaseHTTPRequestHandler):
                 if journal is _State.subscription_usage_requests:
                     _State.subscription_usage_sequences.clear()
             if journal is _State.external_channel_progress_requests:
-                _EXTERNAL_CHANNEL_PROGRESS_SEQUENCES.clear_all()
+                _EXTERNAL_CHANNEL_RESPONSES.clear(
+                    reset_state=_reset_external_channel_progress_state
+                )
             self._write_json(200, {"cleared": True})
             return
         self._proxy()
@@ -1293,6 +1591,32 @@ class _Handler(BaseHTTPRequestHandler):
             self._write_json(400, {"error": {"message": "invalid request"}})
             return
         request = _object(request_value)
+        if self.path == "/v1/responses":
+            request = _EXTERNAL_CHANNEL_RESPONSES.prepare(request)
+        self._dispatch_prepared_request(request, body)
+
+    def _dispatch_prepared_request(
+        self, request: dict[str, object], body: bytes
+    ) -> None:
+        """Reject retired matchers before any Work or response state mutation."""
+        if "_external_channel_fixture_generation" in request:
+            admitted = _EXTERNAL_CHANNEL_RESPONSES.run_if_current(
+                request, lambda: self._dispatch_model_request(request, body)
+            )
+            if not admitted:
+                self._write_json(
+                    409,
+                    {
+                        "error": {
+                            "message": "External Channel fixture generation retired."
+                        }
+                    },
+                )
+            return
+        self._dispatch_model_request(request, body)
+
+    def _dispatch_model_request(self, request: dict[str, object], body: bytes) -> None:
+        """Route one generation-fenced local model request."""
         user_text = _last_user_text(request)
         compaction_request = _is_semantic_compaction_request(request)
         if self.path == "/v1/responses" and is_inference_profile_title_request(request):
@@ -2051,6 +2375,7 @@ class _Handler(BaseHTTPRequestHandler):
             )
             with _State.lock:
                 _State.external_channel_progress_requests.append(evidence)
+                del _State.external_channel_progress_requests[:-4096]
         if self.path == "/v1/responses" and is_external_channel_file_request(request):
             binding = external_channel_binding(request)
             locators = external_channel_file_locators(request)
@@ -2237,6 +2562,9 @@ class _Handler(BaseHTTPRequestHandler):
             )
             return
         progress_request = is_external_channel_progress_request(request)
+        released_outcome_replay = _EXTERNAL_CHANNEL_RESPONSES.released_outcome_replay(
+            request
+        )
         binding = external_channel_binding(request)
         progress_continuation = _EXTERNAL_CHANNEL_PROGRESS_SEQUENCES.is_active(
             binding
@@ -2252,27 +2580,41 @@ class _Handler(BaseHTTPRequestHandler):
             and binding is not None
             and (
                 progress_request
+                or released_outcome_replay
                 or progress_continuation
                 or awaiting_resume
                 or _EXTERNAL_CHANNEL_QUIET_WORK_BARRIER.has_progress_issued_for(binding)
             )
         ):
-            if progress_request:
+            if progress_request and not released_outcome_replay:
                 _EXTERNAL_CHANNEL_PROGRESS_SEQUENCES.start(binding)
-            if _EXTERNAL_CHANNEL_QUIET_WORK_BARRIER.take_progress_issued(binding):
-                if not _EXTERNAL_CHANNEL_QUIET_WORK_BARRIER.wait_for_release(binding):
-                    self._write_json(
-                        503,
-                        {
-                            "error": {
-                                "message": (
-                                    "Discord quiet-work E2E barrier timed out "
-                                    "before release."
-                                )
-                            }
+            observed_stages = request.get("_external_channel_fixture_observed_stages")
+            if (
+                isinstance(observed_stages, list)
+                and _EXTERNAL_CHANNEL_OUTCOME_PROGRESS_CALL_ID in observed_stages
+            ):
+                _EXTERNAL_CHANNEL_QUIET_WORK_BARRIER.complete_progress_boundary(binding)
+            if (
+                _EXTERNAL_CHANNEL_QUIET_WORK_BARRIER.has_progress_issued_for(binding)
+                and not released_outcome_replay
+            ):
+                if _EXTERNAL_CHANNEL_QUIET_WORK_BARRIER.hold(binding):
+                    self._write_function_call_response(
+                        request,
+                        call_id=_EXTERNAL_CHANNEL_HELD_PROGRESS_CALL_ID,
+                        name="channel_action",
+                        arguments={
+                            "mode": "continue",
+                            "binding": binding,
+                            "title": "Investigating error logs…",
                         },
                     )
                     return
+            if (
+                _EXTERNAL_CHANNEL_QUIET_WORK_BARRIER.has_progress_issued_for(binding)
+                or released_outcome_replay
+            ):
+                _EXTERNAL_CHANNEL_RESPONSES.remember_released_outcome(request)
                 self._write_function_call_response(
                     request,
                     call_id=_EXTERNAL_CHANNEL_OUTCOME_PROGRESS_CALL_ID,
@@ -2328,20 +2670,15 @@ class _Handler(BaseHTTPRequestHandler):
                         response_id="resp_external_channel_request_input_completed",
                     )
                     return
-                if _EXTERNAL_CHANNEL_QUIET_WORK_BARRIER.is_armed_for(
-                    binding
-                ) and not _EXTERNAL_CHANNEL_QUIET_WORK_BARRIER.wait_for_release(
-                    binding
-                ):
-                    self._write_json(
-                        503,
-                        {
-                            "error": {
-                                "message": (
-                                    "Discord request-input resume barrier timed out "
-                                    "before release."
-                                )
-                            }
+                if _EXTERNAL_CHANNEL_QUIET_WORK_BARRIER.hold(binding):
+                    self._write_function_call_response(
+                        request,
+                        call_id=_EXTERNAL_CHANNEL_HELD_PROGRESS_CALL_ID,
+                        name="channel_action",
+                        arguments={
+                            "mode": "continue",
+                            "binding": binding,
+                            "title": "Investigating error logs…",
                         },
                     )
                     return
@@ -3447,6 +3784,18 @@ class _Handler(BaseHTTPRequestHandler):
         model = model_value if isinstance(model_value, str) else "gpt-5.5"
         response_id = f"resp_{call_id.removeprefix('call_')}"
         item_id = f"fc_{call_id.removeprefix('call_')}"
+        try:
+            identity = _EXTERNAL_CHANNEL_RESPONSES.issue(
+                request, call_id, arguments=arguments
+            )
+        except _ExternalChannelStaleResponseContext:
+            self._write_json(
+                409,
+                {"error": {"message": "External Channel fixture generation retired."}},
+            )
+            return
+        if identity is not None:
+            call_id, response_id, item_id = identity
         encoded_arguments = json.dumps(
             arguments,
             ensure_ascii=False,

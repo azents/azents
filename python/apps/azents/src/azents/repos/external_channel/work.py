@@ -1904,7 +1904,13 @@ class ExternalChannelWorkRepository:
                         )
                 case "failed":
                     part.status = ExternalChannelWorkProjectionStatus.FAILED
-                    if target_message_key is not None:
+                    if (
+                        target.operation
+                        is ExternalChannelDeliveryOperation.PROGRESS_UPDATE
+                        and outcome.error_kind == "message_not_found"
+                    ):
+                        part.provider_message_key = None
+                    elif target_message_key is not None:
                         part.provider_message_key = target_message_key
                 case "unknown":
                     part.status = ExternalChannelWorkProjectionStatus.UNKNOWN

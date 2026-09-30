@@ -1946,7 +1946,7 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
             root_message_id=root_message_id,
         )
         if message is None and not self.state.allow_synthetic_roots:
-            self._json_response(404, {"message": "Not found."})
+            self._json_response(404, {"message": "Unknown Message", "code": 10008})
             return
         thread_id = self.state.get_root_thread(
             parent_channel_id=parent_channel_id,
@@ -2070,16 +2070,16 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
         if operation == "update_thread_name":
             name = _sdk_string(arguments, "name")
             if not self.state.update_thread_name(channel_id=channel_id, name=name):
-                self._json_response(404, {"message": "Not found."})
+                self._json_response(404, {"message": "Unknown Channel", "code": 10003})
                 return
         else:
             name = self.state.thread_name(channel_id)
             if name is None:
-                self._json_response(404, {"message": "Not found."})
+                self._json_response(404, {"message": "Unknown Channel", "code": 10003})
                 return
         parent_id = self.state.thread_parent_id(channel_id)
         if parent_id is None:
-            self._json_response(404, {"message": "Not found."})
+            self._json_response(404, {"message": "Unknown Channel", "code": 10003})
             return
         self.state.record_operation(
             "thread_title",
@@ -2164,7 +2164,7 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
                 channel_id=channel_id,
                 message_id=message_id,
             ):
-                self._json_response(404, {"message": "Not found."})
+                self._json_response(404, {"message": "Unknown Message", "code": 10008})
                 return
         if scenario in _CONTROLLED_RESPONSE_SCENARIOS:
             failure_outcome = (
@@ -2305,7 +2305,7 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
             root_message_id=message_id,
         )
         if message is None:
-            self._json_response(404, {"message": "Not found."})
+            self._json_response(404, {"message": "Unknown Message", "code": 10008})
             return
         self._json_response(200, message)
 
@@ -2372,8 +2372,10 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
             self._json_response(401, {"message": "Unauthorized."})
         elif scenario in {"forbidden", "permission_denied"}:
             self._json_response(403, {"message": "Forbidden."})
-        elif scenario in {"not_found", "message_not_found"}:
+        elif scenario == "not_found":
             self._json_response(404, {"message": "Not found."})
+        elif scenario == "message_not_found":
+            self._json_response(404, {"message": "Unknown Message", "code": 10008})
         elif scenario in {"rejected", "provider_rejected"}:
             self._json_response(400, {"message": "Rejected."})
         elif scenario in {"server_error", "provider_5xx_unknown", "ambiguous"}:

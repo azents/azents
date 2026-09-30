@@ -104,8 +104,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/toolCallActionPresentation.ts
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
   - typescript/apps/azents-web/messages/*/chat.json
-last_verified_at: 2026-09-29
-spec_version: 186
+last_verified_at: 2026-09-30
+spec_version: 187
 ---
 
 # Agent Execution Loop
@@ -1399,8 +1399,14 @@ clears an earlier pointer because that earlier terminal boundary did not remain 
 `AgentSession.run_state` may become `idle` only after the runner has confirmed that no follow-up work
 exists: no pending command, no pending wake-producing input buffer, no active Run, and no queued
 actionable wake-up. For a completed boundary, the runner dispatches idle hooks only after that
-follow-up check. It then locks the Session, rechecks that the same pointer remains and that the
-session is still free of follow-up work, and atomically commits one outcome: continuation InputBuffers
+follow-up check. Both the pre-hook eligibility check and the post-hook commit recheck start fresh
+transactions with the existing tree-ordered execution admission: the root SessionAgent lifecycle
+gate, Agent parent rows, then the root, direct-parent, and executing Session rows. A contended
+non-blocking attempt releases its savepoint locks before retrying. Hook evaluation remains outside
+these transactions. Owner-generation, Session status, pending pointer, command, wake-producing input,
+active Run, and archived Scheduled Task cycle checks retain their existing semantics. The commit
+recheck confirms that the same pointer remains and that the Session is still free of follow-up work,
+then atomically commits one outcome: continuation InputBuffers
 plus `running`, or pointer removal plus `idle`. Failed, stopped, interrupted, cancelled, or
 retry-active Runs must not enqueue Goal continuation.
 
@@ -1535,6 +1541,9 @@ icon.
 
 ## Changelog
 
+- **2026-09-30** (spec_version 187) — Applied existing tree-ordered execution
+  admission to both completed-run idle eligibility transactions while preserving
+  true-idle, owner-generation, and continuation eligibility boundaries.
 - **2026-09-27** (spec_version 185) — Reconciled pre-dispatch image-model
   validation text with current client Images execution instead of the retired
   OpenAI hosted-tool lowering path.

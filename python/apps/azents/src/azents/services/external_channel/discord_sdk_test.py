@@ -10,11 +10,13 @@ import discord
 import discord.http
 import pytest
 
-from azents.services.external_channel import discord_sdk
+from azents.services.external_channel import discord_delivery, discord_sdk
 from azents.services.external_channel.discord_sdk import (
     DiscordSDKCredentialsInvalid,
+    DiscordSDKMessageUnavailable,
     DiscordSDKPermissionDenied,
     DiscordSDKRequestRejected,
+    DiscordSDKResourceUnavailable,
 )
 
 
@@ -23,6 +25,38 @@ def _http_error(status: int) -> discord.HTTPException:
     response.status = status
     response.reason = "rejected"
     return discord.HTTPException(response, "rejected")
+
+
+@pytest.mark.parametrize("exception_type", [discord.NotFound, discord.HTTPException])
+@pytest.mark.parametrize(
+    ("payload", "confirmed_missing"),
+    [
+        ({"code": 10008, "message": "Unknown Message"}, True),
+        ({"code": 10003, "message": "Unknown Channel"}, False),
+        ({"code": 10004, "message": "Unknown Guild"}, False),
+        ({"code": 0, "message": "Not found"}, False),
+        ("Not found", False),
+    ],
+)
+def test_not_found_delivery_preserves_resource_message_distinction(
+    exception_type: type[discord.HTTPException],
+    payload: dict[str, object] | str,
+    confirmed_missing: bool,
+) -> None:
+    """Only Discord's exact Unknown Message code confirms a missing host."""
+    response = MagicMock()
+    response.status = 404
+    response.reason = "Not Found"
+    error = discord_sdk._sdk_error(exception_type(response, payload))
+
+    assert isinstance(error, DiscordSDKResourceUnavailable)
+    assert isinstance(error, DiscordSDKMessageUnavailable) is confirmed_missing
+    outcome = discord_delivery._sdk_delivery_failure(error)
+    assert outcome.status == "failed"
+    assert outcome.provider_message_key is None
+    assert outcome.error_kind == (
+        "message_not_found" if confirmed_missing else "resource_unavailable"
+    )
 
 
 @pytest.mark.parametrize(

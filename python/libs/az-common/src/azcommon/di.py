@@ -39,6 +39,7 @@ from fastapi.dependencies.utils import (
     get_dependant,
 )
 from starlette.concurrency import run_in_threadpool
+from starlette.requests import HTTPConnection
 
 T = TypeVar("T")
 P = ParamSpec("P")
@@ -110,15 +111,16 @@ async def solve_offline_dependencies(
             call = dependency_overrides_provider.dependency_overrides.get(
                 original_call, original_call
             )
-            use_path = sub_dependant.path
-            assert use_path is not None
-            use_sub_dependant = get_dependant(
-                path=use_path,
-                call=call,
-                name=sub_dependant.name,
-                parent_oauth_scopes=_get_oauth_scopes(dependant=sub_dependant),
-                scope=sub_dependant.scope,
-            )
+            if call is not original_call:
+                use_path = sub_dependant.path
+                assert use_path is not None
+                use_sub_dependant = get_dependant(
+                    path=use_path,
+                    call=call,
+                    name=sub_dependant.name,
+                    parent_oauth_scopes=_get_oauth_scopes(dependant=sub_dependant),
+                    scope=sub_dependant.scope,
+                )
 
         solved_result = await solve_offline_dependencies(
             dependant=use_sub_dependant,
@@ -365,11 +367,14 @@ class Container:
             await cast(Runnable, result).run()
 
 
-def get_container() -> Container:
-    """
-    Dependency for getting the current container.
-    """
-    raise NotImplementedError(
-        "this is a placeholder for the container, you should not call this "
-        "function directly"
-    )
+def get_container(connection: HTTPConnection) -> Container:
+    """Return the configured application Container for HTTP or WebSocket requests."""
+    try:
+        container = connection.app.state.di_container
+    except AttributeError:
+        raise RuntimeError(
+            "Application dependency Container was not configured."
+        ) from None
+    if not isinstance(container, Container):
+        raise RuntimeError("Application dependency Container binding is invalid.")
+    return container
