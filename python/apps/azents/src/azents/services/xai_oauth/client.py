@@ -53,8 +53,8 @@ class XaiOAuthClient:
                     "Accept": "application/json",
                 },
             )
-        except httpx.HTTPError as exc:
-            return Failure(ProviderUnavailable(reason=str(exc)))
+        except httpx.HTTPError:
+            return Failure(ProviderUnavailable(reason="xAI OAuth transport failed"))
 
         if not response.is_success:
             return Failure(_provider_error(response))
@@ -77,8 +77,8 @@ class XaiOAuthClient:
                     expires_in_seconds=int(body["expires_in"]),
                 )
             )
-        except (KeyError, TypeError, ValueError, ValidationError) as exc:
-            return Failure(ProviderUnavailable(reason=str(exc)))
+        except KeyError, TypeError, ValueError, OverflowError, ValidationError:
+            return Failure(ProviderUnavailable(reason="Provider response was invalid"))
 
     async def poll_device_tokens(
         self,
@@ -107,8 +107,8 @@ class XaiOAuthClient:
                     "Accept": "application/json",
                 },
             )
-        except httpx.HTTPError as exc:
-            return Failure(ProviderUnavailable(reason=str(exc)))
+        except httpx.HTTPError:
+            return Failure(ProviderUnavailable(reason="xAI OAuth transport failed"))
 
         if response.is_success:
             token_result = _token_set_from_response(response, connection_method)
@@ -155,8 +155,8 @@ class XaiOAuthClient:
                     "Accept": "application/json",
                 },
             )
-        except httpx.HTTPError as exc:
-            return Failure(ProviderUnavailable(reason=str(exc)))
+        except httpx.HTTPError:
+            return Failure(ProviderUnavailable(reason="xAI OAuth transport failed"))
 
         if not response.is_success:
             return Failure(_provider_error(response))
@@ -201,8 +201,8 @@ def _token_set_from_response(
                 connection_method=connection_method,
             )
         )
-    except (KeyError, TypeError, ValueError, ValidationError) as exc:
-        return Failure(ProviderUnavailable(reason=str(exc)))
+    except KeyError, TypeError, ValueError, OverflowError, ValidationError:
+        return Failure(ProviderUnavailable(reason="Provider response was invalid"))
 
 
 def _provider_error(

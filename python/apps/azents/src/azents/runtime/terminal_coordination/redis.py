@@ -126,6 +126,15 @@ redis.call('DEL', KEYS[1])
 return {'applied', raw}
 """
 
+_CLEAN_STALE_SESSION_POINTER_SCRIPT = """
+local current = redis.call('GET', KEYS[1])
+if current == ARGV[1] and redis.call('EXISTS', KEYS[2]) == 0 then
+  redis.call('DEL', KEYS[1])
+  return false
+end
+return current
+"""
+
 _FINALIZE_SCRIPT = """
 local raw = redis.call('GET', KEYS[1])
 if not raw then
@@ -240,22 +249,28 @@ class RedisRuntimeTerminalCoordinationStore:
     ) -> RuntimeTerminalRecord | None:
         """Return the active singleton or latest non-expired final Terminal."""
         _require_aware(current_time)
-        terminal_id = await self._redis.get(self._session_key(session_id))
-        if terminal_id is not None and not await self._redis.exists(
-            self._record_key(_text(terminal_id))
-        ):
-            await self._redis.delete(self._session_key(session_id))
-            terminal_id = None
+        terminal_id = await self._get_session_pointer(self._session_key(session_id))
         if terminal_id is None:
-            terminal_id = await self._redis.get(self._session_final_key(session_id))
-        if terminal_id is not None and not await self._redis.exists(
-            self._record_key(_text(terminal_id))
-        ):
-            await self._redis.delete(self._session_final_key(session_id))
-            terminal_id = None
+            terminal_id = await self._get_session_pointer(
+                self._session_final_key(session_id)
+            )
         if terminal_id is None:
             return None
         return await self.get_terminal(_text(terminal_id), current_time=current_time)
+
+    async def _get_session_pointer(self, key: str) -> str | None:
+        """Remove only the observed missing record's pointer, never its replacement."""
+        terminal_id = await self._redis.get(key)
+        if terminal_id is None:
+            return None
+        observed = _text(terminal_id)
+        record_key = self._record_key(observed)
+        if await self._redis.exists(record_key):
+            return observed
+        current = await self._redis.eval(
+            _CLEAN_STALE_SESSION_POINTER_SCRIPT, 2, key, record_key, observed
+        )
+        return None if current is None else _text(current)
 
     async def issue_ticket(
         self,
@@ -322,9 +337,8 @@ class RedisRuntimeTerminalCoordinationStore:
                     None,
                     None,
                 )
-            generation = (
-                1 if record.attachment is None else record.attachment.generation + 1
-            )
+            # CAS revisions survive detach and lease repair, unlike attachments.
+            generation = record.revision
             attachment = RuntimeTerminalAttachment(
                 generation=generation,
                 user_id=user_id,

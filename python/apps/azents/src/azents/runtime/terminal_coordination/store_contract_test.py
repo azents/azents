@@ -112,6 +112,87 @@ async def test_ticket_is_binding_fenced_and_consumed_once(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("release", ["detach", "repair"])
+async def test_browser_incarnations_survive_detach_and_lease_repair(
+    store: RuntimeTerminalCoordinationStore, release: str
+) -> None:
+    """A stale browser can never mutate or detach its authorized replacement."""
+    admitted = await store.admit_or_get(_admission(1), admitted_at=_NOW)
+    assert admitted.value is not None
+    terminal_id = admitted.value.admission.terminal_id
+    first = await store.attach_browser(
+        terminal_id, user_id="user-1", attached_at=_NOW, lease_seconds=45
+    )
+    assert first.value is not None
+    old_generation = first.value.generation
+    now = _NOW
+    if release == "detach":
+        detached = await store.detach_browser(
+            terminal_id,
+            attachment_generation=old_generation,
+            detached_at=now,
+            grace_seconds=120,
+        )
+        assert detached.status is RuntimeTerminalMutationStatus.APPLIED
+    else:
+        now += timedelta(seconds=46)
+        await store.repair_expired(current_time=now, limit=10)
+    second = await store.attach_browser(
+        terminal_id, user_id="user-1", attached_at=now, lease_seconds=45
+    )
+    assert second.value is not None
+    assert second.value.generation > old_generation
+    before = await store.get_terminal(terminal_id, current_time=now)
+    results = [
+        await store.enqueue_input(
+            terminal_id,
+            attachment_generation=old_generation,
+            sequence=1,
+            data=b"stale\n",
+            accepted_at=now,
+        ),
+        await store.update_resize(
+            terminal_id,
+            attachment_generation=old_generation,
+            columns=100,
+            rows=30,
+            updated_at=now,
+        ),
+        await store.acknowledge_output(
+            terminal_id,
+            attachment_generation=old_generation,
+            sequence=0,
+            acknowledged_at=now,
+        ),
+        await store.heartbeat_browser(
+            terminal_id,
+            attachment_generation=old_generation,
+            heartbeat_at=now,
+            lease_seconds=45,
+        ),
+        await store.detach_browser(
+            terminal_id,
+            attachment_generation=old_generation,
+            detached_at=now,
+            grace_seconds=120,
+        ),
+    ]
+    assert all(
+        result.status is RuntimeTerminalMutationStatus.STALE_ATTACHMENT_GENERATION
+        for result in results
+    )
+    assert await store.get_terminal(terminal_id, current_time=now) == before
+    accepted = await store.enqueue_input(
+        terminal_id,
+        attachment_generation=second.value.generation,
+        sequence=1,
+        data=b"fresh\n",
+        accepted_at=now,
+    )
+    assert accepted.status is RuntimeTerminalMutationStatus.APPLIED
+
+
+@pytest.mark.asyncio
 async def test_generations_sequences_io_and_backpressure(
     store: RuntimeTerminalCoordinationStore,
 ) -> None:

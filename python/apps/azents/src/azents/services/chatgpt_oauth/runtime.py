@@ -140,26 +140,15 @@ async def _persist_refresh_failure(
     original_secrets = integration.secrets
     assert isinstance(config, ChatGPTOAuthConfig)
     assert isinstance(original_secrets, ChatGPTOAuthSecrets)
-    latest = await persistence_repository.load_integration(
-        integration_id=integration.id
-    )
-    if (
-        latest is not None
-        and isinstance(latest.secrets, ChatGPTOAuthSecrets)
-        and isinstance(latest.config, ChatGPTOAuthConfig)
-    ):
-        if (
-            latest.secrets.refresh_token != original_secrets.refresh_token
-            or latest.config.last_refreshed_at != config.last_refreshed_at
-        ):
-            return latest
     status = (
         ChatGPTOAuthConnectionStatus.REFRESH_REQUIRED
         if isinstance(error, ProviderRejected)
         else ChatGPTOAuthConnectionStatus.TEMPORARILY_UNAVAILABLE
     )
-    await persistence_repository.update_config(
+    return await persistence_repository.persist_refresh_failure(
         integration_id=integration.id,
+        original_secrets=original_secrets,
+        original_config=config,
         config=ChatGPTOAuthConfig(
             account_id=config.account_id,
             email=config.email,
@@ -172,4 +161,3 @@ async def _persist_refresh_failure(
             last_failure_reason=error.reason,
         ),
     )
-    return None

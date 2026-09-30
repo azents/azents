@@ -1,6 +1,7 @@
 """xAI OAuth runtime token refresh support."""
 
 import datetime
+from typing import assert_never
 
 import httpx
 from azcommon.result import Failure, Result, Success
@@ -200,11 +201,26 @@ async def _persist_refresh_failure(
                     connected_at=config.connected_at,
                     last_refreshed_at=config.last_refreshed_at,
                     last_failed_at=datetime.datetime.now(datetime.UTC),
-                    last_failure_reason=error.reason,
+                    last_failure_reason=_safe_failure_reason(error),
                 )
             },
         )
     return None
+
+
+def _safe_failure_reason(
+    error: ProviderRejected | ProviderEntitlementDenied | ProviderUnavailable,
+) -> str:
+    """Keep only classified diagnostics at the plaintext persistence boundary."""
+    match error:
+        case ProviderEntitlementDenied():
+            return "xAI OAuth entitlement was denied"
+        case ProviderRejected():
+            return "xAI OAuth refresh was rejected"
+        case ProviderUnavailable():
+            return "xAI OAuth provider was unavailable"
+        case _:
+            assert_never(error)
 
 
 def _failure_status(

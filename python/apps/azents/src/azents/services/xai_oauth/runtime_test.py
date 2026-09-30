@@ -10,6 +10,9 @@ from azcommon.result import Failure, Result, Success
 from cryptography.fernet import Fernet
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.api.public.llm_provider_integration.v1.data import (
+    LLMProviderIntegrationResponse,
+)
 from azents.core.credentials import XaiOAuthConfig, XaiOAuthSecrets
 from azents.core.crypto import CredentialCipher
 from azents.core.enums import LLMProvider
@@ -30,7 +33,11 @@ from .data import (
     ProviderUnavailable,
     TokenSet,
 )
-from .runtime import ensure_runtime_tokens, refresh_runtime_tokens
+from .runtime import (
+    _persist_refresh_failure,
+    ensure_runtime_tokens,
+    refresh_runtime_tokens,
+)
 
 _TEST_KEY = Fernet.generate_key().decode()
 
@@ -97,6 +104,44 @@ async def _create_integration(
 
 class TestEnsureRuntimeTokens:
     """ensure_runtime_tokens tests."""
+
+    @pytest.mark.parametrize(
+        "error",
+        [
+            ProviderRejected(reason="SYNTHETIC_PERSISTENCE_SENTINEL"),
+            ProviderEntitlementDenied(reason="SYNTHETIC_PERSISTENCE_SENTINEL"),
+            ProviderUnavailable(reason="SYNTHETIC_PERSISTENCE_SENTINEL"),
+        ],
+    )
+    async def test_failure_persistence_and_public_projection_are_safe(
+        self,
+        rdb_session: AsyncSession,
+        error: ProviderRejected | ProviderEntitlementDenied | ProviderUnavailable,
+    ) -> None:
+        """Even an unsafe collaborator reason cannot escape through stored config."""
+        repo, integration_id = await _create_integration(
+            rdb_session,
+            expires_at=datetime.datetime.now(datetime.UTC),
+        )
+        integration = await repo.get_by_id_with_secrets(rdb_session, integration_id)
+        assert integration is not None
+        await _persist_refresh_failure(
+            integration=integration,
+            integration_repository=repo,
+            session_manager=_SessionManager(rdb_session),
+            error=error,
+        )
+        public = await repo.get_by_id(rdb_session, integration_id)
+        assert public is not None and isinstance(public.config, XaiOAuthConfig)
+        assert public.config.last_failure_reason in {
+            "xAI OAuth entitlement was denied",
+            "xAI OAuth refresh was rejected",
+            "xAI OAuth provider was unavailable",
+        }
+        response = LLMProviderIntegrationResponse.convert_from(public)
+        assert "SYNTHETIC_PERSISTENCE_SENTINEL" not in response.model_dump_json()
+        assert "old-access-token" not in response.model_dump_json()
+        assert "old-refresh-token" not in response.model_dump_json()
 
     async def test_fresh_token_returns_existing_integration(
         self, rdb_session: AsyncSession
