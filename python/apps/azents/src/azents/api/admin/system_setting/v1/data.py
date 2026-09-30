@@ -8,7 +8,6 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from azents.core.external_channel_file import (
     MAX_EXTERNAL_CHANNEL_CONFIGURED_ACTION_BYTES,
     MAX_EXTERNAL_CHANNEL_CONFIGURED_FILE_BYTES,
-    MAX_EXTERNAL_CHANNEL_INBOUND_FILE_BYTES,
 )
 from azents.core.external_channel_file_system_setting import (
     ExternalChannelFilesConfig,
@@ -59,12 +58,9 @@ class SystemSettingSecretActionRequest(BaseModel):
 class ExternalChannelFilesPatchRequest(BaseModel):
     """Optimistic partial update for External Channel file limits."""
 
+    model_config = ConfigDict(extra="forbid")
+
     expected_version: int = Field(ge=0)
-    inbound_max_file_bytes: int | None = Field(
-        default=None,
-        ge=1,
-        le=MAX_EXTERNAL_CHANNEL_INBOUND_FILE_BYTES,
-    )
     outbound_max_file_bytes: int | None = Field(
         default=None,
         ge=1,
@@ -83,7 +79,6 @@ class ExternalChannelFilesDetailResponse(BaseModel):
     section: str
     schema_version: int
     admin_version: int
-    inbound_max_file_bytes: int
     outbound_max_file_bytes: int
     outbound_max_action_bytes: int
 
@@ -97,7 +92,6 @@ class ExternalChannelFilesDetailResponse(BaseModel):
             section=resolved.section.value,
             schema_version=resolved.schema_version,
             admin_version=resolved.admin_version,
-            inbound_max_file_bytes=config.inbound_max_file_bytes,
             outbound_max_file_bytes=config.outbound_max_file_bytes,
             outbound_max_action_bytes=config.outbound_max_action_bytes,
         )

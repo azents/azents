@@ -44,7 +44,6 @@ export const systemSettingsRouter = router({
     .input(
       z.object({
         expectedVersion: z.number().int().nonnegative(),
-        inboundMaxFileBytes: z.number().int().positive(),
         outboundMaxFileBytes: z.number().int().positive(),
         outboundMaxActionBytes: z.number().int().positive(),
       }),
@@ -53,7 +52,6 @@ export const systemSettingsRouter = router({
       try {
         const body: ExternalChannelFilesPatchRequest = {
           expected_version: input.expectedVersion,
-          inbound_max_file_bytes: input.inboundMaxFileBytes,
           outbound_max_file_bytes: input.outboundMaxFileBytes,
           outbound_max_action_bytes: input.outboundMaxActionBytes,
         };

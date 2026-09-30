@@ -27,14 +27,16 @@ def _get_object_presign_params(
     key: str,
     filename: str | None,
     content_type: str | None,
+    inline: bool,
 ) -> dict[str, str]:
     """Build allowlisted GET overrides without interpolating raw HTTP headers."""
     params = {"Bucket": bucket, "Key": key}
     if filename is not None:
         if not filename or any(ord(char) < 32 or ord(char) == 127 for char in filename):
             raise ValueError("Download filename contains invalid characters")
+        disposition = "inline" if inline else "attachment"
         params["ResponseContentDisposition"] = (
-            f"attachment; filename*=UTF-8''{quote(filename, safe='')}"
+            f"{disposition}; filename*=UTF-8''{quote(filename, safe='')}"
         )
     if content_type is not None:
         if not content_type or any(
@@ -278,6 +280,7 @@ class S3Service:
             await self.get_download_request(
                 identity=source,
                 expires_in=datetime.timedelta(seconds=60),
+                inline=False,
             )
             checksum_header = base64.b64encode(bytes.fromhex(probe_checksum)).decode(
                 "ascii"
@@ -1164,7 +1167,7 @@ class S3Service:
         persisted_sha256 = metadata.user_metadata.get(_TRANSFER_SHA256_METADATA_KEY)
         if persisted_sha256 != expected_sha256:
             raise ValueError("object SHA-256 metadata does not match expected_sha256")
-        if metadata.checksum_sha256 is not None and not _checksum_matches(
+        if metadata.checksum_sha256 is not None and not s3_checksum_matches_sha256(
             metadata.checksum_sha256,
             expected_sha256,
         ):
@@ -1456,6 +1459,7 @@ class S3Service:
         key: str,
         expires_in: datetime.timedelta,
         *,
+        inline: bool,
         filename: str | None = None,
         content_type: str | None = None,
     ) -> str:
@@ -1473,6 +1477,7 @@ class S3Service:
             key=key,
             filename=filename,
             content_type=content_type,
+            inline=inline,
         )
         return await self.public_s3_client.generate_presigned_url(
             ClientMethod="get_object",
@@ -1485,6 +1490,7 @@ class S3Service:
         *,
         identity: S3ObjectIdentity,
         expires_in: datetime.timedelta,
+        inline: bool,
         now: datetime.datetime | None = None,
         filename: str | None = None,
         content_type: str | None = None,
@@ -1503,6 +1509,7 @@ class S3Service:
                 expires_in,
                 filename=filename,
                 content_type=content_type,
+                inline=inline,
             ),
             expires_at=current + expires_in,
             headers=MappingProxyType({}),
@@ -1819,7 +1826,7 @@ def _known_mapping_value(
     return value.get(key)
 
 
-def _checksum_matches(persisted_checksum: str, expected_sha256: str) -> bool:
+def s3_checksum_matches_sha256(persisted_checksum: str, expected_sha256: str) -> bool:
     """Compare hexadecimal or base64 S3 checksum evidence to a SHA-256 digest."""
     if persisted_checksum == expected_sha256:
         return True

@@ -11,7 +11,6 @@ from collections.abc import AsyncIterator
 from datetime import datetime
 from textwrap import dedent
 from typing import Annotated, Literal, NoReturn, assert_never
-from urllib.parse import quote
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from azcommon.result import Failure, Result, Success
@@ -25,7 +24,7 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 
 from azents.broker.broadcast import (
     WebSocketBroadcast,
@@ -135,6 +134,7 @@ from azents.services.exchange_file import (
     FileExpired,
     FileNotFound,
     FileRetentionOwnerConflict,
+    FileTooLarge,
     FileUnavailable,
 )
 from azents.services.exchange_file import (
@@ -189,7 +189,6 @@ from azents.transport.chat import (
 from azents.utils.appctx import AppContext
 from azents.utils.fastapi.route import RouteMounter
 
-from ...file_download import FileDownloadResponse
 from .data import (
     ActionExecutionProjectionResponse,
     AgentProjectPresetListResponse,
@@ -3091,31 +3090,33 @@ async def bulk_move_agent_workspace_paths(
             assert_never(result)
 
 
-@router.get("/agents/{agent_id}/workspace/download")
+@router.get(
+    "/agents/{agent_id}/workspace/download",
+    response_class=RedirectResponse,
+    status_code=302,
+)
 async def download_agent_workspace_file(
     agent_id: str,
     path: Annotated[str, Query(description="Agent Workspace file path to download")],
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
     workspace_service: Annotated[AgentWorkspaceFileService, Depends()],
-) -> StreamingResponse:
-    """Download an Agent Workspace file."""
+) -> RedirectResponse:
+    """Redirect to one authorized, short-lived Agent Workspace GET capability."""
     _validate_uuid7_hex(agent_id, label="agent ID")
-    result = await workspace_service.open_download_file(
+    result = await workspace_service.create_download_ticket(
         agent_id=agent_id,
         user_id=current_user.user_id,
         raw_path=path,
     )
     match result:
         case Success(value):
-            return FileDownloadResponse(
-                value.stream,
-                media_type=value.media_type,
-                headers={
-                    "Content-Disposition": (
-                        f"attachment; filename*=UTF-8''{quote(value.path.name)}"
-                    ),
-                },
+            return RedirectResponse(
+                value.url,
+                status_code=302,
+                headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"},
             )
+        case Failure(AgentWorkspaceFileTooLarge()):
+            raise HTTPException(status_code=413, detail="File exceeds 128 MiB.")
         case Failure(error):
             _raise_workspace_error(error)
             raise AssertionError("unreachable")
@@ -3425,38 +3426,27 @@ def _raise_chat_upload_error(error: ExchangeUploadError) -> NoReturn:
 
 @router.get(
     "/exchange-files/{file_id}/download",
-    response_class=StreamingResponse,
-    responses={
-        200: {
-            "description": "Exchange file bytes",
-            "content": {
-                "application/octet-stream": {
-                    "schema": {"type": "string", "format": "binary"}
-                }
-            },
-        }
-    },
+    response_class=RedirectResponse,
+    status_code=302,
 )
 async def download_exchange_file(
     file_id: str,
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
     exchange_file_service: Annotated[ExchangeFileService, Depends()],
-) -> StreamingResponse:
-    """Download an Exchange file."""
-    result = await exchange_file_service.open_download(
+    disposition: Literal["attachment", "inline"] = "attachment",
+) -> RedirectResponse:
+    """Redirect to an authorized Exchange GET with safe signed response metadata."""
+    result = await exchange_file_service.create_download_ticket(
         file_id=file_id,
         user_id=current_user.user_id,
+        inline=disposition == "inline",
     )
     match result:
         case Success(value):
-            return FileDownloadResponse(
-                value.stream,
-                media_type=value.file.media_type,
-                headers={
-                    "Content-Disposition": (
-                        f"attachment; filename*=UTF-8''{quote(value.file.filename)}"
-                    ),
-                },
+            return RedirectResponse(
+                value.url,
+                status_code=302,
+                headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"},
             )
         case Failure(error):
             _raise_exchange_file_error(error)
@@ -3520,7 +3510,7 @@ def _raise_workspace_upload_error(error: WorkspaceUploadError) -> NoReturn:
             assert_never(error)
 
 
-def _raise_exchange_file_error(error: ExchangeFileError) -> NoReturn:
+def _raise_exchange_file_error(error: ExchangeFileError | FileTooLarge) -> NoReturn:
     """Convert Exchange file service errors to HTTPException."""
     match error:
         case FileNotFound():
@@ -3531,6 +3521,8 @@ def _raise_exchange_file_error(error: ExchangeFileError) -> NoReturn:
             raise HTTPException(status_code=410, detail="File is expired.")
         case FileUnavailable():
             raise HTTPException(status_code=410, detail="File is no longer available.")
+        case FileTooLarge():
+            raise HTTPException(status_code=413, detail="File exceeds 128 MiB.")
         case ExchangeSessionNotFound():
             raise HTTPException(status_code=404, detail="Session not found.")
         case _:

@@ -5481,10 +5481,6 @@
             "type": "integer",
             "title": "Admin Version"
           },
-          "inbound_max_file_bytes": {
-            "type": "integer",
-            "title": "Inbound Max File Bytes"
-          },
           "outbound_max_file_bytes": {
             "type": "integer",
             "title": "Outbound Max File Bytes"
@@ -5499,7 +5495,6 @@
           "section",
           "schema_version",
           "admin_version",
-          "inbound_max_file_bytes",
           "outbound_max_file_bytes",
           "outbound_max_action_bytes"
         ],
@@ -5512,19 +5507,6 @@
             "type": "integer",
             "minimum": 0.0,
             "title": "Expected Version"
-          },
-          "inbound_max_file_bytes": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "maximum": 524288000.0,
-                "minimum": 1.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Inbound Max File Bytes"
           },
           "outbound_max_file_bytes": {
             "anyOf": [
@@ -5553,6 +5535,7 @@
             "title": "Outbound Max Action Bytes"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "expected_version"

@@ -3018,6 +3018,7 @@ def selenium_container_start(
         .with_name(f"azents-selenium-{random_secret(4)}")
         .with_network(container_network)
         .with_env("SE_NODE_SESSION_TIMEOUT", "120")
+        .with_env("SE_NODE_ENABLE_MANAGED_DOWNLOADS", "true")
         .with_exposed_ports(4444)
         .with_kwargs(shm_size="2g")
     )
@@ -3081,6 +3082,7 @@ def browser_driver(
     port = selenium_container.get_exposed_port(4444)
     options = ChromeOptions()
     options.accept_insecure_certs = True
+    options.enable_downloads = True
     options.add_argument("--headless=new")
     options.add_argument("--window-size=1440,1000")
     driver = webdriver.Remote(

@@ -3,7 +3,9 @@
 import base64
 import hashlib
 import os
+import time
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 
 import azentsadminclient
 import azentspublicclient
@@ -15,6 +17,7 @@ from selenium.webdriver.remote.file_detector import LocalFileDetector
 from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.support import expected_conditions as ec
 from selenium.webdriver.support.ui import WebDriverWait
+from testcontainers.core.container import DockerContainer
 
 from support.utils import create_agent_session_setup
 from tests.web.public.test_workspace_settings_web import _login_main_web
@@ -116,15 +119,30 @@ class _UploadObservation(BaseModel):
     failure: str | None
 
 
+class _DownloadObservation(BaseModel):
+    """Safe terminal GET evidence without capability, cookie, or storage key."""
+
+    api_status: int
+    web_status: int
+    storage_status: int
+    filename: str
+    size: int
+    sha256: str
+    browser_sha256: str
+    media_type: str
+    remaining_lifetime_seconds: float
+
+
 def test_chat_composer_uploads_real_file_directly_then_publishes_attachment(
     browser_driver: WebDriver,
     azents_main_web_url: str,
+    azents_admin_gateway_container: DockerContainer,
     azents_public_server_url: str,
     public_api_client: azentspublicclient.ApiClient,
     admin_api_client: azentsadminclient.ApiClient,
     tmp_path: Path,
 ) -> None:
-    """Worker digest, CORS File PUT and finalize precede a usable attachment."""
+    """Native browser PUT and GET preserve bytes without an API/Web body relay."""
     setup = create_agent_session_setup(
         public_api_client, admin_api_client, azents_public_server_url
     )
@@ -183,13 +201,86 @@ def test_chat_composer_uploads_real_file_directly_then_publishes_attachment(
         f"{observation.finalized.attachment_id}/download",
         headers={"Authorization": f"Bearer {setup.access_token}"},
         timeout=30,
+        allow_redirects=False,
     )
-    assert downloaded.status_code == 200
-    assert downloaded.content == content
+    assert downloaded.status_code == 302
+    assert downloaded.content == b""
+    assert downloaded.headers["Cache-Control"] == "no-store"
+    assert downloaded.headers["Referrer-Policy"] == "no-referrer"
+    location = urlsplit(downloaded.headers["Location"])
+    assert location.scheme == "https"
+    assert location.netloc != urlsplit(azents_public_server_url).netloc
+    signing_query = parse_qs(location.query)
+    remaining_lifetime = (
+        int(signing_query["X-Amz-Expires"][0])
+        if "X-Amz-Expires" in signing_query
+        else int(signing_query["Expires"][0]) - time.time()
+    )
+    assert 0 < remaining_lifetime <= 60
+    direct = requests.get(downloaded.headers["Location"], timeout=30, verify=False)
+    assert direct.status_code == 200
+    assert direct.content == content
+    assert direct.headers["Content-Type"] == "text/plain"
+    assert direct.headers["Content-Disposition"] == (
+        f"attachment; filename*=UTF-8''{filename}"
+    )
+    download_path = (
+        f"/api/chat/exchange-files/{observation.finalized.attachment_id}/download"
+    )
+    # Inspect only the authorized Web entry response, never relay the S3 body.
+    gateway_host = azents_admin_gateway_container.get_container_host_ip()
+    gateway_port = azents_admin_gateway_container.get_exposed_port(8443)
+    web_redirect = requests.get(
+        f"https://{gateway_host}:{gateway_port}{download_path}",
+        headers={"Host": urlsplit(azents_main_web_url).netloc},
+        cookies={
+            cookie["name"]: cookie["value"] for cookie in browser_driver.get_cookies()
+        },
+        timeout=30,
+        verify=False,
+        allow_redirects=False,
+    )
+    assert web_redirect.status_code == 302
+    assert web_redirect.content == b""
+    assert web_redirect.headers["Cache-Control"] == "no-store"
+    assert web_redirect.headers["Referrer-Policy"] == "no-referrer"
+    assert urlsplit(web_redirect.headers["Location"]).netloc == location.netloc
+    wait.until(
+        ec.element_to_be_clickable(
+            (By.CSS_SELECTOR, f"[role='button'][aria-label*='{filename}']")
+        )
+    ).click()
+    wait.until(
+        ec.element_to_be_clickable(
+            (
+                By.CSS_SELECTOR,
+                f"[role='dialog'] a[href='{download_path}'][download]",
+            )
+        )
+    ).click()
+    wait.until(lambda driver: filename in driver.get_downloadable_files())
+    download_directory = tmp_path / "downloaded"
+    browser_driver.download_file(filename, str(download_directory))
+    browser_bytes = (download_directory / filename).read_bytes()
+    assert browser_bytes == content
     artifact_root = os.environ.get("AZENTS_E2E_ARTIFACT_DIR")
     if artifact_root is not None:
         browser_artifacts = Path(artifact_root) / "browser"
         browser_artifacts.mkdir(parents=True, exist_ok=True)
         (browser_artifacts / "chat-direct-upload-evidence.json").write_text(
             observation.model_dump_json(indent=2), encoding="utf-8"
+        )
+        (browser_artifacts / "chat-direct-download-evidence.json").write_text(
+            _DownloadObservation(
+                api_status=downloaded.status_code,
+                web_status=web_redirect.status_code,
+                storage_status=direct.status_code,
+                filename=filename,
+                size=len(browser_bytes),
+                sha256=digest,
+                browser_sha256=hashlib.sha256(browser_bytes).hexdigest(),
+                media_type=direct.headers["Content-Type"],
+                remaining_lifetime_seconds=remaining_lifetime,
+            ).model_dump_json(indent=2),
+            encoding="utf-8",
         )

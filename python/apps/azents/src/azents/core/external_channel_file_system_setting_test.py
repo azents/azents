@@ -4,12 +4,10 @@ import pytest
 from pydantic import ValidationError
 
 from azents.core.external_channel_file import (
-    DEFAULT_EXTERNAL_CHANNEL_INBOUND_MAX_FILE_BYTES,
     DEFAULT_EXTERNAL_CHANNEL_OUTBOUND_MAX_ACTION_BYTES,
     DEFAULT_EXTERNAL_CHANNEL_OUTBOUND_MAX_FILE_BYTES,
     MAX_EXTERNAL_CHANNEL_CONFIGURED_ACTION_BYTES,
     MAX_EXTERNAL_CHANNEL_CONFIGURED_FILE_BYTES,
-    MAX_EXTERNAL_CHANNEL_INBOUND_FILE_BYTES,
 )
 from azents.core.external_channel_file_system_setting import (
     ExternalChannelFilesConfig,
@@ -23,12 +21,9 @@ from azents.core.system_setting import (
 
 
 def test_external_channel_file_limits_use_provider_neutral_defaults() -> None:
-    """The compiled policy permits 500 MiB inbound files."""
+    """Admin configuration owns only independent outbound file/action limits."""
     config = ExternalChannelFilesConfig()
 
-    assert (
-        config.inbound_max_file_bytes == DEFAULT_EXTERNAL_CHANNEL_INBOUND_MAX_FILE_BYTES
-    )
     assert (
         config.outbound_max_file_bytes
         == DEFAULT_EXTERNAL_CHANNEL_OUTBOUND_MAX_FILE_BYTES
@@ -44,7 +39,7 @@ def test_external_channel_file_limits_use_provider_neutral_defaults() -> None:
     [
         ("inbound_max_file_bytes", True),
         ("inbound_max_file_bytes", 0),
-        ("inbound_max_file_bytes", MAX_EXTERNAL_CHANNEL_INBOUND_FILE_BYTES + 1),
+        ("inbound_max_file_bytes", 500 * 1024 * 1024),
         ("outbound_max_file_bytes", True),
         ("outbound_max_file_bytes", 0),
         ("outbound_max_file_bytes", MAX_EXTERNAL_CHANNEL_CONFIGURED_FILE_BYTES + 1),
@@ -69,7 +64,6 @@ def test_external_channel_action_limit_covers_one_outbound_file() -> None:
     """The aggregate action bound cannot be lower than the per-file bound."""
     with pytest.raises(ValidationError, match="must be at least"):
         ExternalChannelFilesConfig(
-            inbound_max_file_bytes=1,
             outbound_max_file_bytes=2,
             outbound_max_action_bytes=1,
         )
@@ -80,7 +74,7 @@ def test_external_channel_files_definition_activates_directly() -> None:
     definition = get_external_channel_files_definition()
 
     assert definition.section is SystemSettingSection.EXTERNAL_CHANNEL_FILES
-    assert definition.schema_version == 1
+    assert definition.schema_version == 2
     assert definition.config_model is ExternalChannelFilesConfig
     assert definition.secret_model is ExternalChannelFilesSecrets
     assert definition.activation_mode is SystemSettingActivationMode.DIRECT

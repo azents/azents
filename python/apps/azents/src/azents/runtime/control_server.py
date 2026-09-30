@@ -48,6 +48,7 @@ from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 
 from azents.core.config import PostgreSQLConfig
+from azents.core.file_transfer import GENERAL_FILE_MAXIMUM_BYTES
 from azents.core.redis import create_redis_client
 from azents.core.runtime_provider_credential import RuntimeProviderCredentialVerifier
 from azents.core.runtime_runner_credential import RuntimeRunnerCredentialVerifier
@@ -632,7 +633,7 @@ class RuntimeControlSettings(BaseSettings):
     runtime_control_workspace_upload_redis_namespace: str = (
         "azents:runtime:workspace-upload:v1"
     )
-    runtime_control_workspace_upload_maximum_file_size: int = 128 * 1024 * 1024
+    runtime_control_workspace_upload_maximum_file_size: int = GENERAL_FILE_MAXIMUM_BYTES
     runtime_control_workspace_upload_maximum_active_uploads_per_requester_agent: int = 4
     runtime_control_workspace_upload_maximum_active_bytes_per_requester_agent: int = (
         256 * 1024 * 1024

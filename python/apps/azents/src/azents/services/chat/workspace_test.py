@@ -2,7 +2,6 @@
 
 import contextlib
 import datetime
-import hashlib
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
@@ -51,13 +50,13 @@ from azents.services.agent_runtime.lifecycle_data import (
     RuntimeOperationTargetResolver,
 )
 from azents.services.agent_runtime.service import AgentRuntimeService
+from azents.services.browser_file_download import BrowserFileDownloadTicket
 from azents.services.chat import workspace as workspace_module
 from azents.services.chat.workspace import (
     AgentWorkspaceFileReadError,
     AgentWorkspaceFileService,
     get_runner_file_operation_timeout,
 )
-from azents.services.file_download_stream import BoundedDownloadStream
 from azents.services.runtime_storage_error import RuntimeStorageError
 
 AGENT_WORKSPACE_ROOT = PurePosixPath("/runtime/home")
@@ -454,38 +453,16 @@ class _FakeRunnerOperations:
 class _FakeRuntimeWorkspaceDownloadService(RuntimeWorkspaceDownloadService):
     """Record authorized Workspace download transfer requests."""
 
-    body: bytes = b"workspace download"
-    stream_body: bytes | None = None
     calls: list[WorkspaceDownloadRequest] = field(default_factory=list)
 
-    async def download(self, request: WorkspaceDownloadRequest) -> bytes:
-        """Return configured verified transfer bytes."""
+    async def create_download_ticket(
+        self, request: WorkspaceDownloadRequest
+    ) -> BrowserFileDownloadTicket:
+        """Return metadata-only verified download handoff."""
         self.calls.append(request)
-        return self.body
-
-    async def open_download(
-        self,
-        request: WorkspaceDownloadRequest,
-    ) -> BoundedDownloadStream:
-        """Return a bounded stream for configured verified transfer bytes."""
-        self.calls.append(request)
-        body = self.body if self.stream_body is None else self.stream_body
-
-        @contextlib.asynccontextmanager
-        async def source() -> AsyncGenerator[AsyncGenerator[bytes, None], None]:
-            async def chunks() -> AsyncGenerator[bytes, None]:
-                yield body
-
-            yield chunks()
-
-        source_context = source()
-        source_iterator = await source_context.__aenter__()
-        return BoundedDownloadStream(
-            source_context=source_context,
-            source_iterator=source_iterator,
-            expected_size=len(body),
-            expected_sha256=hashlib.sha256(body).hexdigest(),
-            maximum_chunk_size=max(1, len(body)),
+        return BrowserFileDownloadTicket(
+            url="https://objects.test/file?signature=redacted",
+            expires_at=_NOW + datetime.timedelta(minutes=1),
         )
 
 
@@ -860,7 +837,7 @@ async def test_text_preview_uses_character_limit_not_file_byte_size() -> None:
 
 @pytest.mark.asyncio
 async def test_download_uses_verified_transfer_not_runner_file_read() -> None:
-    """Complete Workspace downloads avoid the Runner Control file body path."""
+    """Workspace ticket handoff avoids the Runner Control file body path."""
     runtime = _make_agent_runtime()
     runner_operations = _FakeRunnerOperations()
     transfer = _FakeRuntimeWorkspaceDownloadService()
@@ -875,20 +852,18 @@ async def test_download_uses_verified_transfer_not_runner_file_read() -> None:
     )
     file_path = (AGENT_WORKSPACE_ROOT / "test-file.txt").as_posix()
 
-    result = await service.download_file("agent-1", "user-1", file_path)
+    result = await service.create_download_ticket("agent-1", "user-1", file_path)
 
     assert isinstance(result, Success)
-    assert result.value == (
-        AGENT_WORKSPACE_ROOT / "test-file.txt",
-        b"workspace download",
-        "text/plain",
-    )
+    assert result.value.url == "https://objects.test/file?signature=redacted"
     assert runner_operations.read_calls == []
     assert transfer.calls == [
         WorkspaceDownloadRequest(
             agent_id="agent-1",
             runtime_path=file_path,
             expected_size=5,
+            filename="test-file.txt",
+            media_type="text/plain",
             target=ServerToRuntimeTarget(
                 runtime_id="runtime-1",
                 desired_generation=7,
@@ -898,13 +873,11 @@ async def test_download_uses_verified_transfer_not_runner_file_read() -> None:
 
 
 @pytest.mark.asyncio
-async def test_open_download_streams_verified_transfer_without_runner_file_read() -> (
-    None
-):
-    """Open Workspace downloads preserve authorization and stream metadata."""
+async def test_download_ticket_preserves_filename_and_media_metadata() -> None:
+    """Workspace downloads retain authorized safe filename and type metadata."""
     runtime = _make_agent_runtime()
     runner_operations = _FakeRunnerOperations()
-    transfer = _FakeRuntimeWorkspaceDownloadService(stream_body=b"hello")
+    transfer = _FakeRuntimeWorkspaceDownloadService()
     service = AgentWorkspaceFileService(
         agent_repository=_FakeAgentRepository(),
         workspace_user_repository=_FakeWorkspaceUserRepository(),
@@ -916,19 +889,18 @@ async def test_open_download_streams_verified_transfer_without_runner_file_read(
     )
     file_path = (AGENT_WORKSPACE_ROOT / "test-file.txt").as_posix()
 
-    result = await service.open_download_file("agent-1", "user-1", file_path)
+    result = await service.create_download_ticket("agent-1", "user-1", file_path)
 
     assert isinstance(result, Success)
-    assert result.value.path == PurePosixPath(file_path)
-    assert result.value.media_type == "text/plain"
-    assert [chunk async for chunk in result.value.stream] == [b"hello"]
-    await result.value.stream.complete()
+    assert result.value.url == "https://objects.test/file?signature=redacted"
     assert runner_operations.read_calls == []
     assert transfer.calls == [
         WorkspaceDownloadRequest(
             agent_id="agent-1",
             runtime_path=file_path,
             expected_size=5,
+            filename="test-file.txt",
+            media_type="text/plain",
             target=ServerToRuntimeTarget(
                 runtime_id="runtime-1",
                 desired_generation=7,

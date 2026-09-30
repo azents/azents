@@ -23,7 +23,6 @@ from azents.core.enums import ExternalChannelProvider
 from azents.core.external_channel_file import (
     EXTERNAL_CHANNEL_FILE_STREAM_CHUNK_BYTES,
     MAX_EXTERNAL_CHANNEL_FILES,
-    MAX_EXTERNAL_CHANNEL_INBOUND_FILE_BYTES,
     ExternalChannelFileLocator,
     ExternalChannelFileMetadata,
     ExternalChannelOutboundFileManifest,
@@ -31,6 +30,7 @@ from azents.core.external_channel_file import (
 )
 from azents.core.external_channel_file_system_setting import ExternalChannelFilesConfig
 from azents.core.external_channel_provider import ExternalChannelCapabilitySnapshot
+from azents.core.file_transfer import GENERAL_FILE_MAXIMUM_BYTES
 from azents.core.system_setting import SystemSettingSection
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
@@ -332,15 +332,7 @@ class ExternalChannelFileTransferService:
                 "Runtime file transfer service is unavailable."
             )
         credentials = self.credentials_codec.decrypt(target.encrypted_credentials)
-        resolved = await self.system_settings.resolve(
-            SystemSettingSection.EXTERNAL_CHANNEL_FILES
-        )
-        if not isinstance(resolved.config, ExternalChannelFilesConfig):
-            raise RuntimeError("Unexpected External Channel files settings model.")
-        limit = min(
-            resolved.config.inbound_max_file_bytes,
-            MAX_EXTERNAL_CHANNEL_INBOUND_FILE_BYTES,
-        )
+        limit = GENERAL_FILE_MAXIMUM_BYTES
         match target.provider:
             case ExternalChannelProvider.SLACK:
                 return await self._download_slack(

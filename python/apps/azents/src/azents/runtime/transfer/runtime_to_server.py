@@ -222,7 +222,7 @@ class RuntimeToServerConsumer:
             self._state = "committing"
 
     async def complete(self) -> None:
-        """Acknowledge and settle after exact response completion."""
+        """Acknowledge and settle the authorized feature handoff."""
         async with self._terminal_lock:
             if self._state == "completed":
                 return

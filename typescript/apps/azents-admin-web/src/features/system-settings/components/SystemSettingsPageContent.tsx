@@ -147,7 +147,6 @@ function ExternalChannelFilesCard({
   externalFilesDraftDirty,
   externalFilesSaveDisabled,
   externalFilesMutationError,
-  onInboundMaxFileMiBChange,
   onOutboundMaxFileMiBChange,
   onOutboundMaxActionMiBChange,
   onSaveExternalFiles,
@@ -159,7 +158,6 @@ function ExternalChannelFilesCard({
   | "externalFilesDraftDirty"
   | "externalFilesSaveDisabled"
   | "externalFilesMutationError"
-  | "onInboundMaxFileMiBChange"
   | "onOutboundMaxFileMiBChange"
   | "onOutboundMaxActionMiBChange"
   | "onSaveExternalFiles"
@@ -212,19 +210,7 @@ function ExternalChannelFilesCard({
 
         {externalFilesState.type === "LOADED" && (
           <>
-            <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="lg">
-              <NumberInput
-                label="Inbound file limit"
-                description={`Effective: ${formatBytes(
-                  externalFilesState.detail.inbound_max_file_bytes,
-                )}`}
-                value={externalFilesDraft.inboundMaxFileMiB}
-                min={1}
-                max={100}
-                allowDecimal={false}
-                suffix=" MiB"
-                onChange={onInboundMaxFileMiBChange}
-              />
+            <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="lg">
               <NumberInput
                 label="Outbound file limit"
                 description={`Effective: ${formatBytes(
@@ -490,7 +476,6 @@ export function SystemSettingsPageContent({
   checkingHealth,
   saveDisabled,
   mutationError,
-  onInboundMaxFileMiBChange,
   onOutboundMaxFileMiBChange,
   onOutboundMaxActionMiBChange,
   onSaveExternalFiles,
@@ -570,7 +555,6 @@ export function SystemSettingsPageContent({
         externalFilesDraftDirty={externalFilesDraftDirty}
         externalFilesSaveDisabled={externalFilesSaveDisabled}
         externalFilesMutationError={externalFilesMutationError}
-        onInboundMaxFileMiBChange={onInboundMaxFileMiBChange}
         onOutboundMaxFileMiBChange={onOutboundMaxFileMiBChange}
         onOutboundMaxActionMiBChange={onOutboundMaxActionMiBChange}
         onSaveExternalFiles={onSaveExternalFiles}

@@ -36,6 +36,7 @@ from azents.core.enums import (
     AgentSessionTitleSource,
     EventKind,
 )
+from azents.core.file_transfer import GENERAL_FILE_MAXIMUM_BYTES
 from azents.core.goal import GoalStateSnapshot
 from azents.core.inference_profile import (
     AppliedInferenceProfile,
@@ -136,7 +137,7 @@ class ChatUploadPrepareRequest(BaseModel):
 
     filename: str = Field(min_length=1, max_length=255)
     media_type: str = Field(min_length=1, max_length=255, pattern=r"^[^\r\n]+$")
-    size: int = Field(ge=0, le=128 * 1024 * 1024, strict=True)
+    size: int = Field(ge=0, le=GENERAL_FILE_MAXIMUM_BYTES, strict=True)
     sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 

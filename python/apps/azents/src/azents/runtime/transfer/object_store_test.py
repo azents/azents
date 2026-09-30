@@ -21,7 +21,10 @@ from azents.runtime.transfer.data import (
     RuntimeTransferConfig,
     RuntimeTransferDirection,
     RuntimeTransferObject,
+    RuntimeTransferOutcome,
+    RuntimeTransferPhase,
     RuntimeTransferSourceTransport,
+    RuntimeTransferUploadTransport,
 )
 from azents.runtime.transfer.memory import InMemoryRuntimeTransferStateStore
 from azents.runtime.transfer.object_store import RuntimeTransferS3Cleanup
@@ -150,8 +153,11 @@ class _ObjectStore:
 
 
 @pytest.mark.asyncio
-async def test_direct_get_cleanup_preserves_issued_ticket_grace() -> None:
-    """Owned transfer objects remain available past the deadline for active GETs."""
+@pytest.mark.parametrize("workspace_browser", [False, True])
+async def test_direct_get_cleanup_preserves_issued_ticket_grace(
+    workspace_browser: bool,
+) -> None:
+    """Both Runner GET and browser handoff retain owned sources through read grace."""
     now = _NOW
     store = InMemoryRuntimeTransferStateStore(
         config=RuntimeTransferConfig(
@@ -206,6 +212,34 @@ async def test_direct_get_cleanup_preserves_issued_ticket_grace() -> None:
         cleanup_status=RuntimeTransferCleanupStatus.PENDING,
         completed_object_cleanup_required=True,
     )
+    safe_at = admitted.admission.deadline_at + DIRECT_INGRESS_CLEANUP_GRACE
+    expected_deleted = ["v1/runtime-transfer/owned-object"]
+    if workspace_browser:
+        put_expiry = _NOW + timedelta(minutes=8)
+        pending = replace(
+            pending,
+            admission=replace(
+                ready.admission,
+                direction=RuntimeTransferDirection.UPLOAD,
+                resource_class="workspace_download",
+                source_transport=RuntimeTransferSourceTransport.TRANSFER_OBJECT,
+                upload_transport=RuntimeTransferUploadTransport.DIRECT_OBJECT,
+            ),
+            phase=RuntimeTransferPhase.TERMINAL,
+            terminal_outcome=RuntimeTransferOutcome.SUCCEEDED,
+            terminal_expires_at=_NOW + timedelta(minutes=15),
+            upload_response_committed_at=_NOW,
+            runner_result_confirmed_at=_NOW,
+            consumer_acknowledged_at=_NOW,
+            direct_ingress_handle="owned-ingress",
+            direct_ingress_expires_at=put_expiry,
+            direct_ingress_sha256="a" * 64,
+        )
+        safe_at = put_expiry + DIRECT_INGRESS_CLEANUP_GRACE
+        expected_deleted = [
+            "v1/runtime-transfer/owned-ingress",
+            "v1/runtime-transfer/owned-object",
+        ]
     object_store = _ObjectStore()
     cleanup = RuntimeTransferS3Cleanup(
         object_store=object_store,
@@ -216,9 +250,13 @@ async def test_direct_get_cleanup_preserves_issued_ticket_grace() -> None:
     with pytest.raises(RuntimeError, match="not yet safe"):
         await cleanup.cleanup(pending)
     assert object_store.deleted == []
-    now = admitted.admission.deadline_at + DIRECT_INGRESS_CLEANUP_GRACE
+    now = safe_at - timedelta(microseconds=1)
+    with pytest.raises(RuntimeError, match="not yet safe"):
+        await cleanup.cleanup(pending)
+    assert object_store.deleted == []
+    now = safe_at
     await cleanup.cleanup(pending)
-    assert object_store.deleted == ["v1/runtime-transfer/owned-object"]
+    assert object_store.deleted == expected_deleted
 
 
 @pytest.mark.asyncio

@@ -21,6 +21,7 @@ from azents.core.enums import (
     RuntimeDesiredState,
     RuntimeProviderObservedState,
 )
+from azents.core.file_transfer import GENERAL_FILE_MAXIMUM_BYTES
 from azents.core.s3.deps import get_s3_service
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
@@ -67,7 +68,7 @@ from azents.services.agent_runtime.lifecycle_data import (
     RuntimeOperationTargetResolver,
 )
 from azents.services.agent_runtime.service import AgentRuntimeService
-from azents.services.file_download_stream import BoundedDownloadStream
+from azents.services.browser_file_download import BrowserFileDownloadTicket
 from azents.services.runtime_storage_error import RuntimeStorageError
 
 from .data import (
@@ -90,7 +91,7 @@ _RUNNER_OPERATION_CLIENT_DEP = Depends(get_runtime_runner_operation_client)
 _RUNTIME_TARGET_RESOLVER_DEP = Depends(AgentRuntimeService)
 _SESSION_MANAGER_DEP = Depends(get_session_manager)
 _DEFAULT_RUNNER_FILE_OPERATION_TIMEOUT = timedelta(seconds=120)
-_WORKSPACE_DOWNLOAD_MAXIMUM_FILE_BYTES = 64 * 1024 * 1024
+_WORKSPACE_DOWNLOAD_MAXIMUM_FILE_BYTES = GENERAL_FILE_MAXIMUM_BYTES
 _WORKSPACE_DOWNLOAD_DEADLINE = timedelta(minutes=5)
 _WORKSPACE_DOWNLOAD_STATUS_POLL_INTERVAL = timedelta(milliseconds=250)
 _WORKSPACE_DOWNLOAD_CONSUMER_RENEW_INTERVAL = timedelta(seconds=10)
@@ -124,6 +125,7 @@ def get_runtime_workspace_download_service(
         s3_service=s3_service,
         product_maximum_size=_WORKSPACE_DOWNLOAD_MAXIMUM_FILE_BYTES,
         deadline=_WORKSPACE_DOWNLOAD_DEADLINE,
+        clock=_utc_now,
     )
 
 
@@ -348,22 +350,6 @@ class AgentWorkspaceBulkMoveResult:
     """Agent Workspace bulk move result."""
 
     entries: list[AgentWorkspaceMoveResult]
-
-
-class _WorkspaceFileDownload(NamedTuple):
-    """Downloaded file bytes and their workspace metadata."""
-
-    path: PurePosixPath
-    data: bytes
-    media_type: str
-
-
-class WorkspaceFileDownloadStream(NamedTuple):
-    """Response-scoped Workspace stream and its metadata."""
-
-    path: PurePosixPath
-    stream: BoundedDownloadStream
-    media_type: str
 
 
 class _WorkspacePathPreparation(NamedTuple):
@@ -1298,13 +1284,13 @@ class AgentWorkspaceFileService:
         except RuntimeRunnerOperationFailedError as error:
             return _runner_file_error(error)
 
-    async def download_file(
+    async def create_download_ticket(
         self,
         agent_id: str,
         user_id: str,
         raw_path: str,
-    ) -> Result[_WorkspaceFileDownload, AgentWorkspaceError]:
-        """Return Agent Workspace file download data."""
+    ) -> Result[BrowserFileDownloadTicket, AgentWorkspaceError]:
+        """Issue an authorized direct GET without opening a file body stream."""
         access = await self._ensure_active_runtime(agent_id, user_id)
         match access:
             case Success(runtime):
@@ -1342,77 +1328,10 @@ class AgentWorkspaceFileService:
                     detail="Agent Workspace download requires a regular file."
                 )
             )
-        service = self._runtime_workspace_download_service
-        if service is None:
+        if stat.size_bytes > GENERAL_FILE_MAXIMUM_BYTES:
             return Failure(
-                AgentWorkspaceFileReadError(
-                    detail="Runtime Workspace transfer is unavailable."
-                )
-            )
-        try:
-            data = await service.download(
-                WorkspaceDownloadRequest(
-                    agent_id=agent_id,
-                    runtime_path=path.as_posix(),
-                    expected_size=stat.size_bytes,
-                    target=ServerToRuntimeTarget(
-                        runtime_id=runtime.id,
-                        desired_generation=runtime.desired_generation,
-                    ),
-                )
-            )
-        except (RuntimeToServerTransferError, WorkspaceDownloadError) as error:
-            return Failure(AgentWorkspaceFileReadError(detail=str(error)))
-        return Success(
-            _WorkspaceFileDownload(
-                path=path,
-                data=data,
-                media_type=_guess_media_type(path),
-            )
-        )
-
-    async def open_download_file(
-        self,
-        agent_id: str,
-        user_id: str,
-        raw_path: str,
-    ) -> Result[WorkspaceFileDownloadStream, AgentWorkspaceError]:
-        """Open an authorized Agent Workspace file response stream."""
-        access = await self._ensure_active_runtime(agent_id, user_id)
-        match access:
-            case Success(runtime):
-                try:
-                    workspace_root = agent_workspace_root(runtime.workspace_path)
-                except AgentWorkspacePathUnavailable as error:
-                    return Failure(error)
-            case Failure(error):
-                return Failure(error)
-            case _:
-                assert_never(access)
-
-        try:
-            path = normalize_agent_workspace_path(
-                raw_path,
-                workspace_root=workspace_root,
-            )
-        except AgentWorkspacePathDenied as error:
-            return Failure(error)
-
-        stat_result = await self._stat_path(runtime, path)
-        match stat_result:
-            case Success(stat):
-                pass
-            case Failure(error):
-                return Failure(error)
-            case _:
-                assert_never(stat_result)
-        target_kind = stat.resolved_kind if stat.kind == "symlink" else stat.kind
-        if target_kind == "missing":
-            return Failure(AgentWorkspaceFileNotFound())
-        if target_kind != "file" or stat.size_bytes is None:
-            return Failure(
-                AgentWorkspaceInvalidOperation(
-                    detail="Agent Workspace download requires a regular file."
+                AgentWorkspaceFileTooLarge(
+                    size=stat.size_bytes, limit=GENERAL_FILE_MAXIMUM_BYTES
                 )
             )
         service = self._runtime_workspace_download_service
@@ -1423,7 +1342,7 @@ class AgentWorkspaceFileService:
                 )
             )
         try:
-            stream = await service.open_download(
+            ticket = await service.create_download_ticket(
                 WorkspaceDownloadRequest(
                     agent_id=agent_id,
                     runtime_path=path.as_posix(),
@@ -1432,6 +1351,8 @@ class AgentWorkspaceFileService:
                         runtime_id=runtime.id,
                         desired_generation=runtime.desired_generation,
                     ),
+                    filename=path.name,
+                    media_type=_guess_media_type(path),
                 )
             )
         except (RuntimeToServerTransferError, WorkspaceDownloadError) as error:
@@ -1442,13 +1363,20 @@ class AgentWorkspaceFileService:
                     detail="Verified Runtime file object is unavailable."
                 )
             )
-        return Success(
-            WorkspaceFileDownloadStream(
-                path=path,
-                stream=stream,
-                media_type=_guess_media_type(path),
+        refreshed = await self._ensure_active_runtime(agent_id, user_id)
+        if isinstance(refreshed, Failure):
+            return Failure(refreshed.error)
+        if (
+            refreshed.value.id != runtime.id
+            or refreshed.value.desired_generation != runtime.desired_generation
+            or refreshed.value.workspace_path != runtime.workspace_path
+        ):
+            return Failure(
+                AgentWorkspaceFileReadError(
+                    detail="Agent Workspace changed during download preparation."
+                )
             )
-        )
+        return Success(ticket)
 
     async def _prepare_workspace_path(
         self,

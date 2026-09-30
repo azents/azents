@@ -29,11 +29,10 @@ class ExternalChannelFilesDetailResponse(BaseModel):
     section: StrictStr
     schema_version: StrictInt
     admin_version: StrictInt
-    inbound_max_file_bytes: StrictInt
     outbound_max_file_bytes: StrictInt
     outbound_max_action_bytes: StrictInt
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["section", "schema_version", "admin_version", "inbound_max_file_bytes", "outbound_max_file_bytes", "outbound_max_action_bytes"]
+    __properties: ClassVar[List[str]] = ["section", "schema_version", "admin_version", "outbound_max_file_bytes", "outbound_max_action_bytes"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -96,7 +95,6 @@ class ExternalChannelFilesDetailResponse(BaseModel):
             "section": obj.get("section"),
             "schema_version": obj.get("schema_version"),
             "admin_version": obj.get("admin_version"),
-            "inbound_max_file_bytes": obj.get("inbound_max_file_bytes"),
             "outbound_max_file_bytes": obj.get("outbound_max_file_bytes"),
             "outbound_max_action_bytes": obj.get("outbound_max_action_bytes")
         })

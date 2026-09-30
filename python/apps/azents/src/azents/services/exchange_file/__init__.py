@@ -19,6 +19,7 @@ from azcommon.infra.s3.service import (
     S3ProductPublicationMetadata,
     S3Service,
     S3TransferObjectMetadata,
+    s3_checksum_matches_sha256,
 )
 from azcommon.result import Failure, Result, Success
 from azcommon.uuid import uuid7
@@ -35,6 +36,7 @@ from azents.core.enums import (
     ExchangeFileStatus,
 )
 from azents.core.exchange_upload import ExchangeUploadError, ExchangeUploadState
+from azents.core.file_transfer import GENERAL_FILE_MAXIMUM_BYTES
 from azents.core.s3.deps import get_s3_service
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.exchange_file import ExchangeFileRepository, exchange_file_object_key
@@ -56,7 +58,11 @@ from azents.repos.exchange_file.operations import (
 from azents.repos.exchange_file.upload_data import ExchangeUploadOperation
 from azents.repos.file_metadata_authority import FileResourceAuthority
 from azents.repos.workspace_user import WorkspaceUserRepository
-from azents.services.file_download_stream import BoundedDownloadStream
+from azents.services.browser_file_download import (
+    BROWSER_DOWNLOAD_TICKET_TTL,
+    INLINE_IMAGE_MEDIA_TYPES,
+    BrowserFileDownloadTicket,
+)
 from azents.services.file_lifecycle_policy import exchange_file_expires_at
 from azents.services.session_resource_authority import SessionResourceAuthority
 
@@ -111,11 +117,8 @@ class ExchangeFileDownload:
 
 
 @dataclasses.dataclass(frozen=True)
-class ExchangeFileDownloadStream:
-    """Response-scoped Exchange file stream and its metadata."""
-
-    file: ExchangeFile
-    stream: BoundedDownloadStream
+class FileTooLarge:
+    """Exchange file is ineligible under the general transfer policy."""
 
 
 @dataclasses.dataclass(frozen=True)
@@ -139,8 +142,7 @@ ExchangeFileError = (
 _PREVIEW_THUMBNAIL_MAX_SIZE = 512
 _PREVIEW_THUMBNAIL_MEDIA_TYPE = "image/jpeg"
 _MAX_TEXT_PREVIEW_CHARS = 2000
-_EXCHANGE_DOWNLOAD_STREAM_CHUNK_SIZE = 256 * 1024
-CHAT_UPLOAD_MAX_SIZE = 128 * 1024 * 1024
+CHAT_UPLOAD_MAX_SIZE = GENERAL_FILE_MAXIMUM_BYTES
 _CHAT_UPLOAD_TICKET_TTL = datetime.timedelta(minutes=5)
 _CHAT_UPLOAD_OPERATION_TTL = datetime.timedelta(minutes=15)
 _CHAT_UPLOAD_FINALIZE_TIMEOUT = datetime.timedelta(minutes=5)
@@ -1658,53 +1660,64 @@ class ExchangeFileService:
             return Failure(FileUnavailable())
         return Success(ExchangeFileDownload(file=file.value, body=body))
 
-    async def open_download(
+    async def create_download_ticket(
         self,
         *,
         file_id: str,
         user_id: str,
-    ) -> Result[ExchangeFileDownloadStream, ExchangeFileError]:
-        """Open one authorized Exchange object as a bounded response stream."""
+        inline: bool,
+    ) -> Result[BrowserFileDownloadTicket, ExchangeFileError | FileTooLarge]:
+        """Authorize one short-lived GET without reading the private object body."""
         file = await self._get_accessible_file(file_id=file_id, user_id=user_id)
         if isinstance(file, Failure):
             return Failure(file.error)
         if file.value.status == ExchangeFileStatus.EXPIRED:
             return Failure(FileExpired())
+        if file.value.size_bytes > GENERAL_FILE_MAXIMUM_BYTES:
+            return Failure(FileTooLarge())
 
         identity = S3ObjectIdentity(
             bucket=self.config.workspace_s3.bucket,
             key=file.value.object_key,
         )
-        metadata = await self.s3_service.head(identity)
+        metadata = await self.s3_service.head_with_checksum(identity)
         if metadata is None or metadata.content_length != file.value.size_bytes:
             return Failure(FileUnavailable())
-        source_context = self.s3_service.iter_chunks(
-            identity,
-            maximum_chunk_size=_EXCHANGE_DOWNLOAD_STREAM_CHUNK_SIZE,
-        )
-        source_opened = False
-        try:
-            source_iterator = await source_context.__aenter__()
-            source_opened = True
-            stream = BoundedDownloadStream(
-                source_context=source_context,
-                source_iterator=source_iterator,
-                expected_size=file.value.size_bytes,
-                expected_sha256=file.value.sha256,
-                maximum_chunk_size=_EXCHANGE_DOWNLOAD_STREAM_CHUNK_SIZE,
-            )
-        except FileNotFoundError:
-            if source_opened:
-                await source_context.__aexit__(None, None, None)
+        if metadata.checksum_sha256 is not None and not s3_checksum_matches_sha256(
+            metadata.checksum_sha256, file.value.sha256
+        ):
             return Failure(FileUnavailable())
-        except BaseException:
-            if source_opened:
-                await source_context.__aexit__(None, None, None)
-            raise
+        refreshed = await self._get_accessible_file(file_id=file_id, user_id=user_id)
+        if isinstance(refreshed, Failure):
+            return Failure(refreshed.error)
+        if refreshed.value.status == ExchangeFileStatus.EXPIRED:
+            return Failure(FileExpired())
+        if (
+            refreshed.value.object_key != file.value.object_key
+            or refreshed.value.size_bytes != file.value.size_bytes
+            or refreshed.value.sha256 != file.value.sha256
+        ):
+            return Failure(FileUnavailable())
+        file = refreshed
+        current = datetime.datetime.now(datetime.UTC)
+        lifetime = BROWSER_DOWNLOAD_TICKET_TTL
+        if file.value.expires_at is not None:
+            lifetime = min(lifetime, file.value.expires_at - current)
+        seconds = int(lifetime.total_seconds())
+        if seconds <= 0:
+            return Failure(FileExpired())
+        ticket = await self.s3_service.get_download_request(
+            identity=identity,
+            expires_in=datetime.timedelta(seconds=seconds),
+            now=current,
+            filename=file.value.filename,
+            content_type=file.value.media_type,
+            inline=inline and file.value.media_type.lower() in INLINE_IMAGE_MEDIA_TYPES,
+        )
         return Success(
-            ExchangeFileDownloadStream(
-                file=file.value,
-                stream=stream,
+            BrowserFileDownloadTicket(
+                url=ticket.url,
+                expires_at=ticket.expires_at,
             )
         )
 

@@ -41,7 +41,6 @@ export interface SystemSettingsPageContentProps {
   checkingHealth: boolean;
   saveDisabled: boolean;
   mutationError: string | null;
-  onInboundMaxFileMiBChange: (value: number | string) => void;
   onOutboundMaxFileMiBChange: (value: number | string) => void;
   onOutboundMaxActionMiBChange: (value: number | string) => void;
   onSaveExternalFiles: () => void;
@@ -64,7 +63,6 @@ const MAX_FILE_MIB = 100;
 const MAX_ACTION_MIB = 2_000;
 
 const EMPTY_EXTERNAL_FILES_DRAFT: ExternalChannelFilesDraft = {
-  inboundMaxFileMiB: "",
   outboundMaxFileMiB: "",
   outboundMaxActionMiB: "",
 };
@@ -155,7 +153,6 @@ export function useSystemSettingsPageContainer(): SystemSettingsPageContentProps
     }
     initializedExternalFilesVersion.current = detail.admin_version;
     setExternalFilesDraft({
-      inboundMaxFileMiB: bytesToMiB(detail.inbound_max_file_bytes),
       outboundMaxFileMiB: bytesToMiB(detail.outbound_max_file_bytes),
       outboundMaxActionMiB: bytesToMiB(detail.outbound_max_action_bytes),
     });
@@ -296,10 +293,6 @@ export function useSystemSettingsPageContainer(): SystemSettingsPageContentProps
     draft.clearClientSecret,
     draft.clientSecret,
   );
-  const inboundMaxFileBytes = draftMiBToBytes(
-    externalFilesDraft.inboundMaxFileMiB,
-    MAX_FILE_MIB,
-  );
   const outboundMaxFileBytes = draftMiBToBytes(
     externalFilesDraft.outboundMaxFileMiB,
     MAX_FILE_MIB,
@@ -309,16 +302,13 @@ export function useSystemSettingsPageContainer(): SystemSettingsPageContentProps
     MAX_ACTION_MIB,
   );
   const externalFilesDraftValid =
-    inboundMaxFileBytes !== null &&
     outboundMaxFileBytes !== null &&
     outboundMaxActionBytes !== null &&
     outboundMaxActionBytes >= outboundMaxFileBytes;
   const externalFilesDraftDirty =
     externalFilesState.type === "LOADED" &&
-    (externalFilesDraft.inboundMaxFileMiB !==
-      bytesToMiB(externalFilesState.detail.inbound_max_file_bytes) ||
-      externalFilesDraft.outboundMaxFileMiB !==
-        bytesToMiB(externalFilesState.detail.outbound_max_file_bytes) ||
+    (externalFilesDraft.outboundMaxFileMiB !==
+      bytesToMiB(externalFilesState.detail.outbound_max_file_bytes) ||
       externalFilesDraft.outboundMaxActionMiB !==
         bytesToMiB(externalFilesState.detail.outbound_max_action_bytes));
   const externalFilesSaveDisabled =
@@ -337,7 +327,6 @@ export function useSystemSettingsPageContainer(): SystemSettingsPageContentProps
   const onSaveExternalFiles = useCallback((): void => {
     if (
       externalFilesState.type !== "LOADED" ||
-      inboundMaxFileBytes === null ||
       outboundMaxFileBytes === null ||
       outboundMaxActionBytes === null ||
       outboundMaxActionBytes < outboundMaxFileBytes
@@ -346,14 +335,12 @@ export function useSystemSettingsPageContainer(): SystemSettingsPageContentProps
     }
     externalFilesPatchMutation.mutate({
       expectedVersion: externalFilesState.detail.admin_version,
-      inboundMaxFileBytes,
       outboundMaxFileBytes,
       outboundMaxActionBytes,
     });
   }, [
     externalFilesPatchMutation,
     externalFilesState,
-    inboundMaxFileBytes,
     outboundMaxActionBytes,
     outboundMaxFileBytes,
   ]);
@@ -444,11 +431,6 @@ export function useSystemSettingsPageContainer(): SystemSettingsPageContentProps
     checkingHealth: healthMutation.isPending,
     saveDisabled,
     mutationError,
-    onInboundMaxFileMiBChange: (value) =>
-      setExternalFilesDraft((current) => ({
-        ...current,
-        inboundMaxFileMiB: value,
-      })),
     onOutboundMaxFileMiBChange: (value) =>
       setExternalFilesDraft((current) => ({
         ...current,

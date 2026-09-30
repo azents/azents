@@ -126,6 +126,7 @@ async def test_rustfs_presigned_put_finalize_and_get_round_trip(
                 expires_in=timedelta(seconds=60),
                 filename="report ü.txt",
                 content_type="text/plain",
+                inline=False,
             )
             download_response = requests.get(download_request.url, timeout=10)
             assert download_response.status_code == 200
@@ -199,6 +200,7 @@ async def test_rustfs_signed_put_copy_and_get_without_buffering_body(
             ticket = await service.get_download_request(
                 identity=source,
                 expires_in=timedelta(minutes=5),
+                inline=False,
             )
             downloaded = hashlib.sha256()
             received = 0

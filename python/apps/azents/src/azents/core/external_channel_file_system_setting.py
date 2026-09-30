@@ -5,12 +5,10 @@ import datetime
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from azents.core.external_channel_file import (
-    DEFAULT_EXTERNAL_CHANNEL_INBOUND_MAX_FILE_BYTES,
     DEFAULT_EXTERNAL_CHANNEL_OUTBOUND_MAX_ACTION_BYTES,
     DEFAULT_EXTERNAL_CHANNEL_OUTBOUND_MAX_FILE_BYTES,
     MAX_EXTERNAL_CHANNEL_CONFIGURED_ACTION_BYTES,
     MAX_EXTERNAL_CHANNEL_CONFIGURED_FILE_BYTES,
-    MAX_EXTERNAL_CHANNEL_INBOUND_FILE_BYTES,
 )
 from azents.core.system_setting import (
     SystemSettingActivationMode,
@@ -24,12 +22,6 @@ class ExternalChannelFilesConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    inbound_max_file_bytes: int = Field(
-        default=DEFAULT_EXTERNAL_CHANNEL_INBOUND_MAX_FILE_BYTES,
-        ge=1,
-        le=MAX_EXTERNAL_CHANNEL_INBOUND_FILE_BYTES,
-        strict=True,
-    )
     outbound_max_file_bytes: int = Field(
         default=DEFAULT_EXTERNAL_CHANNEL_OUTBOUND_MAX_FILE_BYTES,
         ge=1,
@@ -72,7 +64,7 @@ def get_external_channel_files_definition() -> SystemSettingDefinition:
     """Return the compiled External Channel file-transfer Section definition."""
     return SystemSettingDefinition(
         section=SystemSettingSection.EXTERNAL_CHANNEL_FILES,
-        schema_version=1,
+        schema_version=2,
         config_model=ExternalChannelFilesConfig,
         secret_model=ExternalChannelFilesSecrets,
         activation_mode=SystemSettingActivationMode.DIRECT,
