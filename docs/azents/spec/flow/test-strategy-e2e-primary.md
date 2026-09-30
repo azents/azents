@@ -29,7 +29,7 @@ code_paths:
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
 last_verified_at: 2026-09-30
-spec_version: 72
+spec_version: 73
 ---
 
 # E2E Primary Test Strategy
@@ -56,7 +56,13 @@ Manual-only runbook, blocked placeholder, removed-feature residue check, legacy 
 Required file journeys exercise Chat metadata admission/direct PUT/finalize, Exchange
 attachment-ID authorized `302` download, access denial and deletion, Workspace
 upload/download, verified Runner transfers, Tool-result materialization, and real
-RustFS checksum/copy/expiry behavior, including a streamed 128 MiB storage round trip.
+RustFS checksum/copy/expiry behavior with small deterministic bodies. API, Worker,
+and Workspace fixtures inject a lowered 1 MiB general-file limit; boundary journeys
+exercise below-limit, inclusive-limit, and above-limit behavior without transferring
+128 MiB. Unit tests use a 16-byte limit for 15/16/17-byte boundaries. The completed
+128 MiB acceptance evidence is preserved in the
+[large-file validation report](../../design/direct-file-transfer-large-file-validation-report-2026-09-30.md),
+not executed in routine regression CI.
 Native browser journeys cover Chat and Workspace Web redirects with exact downloaded
 bytes/hash and safe filename preservation. RustFS fixture CORS remains PUT-only:
 download navigation and inline images are not cross-origin fetch APIs.
@@ -563,6 +569,10 @@ External substrate features such as Agent Runtime Provider are recorded in two l
 Local/PR environment without live substrate does not fake live PASS. Instead, separate prerequisite snapshot state and deterministic evidence in PR body and design QA record. If primary E2E substrate such as Browser runner or Docker/testcontainers is unavailable and product path cannot be executed, do not replace it with PASS. Track scenario, blocker category, observed error, expected verification target, and next action in GitHub Issue, and leave blocked evidence plus issue link in design QA record.
 
 ## Changelog
+
+- **2026-09-30** (spec_version 73) — Replaced recurring heavyweight file journeys
+  with lowered, injected limits and small protocol bodies; retained one-time
+  large-file evidence separately and fenced fixture-only download TLS handling.
 
 - **2026-09-30** (spec_version 72) — Added real-storage/native-browser direct-file
   evidence boundaries, capability-safe artifacts, and strict-network proof limitations.

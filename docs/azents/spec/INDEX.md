@@ -39,7 +39,7 @@ Details of all living specs. Synchronized from frontmatter.
 | [External Channel Delivery and Channel Work](flow/external-channel-delivery.md) | @Hardtack | 2026-09-30 | 63 |
 | [External Channel Lifecycle](flow/external-channel-lifecycle.md) | @Hardtack | 2026-09-12 | 45 |
 | [External Channel Provider Ingress](flow/external-channel-provider-ingress.md) | @Hardtack | 2026-09-13 | 63 |
-| [File Exchange Storage](flow/file-exchange-storage.md) | @Hardtack | 2026-09-30 | 52 |
+| [File Exchange Storage](flow/file-exchange-storage.md) | @Hardtack | 2026-09-30 | 53 |
 | [Kimi OAuth Flow](flow/kimi-oauth.md) | @Hardtack | 2026-09-23 | 3 |
 | [MCP OAuth Flow](flow/mcp-oauth.md) | @Hardtack | 2026-09-26 | 7 |
 | [OpenRouter API Key Provider Flow](flow/openrouter-api-key.md) | @Hardtack | 2026-09-15 | 4 |
@@ -47,6 +47,6 @@ Details of all living specs. Synchronized from frontmatter.
 | [Public Release Publication](flow/public-release.md) | @Hardtack | 2026-09-18 | 3 |
 | [Run Resume](flow/run-resume.md) | @Hardtack | 2026-09-13 | 37 |
 | [Session Context Inspector](flow/session-context-inspector.md) | @Hardtack | 2026-09-29 | 23 |
-| [E2E Primary Test Strategy](flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-09-30 | 72 |
+| [E2E Primary Test Strategy](flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-09-30 | 73 |
 | [xAI API Key Provider Flow](flow/xai-api-key.md) | @Hardtack | 2026-09-15 | 4 |
 | [xAI OAuth Flow](flow/xai-oauth.md) | @Hardtack | 2026-09-25 | 9 |

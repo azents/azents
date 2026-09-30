@@ -67,7 +67,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ToolCallCard.tsx
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
 last_verified_at: 2026-09-30
-spec_version: 52
+spec_version: 53
 ---
 
 # File Exchange Storage
@@ -107,6 +107,19 @@ creator, or Run. ModelFile and Artifact have no public read routes; their intern
 Session/Run authority.
 
 ## Flows
+
+### Effective general-file policy
+
+The application injects one positive `Config.general_file_maximum_bytes` value into
+Exchange upload/download, Workspace download, Worker import/presentation/provider
+transfer, and External Channel ingress consumers. Its default and hard ceiling remain
+128 MiB. `AZ_TESTENV_GENERAL_FILE_MAXIMUM_BYTES` may only lower that value when the
+explicit testenv API gate is enabled; invalid values or an ungated override fail
+configuration validation. This setting is not an Admin or persisted product policy.
+Workspace Upload's separate Runtime Control fixture limit is configured consistently
+for lowered-limit E2E. Main Web and the Chat metadata schema retain their 128 MiB
+ceiling; API admission enforces the injected effective value. Image, model-input,
+provider-specific, and transport limits remain independently enforced.
 
 ### User upload to chat
 
@@ -438,6 +451,10 @@ later `import_file` must explicitly copy them into the new Runtime.
 - Tool execution follows [`agent-execution-loop.md`](agent-execution-loop.md).
 
 ## Changelog
+
+- **2026-09-30** (spec_version 53) — Made the general-file limit injectable across
+  consumers for small boundary tests with a lowering-only gated testenv override;
+  retained the production 128 MiB default and independent semantic limits.
 
 - **2026-09-30** (spec_version 52) — Promoted verified Chat direct PUT, Runner direct
   GET/PUT consumers, authorized browser GET redirects, shared 128 MiB eligibility,
