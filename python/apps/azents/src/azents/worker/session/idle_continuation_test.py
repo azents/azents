@@ -130,14 +130,16 @@ class _AgentSessionRepository:
         self.status = status
         self.owner_generation = owner_generation
         self.consumed: list[tuple[str, str, bool]] = []
+        self.execution_admissions: list[str] = []
 
-    async def lock_by_id(
+    async def wait_for_execution_lock_by_id(
         self,
         session: object,
         session_id: str,
     ) -> _LockedSession:
-        """Return a locked Session fixture."""
-        del session, session_id
+        """Record canonical admission before returning the locked Session."""
+        del session
+        self.execution_admissions.append(session_id)
         return _LockedSession(
             pending_idle_continuation_run_id=self.boundary_run_id,
             pending_command_id=None,
@@ -337,6 +339,26 @@ def _service(
         broker=broker,
         session_manager=_SessionManager(),
     )
+
+
+@pytest.mark.asyncio
+async def test_consume_admits_both_idle_transactions_through_execution_tree() -> None:
+    """Initial eligibility and final outcome share the canonical admission gate."""
+    repository = _AgentSessionRepository()
+    result = await _service(
+        mailbox_item_service=_MailboxService(),
+        event_publisher=_EventPublisher(),
+        broker=_Broker(),
+        agent_session_repository=repository,
+    ).consume(
+        _snapshot(),
+        toolkits=[],
+        run_id="run-001",
+    )
+
+    assert result is True
+    assert repository.execution_admissions == ["session-001", "session-001"]
+    assert repository.consumed == [("session-001", "run-001", False)]
 
 
 @pytest.mark.asyncio

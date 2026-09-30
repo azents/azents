@@ -205,6 +205,7 @@ _EXTERNAL_CHANNEL_QUIET_WORK_MARKER = "Discord quiet work presence E2E"
 _EXTERNAL_CHANNEL_QUIET_WORK_SETUP_MARKER = "Discord quiet work setup E2E"
 _EXTERNAL_CHANNEL_SEARCH_CALL_ID = "call_external_channel_tool_search"
 _EXTERNAL_CHANNEL_PROGRESS_CALL_ID = "call_external_channel_progress"
+_EXTERNAL_CHANNEL_PROGRESS_REFERENCE_TOKENS = ("@User UREVIEWER", "#e2e")
 _EXTERNAL_CHANNEL_FINISH_CALL_ID = "call_external_channel_finish"
 _EXTERNAL_CHANNEL_OUTCOME_PROGRESS_CALL_ID = "call_external_channel_outcome_progress"
 _EXTERNAL_CHANNEL_FAILURE_PROGRESS_CALL_ID = "call_external_channel_failure_progress"
@@ -1018,6 +1019,7 @@ class _ExternalChannelResponseContext(NamedTuple):
     call_id: str
     stage: str
     released_outcome: bool = False
+    reference_tokens: tuple[str, ...] = ()
 
 
 class _ExternalChannelStaleResponseContext(ValueError):
@@ -1103,9 +1105,8 @@ class _ExternalChannelResponseRegistry:
             return request
         items = _list(input_value)
         latest_text = _last_user_text(request)
-        binding = latest_external_channel_human_binding(
-            request
-        ) or external_channel_binding(request)
+        human_binding = latest_external_channel_human_binding(request)
+        binding = human_binding or external_channel_binding(request)
         with self._lock:
             generation = self._generation
             context = self._responses.get(str(request.get("previous_response_id")))
@@ -1128,6 +1129,8 @@ class _ExternalChannelResponseRegistry:
                 binding = context.binding
                 flow = context.flow
                 turn = context.turn
+                reference_tokens = context.reference_tokens
+                references = "\n".join(reference_tokens)
                 marker = {
                     "setup": _EXTERNAL_CHANNEL_QUIET_WORK_SETUP_MARKER,
                     "progress": _EXTERNAL_CHANNEL_PROGRESS_MARKER,
@@ -1138,7 +1141,7 @@ class _ExternalChannelResponseRegistry:
                         "role": "user",
                         "content": (
                             "Message Type: EXTERNAL_CHANNEL_TURN\n"
-                            f"Binding: {binding}\n\n{marker}"
+                            f"Binding: {binding}\n\n{marker}\n{references}"
                         ),
                     },
                     *items,
@@ -1154,6 +1157,11 @@ class _ExternalChannelResponseRegistry:
                     )
                 )
                 turn = sha256(latest_text.encode()).hexdigest()[:24]
+                reference_tokens = tuple(
+                    token
+                    for token in _EXTERNAL_CHANNEL_PROGRESS_REFERENCE_TOKENS
+                    if human_binding == binding and token in latest_text
+                )
             else:
                 return request
             latest_user_index = max(
@@ -1191,6 +1199,7 @@ class _ExternalChannelResponseRegistry:
             "input": normalized,
             "_external_channel_fixture_turn": turn,
             "_external_channel_fixture_flow": flow,
+            "_external_channel_fixture_reference_tokens": reference_tokens,
             "_external_channel_fixture_generation": generation,
             "_external_channel_fixture_observed_stages": observed_stages,
             "_external_channel_fixture_request_key": sha256(
@@ -1260,8 +1269,19 @@ class _ExternalChannelResponseRegistry:
                 and flow == "progress"
                 else stage
             )
+            tokens = request.get("_external_channel_fixture_reference_tokens")
+            reference_tokens = tuple(
+                token
+                for token in _EXTERNAL_CHANNEL_PROGRESS_REFERENCE_TOKENS
+                if isinstance(tokens, tuple) and token in tokens
+            )
             context = _ExternalChannelResponseContext(
-                binding, turn, flow, call_id, canonical_stage
+                binding,
+                turn,
+                flow,
+                call_id,
+                canonical_stage,
+                reference_tokens=reference_tokens,
             )
             self._responses[response_id] = context
             self._aliases[(binding, call_id)] = context

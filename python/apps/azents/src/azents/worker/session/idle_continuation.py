@@ -199,8 +199,8 @@ class IdleContinuationService:
         *,
         owner_generation: int,
     ) -> _IdleBoundaryEligibility:
-        """Recheck the true-idle fence before committing hook output."""
-        locked = await self.agent_session_repository.lock_by_id(
+        """Admit tree-ordered execution before checking the true-idle fence."""
+        locked = await self.agent_session_repository.wait_for_execution_lock_by_id(
             session,
             session_id,
         )

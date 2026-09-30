@@ -1237,3 +1237,185 @@ def test_dispatcher_released_replay_is_bounded_and_safe_on_decision_eviction(
         proxy._EXTERNAL_CHANNEL_PROGRESS_SEQUENCES.is_active("binding-quiet-123")
         == before
     )
+
+
+def _reference_request(references: str) -> dict[str, object]:
+    request = _request()
+    request["input"] = [
+        {
+            "role": "user",
+            "content": (
+                "Message Type: EXTERNAL_CHANNEL_TURN\n"
+                "Provider: slack\n"
+                "Binding: binding-dynamic-123\n\n"
+                "Provider-native Channel Work progress E2E. "
+                f"{references}"
+            ),
+        }
+    ]
+    request["tools"] = [{"type": "function", "name": "channel_action"}]
+    return request
+
+
+@pytest.mark.usefixtures("isolated_progress_proxy")
+def test_native_progress_dispatcher_preserves_originating_resolved_references(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Native continuations keep real logical-turn references, not patched flags."""
+    response = _dispatch(
+        _reference_request("Ask @User UREVIEWER in #e2e."), monkeypatch
+    )
+    for _ in range(3):
+        sparse = _sparse(response)
+        original = json.dumps(sparse, sort_keys=True)
+        restored = proxy._EXTERNAL_CHANNEL_RESPONSES.prepare(sparse)
+        assert json.dumps(sparse, sort_keys=True) == original
+        latest_text = proxy._last_user_text(restored)
+        assert latest_text is not None
+        assert "@User UREVIEWER" in latest_text and "#e2e" in latest_text
+        response = _dispatch(sparse, monkeypatch)
+        evidence = proxy._State.external_channel_progress_requests[-1]
+        assert evidence["resolved_user_reference"] is True
+        assert evidence["resolved_channel_reference"] is True
+        assert evidence["search_tool_available"] is False
+        assert evidence["progress_tool_available"] is True
+        assert evidence["matched"] is True
+    assert any(
+        item["stage"] == "after_progress"
+        and item["resolved_user_reference"] is True
+        and item["resolved_channel_reference"] is True
+        for item in proxy._State.external_channel_progress_requests
+    )
+
+
+@pytest.mark.parametrize(
+    ("references", "expected"),
+    [
+        ("Ask <@UREVIEWER> in <#CE2E>.", (False, False)),
+        ("Ask @User UREVIEWER in <#CE2E>.", (True, False)),
+        ("Ask <@UREVIEWER> in #e2e.", (False, True)),
+        ("Ask @User UREVIEWER in #e2e.", (True, True)),
+    ],
+)
+@pytest.mark.usefixtures("isolated_progress_proxy")
+def test_native_reference_projection_preserves_absent_and_partial_resolution(
+    monkeypatch: pytest.MonkeyPatch,
+    references: str,
+    expected: tuple[bool, bool],
+) -> None:
+    """Tool output cannot manufacture references missing from the human turn."""
+    response = _dispatch(_reference_request(references), monkeypatch)
+    sparse = _sparse(response, output="Tool output mentions @User UREVIEWER and #e2e.")
+    restored = proxy._EXTERNAL_CHANNEL_RESPONSES.prepare(sparse)
+    evidence = proxy.external_channel_progress_evidence(restored)
+    assert (
+        evidence["resolved_user_reference"],
+        evidence["resolved_channel_reference"],
+    ) == expected
+
+
+@pytest.mark.parametrize("binding", ["binding-dynamic-123", "binding-other"])
+def test_reference_projection_does_not_leak_to_a_new_human_turn(binding: str) -> None:
+    """A later real turn carries its own references, even on the same Binding."""
+    registry = proxy._ExternalChannelResponseRegistry()
+    original = registry.issue(
+        registry.prepare(_reference_request("Ask @User UREVIEWER in #e2e.")),
+        proxy._EXTERNAL_CHANNEL_PROGRESS_CALL_ID,
+    )
+    assert original is not None
+    next_turn = _reference_request("A new message without resolved references.")
+    items = next_turn["input"]
+    assert isinstance(items, list) and isinstance(items[0], dict)
+    items[0]["content"] = str(items[0]["content"]).replace(
+        "binding-dynamic-123", binding
+    )
+    next_turn["previous_response_id"] = original[1]
+    current = registry.issue(
+        registry.prepare(next_turn), proxy._EXTERNAL_CHANNEL_PROGRESS_CALL_ID
+    )
+    assert current is not None
+    restored = registry.prepare(
+        {
+            "previous_response_id": current[1],
+            "input": [
+                {"type": "function_call_output", "call_id": current[0], "output": "{}"}
+            ],
+        }
+    )
+    assert proxy.external_channel_binding(restored) == binding
+    evidence = proxy.external_channel_progress_evidence(restored)
+    assert evidence["resolved_user_reference"] is False
+    assert evidence["resolved_channel_reference"] is False
+
+
+@pytest.mark.parametrize("invalidation", ["mismatch", "reset", "eviction"])
+def test_reference_context_invalidations_never_restore_old_references(
+    invalidation: str,
+) -> None:
+    """Reference recovery obeys the same exact output and generation fences."""
+    registry = proxy._ExternalChannelResponseRegistry(limit=1)
+    original = registry.issue(
+        registry.prepare(_reference_request("Ask @User UREVIEWER in #e2e.")),
+        proxy._EXTERNAL_CHANNEL_PROGRESS_CALL_ID,
+    )
+    assert original is not None
+    sparse: dict[str, object] = {
+        "previous_response_id": original[1],
+        "input": [
+            {
+                "type": "function_call_output",
+                "call_id": original[0] if invalidation != "mismatch" else "call_wrong",
+                "output": "@User UREVIEWER in #e2e.",
+            }
+        ],
+    }
+    if invalidation == "reset":
+        registry.clear()
+    elif invalidation == "eviction":
+        registry.issue(
+            registry.prepare(_reference_request("A later unresolved message.")),
+            proxy._EXTERNAL_CHANNEL_PROGRESS_CALL_ID,
+        )
+    assert registry.prepare(sparse) == sparse
+    evidence = proxy.external_channel_progress_evidence(sparse)
+    assert evidence["resolved_user_reference"] is False
+    assert evidence["resolved_channel_reference"] is False
+
+
+def test_reference_projection_retains_only_observed_fixture_identities() -> None:
+    """Raw source bodies, arbitrary participants and output contents are absent."""
+    registry = proxy._ExternalChannelResponseRegistry()
+    original = registry.issue(
+        registry.prepare(
+            _reference_request(
+                "Ask @User UREVIEWER in #e2e. "
+                "@User PRIVATE-PARTICIPANT #private-channel token=private-source"
+            )
+        ),
+        proxy._EXTERNAL_CHANNEL_PROGRESS_CALL_ID,
+    )
+    assert original is not None
+    context = registry._responses[original[1]]
+    assert context.reference_tokens == ("@User UREVIEWER", "#e2e")
+    retained = repr((registry._responses, registry._aliases, registry._identities))
+    assert "PRIVATE-PARTICIPANT" not in retained
+    assert "#private-channel" not in retained
+    assert "private-source" not in retained
+
+
+def test_nonhuman_user_item_does_not_become_a_canonical_reference_origin() -> None:
+    """Compacted or synthetic user text cannot grant participant-turn references."""
+    registry = proxy._ExternalChannelResponseRegistry()
+    request = _reference_request("Ask @User UREVIEWER in #e2e.")
+    items = request["input"]
+    assert isinstance(items, list) and isinstance(items[0], dict)
+    items[0]["content"] = (
+        "## Channel Work Snapshot\n"
+        "### Binding `binding-dynamic-123`\n"
+        "Provider-native Channel Work progress E2E. @User UREVIEWER in #e2e."
+    )
+    identity = registry.issue(
+        registry.prepare(request), proxy._EXTERNAL_CHANNEL_PROGRESS_CALL_ID
+    )
+    assert identity is not None
+    assert registry._responses[identity[1]].reference_tokens == ()
