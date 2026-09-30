@@ -131,6 +131,24 @@ _CHAT_ACTION_ADAPTER = TypeAdapter(ChatAction)
 _PERSISTED_CHAT_ACTION_ADAPTER = TypeAdapter(PersistedChatAction)
 
 
+class ChatUploadPrepareRequest(BaseModel):
+    """Metadata-only manifest for one direct Chat attachment upload."""
+
+    filename: str = Field(min_length=1, max_length=255)
+    media_type: str = Field(min_length=1, max_length=255, pattern=r"^[^\r\n]+$")
+    size: int = Field(ge=0, le=128 * 1024 * 1024, strict=True)
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class ChatUploadPrepareResponse(BaseModel):
+    """Transient exact-object PUT ticket; never an attachment publication."""
+
+    upload_id: str
+    put_url: str
+    put_headers: dict[str, str]
+    expires_at: datetime.datetime
+
+
 class UploadResponse(BaseModel):
     """File upload response."""
 

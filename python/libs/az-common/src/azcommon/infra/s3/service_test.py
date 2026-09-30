@@ -5,8 +5,11 @@ import base64
 import hashlib
 from dataclasses import dataclass
 from datetime import timedelta
+from urllib.parse import parse_qs, urlsplit
 
+import aioboto3
 import pytest
+from aiobotocore.config import AioConfig
 from botocore.exceptions import ClientError
 
 from azcommon.infra.s3.service import (
@@ -584,6 +587,76 @@ async def test_presigned_get_rejects_header_controls_before_signing() -> None:
             content_type="text/plain\nX-Evil: yes",
         )
     assert client.presigned_requests == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("size", (0, 128 * 1024 * 1024))
+async def test_put_ticket_binds_native_size_and_checksum(size: int) -> None:
+    """The signed request bounds ingress bytes without a script-set length header."""
+    client = _FakeS3Client()
+    digest = hashlib.sha256(b"").hexdigest()
+
+    request = await _service(client).get_upload_request(
+        identity=S3ObjectIdentity(bucket="private", key="ingress/one"),
+        content_type="application/octet-stream",
+        content_length=size,
+        checksum_sha256=digest,
+        expires_in=timedelta(minutes=5),
+    )
+
+    assert client.presigned_requests[0]["Params"] == {
+        "Bucket": "private",
+        "Key": "ingress/one",
+        "ContentLength": size,
+        "ContentType": "application/octet-stream",
+        "ChecksumSHA256": base64.b64encode(bytes.fromhex(digest)).decode("ascii"),
+    }
+    assert request.method == "PUT"
+    assert "content-length" not in request.headers
+    assert request.headers["content-type"] == "application/octet-stream"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("size", (-1, True))
+async def test_put_ticket_rejects_invalid_size_before_signing(size: int) -> None:
+    client = _FakeS3Client()
+
+    with pytest.raises(ValueError, match="content length"):
+        await _service(client).get_upload_request(
+            identity=S3ObjectIdentity(bucket="private", key="ingress/one"),
+            content_type=None,
+            content_length=size,
+            checksum_sha256=hashlib.sha256(b"").hexdigest(),
+            expires_in=timedelta(minutes=5),
+        )
+
+    assert client.presigned_requests == []
+
+
+@pytest.mark.asyncio
+async def test_native_sigv4_includes_content_length_in_signed_headers() -> None:
+    """Exercise the supported SDK signer without performing any network request."""
+    session = aioboto3.Session(
+        aws_access_key_id="test",
+        aws_secret_access_key="test",
+        region_name="us-east-1",
+    )
+    async with session.client(
+        "s3",
+        endpoint_url="https://objects.invalid",
+        config=AioConfig(signature_version="s3v4", s3={"addressing_style": "path"}),
+    ) as client:
+        request = await S3Service(client).get_upload_request(
+            identity=S3ObjectIdentity(bucket="private", key="ingress/one"),
+            content_type=None,
+            content_length=42,
+            checksum_sha256=hashlib.sha256(b"").hexdigest(),
+            expires_in=timedelta(minutes=5),
+        )
+
+    signed_headers = parse_qs(urlsplit(request.url).query)["X-Amz-SignedHeaders"][0]
+    assert "content-length" in signed_headers.split(";")
+    assert "x-amz-checksum-sha256" in signed_headers.split(";")
 
 
 @pytest.mark.asyncio

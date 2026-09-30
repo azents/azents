@@ -41,7 +41,7 @@ from testcontainers.postgres import PostgresContainer
 from types_boto3_s3.client import S3Client
 
 from support.browser_artifact_safety import sanitize_browser_artifact
-from support.consts import REPOSITORY_ROOT
+from support.consts import E2E_GENERAL_FILE_MAXIMUM_BYTES, REPOSITORY_ROOT
 from support.container_logs import (
     ContainerLogs,
     emit_container_logs,
@@ -1177,6 +1177,10 @@ def _configure_azents_server_container(
         .with_env("AWS_ACCESS_KEY_ID", rustfs_access_key)
         .with_env("AWS_SECRET_ACCESS_KEY", rustfs_secret_key)
         .with_env("AZ_AUTH_JWT_SECRET_KEY", auth_jwt_secret_key)
+        .with_env(
+            "AZ_TESTENV_GENERAL_FILE_MAXIMUM_BYTES",
+            str(E2E_GENERAL_FILE_MAXIMUM_BYTES),
+        )
         .with_env("AZ_CREDENTIAL_ENCRYPTION_KEY", credential_encryption_key)
         .with_env("AZ_SYSTEM_BOOTSTRAP_SETUP_TOKEN", system_bootstrap_setup_token)
         .with_env("AZ_REDIS_URL", "redis://valkey:6379")
@@ -1580,6 +1584,7 @@ def azents_core_service_containers(
     slack_provider_fake_container: DockerContainer,
     github_validation_proxy_container: DockerContainer,
     runtime_provider_bootstrap_source_path: Path,
+    azents_browser_s3_endpoint_url: str,
 ) -> Generator[_CoreServiceContainers, None, None]:
     """Start Public API, Admin API, and Engine Worker concurrently."""
     del (
@@ -1627,6 +1632,9 @@ def azents_core_service_containers(
     public_container = public_container.with_env(
         "AZ_RUNTIME_TRANSFER_COORDINATOR_ENDPOINT", "runtime-control:8030"
     ).with_env("AZ_RUNTIME_TRANSFER_COORDINATOR_ALLOW_INSECURE", "true")
+    public_container = public_container.with_env(
+        "AZ_WORKSPACE_S3_PUBLIC_ENDPOINT_URL", azents_browser_s3_endpoint_url
+    )
     admin_base_container = (
         DockerContainer(
             image=azents_server_image,
@@ -2845,6 +2853,7 @@ def azents_workspace_upload_gateway_container(
     config = """
 server {
     listen 8446 ssl;
+    access_log off;
     ssl_certificate /etc/nginx/tls/tls.crt;
     ssl_certificate_key /etc/nginx/tls/tls.key;
 
@@ -3270,6 +3279,35 @@ def azents_workspace_upload_gateway_url(
     host = azents_workspace_upload_gateway_container.get_container_host_ip()
     port = azents_workspace_upload_gateway_container.get_exposed_port(8446)
     return f"https://{host}:{port}"
+
+
+@pytest.fixture(scope="session")
+def azents_browser_s3_endpoint_url(
+    azents_workspace_upload_gateway_container: DockerContainer,
+) -> str:
+    """Use one exact TLS signing endpoint reachable from host and browser.
+
+    Published ports bind the Docker host. Its network gateway, unlike localhost,
+    is also reachable from Chromium inside the fixture network.
+    """
+    networks = _JSON_OBJECT_ADAPTER.validate_python(
+        azents_workspace_upload_gateway_container.get_wrapped_container().attrs[
+            "NetworkSettings"
+        ]["Networks"]
+    )
+    gateways = {
+        str(_JSON_OBJECT_ADAPTER.validate_python(network)["Gateway"])
+        for network in networks.values()
+    }
+    if len(gateways) != 1 or not next(iter(gateways)):
+        pytest.fail("Browser S3 endpoint requires one observed Docker host gateway.")
+    host = next(iter(gateways))
+    port = azents_workspace_upload_gateway_container.get_exposed_port(8446)
+    endpoint = f"https://{host}:{port}"
+    response = requests.get(f"{endpoint}/", timeout=10, verify=False)
+    if response.status_code >= 500:
+        pytest.fail("Browser S3 signing endpoint is not reachable.")
+    return endpoint
 
 
 # =============================================================================

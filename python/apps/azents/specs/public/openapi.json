@@ -5794,14 +5794,14 @@
         }
       }
     },
-    "/chat/v1/agents/{agent_id}/upload": {
+    "/chat/v1/agents/{agent_id}/uploads": {
       "post": {
         "tags": [
           "Chat v1"
         ],
-        "summary": "Upload File For Agent",
-        "description": "Upload only Exchange attachments scoped to the Agent.",
-        "operationId": "chat_v1_upload_file_for_agent",
+        "summary": "Prepare File Upload For Agent",
+        "description": "Authorize a metadata-only Chat upload and issue its direct PUT ticket.",
+        "operationId": "chat_v1_prepare_file_upload_for_agent",
         "security": [
           {
             "HTTPBearer": []
@@ -5821,13 +5821,70 @@
         "requestBody": {
           "required": true,
           "content": {
-            "multipart/form-data": {
+            "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/Body_chat_v1_upload_file_for_agent"
+                "$ref": "#/components/schemas/ChatUploadPrepareRequest"
               }
             }
           }
         },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatUploadPrepareResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/chat/v1/agents/{agent_id}/uploads/{upload_id}/finalize": {
+      "post": {
+        "tags": [
+          "Chat v1"
+        ],
+        "summary": "Finalize File Upload For Agent",
+        "description": "Publish an attachment only after trusted checksum/size verification.",
+        "operationId": "chat_v1_finalize_file_upload_for_agent",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "upload_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Upload Id"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -21642,20 +21699,6 @@
         "title": "AwsSecrets",
         "description": "AWS IAM based secrets for AWS Bedrock."
       },
-      "Body_chat_v1_upload_file_for_agent": {
-        "properties": {
-          "file": {
-            "type": "string",
-            "contentMediaType": "application/octet-stream",
-            "title": "File"
-          }
-        },
-        "type": "object",
-        "required": [
-          "file"
-        ],
-        "title": "Body_chat_v1_upload_file_for_agent"
-      },
       "BuiltinToolConfig": {
         "properties": {
           "name": {
@@ -22737,6 +22780,76 @@
         ],
         "title": "ChatStopResponse",
         "description": "REST stop response."
+      },
+      "ChatUploadPrepareRequest": {
+        "properties": {
+          "filename": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Filename"
+          },
+          "media_type": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 1,
+            "pattern": "^[^\\r\\n]+$",
+            "title": "Media Type"
+          },
+          "size": {
+            "type": "integer",
+            "maximum": 134217728.0,
+            "minimum": 0.0,
+            "title": "Size"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Sha256"
+          }
+        },
+        "type": "object",
+        "required": [
+          "filename",
+          "media_type",
+          "size",
+          "sha256"
+        ],
+        "title": "ChatUploadPrepareRequest",
+        "description": "Metadata-only manifest for one direct Chat attachment upload."
+      },
+      "ChatUploadPrepareResponse": {
+        "properties": {
+          "upload_id": {
+            "type": "string",
+            "title": "Upload Id"
+          },
+          "put_url": {
+            "type": "string",
+            "title": "Put Url"
+          },
+          "put_headers": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Put Headers"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "upload_id",
+          "put_url",
+          "put_headers",
+          "expires_at"
+        ],
+        "title": "ChatUploadPrepareResponse",
+        "description": "Transient exact-object PUT ticket; never an attachment publication."
       },
       "ChatWriteAcceptedResponse": {
         "properties": {

@@ -39,6 +39,7 @@ _MODEL_IMAGE_NORMALIZED_FORMAT = "jpeg"
 _ORIGINAL_NORMALIZED_FORMAT = "original"
 _IMAGE_JPEG_QUALITY = 85
 _NON_IMAGE_MAX_BYTES = 1_000_000
+_IMAGE_INPUT_SOURCE_MAX_BYTES = 20 * 1024 * 1024
 
 
 @dataclasses.dataclass(frozen=True)
@@ -108,6 +109,20 @@ def model_file_size_limit_message(error: ModelFileOversized) -> str:
         f"{error.actual_bytes} bytes > {error.max_bytes} bytes. "
         "This file was not stored as model input."
     )
+
+
+def model_file_source_size_error(
+    *, media_type: str, size_bytes: int
+) -> ModelFileOversized | None:
+    """Check trusted original metadata before reading a user attachment body."""
+    maximum = (
+        _IMAGE_INPUT_SOURCE_MAX_BYTES
+        if media_type.startswith(_IMAGE_MEDIA_PREFIX)
+        else _NON_IMAGE_MAX_BYTES
+    )
+    if size_bytes > maximum:
+        return ModelFileOversized(max_bytes=maximum, actual_bytes=size_bytes)
+    return None
 
 
 @dataclasses.dataclass

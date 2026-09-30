@@ -20,6 +20,7 @@ from azents.services.archived_session_retention import (
     ArchivedSessionRetentionService,
 )
 from azents.services.chat import ChatSessionService
+from azents.services.exchange_file import ExchangeFileService
 from azents.services.external_account_oauth.service import (
     ExternalAccountOAuthAttemptService,
 )
@@ -166,12 +167,20 @@ async def file_lifecycle_cleanup_handler(context: TaskContext) -> TaskResult:
     """Run bounded scheduler-owned file lifecycle cleanup."""
     service = await context.container.solve(FileLifecycleCleanupService)
     summary = await service.cleanup_once(lease_owner=context.lease_owner)
+    exchange_service = await context.container.solve(ExchangeFileService)
+    upload_operations_cleaned = await exchange_service.cleanup_agent_browser_uploads(
+        limit=100
+    )
+    result_counts = {
+        **summary.to_dict(),
+        "chat_upload_operations_cleaned": upload_operations_cleaned,
+    }
     logger.info(
         "File lifecycle cleanup completed",
         extra={
             "task_key": context.task_key,
             "manual_triggered": context.manual_triggered,
-            **summary.to_dict(),
+            **result_counts,
         },
     )
     return TaskResult(
@@ -179,7 +188,7 @@ async def file_lifecycle_cleanup_handler(context: TaskContext) -> TaskResult:
             "task_key": context.task_key,
             "attempt_started_at": context.attempt_started_at.isoformat(),
             "manual_triggered": context.manual_triggered,
-            **summary.to_dict(),
+            **result_counts,
         }
     )
 

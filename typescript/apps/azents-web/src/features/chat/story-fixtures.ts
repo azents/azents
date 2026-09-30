@@ -193,7 +193,7 @@ export const longUploadErrorFile: PendingFile = {
   ),
   status: "error",
   errorReason: "fileTooLarge",
-  errorDetail: "File size exceeds the 20 MB limit.",
+  errorDetail: "File size exceeds the 128 MiB limit.",
   errorRetryable: false,
 };
 

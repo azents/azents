@@ -93,6 +93,7 @@ class WorkspaceUploadObjectStoreS3(Protocol):
         *,
         identity: S3ObjectIdentity,
         content_type: str | None,
+        content_length: int,
         checksum_sha256: str,
         expires_in: timedelta,
         now: datetime | None = None,
@@ -206,6 +207,7 @@ class WorkspaceUploadObjectStore:
         request = await self.s3_service.get_upload_request(
             identity=self.ingress_identity(ingress_handle),
             content_type=record.admission.media_type,
+            content_length=record.admission.expected_size,
             checksum_sha256=expected_sha256,
             expires_in=expires_in,
             now=now,

@@ -1,14 +1,14 @@
 /// <reference lib="webworker" />
 
-import { IncrementalSha256 } from "./workspaceUploadSha256";
+import { IncrementalSha256 } from "./incrementalSha256";
 
 const HASH_CHUNK_SIZE = 4 * 1024 * 1024;
 
-interface HashRequest {
+interface FileHashRequest {
   file: File;
 }
 
-type HashResponse =
+type FileHashResponse =
   | { type: "progress"; loadedBytes: number; totalBytes: number }
   | { type: "done"; sha256: string };
 
@@ -27,15 +27,15 @@ async function hashFile(file: File): Promise<void> {
       type: "progress",
       loadedBytes,
       totalBytes: file.size,
-    } satisfies HashResponse);
+    } satisfies FileHashResponse);
   }
 
   self.postMessage({
     type: "done",
     sha256: hash.digestHex(),
-  } satisfies HashResponse);
+  } satisfies FileHashResponse);
 }
 
-self.onmessage = (event: MessageEvent<HashRequest>): void => {
+self.onmessage = (event: MessageEvent<FileHashRequest>): void => {
   void hashFile(event.data.file);
 };

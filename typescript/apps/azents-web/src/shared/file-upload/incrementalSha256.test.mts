@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";
 
-import { IncrementalSha256, sha256Hex } from "./workspaceUploadSha256.ts";
+import { IncrementalSha256, sha256Hex } from "./incrementalSha256.ts";
 
 function nodeSha256(value: Uint8Array): string {
   return createHash("sha256").update(value).digest("hex");

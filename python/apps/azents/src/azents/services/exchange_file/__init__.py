@@ -1,6 +1,7 @@
 """Exchange file service."""
 
 import asyncio
+import base64
 import dataclasses
 import datetime
 import hashlib
@@ -14,8 +15,10 @@ from typing import Annotated, NamedTuple, assert_never
 
 from azcommon.infra.s3.service import (
     S3ObjectIdentity,
+    S3PresignedRequest,
     S3ProductPublicationMetadata,
     S3Service,
+    S3TransferObjectMetadata,
 )
 from azcommon.result import Failure, Result, Success
 from azcommon.uuid import uuid7
@@ -31,6 +34,7 @@ from azents.core.enums import (
     ExchangeFileProvenanceKind,
     ExchangeFileStatus,
 )
+from azents.core.exchange_upload import ExchangeUploadError, ExchangeUploadState
 from azents.core.s3.deps import get_s3_service
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.exchange_file import ExchangeFileRepository, exchange_file_object_key
@@ -49,6 +53,7 @@ from azents.repos.exchange_file.operations import (
     ExchangeFileOperationRepository,
     ExchangeFilePreviewCreate,
 )
+from azents.repos.exchange_file.upload_data import ExchangeUploadOperation
 from azents.repos.file_metadata_authority import FileResourceAuthority
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.services.file_download_stream import BoundedDownloadStream
@@ -135,6 +140,19 @@ _PREVIEW_THUMBNAIL_MAX_SIZE = 512
 _PREVIEW_THUMBNAIL_MEDIA_TYPE = "image/jpeg"
 _MAX_TEXT_PREVIEW_CHARS = 2000
 _EXCHANGE_DOWNLOAD_STREAM_CHUNK_SIZE = 256 * 1024
+CHAT_UPLOAD_MAX_SIZE = 128 * 1024 * 1024
+_CHAT_UPLOAD_TICKET_TTL = datetime.timedelta(minutes=5)
+_CHAT_UPLOAD_OPERATION_TTL = datetime.timedelta(minutes=15)
+_CHAT_UPLOAD_FINALIZE_TIMEOUT = datetime.timedelta(minutes=5)
+_CHAT_UPLOAD_CLEANUP_GRACE = datetime.timedelta(minutes=15)
+
+
+@dataclasses.dataclass(frozen=True)
+class ExchangeUploadPreparation:
+    """Transient PUT capability for one authorized immutable manifest."""
+
+    upload_id: str
+    request: S3PresignedRequest
 
 
 class _PreviewProgress(NamedTuple):
@@ -448,6 +466,272 @@ class ExchangeFileService:
     ]
     s3_service: Annotated[S3Service, Depends(get_s3_service)]
     config: Annotated[Config, Depends(get_config)]
+
+    async def prepare_agent_browser_upload(
+        self,
+        *,
+        agent_id: str,
+        user_id: str,
+        filename: str,
+        media_type: str,
+        size: int,
+        sha256: str,
+    ) -> Result[ExchangeUploadPreparation, ExchangeUploadError]:
+        """Reserve an authorized manifest before issuing an exact-object PUT."""
+        if (
+            isinstance(size, bool)
+            or not 0 <= size <= self.config.general_file_maximum_bytes
+            or not media_type
+            or "\r" in media_type
+            or "\n" in media_type
+        ):
+            return Failure(ExchangeUploadError.INVALID_REQUEST)
+        now = datetime.datetime.now(datetime.UTC)
+        expires_at = now + _CHAT_UPLOAD_OPERATION_TTL
+        operation = await self.operation_repository.prepare_agent_upload_operation(
+            agent_id=agent_id,
+            user_id=user_id,
+            filename=sanitize_exchange_filename(filename),
+            media_type=media_type,
+            expected_size=size,
+            expected_sha256=sha256,
+            now=now,
+            expires_at=expires_at,
+            cleanup_after=expires_at + _CHAT_UPLOAD_CLEANUP_GRACE,
+        )
+        if isinstance(operation, Failure):
+            return operation
+        request = await self.s3_service.get_upload_request(
+            identity=self._browser_upload_identity(operation.value, "ingress"),
+            content_type=operation.value.media_type,
+            content_length=operation.value.expected_size,
+            checksum_sha256=operation.value.expected_sha256,
+            expires_in=_CHAT_UPLOAD_TICKET_TTL,
+            now=now,
+        )
+        return Success(
+            ExchangeUploadPreparation(
+                upload_id=operation.value.upload_id, request=request
+            )
+        )
+
+    async def finalize_agent_browser_upload(
+        self, *, agent_id: str, user_id: str, upload_id: str
+    ) -> Result[ExchangeFile, ExchangeUploadError]:
+        """Verify native checksum evidence before atomically publishing Exchange."""
+        now = datetime.datetime.now(datetime.UTC)
+        claim_id = uuid7().hex
+        claimed = await self.operation_repository.claim_agent_upload_operation(
+            agent_id=agent_id,
+            user_id=user_id,
+            upload_id=upload_id,
+            claim_id=claim_id,
+            now=now,
+            lease_until=now + _CHAT_UPLOAD_FINALIZE_TIMEOUT,
+        )
+        if isinstance(claimed, Failure):
+            return claimed
+        operation = claimed.value
+        if operation.state is ExchangeUploadState.FINALIZED:
+            return await self.operation_repository.load_agent_upload_publication(
+                agent_id=agent_id, user_id=user_id, upload_id=upload_id, now=now
+            )
+        try:
+            async with asyncio.timeout(_CHAT_UPLOAD_FINALIZE_TIMEOUT.total_seconds()):
+                source = self._browser_upload_identity(operation, "source")
+                if await self.s3_service.head(source) is None:
+                    ingress = self._browser_upload_identity(operation, "ingress")
+                    metadata = await self.s3_service.head_with_checksum(ingress)
+                    checksum = base64.b64encode(
+                        bytes.fromhex(operation.expected_sha256)
+                    ).decode("ascii")
+                    if (
+                        metadata is None
+                        or metadata.content_length != operation.expected_size
+                        or metadata.content_type != operation.media_type
+                        or metadata.checksum_sha256 != checksum
+                    ):
+                        return Failure(ExchangeUploadError.MANIFEST_MISMATCH)
+                    try:
+                        await self.s3_service.copy_immutable(
+                            source=ingress,
+                            destination=source,
+                            expected_size=operation.expected_size,
+                            transfer_metadata=S3TransferObjectMetadata(
+                                sha256=operation.expected_sha256,
+                                content_type=operation.media_type,
+                            ),
+                            multipart_copy_threshold=CHAT_UPLOAD_MAX_SIZE,
+                            multipart_part_size=8 * 1024 * 1024,
+                        )
+                    except FileExistsError:
+                        # A fenced prior claim may already have completed the same copy.
+                        pass
+                await self.s3_service.verify_transfer_object(
+                    identity=source,
+                    expected_size=operation.expected_size,
+                    expected_sha256=operation.expected_sha256,
+                )
+                prepared = await self._prepare_browser_upload_files(operation, source)
+                await self._upload_prepared_files(prepared)
+                return await self.operation_repository.finalize_agent_upload_operation(
+                    agent_id=agent_id,
+                    user_id=user_id,
+                    upload_id=upload_id,
+                    claim_id=claim_id,
+                    now=datetime.datetime.now(datetime.UTC),
+                    batch=self._create_batch(prepared),
+                )
+        except asyncio.CancelledError:
+            raise
+        except FileNotFoundError, ValueError:
+            return Failure(ExchangeUploadError.MANIFEST_MISMATCH)
+        finally:
+            # Stable operation-owned objects survive uncertain commits and retries.
+            # Expiry cleanup removes them only after delayed claims are fenced.
+            await self.operation_repository.release_agent_upload_claim(
+                upload_id=upload_id, claim_id=claim_id
+            )
+
+    def _browser_upload_identity(
+        self, operation: ExchangeUploadOperation, kind: str
+    ) -> S3ObjectIdentity:
+        """Derive private temporary keys exclusively from persisted ownership."""
+        return S3ObjectIdentity(
+            bucket=self.config.workspace_s3.bucket,
+            key=f"exchange-uploads/{operation.workspace_id}/{operation.upload_id}/{kind}",
+        )
+
+    async def _prepare_browser_upload_files(
+        self, operation: ExchangeUploadOperation, source: S3ObjectIdentity
+    ) -> list[_PreparedExchangeFile]:
+        """Keep existing previews and provenance without retaining original bytes."""
+        prepared = self._prepare_files(
+            workspace_id=operation.workspace_id,
+            agent_id=operation.agent_id,
+            source_user_id=operation.uploader_user_id,
+            source_run_id=None,
+            source_tool_name=None,
+            source_provider=None,
+            provenance_kind=ExchangeFileProvenanceKind.HUMAN,
+            filename=operation.filename,
+            media_type=operation.media_type,
+            body=b"",
+            origin_type=ExchangeFileOrigin.UPLOAD,
+            retention_root_session_id=None,
+        )
+        original = prepared[0]
+        create = original.create.model_copy(
+            update={
+                "id": operation.publication_id,
+                "size_bytes": operation.expected_size,
+                "sha256": operation.expected_sha256,
+                "preview_summary": await self._make_text_preview_from_object(
+                    source=source,
+                    media_type=operation.media_type,
+                    filename=operation.filename,
+                ),
+            }
+        )
+        prepared[0] = dataclasses.replace(
+            original,
+            create=create,
+            object_key=exchange_file_object_key(
+                workspace_id=operation.workspace_id, file_id=operation.publication_id
+            ),
+            body=None,
+            source=source,
+            publication_metadata=S3ProductPublicationMetadata(
+                sha256=operation.expected_sha256,
+                content_type=operation.media_type,
+                publication_id=operation.publication_id,
+            ),
+        )
+        # Image processing retains its independent 20 MiB semantic budget.
+        thumbnail = (
+            await self._make_thumbnail_from_object(
+                source=source, media_type=operation.media_type
+            )
+            if operation.expected_size <= 20 * 1024 * 1024
+            else None
+        )
+        if thumbnail is not None:
+            prepared.append(
+                _PreparedExchangeFile(
+                    create=create.model_copy(
+                        update={
+                            "id": operation.preview_file_id,
+                            "filename": f"{operation.filename}.preview.jpg",
+                            "media_type": _PREVIEW_THUMBNAIL_MEDIA_TYPE,
+                            "size_bytes": len(thumbnail.body),
+                            "sha256": hashlib.sha256(thumbnail.body).hexdigest(),
+                            "provenance_kind": ExchangeFileProvenanceKind.PREVIEW,
+                            "source_user_id": None,
+                            "source_exchange_file_id": operation.publication_id,
+                            "preview_title": f"{operation.filename} preview",
+                            "preview_summary": None,
+                            "preview_generated_at": thumbnail.generated_at,
+                        }
+                    ),
+                    object_key=exchange_file_object_key(
+                        workspace_id=operation.workspace_id,
+                        file_id=operation.preview_file_id,
+                    ),
+                    body=thumbnail.body,
+                    preview_width=thumbnail.width,
+                    preview_height=thumbnail.height,
+                    preview_generated_at=thumbnail.generated_at,
+                )
+            )
+        return prepared
+
+    async def cleanup_agent_browser_uploads(self, *, limit: int) -> int:
+        """Collect bounded operation-owned residues after capability/claim grace."""
+        now = datetime.datetime.now(datetime.UTC)
+        claim_id = uuid7().hex
+        operations = await self.operation_repository.claim_due_agent_upload_cleanup(
+            now=now,
+            claim_id=claim_id,
+            lease_until=now + _CHAT_UPLOAD_FINALIZE_TIMEOUT,
+            limit=limit,
+        )
+        completed = 0
+        for operation in operations:
+            identities = [
+                self._browser_upload_identity(operation, "ingress"),
+                self._browser_upload_identity(operation, "source"),
+            ]
+            if operation.state is ExchangeUploadState.PENDING:
+                identities.extend(
+                    S3ObjectIdentity(
+                        bucket=self.config.workspace_s3.bucket,
+                        key=exchange_file_object_key(
+                            workspace_id=operation.workspace_id, file_id=file_id
+                        ),
+                    )
+                    for file_id in (operation.publication_id, operation.preview_file_id)
+                )
+            for identity in identities:
+                page = await self.s3_service.list_multipart_uploads_page(
+                    bucket=identity.bucket,
+                    prefix=identity.key,
+                    maximum_uploads=100,
+                    key_marker=None,
+                    upload_id_marker=None,
+                )
+                for item in page.uploads:
+                    if item.upload.identity == identity:
+                        await self.s3_service.abort_multipart_upload(upload=item.upload)
+                if page.next_key_marker is not None or page.skipped_entries:
+                    # Resume the durable operation on the next bounded cleanup pass.
+                    break
+                await self.s3_service.delete(bucket=identity.bucket, key=identity.key)
+            else:
+                if await self.operation_repository.finish_agent_upload_cleanup(
+                    upload_id=operation.upload_id, claim_id=claim_id
+                ):
+                    completed += 1
+        return completed
 
     async def create_agent_upload(
         self,
