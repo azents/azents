@@ -7,6 +7,7 @@ from collections.abc import AsyncIterator, Mapping
 from contextlib import AbstractAsyncContextManager
 
 import httpx
+from pydantic import BaseModel, StrictInt, ValidationError
 
 from azents.core.external_channel_projection import (
     is_external_channel_projection,
@@ -32,6 +33,7 @@ from azents.services.external_channel.discord_sdk import (
     DiscordSDKCredentialsInvalid,
     DiscordSDKError,
     DiscordSDKMessage,
+    DiscordSDKMessageUnavailable,
     DiscordSDKPermissionDenied,
     DiscordSDKRateLimited,
     DiscordSDKRequestRejected,
@@ -638,12 +640,24 @@ def _typing_snapshot_targets(
     return list(by_channel.values())
 
 
+class _DiscordFixtureError(BaseModel):
+    """Strict provider error identity at the deterministic SDK boundary."""
+
+    code: StrictInt
+
+
 def _fixture_sdk_error(response: httpx.Response) -> DiscordSDKError:
     if response.status_code == 401:
         return DiscordSDKCredentialsInvalid()
     if response.status_code == 403:
         return DiscordSDKPermissionDenied()
     if response.status_code == 404:
+        try:
+            error = _DiscordFixtureError.model_validate_json(response.content)
+        except ValidationError:
+            return DiscordSDKResourceUnavailable()
+        if error.code == 10008:
+            return DiscordSDKMessageUnavailable()
         return DiscordSDKResourceUnavailable()
     if response.status_code == 429:
         retry_after = response.headers.get("Retry-After", "1")

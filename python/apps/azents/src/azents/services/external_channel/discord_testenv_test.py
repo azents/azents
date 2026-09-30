@@ -10,6 +10,11 @@ import pytest
 
 from azents.repos.external_channel.data import DiscordGatewayTypingTarget
 from azents.services.external_channel import discord_testenv
+from azents.services.external_channel.discord_delivery import _sdk_delivery_failure
+from azents.services.external_channel.discord_sdk import (
+    DiscordSDKMessageUnavailable,
+    DiscordSDKResourceUnavailable,
+)
 from azents.services.external_channel.discord_testenv import (
     DiscordGatewayError,
     DiscordTestenvGatewayRunner,
@@ -19,6 +24,37 @@ from azents.services.external_channel.discord_testenv import (
 
 class _GatewayIdleReached(Exception):
     """Stop the runner after it reaches the stable open state."""
+
+
+@pytest.mark.parametrize(
+    ("content", "confirmed_missing"),
+    [
+        (b'{"code":10008,"message":"Unknown Message"}', True),
+        (b'{"code":10003,"message":"Unknown Channel"}', False),
+        (b'{"code":10004,"message":"Unknown Guild"}', False),
+        (b'{"code":0,"message":"Not found"}', False),
+        (b'{"message":"Not found"}', False),
+        (b'{"code":"10008","message":"Unknown Message"}', False),
+        (b'{"code":true}', False),
+        (b'{"code":10008.0}', False),
+        (b'{"code":10008', False),
+        (b"null", False),
+    ],
+)
+def test_fixture_sdk_missing_message_classification_matches_production(
+    content: bytes,
+    confirmed_missing: bool,
+) -> None:
+    """Only a typed exact message error can permit Tracker identity retirement."""
+    error = discord_testenv._fixture_sdk_error(httpx.Response(404, content=content))
+    assert isinstance(error, DiscordSDKResourceUnavailable)
+    assert isinstance(error, DiscordSDKMessageUnavailable) is confirmed_missing
+    outcome = _sdk_delivery_failure(error)
+    assert outcome.status == "failed"
+    assert outcome.provider_message_key is None
+    assert outcome.error_kind == (
+        "message_not_found" if confirmed_missing else "resource_unavailable"
+    )
 
 
 def _typing_target(
