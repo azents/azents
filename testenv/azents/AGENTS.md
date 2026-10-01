@@ -1,6 +1,6 @@
 # testenv/azents — Agent Instructions
 
-This directory is the test substrate for preparing local infrastructure, fixtures, and external prerequisite snapshots required by azents E2E tests. Product behavior verification belongs primarily in E2E tests. Feature QA plans and evidence belong in design, issue, PR, or report context. `testenv` is not a long-term verification catalog or an E2E wrapper, and it does not primarily own product behavior validation.
+This directory is the test substrate for preparing local infrastructure, fixtures, and external prerequisite snapshots required by azents E2E tests. Representative E2E flows verify each feature's core behavior through the assembled product. Complex condition matrices, internal branches, validation permutations, and edge cases belong in narrower unit or integration tests. Feature QA plans and evidence belong in design, issue, PR, or report context. `testenv` is not a long-term verification catalog or an E2E wrapper.
 
 Coding and operational conventions for this area live in `.claude/rules/testenv-conventions.md`, including the no-direct-DB-write rule and live credential snapshot rules.
 
@@ -27,7 +27,7 @@ uv run testenv fixture up <fixture-id> --json
 - `bootstrap local` prepares only non-secret `.env`, Docker Compose infrastructure, the current-worktree devserver, `fixture up devserver`, and a doctor summary. It does not create external secrets, log in to Tailscale/OAuth, write directly to the product DB, or run E2E tests.
 - If a fixture is missing or stale, prepare it explicitly using `fixture doctor`, `fixture up`, or `fixture reset` guidance.
 - Legacy TC markdown, `run-tc`, verifier, and markdown bash fallback are not part of the event path.
-- When new product behavior needs verification, consider adding E2E coverage first. `testenv` should only provide fixture/prerequisite support that enables E2E execution.
+- When new product behavior needs verification, add or update representative E2E coverage for the feature's core behavior and cover complex conditions at the narrowest unit or integration layer that can prove them. `testenv` should only provide fixture/prerequisite support that enables E2E execution.
 - E2E tests that require external credentials/prerequisites must read a snapshot produced during the prepare phase instead of running doctor directly inside the test.
 - `prerequisite prepare` records external prerequisites such as Bedrock AWS shared credentials and browser/OAuth storage state as safe metadata only. Snapshots and CLI output must not contain raw secrets.
 
@@ -40,7 +40,9 @@ cd testenv/azents/e2e
 uv run pytest ./src/tests/required/public/test_health.py
 ```
 
-E2E is the primary location for product behavior verification. `testenv` is the fixture/prerequisite support layer that makes E2E execution possible.
+E2E owns representative verification of each feature's core behavior. Unit, component,
+and integration tests own exhaustive logic and presentation coverage. `testenv` is the
+fixture/prerequisite support layer that makes E2E execution possible.
 
 Complex UI state matrices, confirmation and error dialogs, copy, conditional controls,
 and responsive component interactions belong to frontend component or Storybook
