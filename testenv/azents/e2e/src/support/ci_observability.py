@@ -133,39 +133,28 @@ def render_summary(
         else None
     )
     summary = parse_junit(junit_path) if junit_path.is_file() else None
-    status = (
-        f"{summary.passed}/{summary.tests} passed"
-        if summary is not None
-        else "tests unavailable"
+    duration_text = (
+        _format_duration(duration) if duration is not None else "time unavailable"
     )
-    if summary is not None:
-        extras = [
-            f"{count} {label}"
-            for label, count in (
-                ("failed", summary.failures),
-                ("errors", summary.errors),
-                ("skipped", summary.skipped),
-            )
-            if count
-        ]
-        if extras:
-            status += f" · {', '.join(extras)}"
+    if summary is None:
+        state = "⚠️ Results unavailable"
+        metrics = f"Job `{_escape_text(job_result)}` · {duration_text}"
+    elif summary.failures or summary.errors:
+        state = "❌ Failed"
+        metrics = _lane_metrics(summary, duration_text)
+    elif job_result != "success":
+        state = f"⚠️ Job {_escape_text(job_result)}"
+        metrics = _lane_metrics(summary, duration_text)
+    else:
+        state = "✅ Passed"
+        metrics = _lane_metrics(summary, duration_text)
     lines = [
-        f"### {_escape_text(lane)}",
+        f"### {_escape_text(lane)} — {state}",
         "",
-        f"Job result: `{_escape_text(job_result)}`",
+        metrics,
         "",
     ]
-    if duration is not None:
-        lines.extend(
-            [
-                f"E2E execution time: **{_format_duration(duration)}**",
-                "",
-            ]
-        )
-    else:
-        lines.extend(["E2E execution time: **unavailable**", ""])
-    lines.extend(["<details>", f"<summary>Tests: {status}</summary>", ""])
+    lines.extend(["<details>", "<summary>Details</summary>", ""])
     if not junit_path.is_file():
         lines.extend(
             [
@@ -570,6 +559,22 @@ def _format_duration(duration_seconds: float) -> str:
     if minutes:
         return f"{minutes}m {seconds}s"
     return f"{seconds}s"
+
+
+def _lane_metrics(summary: JUnitSummary, duration: str) -> str:
+    if not summary.failures and not summary.errors and not summary.skipped:
+        return (
+            f"{summary.tests} {'test' if summary.tests == 1 else 'tests'} · {duration}"
+        )
+    values = [f"{summary.passed} passed"]
+    if summary.failures:
+        values.append(f"{summary.failures} failed")
+    if summary.errors:
+        values.append(f"{summary.errors} errors")
+    if summary.skipped:
+        values.append(f"{summary.skipped} skipped")
+    values.append(duration)
+    return " · ".join(values)
 
 
 def _build_parser() -> argparse.ArgumentParser:

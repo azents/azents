@@ -107,10 +107,36 @@ def test_markdown_keeps_summary_visible_and_evidence_collapsed() -> None:
     )
     markdown = render(report)
     visible = markdown.split("<details>", 1)[0]
-    assert "PASS" in visible
-    assert "candidate `90s` vs base `100s`" in visible
+    assert "✅ Within limit" in visible
+    assert "Candidate `90s` · Base `100s`" in visible
+    assert "Change `-10%` · Limit `110s`" in visible
     assert _HEAD not in visible
-    assert markdown.count("<details>") == markdown.count("</details>") == 1
+    assert "<summary>Details</summary>" in markdown
+    assert "<summary>Raw JSON</summary>" in markdown
+    assert markdown.count("<details>") == markdown.count("</details>") == 2
+
+
+def test_regression_and_unavailable_are_explained_in_plain_language() -> None:
+    regression = compare(
+        {"web-1": Decimal("111")},
+        Sample(7, {"web-1": Decimal("100")}),
+        _HEAD,
+        _BASE,
+    )
+    unavailable_report = {
+        **regression,
+        "outcome": "comparison_unavailable",
+        "reason": "compatible_base_run_unavailable",
+        "reference_seconds": None,
+        "threshold_seconds": None,
+        "increase_percent": None,
+    }
+
+    assert "❌ Over 10% limit" in render(regression)
+    assert "Candidate `111s` · Base `100s`" in render(regression)
+    unavailable_markdown = render(unavailable_report)
+    assert "⚠️ Comparison unavailable" in unavailable_markdown
+    assert "Base timing artifact unavailable" in unavailable_markdown
 
 
 def test_recheck_uses_latest_candidate_values_with_new_base(tmp_path: Path) -> None:
