@@ -26,7 +26,6 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/llm_catalog.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/097a97177350_create_operational_schema_baseline.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/4550a9c9083a_remove_catalog_execution_descriptors.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/2d91f8044dad_reconcile_validated_catalog_cutover_.py
   - python/apps/azents/src/azents/api/public/llm_provider_integration/v1/__init__.py
   - python/apps/azents/src/azents/api/public/llm_provider_integration/v1/data.py
   - python/apps/azents/src/azents/api/admin/model_catalog/v1/__init__.py
@@ -47,8 +46,8 @@ code_paths:
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
   - typescript/apps/azents-web/src/trpc/routers/workspace-model-settings.ts
   - typescript/apps/azents-admin-web/src/features/model-catalog/containers/useModelCatalogPageContainer.ts
-last_verified_at: 2026-09-30
-spec_version: 29
+last_verified_at: 2026-10-01
+spec_version: 30
 ---
 
 # Model Catalog Domain Spec
@@ -80,9 +79,9 @@ it does not merge catalogs or recreate IDs. Existing catalog/source/snapshot/att
 image-generation purpose separation remain intact. Historical Agent diagnostic snapshots and
 native conversation artifacts remain historical evidence, not execution inputs.
 
-Generated merge revision `2d91f8044dad` joins the unchanged, independently validated
-catalog cutover and current-main schema revision `43a0fbdc96fe`. It introduces no
-additional DDL or data transformation and retains the existing migration history.
+The new catalog cutover follows current-main schema revision `43a0fbdc96fe`
+directly, preserving one linear migration chain and leaving existing main
+migrations unchanged.
 
 ## Stored projection entries
 

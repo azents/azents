@@ -9,6 +9,10 @@ from sqlalchemy.engine import Engine
 
 from azents.rdb.models.base import RDBModel
 
+_RUNTIME_WEB_SERVICE_CUTOVER = "a32efa82fd63"
+_CATALOG_EXECUTION_CUTOVER = "4550a9c9083a"
+_PRE_CATALOG_EXECUTION_CUTOVER = "43a0fbdc96fe"
+
 
 def test_single_head_revision(alembic_runner: MigrationContext) -> None:
     """Require one deployable Alembic head."""
@@ -81,12 +85,35 @@ def test_runtime_web_service_cutover_is_forward_only(
     alembic_runner: MigrationContext,
 ) -> None:
     """Reject restoration of deleted Session-scoped Runtime Web authority."""
-    alembic_runner.migrate_up_to("head")
+    alembic_runner.migrate_up_to(_RUNTIME_WEB_SERVICE_CUTOVER)
     with pytest.raises(
         RuntimeError,
         match="Runtime Web service-management cutover is irreversible and forward-only",
     ):
         alembic_runner.migrate_down_to("097a97177350")
+
+
+def test_catalog_execution_cutover_is_forward_only(
+    alembic_runner: MigrationContext,
+    alembic_engine: Engine,
+) -> None:
+    """A later barrier must not mask the original Runtime Web barrier check."""
+    alembic_runner.migrate_up_to(_CATALOG_EXECUTION_CUTOVER)
+    with pytest.raises(
+        RuntimeError,
+        match="Catalog execution descriptor removal is irreversible",
+    ):
+        alembic_runner.migrate_down_to(_PRE_CATALOG_EXECUTION_CUTOVER)
+    with alembic_engine.connect() as connection:
+        revision = connection.execute(
+            sa.text("SELECT version_num FROM alembic_version")
+        ).scalar_one()
+    assert revision == _CATALOG_EXECUTION_CUTOVER
+    columns = {
+        column["name"]
+        for column in sa.inspect(alembic_engine).get_columns("llm_catalogs")
+    }
+    assert "lowerer_target" not in columns
 
 
 def test_all_check_constraints_are_named(

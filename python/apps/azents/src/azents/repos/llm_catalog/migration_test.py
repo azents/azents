@@ -10,6 +10,7 @@ import pytest
 import sqlalchemy as sa
 from alembic import command
 from alembic.config import Config as AlembicConfig
+from alembic.script import ScriptDirectory
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 from testcontainers.postgres import PostgresContainer
@@ -36,7 +37,6 @@ from azents.rdb.models.workspace import RDBWorkspace
 _OLD_REVISION = "841e7188d527"
 _CUTOVER_REVISION = "4550a9c9083a"
 _MAIN_REVISION = "43a0fbdc96fe"
-_MERGED_REVISION = "2d91f8044dad"
 _TABLES = (
     "workspaces",
     "llm_provider_integrations",
@@ -307,23 +307,25 @@ def test_fresh_database_has_only_semantic_catalog_identity(
 def test_fresh_database_includes_current_main_and_catalog_cutover(
     migration_database: _MigrationDatabase,
 ) -> None:
-    """The generated merge retains both independently validated histories."""
-    command.upgrade(migration_database.config, _MERGED_REVISION)
-    _assert_semantic_schema(migration_database.engine, revision=_MERGED_REVISION)
+    """The new cutover extends current main as one linear migration chain."""
+    scripts = ScriptDirectory.from_config(migration_database.config)
+    assert scripts.get_heads() == [_CUTOVER_REVISION]
+    cutover = scripts.get_revision(_CUTOVER_REVISION)
+    assert cutover is not None
+    assert cutover.down_revision == _MAIN_REVISION
+    assert all(
+        isinstance(revision.down_revision, str) or revision.down_revision is None
+        for revision in scripts.walk_revisions()
+    )
+    command.upgrade(migration_database.config, "head")
+    _assert_semantic_schema(migration_database.engine, revision=_CUTOVER_REVISION)
 
 
-@pytest.mark.parametrize(
-    ("starting_revision", "target_revision"),
-    [
-        (_OLD_REVISION, _CUTOVER_REVISION),
-        (_MAIN_REVISION, _MERGED_REVISION),
-    ],
-)
+@pytest.mark.parametrize("starting_revision", [_OLD_REVISION, _MAIN_REVISION])
 def test_upgrade_preserves_state_and_cleans_only_active_projection_keys(
     migration_database: _MigrationDatabase,
     monkeypatch: pytest.MonkeyPatch,
     starting_revision: str,
-    target_revision: str,
 ) -> None:
     """Existing selections, snapshots and image state survive without remote fetch."""
     command.upgrade(migration_database.config, starting_revision)
@@ -336,8 +338,8 @@ def test_upgrade_preserves_state_and_cleans_only_active_projection_keys(
 
     monkeypatch.setattr("httpx.AsyncClient.request", forbidden_remote)
     monkeypatch.setattr("httpx.Client.request", forbidden_remote)
-    command.upgrade(migration_database.config, target_revision)
-    _assert_semantic_schema(migration_database.engine, revision=target_revision)
+    command.upgrade(migration_database.config, _CUTOVER_REVISION)
+    _assert_semantic_schema(migration_database.engine, revision=_CUTOVER_REVISION)
     expected = before
     for row in expected["llm_catalogs"]:
         row.pop("lowerer_target")
@@ -365,7 +367,7 @@ def test_semantic_identity_collisions_abort_before_any_transition(
     scope: str,
 ) -> None:
     """Bounded preflight fails without deleting or merging unexpected catalogs."""
-    command.upgrade(migration_database.config, _OLD_REVISION)
+    command.upgrade(migration_database.config, _MAIN_REVISION)
     integration_id = _seed_upgrade(migration_database.engine)
     with migration_database.engine.begin() as connection:
         if scope == "integration":
@@ -398,7 +400,7 @@ def test_semantic_identity_collisions_abort_before_any_transition(
             connection.execute(
                 sa.text("SELECT version_num FROM alembic_version")
             ).scalar_one()
-            == _OLD_REVISION
+            == _MAIN_REVISION
         )
     assert "lowerer_target" in {
         column["name"]
