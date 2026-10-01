@@ -1912,6 +1912,7 @@ async def test_prepare_toolkits_enters_before_update_context() -> None:
                 ToolkitBinding(
                     toolkit=toolkit,
                     slug="dummy",
+                    base_slug="dummy",
                     use_prefix=False,
                     toolkit_type=None,
                 )
@@ -1946,6 +1947,7 @@ async def test_prepare_toolkits_reuses_same_session_key() -> None:
                 ToolkitBinding(
                     toolkit=first,
                     slug="same",
+                    base_slug="same",
                     use_prefix=False,
                     toolkit_type="mcp",
                 )
@@ -1956,6 +1958,7 @@ async def test_prepare_toolkits_reuses_same_session_key() -> None:
                 ToolkitBinding(
                     toolkit=second,
                     slug="same",
+                    base_slug="same",
                     use_prefix=True,
                     toolkit_type="mcp",
                 )
@@ -1985,6 +1988,7 @@ async def test_prepare_toolkits_replaces_auto_toolkit_on_context_change() -> Non
                 ToolkitBinding(
                     toolkit=stale,
                     slug="skill",
+                    base_slug="skill",
                     use_prefix=False,
                     toolkit_type=None,
                     source_revision="idle-workspace",
@@ -1996,6 +2000,7 @@ async def test_prepare_toolkits_replaces_auto_toolkit_on_context_change() -> Non
                 ToolkitBinding(
                     toolkit=current,
                     slug="skill",
+                    base_slug="skill",
                     use_prefix=False,
                     toolkit_type=None,
                     source_revision="run-workspace",
@@ -2030,6 +2035,7 @@ async def test_prepare_toolkits_reuses_registered_toolkit_across_senders() -> No
                 ToolkitBinding(
                     toolkit=first,
                     slug="github",
+                    base_slug="github",
                     use_prefix=True,
                     toolkit_type="github",
                 )
@@ -2040,6 +2046,7 @@ async def test_prepare_toolkits_reuses_registered_toolkit_across_senders() -> No
                 ToolkitBinding(
                     toolkit=second,
                     slug="github",
+                    base_slug="github",
                     use_prefix=True,
                     toolkit_type="github",
                 )

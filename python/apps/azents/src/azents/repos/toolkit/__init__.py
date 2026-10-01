@@ -12,6 +12,7 @@ from azents.core.crypto import CredentialCipher
 from azents.core.enums import ToolkitScopeType
 from azents.rdb.models.toolkit import (
     RDBAgentToolkit,
+    RDBAgentToolkitNamespaceReservation,
     RDBToolkitConfig,
     RDBToolkitScope,
 )
@@ -24,7 +25,8 @@ from .data import (
     DuplicateScope,
     DuplicateSlug,
     EffectiveToolkitConfig,
-    EffectiveToolkitSlugConflict,
+    EffectiveToolkitNamespaceMismatch,
+    EffectiveToolkitNamespaceMissing,
     EffectiveToolkitSource,
     NotFound,
     ToolkitConfig,
@@ -277,8 +279,18 @@ class ToolkitRepository:
                 RDBToolkitConfig,
                 relation.c.source,
                 relation.c.agent_toolkit_id,
+                RDBAgentToolkitNamespaceReservation.base_slug,
+                RDBAgentToolkitNamespaceReservation.namespace,
             )
             .join(relation, relation.c.toolkit_id == RDBToolkitConfig.id)
+            .outerjoin(
+                RDBAgentToolkitNamespaceReservation,
+                sa.and_(
+                    RDBAgentToolkitNamespaceReservation.agent_id == relation.c.agent_id,
+                    RDBAgentToolkitNamespaceReservation.toolkit_id
+                    == relation.c.toolkit_id,
+                ),
+            )
             .where(
                 relation.c.agent_id == agent_id,
                 relation.c.workspace_id == workspace_id,
@@ -289,16 +301,46 @@ class ToolkitRepository:
                 RDBToolkitConfig.id,
             )
         )
-        effective = [
+        rows = result.all()
+        missing = next(
+            (
+                rdb.id
+                for rdb, _source, _agent_toolkit_id, _base_slug, namespace in rows
+                if namespace is None
+            ),
+            None,
+        )
+        if missing is not None:
+            raise EffectiveToolkitNamespaceMissing(
+                agent_id=agent_id,
+                toolkit_id=missing,
+            )
+        mismatch = next(
+            (
+                (rdb.id, rdb.slug, base_slug)
+                for rdb, _source, _agent_toolkit_id, base_slug, _namespace in rows
+                if base_slug != rdb.slug
+            ),
+            None,
+        )
+        if mismatch is not None:
+            toolkit_id, toolkit_slug, reservation_base_slug = mismatch
+            raise EffectiveToolkitNamespaceMismatch(
+                agent_id=agent_id,
+                toolkit_id=toolkit_id,
+                toolkit_slug=toolkit_slug,
+                reservation_base_slug=reservation_base_slug,
+            )
+        return [
             EffectiveToolkitConfig(
                 toolkit=self._build(rdb),
                 source=EffectiveToolkitSource(source),
                 agent_toolkit_id=agent_toolkit_id,
+                namespace=namespace,
             )
-            for rdb, source, agent_toolkit_id in result.all()
+            for rdb, source, agent_toolkit_id, _base_slug, namespace in rows
+            if namespace is not None
         ]
-        self._assert_unique_effective_slugs(agent_id, effective)
-        return effective
 
     async def has_effective_slug_conflict(
         self,
@@ -450,23 +492,6 @@ class ToolkitRepository:
         )
         result = await session.execute(stmt)
         return [self._build(rdb) for rdb in result.scalars().all()]
-
-    @staticmethod
-    def _assert_unique_effective_slugs(
-        agent_id: str,
-        effective: list[EffectiveToolkitConfig],
-    ) -> None:
-        """Fail when persisted effective Toolkit slugs are not unique."""
-        by_slug: dict[str, list[str]] = {}
-        for item in effective:
-            by_slug.setdefault(item.toolkit.slug, []).append(item.toolkit.id)
-        for slug, toolkit_ids in by_slug.items():
-            if len(toolkit_ids) > 1:
-                raise EffectiveToolkitSlugConflict(
-                    agent_id=agent_id,
-                    slug=slug,
-                    toolkit_ids=tuple(sorted(toolkit_ids)),
-                )
 
     def _encrypt(self, plaintext: str | None) -> str | None:
         """Encrypt plaintext. Return None when None."""

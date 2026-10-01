@@ -1485,6 +1485,7 @@ async def resolve_agent_tools(
     registered_toolkit_config_ids: dict[int, str] = {}
     registered_toolkit_revisions: dict[int, str] = {}
     registered_toolkit_always_expose_tools: dict[int, bool] = {}
+    registered_toolkit_base_slugs: dict[int, str] = {}
     pending: list[
         tuple[
             ToolkitProvider[Any],
@@ -1538,9 +1539,11 @@ async def resolve_agent_tools(
                 toolkit_name=toolkit.name,
                 resolve=provider.resolve(validated_config, resolve_ctx),
             )
-            resolved.display_name = provider.name
+            resolved.display_name = toolkit.name
+            resolved.source_identity = provider.source_identity(validated_config)
             registered_toolkit_config_ids[id(resolved)] = toolkit.id
             registered_toolkit_revisions[id(resolved)] = str(toolkit.revision)
+            registered_toolkit_base_slugs[id(resolved)] = toolkit.slug
             registered_toolkit_always_expose_tools[id(resolved)] = (
                 toolkit.always_expose_tools
             )
@@ -1562,7 +1565,7 @@ async def resolve_agent_tools(
                 provider,
                 resolved,
                 validated_config,
-                toolkit.slug,
+                effective.namespace,
                 toolkit.prompt,
                 True,
                 toolkit.toolkit_type,
@@ -2164,6 +2167,7 @@ async def resolve_agent_tools(
         ToolkitBinding(
             toolkit=_resolved,
             slug=_slug,
+            base_slug=registered_toolkit_base_slugs.get(id(_resolved), _slug),
             use_prefix=_pfx,
             toolkit_type=_ttype,
             toolkit_config_id=registered_toolkit_config_ids.get(id(_resolved)),

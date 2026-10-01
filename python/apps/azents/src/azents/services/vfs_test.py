@@ -32,7 +32,7 @@ from azents.repos.session_execution import (
     CanonicalExecutionOwnerGenerationStaleError,
 )
 from azents.repos.toolkit import ToolkitRepository
-from azents.repos.toolkit.data import EffectiveToolkitSlugConflict
+from azents.repos.toolkit.data import EffectiveToolkitNamespaceMissing
 from azents.services.session_resource_authority import SessionExecutionOwner
 from azents.services.vfs import (
     GLOBAL_RELEASE_SOURCE,
@@ -271,10 +271,9 @@ class _ConflictingToolkitRepository:
     ) -> list[VfsEffectiveToolkitConfig]:
         """Fail before VFS publishes a partial provider projection."""
         del session, workspace_id
-        raise EffectiveToolkitSlugConflict(
+        raise EffectiveToolkitNamespaceMissing(
             agent_id=agent_id,
-            slug="duplicate",
-            toolkit_ids=("toolkit-1", "toolkit-2"),
+            toolkit_id="toolkit-1",
         )
 
 
@@ -420,7 +419,7 @@ async def test_preview_fails_closed_on_duplicate_effective_slug() -> None:
         required_provider_sources={},
     )
 
-    with pytest.raises(EffectiveToolkitSlugConflict):
+    with pytest.raises(EffectiveToolkitNamespaceMissing):
         await service.build_preview(
             agent_id="agent-1",
             workspace_id="workspace-1",

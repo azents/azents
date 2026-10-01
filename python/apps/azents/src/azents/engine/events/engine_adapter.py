@@ -5,7 +5,7 @@ import contextlib
 import dataclasses
 import datetime
 import logging
-from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from typing import Annotated, Protocol, assert_never
 
 import httpx
@@ -1030,6 +1030,11 @@ class AgentEngineAdapter:
                 inner=shared_tool_invoker,
                 dispatcher=hook_dispatcher,
                 providers=hook_providers,
+                toolkit_namespaces={
+                    name: entry.source.namespace
+                    for name, entry in catalog.entries.items()
+                    if entry.source.toolkit_config_id is not None
+                },
                 workspace_id=request.workspace_id,
                 agent_id=request.agent_id,
                 session_id=request.session_id,
@@ -1551,6 +1556,7 @@ class _HookedClientToolInvoker:
         inner: ClientToolInvoker,
         dispatcher: RuntimeHookDispatcher,
         providers: Sequence[RuntimeHookProviderRef],
+        toolkit_namespaces: Mapping[str, str],
         workspace_id: str,
         agent_id: str,
         session_id: str,
@@ -1559,6 +1565,7 @@ class _HookedClientToolInvoker:
         self.inner = inner
         self.dispatcher = dispatcher
         self._providers = list(providers)
+        self._toolkit_namespaces = dict(toolkit_namespaces)
         self._workspace_id = workspace_id
         self._agent_id = agent_id
         self._session_id = session_id
@@ -1573,7 +1580,7 @@ class _HookedClientToolInvoker:
         call: PreparedClientToolInvocation,
     ) -> UnboundedClientToolResult:
         """Run tool after applying before/after tool hooks."""
-        toolkit_slug = _toolkit_slug_from_tool_name(call.name)
+        toolkit_slug = self._toolkit_namespaces.get(call.name, "")
         before = await self.dispatcher.dispatch_before_tool_call(
             self._providers,
             BeforeToolCallHookContext(
@@ -1622,13 +1629,6 @@ class _HookedClientToolInvoker:
                 output=[OutputTextPart(text=after.output_text)],
             )
         return result
-
-
-def _toolkit_slug_from_tool_name(name: str) -> str:
-    """Extract toolkit slug from prefixed tool name."""
-    if "__" not in name:
-        return ""
-    return name.split("__", 1)[0]
 
 
 def _tool_result_text(result: UnboundedClientToolResult) -> str | None:

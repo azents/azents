@@ -6,7 +6,7 @@ import json
 import logging
 import time
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from types import MappingProxyType
 
 from pydantic import TypeAdapter
@@ -127,6 +127,8 @@ class ToolCatalog:
                     toolkit_type=entry.source.toolkit_type,
                     toolkit_name=entry.source.label,
                     toolkit_slug=entry.source.slug,
+                    toolkit_namespace=entry.source.namespace,
+                    source_identity=dict(entry.source.source_identity),
                 )
             }
         )
@@ -265,6 +267,8 @@ def _wire_variant_prompt_input(
         metadata["required_client_tool_model_profile"] = required_model_profile.value
     if entry.source.slug:
         metadata["slug"] = entry.source.slug
+    if entry.source.namespace:
+        metadata["namespace"] = entry.source.namespace
     if entry.source.toolkit_type is not None:
         metadata["toolkit_type"] = entry.source.toolkit_type
     if entry.source.display_name:
@@ -360,6 +364,7 @@ def _runtime_builtin_source() -> ToolCatalogSource:
     """Return source metadata for runtime-provided client tools."""
     return ToolCatalogSource(
         slug="builtin",
+        namespace="builtin",
         toolkit_type=None,
         toolkit_class="RuntimeBuiltinTool",
         display_name="Runtime",
@@ -428,6 +433,24 @@ async def build_tool_catalog(
             bound = (
                 tool.with_prefix(f"{binding.slug}__") if binding.use_prefix else tool
             )
+            if binding.toolkit_config_id is not None:
+                qualifier = _registered_source_qualifier(source)
+                bound = replace(
+                    bound,
+                    spec=bound.spec.model_copy(
+                        update={
+                            "description": (
+                                f"{bound.spec.description}\n\nSource: {qualifier}"
+                            )
+                        }
+                    ),
+                )
+            if bound.spec.name in tools:
+                previous = entries[bound.spec.name].source.toolkit_config_id
+                raise ValueError(
+                    "Duplicate final Toolkit tool name "
+                    f"{bound.spec.name}: {previous}, {binding.toolkit_config_id}"
+                )
             tools[bound.spec.name] = bound
             entries[bound.spec.name] = CatalogTool(
                 tool=bound,
@@ -450,20 +473,46 @@ async def build_tool_catalog(
 def _tool_catalog_source(binding: ToolkitBinding) -> ToolCatalogSource:
     """Retain searchable source and routing metadata for one Toolkit binding."""
     routing_metadata: list[tuple[str, str]] = []
+    if binding.base_slug:
+        routing_metadata.append(("slug", binding.base_slug))
     if binding.slug:
-        routing_metadata.append(("slug", binding.slug))
+        routing_metadata.append(("namespace", binding.slug))
     if binding.toolkit_type is not None:
         routing_metadata.append(("toolkit_type", binding.toolkit_type))
+    routing_metadata.extend(binding.toolkit.source_identity)
     return ToolCatalogSource(
-        slug=binding.slug,
+        slug=binding.base_slug,
+        namespace=binding.slug,
         toolkit_type=binding.toolkit_type,
         toolkit_class=binding.toolkit.__class__.__name__,
         display_name=binding.toolkit.display_name.strip(),
         use_prefix=binding.use_prefix,
         always_expose_tools=binding.always_expose_tools,
         toolkit_config_id=binding.toolkit_config_id,
+        source_identity=binding.toolkit.source_identity,
         routing_metadata=tuple(routing_metadata),
     )
+
+
+def _registered_source_qualifier(source: ToolCatalogSource) -> str:
+    """Return one bounded provider-visible registered Toolkit source qualifier."""
+    parts = [
+        _bounded_source_component(source.label, limit=96),
+        f"namespace {_bounded_source_component(source.namespace, limit=128)}",
+    ]
+    parts.extend(
+        f"{_bounded_source_component(key, limit=32)} "
+        f"{_bounded_source_component(value, limit=96)}"
+        for key, value in source.source_identity[:4]
+    )
+    return "; ".join(parts)
+
+
+def _bounded_source_component(value: str, *, limit: int) -> str:
+    """Bound one source component without removing later identity fields."""
+    if len(value) <= limit:
+        return value
+    return f"{value[: limit - 1]}…"
 
 
 def _toolkit_prompt_input(
@@ -499,7 +548,8 @@ def _toolkit_update_context_log_extra(
         "model": context.model,
         "run_index": context.run_index,
         "toolkit_index": index,
-        "toolkit_slug": binding.slug,
+        "toolkit_slug": binding.base_slug,
+        "toolkit_namespace": binding.slug,
         "toolkit_type": binding.toolkit_type,
         "toolkit_class": binding.toolkit.__class__.__name__,
         "toolkit_display_name": binding.toolkit.display_name,
@@ -527,8 +577,10 @@ def _toolkit_prompt_metadata(binding: ToolkitBinding) -> dict[str, str]:
         "use_prefix": str(binding.use_prefix).lower(),
         "always_expose_tools": str(binding.always_expose_tools).lower(),
     }
+    if binding.base_slug:
+        metadata["slug"] = binding.base_slug
     if binding.slug:
-        metadata["slug"] = binding.slug
+        metadata["namespace"] = binding.slug
     if binding.toolkit_type is not None:
         metadata["toolkit_type"] = binding.toolkit_type
     display_name = binding.toolkit.display_name.strip()

@@ -72,6 +72,7 @@ def _binding(
         binding=ToolkitBinding(
             toolkit=toolkit,
             slug=slug if slug is not None else key_name,
+            base_slug=slug if slug is not None else key_name,
             use_prefix=use_prefix,
             toolkit_type=toolkit_type,
             source_revision=source_revision,

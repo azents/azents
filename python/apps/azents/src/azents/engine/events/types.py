@@ -510,6 +510,8 @@ class ToolkitSourceSnapshot(BaseModel):
     toolkit_type: str = Field(min_length=1)
     toolkit_name: str = Field(min_length=1)
     toolkit_slug: str = Field(min_length=1)
+    toolkit_namespace: str | None = Field(default=None)
+    source_identity: dict[str, str] = Field(default_factory=dict)
 
 
 class ClientToolCallPayload(BaseModel):

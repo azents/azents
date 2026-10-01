@@ -782,6 +782,38 @@ async def _seed_slug_race(
                 """
             )
         )
+        await session.execute(
+            sa.text(
+                """
+                INSERT INTO agent_toolkit_namespace_reservations (
+                    id, agent_id, toolkit_id, base_slug, ordinal, namespace
+                )
+                VALUES (
+                    'namespace-race-owned',
+                    'agent-race',
+                    'toolkit-race-owned',
+                    'conflict',
+                    1,
+                    'conflict'
+                )
+                """
+            )
+        )
+        await session.execute(
+            sa.text(
+                """
+                INSERT INTO agent_toolkit_namespace_sequences (
+                    id, agent_id, base_slug, last_ordinal
+                )
+                VALUES (
+                    'sequence-race-owned',
+                    'agent-race',
+                    'conflict',
+                    1
+                )
+                """
+            )
+        )
 
 
 async def test_concurrent_shared_attach_and_slug_update_preserve_unique_namespace(
@@ -821,6 +853,7 @@ async def test_concurrent_shared_attach_and_slug_update_preserve_unique_namespac
         toolkit_registry={},
         github_runtime=MagicMock(),
     )
+    service.operations_repository.namespace_repository = ToolkitNamespaceRepository()
     start = asyncio.Event()
 
     async def attach() -> object:

@@ -164,6 +164,7 @@ async def test_build_tool_catalog_prefixes_and_lowers_native_schema() -> None:
             ToolkitBinding(
                 toolkit=_Toolkit(),
                 slug="demo",
+                base_slug="demo",
                 use_prefix=True,
             )
         ],
@@ -228,30 +229,35 @@ async def test_build_tool_catalog_classifies_direct_and_deferred_tools() -> None
             ToolkitBinding(
                 toolkit=_Toolkit(),
                 slug="core",
+                base_slug="core",
                 use_prefix=False,
                 toolkit_type=None,
             ),
             ToolkitBinding(
                 toolkit=_Toolkit(),
                 slug="azents",
+                base_slug="azents",
                 use_prefix=True,
                 toolkit_type="github",
             ),
             ToolkitBinding(
                 toolkit=_InlineToolkit(switch_installation),
                 slug="github",
+                base_slug="github",
                 use_prefix=True,
                 toolkit_type="github",
             ),
             ToolkitBinding(
                 toolkit=_InlineToolkit(channel_action),
                 slug="external_channel",
+                base_slug="external_channel",
                 use_prefix=False,
                 toolkit_type=None,
             ),
             ToolkitBinding(
                 toolkit=_InlineToolkit(download_external_file),
                 slug="external_channel",
+                base_slug="external_channel",
                 use_prefix=False,
                 toolkit_type=None,
             ),
@@ -282,6 +288,7 @@ async def test_build_tool_catalog_exposes_all_opted_in_toolkit_tools_directly() 
             ToolkitBinding(
                 toolkit=_Toolkit(),
                 slug="critical",
+                base_slug="critical",
                 use_prefix=True,
                 toolkit_type="mcp",
                 toolkit_config_id="toolkit-config-1",
@@ -310,6 +317,7 @@ async def test_catalog_enriches_registered_tool_call_with_source_snapshot() -> N
             ToolkitBinding(
                 toolkit=toolkit,
                 slug="github",
+                base_slug="github",
                 use_prefix=True,
                 toolkit_type="github",
                 toolkit_config_id="toolkit-config-1",
@@ -339,7 +347,104 @@ async def test_catalog_enriches_registered_tool_call_with_source_snapshot() -> N
         "toolkit_type": "github",
         "toolkit_name": "GitHub",
         "toolkit_slug": "github",
+        "toolkit_namespace": "github",
+        "source_identity": {},
     }
+
+
+async def test_catalog_uses_effective_namespace_and_source_qualifier() -> None:
+    """Separate the stored base Slug from the final model-visible namespace."""
+    toolkit = _Toolkit()
+    toolkit.display_name = "Production MCP"
+    toolkit.source_identity = (("server", "https://mcp.example"),)
+    catalog = await build_tool_catalog(
+        toolkit_bindings=[
+            ToolkitBinding(
+                toolkit=toolkit,
+                slug="mcp_2",
+                base_slug="mcp",
+                use_prefix=True,
+                toolkit_type="mcp",
+                toolkit_config_id="toolkit-config-2",
+            )
+        ],
+        context=TurnContext(
+            workspace_id="workspace-1",
+            model="gpt-5.1",
+            run_id="run-1",
+            publish_event=_noop_publish,
+        ),
+    )
+
+    entry = catalog.entries["mcp_2__echo"]
+    assert entry.source.slug == "mcp"
+    assert entry.source.namespace == "mcp_2"
+    assert entry.source.display_name == "Production MCP"
+    assert entry.source.source_identity == (("server", "https://mcp.example"),)
+    assert "Source: Production MCP; namespace mcp_2" in entry.tool.spec.description
+    assert "server https://mcp.example" in entry.tool.spec.description
+
+
+async def test_catalog_rejects_duplicate_final_names_before_publication() -> None:
+    """Fail instead of silently overwriting two equal final catalog names."""
+    first = _Toolkit()
+    second = _Toolkit()
+    with pytest.raises(ValueError, match="Duplicate final Toolkit tool name"):
+        await build_tool_catalog(
+            toolkit_bindings=[
+                ToolkitBinding(
+                    toolkit=first,
+                    slug="mcp",
+                    base_slug="mcp",
+                    use_prefix=True,
+                    toolkit_type="mcp",
+                    toolkit_config_id="toolkit-config-1",
+                ),
+                ToolkitBinding(
+                    toolkit=second,
+                    slug="mcp",
+                    base_slug="other",
+                    use_prefix=True,
+                    toolkit_type="mcp",
+                    toolkit_config_id="toolkit-config-2",
+                ),
+            ],
+            context=TurnContext(
+                workspace_id="workspace-1",
+                model="gpt-5.1",
+                run_id="run-1",
+                publish_event=_noop_publish,
+            ),
+        )
+
+
+async def test_source_qualifier_retains_namespace_after_long_toolkit_name() -> None:
+    """Bound the Name without truncating namespace or connection identity."""
+    toolkit = _Toolkit()
+    toolkit.display_name = "N" * 255
+    toolkit.source_identity = (("server", "https://mcp.example"),)
+    catalog = await build_tool_catalog(
+        toolkit_bindings=[
+            ToolkitBinding(
+                toolkit=toolkit,
+                slug="mcp_2",
+                base_slug="mcp",
+                use_prefix=True,
+                toolkit_type="mcp",
+                toolkit_config_id="toolkit-config-long-name",
+            )
+        ],
+        context=TurnContext(
+            workspace_id="workspace-1",
+            model="gpt-5.1",
+            run_id="run-1",
+            publish_event=_noop_publish,
+        ),
+    )
+
+    description = catalog.entries["mcp_2__echo"].tool.spec.description
+    assert "namespace mcp_2" in description
+    assert "server https://mcp.example" in description
 
 
 async def test_extend_tool_catalog_marks_runtime_builtin_direct() -> None:
@@ -379,6 +484,7 @@ async def test_build_tool_catalog_separates_dynamic_prompt_layer() -> None:
             ToolkitBinding(
                 toolkit=_DynamicPromptToolkit(),
                 slug="memory",
+                base_slug="memory",
                 use_prefix=True,
             )
         ],
@@ -417,6 +523,7 @@ async def test_native_tools_are_sorted_by_function_name() -> None:
             ToolkitBinding(
                 toolkit=_InlineToolkit(tool),
                 slug="",
+                base_slug="",
                 use_prefix=False,
             )
             for tool in tools
@@ -441,7 +548,7 @@ async def test_client_tool_executor_returns_event_result() -> None:
     """Convert Tool handler result to event client_tool_result."""
     catalog = await build_tool_catalog(
         toolkit_bindings=[
-            ToolkitBinding(toolkit=_Toolkit(), slug="", use_prefix=False)
+            ToolkitBinding(toolkit=_Toolkit(), slug="", base_slug="", use_prefix=False)
         ],
         context=TurnContext(
             workspace_id="workspace-1",
@@ -494,6 +601,7 @@ async def test_client_tool_executor_binds_exact_call_identity() -> None:
                     )
                 ),
                 slug="",
+                base_slug="",
                 use_prefix=False,
             )
         ],
@@ -544,6 +652,7 @@ async def test_client_tool_executor_preserves_failed_result_metadata() -> None:
                     )
                 ),
                 slug="",
+                base_slug="",
                 use_prefix=False,
             )
         ],
@@ -597,6 +706,7 @@ async def test_client_tool_executor_applies_global_text_output_cap() -> None:
                     )
                 ),
                 slug="",
+                base_slug="",
                 use_prefix=False,
             )
         ],
@@ -646,6 +756,7 @@ async def test_client_tool_invoker_preserves_text_before_global_cap() -> None:
                     )
                 ),
                 slug="",
+                base_slug="",
                 use_prefix=False,
             )
         ],
@@ -706,6 +817,7 @@ async def test_client_tool_executor_caps_structured_text_output_parts() -> None:
                     )
                 ),
                 slug="",
+                base_slug="",
                 use_prefix=False,
             )
         ],
@@ -767,6 +879,7 @@ async def test_client_tool_executor_carries_transient_generated_files() -> None:
                     )
                 ),
                 slug="",
+                base_slug="",
                 use_prefix=False,
             )
         ],
@@ -826,6 +939,7 @@ async def test_client_tool_executor_preserves_function_tool_result_metadata() ->
                     )
                 ),
                 slug="",
+                base_slug="",
                 use_prefix=False,
             )
         ],
@@ -884,6 +998,7 @@ async def test_client_tool_executor_dispatches_cancel_handler() -> None:
                     )
                 ),
                 slug="",
+                base_slug="",
                 use_prefix=False,
             )
         ],
@@ -923,6 +1038,7 @@ async def test_client_tool_executor_migrates_function_tool_result_parts() -> Non
             ToolkitBinding(
                 toolkit=_FunctionToolResultToolkit(),
                 slug="",
+                base_slug="",
                 use_prefix=False,
             )
         ],
@@ -1006,6 +1122,7 @@ async def test_client_tool_executor_rejects_dialect_mismatch_before_handler() ->
                     )
                 ),
                 slug="",
+                base_slug="",
                 use_prefix=False,
             )
         ],
@@ -1068,6 +1185,7 @@ async def test_client_tool_executor_rejects_json_for_custom_declaration() -> Non
                     )
                 ),
                 slug="",
+                base_slug="",
                 use_prefix=False,
             )
         ],

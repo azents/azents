@@ -14,7 +14,8 @@ from azents.repos.github_platform_system_setting.repository import (
 
 from . import AgentToolkitRepository, ToolkitRepository
 from .data import (
-    EffectiveToolkitSlugConflict,
+    EffectiveToolkitNamespaceMismatch,
+    EffectiveToolkitNamespaceMissing,
     EffectiveToolkitSource,
     ToolkitCreate,
     ToolkitUpdate,
@@ -234,6 +235,48 @@ async def _seed_effective_toolkits(session: AsyncSession) -> None:
             """
         )
     )
+    await session.execute(
+        sa.text(
+            """
+            INSERT INTO agent_toolkit_namespace_reservations (
+                id, agent_id, toolkit_id, base_slug, ordinal, namespace
+            )
+            VALUES
+                (
+                    'namespace-effective-shared',
+                    'agent-effective-1',
+                    'toolkit-effective-shared',
+                    'shared',
+                    1,
+                    'shared'
+                ),
+                (
+                    'namespace-effective-owned-1',
+                    'agent-effective-1',
+                    'toolkit-effective-owned-1',
+                    'private',
+                    1,
+                    'private'
+                ),
+                (
+                    'namespace-effective-owned-2',
+                    'agent-effective-2',
+                    'toolkit-effective-owned-2',
+                    'private',
+                    1,
+                    'private'
+                ),
+                (
+                    'namespace-effective-disabled',
+                    'agent-effective-1',
+                    'toolkit-effective-disabled',
+                    'disabled',
+                    1,
+                    'disabled'
+                )
+            """
+        )
+    )
     await session.flush()
 
 
@@ -290,22 +333,54 @@ async def test_effective_relation_unions_shared_and_owned_without_projection_lea
     assert [toolkit.id for toolkit in shared] == ["toolkit-effective-shared"]
 
 
-async def test_effective_relation_fails_closed_on_duplicate_slug(
+async def test_effective_relation_allows_duplicate_slug_with_distinct_namespaces(
     rdb_session: AsyncSession,
 ) -> None:
-    """Reject cross-source duplicate slugs before a consumer sees partial state."""
+    """Return duplicate base Slugs through the durable namespace authority."""
     await _seed_effective_toolkits(rdb_session)
     await rdb_session.execute(
         sa.text(
             """
             UPDATE toolkit_configs
             SET slug = 'private'
-            WHERE id = 'toolkit-effective-shared'
+            WHERE id = 'toolkit-effective-shared';
+
+            UPDATE agent_toolkit_namespace_reservations
+            SET base_slug = 'private', ordinal = 2, namespace = 'private_2'
+            WHERE toolkit_id = 'toolkit-effective-shared'
             """
         )
     )
 
-    with pytest.raises(EffectiveToolkitSlugConflict) as exc_info:
+    effective = await ToolkitRepository().list_effective_for_agent(
+        rdb_session,
+        "agent-effective-1",
+        workspace_id="workspace-effective",
+    )
+
+    assert [
+        (item.toolkit.id, item.toolkit.slug, item.namespace) for item in effective
+    ] == [
+        ("toolkit-effective-shared", "private", "private_2"),
+        ("toolkit-effective-owned-1", "private", "private"),
+    ]
+
+
+async def test_effective_relation_fails_closed_on_missing_namespace(
+    rdb_session: AsyncSession,
+) -> None:
+    """Reject an effective Toolkit whose Foundation authority is missing."""
+    await _seed_effective_toolkits(rdb_session)
+    await rdb_session.execute(
+        sa.text(
+            """
+            DELETE FROM agent_toolkit_namespace_reservations
+            WHERE toolkit_id = 'toolkit-effective-shared'
+            """
+        )
+    )
+
+    with pytest.raises(EffectiveToolkitNamespaceMissing) as exc_info:
         await ToolkitRepository().list_effective_for_agent(
             rdb_session,
             "agent-effective-1",
@@ -313,11 +388,35 @@ async def test_effective_relation_fails_closed_on_duplicate_slug(
         )
 
     assert exc_info.value.agent_id == "agent-effective-1"
-    assert exc_info.value.slug == "private"
-    assert exc_info.value.toolkit_ids == (
-        "toolkit-effective-owned-1",
-        "toolkit-effective-shared",
+    assert exc_info.value.toolkit_id == "toolkit-effective-shared"
+
+
+async def test_effective_relation_fails_closed_on_stale_base_slug(
+    rdb_session: AsyncSession,
+) -> None:
+    """Reject a namespace mapping left stale by an older rolling writer."""
+    await _seed_effective_toolkits(rdb_session)
+    await rdb_session.execute(
+        sa.text(
+            """
+            UPDATE toolkit_configs
+            SET slug = 'renamed'
+            WHERE id = 'toolkit-effective-shared'
+            """
+        )
     )
+
+    with pytest.raises(EffectiveToolkitNamespaceMismatch) as exc_info:
+        await ToolkitRepository().list_effective_for_agent(
+            rdb_session,
+            "agent-effective-1",
+            workspace_id="workspace-effective",
+        )
+
+    assert exc_info.value.agent_id == "agent-effective-1"
+    assert exc_info.value.toolkit_id == "toolkit-effective-shared"
+    assert exc_info.value.toolkit_slug == "renamed"
+    assert exc_info.value.reservation_base_slug == "shared"
 
 
 async def test_platform_impact_counts_shared_and_direct_owner_agents(

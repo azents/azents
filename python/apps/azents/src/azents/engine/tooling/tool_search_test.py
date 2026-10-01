@@ -60,6 +60,7 @@ def _entry(
         ),
         source=ToolCatalogSource(
             slug=slug,
+            namespace=slug,
             toolkit_type=toolkit_type,
             toolkit_class="TestToolkit",
             display_name="GitHub",
