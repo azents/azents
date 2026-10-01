@@ -5,23 +5,16 @@ import binascii
 import datetime
 import json
 from collections.abc import Sequence
-from typing import NamedTuple
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.enums import (
-    AgentSessionKind,
-    AgentSessionProductMode,
-    AgentSessionStatus,
-    EventKind,
-)
+from azents.core.enums import EventKind
 from azents.engine.events.action_messages import ActionMessagePayload
 from azents.engine.events.types import (
     AssistantMessagePayload,
     ClientToolCallPayload,
     ClientToolResultPayload,
-    Event,
     ExternalChannelMessagePayload,
     InputTextPart,
     OutputTextPart,
@@ -34,13 +27,15 @@ from azents.engine.run.types import FunctionTool, FunctionToolError
 from azents.engine.tooling.make_tool import make_tool
 from azents.rdb.session import SessionManager
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSession
 from azents.repos.message import MessageRepository
+from azents.repos.session_history.operations import (
+    SessionHistoryEvent,
+    SessionHistoryOperationRepository,
+    SessionHistoryUnavailableError,
+)
 from azents.repos.session_history.repository import (
     SEARCHABLE_KINDS,
-    VISIBLE_KINDS,
     SessionHistoryRepository,
-    SessionHistoryScope,
 )
 from azents.repos.workspace_user import WorkspaceUserRepository
 
@@ -51,13 +46,6 @@ _EVENT_TEXT_LIMIT = 1800
 _RESULT_TEXT_LIMIT = 2000
 _SNIPPET_LIMIT = 240
 _TOOL_NAME_LIMIT = 160
-
-
-class ActiveSessionRoot(NamedTuple):
-    """Concrete execution Session and its privacy root."""
-
-    concrete: AgentSession
-    root: AgentSession
 
 
 class SearchSessionsInput(BaseModel):
@@ -150,90 +138,6 @@ def _decode_cursor[CursorT: BaseModel](value: str, model: type[CursorT]) -> Curs
         raise FunctionToolError("Invalid history cursor") from exc
 
 
-async def _active_root(
-    session: AsyncSession,
-    session_id: str,
-    repo: AgentSessionRepository,
-) -> ActiveSessionRoot:
-    """Resolve a concrete Session and its active privacy root."""
-    concrete = await repo.get_by_id(session, session_id)
-    if concrete is None or concrete.status is not AgentSessionStatus.ACTIVE:
-        raise FunctionToolError(_UNAVAILABLE)
-    if concrete.session_kind is AgentSessionKind.ROOT:
-        return ActiveSessionRoot(concrete=concrete, root=concrete)
-    if concrete.session_kind is not AgentSessionKind.SUBAGENT:
-        raise FunctionToolError(_UNAVAILABLE)
-    root_agent = await repo.get_root_session_agent_by_session_id(session, session_id)
-    if root_agent is None:
-        raise FunctionToolError(_UNAVAILABLE)
-    root = await repo.get_by_id(session, root_agent.agent_session_id)
-    if (
-        root is None
-        or root.session_kind is not AgentSessionKind.ROOT
-        or root.status is not AgentSessionStatus.ACTIVE
-        or root.agent_id != concrete.agent_id
-        or root.workspace_id != concrete.workspace_id
-    ):
-        raise FunctionToolError(_UNAVAILABLE)
-    return ActiveSessionRoot(concrete=concrete, root=root)
-
-
-async def _source_scope(
-    session: AsyncSession,
-    *,
-    current_session_id: str,
-    agent_id: str,
-    repo: AgentSessionRepository,
-    users: WorkspaceUserRepository,
-) -> SessionHistoryScope:
-    """Bind search/read authority to this execution's root, never tool input."""
-    root = (await _active_root(session, current_session_id, repo)).root
-    if root.agent_id != agent_id:
-        raise FunctionToolError(_UNAVAILABLE)
-    if root.product_mode is AgentSessionProductMode.TEAM:
-        owner = None
-    elif root.product_mode is AgentSessionProductMode.USER:
-        owner = root.associated_user_id
-        if (
-            owner is None
-            or await users.get_by_workspace_and_user(
-                session, workspace_id=root.workspace_id, user_id=owner
-            )
-            is None
-        ):
-            raise FunctionToolError(_UNAVAILABLE)
-    else:
-        raise FunctionToolError(_UNAVAILABLE)
-    return SessionHistoryScope(
-        agent_id=agent_id,
-        workspace_id=root.workspace_id,
-        associated_user_id=owner,
-    )
-
-
-async def _target(
-    session: AsyncSession,
-    *,
-    session_id: str,
-    scope: SessionHistoryScope,
-    repo: AgentSessionRepository,
-) -> AgentSession:
-    """Authorize a known target independently of any previous search hit."""
-    binding = await _active_root(session, session_id, repo)
-    concrete, root = binding.concrete, binding.root
-    if root.agent_id != scope.agent_id or root.workspace_id != scope.workspace_id:
-        raise FunctionToolError(_UNAVAILABLE)
-    if root.product_mode is AgentSessionProductMode.TEAM:
-        return concrete
-    if (
-        root.product_mode is AgentSessionProductMode.USER
-        and scope.associated_user_id is not None
-        and root.associated_user_id == scope.associated_user_id
-    ):
-        return concrete
-    raise FunctionToolError(_UNAVAILABLE)
-
-
 def _content_text(content: str | Sequence[object]) -> str:
     """Project only semantic text parts, without attachment or file metadata."""
     if isinstance(content, str):
@@ -268,7 +172,7 @@ def _snippet(text: str, query: str) -> str:
     return text[start : start + _SNIPPET_LIMIT]
 
 
-def _render_event(event: Event) -> dict[str, object]:
+def _render_event(event: SessionHistoryEvent) -> dict[str, object]:
     """Allowlist semantic fields only; never serialize raw event payloads."""
     payload = event.payload
     data: dict[str, object] = {
@@ -310,17 +214,17 @@ def make_session_history_tools(
     users = WorkspaceUserRepository()
     history = SessionHistoryRepository()
     messages = MessageRepository()
+    operations = SessionHistoryOperationRepository(
+        session_manager=session_manager,
+        agent_session_repository=agent_sessions,
+        workspace_user_repository=users,
+        history_repository=history,
+        message_repository=messages,
+    )
 
     async def search_sessions(args: SearchSessionsInput) -> str:
         """Search permitted active Sessions or a selected Session's messages."""
-        async with session_manager() as session:
-            scope = await _source_scope(
-                session,
-                current_session_id=current_session_id,
-                agent_id=agent_id,
-                repo=agent_sessions,
-                users=users,
-            )
+        try:
             query = (args.query or "").strip()
             if args.session_id is not None:
                 target_id = (
@@ -328,22 +232,18 @@ def make_session_history_tools(
                     if args.session_id == "current"
                     else args.session_id
                 )
-                target = await _target(
-                    session,
-                    session_id=target_id,
-                    scope=scope,
-                    repo=agent_sessions,
-                )
-                page = await history.search_events(
-                    session,
-                    session_id=target.id,
+                result = await operations.search_in_session(
+                    agent_id=agent_id,
+                    current_session_id=current_session_id,
+                    target_session_id=target_id,
                     query=query,
                     limit=_SEARCH_LIMIT,
                     before=args.cursor,
                 )
+                page = result.page
                 return json.dumps(
                     {
-                        "session_id": target.id,
+                        "session_id": result.session_id,
                         "matches": [
                             {
                                 "event_id": hit.event_id,
@@ -367,9 +267,9 @@ def make_session_history_tools(
             if args.cursor is not None:
                 cursor = _decode_cursor(args.cursor, _RootSearchCursor)
                 before = (cursor.time, cursor.session)
-            page = await history.search_roots(
-                session,
-                scope=scope,
+            page = await operations.search_roots(
+                agent_id=agent_id,
+                current_session_id=current_session_id,
                 query=query,
                 limit=_SEARCH_LIMIT,
                 before=before,
@@ -400,72 +300,45 @@ def make_session_history_tools(
                 },
                 ensure_ascii=False,
             )
+        except SessionHistoryUnavailableError:
+            raise FunctionToolError(_UNAVAILABLE) from None
 
     async def read_session_history(args: ReadSessionHistoryInput) -> str:
         """Read a newest, older, newer, or search-anchored visible history page."""
-        async with session_manager() as session:
-            scope = await _source_scope(
-                session,
-                current_session_id=current_session_id,
+        try:
+            page = await operations.read_history(
                 agent_id=agent_id,
-                repo=agent_sessions,
-                users=users,
-            )
-            target = await _target(
-                session,
-                session_id=args.session_id,
-                scope=scope,
-                repo=agent_sessions,
-            )
-            if args.around_event_id is not None:
-                anchor = await messages.get_by_id(session, args.around_event_id)
-                if (
-                    anchor is None
-                    or anchor.session_id != target.id
-                    or anchor.reverted
-                    or anchor.kind not in VISIBLE_KINDS
-                ):
-                    raise FunctionToolError(_UNAVAILABLE)
-            page = await messages.list_events_by_session_id_paginated(
-                session,
-                target.id,
+                current_session_id=current_session_id,
+                target_session_id=args.session_id,
                 limit=_PAGE_LIMIT,
                 before=args.before,
                 after=args.after,
-                around=args.around_event_id,
-                visible_kinds=VISIBLE_KINDS,
+                around_event_id=args.around_event_id,
             )
             return json.dumps(
                 {
-                    "session_id": target.id,
+                    "session_id": page.session_id,
                     "events": [_render_event(event) for event in page.items],
-                    "has_older": page.has_more,
+                    "has_older": page.has_older,
                     "has_newer": page.has_newer,
                     "before": page.items[0].id if page.items else None,
                     "after": page.items[-1].id if page.items else None,
                 },
                 ensure_ascii=False,
             )
+        except SessionHistoryUnavailableError:
+            raise FunctionToolError(_UNAVAILABLE) from None
 
     async def read_session_tool_result(args: ReadSessionToolResultInput) -> str:
         """Read one chosen tool output as bounded text, with optional continuation."""
-        async with session_manager() as session:
-            scope = await _source_scope(
-                session,
-                current_session_id=current_session_id,
+        try:
+            result = await operations.read_tool_event(
                 agent_id=agent_id,
-                repo=agent_sessions,
-                users=users,
+                current_session_id=current_session_id,
+                target_session_id=args.session_id,
+                event_id=args.event_id,
             )
-            target = await _target(
-                session,
-                session_id=args.session_id,
-                scope=scope,
-                repo=agent_sessions,
-            )
-            event = await messages.get_by_id(session, args.event_id)
-            if event is None or event.session_id != target.id or event.reverted:
-                raise FunctionToolError(_UNAVAILABLE)
+            event = result.event
             if event.kind.value == "client_tool_result":
                 payload = ClientToolResultPayload.model_validate(
                     upgrade_persisted_client_tool_payload(event.kind, event.payload)
@@ -481,7 +354,7 @@ def make_session_history_tools(
             offset = 0
             if args.cursor is not None:
                 cursor = _decode_cursor(args.cursor, _ToolResultCursor)
-                if cursor.session != target.id or cursor.event != args.event_id:
+                if cursor.session != result.session_id or cursor.event != args.event_id:
                     raise FunctionToolError("Invalid history cursor")
                 offset = cursor.offset
                 if offset > len(text):
@@ -489,14 +362,16 @@ def make_session_history_tools(
             end = min(offset + _RESULT_TEXT_LIMIT, len(text))
             return json.dumps(
                 {
-                    "session_id": target.id,
+                    "session_id": result.session_id,
                     "event_id": args.event_id,
                     "tool": tool[:_TOOL_NAME_LIMIT],
                     "text": text[offset:end],
                     "next_cursor": (
                         _encode_cursor(
                             _ToolResultCursor(
-                                session=target.id, event=args.event_id, offset=end
+                                session=result.session_id,
+                                event=args.event_id,
+                                offset=end,
                             )
                         )
                         if end < len(text)
@@ -505,6 +380,8 @@ def make_session_history_tools(
                 },
                 ensure_ascii=False,
             )
+        except SessionHistoryUnavailableError:
+            raise FunctionToolError(_UNAVAILABLE) from None
 
     return [
         make_tool(

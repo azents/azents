@@ -24,8 +24,8 @@ code_paths:
 api_routes:
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/memories
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/memories/{memory_id}
-last_verified_at: 2026-09-26
-spec_version: 8
+last_verified_at: 2026-10-01
+spec_version: 9
 ---
 
 # Memory
@@ -124,6 +124,13 @@ Known-ID search, history paging, and tool-result reads independently recheck
 target and root status and scope. An archived, purged, or inaccessible target is
 unavailable even if the caller has its ID or a previous search result.
 
+Runtime Memory CRUD/search, Memory prompt summary loading, associated-User scope
+resolution, and Session-history authorization/read operations complete their
+database transactions in repositories before tool rendering returns. Exact
+Memory search and its partial fallback share one transaction. Session-history
+active-root, Workspace, Agent, User, and target checks share the same transaction
+as each authorized search or read.
+
 Search covers titles/handles and semantic user, assistant, user-authored action,
 and external-channel message text. Within a known Session it returns bounded
 matching event IDs and snippets; global results include a matching event anchor
@@ -169,6 +176,7 @@ The Agent Memory settings page exposes the Agent `memory_enabled` toggle and man
 
 | Date | Version | Change |
 |---|---:|---|
+| 2026-10-01 | 9 | Moved runtime Memory, prompt-scope, and Session-history authority/read transaction lifetimes into completed repository operations without changing tool behavior |
 | 2026-09-26 | 8 | Added Memory-gated authorized Session discovery, visible history paging, and selected bounded tool-result text lookup |
 | 2026-08-06 | 7 | Documented User Session Agent+User Memory capability projection while Team Sessions remain Agent-scope only |
 | 2026-07-24 | 6 | Restricted current Team Session runtime projection to shared Agent Memory and made User-scope Memory unavailable without a separate User Session capability boundary |

@@ -115,7 +115,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
   - typescript/apps/azents-web/messages/*/chat.json
 last_verified_at: 2026-10-01
-spec_version: 191
+spec_version: 192
 ---
 
 # Agent Execution Loop
@@ -949,6 +949,9 @@ only a selected client/hosted tool event's text in bounded chunks, never a
 native artifact or file bytes. Archived targets are unavailable on subsequent
 calls even if their IDs were previously observed. The canonical event
 transcript remains the only history source; no new event or write path is added.
+Memory CRUD/search and prompt summary loads, plus each Session-history authority
+and read composition, return from completed repository transactions before the
+Engine renders model-visible output.
 
 `AgentRunExecution` executes foreground client tool calls in parallel. Each tool result is normalized
 to a `client_tool_result` with status:
@@ -1612,6 +1615,9 @@ icon.
 
 ## Changelog
 
+- **2026-10-01** (spec_version 192) — Moved Memory CRUD/search, prompt scope and
+  summary reads, and Session-history authorization/read compositions behind
+  repository-owned completed transactions.
 - **2026-10-01** (spec_version 191) — Moved Engine Tool Search, appendix-dedupe,
   and Todo state transactions behind repository-owned completed operations while
   preserving owner fencing, optimistic retry, and compaction atomicity.
