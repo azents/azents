@@ -1,8 +1,4 @@
-"""LiteLLM mapping by LLM provider.
-
-Converts provider + model identifiers to LiteLLM model strings and converts
-credentials to LiteLLM kwargs format.
-"""
+"""Convert saved integration credentials into operation-scoped SDK settings."""
 
 from typing import cast
 
@@ -33,54 +29,14 @@ from azents.repos.llm_provider_integration.data import (
     LLMProviderIntegrationWithSecrets,
 )
 
-# Provider to LiteLLM model string prefix mapping
-PROVIDER_LITELLM_PREFIX: dict[LLMProvider, str] = {
-    LLMProvider.OPENAI: "openai/",
-    LLMProvider.ANTHROPIC: "anthropic/",
-    LLMProvider.GOOGLE_GEMINI: "gemini/",
-    LLMProvider.AWS_BEDROCK: "bedrock/",
-    LLMProvider.GOOGLE_VERTEX_AI: "vertex_ai/",
-    LLMProvider.CHATGPT_OAUTH: "",
-    LLMProvider.XAI: "xai/",
-    LLMProvider.XAI_OAUTH: "xai/",
-    LLMProvider.KIMI_OAUTH: "moonshot/",
-    LLMProvider.OPENROUTER: "openrouter/",
-}
-
-
-def to_litellm_model(provider: LLMProvider, model_identifier: str) -> str:
-    """Convert provider and model identifier to LiteLLM model string.
-
-    :param provider: LLM provider
-    :param model_identifier: Provider-specific model identifier
-    :return: LiteLLM model string, e.g. ``openai/gpt-4o``
-    """
-    return f"{PROVIDER_LITELLM_PREFIX[provider]}{model_identifier}"
-
-
-def to_runtime_model(provider: LLMProvider, model_identifier: str) -> str:
-    """Return model identifier to pass to SDK runtime.
-
-    OpenAI Responses API provider uses native OpenAI SDK, so pass raw model id
-    without provider prefix. Other providers pass through LiteLLM adapter, so keep
-    LiteLLM routing prefix.
-
-    :param provider: LLM provider
-    :param model_identifier: Provider-specific model identifier
-    :return: Model identifier to pass to SDK execution
-    """
-    if provider in {LLMProvider.OPENAI, LLMProvider.CHATGPT_OAUTH}:
-        return model_identifier
-    return to_litellm_model(provider, model_identifier)
-
 
 def build_credential_kwargs(
     integration: LLMProviderIntegrationWithSecrets,
 ) -> dict[str, object]:
-    """Convert integration credentials to LiteLLM kwargs format.
+    """Convert integration credentials to operation-scoped client settings.
 
     :param integration: Integration info including secrets
-    :return: Credential kwargs passed to litellm.acompletion()
+    :return: Settings consumed by the selected official SDK client factory
     """
     match integration.secrets:
         case ApiKeySecrets(api_key=key):
@@ -88,15 +44,11 @@ def build_credential_kwargs(
                 return {
                     "api_key": key,
                     "base_url": resolve_xai_api_base_url(),
-                    "api_base": resolve_xai_api_base_url(),
-                    "custom_llm_provider": "xai",
                 }
             if integration.provider == LLMProvider.OPENROUTER:
                 return {
                     "api_key": key,
                     "base_url": OPENROUTER_API_BASE_URL,
-                    "api_base": OPENROUTER_API_BASE_URL,
-                    "custom_llm_provider": "openrouter",
                     "extra_headers": {
                         "X-OpenRouter-Title": OPENROUTER_APP_TITLE,
                     },
@@ -109,7 +61,6 @@ def build_credential_kwargs(
             return {
                 "api_key": token,
                 "base_url": CHATGPT_OAUTH_BACKEND_BASE_URL,
-                "api_base": CHATGPT_OAUTH_BACKEND_BASE_URL,
                 "extra_headers": build_chatgpt_oauth_headers(
                     account_id=config.account_id
                 ),
@@ -118,8 +69,6 @@ def build_credential_kwargs(
             return {
                 "api_key": token,
                 "base_url": resolve_xai_api_base_url(),
-                "api_base": resolve_xai_api_base_url(),
-                "custom_llm_provider": "xai",
             }
         case KimiOAuthSecrets(access_token=token, device_id=device_id):
             if not isinstance(integration.config, KimiOAuthConfig):
@@ -128,8 +77,6 @@ def build_credential_kwargs(
             return {
                 "api_key": token,
                 "base_url": base_url,
-                "api_base": base_url,
-                "custom_llm_provider": "moonshot",
                 "extra_headers": build_kimi_compatibility_headers(device_id=device_id),
             }
         case AwsSecrets(secret_access_key=secret):

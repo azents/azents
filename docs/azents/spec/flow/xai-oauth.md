@@ -26,11 +26,12 @@ code_paths:
   - python/apps/azents/src/azents/engine/run/resolve.py
   - python/apps/azents/src/azents/core/llm_mapping.py
   - python/apps/azents/src/azents/engine/events/**
+  - python/apps/azents/src/azents/engine/providers/**
   - typescript/apps/azents-web/src/features/llm-settings/**
   - typescript/apps/azents-web/src/shared/subscription-usage/**
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
 last_verified_at: 2026-10-01
-spec_version: 9
+spec_version: 10
 ---
 
 # xAI OAuth Flow
@@ -158,7 +159,7 @@ sequenceDiagram
     participant OAuth as xAI OAuth runtime
     participant AS as xAI OAuth
     participant DB as PostgreSQL
-    participant LiteLLM as LiteLLM Responses
+    participant Model as Pydantic AI / official OpenAI SDK
     participant XAI as xAI API
 
     Worker->>Resolve: Resolve agent snapshot + integration
@@ -177,15 +178,22 @@ sequenceDiagram
         OAuth->>DB: status refresh_required
         OAuth-->>Resolve: failure
     end
-    Resolve->>LiteLLM: api_key=access_token, base_url=https://api.x.ai/v1, provider=xai
-    LiteLLM->>XAI: Responses request
+    Resolve->>Model: Access token, configured xAI endpoint, exact model ID, xai_oauth identity
+    Model->>XAI: HTTP Responses request
 ```
 
 Rules:
 
 - Refresh applies only to integrations whose provider is `xai_oauth`.
 - Runtime calls pass `api_key=<access token>`, `base_url=https://api.x.ai/v1`, `api_base=https://api.x.ai/v1`, and `custom_llm_provider=xai`.
-- After runtime credentials resolve, LiteLLM HTTP, transport, and typed terminal failures use the common `ModelProviderFailure` contract only when their typed status or identifiers map to a known category. The UI retains only the bounded, redacted provider-authored reason under `Model provider error`, and every classified provider failure receives the complete current Run retry budget regardless of category or diagnostic retryability. Unclassified outcomes follow internal-error handling and do not create provider retry state or generic provider-error presentation.
+- After runtime credentials resolve, official SDK/model HTTP, transport, and typed native-terminal
+  failures use the common bounded `ModelProviderFailure` contract only for known categories.
+  Classified failures retain the full current Run retry budget; unclassified outcomes remain
+  internal errors. Native response acquisition and parsed-event progress are separate from common
+  model assembly. Hidden SDK/model recovery generations are blocked before I/O.
+- Both xAI credential variants use configured Responses HTTP endpoints through the public
+  Pydantic AI/official SDK boundary. OAuth does not switch to the CLI model-listing proxy endpoint
+  for inference, acquire a gRPC mode, or borrow API-key billing/visibility semantics.
 - OAuth and API-key identities share xAI transport lowering: the first `system` input item carries system instructions, top-level `instructions` is omitted, hosted `web_search` uses the xAI Responses tool target, and Anthropic cache-control hints are not applied.
 - Transient network/provider failures mark the integration `temporarily_unavailable` and can be retried by a later run.
 - Token refresh 400/401 marks the integration `refresh_required`.
@@ -255,7 +263,11 @@ Unexpected presentation failures remain inside a card-local error boundary.
 
 Each `xai_oauth` integration owns a stored account-specific catalog. Before synchronization, Azents reuses the runtime token-freshness service and persists any rotated token set. It then calls the Grok CLI proxy `/models` endpoint with the bearer token, account id, token-auth marker, pinned model-list client version, Grok shell identifier, and interactive client mode.
 
-The returned account-visible models are authoritative for existence and may differ from API-key integrations. Provider context-window, reasoning-effort, backend-search, and API-backend fields override optional LiteLLM enrichment. An exact or expanded-alias LiteLLM `xai/<model>` entry may fill absent capabilities and bounded pricing metadata, but a missing entry does not hide the model. Picker reads use only the stored snapshot. Provider-facing identifiers omit the `xai/` prefix, and runtime identifiers restore it before invocation.
+The returned account-visible models are authoritative and may differ from API-key integrations.
+Provider context-window, reasoning-effort, backend-search, and API-backend fields override optional
+retained-source enrichment. An exact or expanded-alias `xai/<model>` entry may fill missing metadata,
+but a miss does not hide a model. Picker reads use the stored snapshot. Runtime uses exact raw
+provider IDs; `xai/` remains only in source lookup keys.
 
 ## Frontend UX Rules
 
@@ -278,6 +290,7 @@ The returned account-visible models are authoritative for existence and may diff
 
 | Date | Version | Change | Rationale |
 |---|---|---|---|
+| 2026-09-30 | 10 | Documented public Pydantic AI/SDK HTTP inference and raw model identity | Preserve OAuth-specific credentials, endpoints and account semantics during executable package removal |
 | 2026-09-23 | 9 | Documented integration-targeted device reauthentication, shared management UI, and the target migration | Match the implemented in-place subscription credential replacement |
 | 2026-09-04 | 8 | Mapped the shared subscription-usage state and container modules | Keep provider usage eligibility, retained-success refresh state, summary, and threshold presentation linked after the frontend boundary relocation |
 | 2026-08-18 | 7 | Replaced global OAuth model visibility with refreshed account-specific integration discovery | [xai-260818/ADR](../../adr/xai-260818-integration-model-discovery.md) |

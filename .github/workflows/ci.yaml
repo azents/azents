@@ -624,6 +624,7 @@ jobs:
           timeout 30s docker stats --all --no-stream > "$report_dir/docker-stats.txt" 2>&1 || true
           timeout 30s docker system df > "$report_dir/docker-system-df.txt" 2>&1 || true
           timeout 30s docker buildx du --builder "${{ steps.buildx.outputs.name }}" > "$report_dir/docker-buildx-du.txt" 2>&1 || true
+          timeout 30s docker buildx du --builder default > "$report_dir/docker-buildx-du-default.txt" 2>&1 || true
           python testenv/azents/e2e/src/support/ci_observability.py summarize \
             --lane "${{ matrix.lane }}" \
             --job-result "${{ job.status }}" \

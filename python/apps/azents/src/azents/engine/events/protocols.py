@@ -61,7 +61,7 @@ class _ContinuationProperties(NamedTuple):
 
 
 class NativeModelRequest(BaseModel):
-    """LiteLLM adapter native model request."""
+    """Shared logical Responses envelope for native Responses lowering."""
 
     model_config = ConfigDict(frozen=True)
 

@@ -51,7 +51,6 @@ from azents.core.inference_profile import (
     SessionInferenceState,
 )
 from azents.core.llm_catalog import ModelReasoningEffort
-from azents.core.llm_mapping import to_runtime_model
 from azents.core.model_execution_options import ModelExecutionOptionId
 from azents.core.model_operation import ModelOperationKind, ModelOperationState
 from azents.core.runtime_capabilities import (
@@ -2346,6 +2345,8 @@ async def _resolve_success(*args: object, **kwargs: object) -> object:
     return Success(
         ResolvedInvokeInputProfile(
             run_request=RunRequest(
+                model_assembly_metadata=None,
+                compaction_assembly_metadata=None,
                 enabled_execution_options=[],
                 session_id="session-001",
                 user_messages=[],
@@ -2360,10 +2361,7 @@ async def _resolve_success(*args: object, **kwargs: object) -> object:
                 compaction_provider_integration_id=(
                     selection.llm_provider_integration_id
                 ),
-                compaction_model=to_runtime_model(
-                    selection.provider,
-                    selection.model_identifier,
-                ),
+                compaction_model=selection.model_identifier,
                 compaction_provider=selection.provider,
                 compaction_credential_kwargs={},
                 compaction_max_input_tokens=128_000,
@@ -2382,6 +2380,8 @@ async def _resolve_existing_success(*args: object, **kwargs: object) -> object:
     selection = make_test_model_selection()
     return Success(
         RunRequest(
+            model_assembly_metadata=None,
+            compaction_assembly_metadata=None,
             enabled_execution_options=[],
             session_id="session-001",
             user_messages=[],
@@ -2394,10 +2394,7 @@ async def _resolve_existing_success(*args: object, **kwargs: object) -> object:
             tool_search_enabled=False,
             auto_compaction_threshold_tokens=None,
             compaction_provider_integration_id=(selection.llm_provider_integration_id),
-            compaction_model=to_runtime_model(
-                selection.provider,
-                selection.model_identifier,
-            ),
+            compaction_model=selection.model_identifier,
             compaction_provider=selection.provider,
             compaction_credential_kwargs={},
             compaction_max_input_tokens=128_000,
@@ -2760,6 +2757,8 @@ async def test_execute_recovers_activated_run_before_flushing_input(
         recovered_snapshots.append(resolved_selection)
         return Success(
             RunRequest(
+                model_assembly_metadata=None,
+                compaction_assembly_metadata=None,
                 enabled_execution_options=[],
                 session_id="session-001",
                 user_messages=[],
@@ -2982,6 +2981,8 @@ async def test_execute_recovers_activated_command_run(
         del args, kwargs
         return Success(
             RunRequest(
+                model_assembly_metadata=None,
+                compaction_assembly_metadata=None,
                 enabled_execution_options=[],
                 session_id="session-001",
                 user_messages=[],
@@ -3091,6 +3092,8 @@ async def test_execute_recovers_durable_retry_budget(
         del args, kwargs
         return Success(
             RunRequest(
+                model_assembly_metadata=None,
+                compaction_assembly_metadata=None,
                 enabled_execution_options=[],
                 session_id="session-001",
                 user_messages=[],
@@ -3204,6 +3207,8 @@ async def test_execute_recovers_unclassified_provider_retry_with_current_profile
         return Success(
             ResolvedInvokeInputProfile(
                 run_request=RunRequest(
+                    model_assembly_metadata=None,
+                    compaction_assembly_metadata=None,
                     enabled_execution_options=(
                         requested_profile.enabled_execution_options
                     ),
@@ -3220,10 +3225,7 @@ async def test_execute_recovers_unclassified_provider_retry_with_current_profile
                     compaction_provider_integration_id=(
                         selection.llm_provider_integration_id
                     ),
-                    compaction_model=to_runtime_model(
-                        selection.provider,
-                        selection.model_identifier,
-                    ),
+                    compaction_model=selection.model_identifier,
                     compaction_provider=selection.provider,
                     compaction_credential_kwargs={},
                     compaction_max_input_tokens=128_000,
@@ -3633,10 +3635,7 @@ async def test_prepare_fresh_turn_materializes_the_frozen_compaction_candidate(
             ResolvedModelCandidateRuntime(
                 provider=selection.provider,
                 provider_integration_id=selection.llm_provider_integration_id,
-                model=to_runtime_model(
-                    selection.provider,
-                    selection.model_identifier,
-                ),
+                model=selection.model_identifier,
                 credential_kwargs={"api_key": "frozen"},
                 effective_input_tokens=128_000,
             )
@@ -3674,6 +3673,13 @@ async def test_prepare_fresh_turn_materializes_the_frozen_compaction_candidate(
     assert prepared.value.run_request.compaction_credential_kwargs == {
         "api_key": "frozen"
     }
+    metadata = prepared.value.run_request.compaction_assembly_metadata
+    assert metadata is not None
+    frozen_selection = frozen_compaction_selections[0]
+    assert metadata.model_developer is frozen_selection.model_developer
+    assert metadata.model_family == frozen_selection.model_family
+    assert metadata.capabilities == frozen_selection.normalized_capabilities
+    assert metadata.capabilities is not frozen_selection.normalized_capabilities
 
 
 @pytest.mark.asyncio
@@ -3699,10 +3705,7 @@ async def test_prepare_compaction_recreates_slot_after_prior_success(
             ResolvedModelCandidateRuntime(
                 provider=selection.provider,
                 provider_integration_id=selection.llm_provider_integration_id,
-                model=to_runtime_model(
-                    selection.provider,
-                    selection.model_identifier,
-                ),
+                model=selection.model_identifier,
                 credential_kwargs={"api_key": "compaction"},
                 effective_input_tokens=128_000,
             )
@@ -4138,10 +4141,7 @@ async def test_execute_refreshes_same_label_settings_before_next_model_call(
         )
         candidate = selected_option.candidates[0]
         selection = candidate.model_selection
-        runtime_model = to_runtime_model(
-            selection.provider,
-            selection.model_identifier,
-        )
+        runtime_model = selection.model_identifier
         resolved = await _resolve_success()
         assert isinstance(resolved, Success)
         request = dataclasses.replace(
@@ -4190,10 +4190,7 @@ async def test_execute_refreshes_same_label_settings_before_next_model_call(
             ResolvedModelCandidateRuntime(
                 provider=selection.provider,
                 provider_integration_id=selection.llm_provider_integration_id,
-                model=to_runtime_model(
-                    selection.provider,
-                    selection.model_identifier,
-                ),
+                model=selection.model_identifier,
                 credential_kwargs={},
                 effective_input_tokens=128_000,
             )
@@ -6608,15 +6605,14 @@ async def test_quota_progresses_candidate_before_generic_retry(
 
     def request_for(selection: AgentModelSelection) -> RunRequest:
         return RunRequest(
+            model_assembly_metadata=None,
+            compaction_assembly_metadata=None,
             session_id="session-001",
             user_messages=[],
             agent_prompt=None,
             toolkits=[],
             provider=selection.provider,
-            model=to_runtime_model(
-                selection.provider,
-                selection.model_identifier,
-            ),
+            model=selection.model_identifier,
             credential_kwargs={},
             workspace_id="workspace-001",
             agent_id="agent-001",
@@ -6625,10 +6621,7 @@ async def test_quota_progresses_candidate_before_generic_retry(
             enabled_execution_options=[],
             inference_state=None,
             compaction_provider_integration_id=(primary.llm_provider_integration_id),
-            compaction_model=to_runtime_model(
-                primary.provider,
-                primary.model_identifier,
-            ),
+            compaction_model=primary.model_identifier,
             compaction_provider=primary.provider,
             compaction_credential_kwargs={},
             compaction_max_input_tokens=128_000,
@@ -6696,8 +6689,8 @@ async def test_quota_progresses_candidate_before_generic_retry(
 
     assert result.terminal_run_status is AgentRunStatus.COMPLETED
     assert [request.model for request in engine.requests] == [
-        to_runtime_model(primary.provider, primary.model_identifier),
-        to_runtime_model(fallback.provider, fallback.model_identifier),
+        primary.model_identifier,
+        fallback.model_identifier,
     ]
     live_runs = [run for _, run in live_event_projector.live_run_updates]
     assert any(run.using_fallback for run in live_runs)
@@ -6847,6 +6840,8 @@ async def test_execute_refreshes_session_profile_before_model_retry(
         return Success(
             ResolvedInvokeInputProfile(
                 run_request=RunRequest(
+                    model_assembly_metadata=None,
+                    compaction_assembly_metadata=None,
                     enabled_execution_options=(
                         requested_profile.enabled_execution_options
                     ),
@@ -6863,10 +6858,7 @@ async def test_execute_refreshes_session_profile_before_model_retry(
                     compaction_provider_integration_id=(
                         selection.llm_provider_integration_id
                     ),
-                    compaction_model=to_runtime_model(
-                        selection.provider,
-                        selection.model_identifier,
-                    ),
+                    compaction_model=selection.model_identifier,
                     compaction_provider=selection.provider,
                     compaction_credential_kwargs={},
                     compaction_max_input_tokens=128_000,

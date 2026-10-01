@@ -9,7 +9,6 @@ Name | Type | Description | Notes
 **id** | **str** |  | 
 **provider** | [**LLMProvider**](LLMProvider.md) |  | 
 **provider_model_identifier** | **str** |  | 
-**runtime_model_identifier** | **str** |  | 
 **display_name** | **str** |  | 
 **normalized_capabilities** | [**ModelCapabilities**](ModelCapabilities.md) |  | 
 **supported_execution_options** | [**List[ModelExecutionOptionId]**](ModelExecutionOptionId.md) |  | 

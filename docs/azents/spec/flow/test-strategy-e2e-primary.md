@@ -30,7 +30,7 @@ code_paths:
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
 last_verified_at: 2026-10-01
-spec_version: 75
+spec_version: 77
 ---
 
 # E2E Primary Test Strategy
@@ -198,10 +198,12 @@ owner and keeps live-provider tests diagnostic only.
 
 Model quota fallback follows this allocation. Credential-free API/browser E2E verifies clean
 candidate-chain consumption, a real quota-to-fallback response, immutable route provenance, and
-desktop/mobile transient fallback presentation that disappears after terminal completion. Public
-availability and reservation contracts remain covered by the API E2E; their internal health,
-generation-fencing, half-open claims, reservation races, operation handover, compaction/title
-ordering, and Redis-empty recovery use deterministic production repository/Worker integration tests.
+one desktop transient fallback presentation that disappears after terminal completion. A colocated
+mobile Storybook interaction verifies the responsive presentation and absence of availability
+controls without repeating the full provider journey. Public availability and reservation contracts
+remain covered by the API E2E; their internal health, generation-fencing, half-open claims,
+reservation races, operation handover, compaction/title ordering, and Redis-empty recovery use
+deterministic production repository/Worker integration tests.
 
 Scheduled Task required E2E creates Workspace, Agent, Runtime, Session, and Task
 state through Public/Admin APIs and generated clients. A credential-free
@@ -277,6 +279,13 @@ Always-on required CI does not depend on external credentials.
   current-worktree Server build, as does any unavailable or incompatible overlay
   base. Snapshot and image-build artifacts distinguish final-image pulls,
   source-overlay-base pulls, full builds, and source-overlay builds.
+  A changed Server dependency set still performs a complete current-worktree image
+  build inside the lane. That full build uses Docker's local BuildKit cache rather
+  than importing the slower remote E2E cache; source-overlay builds continue to use
+  the pulled dependency-compatible snapshot without remote cache. Image timing
+  evidence identifies the full-build path as `docker-local:default`, and lane
+  diagnostics capture disk usage for both the named remote-cache builder and the
+  default builder.
 - Snapshot workflow dispatch keeps downstream publication enabled by default for
   compatibility. An explicit `dispatch_downstream: false` manual input builds and
   publishes immutable images without invoking the downstream deployment, allowing
@@ -481,9 +490,9 @@ Always-on required CI does not depend on external credentials.
   confirmation, and non-cancellable removal progress. The browser journey does not write directly
   to PostgreSQL or derive Runtime actions in test code.
 - Runtime Web Gateway E2E starts the real Docker Runtime and launches a bounded
-  loopback fixture application through the product Terminal API. It runs both
-  shared-cookie and separate-domain browser identity flows through a local TLS
-  wildcard edge, creates one Off Agent service through the generated Public client,
+  loopback fixture application through the product Terminal API. It runs one
+  representative shared-cookie browser identity flow through a local TLS wildcard
+  edge, creates one Off Agent service through the generated Public client,
   turns it On through the authenticated service URL, and verifies stable secret-free
   URLs, current Agent-scoped projection, stale-revision rejection, expiration reset,
   direct Off control, browser upload digest and streamed download byte count,
@@ -491,10 +500,13 @@ Always-on required CI does not depend on external credentials.
   WebSocket text, binary, ping/pong, and close behavior. A second Runtime Control
   replica accepts the Gateway session after the Runner has registered with the first
   replica, forcing the PostgreSQL Owner route and maximum-one-hop trusted relay path.
-  The recurring file collects four tests: shared-cookie and separate-domain full
-  journeys, pre-body hard-limit rejection, and maintenance preflight. The capacity
-  backend is selectable between memory and Redis; Redis loss/recovery behavior stays
-  within the same lightweight journey and does not make Redis a readiness dependency.
+  The recurring file collects two tests: the shared-cookie full journey and maintenance
+  preflight. Separate-domain ticket and authentication contracts remain in focused
+  repository and Gateway settings tests. Active-exchange capacity, pre-body rejection,
+  application/control buffer accounting, reservation release, and concurrent stream
+  recovery remain in focused Gateway integration tests. The capacity backend is
+  selectable between memory and Redis; Redis loss/recovery behavior stays within the
+  same lightweight journey and does not make Redis a readiness dependency.
   Recurring defaults are 1 MiB transfer bodies, eight assets, and a 120-second
   browser-script deadline. The same collected journey accepts bounded
   `AZENTS_E2E_RUNTIME_WEB_TRANSFER_BYTES`,
@@ -585,6 +597,10 @@ Local/PR environment without live substrate does not fake live PASS. Instead, se
 
 ## Changelog
 
+- **2026-10-01** (spec_version 77) — Kept representative desktop quota-fallback and
+  shared-cookie Runtime Web browser journeys, moved mobile presentation to a Storybook
+  interaction, and assigned alternate authentication plus capacity edge cases to
+  focused lower-layer tests.
 - **2026-10-01** (spec_version 75) — Added base-relative ten-percent duration gating,
   evidence-only base-change reevaluation, and compact collapsible comments.
 

@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from azents.core.enums import LLMProvider
 from azents.core.tools import Toolkit, ToolkitState, ToolkitStatus, TurnContext
 from azents.engine.events.generated_files import GeneratedFileOutput
-from azents.engine.events.litellm_responses import LiteLLMResponsesLowerer
+from azents.engine.events.openai_responses import OpenAIResponsesLowerer
 from azents.engine.events.output_parts import (
     TOOL_OUTPUT_TEXT_HARD_CAP_CHARS,
     iter_output_parts,
@@ -187,7 +187,7 @@ async def test_build_tool_catalog_prefixes_and_lowers_native_schema() -> None:
     assert catalog.native_tools[0]["name"] == "demo__echo"
     assert catalog.native_tools[0]["strict"] is False
 
-    request = LiteLLMResponsesLowerer(
+    request = OpenAIResponsesLowerer(
         supported_execution_options=[],
         enabled_execution_options=[],
         provider="openai",
@@ -1124,12 +1124,12 @@ class _DualDialectHandler:
 
 
 def _prepare_json_catalog(candidate: ToolCatalog) -> ToolCatalog:
-    """Project a candidate catalog through generic LiteLLM Responses."""
+    """Project a candidate catalog through the current JSON-function profile."""
     adapter_profile = resolve_client_tool_adapter_profile(
         route=ClientToolRoute(
             provider=LLMProvider.OPENAI,
-            adapter="litellm",
-            native_format="responses",
+            adapter="pydantic_ai",
+            native_format="model_messages",
         )
     )
     if adapter_profile is None:

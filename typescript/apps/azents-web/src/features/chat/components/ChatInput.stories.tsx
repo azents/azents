@@ -308,6 +308,34 @@ export const ActiveFallback = {
   },
 } satisfies Story;
 
+export const MobileActiveFallback = {
+  args: {
+    ...baseArgs,
+    isMobile: true,
+    contextUsageActiveRun: activeFallbackRun,
+  },
+  decorators: [
+    (Story) => (
+      <StorybookCanvas maxWidth={rem(390)}>
+        <Story />
+      </StorybookCanvas>
+    ),
+  ],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByText("Fallback")).toBeVisible();
+    await userEvent.click(canvas.getByRole("button", { name: "Model" }));
+    const page = within(canvasElement.ownerDocument.body);
+    await expect(page.queryByText("Model availability")).toBeNull();
+    await expect(
+      page.queryByRole("button", { name: "Try Primary next" }),
+    ).toBeNull();
+    await expect(
+      page.queryByRole("button", { name: "Cancel Primary next" }),
+    ).toBeNull();
+  },
+} satisfies Story;
+
 export const ExclusiveProcessingSpeed = {
   args: {
     ...baseArgs,

@@ -923,6 +923,17 @@ def _build_configured_e2e_image(
         )
         return
 
+    if image_build is _SERVER_IMAGE_BUILD:
+        _build_e2e_image(
+            image_tag=image_tag,
+            dockerfile=image_build.dockerfile,
+            cache_repository=None,
+            observability_image=image_build.cache_repository,
+            builder_override="default",
+            cache_backend_override="docker-local:default",
+        )
+        return
+
     if image_build.web:
         _build_e2e_web_image(
             image_tag=image_tag,
@@ -1032,6 +1043,7 @@ def _build_e2e_image(
     observability_image: str | None = None,
     build_mode: str = "full",
     builder_override: str | None = None,
+    cache_backend_override: str | None = None,
 ) -> None:
     """Build one E2E product image with an optional BuildKit cache backend."""
     cache_options = (
@@ -1059,7 +1071,7 @@ def _build_e2e_image(
     finally:
         _write_e2e_image_build_observability(
             cache_repository=observability_image or cache_repository or "unknown",
-            cache_backend=cache_options.cache_backend,
+            cache_backend=cache_backend_override or cache_options.cache_backend,
             cache_scope=cache_options.cache_scope,
             cache_export_enabled=cache_options.cache_to is not None,
             completed=completed,

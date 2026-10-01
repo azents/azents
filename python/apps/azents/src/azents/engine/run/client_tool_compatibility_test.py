@@ -61,7 +61,7 @@ def _route(
     return ClientToolRoute(
         provider=provider,
         adapter=adapter,
-        native_format=native_format,
+        native_format=("model_messages" if adapter == "pydantic_ai" else native_format),
     )
 
 
@@ -133,25 +133,25 @@ def test_native_chatgpt_oauth_uses_the_same_openai_adapter_profile() -> None:
     assert profile.wire_dialects_for(_PROFILE)[0] == "plaintext_custom"
 
 
-def test_openrouter_profile_overrides_generic_litellm_profile() -> None:
+def test_openrouter_profile_overrides_generic_pydantic_ai_profile() -> None:
     profile = resolve_client_tool_adapter_profile(
-        route=_route(provider=LLMProvider.OPENROUTER, adapter="litellm")
+        route=_route(provider=LLMProvider.OPENROUTER, adapter="pydantic_ai")
     )
 
     assert profile is not None
-    assert profile.profile_id == "openrouter-litellm-responses"
+    assert profile.profile_id == "openrouter-pydantic-model-messages"
     assert profile.wire_dialects_for(None) == ("json_function",)
     assert profile.wire_dialects_for(_PROFILE) == ("json_function",)
     assert not profile.supports_wire_dialect("plaintext_custom")
 
 
-def test_generic_litellm_profile_keeps_ordinary_json_tools_only() -> None:
+def test_generic_pydantic_ai_profile_keeps_ordinary_json_tools_only() -> None:
     profile = resolve_client_tool_adapter_profile(
-        route=_route(provider=LLMProvider.OPENAI, adapter="litellm")
+        route=_route(provider=LLMProvider.OPENAI, adapter="pydantic_ai")
     )
 
     assert profile is not None
-    assert profile.profile_id == "generic-litellm-responses"
+    assert profile.profile_id == "generic-pydantic-model-messages"
     assert profile.wire_dialects_for(None) == ("json_function",)
     assert profile.wire_dialects_for(_PROFILE) == ()
 

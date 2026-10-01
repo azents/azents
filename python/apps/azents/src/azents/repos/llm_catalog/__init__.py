@@ -11,7 +11,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.core.enums import (
     LLMCatalogAttemptStatus,
     LLMCatalogEntryVisibility,
-    LLMCatalogLowererTarget,
     LLMCatalogPurpose,
     LLMCatalogScope,
     LLMProvider,
@@ -312,7 +311,6 @@ class LLMCatalogRepository:
         *,
         integration_id: str,
         provider: LLMProvider,
-        lowerer_target: LLMCatalogLowererTarget,
         purpose: LLMCatalogPurpose,
     ) -> LLMCatalog:
         """Create or fetch an integration catalog."""
@@ -323,13 +321,11 @@ class LLMCatalogRepository:
                 scope=LLMCatalogScope.INTEGRATION,
                 provider=provider,
                 provider_integration_id=integration_id,
-                lowerer_target=lowerer_target,
                 purpose=purpose,
             )
             .on_conflict_do_nothing(
                 index_elements=[
                     "provider_integration_id",
-                    "lowerer_target",
                     "purpose",
                 ],
                 # Keep this predicate literal so PostgreSQL can infer the partial
@@ -343,7 +339,6 @@ class LLMCatalogRepository:
             existing = await session.execute(
                 sa.select(RDBLLMCatalog).where(
                     RDBLLMCatalog.provider_integration_id == integration_id,
-                    RDBLLMCatalog.lowerer_target == lowerer_target,
                     RDBLLMCatalog.purpose == purpose,
                 )
             )
@@ -356,7 +351,6 @@ class LLMCatalogRepository:
         session: AsyncSession,
         *,
         provider: LLMProvider,
-        lowerer_target: LLMCatalogLowererTarget,
         purpose: LLMCatalogPurpose,
     ) -> LLMCatalog:
         """Create or fetch a system catalog."""
@@ -367,11 +361,10 @@ class LLMCatalogRepository:
                 scope=LLMCatalogScope.SYSTEM,
                 provider=provider,
                 provider_integration_id=None,
-                lowerer_target=lowerer_target,
                 purpose=purpose,
             )
             .on_conflict_do_nothing(
-                index_elements=["provider", "lowerer_target", "purpose"],
+                index_elements=["provider", "purpose"],
                 # Keep this predicate literal so PostgreSQL can infer the partial
                 # unique index after psycopg prepares the repeated statement.
                 index_where=sa.text("scope = 'system'"),
@@ -384,7 +377,6 @@ class LLMCatalogRepository:
                 sa.select(RDBLLMCatalog).where(
                     RDBLLMCatalog.scope == LLMCatalogScope.SYSTEM,
                     RDBLLMCatalog.provider == provider,
-                    RDBLLMCatalog.lowerer_target == lowerer_target,
                     RDBLLMCatalog.purpose == purpose,
                 )
             )
@@ -428,8 +420,6 @@ class LLMCatalogRepository:
                     snapshot_id=snapshot_id,
                     provider=entry.provider,
                     provider_model_identifier=entry.provider_model_identifier,
-                    lowerer_target=entry.lowerer_target,
-                    runtime_model_identifier=entry.runtime_model_identifier,
                     display_name=entry.display_name,
                     normalized_capabilities=entry.normalized_capabilities,
                     supported_execution_options=entry.supported_execution_options,
@@ -703,7 +693,6 @@ class LLMCatalogRepository:
             catalog = await self.get_system_catalog(
                 session,
                 provider=integration.provider,
-                lowerer_target=LLMCatalogLowererTarget.LITELLM,
                 purpose=purpose,
             )
         if catalog is None:
@@ -887,7 +876,6 @@ class LLMCatalogRepository:
         session: AsyncSession,
         *,
         provider: LLMProvider,
-        lowerer_target: LLMCatalogLowererTarget,
         purpose: LLMCatalogPurpose,
     ) -> LLMCatalog | None:
         """Fetch a system catalog."""
@@ -895,7 +883,6 @@ class LLMCatalogRepository:
             sa.select(RDBLLMCatalog).where(
                 RDBLLMCatalog.scope == LLMCatalogScope.SYSTEM,
                 RDBLLMCatalog.provider == provider,
-                RDBLLMCatalog.lowerer_target == lowerer_target,
                 RDBLLMCatalog.purpose == purpose,
             )
         )
@@ -977,7 +964,6 @@ class LLMCatalogRepository:
             provider=rdb.provider,
             purpose=rdb.purpose,
             provider_integration_id=rdb.provider_integration_id,
-            lowerer_target=rdb.lowerer_target,
             current_snapshot_id=rdb.current_snapshot_id,
             latest_attempt_id=rdb.latest_attempt_id,
         )
@@ -989,8 +975,6 @@ class LLMCatalogRepository:
             snapshot_id=rdb.snapshot_id,
             provider=rdb.provider,
             provider_model_identifier=rdb.provider_model_identifier,
-            lowerer_target=rdb.lowerer_target,
-            runtime_model_identifier=rdb.runtime_model_identifier,
             display_name=rdb.display_name,
             normalized_capabilities=rdb.normalized_capabilities,
             supported_execution_options=rdb.supported_execution_options,

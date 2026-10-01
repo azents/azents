@@ -7,7 +7,6 @@ from typing import Any
 from azents.core.enums import (
     LLMCatalogAttemptStatus,
     LLMCatalogEntryVisibility,
-    LLMCatalogLowererTarget,
     LLMCatalogPurpose,
     LLMCatalogScope,
     LLMModelLifecycleStatus,
@@ -24,7 +23,6 @@ class LLMCatalog:
     provider: LLMProvider
     purpose: LLMCatalogPurpose
     provider_integration_id: str | None
-    lowerer_target: LLMCatalogLowererTarget
     current_snapshot_id: str | None
     latest_attempt_id: str | None
 
@@ -38,8 +36,6 @@ class LLMCatalogEntry:
     snapshot_id: str
     provider: LLMProvider
     provider_model_identifier: str
-    lowerer_target: LLMCatalogLowererTarget
-    runtime_model_identifier: str
     display_name: str
     normalized_capabilities: dict[str, Any]
     supported_execution_options: list[str]
@@ -60,8 +56,6 @@ class LLMCatalogEntryCreate:
 
     provider: LLMProvider
     provider_model_identifier: str
-    lowerer_target: LLMCatalogLowererTarget
-    runtime_model_identifier: str
     display_name: str
     normalized_capabilities: dict[str, Any]
     supported_execution_options: list[str]

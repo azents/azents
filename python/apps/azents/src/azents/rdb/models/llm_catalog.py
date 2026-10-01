@@ -11,7 +11,6 @@ from sqlalchemy.orm import Mapped, mapped_column
 from azents.core.enums import (
     LLMCatalogAttemptStatus,
     LLMCatalogEntryVisibility,
-    LLMCatalogLowererTarget,
     LLMCatalogPurpose,
     LLMCatalogScope,
     LLMModelLifecycleStatus,
@@ -35,12 +34,6 @@ llm_catalog_scope_enum = ENUM(
 llm_catalog_purpose_enum = ENUM(
     LLMCatalogPurpose,
     name="llm_catalog_purpose",
-    create_type=False,
-    values_callable=_enum_values,
-)
-llm_catalog_lowerer_target_enum = ENUM(
-    LLMCatalogLowererTarget,
-    name="llm_catalog_lowerer_target",
     create_type=False,
     values_callable=_enum_values,
 )
@@ -76,17 +69,15 @@ class RDBLLMCatalog(RDBModel):
     __tablename__ = "llm_catalogs"
 
     UQ_SYSTEM_CATALOG = sa.Index(
-        "uq_llm_catalogs_system_scope_provider_target_purpose",
+        "uq_llm_catalogs_system_scope_provider_purpose",
         "provider",
-        "lowerer_target",
         "purpose",
         unique=True,
         postgresql_where=sa.text("scope = 'system'"),
     )
     UQ_INTEGRATION_CATALOG = sa.Index(
-        "uq_llm_catalogs_integration_target_purpose",
+        "uq_llm_catalogs_integration_purpose",
         "provider_integration_id",
-        "lowerer_target",
         "purpose",
         unique=True,
         postgresql_where=sa.text("scope = 'integration'"),
@@ -103,10 +94,6 @@ class RDBLLMCatalog(RDBModel):
     provider: Mapped[LLMProvider] = mapped_column(llm_provider_enum, nullable=False)
     purpose: Mapped[LLMCatalogPurpose] = mapped_column(
         llm_catalog_purpose_enum,
-        nullable=False,
-    )
-    lowerer_target: Mapped[LLMCatalogLowererTarget] = mapped_column(
-        llm_catalog_lowerer_target_enum,
         nullable=False,
     )
     provider_integration_id: Mapped[str | None] = mapped_column(
@@ -229,12 +216,6 @@ class RDBLLMCatalogEntry(RDBModel):
     )
     provider: Mapped[LLMProvider] = mapped_column(llm_provider_enum, nullable=False)
     provider_model_identifier: Mapped[str] = mapped_column(
-        sa.String(300), nullable=False
-    )
-    lowerer_target: Mapped[LLMCatalogLowererTarget] = mapped_column(
-        llm_catalog_lowerer_target_enum, nullable=False
-    )
-    runtime_model_identifier: Mapped[str] = mapped_column(
         sa.String(300), nullable=False
     )
     display_name: Mapped[str] = mapped_column(sa.String(300), nullable=False)

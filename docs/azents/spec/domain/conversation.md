@@ -12,6 +12,7 @@ code_paths:
   - python/apps/azents/src/azents/services/agent_runtime/**
   - python/apps/azents/src/azents/engine/run/contracts.py
   - python/apps/azents/src/azents/engine/events/**
+  - python/apps/azents/src/azents/engine/providers/native_observation.py
   - python/apps/azents/src/azents/engine/run/types.py
   - python/apps/azents-runtime-runner/**
   - python/apps/azents-runtime-provider-docker/**
@@ -139,7 +140,7 @@ api_routes:
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ticket
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ws
 last_verified_at: 2026-09-30
-spec_version: 174
+spec_version: 175
 ---
 
 # Conversation & Events
@@ -875,11 +876,14 @@ Same-native pass-through is allowed only when the compat key matches exactly:
 adapter:native_format:provider:model:schema_version
 ```
 
-Official OpenAI SDK Responses artifacts use adapter identity `openai`; LiteLLM Responses artifacts
-use `litellm`. A mismatch always reconstructs provider input from canonical events. Provider-tool
+Official OpenAI SDK Responses artifacts use adapter identity `openai`, native format `responses`,
+and schema version `1`. Pydantic AI model-layer artifacts use adapter identity `pydantic_ai`, native
+format `model_messages`, the exact raw provider/model identity, and schema version `1`.
+Historical LiteLLM Responses artifacts retain their original `litellm` identity and are not
+relabeled or replayed by a new adapter. A mismatch always reconstructs input from canonical events. Provider-tool
 fallback uses one deterministic readable rendering of semantic input, output, references, excerpts,
 and stable metadata rather than inspecting native artifacts. This includes forward cutover from old
-LiteLLM artifacts and a code-version rollback that reads newer OpenAI-native artifacts;
+LiteLLM artifacts and a compatible code-version rollback reading artifacts owned by another adapter;
 cross-adapter objects are never replayed as though they shared schema ownership.
 
 Client-tool native artifacts are subordinate to the canonical stored dialect. A same-native custom
@@ -1425,6 +1429,8 @@ presentations.
 
 ## 13. Changelog
 
+- **2026-09-30** — v175. Documented truthful Pydantic AI model-message native identity and
+  canonical fallback for historical adapters while retaining native OpenAI and exact replay authority.
 - **2026-09-29** — v174. Added registry-derived exclusive Normal/Fast/Ultrafast
   composer selection and immutable processing-speed intent in usage details.
 - **2026-09-25** — v173. Added ordered multi-thumbnail Brave client-tool

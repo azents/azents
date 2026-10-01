@@ -142,6 +142,8 @@ The completed replacement must have evidence for both preserved behavior and the
 **Acceptance criteria**
 
 - Verification covers user-visible behavior end to end, with deterministic provider fixtures and focused lower-level tests for provider-specific transformations and failure boundaries.
+- E2E verifies core user-visible behavior and real product boundaries. Complex condition combinations, provider/SDK transformation details, and boundary-value matrices belong in focused unit or contract tests; the evidence mapping still accounts for every required behavior.
+- E2E execution time must remain strictly below 110% of the comparable main baseline. A slowdown of 10% or more rejects the delivery. Measurements use equivalent execution conditions and include added fixture/setup/teardown work rather than hiding it through extra runners or prerequisite stages.
 - Provider, credential, supported-tool, history-continuation, timeout, Stop, retry, catalog, context, and usage cases are mapped explicitly to requirements and evidence.
 - Mock or offline probes are labeled as such; they are not represented as successful authenticated provider integration. Unverified live credential or transport prerequisites remain explicit feasibility conditions.
 - The removal inventory accounts for runtime code, tests and fixtures, dependency and maintenance configuration, model identifiers, current documentation, and affected persistence/API/generated surfaces. Each has a replacement or an explicit remaining authority.
@@ -165,3 +167,5 @@ The completed replacement must have evidence for both preserved behavior and the
 ## Confirmation
 
 Confirmed by the requester on 2026-09-30 (KST) before ADR and design decisions began. Confirmation covers REQ-1 through REQ-8, goals, non-goals, fixed constraints, and the explicit distinction between executable package removal and public metadata-source policy. It does not authorize implementation or deployment.
+
+The requester added the REQ-8 verification-quality clarification on 2026-09-30 (KST): E2E at least 10% slower than main is rejected, complex conditional tests belong in unit tests, and E2E verifies core behavior. This clarification changes test ownership and delivery acceptance, not the approved provider behavior or M1–M13 material mechanisms.

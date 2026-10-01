@@ -2,8 +2,6 @@
 
 import datetime
 
-import pytest
-
 from azents.core.chatgpt_oauth import CHATGPT_OAUTH_BACKEND_BASE_URL
 from azents.core.credentials import (
     ApiKeySecrets,
@@ -21,11 +19,7 @@ from azents.core.credentials import (
 )
 from azents.core.enums import LLMProvider
 from azents.core.kimi_oauth import KIMI_CODE_API_BASE_URL
-from azents.core.llm_mapping import (
-    build_credential_kwargs,
-    to_litellm_model,
-    to_runtime_model,
-)
+from azents.core.llm_mapping import build_credential_kwargs
 from azents.core.openrouter import OPENROUTER_API_BASE_URL, OPENROUTER_APP_TITLE
 from azents.core.xai import XAI_API_BASE_URL
 from azents.repos.llm_provider_integration.data import (
@@ -53,135 +47,6 @@ def _make_integration(
         secrets=secrets,
         catalog_configuration_version=1,
     )
-
-
-class TestToLitellmModel:
-    """to_litellm_model function tests."""
-
-    def test_openai(self) -> None:
-        """OpenAI provider mapping."""
-        # Given: OpenAI provider and model identifier
-        # When: convert to LiteLLM model string
-        result = to_litellm_model(LLMProvider.OPENAI, "gpt-4o")
-
-        # Then: openai/ prefix
-        assert result == "openai/gpt-4o"
-
-    def test_anthropic(self) -> None:
-        """Anthropic provider mapping."""
-        # Given: Anthropic provider and model identifier
-        # When: convert to LiteLLM model string
-        result = to_litellm_model(LLMProvider.ANTHROPIC, "claude-opus-4-6")
-
-        # Then: anthropic/ prefix
-        assert result == "anthropic/claude-opus-4-6"
-
-    def test_google_gemini(self) -> None:
-        """Google Gemini provider mapping."""
-        # Given: Google Gemini provider and model identifier
-        # When: convert to LiteLLM model string
-        result = to_litellm_model(LLMProvider.GOOGLE_GEMINI, "gemini-2.0-flash")
-
-        # Then: gemini/ prefix
-        assert result == "gemini/gemini-2.0-flash"
-
-    def test_aws_bedrock(self) -> None:
-        """AWS Bedrock provider mapping."""
-        # Given: AWS Bedrock provider and model identifier
-        # When: convert to LiteLLM model string
-        result = to_litellm_model(LLMProvider.AWS_BEDROCK, "anthropic.claude-v2")
-
-        # Then: bedrock/ prefix
-        assert result == "bedrock/anthropic.claude-v2"
-
-    def test_google_vertex_ai(self) -> None:
-        """Google Vertex AI provider mapping."""
-        # Given: Google Vertex AI provider and model identifier
-        # When: convert to LiteLLM model string
-        result = to_litellm_model(LLMProvider.GOOGLE_VERTEX_AI, "gemini-2.0-flash")
-
-        # Then: vertex_ai/ prefix
-        assert result == "vertex_ai/gemini-2.0-flash"
-
-    def test_chatgpt_oauth(self) -> None:
-        """ChatGPT OAuth provider uses Responses model ID as-is."""
-        result = to_litellm_model(LLMProvider.CHATGPT_OAUTH, "gpt-5.1-codex")
-
-        assert result == "gpt-5.1-codex"
-
-    def test_xai(self) -> None:
-        """xAI API key provider uses LiteLLM xAI routing prefix."""
-        result = to_litellm_model(LLMProvider.XAI, "grok-4.5")
-
-        assert result == "xai/grok-4.5"
-
-    def test_xai_oauth(self) -> None:
-        """xAI OAuth provider uses LiteLLM xAI routing prefix."""
-        result = to_litellm_model(LLMProvider.XAI_OAUTH, "grok-4.5")
-
-        assert result == "xai/grok-4.5"
-
-    def test_kimi_oauth(self) -> None:
-        """Kimi OAuth models use LiteLLM Moonshot routing."""
-        result = to_litellm_model(LLMProvider.KIMI_OAUTH, "kimi-k2.5")
-
-        assert result == "moonshot/kimi-k2.5"
-
-    def test_openrouter(self) -> None:
-        """OpenRouter keeps its publisher-qualified model identifier."""
-        result = to_litellm_model(
-            LLMProvider.OPENROUTER,
-            "anthropic/claude-sonnet-4.6",
-        )
-
-        assert result == "openrouter/anthropic/claude-sonnet-4.6"
-
-
-class TestToRuntimeModel:
-    """to_runtime_model function tests."""
-
-    def test_openai_responses_uses_raw_model_id(self) -> None:
-        """Pass model ID without LiteLLM prefix to OpenAI Responses SDK."""
-        result = to_runtime_model(LLMProvider.OPENAI, "gpt-5.5")
-
-        assert result == "gpt-5.5"
-
-    def test_chatgpt_oauth_uses_raw_model_id(self) -> None:
-        """ChatGPT OAuth Responses SDK also uses raw model ID."""
-        result = to_runtime_model(LLMProvider.CHATGPT_OAUTH, "gpt-5.1-codex")
-
-        assert result == "gpt-5.1-codex"
-
-    def test_bedrock_uses_litellm_routing_id(self) -> None:
-        """LiteLLM provider keeps provider prefix."""
-        result = to_runtime_model(
-            LLMProvider.AWS_BEDROCK,
-            "anthropic.claude-v2",
-        )
-
-        assert result == "bedrock/anthropic.claude-v2"
-
-    @pytest.mark.parametrize("provider", [LLMProvider.XAI, LLMProvider.XAI_OAUTH])
-    def test_xai_uses_litellm_routing_id(self, provider: LLMProvider) -> None:
-        """Both xAI credential modes use LiteLLM xAI routing."""
-        result = to_runtime_model(provider, "grok-4.5")
-
-        assert result == "xai/grok-4.5"
-
-    def test_kimi_oauth_uses_litellm_routing_id(self) -> None:
-        """Kimi OAuth runtime uses the LiteLLM Moonshot routing prefix."""
-        result = to_runtime_model(LLMProvider.KIMI_OAUTH, "kimi-k2.5")
-
-        assert result == "moonshot/kimi-k2.5"
-
-    def test_openrouter_uses_litellm_routing_id(self) -> None:
-        """OpenRouter runtime uses the LiteLLM OpenRouter routing prefix."""
-        result = to_runtime_model(
-            LLMProvider.OPENROUTER,
-            "anthropic/claude-sonnet-4.6",
-        )
-
-        assert result == "openrouter/anthropic/claude-sonnet-4.6"
 
 
 class TestBuildCredentialKwargs:
@@ -213,8 +78,6 @@ class TestBuildCredentialKwargs:
         assert result == {
             "api_key": "xai-test-key",
             "base_url": XAI_API_BASE_URL,
-            "api_base": XAI_API_BASE_URL,
-            "custom_llm_provider": "xai",
         }
 
     def test_openrouter_api_key_secrets(self) -> None:
@@ -229,8 +92,6 @@ class TestBuildCredentialKwargs:
         assert result == {
             "api_key": "openrouter-test-key",
             "base_url": OPENROUTER_API_BASE_URL,
-            "api_base": OPENROUTER_API_BASE_URL,
-            "custom_llm_provider": "openrouter",
             "extra_headers": {
                 "X-OpenRouter-Title": OPENROUTER_APP_TITLE,
             },
@@ -300,7 +161,6 @@ class TestBuildCredentialKwargs:
         assert result == {
             "api_key": "access-token",
             "base_url": CHATGPT_OAUTH_BACKEND_BASE_URL,
-            "api_base": CHATGPT_OAUTH_BACKEND_BASE_URL,
             "extra_headers": {
                 "originator": "azents",
                 "user-agent": "azents/0.1.0",
@@ -325,12 +185,10 @@ class TestBuildCredentialKwargs:
         assert result == {
             "api_key": "access-token",
             "base_url": XAI_API_BASE_URL,
-            "api_base": XAI_API_BASE_URL,
-            "custom_llm_provider": "xai",
         }
 
     def test_kimi_oauth_secrets(self) -> None:
-        """Convert Kimi OAuth secrets to Moonshot LiteLLM kwargs."""
+        """Convert Kimi OAuth secrets to the official compatible client settings."""
         now = datetime.datetime.now(datetime.UTC)
         integration = _make_integration(
             provider=LLMProvider.KIMI_OAUTH,
@@ -354,8 +212,6 @@ class TestBuildCredentialKwargs:
 
         assert result["api_key"] == "kimi-access-token"
         assert result["base_url"] == KIMI_CODE_API_BASE_URL
-        assert result["api_base"] == KIMI_CODE_API_BASE_URL
-        assert result["custom_llm_provider"] == "moonshot"
         headers = result["extra_headers"]
         assert is_string_object_dict(headers)
         assert headers["X-Msh-Platform"] == "kimi_cli"

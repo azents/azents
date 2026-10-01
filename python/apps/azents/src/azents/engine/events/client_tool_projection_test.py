@@ -167,7 +167,7 @@ async def test_openrouter_selects_json_variant_and_matching_guidance() -> None:
     projected = project_tool_catalog_for_client_compatibility(
         candidate,
         frozenset({_PROFILE}),
-        _adapter_profile(provider=LLMProvider.OPENROUTER, adapter="litellm"),
+        _adapter_profile(provider=LLMProvider.OPENROUTER, adapter="pydantic_ai"),
     )
 
     assert projected.wire_dialects[_TOOL_NAME] == "json_function"
@@ -181,15 +181,13 @@ async def test_openrouter_selects_json_variant_and_matching_guidance() -> None:
     ]
 
 
-async def test_generic_litellm_route_omits_profiled_tool_but_keeps_ordinary_tool() -> (
-    None
-):
+async def test_generic_pydantic_route_omits_profiled_tool_keeps_ordinary_tool() -> None:
     candidate = await _candidate_catalog(_DualDialectHandler())
 
     projected = project_tool_catalog_for_client_compatibility(
         candidate,
         frozenset({_PROFILE}),
-        _adapter_profile(provider=LLMProvider.OPENAI, adapter="litellm"),
+        _adapter_profile(provider=LLMProvider.OPENAI, adapter="pydantic_ai"),
     )
 
     assert list(projected.tools) == ["edit"]
@@ -268,7 +266,7 @@ def _adapter_profile(
         route=ClientToolRoute(
             provider=provider,
             adapter=adapter,
-            native_format="responses",
+            native_format="model_messages" if adapter == "pydantic_ai" else "responses",
         )
     )
     if profile is None:

@@ -13,7 +13,6 @@ from azents.core.crypto import CredentialCipher
 from azents.core.deps import get_credential_cipher
 from azents.core.enums import (
     LLMCatalogEntryVisibility,
-    LLMCatalogLowererTarget,
     LLMCatalogPurpose,
     LLMProvider,
 )
@@ -328,7 +327,6 @@ class ImageGenerationCatalogService:
                 session,
                 integration_id=integration.id,
                 provider=integration.provider,
-                lowerer_target=LLMCatalogLowererTarget.LITELLM,
                 purpose=LLMCatalogPurpose.IMAGE_GENERATION,
             )
             page = await (
@@ -397,7 +395,6 @@ class ImageGenerationCatalogService:
                 session,
                 integration_id=integration.id,
                 provider=integration.provider,
-                lowerer_target=LLMCatalogLowererTarget.LITELLM,
                 purpose=LLMCatalogPurpose.IMAGE_GENERATION,
             )
         started_at = _utcnow()

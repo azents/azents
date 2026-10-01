@@ -7,7 +7,7 @@ import logging
 from collections.abc import AsyncIterator
 from unittest.mock import AsyncMock
 
-import httpx
+import httpx2
 import pytest
 from openai import AsyncOpenAI, AuthenticationError, BadRequestError, OpenAIError, omit
 from openai.resources.responses.responses import AsyncResponsesConnection
@@ -41,6 +41,7 @@ from openai.types.responses.response_usage import (
     OutputTokensDetails,
 )
 from pydantic import ValidationError
+from pydantic_ai.messages import ModelResponse, TextPart
 from websockets.datastructures import Headers
 from websockets.exceptions import InvalidStatus
 from websockets.http11 import Response as WebSocketHTTPResponse
@@ -59,7 +60,6 @@ from azents.core.model_execution_options import ModelExecutionOptionId
 from azents.core.model_pricing import ModelPricing, normalize_model_pricing
 from azents.core.openai_client_config import openai_responses_client_config
 from azents.engine.events.file_parts import ModelFileLoweringContent
-from azents.engine.events.litellm_responses import LiteLLMResponsesLowerer
 from azents.engine.events.openai_responses import (
     OpenAIResponsesLowerer,
     OpenAIResponsesModelAdapter,
@@ -75,6 +75,7 @@ from azents.engine.events.protocols import (
     ProviderToolActivityProjection,
     ReasoningDeltaProjection,
 )
+from azents.engine.events.pydantic_ai_lowering import PydanticAILowerer
 from azents.engine.events.responses_continuation import ResponsesContinuationPlanner
 from azents.engine.events.system_reminders import format_compaction_summary_reminder
 from azents.engine.events.types import (
@@ -219,17 +220,13 @@ def test_openai_lowerer_rejects_unbounded_service_tier_kwarg() -> None:
         )
 
 
-@pytest.mark.parametrize(
-    "lowerer_type", [OpenAIResponsesLowerer, LiteLLMResponsesLowerer]
-)
 @pytest.mark.parametrize("provider", [LLMProvider.OPENAI, LLMProvider.CHATGPT_OAUTH])
 def test_responses_lowerers_reject_conflicting_speed_preferences(
-    lowerer_type: type[OpenAIResponsesLowerer] | type[LiteLLMResponsesLowerer],
     provider: LLMProvider,
 ) -> None:
     """Reject conflicts before either Responses adapter can invoke a provider."""
     options = [ModelExecutionOptionId.FAST, ModelExecutionOptionId.ULTRAFAST]
-    lowerer = lowerer_type(
+    lowerer = OpenAIResponsesLowerer(
         provider=provider.value,
         model="gpt-6-astra",
         provider_id=provider,
@@ -1288,14 +1285,14 @@ async def test_pinned_sdk_http_serializes_and_parses_ultrafast() -> None:
     response = _response().model_dump(mode="json")
     response["service_tier"] = "ultrafast"
 
-    def handle(request: httpx.Request) -> httpx.Response:
+    def handle(request: httpx2.Request) -> httpx2.Response:
         captured.update(json.loads(request.content))
-        return httpx.Response(200, request=request, json=response)
+        return httpx2.Response(200, request=request, json=response)
 
     sdk = AsyncOpenAI(
         api_key="synthetic-test-key",
         max_retries=0,
-        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handle)),
+        http_client=httpx2.AsyncClient(transport=httpx2.MockTransport(handle)),
     )
     client = OpenAISDKResponsesClient(sdk, websocket_headers=None)
     parsed = await client.create_response(
@@ -1531,10 +1528,10 @@ async def test_adapter_maps_sdk_status_error_without_duplicate_adapter_log(
 ) -> None:
     """SDK status failures preserve their exception context for the error boundary."""
     caplog.set_level(logging.WARNING)
-    request_handle = httpx.Request("POST", "https://provider.example/responses")
+    request_handle = httpx2.Request("POST", "https://provider.example/responses")
     error = BadRequestError(
         "Error code: 400 - {'error': {'message': 'raw body'}}",
-        response=httpx.Response(
+        response=httpx2.Response(
             400,
             headers={"x-request-id": "req_synthetic"},
             request=request_handle,
@@ -2247,12 +2244,12 @@ async def test_official_sdk_wire_request_preserves_presence_and_stop() -> None:
     """Public SDK serialization omits absent fields and merges the stop extension."""
     captured_body: dict[str, object] = {}
 
-    async def respond(request: httpx.Request) -> httpx.Response:
+    async def respond(request: httpx2.Request) -> httpx2.Response:
         body = json.loads((await request.aread()).decode())
         assert isinstance(body, dict)
         captured_body.update(body)
         event = _completed_event().model_dump_json(exclude_unset=True)
-        return httpx.Response(
+        return httpx2.Response(
             200,
             headers={"content-type": "text/event-stream"},
             content=f"data: {event}\n\ndata: [DONE]\n\n",
@@ -2262,7 +2259,7 @@ async def test_official_sdk_wire_request_preserves_presence_and_stop() -> None:
     sdk_client = AsyncOpenAI(
         api_key="synthetic-test-key",
         base_url="https://provider.example/v1",
-        http_client=httpx.AsyncClient(transport=httpx.MockTransport(respond)),
+        http_client=httpx2.AsyncClient(transport=httpx2.MockTransport(respond)),
     )
     adapter = OpenAIResponsesModelAdapter(
         client=OpenAISDKResponsesClient(sdk_client, websocket_headers=None),
@@ -2318,12 +2315,12 @@ async def test_official_sdk_wire_request_sanitizes_unstored_generated_image() ->
     """Send only the ChatGPT stateless generated-image input contract."""
     captured_body: dict[str, object] = {}
 
-    async def respond(request: httpx.Request) -> httpx.Response:
+    async def respond(request: httpx2.Request) -> httpx2.Response:
         body = json.loads((await request.aread()).decode())
         assert isinstance(body, dict)
         captured_body.update(body)
         event = _completed_event().model_dump_json(exclude_unset=True)
-        return httpx.Response(
+        return httpx2.Response(
             200,
             headers={"content-type": "text/event-stream"},
             content=f"data: {event}\n\ndata: [DONE]\n\n",
@@ -2390,7 +2387,7 @@ async def test_official_sdk_wire_request_sanitizes_unstored_generated_image() ->
     sdk_client = AsyncOpenAI(
         api_key="synthetic-test-key",
         base_url="https://provider.example/v1",
-        http_client=httpx.AsyncClient(transport=httpx.MockTransport(respond)),
+        http_client=httpx2.AsyncClient(transport=httpx2.MockTransport(respond)),
     )
     adapter = OpenAIResponsesModelAdapter(
         client=OpenAISDKResponsesClient(sdk_client, websocket_headers=None),
@@ -3347,7 +3344,7 @@ def test_typed_failed_event_preserves_http_status_code() -> None:
 
 
 def test_cross_adapter_artifacts_use_canonical_fallback() -> None:
-    """OpenAI and LiteLLM artifacts never cross their exact compat boundary."""
+    """Native Responses and ModelMessages artifacts have exact compat boundaries."""
     openai_artifact = NativeArtifact(
         compat_key=build_native_compat_key(
             adapter="openai",
@@ -3374,15 +3371,23 @@ def test_cross_adapter_artifacts_use_canonical_fallback() -> None:
         ),
         created_at=datetime.datetime.now(datetime.UTC),
     )
-    lite_request = LiteLLMResponsesLowerer(
+    model_request = PydanticAILowerer(
         supported_execution_options=[],
         enabled_execution_options=[],
         provider="openai",
         model="gpt-5.1-codex",
         provider_id=LLMProvider.OPENAI,
+        tools=None,
+        model_capabilities=None,
     ).lower([event], model="gpt-5.1-codex")
 
-    assert lite_request.input == [{"role": "assistant", "content": "canonical text"}]
+    responses = [
+        message
+        for message in model_request.messages
+        if isinstance(message, ModelResponse)
+    ]
+    assert len(responses) == 1
+    assert responses[0].parts == [TextPart("canonical text")]
 
 
 @pytest.mark.parametrize(
@@ -3548,10 +3553,10 @@ async def test_authentication_error_preserves_typed_provider_message(
     body: dict[str, object],
 ) -> None:
     """Final SDK status failures preserve bounded provider-authored text."""
-    request_handle = httpx.Request("POST", "https://provider.example/responses")
+    request_handle = httpx2.Request("POST", "https://provider.example/responses")
     error = AuthenticationError(
         "Error code: 401 - {'error': {'message': 'raw body'}}",
-        response=httpx.Response(401, request=request_handle),
+        response=httpx2.Response(401, request=request_handle),
         body=body,
     )
     client = _SequencedFakeClient([error])
@@ -3640,10 +3645,10 @@ async def test_missing_previous_response_retries_full_input_once(
             ]
         }
     )
-    request_handle = httpx.Request("POST", "https://provider.example/responses")
+    request_handle = httpx2.Request("POST", "https://provider.example/responses")
     missing = BadRequestError(
         "stored response missing",
-        response=httpx.Response(400, request=request_handle),
+        response=httpx2.Response(400, request=request_handle),
         body={"error": {"code": "previous_response_not_found"}},
     )
     completed_stream = _FakeStream([_completed_event()])

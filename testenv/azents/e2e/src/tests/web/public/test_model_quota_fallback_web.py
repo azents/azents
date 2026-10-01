@@ -4,7 +4,6 @@ from typing import NamedTuple
 
 import azentsadminclient
 import azentspublicclient
-import pytest
 import requests
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
@@ -239,14 +238,6 @@ def test_agent_editor_reorders_and_persists_fallback_candidates(
     )
 
 
-@pytest.mark.parametrize(
-    ("width", "height", "prompt"),
-    [
-        (1440, 1000, "Quota fallback desktop uses secondary candidate"),
-        (390, 844, "Quota fallback mobile uses secondary candidate"),
-    ],
-    ids=["desktop-popover", "mobile-drawer"],
-)
 def test_fallback_status_is_transient_and_picker_has_no_availability_controls(
     browser_driver: WebDriver,
     azents_main_web_url: str,
@@ -254,17 +245,14 @@ def test_fallback_status_is_transient_and_picker_has_no_availability_controls(
     mock_openai_url: str,
     public_api_client: azentspublicclient.ApiClient,
     admin_api_client: azentsadminclient.ApiClient,
-    width: int,
-    height: int,
-    prompt: str,
 ) -> None:
-    """Fallback execution remains automatic while the picker stays ordinary."""
+    """Fallback execution remains automatic in one representative Web flow."""
     email, handle, token, agent_id, session_id = _create_configured_session(
         public_api_client=public_api_client,
         admin_api_client=admin_api_client,
         server_url=azents_public_server_url,
     )
-    browser_driver.set_window_size(width, height)
+    browser_driver.set_window_size(1440, 1000)
     _login_main_web(browser_driver, base_url=azents_main_web_url, email=email)
     browser_driver.get(
         f"{azents_main_web_url}/w/{handle}/agents/{agent_id}/sessions/{session_id}"
@@ -289,7 +277,10 @@ def test_fallback_status_is_transient_and_picker_has_no_availability_controls(
         "//button[normalize-space()='Cancel Primary next']",
     )
     requests.delete(f"{mock_openai_url}/v1/_requests", timeout=10).raise_for_status()
-    message_input.send_keys(prompt, Keys.ENTER)
+    message_input.send_keys(
+        "Quota fallback desktop uses secondary candidate",
+        Keys.ENTER,
+    )
     _wait(browser_driver).until(
         ec.visibility_of_element_located(
             (

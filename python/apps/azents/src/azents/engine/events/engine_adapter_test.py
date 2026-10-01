@@ -67,19 +67,19 @@ from azents.engine.events.filters import (
     EventPreLowerFilterPipeline,
     PostLowerFilterPipeline,
 )
-from azents.engine.events.litellm_responses import LiteLLMResponsesModelAdapter
 from azents.engine.events.openai_responses import (
     OpenAIResponsesModelAdapter,
     OpenAIResponsesRequest,
 )
 from azents.engine.events.protocols import (
-    NativeModelRequest,
     NativeRequestInspection,
     NormalizedAdapterOutput,
     OutputSink,
     SummaryEnricher,
     SummaryGenerator,
 )
+from azents.engine.events.pydantic_ai_adapter import PydanticAIModelAdapter
+from azents.engine.events.pydantic_ai_types import PydanticAIRequest
 from azents.engine.events.responses_continuation import ResponsesContinuationPlanner
 from azents.engine.events.tool_invocation import (
     PreparedClientToolInvocation,
@@ -110,6 +110,8 @@ from azents.engine.hooks.types import (
     TurnStartHookContext,
     TurnStartResult,
 )
+from azents.engine.model_assembly import ModelAssemblyMetadata
+from azents.engine.model_factories import get_model_sdk_factories
 from azents.engine.run.client_tool_compatibility import ClientToolModelProfile
 from azents.engine.run.contracts import RunContext, RunRequest, ToolkitBinding
 from azents.engine.run.emit import Emit
@@ -1159,6 +1161,8 @@ async def test_assembled_tool_chain_rechecks_owner_after_before_hook() -> None:
         execution_factory=_capture_execution_factory(execution),
     )
     request = RunRequest(
+        model_assembly_metadata=None,
+        compaction_assembly_metadata=None,
         enabled_execution_options=[],
         session_id="session-1",
         user_messages=[],
@@ -1216,6 +1220,8 @@ async def test_event_engine_adapter_runs_execution() -> None:
         emit
         async for emit in adapter.run(
             RunRequest(
+                model_assembly_metadata=None,
+                compaction_assembly_metadata=None,
                 enabled_execution_options=[],
                 session_id="session-1",
                 user_messages=[],
@@ -1266,6 +1272,8 @@ async def test_disabled_tool_search_exposes_complete_catalog() -> None:
         execution_factory=_capture_execution_factory(execution),
     )
     request = RunRequest(
+        model_assembly_metadata=None,
+        compaction_assembly_metadata=None,
         enabled_execution_options=[],
         session_id="session-1",
         user_messages=[],
@@ -1399,7 +1407,7 @@ async def test_client_tool_profile_re_evaluates_for_changed_model_snapshot() -> 
 
 
 async def test_client_tool_adapter_profile_selects_json_on_openrouter() -> None:
-    """Use the provider-specific LiteLLM preference for the same semantic tool."""
+    """Use the selected JSON-function profile on the public model route."""
     prepared = await _prepare_profiled_model_call(
         model_identifier="gpt-5.1",
         model_developer=LLMModelDeveloper.OPENAI,
@@ -1409,18 +1417,14 @@ async def test_client_tool_adapter_profile_selects_json_on_openrouter() -> None:
     )
 
     native_request = prepared.native_request
-    assert isinstance(native_request, NativeModelRequest)
-    assert native_request.tools == [
-        {
-            "type": "function",
-            "name": "batch_update",
-            "description": "Apply one batch update.",
-            "parameters": {"type": "object", "properties": {}},
-            "strict": False,
-        }
-    ]
-    instructions = native_request.kwargs.get("instructions")
-    assert isinstance(instructions, str)
+    assert isinstance(native_request, PydanticAIRequest)
+    tools = native_request.parameters.function_tools
+    assert len(tools) == 1
+    assert tools[0].name == "batch_update"
+    assert tools[0].description == "Apply one batch update."
+    assert tools[0].parameters_json_schema == {"type": "object", "properties": {}}
+    assert tools[0].strict is False
+    instructions = str(native_request.messages[0])
     assert "Send structured arguments for batch updates." in instructions
     assert "Send one plaintext batch update request." not in instructions
 
@@ -1467,6 +1471,8 @@ async def test_tool_search_activation_updates_the_next_prepared_call() -> None:
         execution_factory=_capture_execution_factory(execution),
     )
     request = RunRequest(
+        model_assembly_metadata=None,
+        compaction_assembly_metadata=None,
         enabled_execution_options=[],
         session_id="session-1",
         user_messages=[],
@@ -1581,6 +1587,8 @@ async def test_runtime_provider_adds_run_tool_to_file_as_direct_tool() -> None:
         execution_factory=_capture_execution_factory(execution),
     )
     request = RunRequest(
+        model_assembly_metadata=None,
+        compaction_assembly_metadata=None,
         enabled_execution_options=[],
         session_id="session-1",
         user_messages=[],
@@ -1650,6 +1658,8 @@ async def _prepare_profiled_model_call(
         resolved_at=datetime.datetime.now(datetime.UTC),
     )
     request = RunRequest(
+        model_assembly_metadata=None,
+        compaction_assembly_metadata=None,
         enabled_execution_options=enabled_execution_options or [],
         session_id="session-1",
         user_messages=[],
@@ -1766,6 +1776,8 @@ async def test_openai_image_generation_is_bound_as_client_function_tool(
         emit
         async for emit in adapter.run(
             RunRequest(
+                model_assembly_metadata=None,
+                compaction_assembly_metadata=None,
                 enabled_execution_options=[],
                 session_id="session-1",
                 user_messages=[],
@@ -1831,6 +1843,8 @@ async def test_xai_image_generation_is_bound_as_client_function_tool(
         emit
         async for emit in adapter.run(
             RunRequest(
+                model_assembly_metadata=None,
+                compaction_assembly_metadata=None,
                 enabled_execution_options=[],
                 session_id="session-1",
                 user_messages=[],
@@ -1867,9 +1881,10 @@ async def test_xai_image_generation_is_bound_as_client_function_tool(
 
     assert execution.prepared_model_call is not None
     prepared_request = execution.prepared_model_call.native_request
-    assert isinstance(prepared_request, NativeModelRequest)
-    assert [tool["name"] for tool in prepared_request.tools] == ["image_generation"]
-    assert all(tool.get("type") == "function" for tool in prepared_request.tools)
+    assert isinstance(prepared_request, PydanticAIRequest)
+    assert [tool.name for tool in prepared_request.parameters.function_tools] == [
+        "image_generation"
+    ]
     projection_record = next(
         record
         for record in caplog.records
@@ -1917,6 +1932,8 @@ async def test_xai_oauth_refresh_updates_later_model_turn_credentials(
         xai_imagine_client_factory=_refreshing_imagine_client_factory(tokens),
     )
     request = RunRequest(
+        model_assembly_metadata=None,
+        compaction_assembly_metadata=None,
         enabled_execution_options=[],
         session_id="session-1",
         user_messages=[],
@@ -1957,8 +1974,9 @@ async def test_xai_oauth_refresh_updates_later_model_turn_credentials(
         model="xai/grok-4",
     )
     second_request = second_prepared.native_request
-    assert isinstance(second_request, NativeModelRequest)
-    assert second_request.kwargs["api_key"] == "new-access-token"
+    assert isinstance(second_request, PydanticAIRequest)
+    assert "new-access-token" not in str(second_request)
+    assert request.credential_kwargs["api_key"] == "new-access-token"
 
     second_result = await second_prepared.tool_executor.execute(
         ClientToolCallPayload(
@@ -2016,6 +2034,8 @@ async def test_xai_oauth_refresh_preserves_failure_classification(
         xai_imagine_client_factory=_refreshing_imagine_client_factory([]),
     )
     request = RunRequest(
+        model_assembly_metadata=None,
+        compaction_assembly_metadata=None,
         enabled_execution_options=[],
         session_id="session-1",
         user_messages=[],
@@ -2055,6 +2075,8 @@ async def test_adapter_yields_model_output_before_run_completion() -> None:
 
     stream = adapter.run(
         RunRequest(
+            model_assembly_metadata=None,
+            compaction_assembly_metadata=None,
             enabled_execution_options=[],
             session_id="session-1",
             user_messages=[],
@@ -2106,6 +2128,8 @@ async def test_adapter_forwards_user_stop_cancellation_to_execution() -> None:
         """Receive external cancellation while consuming adapter stream."""
         async for _emit in adapter.run(
             RunRequest(
+                model_assembly_metadata=None,
+                compaction_assembly_metadata=None,
                 enabled_execution_options=[],
                 session_id="session-1",
                 user_messages=[],
@@ -2159,6 +2183,8 @@ async def test_adapter_drains_run_task_on_stream_close() -> None:
 
     stream = adapter.run(
         RunRequest(
+            model_assembly_metadata=None,
+            compaction_assembly_metadata=None,
             enabled_execution_options=[],
             session_id="session-1",
             user_messages=[],
@@ -2207,6 +2233,8 @@ async def test_event_engine_adapter_includes_turn_start_injected_prompts() -> No
         emit
         async for emit in adapter.run(
             RunRequest(
+                model_assembly_metadata=None,
+                compaction_assembly_metadata=None,
                 enabled_execution_options=[],
                 session_id="session-1",
                 user_messages=[],
@@ -2262,6 +2290,8 @@ async def test_adapter_propagates_user_visible_model_call_error() -> None:
     with pytest.raises(ModelCallError, match="Missing scopes"):
         async for emit in adapter.run(
             RunRequest(
+                model_assembly_metadata=None,
+                compaction_assembly_metadata=None,
                 enabled_execution_options=[],
                 session_id="session-1",
                 user_messages=[],
@@ -2363,6 +2393,8 @@ async def test_model_kwargs_routes_chatgpt_oauth_to_backend_api() -> None:
         emit
         async for emit in adapter.run(
             RunRequest(
+                model_assembly_metadata=None,
+                compaction_assembly_metadata=None,
                 enabled_execution_options=[],
                 session_id="session-1",
                 user_messages=[],
@@ -2405,8 +2437,8 @@ async def test_model_kwargs_routes_chatgpt_oauth_to_backend_api() -> None:
     assert model_adapter.continuation_planner is None
 
 
-async def test_model_kwargs_keep_openrouter_on_litellm_responses() -> None:
-    """OpenRouter uses LiteLLM Responses and preserves endpoint credentials."""
+async def test_openrouter_model_binding_keeps_responses_and_exact_model_id() -> None:
+    """Credentials belong to the Responses model factory, not logical messages."""
     execution = _Execution()
     captured: dict[str, object] = {}
 
@@ -2433,19 +2465,19 @@ async def test_model_kwargs_keep_openrouter_on_litellm_responses() -> None:
         emit
         async for emit in adapter.run(
             RunRequest(
+                model_assembly_metadata=None,
+                compaction_assembly_metadata=None,
                 enabled_execution_options=[],
                 session_id="session-1",
                 user_messages=[],
                 agent_prompt=None,
                 toolkits=[],
                 provider=LLMProvider.OPENROUTER,
-                model="openrouter/anthropic/claude-sonnet-4.6",
+                model="anthropic/claude-sonnet-4.6",
                 model_developer=LLMModelDeveloper.ANTHROPIC,
                 credential_kwargs={
                     "api_key": "openrouter-test-key",
                     "base_url": OPENROUTER_API_BASE_URL,
-                    "api_base": OPENROUTER_API_BASE_URL,
-                    "custom_llm_provider": "openrouter",
                     "extra_headers": {
                         "X-OpenRouter-Title": OPENROUTER_APP_TITLE,
                     },
@@ -2472,19 +2504,17 @@ async def test_model_kwargs_keep_openrouter_on_litellm_responses() -> None:
 
     assert execution.prepared_model_call is not None
     native_request = execution.prepared_model_call.native_request
-    assert isinstance(native_request, NativeModelRequest)
-    assert native_request.model == "openrouter/anthropic/claude-sonnet-4.6"
-    assert native_request.kwargs["custom_llm_provider"] == "openrouter"
-    assert native_request.kwargs["base_url"] == OPENROUTER_API_BASE_URL
-    assert native_request.kwargs["extra_headers"] == {
-        "X-OpenRouter-Title": OPENROUTER_APP_TITLE,
-    }
+    assert isinstance(native_request, PydanticAIRequest)
+    assert native_request.model == "anthropic/claude-sonnet-4.6"
+    assert "openrouter-test-key" not in str(native_request)
     model_adapter = captured["model_adapter"]
-    assert isinstance(model_adapter, LiteLLMResponsesModelAdapter)
-    assert isinstance(
-        model_adapter.continuation_planner,
-        ResponsesContinuationPlanner,
-    )
+    assert isinstance(model_adapter, PydanticAIModelAdapter)
+    assert model_adapter.factory.provider is LLMProvider.OPENROUTER
+    assert model_adapter.factory.credential_kwargs == {
+        "api_key": "openrouter-test-key",
+        "base_url": OPENROUTER_API_BASE_URL,
+        "extra_headers": {"X-OpenRouter-Title": OPENROUTER_APP_TITLE},
+    }
 
 
 async def test_adapter_wires_event_filters_and_session_head_repo() -> None:
@@ -2516,6 +2546,8 @@ async def test_adapter_wires_event_filters_and_session_head_repo() -> None:
         emit
         async for emit in adapter.run(
             RunRequest(
+                model_assembly_metadata=None,
+                compaction_assembly_metadata=None,
                 enabled_execution_options=[],
                 session_id="session-1",
                 user_messages=[],
@@ -2611,6 +2643,7 @@ async def test_manual_compact_runs_append_only_event_compactor() -> None:
         provider_integration_id: str | None,
         model: str,
         credential_kwargs: dict[str, object],
+        assembly_metadata: ModelAssemblyMetadata | None,
         system_prompt: str,
         user_prompt: str,
         conversation_text: str,
@@ -2646,6 +2679,8 @@ async def test_manual_compact_runs_append_only_event_compactor() -> None:
         emit
         async for emit in adapter.compact(
             RunRequest(
+                model_assembly_metadata=None,
+                compaction_assembly_metadata=None,
                 enabled_execution_options=[],
                 session_id="session-1",
                 user_messages=[],
@@ -2708,6 +2743,7 @@ async def test_manual_compact_runs_compaction_summary_hook() -> None:
         provider_integration_id: str | None,
         model: str,
         credential_kwargs: dict[str, object],
+        assembly_metadata: ModelAssemblyMetadata | None,
         system_prompt: str,
         user_prompt: str,
         conversation_text: str,
@@ -2743,6 +2779,8 @@ async def test_manual_compact_runs_compaction_summary_hook() -> None:
         emit
         async for emit in adapter.compact(
             RunRequest(
+                model_assembly_metadata=None,
+                compaction_assembly_metadata=None,
                 enabled_execution_options=[],
                 session_id="session-1",
                 user_messages=[],
@@ -2833,6 +2871,7 @@ async def test_manual_compact_trims_summary_input_to_checkpoint_and_tail() -> No
         provider_integration_id: str | None,
         model: str,
         credential_kwargs: dict[str, object],
+        assembly_metadata: ModelAssemblyMetadata | None,
         system_prompt: str,
         user_prompt: str,
         conversation_text: str,
@@ -2869,6 +2908,8 @@ async def test_manual_compact_trims_summary_input_to_checkpoint_and_tail() -> No
         emit
         async for emit in adapter.compact(
             RunRequest(
+                model_assembly_metadata=None,
+                compaction_assembly_metadata=None,
                 enabled_execution_options=[],
                 session_id="session-1",
                 user_messages=[],
@@ -2931,6 +2972,8 @@ async def test_manual_compact_propagates_compaction_failure() -> None:
 
     iterator = adapter.compact(
         RunRequest(
+            model_assembly_metadata=None,
+            compaction_assembly_metadata=None,
             enabled_execution_options=[],
             session_id="session-1",
             user_messages=[],
@@ -3121,6 +3164,7 @@ def _agent_engine_adapter(
     """Create AgentEngineAdapter for tests."""
     watchdog = make_test_model_stream_watchdog()
     return AgentEngineAdapter(
+        sdk_factories=get_model_sdk_factories(),
         session_manager=session_manager,
         tool_working_set_store=(tool_working_set_store or _ToolWorkingSetStore()),
         artifact_service=artifact_service or _ArtifactService(),
@@ -3146,7 +3190,11 @@ def _agent_engine_adapter(
         ),
         compactor=compactor or _Compactor(),
         summary_model_call=summary_model_call
-        or functools.partial(summarize_text_with_model, watchdog=watchdog),
+        or functools.partial(
+            summarize_text_with_model,
+            watchdog=watchdog,
+            sdk_factories=get_model_sdk_factories(),
+        ),
     )
 
 

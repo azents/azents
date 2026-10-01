@@ -10,6 +10,7 @@ code_paths:
   - python/apps/azents/src/azents/broker/redis.py
   - python/apps/azents/src/azents/core/vfs.py
   - python/apps/azents/src/azents/core/model_pricing.py
+  - python/apps/azents/src/azents/engine/providers/**
   - python/apps/azents/src/azents/services/model_metadata.py
   - python/apps/azents/src/azents/core/goal.py
   - python/apps/azents/src/azents/core/skill_projection.py
@@ -40,6 +41,9 @@ code_paths:
   - python/apps/azents/src/azents/engine/context/compaction.py
   - python/apps/azents/src/azents/engine/context/window.py
   - python/apps/azents/src/azents/engine/model_stream.py
+  - python/apps/azents/src/azents/engine/model_assembly.py
+  - python/apps/azents/src/azents/engine/model_text.py
+  - python/apps/azents/src/azents/engine/providers/model_factory.py
   - python/apps/azents/src/azents/utils/logging.py
   - python/apps/azents/src/azents/engine/responses.py
   - python/apps/azents/src/azents/engine/events/**
@@ -109,7 +113,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
   - typescript/apps/azents-web/messages/*/chat.json
 last_verified_at: 2026-10-01
-spec_version: 189
+spec_version: 190
 ---
 
 # Agent Execution Loop
@@ -152,11 +156,20 @@ Main steps:
 5. `PreLowerFilterPipeline` cleans up event transcript into DB-mutating event transcript.
 6. The provider-selected lowerer converts the event transcript, client tools, hosted tools, and
    model options into a complete adapter-owned logical request. OpenAI API-key and ChatGPT OAuth use
-   `OpenAIResponsesLowerer`; other providers use `LiteLLMResponsesLowerer`.
+   `OpenAIResponsesLowerer`; other providers use `PydanticAILowerer`.
 7. `PostLowerFilterPipeline` applies adapter-native request guards to that complete logical request.
 8. OpenAI API-key and ChatGPT OAuth primary sampling selects a persistent Responses WebSocket or
    streaming HTTP through the official OpenAI SDK after the complete request is validated;
-   non-migrated providers continue through `LiteLLMResponsesModelAdapter`.
+   the other eight provider identities use `PydanticAIModelAdapter` with supported official SDKs,
+   native observation, and the same Azents-owned execution lifecycle. Each replacement request also
+   carries a captured `ModelAssemblyMetadata` from its selected physical candidate: the typed saved
+   developer, canonical family and capability snapshot. Main sampling, title candidates and the
+   actual lightweight compaction candidate (including recovery and candidate transitions) carry
+   their own metadata. An opaque Bedrock profile may use this saved authority for family wire
+   traits such as native thinking replay, cache points and tool-result placement; known SDK model
+   profiles take precedence. The metadata does not authorize tools, modalities, reasoning options,
+   version-specific features or new routes, and never changes the raw model/ARN or compatibility
+   identity. No mutable catalog or source lookup is performed to fill missing family authority.
 9. The matching `AdapterOutputNormalizer` incrementally processes native output into typed,
    provider-neutral UI stream projections while retaining only the state needed to build durable
    output at completion. Provider-native hosted-tool stages are adapter-local and become canonical
@@ -235,8 +248,10 @@ Streaming text, reasoning, function-call deltas, and provider-tool activity are 
 The worker coalesces text and reasoning deltas for at most 75 milliseconds or 96 characters before
 Redis/WebSocket publication. Provider-tool activity is emitted as a full canonical snapshot keyed by
 stable adapter-normalized `call_id`, with semantic name, status `running | completed | failed`, and
-optional canonical JSON arguments. A normally exhausted Responses stream must contain an explicit native
-`response.completed` terminal event before its normalized output can be appended. The OpenAI SDK
+optional canonical JSON arguments. OpenAI and Responses-protocol model routes require native
+`response.completed` success before normalized output can be appended. Other Pydantic AI routes
+require their protocol-native completion evidence, classified by the observer; common model state,
+partial output, or EOF alone does not prove success. The OpenAI SDK
 normalizer requires both the documented SDK event class and exact wire discriminator;
 `response.incomplete`, `response.failed`, and `error` outcomes, plus EOF without a recognized
 terminal event, raise before durable model events or markers are appended. Provider-attributed SDK
@@ -244,9 +259,9 @@ exceptions, transport failures, and typed terminal events enter the `ModelProvid
 only when their status or typed identifiers map to a known category. That contract retains only a
 bounded redacted provider-authored scalar message and validated safe diagnostics, including a
 sanitized provider parameter path when the typed error supplies one; raw bodies,
-credentials, headers, request/model output, and stream frames never cross the adapter boundary. When
-LiteLLM exposes an error only through its bounded SDK serialization, the adapter parses that wrapper
-and retains only the provider's scalar `message`, `code`, and `type`. Every provider-attributed error
+credentials, headers, request/model output, and stream frames never cross the failure/logging boundary.
+Supported SDK/model boundaries retain only allowlisted typed provider evidence; opaque exception
+serialization is not a durable failure contract. Every provider-attributed error
 emits the common structured provider fields, including the sanitized message and stable fingerprint,
 at the boundary that handles it. Every classified provider failure receives the complete configured
 Run retry budget regardless of category or diagnostic retryability. An unclassified SDK exception is
@@ -348,9 +363,12 @@ model-, inference-profile-, Session-, or legacy-fallback overrides. The producti
 | Absolute attempt | 1,800 seconds | Starts with response-handle acquisition and never resets. |
 | Provider close grace | 5 seconds | Bounds cooperative close before cleanup remains process-owned. |
 
-The active LiteLLM or official OpenAI SDK HTTP client receives a connect-only `httpx.Timeout`; its
-read, write, and pool bounds remain disabled so transport idle behavior does not become a second
-stream-liveness policy. The official SDK WebSocket open timeout is likewise disabled so the Azents
+The native OpenAI HTTP client retains its connect-only `httpx.Timeout`. Replacement HTTP SDK clients
+use the supported observed transport with automatic retries and competing SDK timeouts disabled.
+Native response-handle acquisition signals the watchdog before stock assembly peeks its first
+chunk; common Pydantic part events do not stand in for parsed-native-event activity.
+Read, write and pool timeouts do not become a second stream-liveness policy.
+The official SDK WebSocket open timeout is likewise disabled so the Azents
 connection-establishment deadline exclusively bounds lazy connection and response acquisition.
 Response handle acquisition and async iteration share the same parsed-event idle and absolute
 deadlines. The watchdog does not classify semantic progress: metadata, reasoning, text, tool-call,
@@ -373,6 +391,12 @@ many non-cooperative tasks remain pending. Structured lifecycle logs carry only 
 such as call kind, provider, model, Session/Run identifiers, attempt number, deadline, elapsed time,
 failure code, and cleanup state;
 they do not include model content.
+
+Bedrock AssumeRole credential work retains its STS client from creation through actual
+synchronous SDK completion, independently of generation dispatch. Caller cancellation
+and connect/absolute watchdog deadlines leave its cleanup strongly owned; STS closes
+only after the credential worker settles. A successful role response supplies explicit
+assumed credentials to the Bedrock client without consuming generation authorization.
 
 When a cancelled response acquisition/iteration later raises instead of
 cooperatively cancelling, its final cleanup observer emits one warning with the
@@ -592,9 +616,12 @@ Durable event kinds:
 
 Native/raw artifacts are not interpreted by event core. They are opaque same-native replay
 optimizations. Each adapter lowerer replays a native artifact item only when this compatibility key
-matches exactly. OpenAI SDK artifacts use adapter identity `openai`; LiteLLM artifacts use `litellm`.
+matches exactly. OpenAI SDK artifacts use `openai:responses` identity; the Pydantic AI model layer
+uses `pydantic_ai:model_messages`, exact raw provider/model IDs and schema version `1`.
+Historical LiteLLM artifacts retain their `litellm` identity and are not relabeled.
 Canonical fallback lowering is used across an adapter, provider, model, format, or schema mismatch,
-including a code-version rollback from a new OpenAI artifact to the preceding LiteLLM implementation.
+including a cutover from historical LiteLLM artifacts or a compatible code-version rollback
+that encounters artifacts owned by another adapter.
 Every provider-hosted native item is represented by one durable `provider_tool_call` carrying required
 bounded `semantic` content with readable input, model-visible output, and typed URL/file/other
 references. The shared deterministic renderer is the canonical textual fallback; event-core consumers
@@ -617,14 +644,32 @@ flowchart LR
     E[Event transcript] --> P[PreLowerFilterPipeline]
     P --> S{Provider route}
     S -->|OpenAI or ChatGPT OAuth| OL[OpenAIResponsesLowerer]
-    S -->|Other providers| LL[LiteLLMResponsesLowerer]
+    S -->|Other providers| PL[PydanticAILowerer]
     OL --> G[NativeRequestSizeGuard]
-    LL --> G
+    PL --> G
     G --> OA[Official OpenAI SDK adapter and typed normalizer]
-    G --> LA[LiteLLM adapter and normalizer]
+    G --> PA[Public Model / official SDK / native observation]
     OA --> C[Canonical events and stream projections]
-    LA --> C
+    PA --> C
 ```
+
+### Provider model layer and native observation
+
+The replacement model layer is used without a Pydantic Agent graph. Anthropic uses its official
+Messages SDK, Gemini uses the official Google SDK, Vertex dispatches separately to Google and
+Anthropic publishers, and Bedrock uses official AWS Converse operations with the exact model ID.
+xAI API-key and OAuth use the configured HTTP Responses endpoint through the official
+OpenAI-compatible SDK; OpenRouter retains Responses and Kimi OAuth uses Chat Completions with its
+existing device headers. Native OpenAI/ChatGPT execution and its HTTP/WebSocket continuation
+policy remain independent.
+
+An operation-local observed SDK stream supplies acquisition, parsed-native-event progress, native
+terminal evidence, usage and authorized supplementary artifacts while stock public model assembly
+supplies common parts. The normalizer does not promote common completion state to native success
+or opaque reasoning to visible text. One request cannot issue an unauthorized hidden recovery
+generation: dispatch is checked before I/O and a failure-triggered recovery retains the original
+sanitized failure. Existing explicit native OpenAI continuation recovery and title compatibility
+transitions remain owned by their current Azents services.
 
 Pre-lower filters may mutate DB-backed event transcript state or shape an in-memory transcript clone
 for the next model call. Post-lower filters operate on the complete adapter-native logical request and
@@ -658,7 +703,8 @@ provider-hosted. OpenAI API-key, ChatGPT OAuth, xAI API-key, and xAI OAuth
 `image_generation` become auto-bound client function tools; an advertised
 `image_generation` capability for another provider remains provider-hosted.
 Only provider-hosted specs reach the
-lowerer; LiteLLM receives those specs as Responses semantic tools for provider-dialect translation.
+lowerer; Pydantic AI routes translate them through provider-specific model settings and supported
+SDK native-tool declarations. Stock model profiles do not enable unsaved capabilities.
 An unsupported, unimplemented, or unbound required capability fails before provider dispatch, and no
 configured builtin is silently omitted.
 
@@ -738,7 +784,7 @@ image item is replayed natively only when the request retains its provider item 
 stateless or the artifact lacks that identity, the lowerer emits the same bounded provider-tool
 semantic history instead of an invalid native item without either `id` or `result`.
 
-Each output stream owns one shared provider-tool activity accumulator. OpenAI SDK and LiteLLM
+Each output stream owns one shared provider-tool activity accumulator. OpenAI SDK and Pydantic AI
 normalizers extract adapter-native observations locally, normalize stable call identity and semantic
 hosted-tool names, and submit them to the accumulator. The accumulator suppresses duplicate
 snapshots, enriches later arguments, supports multiple calls, and prevents `completed` or `failed`
@@ -1084,8 +1130,8 @@ declaration provider-visible.
 
 The current `apply_patch` tool requires the reviewed V4A patch semantic profile for identified OpenAI
 GPT families and declares JSON-function and plaintext-custom variants. Native OpenAI Responses
-prefers plaintext custom before JSON function. The provider-specific OpenRouter LiteLLM Responses
-profile enables JSON function for the same semantic profile. Generic LiteLLM Responses retains JSON
+prefers plaintext custom before JSON function. The provider-specific OpenRouter Pydantic AI Responses
+profile enables JSON function for the same semantic profile. Other Pydantic AI routes retain JSON
 function for ordinary tools but has no V4A patch override, preserving the existing `apply_patch`
 exposure set. The existing `edit` tool remains unconditional.
 
@@ -1112,8 +1158,8 @@ Before exposing schemas on the enabled path, preparation resolves provider-hoste
 
 The current registry applies these reviewed hard limits:
 
-- xAI API-key and xAI OAuth LiteLLM Responses paths: 200 total tool declarations;
-- Vertex AI LiteLLM Responses paths for Google/Gemini models: 128 function declarations, using the conservative value from conflicting official 128 and 512 documentation;
+- xAI API-key and xAI OAuth Pydantic AI Responses paths: 200 total tool declarations;
+- Vertex AI Pydantic AI paths for Google/Gemini models: 128 function declarations, using the conservative value from conflicting official 128 and 512 documentation;
 - direct Gemini API and Vertex-hosted non-Google models: no matched hard-limit rule.
 
 An unmatched request path is unlimited. Preparation does not invent a global soft cap or truncate active tools from an unknown limit. For a matched rule, provider-hosted declarations reserve capacity only when they share that rule's counting scope. Pinned direct client functions consume the remaining capacity first. If direct functions do not fit, preparation raises `ToolDeclarationBudgetExceededError` before lowerer or provider I/O rather than silently dropping a direct capability.
@@ -1188,7 +1234,8 @@ Manual compaction uses the same summary-plus-continuity structure as automatic c
 runtime no longer keeps a separate raw tail by moving the compaction boundary; recent continuity is
 embedded into the summary payload with per-event truncation. OpenAI API-key and ChatGPT OAuth summary
 generation uses the operation-scoped official OpenAI SDK helper from
-`engine/context/compaction.py`; other providers continue through the shared LiteLLM Responses helper.
+`engine/context/compaction.py`; other providers use the shared public Pydantic AI model/SDK helper
+with route-native terminal proof and the lightweight operation's captured pricing.
 The OpenAI-compatible helper uses standard Responses input and instructions, omits
 `max_output_tokens`, and never uses sampling continuation. ChatGPT OAuth additionally uses full input,
 `store=false`, and encrypted reasoning inclusion. Automatic and manual compaction publish one stable
@@ -1351,7 +1398,7 @@ Primary checks:
 - `cd python/apps/azents && uv run pytest src/azents/runtime/file_resource_lifecycle_verification_test.py -q`
 - `cd python/apps/azents && uv run pytest src/azents/runtime -q`
 - `cd python/apps/azents && uv run pytest src/azents/engine/events/execution_test.py src/azents/engine/events/filters_test.py src/azents/engine/events/engine_adapter_test.py`
-- `cd python/apps/azents && uv run pytest src/azents/engine/run/tool_budget_test.py src/azents/engine/tooling/tool_search_test.py src/azents/engine/events/tools_test.py src/azents/engine/events/engine_adapter_test.py src/azents/engine/events/litellm_responses_test.py src/azents/engine/events/openai_responses_test.py src/azents/engine/tools/mcp_base_test.py src/azents/engine/tooling/toolkit_state_test.py`
+- `cd python/apps/azents && uv run pytest src/azents/engine/run/tool_budget_test.py src/azents/engine/tooling/tool_search_test.py src/azents/engine/events/tools_test.py src/azents/engine/events/engine_adapter_test.py src/azents/engine/events/pydantic_ai_lowering_test.py src/azents/engine/events/pydantic_ai_output_test.py src/azents/engine/events/openai_responses_test.py src/azents/engine/tools/mcp_base_test.py src/azents/engine/tooling/toolkit_state_test.py`
 - `cd testenv/azents/e2e && uv run pytest -q src/tests/required/public/test_runtime_hooks.py -k tool_search`
 - `cd python/apps/azents && uv run pyright`
 - deterministic azents E2E CI for text/tool/UI projection behavior
@@ -1559,6 +1606,9 @@ icon.
 
 ## Changelog
 
+- **2026-09-30** (spec_version 190) — Documented public Pydantic AI/SDK routes, native
+  terminal/progress observation, truthful model-message artifacts and semantic raw-ID dispatch,
+  retaining native OpenAI, engine-owned tools/retries/Stop and captured metadata/pricing authority.
 - **2026-09-30** (spec_version 188) — Aligned builtin complete-file consumers with
   direct Runner GET/PUT and shared 128 MiB eligibility, preserving model/provider bounds.
 

@@ -8,6 +8,10 @@ touches_domains: [agent, conversation, external-channel]
 code_paths:
   - python/apps/azents/src/azents/engine/context/compaction.py
   - python/apps/azents/src/azents/engine/context/window.py
+  - python/apps/azents/src/azents/services/model_metadata.py
+  - python/apps/azents/src/azents/core/model_source_metadata.py
+  - python/apps/azents/src/azents/engine/responses.py
+  - python/apps/azents/src/azents/engine/providers/**
   - python/apps/azents/src/azents/engine/events/**
   - python/apps/azents/src/azents/engine/hooks/**
   - python/apps/azents/src/azents/engine/tooling/tool_search.py
@@ -25,8 +29,8 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/agent_session.py
   - python/apps/azents/src/azents/rdb/models/agent_run.py
   - python/apps/azents/src/azents/rdb/models/agent.py
-last_verified_at: 2026-09-13
-spec_version: 41
+last_verified_at: 2026-09-30
+spec_version: 42
 ---
 
 # Context Compaction
@@ -37,7 +41,7 @@ history. The event runtime uses append-only compaction.
 Automatic compaction effective context window is computed by
 `engine/context/window.py`. Each option first resolves a default input window and
 maximum input window from its normalized capability, using the maximum as the
-default when the distinct default is absent. LiteLLM metadata and the 128,000-token
+default when the distinct default is absent. Locally captured validated-source metadata and the 128,000-token
 fallback fill missing limits. An unset option cap uses that resolved default; an
 explicit option cap is clamped to the resolved maximum.
 
@@ -77,8 +81,9 @@ from current durable history.
 ## Summary Model
 
 Summary generation is routed by provider from `engine/context/compaction.py`. OpenAI API-key and
-ChatGPT OAuth use an operation-scoped official OpenAI SDK client; other providers use the shared
-LiteLLM Responses helper. The compaction model is resolved from the current candidate in the frozen
+ChatGPT OAuth use an operation-scoped official OpenAI SDK client; the other eight provider identities
+use the public Pydantic AI model/official SDK boundary through `engine/responses.py`.
+The compaction model is resolved from the current candidate in the frozen
 Agent lightweight chain. Its model-scoped context cap participates in the effective input window, while its
 model-scoped `max_output_tokens` and built-in tools do not replace internal compaction request policy.
 
@@ -87,8 +92,9 @@ stream so the common watchdog can enforce parsed-event idle and absolute attempt
 standard OpenAI-compatible helper sends ordinary user input plus top-level instructions and omits
 `max_output_tokens`; it does not use sampling continuation. ChatGPT OAuth also uses complete input,
 `store=false`, encrypted reasoning inclusion, and no `previous_response_id`.
-Non-migrated providers receive `max_output_tokens` from the dynamic summary budget through the
-LiteLLM helper. Both adapter families preserve only a bounded redacted provider message and typed safe
+Pydantic AI routes receive the dynamic summary token budget through provider-specific model settings
+and validate their protocol-native completion before admitting a summary. Both adapter families
+preserve only a bounded redacted provider message and typed safe
 diagnostics for classified provider failures. A normalized compaction `quota_or_billing` failure
 records the candidate outcome, shares its Workspace cooldown, and advances immediately to the next
 compatible frozen lightweight candidate without consuming same-candidate retry. Other classified
@@ -264,8 +270,8 @@ the immediate shape of the recent interaction.
 - Automatic and manual compaction expose one Run-scoped `preparing_context` live operation whose identity remains stable across retry and is removed at every terminal boundary.
 - Every classified provider-attributed compaction failure uses the common bounded failure contract and the owning Run's full retry budget; unclassified provider outcomes are internal errors and do not enter provider retry state.
 - Summary model calls use watched streaming transport without publishing user-facing deltas. OpenAI
-  API-key and ChatGPT OAuth omit API-level `max_output_tokens`; non-migrated providers receive the
-  dynamic summary budget through the LiteLLM helper.
+  API-key and ChatGPT OAuth omit API-level `max_output_tokens`; the Pydantic AI model routes receive
+  the dynamic summary budget through their supported provider SDK settings.
 - Summary content is bounded by the runtime char guard after the model returns.
 - UI/audit history continues to include pre-compaction events. ModelFile GC may later delete unpinned ModelFile blobs whose single FilePart event is behind the head cursor, but it does not delete events or history metadata.
 - Legacy SDK compaction packages are not part of production compaction.
@@ -300,6 +306,8 @@ terminalizes.
 
 ## Changelog
 
+- **2026-09-30** (spec_version 42) — Documented local validated-source context fallback and
+  provider-specific Pydantic AI summary execution while retaining native OpenAI and compaction ownership.
 - **2026-09-13** (spec_version 41) — Added an independent frozen Lightweight candidate chain for
   compaction, quota-before-retry progression, shared Workspace cooldown, and recovery-preserved
   compaction cursor state.

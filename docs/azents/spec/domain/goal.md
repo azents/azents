@@ -6,7 +6,7 @@ spec_type: domain
 domain: goal
 code_paths:
   - python/apps/azents/src/azents/engine/tools/goal.py
-  - python/apps/azents/src/azents/engine/events/litellm_responses.py
+  - python/apps/azents/src/azents/engine/events/pydantic_ai_lowering.py
   - python/apps/azents/src/azents/engine/events/system_reminders.py
   - python/apps/azents/src/azents/engine/hooks/**
   - python/apps/azents/src/azents/worker/worker.py
@@ -17,8 +17,8 @@ code_paths:
   - python/apps/azents/src/azents/services/chat/**
   - python/apps/azents/src/azents/api/public/chat/v1/**
   - typescript/apps/azents-web/src/features/chat/**
-last_verified_at: 2026-08-23
-spec_version: 15
+last_verified_at: 2026-09-30
+spec_version: 16
 ---
 
 # Goal Domain Spec
@@ -259,7 +259,7 @@ Goal briefing:
 Primary checks:
 
 - `cd python/apps/azents && uv run pytest src/azents/engine/tools/goal_test.py`
-- `cd python/apps/azents && uv run pytest src/azents/engine/events/litellm_responses_test.py`
+- `cd python/apps/azents && uv run pytest src/azents/engine/events/pydantic_ai_lowering_test.py`
 - `cd python/apps/azents && uv run pytest src/azents/engine/hooks/dispatcher_test.py`
 - `cd python/apps/azents && uv run pytest src/azents/services/mailbox_test.py`
 - `cd python/apps/azents && uv run pytest src/azents/worker/session/idle_continuation_test.py`
@@ -271,6 +271,8 @@ Primary checks:
 
 ## Changelog
 
+- **2026-09-30** (spec_version 16) — Mapped Goal-owned continuation to current provider
+  model-message lowering without changing Goal state, event ownership or idle-continuation policy.
 - **2026-08-23** (spec_version 15) — Documented the Goal TurnAction's shared
   closed policy and Goal-owned preparation without changing its state or event
   contract.

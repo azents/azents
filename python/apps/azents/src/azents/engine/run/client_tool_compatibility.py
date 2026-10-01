@@ -309,18 +309,18 @@ def build_default_client_tool_adapter_profile_registry() -> (
                 ),
             ),
             ClientToolAdapterProfile(
-                profile_id="generic-litellm-responses",
+                profile_id="generic-pydantic-model-messages",
                 provider=None,
-                adapter="litellm",
-                native_format="responses",
+                adapter="pydantic_ai",
+                native_format="model_messages",
                 default_wire_dialects=("json_function",),
                 model_profile_preferences=(),
             ),
             ClientToolAdapterProfile(
-                profile_id="openrouter-litellm-responses",
+                profile_id="openrouter-pydantic-model-messages",
                 provider=LLMProvider.OPENROUTER,
-                adapter="litellm",
-                native_format="responses",
+                adapter="pydantic_ai",
+                native_format="model_messages",
                 default_wire_dialects=("json_function",),
                 model_profile_preferences=(
                     ClientToolAdapterModelProfilePreference(

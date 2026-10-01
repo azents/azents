@@ -54,7 +54,6 @@ class ModelCatalogEntryResponse(BaseModel):
     id: str
     provider: LLMProvider
     provider_model_identifier: str
-    runtime_model_identifier: str
     display_name: str
     normalized_capabilities: ModelCapabilities
     supported_execution_options: list[ModelExecutionOptionId]
@@ -75,7 +74,6 @@ class ModelCatalogEntryResponse(BaseModel):
             id=entry.id,
             provider=entry.provider,
             provider_model_identifier=entry.provider_model_identifier,
-            runtime_model_identifier=entry.runtime_model_identifier,
             display_name=entry.display_name,
             normalized_capabilities=entry.normalized_capabilities,
             supported_execution_options=entry.supported_execution_options,
