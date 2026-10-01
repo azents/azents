@@ -20,7 +20,7 @@ from azents.core.model_metadata_source import (
 from azents.core.model_source_metadata import source_provider_matches
 
 ESTIMATOR_SCHEMA_VERSION = "1"
-GENAI_PRICES_ESTIMATOR_SCHEMA_VERSION = "2"
+GENAI_PRICES_ESTIMATOR_SCHEMA_VERSION = "3"
 
 
 class ModelPricingUnavailableReason(StrEnum):
@@ -478,6 +478,16 @@ def _estimate_genai_model_cost(
         return _unavailable(tier, ModelPricingUnavailableReason.UNKNOWN_COMPONENT)
     if not _valid_usage(usage):
         return _unavailable(tier, ModelPricingUnavailableReason.INVALID_USAGE)
+    if (
+        usage.cache_write_input_tokens is not None
+        and (
+            usage.cache_write_5m_tokens is not None
+            or usage.cache_write_1h_tokens is not None
+        )
+        and (usage.cache_write_5m_tokens or 0) + (usage.cache_write_1h_tokens or 0)
+        != usage.cache_write_input_tokens
+    ):
+        return _unavailable(tier, ModelPricingUnavailableReason.INVALID_USAGE)
     if pricing.source_provider is None or pricing.source_model is None:
         return _unavailable(tier, ModelPricingUnavailableReason.MODEL_UNMATCHED)
 
@@ -536,12 +546,65 @@ def _estimate_genai_model_cost(
             provider,
             genai_request_timestamp=pricing.request_timestamp,
         )
+        if not _has_required_genai_prices(
+            price_fields={
+                key
+                for key, value in calculation.model_price.__dict__.items()
+                if not key.startswith("_") and value is not None
+            },
+            usage=usage,
+            billing=billing,
+        ):
+            return _unavailable(tier, ModelPricingUnavailableReason.MISSING_PRICE)
         cost = float(calculation.total_price)
     except StopIteration, TypeError, ValueError:
         return _unavailable(tier, ModelPricingUnavailableReason.UNSUPPORTED_RULE)
     if not math.isfinite(cost) or cost < 0:
         return _unavailable(tier, ModelPricingUnavailableReason.INVALID_PRICE)
     return ModelCostEstimate(cost_usd=cost, unavailable_reason=None, service_tier=tier)
+
+
+def _has_required_genai_prices(
+    *,
+    price_fields: set[str],
+    usage: ModelPricingUsage,
+    billing: ModelPricingBilling,
+) -> bool:
+    """Require explicit rates for every separately identified billable quantity."""
+    required: set[str] = set()
+    if usage.prompt_tokens > 0:
+        required.add("input_mtok")
+    if usage.completion_tokens > 0:
+        required.add("output_mtok")
+    if (usage.cached_input_tokens or 0) > 0:
+        required.add("cache_read_mtok")
+    if (
+        usage.cache_write_5m_tokens is not None
+        or usage.cache_write_1h_tokens is not None
+    ):
+        if (usage.cache_write_5m_tokens or 0) > 0:
+            required.add("cache_write_5m_mtok")
+        if (usage.cache_write_1h_tokens or 0) > 0:
+            required.add("cache_write_1h_mtok")
+    elif (usage.cache_write_input_tokens or 0) > 0:
+        required.add("cache_write_mtok")
+    for count, price_field in (
+        (usage.input_audio_tokens, "input_audio_mtok"),
+        (usage.input_image_tokens, "input_image_mtok"),
+        (usage.output_audio_tokens, "output_audio_mtok"),
+        (usage.output_image_tokens, "output_image_mtok"),
+    ):
+        if (count or 0) > 0:
+            required.add(price_field)
+    component_price_fields = {
+        "web_search": "web_searches_kcount",
+        "file_search": "storage_searches_kcount",
+        "code_interpreter": "code_executions_kcount",
+    }
+    for component in billing.components:
+        if component.quantity > 0:
+            required.add(component_price_fields[component.kind])
+    return required <= price_fields
 
 
 def _unavailable(tier: str, reason: ModelPricingUnavailableReason) -> ModelCostEstimate:

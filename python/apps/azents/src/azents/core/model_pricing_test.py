@@ -173,6 +173,141 @@ def test_genai_prices_unsupported_priority_remains_unknown(tier: str) -> None:
     assert result.service_tier == "priority"
 
 
+@pytest.mark.parametrize(
+    ("usage", "billing"),
+    [
+        (
+            dataclasses.replace(
+                _usage(),
+                cached_input_tokens=1,
+                cache_write_input_tokens=None,
+                reasoning_tokens=None,
+            ),
+            _billing(),
+        ),
+        (
+            dataclasses.replace(
+                _usage(),
+                cached_input_tokens=None,
+                cache_write_input_tokens=None,
+                reasoning_tokens=None,
+                input_audio_tokens=1,
+            ),
+            _billing(),
+        ),
+        (
+            dataclasses.replace(
+                _usage(),
+                cached_input_tokens=None,
+                cache_write_input_tokens=None,
+                reasoning_tokens=None,
+            ),
+            dataclasses.replace(
+                _billing(),
+                components=(
+                    ModelPricingComponentUsage(
+                        kind="web_search",
+                        quantity=1,
+                        search_context_size=None,
+                    ),
+                ),
+            ),
+        ),
+    ],
+)
+def test_genai_prices_missing_used_specialized_rate_is_unknown(
+    usage: ModelPricingUsage,
+    billing: ModelPricingBilling,
+) -> None:
+    """The generic calculator cannot label a partial token subtotal complete."""
+    result = estimate_model_cost(
+        pricing=_genai_pricing(
+            [
+                SourcePriceSet(
+                    constraint=None,
+                    prices={
+                        "input_mtok": SourceScalarPrice(value=Decimal("1")),
+                        "output_mtok": SourceScalarPrice(value=Decimal("2")),
+                    },
+                )
+            ]
+        ),
+        usage=usage,
+        billing=billing,
+    )
+
+    assert result.cost_usd is None
+    assert result.unavailable_reason is ModelPricingUnavailableReason.MISSING_PRICE
+
+
+def test_genai_prices_prices_separately_identified_media_and_tools() -> None:
+    """Explicit media and tool rates replace or extend generic token rates."""
+    result = estimate_model_cost(
+        pricing=_genai_pricing(
+            [
+                SourcePriceSet(
+                    constraint=None,
+                    prices={
+                        "input_mtok": SourceScalarPrice(value=Decimal("1")),
+                        "output_mtok": SourceScalarPrice(value=Decimal("2")),
+                        "input_audio_mtok": SourceScalarPrice(value=Decimal("3")),
+                        "web_searches_kcount": SourceScalarPrice(value=Decimal("10")),
+                    },
+                )
+            ]
+        ),
+        usage=dataclasses.replace(
+            _usage(),
+            cached_input_tokens=None,
+            cache_write_input_tokens=None,
+            reasoning_tokens=None,
+            input_audio_tokens=2,
+        ),
+        billing=dataclasses.replace(
+            _billing(),
+            components=(
+                ModelPricingComponentUsage(
+                    kind="web_search",
+                    quantity=1,
+                    search_context_size=None,
+                ),
+            ),
+        ),
+    )
+
+    assert result.cost_usd == pytest.approx(0.010024)
+    assert result.unavailable_reason is None
+
+
+def test_genai_prices_rejects_inconsistent_cache_ttl_partition() -> None:
+    """TTL-specific counts must partition the captured cache-write total."""
+    result = estimate_model_cost(
+        pricing=_genai_pricing(
+            [
+                SourcePriceSet(
+                    constraint=None,
+                    prices={
+                        "input_mtok": SourceScalarPrice(value=Decimal("1")),
+                        "output_mtok": SourceScalarPrice(value=Decimal("2")),
+                        "cache_read_mtok": SourceScalarPrice(value=Decimal("0.5")),
+                        "cache_write_5m_mtok": SourceScalarPrice(value=Decimal("1")),
+                        "cache_write_1h_mtok": SourceScalarPrice(value=Decimal("2")),
+                    },
+                )
+            ]
+        ),
+        usage=dataclasses.replace(
+            _usage(),
+            cache_write_5m_tokens=2,
+            cache_write_1h_tokens=2,
+        ),
+        billing=_billing(),
+    )
+
+    assert result.cost_usd is None
+    assert result.unavailable_reason is ModelPricingUnavailableReason.INVALID_USAGE
+
+
 def test_genai_prices_conditional_and_tiered_rules_use_capture_time() -> None:
     """Captured request time selects the conditional set before tier evaluation."""
     pricing = _genai_pricing(
