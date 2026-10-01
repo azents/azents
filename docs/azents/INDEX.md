@@ -96,6 +96,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Run-Scoped Azents Virtual Filesystem for Managed Skills and Resources Historical Requirements Reconstruction](requirements/bundled-260719-bundled-and-backed-skill-sources.md) | bundled-260719 | 2026-07-19 | - |
 | [Discord Callback SDK Gap Requirements](requirements/callback-260809-discord-sdk-gap.md) | callback-260809 | 2026-08-09 | 2026-08-09 |
 | [Model Catalog Projection and Sync Historical Requirements Reconstruction](requirements/catalog-260620-catalog-projection-sync.md) | catalog-260620 | 2026-06-20 | - |
+| [Runtime-Aligned Model Metadata Requirements](requirements/catalog-261001-runtime-aligned-model-metadata.md) | catalog-261001 | 2026-10-01 | - |
 | [Responsive Context-Preserving External Conversations Requirements](requirements/channel-260729-responsive-context-preserving-conversations.md) | channel-260729 | 2026-07-29 | 2026-07-30 |
 | [Reliable External Channel Provider Connections Requirements](requirements/channel-260731-reliable-provider-connections.md) | channel-260731 | 2026-07-31 | 2026-07-31 |
 | [External Channel Binding Response Modes Requirements](requirements/channel-260801-binding-response-modes.md) | channel-260801 | 2026-08-01 | 2026-08-01 |
@@ -544,6 +545,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Run-Scoped Azents Virtual Filesystem for Managed Skills and Resources](adr/bundled-260719-bundled-and-backed-skill-sources.md)
 - [Discord Callback SDK Gap Decisions](adr/callback-260809-discord-sdk-gap.md)
 - [Model Catalog Projection and Sync](adr/catalog-260620-catalog-projection-sync.md)
+- [Runtime-Aligned Model Metadata Decisions](adr/catalog-261001-runtime-aligned-model-metadata.md)
 - [Responsive Context-Preserving External Conversations](adr/channel-260729-responsive-context-preserving-conversations.md)
 - [Reliable External Channel Provider Connections](adr/channel-260731-reliable-provider-connections.md)
 - [External Channel Binding Response Modes](adr/channel-260801-binding-response-modes.md)
