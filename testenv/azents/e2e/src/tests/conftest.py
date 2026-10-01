@@ -1603,8 +1603,7 @@ def azents_core_service_containers(
         .with_command(
             [
                 "uvicorn",
-                "azents.testing.provider_fixture_process:create_public_fixture_app",
-                "--factory",
+                "apiserver:app",
                 "--host",
                 "0.0.0.0",
                 "--port",
@@ -1646,8 +1645,7 @@ def azents_core_service_containers(
         .with_command(
             [
                 "uvicorn",
-                "azents.testing.provider_fixture_process:create_admin_fixture_app",
-                "--factory",
+                "adminserver:app",
                 "--host",
                 "0.0.0.0",
                 "--port",
@@ -1701,7 +1699,7 @@ def azents_core_service_containers(
         auth_jwt_secret_key=auth_jwt_secret_key,
         credential_encryption_key=credential_encryption_key,
         system_bootstrap_setup_token=system_bootstrap_setup_token,
-    ).with_command(["python", "-m", "azents.testing.provider_fixture_process"])
+    )
 
     containers = _CoreServiceContainers(
         public=public_container,
