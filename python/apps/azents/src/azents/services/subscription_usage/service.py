@@ -45,6 +45,7 @@ from azents.repos.llm_provider_integration.data import LLMProviderIntegrationWit
 from azents.repos.llm_provider_integration.deps import (
     get_llm_provider_integration_repository,
 )
+from azents.repos.xai_oauth_runtime import XaiOAuthRuntimeRepository
 from azents.services.chatgpt_oauth.data import ProviderRejected, ProviderUnavailable
 from azents.services.chatgpt_oauth.runtime import (
     ensure_runtime_tokens,
@@ -151,6 +152,9 @@ class SubscriptionUsageService:
     ]
     chatgpt_oauth_runtime_repository: Annotated[
         ChatGPTOAuthRuntimeRepository, Depends(ChatGPTOAuthRuntimeRepository)
+    ]
+    xai_oauth_runtime_repository: Annotated[
+        XaiOAuthRuntimeRepository, Depends(XaiOAuthRuntimeRepository)
     ]
     session_manager: Annotated[
         SessionManager[AsyncSession], Depends(get_session_manager)
@@ -433,8 +437,7 @@ class SubscriptionUsageService:
             )
         fresh_result = await ensure_xai_runtime_tokens(
             integration=integration,
-            integration_repository=self.repository,
-            session_manager=self.session_manager,
+            persistence_repository=self.xai_oauth_runtime_repository,
         )
         match fresh_result:
             case Success(fresh_integration):
@@ -502,8 +505,7 @@ class SubscriptionUsageService:
         """Force one xAI token refresh and repeat the full usage sequence once."""
         refresh_result = await refresh_xai_runtime_tokens(
             integration=integration,
-            integration_repository=self.repository,
-            session_manager=self.session_manager,
+            persistence_repository=self.xai_oauth_runtime_repository,
         )
         match refresh_result:
             case Failure(error):

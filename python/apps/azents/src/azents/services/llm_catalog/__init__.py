@@ -69,6 +69,7 @@ from azents.repos.llm_catalog.data import (
 )
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.llm_provider_integration.data import LLMProviderIntegrationWithSecrets
+from azents.repos.xai_oauth_runtime import XaiOAuthRuntimeRepository
 from azents.services.builtin_capabilities import supported_builtin_capabilities
 from azents.services.chatgpt_oauth.data import ProviderRejected, ProviderUnavailable
 from azents.services.chatgpt_oauth.runtime import ensure_runtime_tokens
@@ -958,6 +959,9 @@ class IntegrationCatalogProjectionService:
     chatgpt_oauth_runtime_repository: Annotated[
         ChatGPTOAuthRuntimeRepository, Depends(ChatGPTOAuthRuntimeRepository)
     ]
+    xai_oauth_runtime_repository: Annotated[
+        XaiOAuthRuntimeRepository, Depends(XaiOAuthRuntimeRepository)
+    ]
     source_sync_service: Annotated[
         LiteLLMSourceSyncService, Depends(LiteLLMSourceSyncService)
     ]
@@ -1084,8 +1088,7 @@ class IntegrationCatalogProjectionService:
             elif integration.provider == LLMProvider.XAI_OAUTH:
                 xai_token_result = await ensure_xai_runtime_tokens(
                     integration=integration,
-                    integration_repository=self.integration_repository,
-                    session_manager=self.session_manager,
+                    persistence_repository=self.xai_oauth_runtime_repository,
                 )
                 if xai_token_result.success:
                     integration = xai_token_result.value

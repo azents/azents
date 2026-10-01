@@ -214,6 +214,7 @@ from azents.repos.llm_provider_integration.deps import (
 )
 from azents.repos.model_file_pin import ModelFilePinRepository
 from azents.repos.session_execution.ownership import OwnerBoundSessionManager
+from azents.repos.xai_oauth_runtime import XaiOAuthRuntimeRepository
 from azents.services.artifact import ArtifactService
 from azents.services.chatgpt_oauth.data import (
     ProviderRejected as ChatGPTProviderRejected,
@@ -417,11 +418,13 @@ class AgentEngineAdapter:
                 raise FunctionToolError(
                     "xAI OAuth reconnect is required for image generation."
                 )
-            async with self.session_manager() as session:
-                integration = await self.integration_repository.get_by_id_with_secrets(
-                    session,
-                    integration_id,
-                )
+            persistence_repository = XaiOAuthRuntimeRepository(
+                integration_repository=self.integration_repository,
+                session_manager=self.session_manager,
+            )
+            integration = await persistence_repository.load_integration(
+                integration_id=integration_id
+            )
             if (
                 integration is None
                 or integration.workspace_id != request.workspace_id
@@ -432,8 +435,7 @@ class AgentEngineAdapter:
                 )
             refresh_result = await refresh_runtime_tokens(
                 integration=integration,
-                integration_repository=self.integration_repository,
-                session_manager=self.session_manager,
+                persistence_repository=persistence_repository,
             )
             match refresh_result:
                 case Failure(error):

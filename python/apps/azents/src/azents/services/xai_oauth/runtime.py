@@ -5,7 +5,6 @@ from typing import assert_never
 
 import httpx
 from azcommon.result import Failure, Result, Success
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.credentials import XaiOAuthConfig, XaiOAuthSecrets
 from azents.core.enums import LLMProvider
@@ -13,11 +12,10 @@ from azents.core.xai_oauth import (
     XaiOAuthConnectionMethod,
     XaiOAuthConnectionStatus,
 )
-from azents.rdb.session import SessionManager
-from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.llm_provider_integration.data import (
     LLMProviderIntegrationWithSecrets,
 )
+from azents.repos.xai_oauth_runtime import XaiOAuthRuntimeRepository
 
 from .client import XaiOAuthClient
 from .data import (
@@ -33,8 +31,7 @@ _REFRESH_WINDOW = datetime.timedelta(minutes=5)
 async def ensure_runtime_tokens(
     *,
     integration: LLMProviderIntegrationWithSecrets,
-    integration_repository: LLMProviderIntegrationRepository,
-    session_manager: SessionManager[AsyncSession],
+    persistence_repository: XaiOAuthRuntimeRepository,
 ) -> Result[
     LLMProviderIntegrationWithSecrets,
     ProviderRejected | ProviderEntitlementDenied | ProviderUnavailable,
@@ -57,16 +54,14 @@ async def ensure_runtime_tokens(
         return Success(integration)
     return await refresh_runtime_tokens(
         integration=integration,
-        integration_repository=integration_repository,
-        session_manager=session_manager,
+        persistence_repository=persistence_repository,
     )
 
 
 async def refresh_runtime_tokens(
     *,
     integration: LLMProviderIntegrationWithSecrets,
-    integration_repository: LLMProviderIntegrationRepository,
-    session_manager: SessionManager[AsyncSession],
+    persistence_repository: XaiOAuthRuntimeRepository,
 ) -> Result[
     LLMProviderIntegrationWithSecrets,
     ProviderRejected | ProviderEntitlementDenied | ProviderUnavailable,
@@ -89,8 +84,7 @@ async def refresh_runtime_tokens(
         case Success(tokens):
             refresh_success = await _persist_refresh_success(
                 integration=integration,
-                integration_repository=integration_repository,
-                session_manager=session_manager,
+                persistence_repository=persistence_repository,
                 tokens=tokens,
             )
             match refresh_success:
@@ -101,8 +95,7 @@ async def refresh_runtime_tokens(
         case Failure(error):
             recovered = await _persist_refresh_failure(
                 integration=integration,
-                integration_repository=integration_repository,
-                session_manager=session_manager,
+                persistence_repository=persistence_repository,
                 error=error,
             )
             if recovered is not None:
@@ -113,42 +106,30 @@ async def refresh_runtime_tokens(
 async def _persist_refresh_success(
     *,
     integration: LLMProviderIntegrationWithSecrets,
-    integration_repository: LLMProviderIntegrationRepository,
-    session_manager: SessionManager[AsyncSession],
+    persistence_repository: XaiOAuthRuntimeRepository,
     tokens: TokenSet,
 ) -> Result[LLMProviderIntegrationWithSecrets, ProviderRejected]:
     """Store refresh success result and return latest integration."""
     if not isinstance(integration.config, XaiOAuthConfig):
         return Failure(ProviderRejected(reason="xAI OAuth integration is invalid"))
     config = integration.config
-    async with session_manager() as session:
-        update = await integration_repository.update_by_id(
-            session,
-            integration.id,
-            {
-                "secrets": XaiOAuthSecrets(
-                    access_token=tokens.access_token,
-                    refresh_token=tokens.refresh_token,
-                    id_token=tokens.id_token,
-                    expires_at=tokens.expires_at,
-                ),
-                "config": XaiOAuthConfig(
-                    account_id=tokens.account_id or config.account_id,
-                    email=tokens.email or config.email,
-                    connection_method=config.connection_method,
-                    status=XaiOAuthConnectionStatus.CONNECTED.value,
-                    connected_at=config.connected_at,
-                    last_refreshed_at=datetime.datetime.now(datetime.UTC),
-                ),
-            },
-        )
-        if isinstance(update, Failure):
-            return Failure(
-                ProviderRejected(reason="xAI OAuth integration was not found")
-            )
-        refreshed = await integration_repository.get_by_id_with_secrets(
-            session, integration.id
-        )
+    refreshed = await persistence_repository.update_and_reload(
+        integration_id=integration.id,
+        secrets=XaiOAuthSecrets(
+            access_token=tokens.access_token,
+            refresh_token=tokens.refresh_token,
+            id_token=tokens.id_token,
+            expires_at=tokens.expires_at,
+        ),
+        config=XaiOAuthConfig(
+            account_id=tokens.account_id or config.account_id,
+            email=tokens.email or config.email,
+            connection_method=config.connection_method,
+            status=XaiOAuthConnectionStatus.CONNECTED.value,
+            connected_at=config.connected_at,
+            last_refreshed_at=datetime.datetime.now(datetime.UTC),
+        ),
+    )
     if refreshed is None:
         return Failure(ProviderRejected(reason="xAI OAuth integration was not found"))
     return Success(refreshed)
@@ -157,8 +138,7 @@ async def _persist_refresh_success(
 async def _persist_refresh_failure(
     *,
     integration: LLMProviderIntegrationWithSecrets,
-    integration_repository: LLMProviderIntegrationRepository,
-    session_manager: SessionManager[AsyncSession],
+    persistence_repository: XaiOAuthRuntimeRepository,
     error: ProviderRejected | ProviderEntitlementDenied | ProviderUnavailable,
 ) -> LLMProviderIntegrationWithSecrets | None:
     """Store refresh failure state or return concurrent refresh success result."""
@@ -167,45 +147,27 @@ async def _persist_refresh_failure(
     ):
         return None
     config = integration.config
-    original_secrets = integration.secrets
-    async with session_manager() as session:
-        latest = await integration_repository.get_by_id_with_secrets(
-            session, integration.id
-        )
-    if (
-        latest is not None
-        and isinstance(latest.secrets, XaiOAuthSecrets)
-        and isinstance(latest.config, XaiOAuthConfig)
-    ):
-        if (
-            latest.secrets.refresh_token != original_secrets.refresh_token
-            or latest.config.last_refreshed_at != config.last_refreshed_at
-        ):
-            return latest
     status = _failure_status(error)
-    async with session_manager() as session:
-        await integration_repository.update_by_id(
-            session,
-            integration.id,
-            {
-                "config": XaiOAuthConfig(
-                    account_id=config.account_id,
-                    email=config.email,
-                    connection_method=config.connection_method,
-                    status=status.value,
-                    entitlement_status=(
-                        "denied"
-                        if status == XaiOAuthConnectionStatus.ENTITLEMENT_DENIED
-                        else config.entitlement_status
-                    ),
-                    connected_at=config.connected_at,
-                    last_refreshed_at=config.last_refreshed_at,
-                    last_failed_at=datetime.datetime.now(datetime.UTC),
-                    last_failure_reason=_safe_failure_reason(error),
-                )
-            },
-        )
-    return None
+    return await persistence_repository.persist_refresh_failure(
+        integration_id=integration.id,
+        original_secrets=integration.secrets,
+        original_config=config,
+        config=XaiOAuthConfig(
+            account_id=config.account_id,
+            email=config.email,
+            connection_method=config.connection_method,
+            status=status.value,
+            entitlement_status=(
+                "denied"
+                if status == XaiOAuthConnectionStatus.ENTITLEMENT_DENIED
+                else config.entitlement_status
+            ),
+            connected_at=config.connected_at,
+            last_refreshed_at=config.last_refreshed_at,
+            last_failed_at=datetime.datetime.now(datetime.UTC),
+            last_failure_reason=_safe_failure_reason(error),
+        ),
+    )
 
 
 def _safe_failure_reason(

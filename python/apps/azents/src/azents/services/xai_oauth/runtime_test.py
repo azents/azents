@@ -25,6 +25,7 @@ from azents.repos.llm_provider_integration import LLMProviderIntegrationReposito
 from azents.repos.llm_provider_integration.data import LLMProviderIntegrationCreate
 from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace.data import WorkspaceCreate
+from azents.repos.xai_oauth_runtime import XaiOAuthRuntimeRepository
 
 from .client import XaiOAuthClient
 from .data import (
@@ -73,6 +74,8 @@ async def _create_workspace(session: AsyncSession) -> str:
 
 
 class _CreatedIntegration(NamedTuple):
+    """Created xAI OAuth integration test fixture."""
+
     repository: LLMProviderIntegrationRepository
     integration_id: str
 
@@ -107,6 +110,17 @@ async def _create_integration(
     return _CreatedIntegration(repository=repo, integration_id=integration.id)
 
 
+def _persistence_repository(
+    integration_repository: LLMProviderIntegrationRepository,
+    session: AsyncSession,
+) -> XaiOAuthRuntimeRepository:
+    """Create the completed runtime persistence boundary for existing tests."""
+    return XaiOAuthRuntimeRepository(
+        integration_repository=integration_repository,
+        session_manager=_SessionManager(session),
+    )
+
+
 class TestEnsureRuntimeTokens:
     """ensure_runtime_tokens tests."""
 
@@ -132,8 +146,7 @@ class TestEnsureRuntimeTokens:
         assert integration is not None
         await _persist_refresh_failure(
             integration=integration,
-            integration_repository=repo,
-            session_manager=_SessionManager(rdb_session),
+            persistence_repository=_persistence_repository(repo, rdb_session),
             error=error,
         )
         public = await repo.get_by_id(rdb_session, integration_id)
@@ -162,8 +175,7 @@ class TestEnsureRuntimeTokens:
 
         result = await ensure_runtime_tokens(
             integration=integration,
-            integration_repository=repo,
-            session_manager=_SessionManager(rdb_session),
+            persistence_repository=_persistence_repository(repo, rdb_session),
         )
 
         assert isinstance(result, Success)
@@ -189,8 +201,7 @@ class TestEnsureRuntimeTokens:
 
         result = await ensure_runtime_tokens(
             integration=integration,
-            integration_repository=repo,
-            session_manager=_SessionManager(rdb_session),
+            persistence_repository=_persistence_repository(repo, rdb_session),
         )
 
         assert isinstance(result, Success)
@@ -215,8 +226,7 @@ class TestEnsureRuntimeTokens:
 
         result = await ensure_runtime_tokens(
             integration=integration,
-            integration_repository=repo,
-            session_manager=_SessionManager(rdb_session),
+            persistence_repository=_persistence_repository(repo, rdb_session),
         )
 
         assert isinstance(result, Success)
@@ -258,8 +268,7 @@ class TestEnsureRuntimeTokens:
 
         result = await refresh_runtime_tokens(
             integration=integration,
-            integration_repository=repo,
-            session_manager=_SessionManager(rdb_session),
+            persistence_repository=_persistence_repository(repo, rdb_session),
         )
 
         assert isinstance(result, Success)
@@ -302,8 +311,7 @@ class TestEnsureRuntimeTokens:
 
         result = await ensure_runtime_tokens(
             integration=integration,
-            integration_repository=repo,
-            session_manager=_SessionManager(rdb_session),
+            persistence_repository=_persistence_repository(repo, rdb_session),
         )
 
         assert isinstance(result, Success)
@@ -338,8 +346,7 @@ class TestEnsureRuntimeTokens:
 
         result = await ensure_runtime_tokens(
             integration=integration,
-            integration_repository=repo,
-            session_manager=_SessionManager(rdb_session),
+            persistence_repository=_persistence_repository(repo, rdb_session),
         )
         updated = await repo.get_by_id(rdb_session, integration_id)
 
@@ -377,8 +384,7 @@ class TestEnsureRuntimeTokens:
         monkeypatch.setattr(XaiOAuthClient, "refresh_tokens", fail_refresh)
         first = await ensure_runtime_tokens(
             integration=integration,
-            integration_repository=repo,
-            session_manager=_SessionManager(rdb_session),
+            persistence_repository=_persistence_repository(repo, rdb_session),
         )
         after_failure = await repo.get_by_id_with_secrets(rdb_session, integration_id)
         assert isinstance(first, Failure)
@@ -411,8 +417,7 @@ class TestEnsureRuntimeTokens:
         monkeypatch.setattr(XaiOAuthClient, "refresh_tokens", success_refresh)
         second = await ensure_runtime_tokens(
             integration=after_failure,
-            integration_repository=repo,
-            session_manager=_SessionManager(rdb_session),
+            persistence_repository=_persistence_repository(repo, rdb_session),
         )
 
         assert isinstance(second, Success)
