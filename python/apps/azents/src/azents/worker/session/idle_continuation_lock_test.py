@@ -112,7 +112,7 @@ async def test_idle_admission_yields_to_child_terminal_parent_lock(
             backend_pid = await idle_session.scalar(sa.text("SELECT pg_backend_pid()"))
             assert isinstance(backend_pid, int)
             idle_pid.set_result(backend_pid)
-            eligibility = await service._eligible_idle_boundary_in_session(
+            eligibility = await service.repository._eligibility(
                 idle_session,
                 root.id,
                 "0" * 32,

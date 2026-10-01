@@ -192,7 +192,12 @@ def _speed_radio(driver: WebDriver, option: str) -> WebElement:
                 )
             )
         ).click()
-    return _wait(driver).until(ec.element_to_be_clickable((By.CSS_SELECTOR, selector)))
+    return WebDriverWait(
+        driver,
+        20,
+        poll_frequency=0.1,
+        ignored_exceptions=(StaleElementReferenceException,),
+    ).until(ec.element_to_be_clickable((By.CSS_SELECTOR, selector)))
 
 
 def _assert_speed_checked(driver: WebDriver, option: str, checked: bool) -> None:

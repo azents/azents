@@ -16,6 +16,7 @@ code_paths:
   - python/apps/azents/src/azents/core/auth/permissions.py
   - python/apps/azents/src/azents/core/auth/roles.py
   - python/apps/azents/src/azents/services/chat/workspace.py
+  - python/apps/azents/src/azents/repos/agent_workspace_access.py
   - python/apps/azents/src/azents/services/chat/workspace_upload.py
   - python/apps/azents/src/azents/repos/workspace_upload_authority/**
   - python/apps/azents/src/azents/services/file_download_stream.py
@@ -130,7 +131,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/agents
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/channel-defaults
-last_verified_at: 2026-09-30
+last_verified_at: 2026-10-01
 spec_version: 90
 ---
 

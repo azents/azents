@@ -27,6 +27,11 @@ from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
 from azents.repos.agent_runtime.data import AgentRuntime, AgentRuntimeActions
+from azents.repos.agent_workspace_access import (
+    AgentWorkspaceAccessRepository,
+    AgentWorkspaceAgentNotFound,
+    AgentWorkspaceMembershipNotFound,
+)
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.runtime.control_protocol.runner_operations import (
     RuntimeFileBulkDeleteResult,
@@ -685,20 +690,25 @@ class AgentWorkspaceFileService:
         user_id: str,
     ) -> Result[Agent, AgentWorkspaceError]:
         """Fetch Agent and check workspace membership."""
-        async with self._session_manager() as session:
-            agent = await self._agent_repository.get_by_id(session, agent_id)
-            if agent is None:
-                return Failure(AgentNotFound())
-            workspace_user = (
-                await self._workspace_user_repository.get_by_workspace_and_user(
-                    session,
-                    workspace_id=agent.workspace_id,
-                    user_id=user_id,
-                )
-            )
-            if workspace_user is None:
-                return Failure(NotWorkspaceMember())
-            return Success(agent)
+        result = await AgentWorkspaceAccessRepository(
+            session_manager=self._session_manager,
+            agent_repository=self._agent_repository,
+            workspace_user_repository=self._workspace_user_repository,
+        ).get_agent_for_user(
+            agent_id,
+            user_id=user_id,
+        )
+        match result:
+            case Success(agent):
+                return Success(agent)
+            case Failure(error):
+                match error:
+                    case AgentWorkspaceAgentNotFound():
+                        return Failure(AgentNotFound())
+                    case AgentWorkspaceMembershipNotFound():
+                        return Failure(NotWorkspaceMember())
+                    case _:
+                        assert_never(error)
 
     async def _workspace_panel_state(
         self,

@@ -30,6 +30,19 @@ The remaining current inventory is delivered in this branch chain before CI:
 Each PR uses the previous phase branch as its base. Design delta remains `None`;
 M1–M5 and REQ-1 through REQ-5 remain the complete authority.
 
+## Stack Extension — 2026-10-01
+
+The post-Phase-15 lexical checkpoint found 598 remaining session contexts across
+122 non-repository application files. This is discovery evidence, not 598 confirmed
+violations, and it invalidates the earlier assumption that one residual PR plus one
+validation PR would complete the issue. Keep the existing PR numbering as historical
+stack labels, but continue sequential stacked delivery by bounded domain batches until
+every context has a call-path-backed corrected or excluded disposition. Phase 16 owns
+the already assigned Chat Workspace, Discord lifecycle/settings, and idle-continuation
+slice. Later branches must cover Engine execution/tools, Chat and mailbox, Runtime and
+lifecycle workers, account/workspace/configuration services, API/CLI entrypoints, and
+other residual groups before final validation and plan cleanup.
+
 ## Delivery Boundaries
 
 1. Correct the title-generation and ChatGPT OAuth persistence boundary as one

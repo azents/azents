@@ -23,7 +23,7 @@ Details of all living specs. Synchronized from frontmatter.
 | system-settings | [System Settings](domain/system-settings.md) | @Hardtack | 2026-09-30 | 7 |
 | toolkit | [Toolkit](domain/toolkit.md) | @Hardtack | 2026-09-30 | 122 |
 | user-auth | [User & Authentication](domain/user-auth.md) | @Hardtack | 2026-09-16 | 22 |
-| workspace | [Workspace & Membership](domain/workspace.md) | @Hardtack | 2026-09-30 | 90 |
+| workspace | [Workspace & Membership](domain/workspace.md) | @Hardtack | 2026-10-01 | 90 |
 
 ## Flow Specs
 
@@ -38,7 +38,7 @@ Details of all living specs. Synchronized from frontmatter.
 | [External Channel Authorization](flow/external-channel-authorization.md) | @Hardtack | 2026-09-29 | 27 |
 | [External Channel Delivery and Channel Work](flow/external-channel-delivery.md) | @Hardtack | 2026-10-01 | 63 |
 | [External Channel Lifecycle](flow/external-channel-lifecycle.md) | @Hardtack | 2026-10-01 | 45 |
-| [External Channel Provider Ingress](flow/external-channel-provider-ingress.md) | @Hardtack | 2026-09-13 | 63 |
+| [External Channel Provider Ingress](flow/external-channel-provider-ingress.md) | @Hardtack | 2026-10-01 | 63 |
 | [File Exchange Storage](flow/file-exchange-storage.md) | @Hardtack | 2026-10-01 | 53 |
 | [Kimi OAuth Flow](flow/kimi-oauth.md) | @Hardtack | 2026-09-30 | 4 |
 | [MCP OAuth Flow](flow/mcp-oauth.md) | @Hardtack | 2026-09-26 | 7 |

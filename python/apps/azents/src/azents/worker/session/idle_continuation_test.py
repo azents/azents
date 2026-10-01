@@ -27,6 +27,12 @@ from azents.engine.hooks.types import (
     SessionIdleResult,
 )
 from azents.engine.run.contracts import ToolkitBinding
+from azents.repos.idle_continuation import (
+    IdleBoundaryEligibility,
+    IdleContinuationAdmission,
+    IdleContinuationFinalization,
+    IdleContinuationInput,
+)
 from azents.repos.mailbox.data import (
     MailboxItem,
     ScheduledTaskContinuationMailboxPayload,
@@ -124,11 +130,13 @@ class _AgentSessionRepository:
         workspace_id: str = "workspace-001",
         owner_generation: int = 1,
         status: AgentSessionStatus = AgentSessionStatus.ACTIVE,
+        consume_result: bool = True,
     ) -> None:
         self.boundary_run_id: str | None = "run-001"
         self.workspace_id = workspace_id
         self.status = status
         self.owner_generation = owner_generation
+        self.consume_result = consume_result
         self.consumed: list[tuple[str, str, bool]] = []
         self.execution_admissions: list[str] = []
 
@@ -163,6 +171,8 @@ class _AgentSessionRepository:
         assert allow_archived_scheduled_continuation is (
             self.status is AgentSessionStatus.ARCHIVED
         )
+        if not self.consume_result:
+            return False
         if self.boundary_run_id != run_id:
             return False
         self.boundary_run_id = None
@@ -231,6 +241,165 @@ class _MailboxRepository:
         del session, scheduling_mode
         self.checked_session_ids.append(session_id)
         return self.pending
+
+
+class _IdleContinuationRepository:
+    """Completed idle-operation test double backed by existing narrow fakes."""
+
+    def __init__(
+        self,
+        *,
+        mailbox_item_service: _MailboxService,
+        agent_session_repository: _AgentSessionRepository,
+        agent_run_repository: _AgentRunRepository,
+        mailbox_item_repository: _MailboxRepository,
+        scheduled_task_cycle_repository: _CycleRepository,
+    ) -> None:
+        self.mailbox_item_service = mailbox_item_service
+        self.agent_session_repository = agent_session_repository
+        self.agent_run_repository = agent_run_repository
+        self.mailbox_item_repository = mailbox_item_repository
+        self.scheduled_task_cycle_repository = scheduled_task_cycle_repository
+
+    async def get_eligibility(
+        self,
+        session_id: str,
+        run_id: str,
+        *,
+        owner_generation: int,
+    ) -> IdleBoundaryEligibility:
+        """Return one completed eligibility result."""
+        return await self._eligibility(
+            object(),
+            session_id,
+            run_id,
+            owner_generation=owner_generation,
+        )
+
+    async def finalize(
+        self,
+        *,
+        session_id: str,
+        run_id: str,
+        owner_generation: int,
+        inputs: list[IdleContinuationInput],
+    ) -> IdleContinuationFinalization:
+        """Revalidate, record enqueues, and consume the boundary."""
+        session = object()
+        eligibility = await self._eligibility(
+            session,
+            session_id,
+            run_id,
+            owner_generation=owner_generation,
+        )
+        if not eligibility.eligible:
+            return IdleContinuationFinalization(False, [], 0)
+        accepted = inputs
+        if eligibility.archived_cycle_id is not None:
+            accepted = [
+                input
+                for input in inputs
+                if input.scheduled_cycle_id == eligibility.archived_cycle_id
+            ]
+        mailbox_inputs = [
+            MailboxEnqueue(
+                session_id=input.session_id,
+                kind=input.kind,
+                scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
+                requested_model_target_label=None,
+                requested_reasoning_effort=None,
+                requested_enabled_execution_options=[],
+                sender_user_id=None,
+                order_group=None,
+                order_sequence=0,
+                content=input.content,
+                idempotency_key=input.idempotency_key,
+                metadata=input.metadata,
+                action=None,
+                attachments=[],
+                file_parts=[],
+                payload=input.payload,
+            )
+            for input in accepted
+        ]
+        results = await self.mailbox_item_service.enqueue_idle_continuations(
+            session,
+            mailbox_inputs,
+        )
+        consumed = (
+            await self.agent_session_repository.consume_pending_idle_continuation(
+                session,
+                session_id=session_id,
+                run_id=run_id,
+                continue_running=bool(accepted),
+                allow_archived_scheduled_continuation=(
+                    eligibility.archived_cycle_id is not None
+                ),
+            )
+        )
+        return IdleContinuationFinalization(
+            consumed=consumed,
+            admissions=[
+                IdleContinuationAdmission(
+                    mailbox_item=result.mailbox_item,
+                    created=result.created,
+                )
+                for result in results
+            ],
+            continuation_count=len(accepted),
+        )
+
+    async def _eligibility(
+        self,
+        session: object,
+        session_id: str,
+        run_id: str,
+        *,
+        owner_generation: int,
+    ) -> IdleBoundaryEligibility:
+        """Evaluate the same durable predicates as the production repository."""
+        locked = await self.agent_session_repository.wait_for_execution_lock_by_id(
+            session,
+            session_id,
+        )
+        if locked.owner_generation != owner_generation:
+            raise CanonicalExecutionOwnerGenerationStaleError(
+                "Session owner generation is stale during idle continuation"
+            )
+        archived_cycle_id = None
+        if locked.status is not AgentSessionStatus.ACTIVE:
+            if locked.status is not AgentSessionStatus.ARCHIVED:
+                return IdleBoundaryEligibility(False, None)
+            run = await self.agent_run_repository.get_by_id(session, run_id)
+            cycle_id = run.scheduled_task_cycle_id
+            cycle = await self.scheduled_task_cycle_repository.get_started(
+                session,
+                agent_id=locked.agent_id,
+                session_id=session_id,
+                cycle_id=cycle_id,
+            )
+            if cycle is None or cycle.state.current_run_id != run_id:
+                return IdleBoundaryEligibility(False, None)
+            archived_cycle_id = cycle_id
+        if locked.pending_idle_continuation_run_id != run_id:
+            return IdleBoundaryEligibility(False, None)
+        if locked.pending_command_id is not None:
+            return IdleBoundaryEligibility(False, None)
+        if await self.mailbox_item_repository.has_by_session_id_and_scheduling_mode(
+            session,
+            session_id=session_id,
+            scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
+        ):
+            return IdleBoundaryEligibility(False, None)
+        if (
+            await self.agent_run_repository.get_active_by_session_id(
+                session,
+                session_id=session_id,
+            )
+            is not None
+        ):
+            return IdleBoundaryEligibility(False, None)
+        return IdleBoundaryEligibility(True, archived_cycle_id)
 
 
 class _EventPublisher:
@@ -328,16 +497,18 @@ def _service(
     mailbox_item_repository: Any | None = None,  # noqa: ANN401
 ) -> IdleContinuationService:
     """Create IdleContinuationService under test."""
+    agent_session = agent_session_repository or _AgentSessionRepository()
+    mailbox_repository = mailbox_item_repository or _MailboxRepository(pending=False)
     return _construct_service(
-        mailbox_item_service=mailbox_item_service,
-        agent_session_repository=agent_session_repository or _AgentSessionRepository(),
-        agent_run_repository=_AgentRunRepository(),
-        mailbox_item_repository=mailbox_item_repository
-        or _MailboxRepository(pending=False),
-        scheduled_task_cycle_repository=_CycleRepository(),
+        repository=_IdleContinuationRepository(
+            mailbox_item_service=mailbox_item_service,
+            agent_session_repository=agent_session,
+            agent_run_repository=_AgentRunRepository(),
+            mailbox_item_repository=mailbox_repository,
+            scheduled_task_cycle_repository=_CycleRepository(),
+        ),
         event_publisher=event_publisher,
         broker=broker,
-        session_manager=_SessionManager(),
     )
 
 
@@ -359,6 +530,33 @@ async def test_consume_admits_both_idle_transactions_through_execution_tree() ->
     assert result is True
     assert repository.execution_admissions == ["session-001", "session-001"]
     assert repository.consumed == [("session-001", "run-001", False)]
+
+
+@pytest.mark.asyncio
+async def test_consume_failure_publishes_no_event_or_wakeup() -> None:
+    """A failed final boundary consume produces no external effects."""
+    repository = _AgentSessionRepository(consume_result=False)
+    mailbox_item_service = _MailboxService()
+    event_publisher = _EventPublisher()
+    broker = _Broker()
+    toolkit = _IdleToolkit(
+        [GoalSessionContinuationInput(content="continue", metadata={})]
+    )
+
+    result = await _service(
+        mailbox_item_service=mailbox_item_service,
+        event_publisher=event_publisher,
+        broker=broker,
+        agent_session_repository=repository,
+    ).consume(
+        _snapshot(),
+        toolkits=[ToolkitBinding(toolkit, "goal", False)],
+        run_id="run-001",
+    )
+
+    assert result is False
+    assert event_publisher.dispatched == []
+    assert broker.sent_messages == []
 
 
 @pytest.mark.asyncio
