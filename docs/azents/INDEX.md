@@ -24,7 +24,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Runtime Provider](spec/domain/runtime-provider.md) | runtime-provider | - | 2026-09-30 | 34 |
 | [Scheduled Task Domain Spec](spec/domain/scheduled-task.md) | scheduled-task | - | 2026-10-01 | 13 |
 | [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-09-30 | 7 |
-| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-10-01 | 123 |
+| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-10-01 | 124 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-09-16 | 22 |
 | [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-10-01 | 90 |
 

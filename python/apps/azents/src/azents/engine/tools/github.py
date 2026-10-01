@@ -19,6 +19,7 @@ from mcp.types import Tool as McpBaseTool
 from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.engine_tool_state import McpToolSnapshotState
 from azents.core.github_auth import (
     create_github_app_jwt,
     exchange_installation_token,
@@ -30,10 +31,6 @@ from azents.core.github_credentials import (
     GitHubSecretsPAT,
 )
 from azents.core.mcp_transport import test_mcp_transport
-from azents.core.toolkit_state import (
-    ToolkitStateIdentity,
-    ToolkitStateModel,
-)
 from azents.core.tools import (
     GitHubToolkitConfig,
     McpToolkitConfig,
@@ -48,11 +45,12 @@ from azents.core.tools import (
 from azents.engine.run.types import FunctionTool, FunctionToolError
 from azents.engine.tooling.make_tool import make_tool
 from azents.engine.tools.mcp import McpToolkit
-from azents.engine.tools.mcp_base import McpToolSnapshotState, wrap_mcp_tool
+from azents.engine.tools.mcp_base import wrap_mcp_tool
 from azents.rdb.session import SessionManager
 from azents.repos.session_execution.ownership import OwnerBoundSessionManager
-from azents.repos.toolkit_state.store import (
-    ToolkitStateStore,
+from azents.repos.toolkit_state.engine import (
+    GitHubSelectedInstallationStore,
+    McpToolSnapshotStore,
 )
 from azents.services.github_platform_system_setting.runtime import (
     PlatformGitHubAppRuntimeService,
@@ -178,15 +176,6 @@ def _filter_by_toolsets(
 
 _INSTALLATION_ENV_PREFIX = "GITHUB_TOKEN_INSTALLATION_"
 _SAFE_TOOL_SEGMENT = re.compile(r"[^a-zA-Z0-9_]")
-_GITHUB_TOOLKIT_STATE_NAMESPACE = "github"
-_SELECTED_INSTALLATION_STATE_NAME = "selected_installation"
-
-
-class GitHubSelectedInstallationState(ToolkitStateModel):
-    """Selected GitHub installation for Runtime environment defaults."""
-
-    schema_version: int = 1
-    installation_id: str = Field(min_length=1, description="GitHub installation ID")
 
 
 class GitHubSwitchInstallationInput(BaseModel):
@@ -196,77 +185,6 @@ class GitHubSwitchInstallationInput(BaseModel):
         min_length=1,
         description="Installation ID or account login to select for gh CLI defaults",
     )
-
-
-class GitHubSelectedInstallationStore:
-    """Session-bound GitHub selected installation Toolkit State store."""
-
-    def __init__(
-        self,
-        *,
-        session_manager: SessionManager[AsyncSession],
-        agent_id: str,
-        session_id: str,
-    ) -> None:
-        """Create selected installation store."""
-        self.session_manager = session_manager
-        self._agent_id = agent_id
-        self._session_id = session_id
-
-    def for_execution(
-        self,
-        owner: SessionExecutionOwner,
-    ) -> "GitHubSelectedInstallationStore":
-        """Bind selection state to one durable Session owner."""
-        return GitHubSelectedInstallationStore(
-            session_manager=OwnerBoundSessionManager(
-                session_manager=self.session_manager,
-                session_id=owner.session_id,
-                owner_generation=owner.owner_generation,
-            ),
-            agent_id=self._agent_id,
-            session_id=self._session_id,
-        )
-
-    async def load(self) -> str | None:
-        """Load selected installation ID."""
-        if not self._agent_id or not self._session_id:
-            return None
-        async with self.session_manager() as session:
-            handle = ToolkitStateStore(session=session).handle(
-                self._identity(),
-                GitHubSelectedInstallationState,
-            )
-            state = await handle.load(
-                default_factory=lambda: GitHubSelectedInstallationState(
-                    installation_id="__unset__"
-                )
-            )
-            if state.installation_id == "__unset__":
-                return None
-            return state.installation_id
-
-    async def save(self, installation_id: str) -> None:
-        """Persist selected installation ID."""
-        if not self._agent_id or not self._session_id:
-            return
-        async with self.session_manager() as session:
-            handle = ToolkitStateStore(session=session).handle(
-                self._identity(),
-                GitHubSelectedInstallationState,
-            )
-            await handle.save(
-                GitHubSelectedInstallationState(installation_id=installation_id)
-            )
-
-    def _identity(self) -> ToolkitStateIdentity:
-        """Create Toolkit State identity."""
-        return ToolkitStateIdentity(
-            agent_id=self._agent_id,
-            session_id=self._session_id,
-            toolkit_namespace=_GITHUB_TOOLKIT_STATE_NAMESPACE,
-            state_name=_SELECTED_INSTALLATION_STATE_NAME,
-        )
 
 
 class GitHubSelectedInstallationStoreProtocol(Protocol):
@@ -295,6 +213,7 @@ class GitHubInstallationBinding:
     agent_id: str
     session_id: str
     state_name: str
+    snapshot_store: McpToolSnapshotStore | None
     lazy_mcp_task: asyncio.Task[None] | None = None
     lazy_mcp_error: str | None = None
 
@@ -447,7 +366,7 @@ class GitHubToolkit(Toolkit[GitHubToolkitConfig]):
             self._installation_bindings[0].session_id
             if self._installation_bindings
             else (
-                self.selected_installation_store._session_id
+                self.selected_installation_store.session_id
                 if isinstance(
                     self.selected_installation_store,
                     GitHubSelectedInstallationStore,
@@ -477,6 +396,8 @@ class GitHubToolkit(Toolkit[GitHubToolkitConfig]):
                     session_id=owner.session_id,
                     owner_generation=owner.owner_generation,
                 )
+            if binding.snapshot_store is not None:
+                binding.snapshot_store = binding.snapshot_store.for_execution(owner)
             if binding.mcp_toolkit is not None:
                 binding.mcp_toolkit.bind_execution_owner(owner)
         self._execution_owner = owner
@@ -1317,6 +1238,16 @@ def _build_installation_bindings(
                     toolkit_id=toolkit_id,
                     suffix=f"installation:{target.installation_id}",
                 ),
+                snapshot_store=McpToolSnapshotStore(
+                    session_manager=session_manager,
+                    agent_id=agent_id,
+                    session_id=session_id,
+                    toolkit_namespace="mcp",
+                    state_name=_github_snapshot_state_name(
+                        toolkit_id=toolkit_id,
+                        suffix=f"installation:{target.installation_id}",
+                    ),
+                ),
             )
         )
     return bindings
@@ -1370,6 +1301,16 @@ def _build_platform_installation_bindings(
                     toolkit_id=toolkit_id,
                     suffix=f"installation:{target.installation_id}",
                 ),
+                snapshot_store=McpToolSnapshotStore(
+                    session_manager=session_manager,
+                    agent_id=agent_id,
+                    session_id=session_id,
+                    toolkit_namespace="mcp",
+                    state_name=_github_snapshot_state_name(
+                        toolkit_id=toolkit_id,
+                        suffix=f"installation:{target.installation_id}",
+                    ),
+                ),
             )
         )
     return bindings
@@ -1380,25 +1321,11 @@ async def _load_installation_tool_snapshot(
 ) -> McpToolSnapshotState | None:
     """Load a previous MCP tool snapshot before lazy GitHub MCP setup finishes."""
     config = binding.lazy_mcp_config
-    if (
-        config is None
-        or binding.session_manager is None
-        or not binding.agent_id
-        or not binding.session_id
-    ):
+    if config is None or binding.snapshot_store is None:
         return None
-    identity = ToolkitStateIdentity(
-        agent_id=binding.agent_id,
-        session_id=binding.session_id,
-        toolkit_namespace="mcp",
-        state_name=binding.state_name,
-    )
-    async with binding.session_manager() as session:
-        handle = ToolkitStateStore(session=session).handle(
-            identity,
-            McpToolSnapshotState,
-        )
-        snapshot = await handle.load(default_factory=McpToolSnapshotState)
+    snapshot = await binding.snapshot_store.load()
+    if snapshot is None:
+        return None
     if not snapshot.tools:
         return None
     if snapshot.server_url != config.server_url:

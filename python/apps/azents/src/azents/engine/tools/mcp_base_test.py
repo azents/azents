@@ -8,10 +8,13 @@ import pytest
 from mcp.types import Tool as McpBaseTool
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.engine_tool_state import (
+    McpToolSnapshotItem,
+    McpToolSnapshotState,
+)
 from azents.core.toolkit_state import ToolkitStateIdentity
 from azents.core.tools import McpToolkitConfig, TurnContext
 from azents.engine.tools.mcp import McpToolkit
-from azents.engine.tools.mcp_base import McpToolSnapshotItem, McpToolSnapshotState
 from azents.repos.session_execution import (
     CanonicalExecutionOwnerGenerationStaleError,
 )
@@ -82,7 +85,7 @@ def _toolkit_state_store(  # pytest autouse fixture
     """Patch Toolkit State to an in-memory store."""
     _FakeToolkitStateHandle.clear()
     monkeypatch.setattr(
-        "azents.engine.tools.mcp_base.ToolkitStateStore",
+        "azents.repos.toolkit_state.engine.ToolkitStateStore",
         _FakeToolkitStateStore,
     )
 

@@ -9,12 +9,16 @@ import pytest
 from mcp.types import TextContent
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.engine_tool_state import (
+    McpToolSnapshotItem,
+    McpToolSnapshotState,
+)
 from azents.core.github_credentials import GitHubInstallationTarget
 from azents.core.toolkit_state import ToolkitStateIdentity
 from azents.core.tools import GitHubToolkitConfig, McpToolkitConfig, TurnContext
 from azents.engine.run.types import FunctionTool
 from azents.engine.tools.github import GitHubInstallationBinding, GitHubToolkit
-from azents.engine.tools.mcp_base import McpToolSnapshotItem, McpToolSnapshotState
+from azents.repos.toolkit_state.engine import McpToolSnapshotStore
 from azents.testing.types import is_object_factory
 
 _GITHUB_MCP_URL = "https://api.githubcopilot.com/mcp/"
@@ -117,7 +121,7 @@ def _toolkit_state_store(  # pytest fixture
     """Patch Toolkit State to an in-memory store."""
     _FakeToolkitStateHandle.clear()
     monkeypatch.setattr(
-        "azents.engine.tools.github.ToolkitStateStore",
+        "azents.repos.toolkit_state.engine.ToolkitStateStore",
         _FakeToolkitStateStore,
     )
 
@@ -210,6 +214,13 @@ def _binding(
         agent_id="agent-1",
         session_id="session-1",
         state_name=state_name,
+        snapshot_store=McpToolSnapshotStore(
+            session_manager=_FakeSessionManager(),
+            agent_id="agent-1",
+            session_id="session-1",
+            toolkit_namespace="mcp",
+            state_name=state_name,
+        ),
     )
 
 

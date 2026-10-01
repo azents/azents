@@ -244,6 +244,7 @@ class TestExposeEnvMultiInstallation:
                     agent_id="agent-1",
                     session_id="session-1",
                     state_name="tool_snapshot:test",
+                    snapshot_store=None,
                 ),
                 GitHubInstallationBinding(
                     target=GitHubInstallationTarget(
@@ -261,6 +262,7 @@ class TestExposeEnvMultiInstallation:
                     agent_id="agent-1",
                     session_id="session-1",
                     state_name="tool_snapshot:test",
+                    snapshot_store=None,
                 ),
             ],
         )
@@ -306,6 +308,7 @@ class TestExposeEnvMultiInstallation:
                     agent_id="agent-1",
                     session_id="session-1",
                     state_name="tool_snapshot:test",
+                    snapshot_store=None,
                 )
             ],
         )
@@ -345,6 +348,7 @@ class TestExposeEnvMultiInstallation:
                     agent_id="agent-1",
                     session_id="session-1",
                     state_name="tool_snapshot:test",
+                    snapshot_store=None,
                 ),
                 GitHubInstallationBinding(
                     target=GitHubInstallationTarget(
@@ -362,6 +366,7 @@ class TestExposeEnvMultiInstallation:
                     agent_id="agent-1",
                     session_id="session-1",
                     state_name="tool_snapshot:test",
+                    snapshot_store=None,
                 ),
             ],
             selected_installation_store=_FakeSelectedInstallationStore("202"),
@@ -397,6 +402,7 @@ class TestExposeEnvMultiInstallation:
                     agent_id="agent-1",
                     session_id="session-1",
                     state_name="tool_snapshot:test",
+                    snapshot_store=None,
                 ),
                 GitHubInstallationBinding(
                     target=GitHubInstallationTarget(
@@ -416,6 +422,7 @@ class TestExposeEnvMultiInstallation:
                     agent_id="agent-1",
                     session_id="session-1",
                     state_name="tool_snapshot:test",
+                    snapshot_store=None,
                 ),
             ],
             selected_installation_store=store,
@@ -456,6 +463,7 @@ class TestExposeEnvMultiInstallation:
                     agent_id="agent-1",
                     session_id="session-1",
                     state_name="tool_snapshot:test",
+                    snapshot_store=None,
                 ),
                 GitHubInstallationBinding(
                     target=GitHubInstallationTarget(
@@ -475,6 +483,7 @@ class TestExposeEnvMultiInstallation:
                     agent_id="agent-1",
                     session_id="session-1",
                     state_name="tool_snapshot:test",
+                    snapshot_store=None,
                 ),
             ],
             selected_installation_store=store,
@@ -510,6 +519,7 @@ class TestExposeEnvMultiInstallation:
                     agent_id="agent-1",
                     session_id="session-1",
                     state_name="tool_snapshot:test",
+                    snapshot_store=None,
                 ),
                 GitHubInstallationBinding(
                     target=GitHubInstallationTarget(
@@ -529,6 +539,7 @@ class TestExposeEnvMultiInstallation:
                     agent_id="agent-1",
                     session_id="session-1",
                     state_name="tool_snapshot:test",
+                    snapshot_store=None,
                 ),
             ],
             selected_installation_store=_FakeSelectedInstallationStore(),

@@ -34,15 +34,14 @@ from mcp.types import (
     TextResourceContents,
 )
 from mcp.types import Tool as McpBaseTool
-from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.engine_tool_state import (
+    McpToolSnapshotItem,
+    McpToolSnapshotState,
+)
 from azents.core.mcp_transport import call_tool as mcp_call_tool
 from azents.core.mcp_transport import list_tools as mcp_list_tools
-from azents.core.toolkit_state import (
-    ToolkitStateIdentity,
-    ToolkitStateModel,
-)
 from azents.core.tools import (
     McpToolkitConfig,
     Toolkit,
@@ -60,11 +59,7 @@ from azents.rdb.session import SessionManager
 from azents.repos.session_execution import (
     CanonicalExecutionOwnerGenerationStaleError,
 )
-from azents.repos.session_execution.ownership import OwnerBoundSessionManager
-from azents.repos.toolkit_state.store import (
-    ToolkitStateHandle,
-    ToolkitStateStore,
-)
+from azents.repos.toolkit_state.engine import McpToolSnapshotStore
 from azents.services.artifact import ArtifactService
 from azents.services.session_resource_authority import (
     SessionExecutionOwner,
@@ -75,8 +70,6 @@ from azents.services.session_resource_authority import (
 logger = logging.getLogger(__name__)
 
 McpConfigT = TypeVar("McpConfigT", bound=McpToolkitConfig)
-MCP_TOOL_SNAPSHOT_SCHEMA_VERSION = 1
-MCP_TOOL_SNAPSHOT_STATE_NAME = "tool_snapshot"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -96,27 +89,6 @@ class McpCredentials(NamedTuple):
     secret: str | None
     auth_scheme: None
     proxy_url: str | None
-
-
-class McpToolSnapshotItem(BaseModel):
-    """Serializable MCP tool snapshot item."""
-
-    raw_name: str
-    model_name: str
-    description: str
-    input_schema: dict[str, object]
-    server_url: str
-    use_streamable_http: bool = False
-
-
-class McpToolSnapshotState(ToolkitStateModel):
-    """Latest successful MCP tool snapshot."""
-
-    schema_version: int = MCP_TOOL_SNAPSHOT_SCHEMA_VERSION
-    loaded_at: str | None = None
-    server_url: str = ""
-    tool_hash: str = ""
-    tools: list[McpToolSnapshotItem] = Field(default_factory=list)
 
 
 def build_mcp_artifact_sink(
@@ -587,6 +559,7 @@ class McpBasedToolkit(Toolkit[McpConfigT], ABC, Generic[McpConfigT]):
     _session_id: str
     _state_namespace: str
     _state_name: str
+    snapshot_store: McpToolSnapshotStore
 
     # Background connection status
     _bg_task: asyncio.Task[None] | None
@@ -605,6 +578,13 @@ class McpBasedToolkit(Toolkit[McpConfigT], ABC, Generic[McpConfigT]):
         self._entered = False
         self._execution_owner: SessionExecutionOwner | None = None
         self._owner_stale = False
+        self.snapshot_store = McpToolSnapshotStore(
+            session_manager=self.session_manager,
+            agent_id=self._agent_id,
+            session_id=self._session_id,
+            toolkit_namespace=self._state_namespace,
+            state_name=self._state_name,
+        )
 
     def bind_execution_owner(self, owner: SessionExecutionOwner) -> None:
         """Bind snapshot state before starting background discovery."""
@@ -613,21 +593,24 @@ class McpBasedToolkit(Toolkit[McpConfigT], ABC, Generic[McpConfigT]):
             owner,
             session_id=self._session_id,
         ):
-            if self.session_manager is not None:
-                self.session_manager = OwnerBoundSessionManager(
-                    session_manager=self.session_manager,
-                    session_id=owner.session_id,
-                    owner_generation=owner.owner_generation,
-                )
+            self.snapshot_store = self.snapshot_store.for_execution(owner)
             self._execution_owner = owner
 
     def set_agent_id(self, agent_id: str) -> None:
         """Inject agent ID for Toolkit State identity."""
         self._agent_id = agent_id
+        self.snapshot_store = self.snapshot_store.with_identity(
+            agent_id=agent_id,
+            session_id=self._session_id,
+        )
 
     def set_session_id(self, session_id: str) -> None:
         """Inject session ID for Toolkit State identity."""
         self._session_id = session_id
+        self.snapshot_store = self.snapshot_store.with_identity(
+            agent_id=self._agent_id,
+            session_id=session_id,
+        )
 
     def _current_artifact_sink(self) -> McpArtifactSink | None:
         """Return Artifact sink for current run."""
@@ -754,13 +737,9 @@ class McpBasedToolkit(Toolkit[McpConfigT], ABC, Generic[McpConfigT]):
 
     async def _load_tool_snapshot(self) -> McpToolSnapshotState | None:
         """Load the latest successful MCP tool snapshot from Toolkit State."""
-        if self.session_manager is None:
+        snapshot = await self.snapshot_store.load()
+        if snapshot is None:
             return None
-        async with self.session_manager() as session:
-            handle = self._tool_snapshot_handle(session)
-            if handle is None:
-                return None
-            snapshot = await handle.load(default_factory=McpToolSnapshotState)
         if not snapshot.tools:
             return None
         if snapshot.server_url != self._config.server_url:
@@ -769,32 +748,7 @@ class McpBasedToolkit(Toolkit[McpConfigT], ABC, Generic[McpConfigT]):
 
     async def _save_tool_snapshot(self, snapshot: McpToolSnapshotState) -> None:
         """Atomically save a successful MCP tool snapshot."""
-        if self.session_manager is None:
-            return
-        async with self.session_manager() as session:
-            handle = self._tool_snapshot_handle(session)
-            if handle is None:
-                return
-            await handle.load(default_factory=McpToolSnapshotState)
-            await handle.save(snapshot)
-
-    def _tool_snapshot_handle(
-        self,
-        session: AsyncSession,
-    ) -> ToolkitStateHandle[McpToolSnapshotState] | None:
-        """Create Toolkit State handle for MCP tool snapshot."""
-        if not self._agent_id or not self._session_id:
-            return None
-        identity = ToolkitStateIdentity(
-            agent_id=self._agent_id,
-            session_id=self._session_id,
-            toolkit_namespace=self._state_namespace,
-            state_name=self._state_name,
-        )
-        return ToolkitStateStore(session=session).handle(
-            identity,
-            McpToolSnapshotState,
-        )
+        await self.snapshot_store.replace(snapshot)
 
     def _tools_from_snapshot(
         self, snapshot: McpToolSnapshotState

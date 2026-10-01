@@ -21,6 +21,10 @@ from mcp.types import Tool as McpBaseTool
 from pydantic import BaseModel, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.engine_tool_state import (
+    McpToolSnapshotItem,
+    McpToolSnapshotState,
+)
 from azents.core.mcp_transport import (
     call_tool as mcp_call_tool,
 )
@@ -29,9 +33,6 @@ from azents.core.mcp_transport import (
 )
 from azents.core.mcp_transport import (
     list_tools as mcp_list_tools,
-)
-from azents.core.toolkit_state import (
-    ToolkitStateIdentity,
 )
 from azents.core.tools import (
     GcpService,
@@ -53,8 +54,6 @@ from azents.engine.run.types import (
 from azents.engine.tools.mcp_base import (
     ArtifactSinkGetter,
     McpArtifactSink,
-    McpToolSnapshotItem,
-    McpToolSnapshotState,
     _extract_tool_result,  # reuse common MCP result extraction for GCP wrapper.
     _is_http_401,  # reuse common MCP 401 retry detection.
     build_mcp_artifact_sink,
@@ -63,11 +62,7 @@ from azents.rdb.session import SessionManager
 from azents.repos.session_execution import (
     CanonicalExecutionOwnerGenerationStaleError,
 )
-from azents.repos.session_execution.ownership import OwnerBoundSessionManager
-from azents.repos.toolkit_state.store import (
-    ToolkitStateHandle,
-    ToolkitStateStore,
-)
+from azents.repos.toolkit_state.engine import McpToolSnapshotStore
 from azents.services.artifact import ArtifactService
 from azents.services.session_resource_authority import (
     SessionExecutionOwner,
@@ -282,10 +277,14 @@ class GcpToolkit(Toolkit[GcpToolkitConfig]):
         self._writable_services = writable_services
         self._proxy_url = proxy_url
         self.artifact_service = artifact_service
-        self.session_manager = session_manager
-        self._agent_id = agent_id
         self._session_id = session_id
-        self._state_name = state_name
+        self.snapshot_store = McpToolSnapshotStore(
+            session_manager=session_manager,
+            agent_id=agent_id,
+            session_id=session_id,
+            toolkit_namespace=_GCP_TOOLKIT_STATE_NAMESPACE,
+            state_name=state_name,
+        )
         self._bg_task: asyncio.Task[None] | None = None
         self._artifact_sink: McpArtifactSink | None = None
         self._entered = False
@@ -299,12 +298,7 @@ class GcpToolkit(Toolkit[GcpToolkitConfig]):
             owner,
             session_id=self._session_id,
         ):
-            if self.session_manager is not None:
-                self.session_manager = OwnerBoundSessionManager(
-                    session_manager=self.session_manager,
-                    session_id=owner.session_id,
-                    owner_generation=owner.owner_generation,
-                )
+            self.snapshot_store = self.snapshot_store.for_execution(owner)
             self._execution_owner = owner
 
     def _current_artifact_sink(self) -> McpArtifactSink | None:
@@ -441,42 +435,16 @@ class GcpToolkit(Toolkit[GcpToolkitConfig]):
 
     async def _load_tool_snapshot(self) -> McpToolSnapshotState | None:
         """Load the latest successful GCP MCP tool snapshot."""
-        if self.session_manager is None:
+        snapshot = await self.snapshot_store.load()
+        if snapshot is None:
             return None
-        async with self.session_manager() as session:
-            handle = self._tool_snapshot_handle(session)
-            if handle is None:
-                return None
-            snapshot = await handle.load(default_factory=McpToolSnapshotState)
         if not snapshot.tools or snapshot.server_url != self._project_id:
             return None
         return snapshot
 
     async def _save_tool_snapshot(self, snapshot: McpToolSnapshotState) -> None:
         """Atomically save a successful GCP MCP tool snapshot."""
-        if self.session_manager is None:
-            return
-        async with self.session_manager() as session:
-            handle = self._tool_snapshot_handle(session)
-            if handle is None:
-                return
-            await handle.load(default_factory=McpToolSnapshotState)
-            await handle.save(snapshot)
-
-    def _tool_snapshot_handle(
-        self,
-        session: AsyncSession,
-    ) -> ToolkitStateHandle[McpToolSnapshotState] | None:
-        """Create Toolkit State handle for the GCP MCP snapshot."""
-        if not self._agent_id or not self._session_id:
-            return None
-        identity = ToolkitStateIdentity(
-            agent_id=self._agent_id,
-            session_id=self._session_id,
-            toolkit_namespace=_GCP_TOOLKIT_STATE_NAMESPACE,
-            state_name=self._state_name,
-        )
-        return ToolkitStateStore(session=session).handle(identity, McpToolSnapshotState)
+        await self.snapshot_store.replace(snapshot)
 
     def _tools_from_snapshot(
         self, snapshot: McpToolSnapshotState

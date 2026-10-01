@@ -10,10 +10,14 @@ from azents.core.engine_tool_state import (
     AGENTS_TOOLKIT_NAMESPACE,
     CLAUDE_RULES_APPENDIX_DEDUPE_TOOLKIT_STATE_NAME,
     CLAUDE_RULES_TOOLKIT_NAMESPACE,
+    GITHUB_SELECTED_INSTALLATION_STATE_NAME,
+    GITHUB_TOOLKIT_STATE_NAMESPACE,
     TODO_TOOLKIT_NAMESPACE,
     TODO_TOOLKIT_STATE_NAME,
     TOOL_SEARCH_TOOLKIT_NAMESPACE,
     TOOL_SEARCH_WORKING_SET_STATE_NAME,
+    McpToolSnapshotItem,
+    McpToolSnapshotState,
     TodoItem,
     TodoState,
 )
@@ -21,6 +25,8 @@ from azents.engine.tooling.toolkit_state_test import _create_agent_and_session
 from azents.rdb.session import SessionManager
 from azents.repos.toolkit_state import ToolkitStateRepository
 from azents.repos.toolkit_state.engine import (
+    GitHubSelectedInstallationStore,
+    McpToolSnapshotStore,
     TodoStateStore,
     ToolkitAgentsAppendixDedupeStateStore,
     ToolkitClaudeRulesAppendixDedupeStateStore,
@@ -58,6 +64,18 @@ async def test_engine_tool_state_operations_close_transactions_before_returning(
         session_manager=tracked_session_manager,
     )
     todo_store = TodoStateStore(session_manager=tracked_session_manager)
+    mcp_snapshot_store = McpToolSnapshotStore(
+        session_manager=tracked_session_manager,
+        agent_id=fixture.agent_id,
+        session_id=fixture.agent_session_id,
+        toolkit_namespace="mcp",
+        state_name="tool_snapshot:test",
+    )
+    github_selection_store = GitHubSelectedInstallationStore(
+        session_manager=tracked_session_manager,
+        agent_id=fixture.agent_id,
+        session_id=fixture.agent_session_id,
+    )
     agent_id = fixture.agent_id
     session_id = fixture.agent_session_id
 
@@ -103,6 +121,31 @@ async def test_engine_tool_state_operations_close_transactions_before_returning(
     assert not transaction_active
     assert cleared.tool_names == []
 
+    snapshot = McpToolSnapshotState(
+        loaded_at="2026-10-01T00:00:00+00:00",
+        server_url="https://mcp.example.test",
+        tool_hash="snapshot-hash",
+        tools=[
+            McpToolSnapshotItem(
+                raw_name="read",
+                model_name="read",
+                description="Read data",
+                input_schema={"type": "object", "properties": {}},
+                server_url="https://mcp.example.test",
+                use_streamable_http=True,
+            )
+        ],
+    )
+    await mcp_snapshot_store.replace(snapshot)
+    assert not transaction_active
+    assert await mcp_snapshot_store.load() == snapshot
+    assert not transaction_active
+
+    await github_selection_store.save("installation-1")
+    assert not transaction_active
+    assert await github_selection_store.load() == "installation-1"
+    assert not transaction_active
+
     async with rdb_session_manager() as session:
         repository = ToolkitStateRepository()
         working_set_record = await repository.get(
@@ -133,6 +176,20 @@ async def test_engine_tool_state_operations_close_transactions_before_returning(
             toolkit_namespace=TODO_TOOLKIT_NAMESPACE,
             state_name=TODO_TOOLKIT_STATE_NAME,
         )
+        mcp_snapshot_record = await repository.get(
+            session,
+            agent_id=agent_id,
+            session_id=session_id,
+            toolkit_namespace="mcp",
+            state_name="tool_snapshot:test",
+        )
+        github_selection_record = await repository.get(
+            session,
+            agent_id=agent_id,
+            session_id=session_id,
+            toolkit_namespace=GITHUB_TOOLKIT_STATE_NAMESPACE,
+            state_name=GITHUB_SELECTED_INSTALLATION_STATE_NAME,
+        )
 
     assert working_set_record is not None
     assert working_set_record.state_json == {
@@ -153,6 +210,13 @@ async def test_engine_tool_state_operations_close_transactions_before_returning(
     assert todo_record.state_json == {
         "schema_version": 1,
         "items": [{"content": "Verify boundary", "status": "in_progress"}],
+    }
+    assert mcp_snapshot_record is not None
+    assert mcp_snapshot_record.state_json == snapshot.model_dump(mode="json")
+    assert github_selection_record is not None
+    assert github_selection_record.state_json == {
+        "schema_version": 1,
+        "installation_id": "installation-1",
     }
 
 

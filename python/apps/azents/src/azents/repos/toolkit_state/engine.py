@@ -11,12 +11,16 @@ from azents.core.engine_tool_state import (
     AGENTS_TOOLKIT_NAMESPACE,
     CLAUDE_RULES_APPENDIX_DEDUPE_TOOLKIT_STATE_NAME,
     CLAUDE_RULES_TOOLKIT_NAMESPACE,
+    GITHUB_SELECTED_INSTALLATION_STATE_NAME,
+    GITHUB_TOOLKIT_STATE_NAMESPACE,
     TODO_TOOLKIT_NAMESPACE,
     TODO_TOOLKIT_STATE_NAME,
     TOOL_SEARCH_TOOLKIT_NAMESPACE,
     TOOL_SEARCH_WORKING_SET_STATE_NAME,
     AgentsAppendixDedupeState,
     ClaudeRulesAppendixDedupeState,
+    GitHubSelectedInstallationState,
+    McpToolSnapshotState,
     TodoState,
     ToolWorkingSetState,
 )
@@ -406,6 +410,147 @@ class TodoStateStore:
                 state_name=TODO_TOOLKIT_STATE_NAME,
             ),
             TodoState,
+        )
+
+
+@dataclasses.dataclass
+class McpToolSnapshotStore:
+    """Own completed MCP tool snapshot operations."""
+
+    session_manager: SessionManager[AsyncSession] | None
+    agent_id: str
+    session_id: str
+    toolkit_namespace: str
+    state_name: str
+
+    def for_execution(
+        self,
+        owner: SessionExecutionOwnerLike,
+    ) -> "McpToolSnapshotStore":
+        """Bind snapshot operations to one durable Session owner."""
+        manager = self.session_manager
+        if manager is not None:
+            manager = OwnerBoundSessionManager(
+                session_manager=manager,
+                session_id=owner.session_id,
+                owner_generation=owner.owner_generation,
+            )
+        return dataclasses.replace(self, session_manager=manager)
+
+    async def load(self) -> McpToolSnapshotState | None:
+        """Load one snapshot in a completed transaction."""
+        if not self._available():
+            return None
+        assert self.session_manager is not None  # noqa: S101
+        async with self.session_manager() as session:
+            return await self._handle(session).load(
+                default_factory=McpToolSnapshotState
+            )
+
+    async def replace(self, snapshot: McpToolSnapshotState) -> None:
+        """Replace one snapshot in a completed transaction."""
+        if not self._available():
+            return
+        assert self.session_manager is not None  # noqa: S101
+        async with self.session_manager() as session:
+            await self._handle(session).save(snapshot)
+
+    def with_identity(
+        self,
+        *,
+        agent_id: str,
+        session_id: str,
+    ) -> "McpToolSnapshotStore":
+        """Return the same repository operation for another state identity."""
+        return dataclasses.replace(
+            self,
+            agent_id=agent_id,
+            session_id=session_id,
+        )
+
+    def _available(self) -> bool:
+        """Return whether persistence and state identity are available."""
+        return (
+            self.session_manager is not None
+            and bool(self.agent_id)
+            and bool(self.session_id)
+        )
+
+    def _handle(
+        self,
+        session: AsyncSession,
+    ) -> ToolkitStateHandle[McpToolSnapshotState]:
+        """Create the typed MCP snapshot handle."""
+        return ToolkitStateStore(session=session).handle(
+            ToolkitStateIdentity(
+                agent_id=self.agent_id,
+                session_id=self.session_id,
+                toolkit_namespace=self.toolkit_namespace,
+                state_name=self.state_name,
+            ),
+            McpToolSnapshotState,
+        )
+
+
+@dataclasses.dataclass
+class GitHubSelectedInstallationStore:
+    """Own completed GitHub selected-installation operations."""
+
+    session_manager: SessionManager[AsyncSession]
+    agent_id: str
+    session_id: str
+
+    def for_execution(
+        self,
+        owner: SessionExecutionOwnerLike,
+    ) -> "GitHubSelectedInstallationStore":
+        """Bind selection operations to one durable Session owner."""
+        return GitHubSelectedInstallationStore(
+            session_manager=OwnerBoundSessionManager(
+                session_manager=self.session_manager,
+                session_id=owner.session_id,
+                owner_generation=owner.owner_generation,
+            ),
+            agent_id=self.agent_id,
+            session_id=self.session_id,
+        )
+
+    async def load(self) -> str | None:
+        """Load the selected installation in a completed transaction."""
+        if not self.agent_id or not self.session_id:
+            return None
+        async with self.session_manager() as session:
+            state = await self._handle(session).load(
+                default_factory=lambda: GitHubSelectedInstallationState(
+                    installation_id="__unset__"
+                )
+            )
+        if state.installation_id == "__unset__":
+            return None
+        return state.installation_id
+
+    async def save(self, installation_id: str) -> None:
+        """Persist the selected installation in a completed transaction."""
+        if not self.agent_id or not self.session_id:
+            return
+        async with self.session_manager() as session:
+            await self._handle(session).save(
+                GitHubSelectedInstallationState(installation_id=installation_id)
+            )
+
+    def _handle(
+        self,
+        session: AsyncSession,
+    ) -> ToolkitStateHandle[GitHubSelectedInstallationState]:
+        """Create the typed selected-installation handle."""
+        return ToolkitStateStore(session=session).handle(
+            ToolkitStateIdentity(
+                agent_id=self.agent_id,
+                session_id=self.session_id,
+                toolkit_namespace=GITHUB_TOOLKIT_STATE_NAMESPACE,
+                state_name=GITHUB_SELECTED_INSTALLATION_STATE_NAME,
+            ),
+            GitHubSelectedInstallationState,
         )
 
 
