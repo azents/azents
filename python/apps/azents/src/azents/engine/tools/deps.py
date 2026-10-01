@@ -35,6 +35,9 @@ from azents.repos.goal.store import GoalStateStore
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.mcp_oauth_connection import MCPOAuthConnectionRepository
 from azents.repos.scheduled_task.repository import ScheduledTaskRepository
+from azents.repos.scheduled_task.tool_operations import (
+    ScheduledTaskToolOperationRepository,
+)
 from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
 from azents.repos.toolkit import ToolkitRepository
 from azents.repos.toolkit_state.engine import TodoStateStore
@@ -55,10 +58,6 @@ from azents.services.runtime_web.service import (
 from azents.services.scheduled_task.channel import (
     ScheduledTaskChannelService,
     get_scheduled_task_channel_service,
-)
-from azents.services.scheduled_task.service import (
-    RDBScheduledTaskAuthorityValidator,
-    ScheduledTaskService,
 )
 from azents.services.scheduled_task.terminal import ScheduledTaskTerminalService
 from azents.services.vfs import ReleaseVfsCatalog, VfsProjectionService
@@ -159,15 +158,14 @@ def get_scheduled_toolkit_provider(
     ],
 ) -> ScheduledToolkitProvider:
     """Scheduled Toolkit dependency without ToolkitConfig or credentials."""
-    service = ScheduledTaskService(
-        repository=task_repository,
-        cycle_repository=cycle_repository,
-        mailbox_repository=mailbox_repository,
-        authority_validator=RDBScheduledTaskAuthorityValidator(),
-    )
     return ScheduledToolkitProvider(
-        session_manager=session_manager,
-        service=service,
+        operations=ScheduledTaskToolOperationRepository(
+            session_manager=session_manager,
+            task_repository=task_repository,
+            cycle_repository=cycle_repository,
+            mailbox_repository=mailbox_repository,
+            run_repository=run_repository,
+        ),
         terminal_service=ScheduledTaskTerminalService(
             session_manager=session_manager,
             run_repository=run_repository,
@@ -177,8 +175,6 @@ def get_scheduled_toolkit_provider(
         ),
         channel_service=channel_service,
         file_transfer_service=file_transfer_service,
-        cycle_repository=cycle_repository,
-        run_repository=run_repository,
     )
 
 

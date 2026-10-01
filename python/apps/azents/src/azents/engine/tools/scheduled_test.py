@@ -2,14 +2,11 @@
 
 import datetime
 import json
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from typing import NamedTuple, cast
 from unittest.mock import AsyncMock
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import EventKind, ScheduledTaskScheduleType
 from azents.core.external_channel_file import (
@@ -28,10 +25,11 @@ from azents.engine.run.types import FunctionToolError, FunctionToolResult
 from azents.engine.tools.runtime_instruction_context import (
     RuntimeInstructionContextStore,
 )
-from azents.rdb.session import SessionManager
-from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.scheduled_task.data import ScheduledTask
-from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
+from azents.repos.scheduled_task.tool_operations import (
+    ScheduledTaskToolOperationRepository,
+    ScheduledTaskToolProjection,
+)
 from azents.repos.scheduled_task_cycle.data import (
     ScheduledTaskCycleRecord,
     ScheduledTaskCycleState,
@@ -40,7 +38,6 @@ from azents.services.external_channel.file_transfer import (
     ExternalChannelFileTransferService,
 )
 from azents.services.scheduled_task.channel import ScheduledTaskChannelService
-from azents.services.scheduled_task.service import ScheduledTaskService
 from azents.services.scheduled_task.terminal import (
     ScheduledTaskTerminalEffectSnapshot,
     ScheduledTaskTerminalOutcome,
@@ -59,18 +56,10 @@ class _ScheduledToolkitFixture(NamedTuple):
     """Toolkit fixture and its assertion-visible collaborators."""
 
     toolkit: ScheduledToolkit
-    service: AsyncMock
+    operations: AsyncMock
     terminal_service: AsyncMock
     channel_service: AsyncMock
     transfer_service: AsyncMock
-    cycle_repository: AsyncMock
-    run_repository: AsyncMock
-
-
-@asynccontextmanager
-async def _session_manager() -> AsyncIterator[AsyncSession]:
-    """Yield one non-persistent Toolkit test session."""
-    yield cast(AsyncSession, object())
 
 
 def _cycle(
@@ -137,45 +126,33 @@ def _toolkit(
     file_transfer_service: AsyncMock | None = None,
 ) -> _ScheduledToolkitFixture:
     """Compose one Toolkit with assertion-visible collaborators."""
-    service = AsyncMock()
+    operations = AsyncMock(spec=ScheduledTaskToolOperationRepository)
     terminal_service = AsyncMock()
     channel_service = AsyncMock()
     channel_service.execute_registration.return_value = None
     channel_service.execute_deletion.return_value = None
     channel_service.execute_terminal.return_value = ()
     transfer_service = file_transfer_service or AsyncMock()
-    cycle_repository = AsyncMock()
-    run_repository = AsyncMock()
-    run_repository.get_by_id.return_value = SimpleNamespace(
-        session_id="s" * 32,
-        scheduled_task_cycle_id=(
-            active_cycle.state.cycle_id if active_cycle is not None else None
-        ),
-    )
-    cycle_repository.get_started.return_value = active_cycle
+    operations.active_cycle.return_value = active_cycle
+    operations.list_started_cycle_states.return_value = []
     toolkit = ScheduledToolkit(
-        session_manager=cast(SessionManager[AsyncSession], _session_manager),
-        service=cast(ScheduledTaskService, service),
+        operations=cast(ScheduledTaskToolOperationRepository, operations),
         terminal_service=cast(ScheduledTaskTerminalService, terminal_service),
         channel_service=cast(ScheduledTaskChannelService, channel_service),
         file_transfer_service=cast(
             ExternalChannelFileTransferService,
             transfer_service,
         ),
-        cycle_repository=cast(ScheduledTaskCycleRepository, cycle_repository),
-        run_repository=cast(AgentRunRepository, run_repository),
         workspace_id="w" * 32,
         agent_id="a" * 32,
         session_id="s" * 32,
     )
     return _ScheduledToolkitFixture(
         toolkit=toolkit,
-        service=service,
+        operations=operations,
         terminal_service=terminal_service,
         channel_service=channel_service,
         transfer_service=transfer_service,
-        cycle_repository=cycle_repository,
-        run_repository=run_repository,
     )
 
 
@@ -233,15 +210,14 @@ async def test_toolkit_exposes_management_tools_and_valid_cycle_terminal_tool() 
 
 async def test_management_tools_derive_scope_and_project_execution_state() -> None:
     """Management actions use exact current Workspace, Agent, and Session scope."""
-    toolkit, service, _, channel_service, _, cycle_repository, _ = _toolkit(
-        active_cycle=None
-    )
+    toolkit, operations, _, channel_service, _ = _toolkit(active_cycle=None)
     created = _task()
     running = _task(active_cycle_id=_CYCLE_ID)
-    service.create.return_value = created
-    service.list_tasks.return_value = [running]
-    service.delete_with_snapshot.return_value = created
-    cycle_repository.get.return_value = _cycle()
+    operations.create.return_value = created
+    operations.list_tasks.return_value = [
+        ScheduledTaskToolProjection(task=running, execution_state="running")
+    ]
+    operations.delete.return_value = created
     state = await toolkit.update_context(_turn_context())
     tools = {tool.spec.name: tool for tool in state.tools}
 
@@ -270,20 +246,20 @@ async def test_management_tools_derive_scope_and_project_execution_state() -> No
 
     assert added["created"] is True
     assert added["registration"] is None
-    service.create.assert_awaited_once()
-    _, create_kwargs = service.create.await_args
+    operations.create.assert_awaited_once()
+    create_kwargs = operations.create.await_args.kwargs
     assert create_kwargs["workspace_id"] == "w" * 32
     assert create_kwargs["agent_id"] == "a" * 32
     assert create_kwargs["session_id"] == "s" * 32
     assert listed["tasks"][0]["execution_state"] == "running"
-    service.list_tasks.assert_awaited_once()
+    operations.list_tasks.assert_awaited_once()
     assert deleted == {
         "deleted": True,
         "notification": None,
         "task_id": "t" * 32,
     }
-    service.delete_with_snapshot.assert_awaited_once()
-    _, delete_kwargs = service.delete_with_snapshot.await_args
+    operations.delete.assert_awaited_once()
+    delete_kwargs = operations.delete.await_args.kwargs
     assert delete_kwargs == {
         "session_id": "s" * 32,
         "task_id": "t" * 32,
@@ -325,8 +301,8 @@ async def test_add_tool_normalizes_empty_schedule_fields(
     expected: dict[str, str | None],
 ) -> None:
     """Empty mutually exclusive schedule fields behave as omitted values."""
-    toolkit, service, _, _, _, _, _ = _toolkit(active_cycle=None)
-    service.create.return_value = _task()
+    toolkit, operations, _, _, _ = _toolkit(active_cycle=None)
+    operations.create.return_value = _task()
     state = await toolkit.update_context(_turn_context())
 
     await state.tools[0].handler(
@@ -340,14 +316,14 @@ async def test_add_tool_normalizes_empty_schedule_fields(
         )
     )
 
-    service.create.assert_awaited_once()
-    _, create_kwargs = service.create.await_args
+    operations.create.assert_awaited_once()
+    create_kwargs = operations.create.await_args.kwargs
     assert {key: create_kwargs[key] for key in ("at", "cron", "timezone")} == expected
 
 
 async def test_terminal_tool_publishes_new_event_and_requests_run_completion() -> None:
     """A canonical terminal outcome becomes an engine-terminal tool result."""
-    toolkit, _, terminal_service, _, _, _, _ = _toolkit(active_cycle=_cycle())
+    toolkit, _, terminal_service, _, _ = _toolkit(active_cycle=_cycle())
     publish_event = AsyncMock()
     event = Event(
         id="e" * 32,
@@ -396,7 +372,7 @@ async def test_terminal_tool_publishes_new_event_and_requests_run_completion() -
 async def test_terminal_tool_preflights_files_for_exact_bound_conversation() -> None:
     """Terminal files reuse Channel Action validation and the cycle Binding."""
     transfer_service = AsyncMock()
-    toolkit, _, terminal_service, channel_service, _, _, _ = _toolkit(
+    toolkit, _, terminal_service, channel_service, _ = _toolkit(
         active_cycle=_cycle(binding_id="b" * 32),
         file_transfer_service=transfer_service,
     )
@@ -484,7 +460,7 @@ async def test_terminal_tool_preflights_files_for_exact_bound_conversation() -> 
 
 async def test_terminal_tool_rejects_files_for_session_only_cycle() -> None:
     """A Session-only cycle cannot imply an External Channel file delivery."""
-    toolkit, _, terminal_service, _, _, _, _ = _toolkit(active_cycle=_cycle())
+    toolkit, _, terminal_service, _, _ = _toolkit(active_cycle=_cycle())
     state = await toolkit.update_context(_turn_context())
 
     with pytest.raises(FunctionToolError, match="channel-bound cycle"):
@@ -504,7 +480,7 @@ async def test_terminal_tool_rejects_files_for_session_only_cycle() -> None:
 async def test_recovered_terminal_result_does_not_replay_requested_files() -> None:
     """A recovered canonical result does not validate or republish new files."""
     transfer_service = AsyncMock()
-    toolkit, _, terminal_service, channel_service, _, cycle_repository, _ = _toolkit(
+    toolkit, operations, terminal_service, channel_service, _ = _toolkit(
         active_cycle=_cycle(binding_id="b" * 32),
         file_transfer_service=transfer_service,
     )
@@ -527,7 +503,7 @@ async def test_recovered_terminal_result_does_not_replay_requested_files() -> No
         effect_snapshot=None,
     )
     state = await toolkit.update_context(_turn_context())
-    cycle_repository.get_started.return_value = None
+    operations.active_cycle.return_value = None
 
     result = await state.tools[-1].handler(
         json.dumps(
@@ -546,13 +522,16 @@ async def test_recovered_terminal_result_does_not_replay_requested_files() -> No
 
 async def test_idle_and_compaction_hooks_use_all_started_cycles_in_order() -> None:
     """Toolkit continuity hooks project every current started cycle."""
-    toolkit, _, _, _, _, cycle_repository, _ = _toolkit(active_cycle=None)
+    toolkit, operations, _, _, _ = _toolkit(active_cycle=None)
     first = _cycle(cycle_id="a" * 32, scheduled_for=_NOW)
     second = _cycle(
         cycle_id="b" * 32,
         scheduled_for=_NOW + datetime.timedelta(minutes=1),
     )
-    cycle_repository.list_started.return_value = [first, second]
+    operations.list_started_cycle_states.return_value = [
+        first.state,
+        second.state,
+    ]
     hooks = toolkit.hooks()
     idle_hook = hooks["on_session_idle"]
     compaction_hook = hooks["on_compaction_summary"]

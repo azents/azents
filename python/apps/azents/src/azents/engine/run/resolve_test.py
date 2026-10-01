@@ -139,13 +139,10 @@ def _session_manager_for(
 def _make_scheduled_provider() -> ScheduledToolkitProvider:
     """Create a provider whose collaborators are not exercised during resolution."""
     return ScheduledToolkitProvider(
-        session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
-        service=AsyncMock(),
+        operations=AsyncMock(),
         terminal_service=AsyncMock(),
         channel_service=AsyncMock(),
         file_transfer_service=AsyncMock(),
-        cycle_repository=AsyncMock(),
-        run_repository=AsyncMock(),
     )
 
 
@@ -509,14 +506,11 @@ def _make_builtin_provider() -> BuiltinToolkitProvider:
 
 def _make_subagent_provider() -> SubagentToolkitProvider:
     """Create SubagentToolkitProvider for resolve_agent_tools tests."""
-    agent_repository = AsyncMock()
-    agent_repository.get_by_id.return_value = _make_agent()
+    operations = AsyncMock()
+    operations.get_agent.return_value = _make_agent()
     return SubagentToolkitProvider(
-        model_metadata_service=make_test_model_metadata_service(snapshot=None),
-        session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
+        operations=operations,
         broker=AsyncMock(),
-        mailbox_item_service=AsyncMock(),
-        agent_repository=agent_repository,
     )
 
 

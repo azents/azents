@@ -45,6 +45,7 @@ from azents.engine.tools.subagent import SubagentToolkitProvider
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
+from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.exchange_file import ExchangeFileRepository
@@ -52,11 +53,17 @@ from azents.repos.exchange_file.operations import ExchangeFileOperationRepositor
 from azents.repos.external_channel.file_access import (
     ExternalChannelFileAccessRepository,
 )
+from azents.repos.llm_catalog import LiteLLMSourceSnapshotRepository
+from azents.repos.mailbox import MailboxRepository
 from azents.repos.memory import MemoryRepository
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 from azents.repos.session_workspace_project_operations import (
     SessionWorkspaceProjectOperationsRepository,
 )
+from azents.repos.subagent_coordination.repository import (
+    SubagentCoordinationRepository,
+)
+from azents.repos.subagent_tool_operations import SubagentToolOperationRepository
 from azents.repos.toolkit import ToolkitRepository
 from azents.repos.toolkit_state.engine import (
     ToolkitAgentsAppendixDedupeStateStore,
@@ -107,9 +114,7 @@ from azents.services.external_channel.file_transfer import (
     get_slack_file_client,
 )
 from azents.services.external_channel.slack_events import SlackConversationClient
-from azents.services.mailbox import MailboxService
 from azents.services.model_file import ModelFileService
-from azents.services.model_metadata import ModelMetadataService
 from azents.services.scheduled_task.channel import (
     ScheduledTaskChannelService,
     get_scheduled_task_channel_service,
@@ -514,19 +519,21 @@ def get_subagent_toolkit_provider(
         SessionManager[AsyncSession], Depends(get_session_manager)
     ],
     broker: Annotated[SessionBroker, Depends(get_worker_broker)],
-    mailbox_item_service: Annotated[MailboxService, Depends(MailboxService)],
     agent_repository: Annotated[AgentRepository, Depends(AgentRepository)],
-    model_metadata_service: Annotated[
-        ModelMetadataService, Depends(ModelMetadataService)
-    ],
 ) -> SubagentToolkitProvider:
     """SubagentToolkitProvider dependency for Worker."""
     return SubagentToolkitProvider(
-        session_manager=session_manager,
+        operations=SubagentToolOperationRepository(
+            session_manager=session_manager,
+            agent_repository=agent_repository,
+            agent_session_repository=AgentSessionRepository(),
+            agent_run_repository=AgentRunRepository(),
+            event_transcript_repository=EventTranscriptRepository(),
+            mailbox_repository=MailboxRepository(),
+            source_snapshot_repository=LiteLLMSourceSnapshotRepository(),
+            coordination_repository=SubagentCoordinationRepository(),
+        ),
         broker=broker,
-        mailbox_item_service=mailbox_item_service,
-        agent_repository=agent_repository,
-        model_metadata_service=model_metadata_service,
     )
 
 

@@ -33,7 +33,7 @@ api_routes:
   - /scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks/{task_id}
   - /scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks/{task_id}/cycle
 last_verified_at: 2026-10-01
-spec_version: 13
+spec_version: 14
 ---
 
 # Scheduled Task Domain Spec
@@ -134,6 +134,14 @@ receives these management tools:
 valid started Scheduled Task cycle. It accepts `finished` or `failed` and a
 non-empty result. A Scheduled-bound `channel_action` may report progress only with
 `continue`; terminal completion must use `submit_scheduled_task_result`.
+
+The Toolkit's active-cycle and continuity reads, Task creation, Task listing with
+derived execution state, and Task deletion are completed repository operations.
+Creation and deletion retain exact Session, Agent, and optional Binding
+authority. Deletion preserves the Mailbox → cycle → Task lock order and removes
+an admitted trigger/cycle atomically with the Task. External Channel
+registration and deletion notification execute only after the database
+transaction closes.
 
 The release-bundled `scheduled-task` Skill is projected from the immutable
 `azents://` managed Skill VFS. It explains schedule interpretation, Session and
@@ -331,6 +339,10 @@ and result text.
 
 ## Changelog
 
+- **2026-10-01** (spec_version 14) — Moved Scheduled Toolkit cycle reads and
+  management mutations behind completed repository operations while preserving
+  authority, mutation lock order, execution-state projection, and post-commit
+  channel effects.
 - **2026-10-01** (spec_version 13) — Defined schedule and `scheduled_for` values
   as occurrence start triggers that do not imply completion deadlines, removed
   duplicate full-message rendering from the dynamic Toolkit prompt, and preserved
