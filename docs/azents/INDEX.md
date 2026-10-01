@@ -42,7 +42,7 @@ Design documents are accumulated records and are not listed individually in this
 | [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-10-01 | 63 |
 | [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-10-01 | 45 |
 | [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-10-01 | 63 |
-| [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-10-01 | 53 |
+| [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-10-01 | 54 |
 | [Kimi OAuth Flow](spec/flow/kimi-oauth.md) | @Hardtack | 2026-09-30 | 4 |
 | [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-10-01 | 8 |
 | [OpenRouter API Key Provider Flow](spec/flow/openrouter-api-key.md) | @Hardtack | 2026-09-30 | 5 |

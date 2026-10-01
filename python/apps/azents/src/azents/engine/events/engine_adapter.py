@@ -211,6 +211,7 @@ from azents.repos.llm_provider_integration.deps import (
     get_llm_provider_integration_repository,
 )
 from azents.repos.model_file_pin import ModelFilePinRepository
+from azents.repos.provider_output_operation import ProviderOutputOperationRepository
 from azents.repos.session_execution.ownership import OwnerBoundSessionManager
 from azents.repos.toolkit_state.engine import ToolWorkingSetStore
 from azents.repos.xai_oauth_runtime import XaiOAuthRuntimeRepository
@@ -368,6 +369,10 @@ class AgentEngineAdapter:
     artifact_service: Annotated[ArtifactService, Depends(ArtifactService)]
     exchange_file_service: Annotated[ExchangeFileService, Depends(ExchangeFileService)]
     model_file_service: Annotated[ModelFileService, Depends(ModelFileService)]
+    provider_output_operation_repository: Annotated[
+        ProviderOutputOperationRepository,
+        Depends(ProviderOutputOperationRepository),
+    ]
     integration_repository: Annotated[
         LLMProviderIntegrationRepository,
         Depends(get_llm_provider_integration_repository),
@@ -1241,6 +1246,7 @@ class AgentEngineAdapter:
             ProviderOutputMaterializer(
                 exchange_file_service=self.exchange_file_service,
                 model_file_service=self.model_file_service,
+                operation_repository=self.provider_output_operation_repository,
                 authority=context.resource_authority,
                 provider_name=provider,
             )

@@ -141,6 +141,7 @@ from azents.repos.agent_session_system_prompt_snapshot import (
     AgentSessionSystemPromptSnapshotRepository,
 )
 from azents.repos.model_file_pin import ModelFilePinRepository
+from azents.repos.provider_output_operation import ProviderOutputOperationRepository
 from azents.repos.session_execution import (
     CanonicalExecutionOwnerGenerationStaleError,
 )
@@ -3168,6 +3169,9 @@ def _agent_engine_adapter(
         artifact_service=artifact_service or _ArtifactService(),
         exchange_file_service=exchange_file_service or _ExchangeFileService(),
         model_file_service=model_file_service or _ModelFileService(),
+        provider_output_operation_repository=AsyncMock(
+            spec=ProviderOutputOperationRepository
+        ),
         integration_repository=integration_repository or AsyncMock(),
         metadata_service=make_test_model_metadata_service(snapshot=None),
         xai_imagine_client_factory=(

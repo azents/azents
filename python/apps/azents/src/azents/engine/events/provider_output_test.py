@@ -50,6 +50,7 @@ from azents.repos.exchange_file.operations import ExchangeFileOperationRepositor
 from azents.repos.model_file import ModelFileRepository
 from azents.repos.model_file.data import ModelFile, ModelFileCreate
 from azents.repos.model_file.operations import ModelFileOperationRepository
+from azents.repos.provider_output_operation import ProviderOutputOperationRepository
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.repos.workspace_user.data import WorkspaceUser
 from azents.services.exchange_file import ExchangeFileService
@@ -473,6 +474,13 @@ def _materializer(
         materializer=ProviderOutputMaterializer(
             exchange_file_service=exchange_service,
             model_file_service=model_service,
+            operation_repository=ProviderOutputOperationRepository(
+                session_manager=session_manager,
+                exchange_file_repository=exchange_repository,
+                model_file_repository=model_repository,
+                agent_session_repository=session_repository,
+                agent_run_repository=model_run_repository,
+            ),
             authority=SessionResourceAuthority(
                 workspace_id="workspace-1",
                 agent_id="agent-1",
@@ -879,7 +887,7 @@ async def test_failed_admission_compensates_every_uploaded_object() -> None:
     model_repository = fixture.model_repository
     s3_service = fixture.s3_service
     run_repository = require_instance(
-        materializer.model_file_service.agent_run_repository,
+        materializer.operation_repository.agent_run_repository,
         _AgentRunRepository,
     )
     prepared = await materializer.prepare(_normalized_output())

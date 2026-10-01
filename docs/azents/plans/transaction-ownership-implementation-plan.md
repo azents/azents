@@ -75,6 +75,13 @@ that revalidates the invoking Run and root-tree capacity after detached pure
 inference/fork preparation. Model execution, provider output, and compactor
 ownership remain later phases.
 
+Phase 22 moves Provider Output scope, retry-preflight, and cleanup-protection
+reads into completed repository operations while retaining the existing
+database-only metadata admission inside the same transaction as model/tool Event
+commit. Object upload and compensation delete remain outside database
+transactions. Engine execution and compactor/filter ownership remain later
+phases.
+
 ## Delivery Boundaries
 
 1. Correct the title-generation and ChatGPT OAuth persistence boundary as one
