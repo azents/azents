@@ -149,6 +149,30 @@ def test_genai_prices_inclusive_cache_and_reasoning_parity() -> None:
     assert result.unavailable_reason is None
 
 
+@pytest.mark.parametrize("tier", ["priority", "fast", "ON_DEMAND_PRIORITY"])
+def test_genai_prices_unsupported_priority_remains_unknown(tier: str) -> None:
+    """Generic standard prices never become a fabricated premium estimate."""
+    result = estimate_model_cost(
+        pricing=_genai_pricing(
+            [
+                SourcePriceSet(
+                    constraint=None,
+                    prices={
+                        "input_mtok": SourceScalarPrice(value=Decimal("1")),
+                        "output_mtok": SourceScalarPrice(value=Decimal("2")),
+                    },
+                )
+            ]
+        ),
+        usage=_usage(),
+        billing=dataclasses.replace(_billing(), service_tier=tier),
+    )
+
+    assert result.cost_usd is None
+    assert result.unavailable_reason is ModelPricingUnavailableReason.UNSUPPORTED_TIER
+    assert result.service_tier == "priority"
+
+
 def test_genai_prices_conditional_and_tiered_rules_use_capture_time() -> None:
     """Captured request time selects the conditional set before tier evaluation."""
     pricing = _genai_pricing(

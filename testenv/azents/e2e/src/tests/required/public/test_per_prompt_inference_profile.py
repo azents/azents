@@ -1133,7 +1133,7 @@ class TestPerPromptInferenceProfile:
                 "served-priority",
                 ["fast"],
                 "priority",
-                True,
+                False,
             ),
         ],
     )
