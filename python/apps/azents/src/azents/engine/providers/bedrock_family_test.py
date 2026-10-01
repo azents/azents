@@ -35,7 +35,7 @@ from azents.engine.providers.bedrock_cache_compatibility_test import (
     cache_points,
 )
 from azents.engine.providers.bedrock_lifecycle_test import bedrock_call, nominal_body
-from azents.engine.providers.model_factory import bedrock_assembly_profile
+from azents.engine.providers.model_profiles import bedrock_assembly_profile
 from azents.engine.providers.observation_state import NativeObservationState
 from azents.testing.provider_native_envelopes import aws_event_frame
 

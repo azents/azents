@@ -78,6 +78,7 @@ async def test_read_service_returns_latest_failed_attempt_without_snapshot() -> 
             purpose=LLMCatalogPurpose.CONVERSATION,
             provider_integration_id="integration-id",
             current_snapshot_id=None,
+            rollback_snapshot_id=None,
             latest_attempt_id="attempt-id",
         ),
         entries=[],

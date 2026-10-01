@@ -6,10 +6,9 @@ import asyncio
 import dataclasses
 import json
 import logging
-import re
 import threading
 from collections.abc import Awaitable, Callable, Iterator
-from typing import TYPE_CHECKING, Literal, assert_never
+from typing import TYPE_CHECKING, assert_never
 
 import anyio.to_thread
 import boto3
@@ -30,25 +29,22 @@ from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.models.bedrock import BedrockConverseModel
 from pydantic_ai.models.google import GoogleModel
 from pydantic_ai.models.openai import OpenAIChatModel, OpenAIResponsesModel
-from pydantic_ai.native_tools import (
-    ImageGenerationTool,
-    WebSearchTool,
-)
-from pydantic_ai.profiles import ModelProfile, merge_profile
-from pydantic_ai.profiles.anthropic import AnthropicModelProfile
-from pydantic_ai.profiles.google import GoogleModelProfile
-from pydantic_ai.profiles.openai import OpenAIModelProfile
 from pydantic_ai.providers.anthropic import AnthropicProvider
-from pydantic_ai.providers.bedrock import BedrockModelProfile, BedrockProvider
+from pydantic_ai.providers.bedrock import BedrockProvider
 from pydantic_ai.providers.google import GoogleProvider
 from pydantic_ai.providers.google_cloud import GoogleCloudProvider
 from pydantic_ai.providers.openai import OpenAIProvider
 
-from azents.core.enums import LLMModelDeveloper, LLMProvider
+from azents.core.enums import LLMProvider
 from azents.core.type_guards import is_string_object_dict, is_string_string_dict
 from azents.engine.events.pydantic_ai_types import NativeModelProtocol, SDKFailureMapper
 from azents.engine.providers.bedrock_output import BedrockOutputCompatibilityModel
 from azents.engine.providers.http_observation import ObservedHTTPX2Transport
+from azents.engine.providers.model_profiles import (
+    protocol_for_provider,
+    resolve_runtime_model_profile,
+    vertex_model_family,
+)
 from azents.engine.providers.observation_state import NativeObservationState
 
 if TYPE_CHECKING:
@@ -83,97 +79,6 @@ class _NamedResponsesProvider(OpenAIProvider):
     @property
     def name(self) -> str:
         return self.provider_name
-
-
-_BEDROCK_MODEL_RESOURCE_ARN = re.compile(
-    r"^arn:(?:aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b|aws-iso-e|aws-iso-f)"
-    r":bedrock:[a-z0-9-]+:(?P<account>[0-9]{12})?:"
-    r"(?P<kind>foundation-model|inference-profile)/"
-    r"(?P<model>[a-z0-9][A-Za-z0-9._:-]*)$"
-)
-
-
-def bedrock_assembly_profile(model: str) -> ModelProfile | None:
-    """Look up dialects from a literal SDK ID or a documented model resource."""
-    if not model.startswith("arn:"):
-        return BedrockProvider.model_profile(model)
-    resource = _BEDROCK_MODEL_RESOURCE_ARN.fullmatch(model)
-    if resource is None:
-        return None
-    # Foundation-model resources have no account. System inference-profile
-    # resources carry an account and may contain a literal geo-prefixed SDK ID.
-    # Application/custom profile IDs are opaque and cannot authorize a family.
-    account = resource.group("account")
-    if (resource.group("kind") == "foundation-model") != (account is None):
-        return None
-    return BedrockProvider.model_profile(resource.group("model"))
-
-
-_BEDROCK_OPAQUE_RESOURCE_ARN = re.compile(
-    r"^arn:(?:aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b|aws-iso-e|aws-iso-f)"
-    r":bedrock:[a-z0-9-]+:[0-9]{12}:"
-    r"(?:application-inference-profile|inference-profile|provisioned-model|"
-    r"custom-model-deployment|custom-model)/[A-Za-z0-9][A-Za-z0-9._:/-]*$"
-)
-
-
-def _saved_bedrock_assembly_profile(
-    model: str,
-    *,
-    metadata: ModelAssemblyMetadata | None,
-) -> BedrockModelProfile | None:
-    """Retain invariant family wire traits from the selected saved authority."""
-    if metadata is None or _BEDROCK_OPAQUE_RESOURCE_ARN.fullmatch(model) is None:
-        return None
-    # These are public Bedrock family dialects, not fabricated SDK model names.
-    # Do not copy version-specific thinking/defaults, strict/native output or
-    # built-in tools. The lowerer remains the authority for settings and tools.
-    match metadata.model_developer:
-        case LLMModelDeveloper.ANTHROPIC:
-            return BedrockModelProfile(
-                bedrock_supports_tool_choice=True,
-                bedrock_send_back_thinking_parts=True,
-                bedrock_supports_prompt_caching=True,
-                bedrock_supports_tool_caching=True,
-                bedrock_supported_media_kinds_in_tool_returns=frozenset(
-                    {"image", "document"}
-                ),
-                bedrock_tool_result_colocatable_content=frozenset({"text", "image"}),
-                bedrock_supports_leading_assistant_message=True,
-                bedrock_thinking_variant="anthropic",
-                bedrock_top_k_variant="anthropic",
-            )
-        case LLMModelDeveloper.MISTRAL:
-            return BedrockModelProfile(
-                bedrock_tool_result_format="json",
-                bedrock_tool_result_colocatable_content=frozenset(),
-                bedrock_supported_media_kinds_in_tool_returns=frozenset({"document"}),
-            )
-        case LLMModelDeveloper.META:
-            return BedrockModelProfile(
-                bedrock_tool_result_colocatable_content=frozenset(),
-                bedrock_supported_media_kinds_in_tool_returns=frozenset(
-                    {"image", "document"}
-                ),
-            )
-        case LLMModelDeveloper.OTHER:
-            if metadata.model_family not in {"amazon.nova", "nova"}:
-                return None
-            return BedrockModelProfile(
-                bedrock_supports_tool_choice=True,
-                bedrock_supports_prompt_caching=True,
-                bedrock_top_k_variant="nova",
-            )
-        case (
-            None
-            | LLMModelDeveloper.OPENAI
-            | LLMModelDeveloper.GOOGLE
-            | LLMModelDeveloper.XAI
-            | LLMModelDeveloper.MOONSHOT
-        ):
-            return None
-        case _:
-            assert_never(metadata.model_developer)
 
 
 def _bedrock_cache_points(params: dict[str, object]) -> Iterator[dict[str, object]]:
@@ -259,20 +164,6 @@ def _headers(values: dict[str, object]) -> dict[str, str]:
     return dict(headers)
 
 
-def vertex_model_family(model: str) -> Literal["google", "anthropic"]:
-    """Interpret documented publisher resources, not arbitrary slash prefixes."""
-    parts = model.split("/")
-    if "publishers" in parts:
-        index = parts.index("publishers")
-        if len(parts) <= index + 3 or parts[index + 2] != "models":
-            raise ValueError("The Vertex publisher resource is malformed.")
-        publisher = parts[index + 1]
-        if publisher in {"google", "anthropic"}:
-            return publisher
-        raise ValueError("The Vertex publisher is not an authorized model family.")
-    return "anthropic" if model.startswith("claude-") else "google"
-
-
 def _vertex_anthropic_sdk_id(model: str, *, project: str, location: str) -> str:
     """Translate only the documented resource accepted by this SDK operation."""
     prefix = f"projects/{project}/locations/{location}/publishers/anthropic/models/"
@@ -288,29 +179,6 @@ def _vertex_anthropic_sdk_id(model: str, *, project: str, location: str) -> str:
     if not identifier or "/" in identifier:
         raise ValueError("The Vertex Anthropic model identifier is malformed.")
     return identifier
-
-
-def protocol_for_provider(*, provider: LLMProvider, model: str) -> NativeModelProtocol:
-    """Resolve a reviewed protocol without selecting a model or credentials."""
-    match provider:
-        case LLMProvider.ANTHROPIC:
-            return "anthropic"
-        case LLMProvider.GOOGLE_GEMINI:
-            return "google"
-        case LLMProvider.AWS_BEDROCK:
-            return "bedrock"
-        case LLMProvider.GOOGLE_VERTEX_AI:
-            return (
-                "anthropic" if vertex_model_family(model) == "anthropic" else "google"
-            )
-        case LLMProvider.XAI | LLMProvider.XAI_OAUTH | LLMProvider.OPENROUTER:
-            return "responses"
-        case LLMProvider.KIMI_OAUTH:
-            return "chat_completions"
-        case LLMProvider.OPENAI | LLMProvider.CHATGPT_OAUTH:
-            raise ValueError("Native OpenAI providers do not use this factory.")
-        case _:
-            assert_never(provider)
 
 
 class _ObservedBedrockStream:
@@ -482,24 +350,23 @@ class ProviderModelFactory:
         )
         state.close_callbacks.append(sdk.close)
         provider = _NamedResponsesProvider(name=self.provider.value, client=sdk)
-        # These profiles describe assembly only. The request's saved-snapshot
-        # lowering is the sole authority for options and native-tool selection.
-        profile = OpenAIModelProfile(
-            supports_tools=True,
-            supports_json_schema_output=True,
-            supports_json_object_output=True,
-            supports_thinking=True,
-            supported_native_tools=frozenset({WebSearchTool}),
-            openai_system_prompt_role="system",
-            openai_supports_strict_tool_definition=False,
-            openai_supports_encrypted_reasoning_content=True,
-            tool_addition_mode=None,
-            tool_deferral_mode=None,
+        resolution = resolve_runtime_model_profile(
+            provider=self.provider,
+            model=model,
+            profile_model=model,
+            assembly_metadata=None,
+            context_window=None,
+            context_window_explicit=False,
+            source_model=None,
         )
         public_model = (
-            OpenAIChatModel(model, provider=provider, profile=profile)
+            OpenAIChatModel(model, provider=provider, profile=resolution.profile)
             if self.provider is LLMProvider.KIMI_OAUTH
-            else OpenAIResponsesModel(model, provider=provider, profile=profile)
+            else OpenAIResponsesModel(
+                model,
+                provider=provider,
+                profile=resolution.profile,
+            )
         )
         return ProviderModelBinding(model=public_model, close=sdk.close)
 
@@ -553,19 +420,19 @@ class ProviderModelFactory:
             )
             sdk_model = model
         state.close_callbacks.append(sdk.close)
-        profile = AnthropicModelProfile(
-            supports_tools=True,
-            supports_json_schema_output=True,
-            supports_thinking=True,
-            supported_native_tools=frozenset({WebSearchTool}),
-            anthropic_binds_thinking_blocks=False,
-            tool_addition_mode=None,
-            tool_deferral_mode=None,
+        resolution = resolve_runtime_model_profile(
+            provider=self.provider,
+            model=model,
+            profile_model=sdk_model,
+            assembly_metadata=None,
+            context_window=None,
+            context_window_explicit=False,
+            source_model=None,
         )
         public_model = AnthropicModel(
             sdk_model,
             provider=AnthropicProvider(anthropic_client=sdk),
-            profile=profile,
+            profile=resolution.profile,
         )
         return ProviderModelBinding(model=public_model, close=sdk.close)
 
@@ -591,17 +458,19 @@ class ProviderModelFactory:
             )
         close = provider.client.aio.aclose
         state.close_callbacks.append(close)
+        resolution = resolve_runtime_model_profile(
+            provider=self.provider,
+            model=model,
+            profile_model=model,
+            assembly_metadata=None,
+            context_window=None,
+            context_window_explicit=False,
+            source_model=None,
+        )
         public_model = GoogleModel(
             model,
             provider=provider,
-            profile=GoogleModelProfile(
-                supports_tools=True,
-                supports_json_schema_output=True,
-                supports_thinking=True,
-                supported_native_tools=frozenset({WebSearchTool, ImageGenerationTool}),
-                tool_addition_mode=None,
-                tool_deferral_mode=None,
-            ),
+            profile=resolution.profile,
         )
         return ProviderModelBinding(model=public_model, close=close)
 
@@ -708,11 +577,15 @@ class ProviderModelFactory:
 
         state.close_callbacks.append(close)
         provider = BedrockProvider(bedrock_client=client)
-        family_profile = bedrock_assembly_profile(model)
-        if family_profile is None:
-            family_profile = _saved_bedrock_assembly_profile(
-                model, metadata=assembly_metadata
-            )
+        resolution = resolve_runtime_model_profile(
+            provider=self.provider,
+            model=model,
+            profile_model=model,
+            assembly_metadata=assembly_metadata,
+            context_window=None,
+            context_window_explicit=False,
+            source_model=None,
+        )
         # Preserve public SDK family dialects for tool choice, opaque replay,
         # caching and tool-result layout. These assembly defaults do not select
         # semantic tools/settings: the saved-snapshot lowerer owns that request.
@@ -721,17 +594,7 @@ class ProviderModelFactory:
         stock = BedrockConverseModel(
             model,
             provider=provider,
-            profile=merge_profile(
-                family_profile,
-                BedrockModelProfile(
-                    supports_tools=True,
-                    supports_json_schema_output=True,
-                    supports_thinking=True,
-                    bedrock_supports_strict_tool_definition=False,
-                    tool_addition_mode=None,
-                    tool_deferral_mode=None,
-                ),
-            ),
+            profile=resolution.profile,
         )
         return ProviderModelBinding(
             model=BedrockOutputCompatibilityModel(stock=stock),

@@ -7,9 +7,12 @@ domain: model-catalog
 code_paths:
   - python/apps/azents/src/azents/core/model_execution_options.py
   - python/apps/azents/src/azents/core/openai_client_config.py
+  - python/apps/azents/src/azents/core/model_metadata_source.py
   - python/apps/azents/src/azents/core/model_source_metadata.py
   - python/apps/azents/src/azents/core/model_pricing.py
   - python/apps/azents/src/azents/services/model_metadata.py
+  - python/apps/azents/src/azents/services/model_metadata_source.py
+  - python/apps/azents/src/azents/services/model_metadata_projection.py
   - python/apps/azents/src/azents/core/agent.py
   - python/apps/azents/src/azents/core/llm_catalog.py
   - python/apps/azents/src/azents/core/llm_catalog_sync.py
@@ -23,9 +26,15 @@ code_paths:
   - python/apps/azents/src/azents/services/kimi_oauth/**
   - python/apps/azents/src/azents/repos/llm_catalog/__init__.py
   - python/apps/azents/src/azents/repos/llm_catalog/data.py
+  - python/apps/azents/src/azents/repos/model_metadata_source.py
+  - python/apps/azents/src/azents/repos/model_metadata_source_data.py
   - python/apps/azents/src/azents/rdb/models/llm_catalog.py
+  - python/apps/azents/src/azents/rdb/models/model_metadata_source.py
+  - python/apps/azents/src/azents/engine/providers/model_profiles.py
+  - python/apps/azents/src/azents/scheduler/registry.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/097a97177350_create_operational_schema_baseline.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/4550a9c9083a_remove_catalog_execution_descriptors.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/91dd4bb71ef6_add_model_metadata_source_shadow_schema.py
   - python/apps/azents/src/azents/api/public/llm_provider_integration/v1/__init__.py
   - python/apps/azents/src/azents/api/public/llm_provider_integration/v1/data.py
   - python/apps/azents/src/azents/api/admin/model_catalog/v1/__init__.py
@@ -33,7 +42,7 @@ code_paths:
   - python/apps/azents/src/azents/services/workspace_model_settings/__init__.py
   - python/apps/azents/src/azents/services/model_listing/providers.py
   - python/apps/azents/src/azents/services/model_options.py
-  - python/apps/azents/src/azents/services/builtin_capabilities.py
+  - python/apps/azents/src/azents/core/builtin_tools.py
   - python/apps/azents/src/azents/engine/run/tool_budget.py
   - python/apps/azents/src/azents/engine/events/engine_adapter.py
   - typescript/apps/azents-web/src/features/agents/components/ModelCatalogPicker.tsx
@@ -47,7 +56,7 @@ code_paths:
   - typescript/apps/azents-web/src/trpc/routers/workspace-model-settings.ts
   - typescript/apps/azents-admin-web/src/features/model-catalog/containers/useModelCatalogPageContainer.ts
 last_verified_at: 2026-10-01
-spec_version: 30
+spec_version: 31
 ---
 
 # Model Catalog Domain Spec
@@ -208,6 +217,23 @@ snapshots continue to retain only the current successful version. A newly starte
 source attempt terminalizes any unfinished earlier source attempt before remote
 work begins.
 
+A separate six-hour `model_metadata_shadow_projection` scheduled task prepares the
+replacement metadata authority without changing current catalog or runtime
+authority. It calls the public `genai-prices` fetch operation through an
+Azents-owned adapter, validates and canonicalizes provider/model matching,
+context, lifecycle, and pricing rules, and stores an explicitly selected generic
+source snapshot. It resolves OpenAI, Anthropic, and Gemini candidates through the
+same credential-free runtime profile resolver used by provider model construction,
+then writes complete non-current catalog candidate snapshots with source,
+dependency, resolver, and policy provenance.
+
+The shadow task has its own retry lifecycle, so replacement-source failure does
+not change the existing system catalog task result or current pointers. Candidate
+creation never sets `llm_catalogs.current_snapshot_id` or
+`rollback_snapshot_id`. The generic schema includes a nullable rollback pointer
+and replacement projection provenance for the later coordinated cutover, but
+those fields remain inert while the legacy metadata source is current authority.
+
 ChatGPT OAuth integration catalogs additionally fetch the authenticated account-visible model list from the ChatGPT Codex backend during sync. Backend metadata is authoritative for visibility, reasoning efforts, modalities, and context window. `context_window` projects to the default input window and `max_context_window` projects to the maximum; when the maximum is absent, the default also supplies the maximum. Request-dialect hints are excluded from normalized capabilities and stored projection metadata. Following Codex's provider-level capability policy, every API-supported and picker-visible ChatGPT OAuth model is projected with the semantic `web_search` built-in tool capability. `image_generation` is projected only from an explicit trusted source flag or the maintained OpenAI-family model support policy shared with OpenAI system catalog projection. ChatGPT entries do not require a matching LiteLLM model metadata key or source snapshot.
 
 OpenRouter integration catalogs fetch the authenticated account-visible text-output model list from the fixed OpenRouter `/models/user` endpoint. Every valid returned model is eligible for direct projection without a model, publisher, family, upstream-provider, or LiteLLM metadata allowlist. Exact provider identifiers, including publisher paths, are preserved without an execution-library prefix. Recognized publisher aliases map to the canonical model developer; an unrecognized publisher maps to `other` and never falls back to Anthropic. OpenRouter capabilities remain conservative: missing or unverified metadata disables an individual capability rather than hiding the model. The initial projection can advertise text and verified image input, text output, function tools, reasoning, standard parameters, and semantic `web_search`; it does not advertise PDF, audio, video, image generation, prompt caching, or strict structured output.
@@ -366,6 +392,7 @@ Only Workspace Owners receive the explicit image sync action.
 
 | Date | Version | Change |
 |---|---:|---|
+| 2026-10-01 | 31 | Added independent genai-prices source shadow collection, shared runtime profile resolution, generic source persistence, non-current replacement candidates, and inert rollback/projection provenance without changing current catalog authority. |
 | 2026-09-30 | 29 | Removed active execution-library catalog descriptors and documented semantic identity, preserved historical/source links, and exact raw provider IDs. |
 | 2026-09-25 | 26 | Projected OpenAI and ChatGPT image generation as a client-tool capability, including function-capable GPT-6 models without a provider-hosted image tool. |
 | 2026-09-13 | 25 | Normalized every candidate in an ordered label-local chain, made Primary capabilities drive label controls, and removed singular public mutation compatibility. |
@@ -407,3 +434,9 @@ conversation-model visibility. The xAI projections may enrich provider-visible
 models from an exact or expanded-alias LiteLLM `xai/<model>` entry without
 requiring a match. Provider-facing and runtime xAI model identifiers are the same exact raw ID.
 The `xai/` namespace identifies a retained-source lookup key, not an execution prefix.
+
+The replacement genai-prices source and profile-resolved system projections are
+shadow evidence only. Normal reads, context fallback, pricing capture, system
+current pointers, integration projection, and saved selection behavior continue to
+use the existing current authority until the coordinated cutover is implemented
+and verified.

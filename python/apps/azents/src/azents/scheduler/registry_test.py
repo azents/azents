@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
+from azents.core.enums import LLMProvider
 from azents.repos.external_account_oauth.data import (
     ExternalAccountOAuthAttemptCleanupSummary,
 )
@@ -18,6 +19,10 @@ from azents.services.external_account_oauth.service import (
 from azents.services.file_lifecycle_cleanup import (
     FileLifecycleCleanupService,
     FileLifecycleCleanupSummary,
+)
+from azents.services.model_metadata_projection import (
+    SystemCatalogShadowProjectionService,
+    SystemCatalogShadowSummary,
 )
 from azents.services.scheduled_task.service import (
     ScheduledTaskDispatcher,
@@ -83,6 +88,104 @@ class _OAuthCleanupContainer:
         """Return the configured OAuth attempt service."""
         assert target is ExternalAccountOAuthAttemptService
         return self.service
+
+
+class _CatalogProjectionContainer:
+    """Resolve the replacement model catalog service."""
+
+    def __init__(self, shadow: SystemCatalogShadowProjectionService) -> None:
+        self.shadow = shadow
+
+    async def solve(self, target: type[object]) -> object:
+        """Return the requested catalog projection service."""
+        assert target is SystemCatalogShadowProjectionService
+        return self.shadow
+
+
+@pytest.mark.asyncio
+async def test_model_metadata_shadow_handler_prepares_candidates() -> None:
+    """A separate scheduled task prepares inert replacement evidence."""
+    shadow = Mock(spec=SystemCatalogShadowProjectionService)
+    shadow.prepare_candidates = AsyncMock(
+        return_value=[
+            SystemCatalogShadowSummary(
+                provider=LLMProvider.OPENAI,
+                catalog_id="catalog-id",
+                candidate_snapshot_id="candidate-id",
+                visible_count=3,
+                hidden_count=2,
+                projection_fingerprint="a" * 64,
+            )
+        ]
+    )
+    now = datetime.datetime(2026, 10, 1, tzinfo=datetime.UTC)
+    context = TaskContext(
+        task_key="model_metadata_shadow_projection",
+        attempt_started_at=now,
+        lease_owner="scheduler-1",
+        deadline=now + datetime.timedelta(minutes=5),
+        manual_triggered=False,
+        container=_CatalogProjectionContainer(shadow),  # ty: ignore[invalid-argument-type] # Focused container implements only solve().
+    )
+
+    result = await registry.model_metadata_shadow_projection_handler(context)
+
+    assert result.summary is not None
+    assert result.summary["replacement_candidates"] == [
+        {
+            "provider": "openai",
+            "catalog_id": "catalog-id",
+            "candidate_snapshot_id": "candidate-id",
+            "visible_count": 3,
+            "hidden_count": 2,
+            "projection_fingerprint": "a" * 64,
+        }
+    ]
+    shadow.prepare_candidates.assert_awaited_once_with()
+
+
+@pytest.mark.asyncio
+async def test_model_metadata_shadow_failure_isolated_from_legacy_handler() -> None:
+    """A shadow failure propagates without invoking the legacy catalog task."""
+    shadow = Mock(spec=SystemCatalogShadowProjectionService)
+    shadow.prepare_candidates = AsyncMock(side_effect=RuntimeError("source failed"))
+    now = datetime.datetime(2026, 10, 1, tzinfo=datetime.UTC)
+    context = TaskContext(
+        task_key="model_metadata_shadow_projection",
+        attempt_started_at=now,
+        lease_owner="scheduler-1",
+        deadline=now + datetime.timedelta(minutes=5),
+        manual_triggered=False,
+        container=_CatalogProjectionContainer(shadow),  # ty: ignore[invalid-argument-type] # Focused container implements only solve().
+    )
+
+    with pytest.raises(RuntimeError, match="source failed"):
+        await registry.model_metadata_shadow_projection_handler(context)
+
+    shadow.prepare_candidates.assert_awaited_once_with()
+    assert registry.MODEL_METADATA_SHADOW_PROJECTION_TASK.handler is (
+        registry.model_metadata_shadow_projection_handler
+    )
+    assert registry.SYSTEM_CATALOG_PROJECTION_TASK.handler is (
+        registry.system_catalog_projection_handler
+    )
+
+
+def test_model_metadata_shadow_projection_is_registered_separately() -> None:
+    """Replacement preparation cannot make current catalog refresh fail."""
+    definitions = registry.get_task_definitions()
+    matches = [
+        definition
+        for definition in definitions
+        if definition.key == "model_metadata_shadow_projection"
+    ]
+
+    assert matches == [registry.MODEL_METADATA_SHADOW_PROJECTION_TASK]
+    definition = matches[0]
+    assert definition.interval == datetime.timedelta(hours=6)
+    assert definition.timeout == datetime.timedelta(minutes=5)
+    assert definition.retry_policy.kind == "bounded_backoff"
+    assert definition.enabled_by_default is True
 
 
 @pytest.mark.asyncio
