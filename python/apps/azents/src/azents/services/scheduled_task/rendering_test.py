@@ -54,8 +54,11 @@ def test_cycle_guidance_distinguishes_session_and_channel_execution() -> None:
     channel_guidance = render_scheduled_task_cycle_guidance(_state(binding_id="b" * 32))
 
     assert "occurrence start triggers" in session_guidance
-    assert "completion deadline or execution time budget" in session_guidance
+    assert "Do not infer a completion deadline or execution time budget" in (
+        session_guidance
+    )
     assert "Work may start or continue after those timestamps" in session_guidance
+    assert "authoritatively discovered during execution" in session_guidance
     assert "no external provider publication is available" in session_guidance
     assert "`channel_action` only for interim progress" in channel_guidance
     assert "files set to null" in session_guidance
@@ -103,12 +106,11 @@ def test_runtime_message_keeps_exact_prompt_after_structured_schedule() -> None:
     assert "Scheduled for details: 2026-08-16T12:00:00Z" in message
     assert "occurrence start triggers" in message
     assert (
-        "They do not define a completion deadline or execution time budget." in message
+        "Do not infer a completion deadline or execution time budget from them."
+        in message
     )
-    assert (
-        "Work may start or continue after those timestamps without failing." in message
-    )
-    assert "Only a deadline explicitly stated in the objective" in message
+    assert "without failing solely because they are past." in message
+    assert "authoritatively discovered during execution" in message
     assert message.endswith(f"Prompt:\n{objective}")
 
 

@@ -22,7 +22,7 @@ _OBJECTIVE_LIMIT = 4_000
 _PROGRESS_TITLE_LIMIT = 500
 _TASK_LIMIT = 100
 _TASK_TEXT_LIMIT = 1_000
-_SCHEDULE_TIMING_GUIDANCE = """The schedule and scheduled-for timestamp are occurrence start triggers. They do not define a completion deadline or execution time budget. Work may start or continue after those timestamps without failing. Only a deadline explicitly stated in the objective limits completion time."""  # noqa: E501
+_SCHEDULE_TIMING_GUIDANCE = """The schedule and scheduled-for timestamp are occurrence start triggers. Do not infer a completion deadline or execution time budget from them. Work may start or continue after those timestamps without failing solely because they are past. Honor completion deadlines or validity windows explicitly stated in the objective or authoritatively discovered during execution."""  # noqa: E501
 _EXECUTION_GUIDANCE = """Continue autonomously across Agent runs until the objective is complete. If required information, authority, user choice, or another prerequisite is unavailable after reasonable attempts, submit a failed result explaining what is missing. Submit a finished or failed Scheduled Task result explicitly."""  # noqa: E501
 
 

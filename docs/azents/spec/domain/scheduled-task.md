@@ -199,10 +199,12 @@ Toolkit State only and introduces no additional persistence authority.
 
 Every trigger and continuation runtime message identifies the occurrence as
 started and defines the schedule and `scheduled_for` instant as start triggers,
-not completion deadlines or execution budgets. Delayed dispatch and later
-continuations remain valid after those instants. Only a deadline explicitly stated
-in the objective limits completion time. The dynamic Toolkit prompt repeats these
-timing and lifecycle semantics without duplicating the complete runtime message.
+without inferring completion deadlines or execution budgets from them. Delayed
+dispatch and later continuations remain valid after those instants solely despite
+their being in the past. Explicit objective constraints and authoritative
+deadlines or validity windows discovered during execution remain applicable. The
+dynamic Toolkit prompt repeats these timing and lifecycle semantics without
+duplicating the complete runtime message.
 
 ## Terminal Result
 
@@ -330,9 +332,9 @@ and result text.
 ## Changelog
 
 - **2026-10-01** (spec_version 13) — Defined schedule and `scheduled_for` values
-  as occurrence start triggers rather than completion deadlines, removed duplicate
-  full-message rendering from the dynamic Toolkit prompt, and kept completion-time
-  constraints only when the objective explicitly contains them.
+  as occurrence start triggers that do not imply completion deadlines, removed
+  duplicate full-message rendering from the dynamic Toolkit prompt, and preserved
+  explicit or authoritatively discovered completion constraints.
 - **2026-09-12** (spec_version 12) — Bound Scheduled progress, initial
   channel tracking, terminal state, and provider settlement to the current Session
   execution owner.
