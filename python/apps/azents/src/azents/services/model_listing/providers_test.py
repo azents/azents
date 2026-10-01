@@ -758,7 +758,7 @@ class _FakeKimiAsyncClient:
 async def test_list_kimi_models_projects_authenticated_account_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Kimi listing projects account-visible models without LiteLLM gating."""
+    """Kimi listing projects account-visible models without metadata gating."""
     monkeypatch.setattr(httpx, "AsyncClient", _FakeKimiAsyncClient)
 
     result = await providers.list_kimi_models_for_integration(_kimi_integration())

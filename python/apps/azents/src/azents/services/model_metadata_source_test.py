@@ -134,6 +134,16 @@ def test_source_url_accepts_https_and_loopback(source_url: str) -> None:
     validate_genai_prices_source_url(source_url)
 
 
+def test_source_url_accepts_fixed_testenv_proxy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The deterministic container fixture uses one explicit internal host."""
+    monkeypatch.setenv("AZ_TESTENV_API_ENABLED", "true")
+    validate_genai_prices_source_url(
+        "http://openai-proxy:8081/inference-profile/catalog-source"
+    )
+
+
 async def test_sync_publishes_and_selects_current_source(
     rdb_session_manager: SessionManager[AsyncSession],
 ) -> None:

@@ -17,10 +17,6 @@ from azents.core.enums import AgentRunStatus, AgentSessionRunState, SessionAgent
 from azents.core.inference_profile import SessionInferenceState
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.core.model_execution_options import validate_execution_options
-from azents.core.model_source_metadata import (
-    lookup_model_source_metadata,
-    source_max_input_tokens,
-)
 from azents.core.tools import (
     PublishEventFn,
     ResolveContext,
@@ -52,6 +48,7 @@ from azents.repos.subagent_tool_operations import (
     SubagentToolOperationError,
     SubagentToolOperationRepository,
 )
+from azents.services.model_metadata import ModelMetadataService
 from azents.services.session_resource_authority import (
     SessionExecutionOwner,
     accepts_execution_owner,
@@ -481,28 +478,20 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
             compaction_input_tokens = resolve_model_input_tokens(
                 lightweight.normalized_capabilities.context_window.default_input_tokens,
                 lightweight.normalized_capabilities.context_window.max_input_tokens,
-                source_max_input_tokens(
-                    None
-                    if source_snapshot is None
-                    else lookup_model_source_metadata(
-                        provider=lightweight.provider,
-                        model_identifier=lightweight.model_identifier,
-                        payload=source_snapshot.payload,
-                    )
+                ModelMetadataService.maximum_input_tokens(
+                    source_snapshot,
+                    provider=lightweight.provider,
+                    model_identifier=lightweight.model_identifier,
                 ),
                 lightweight_option.candidates[0].settings.context_window_tokens,
             )
             main_input_tokens = resolve_model_input_tokens(
                 selection.normalized_capabilities.context_window.default_input_tokens,
                 selection.normalized_capabilities.context_window.max_input_tokens,
-                source_max_input_tokens(
-                    None
-                    if source_snapshot is None
-                    else lookup_model_source_metadata(
-                        provider=selection.provider,
-                        model_identifier=selection.model_identifier,
-                        payload=source_snapshot.payload,
-                    )
+                ModelMetadataService.maximum_input_tokens(
+                    source_snapshot,
+                    provider=selection.provider,
+                    model_identifier=selection.model_identifier,
                 ),
                 settings.context_window_tokens,
             )

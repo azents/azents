@@ -3,9 +3,6 @@
 import dataclasses
 import datetime
 import math
-import re
-from collections.abc import Mapping
-from decimal import Decimal, InvalidOperation, localcontext
 from enum import StrEnum
 from typing import Literal
 
@@ -17,9 +14,7 @@ from azents.core.model_metadata_source import (
     SourceModelRecord,
     SourceProviderRecord,
 )
-from azents.core.model_source_metadata import source_provider_matches
 
-ESTIMATOR_SCHEMA_VERSION = "1"
 GENAI_PRICES_ESTIMATOR_SCHEMA_VERSION = "3"
 
 
@@ -37,27 +32,6 @@ class ModelPricingUnavailableReason(StrEnum):
     UNSUPPORTED_RULE = "unsupported_billing_rule"
 
 
-PricingMetric = Literal[
-    "input_tokens",
-    "output_tokens",
-    "cache_read_tokens",
-    "cache_write_5m_tokens",
-    "cache_write_1h_tokens",
-    "reasoning_tokens",
-    "input_audio_tokens",
-    "input_image_tokens",
-    "output_audio_tokens",
-    "output_image_tokens",
-    "web_search",
-    "file_search",
-    "code_interpreter",
-    "input_images",
-    "output_images",
-    "input_audio_seconds",
-    "input_video_seconds",
-    "output_audio_seconds",
-    "output_video_seconds",
-]
 PricingComponentKind = Literal[
     "web_search",
     "file_search",
@@ -70,41 +44,6 @@ PricingComponentKind = Literal[
     "output_video_seconds",
 ]
 SearchContextSize = Literal["low", "medium", "high"]
-
-
-@dataclasses.dataclass(frozen=True)
-class ModelPriceRate:
-    """One decoded source rate, including invalid evidence without a fake zero."""
-
-    metric: PricingMetric
-    service_tier: str
-    above_input_tokens: int | None
-    search_context_size: SearchContextSize | None
-    usd_per_unit: Decimal | None
-
-
-@dataclasses.dataclass(frozen=True)
-class ModelPriceMultiplier:
-    """A provider-specific multiplier decoded at the source ingress."""
-
-    kind: Literal["inference_geo", "speed", "data_residency"]
-    value: str
-    multiplier: Decimal | None
-
-
-@dataclasses.dataclass(frozen=True)
-class ModelPricing:
-    """Immutable prices tied to exact semantic selection and source evidence."""
-
-    provider: LLMProvider
-    model_identifier: str
-    source_snapshot_id: str | None
-    source_hash: str | None
-    source_model_key: str | None
-    estimator_version: str
-    rates: tuple[ModelPriceRate, ...]
-    multipliers: tuple[ModelPriceMultiplier, ...]
-    unavailable_reason: ModelPricingUnavailableReason | None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -123,7 +62,7 @@ class GenAIModelPricing:
     unavailable_reason: ModelPricingUnavailableReason | None
 
 
-CapturedModelPricing = ModelPricing | GenAIModelPricing
+CapturedModelPricing = GenAIModelPricing
 
 
 @dataclasses.dataclass(frozen=True)
@@ -176,117 +115,6 @@ class ModelCostEstimate:
     service_tier: str
 
 
-# Source field vocabulary is not a process-local price authority.
-_TOKEN_SOURCE_FIELDS: Mapping[str, PricingMetric] = {
-    "input_cost_per_token": "input_tokens",
-    "output_cost_per_token": "output_tokens",
-    "cache_read_input_token_cost": "cache_read_tokens",
-    "cache_creation_input_token_cost": "cache_write_5m_tokens",
-    "cache_creation_input_token_cost_above_1hr": "cache_write_1h_tokens",
-    "output_cost_per_reasoning_token": "reasoning_tokens",
-    "input_cost_per_audio_token": "input_audio_tokens",
-    "input_cost_per_image_token": "input_image_tokens",
-    "output_cost_per_audio_token": "output_audio_tokens",
-    "output_cost_per_image_token": "output_image_tokens",
-    "input_cost_per_image": "input_images",
-    "output_cost_per_image": "output_images",
-    "input_cost_per_audio_per_second": "input_audio_seconds",
-    "input_cost_per_video_per_second": "input_video_seconds",
-    "output_cost_per_audio_per_second": "output_audio_seconds",
-    "output_cost_per_video_per_second": "output_video_seconds",
-    "file_search_cost_per_1k_calls": "file_search",
-    "code_interpreter_cost_per_session": "code_interpreter",
-}
-_THRESHOLD_SUFFIX = re.compile(
-    r"^(?:_(priority|flex))?(?:_above_([0-9]+(?:k)?)_tokens)?"
-    r"(?:_(priority|flex))?$"
-)
-
-
-def normalize_model_pricing(
-    *,
-    provider: LLMProvider,
-    model_identifier: str,
-    source_snapshot_id: str | None,
-    source_hash: str | None,
-    source_model_key: str | None,
-    metadata: Mapping[str, object] | None,
-) -> ModelPricing:
-    """Decode only pricing inputs from an explicitly selected validated snapshot.
-
-    :param provider: semantic provider, independent of SDK routing prefixes
-    :param model_identifier: exact selected provider model identifier
-    :param source_snapshot_id: captured validated source snapshot identity
-    :param source_hash: captured source content hash
-    :param source_model_key: exact matched source key or alias
-    :param metadata: matched source entry, never a package or remote lookup
-    :returns: frozen pricing evidence, including unavailable-source state
-    """
-    reason: ModelPricingUnavailableReason | None = None
-    rates: list[ModelPriceRate] = []
-    multipliers: list[ModelPriceMultiplier] = []
-    if source_snapshot_id is None or source_hash is None:
-        reason = ModelPricingUnavailableReason.SOURCE_UNAVAILABLE
-    elif metadata is None or source_model_key is None:
-        reason = ModelPricingUnavailableReason.MODEL_UNMATCHED
-    elif not source_provider_matches(provider, source_model_key, metadata):
-        reason = ModelPricingUnavailableReason.PROVIDER_MISMATCH
-    elif metadata.get("currency", "USD") != "USD":
-        reason = ModelPricingUnavailableReason.UNSUPPORTED_RULE
-    elif _has_character_billing(metadata):
-        reason = ModelPricingUnavailableReason.UNSUPPORTED_RULE
-    else:
-        for source_field, metric in _TOKEN_SOURCE_FIELDS.items():
-            for key, value in metadata.items():
-                if key == source_field or key.startswith(source_field + "_"):
-                    suffix = _THRESHOLD_SUFFIX.fullmatch(key[len(source_field) :])
-                    if suffix is None:
-                        continue
-                    tier_before, threshold_text, tier_after = suffix.groups()
-                    if tier_before and tier_after and tier_before != tier_after:
-                        reason = ModelPricingUnavailableReason.INVALID_PRICE
-                        continue
-                    try:
-                        threshold = _threshold_value(threshold_text)
-                    except ValueError:
-                        reason = ModelPricingUnavailableReason.INVALID_PRICE
-                        continue
-                    rate = _decimal_nonnegative(value)
-                    if metric == "file_search" and rate is not None:
-                        with localcontext() as decimal_context:
-                            decimal_context.prec = 50
-                            rate /= Decimal(1000)
-                    rates.append(
-                        ModelPriceRate(
-                            metric=metric,
-                            service_tier=(
-                                tier_before
-                                or tier_after
-                                or ("all" if _unit_fee(metric) else "standard")
-                            ),
-                            above_input_tokens=threshold,
-                            search_context_size=None,
-                            usd_per_unit=rate,
-                        )
-                    )
-        _decode_search_rates(metadata, rates)
-        _decode_generic_second_rates(metadata, rates)
-        _decode_multipliers(metadata, multipliers)
-        if not rates:
-            reason = ModelPricingUnavailableReason.MISSING_PRICE
-    return ModelPricing(
-        provider=provider,
-        model_identifier=model_identifier,
-        source_snapshot_id=source_snapshot_id,
-        source_hash=source_hash,
-        source_model_key=source_model_key,
-        estimator_version=ESTIMATOR_SCHEMA_VERSION,
-        rates=tuple(rates),
-        multipliers=tuple(multipliers),
-        unavailable_reason=reason,
-    )
-
-
 def normalize_genai_model_pricing(
     *,
     provider: LLMProvider,
@@ -324,143 +152,16 @@ def normalize_genai_model_pricing(
 
 def estimate_model_cost(
     *,
-    pricing: CapturedModelPricing,
+    pricing: GenAIModelPricing,
     usage: ModelPricingUsage,
     billing: ModelPricingBilling,
 ) -> ModelCostEstimate:
-    """Estimate a complete total from normalized quantities without output content.
-
-    :param pricing: captured immutable source prices and provenance
-    :param usage: native token accounting with explicit inclusion semantics
-    :param billing: applicable tier and separately billed activity quantities
-    :returns: finite nonnegative estimated USD or an unavailable reason
-    """
-    if isinstance(pricing, GenAIModelPricing):
-        return _estimate_genai_model_cost(
-            pricing=pricing,
-            usage=usage,
-            billing=billing,
-        )
-    tier = _normalize_tier(billing.service_tier)
-    if pricing.unavailable_reason is not None:
-        return _unavailable(tier, pricing.unavailable_reason)
-    if tier not in {"standard", "priority", "flex"}:
-        return _unavailable(tier, ModelPricingUnavailableReason.UNSUPPORTED_TIER)
-    if billing.unknown_billable_components:
-        return _unavailable(tier, ModelPricingUnavailableReason.UNKNOWN_COMPONENT)
-    if not _valid_usage(usage) or (
-        billing.context_input_tokens is not None
-        and not _valid_count(billing.context_input_tokens)
-    ):
-        return _unavailable(tier, ModelPricingUnavailableReason.INVALID_USAGE)
-
-    cache_read = usage.cached_input_tokens or 0
-    cache_write = usage.cache_write_input_tokens or 0
-    write_5m = usage.cache_write_5m_tokens
-    write_1h = usage.cache_write_1h_tokens
-    if write_5m is not None or write_1h is not None:
-        ttl_total = (write_5m or 0) + (write_1h or 0)
-        if usage.cache_write_input_tokens is not None and cache_write != ttl_total:
-            return _unavailable(tier, ModelPricingUnavailableReason.INVALID_USAGE)
-        cache_write = ttl_total
-    else:
-        write_5m = cache_write
-        write_1h = 0
-    prompt_total = usage.prompt_tokens
-    if not usage.prompt_tokens_include_cache:
-        prompt_total += cache_read + cache_write
-    prompt_text = prompt_total - cache_read - cache_write
-    prompt_text -= (usage.input_audio_tokens or 0) + (usage.input_image_tokens or 0)
-    reasoning = usage.reasoning_tokens or 0
-    output_total = usage.completion_tokens
-    if not usage.completion_tokens_include_reasoning:
-        output_total += reasoning
-    output_text = output_total - reasoning
-    output_text -= (usage.output_audio_tokens or 0) + (usage.output_image_tokens or 0)
-    if prompt_text < 0 or output_text < 0:
-        return _unavailable(tier, ModelPricingUnavailableReason.INVALID_USAGE)
-    context = billing.context_input_tokens
-    if context is None:
-        context = prompt_total
-
-    quantities: tuple[tuple[PricingMetric, int], ...] = (
-        ("input_tokens", prompt_text),
-        ("output_tokens", output_text),
-        ("cache_read_tokens", cache_read),
-        ("cache_write_5m_tokens", write_5m or 0),
-        ("cache_write_1h_tokens", write_1h or 0),
-        ("reasoning_tokens", reasoning),
-        ("input_audio_tokens", usage.input_audio_tokens or 0),
-        ("input_image_tokens", usage.input_image_tokens or 0),
-        ("output_audio_tokens", usage.output_audio_tokens or 0),
-        ("output_image_tokens", usage.output_image_tokens or 0),
+    """Estimate a complete total from captured generic source evidence."""
+    return _estimate_genai_model_cost(
+        pricing=pricing,
+        usage=usage,
+        billing=billing,
     )
-    with localcontext() as decimal_context:
-        decimal_context.prec = 50
-        regular_cost = Decimal(0)
-        cache_cost = Decimal(0)
-        for metric, quantity in quantities:
-            if quantity == 0:
-                continue
-            selected = _select_rate(pricing, metric, tier, context)
-            if selected is None and not any(
-                rate.metric == metric for rate in pricing.rates
-            ):
-                fallback_metric = _token_fallback_metric(metric)
-                if fallback_metric is not None:
-                    selected = _select_rate(pricing, fallback_metric, tier, context)
-            if selected is None:
-                return _unavailable(tier, ModelPricingUnavailableReason.MISSING_PRICE)
-            if selected.usd_per_unit is None:
-                return _unavailable(tier, ModelPricingUnavailableReason.INVALID_PRICE)
-            amount = Decimal(quantity) * selected.usd_per_unit
-            if metric in {
-                "cache_read_tokens",
-                "cache_write_5m_tokens",
-                "cache_write_1h_tokens",
-            }:
-                cache_cost += amount
-            else:
-                regular_cost += amount
-
-        route_multiplier = _routing_multiplier(pricing, billing)
-        residency_multiplier = _residency_multiplier(pricing, billing)
-        if route_multiplier is None or residency_multiplier is None:
-            return _unavailable(tier, ModelPricingUnavailableReason.UNSUPPORTED_RULE)
-        total = (regular_cost * route_multiplier + cache_cost) * residency_multiplier
-        for component in billing.components:
-            if isinstance(component.quantity, bool) or not isinstance(
-                component.quantity, int | float
-            ):
-                return _unavailable(tier, ModelPricingUnavailableReason.INVALID_USAGE)
-            quantity = _decimal_nonnegative(component.quantity)
-            if quantity is None:
-                return _unavailable(tier, ModelPricingUnavailableReason.INVALID_USAGE)
-            if component.kind in {
-                "web_search",
-                "file_search",
-                "code_interpreter",
-                "input_images",
-                "output_images",
-            } and not _valid_count(component.quantity):
-                return _unavailable(tier, ModelPricingUnavailableReason.INVALID_USAGE)
-            if quantity == 0:
-                continue
-            if component.kind == "web_search":
-                selected = _select_search_rate(
-                    pricing, tier, component.search_context_size
-                )
-            else:
-                selected = _select_rate(pricing, component.kind, tier, context)
-            if selected is None:
-                return _unavailable(tier, ModelPricingUnavailableReason.MISSING_PRICE)
-            if selected.usd_per_unit is None:
-                return _unavailable(tier, ModelPricingUnavailableReason.INVALID_PRICE)
-            total += quantity * selected.usd_per_unit
-        cost = float(total)
-    if not math.isfinite(cost) or cost < 0:
-        return _unavailable(tier, ModelPricingUnavailableReason.INVALID_PRICE)
-    return ModelCostEstimate(cost_usd=cost, unavailable_reason=None, service_tier=tier)
 
 
 def _estimate_genai_model_cost(
@@ -546,7 +247,7 @@ def _estimate_genai_model_cost(
             provider,
             genai_request_timestamp=pricing.request_timestamp,
         )
-        if not _has_required_genai_prices(
+        if not _has_required_prices(
             price_fields={
                 key
                 for key, value in calculation.model_price.__dict__.items()
@@ -564,7 +265,7 @@ def _estimate_genai_model_cost(
     return ModelCostEstimate(cost_usd=cost, unavailable_reason=None, service_tier=tier)
 
 
-def _has_required_genai_prices(
+def _has_required_prices(
     *,
     price_fields: set[str],
     usage: ModelPricingUsage,
@@ -627,32 +328,6 @@ def _normalize_tier(value: str | None) -> str:
     return value.lower()
 
 
-def _threshold_value(value: str | None) -> int | None:
-    if value is None:
-        return None
-    if len(value) > 20:
-        raise ValueError("The source token threshold is not supported.")
-    threshold = int(value[:-1]) * 1000 if value.endswith("k") else int(value)
-    if threshold <= 0:
-        raise ValueError("The source token threshold must be positive.")
-    return threshold
-
-
-def _decimal_nonnegative(value: object) -> Decimal | None:
-    if isinstance(value, bool) or not isinstance(value, int | float | str | Decimal):
-        return None
-    try:
-        result = Decimal(str(value))
-    except InvalidOperation, ValueError:
-        return None
-    if not result.is_finite() or result < 0:
-        return None
-    numeric = float(result)
-    if not math.isfinite(numeric) or numeric == 0 and result != 0:
-        return None
-    return result
-
-
 def _valid_count(value: object) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value >= 0
 
@@ -678,252 +353,3 @@ def _valid_usage(usage: ModelPricingUsage) -> bool:
             )
         )
     )
-
-
-def _has_character_billing(metadata: Mapping[str, object]) -> bool:
-    """Separate character tariffs require quantity evidence, never content."""
-    for key in ("input_cost_per_character", "output_cost_per_character"):
-        if key in metadata:
-            if metadata[key] is None:
-                continue
-            rate = _decimal_nonnegative(metadata[key])
-            if rate is None or rate > 0:
-                return True
-    return False
-
-
-def _select_rate(
-    pricing: ModelPricing,
-    metric: PricingMetric,
-    tier: str,
-    context: int,
-) -> ModelPriceRate | None:
-    exact = [
-        rate
-        for rate in pricing.rates
-        if rate.metric == metric and rate.service_tier == tier
-    ]
-    if not exact and _unit_fee(metric):
-        exact = [
-            rate
-            for rate in pricing.rates
-            if rate.metric == metric and rate.service_tier == "all"
-        ]
-    crossed = [
-        rate.above_input_tokens
-        for rate in pricing.rates
-        if rate.metric == "input_tokens"
-        and rate.above_input_tokens is not None
-        and context > rate.above_input_tokens
-    ]
-    threshold = max(crossed) if crossed else None
-    if threshold is not None:
-        matching = [rate for rate in exact if rate.above_input_tokens == threshold]
-        if matching:
-            return _single_rate(matching)
-        if metric == "input_tokens" or any(
-            rate.metric == metric and rate.above_input_tokens == threshold
-            for rate in pricing.rates
-        ):
-            return None
-    applicable = [
-        rate
-        for rate in exact
-        if rate.above_input_tokens is None or context > rate.above_input_tokens
-    ]
-    if not applicable:
-        return None
-    highest = max(rate.above_input_tokens or 0 for rate in applicable)
-    return _single_rate(
-        [rate for rate in applicable if (rate.above_input_tokens or 0) == highest]
-    )
-
-
-def _single_rate(rates: list[ModelPriceRate]) -> ModelPriceRate:
-    first = rates[0]
-    if any(rate.usd_per_unit != first.usd_per_unit for rate in rates[1:]):
-        return dataclasses.replace(first, usd_per_unit=None)
-    return first
-
-
-def _token_fallback_metric(metric: PricingMetric) -> PricingMetric | None:
-    # Existing token-accounting rules price reasoning/output modalities at the
-    # output tariff, and input image tokens at the input tariff when unsplit.
-    if metric in {"reasoning_tokens", "output_audio_tokens", "output_image_tokens"}:
-        return "output_tokens"
-    if metric == "input_image_tokens":
-        return "input_tokens"
-    return None
-
-
-def _unit_fee(metric: PricingMetric) -> bool:
-    """Unmarked per-tool/media-unit fees apply independently of token tiers."""
-    return metric in {
-        "web_search",
-        "file_search",
-        "code_interpreter",
-        "input_images",
-        "output_images",
-        "input_audio_seconds",
-        "input_video_seconds",
-        "output_audio_seconds",
-        "output_video_seconds",
-    }
-
-
-def _decode_search_rates(
-    metadata: Mapping[str, object], rates: list[ModelPriceRate]
-) -> None:
-    for tier in ("standard", "priority", "flex"):
-        key = "search_context_cost_per_query" + (
-            "" if tier == "standard" else f"_{tier}"
-        )
-        value = metadata.get(key)
-        if value is None:
-            continue
-        rate_tier = "all" if tier == "standard" else tier
-        if not isinstance(value, dict):
-            rates.append(ModelPriceRate("web_search", rate_tier, None, None, None))
-            continue
-        for size in ("low", "medium", "high"):
-            context_size: SearchContextSize = size
-            rate = value.get(f"search_context_size_{size}")
-            if rate is not None:
-                rates.append(
-                    ModelPriceRate(
-                        "web_search",
-                        rate_tier,
-                        None,
-                        context_size,
-                        _decimal_nonnegative(rate),
-                    )
-                )
-
-
-def _select_search_rate(
-    pricing: ModelPricing, tier: str, size: SearchContextSize | None
-) -> ModelPriceRate | None:
-    rates = [
-        rate
-        for rate in pricing.rates
-        if rate.metric == "web_search" and rate.service_tier == tier
-    ]
-    if not rates:
-        rates = [
-            rate
-            for rate in pricing.rates
-            if rate.metric == "web_search" and rate.service_tier == "all"
-        ]
-    if size is not None:
-        matching = [
-            rate
-            for rate in rates
-            if rate.search_context_size == size or rate.search_context_size is None
-        ]
-        return _single_rate(matching) if matching else None
-    sizes = {rate.search_context_size for rate in rates}
-    if sizes == {"low", "medium", "high"}:
-        if (
-            all(rate.usd_per_unit is not None for rate in rates)
-            and len({rate.usd_per_unit for rate in rates}) > 1
-        ):
-            return None
-        return _single_rate(rates)
-    return None
-
-
-def _decode_generic_second_rates(
-    metadata: Mapping[str, object], rates: list[ModelPriceRate]
-) -> None:
-    for tier in ("standard", "priority", "flex"):
-        key = "output_cost_per_second" + ("" if tier == "standard" else f"_{tier}")
-        if key not in metadata:
-            continue
-        rate_tier = "all" if tier == "standard" else tier
-        for metric in ("output_audio_seconds", "output_video_seconds"):
-            typed_metric: PricingMetric = metric
-            if not any(
-                rate.metric == metric and rate.service_tier == rate_tier
-                for rate in rates
-            ):
-                rates.append(
-                    ModelPriceRate(
-                        typed_metric,
-                        rate_tier,
-                        None,
-                        None,
-                        _decimal_nonnegative(metadata[key]),
-                    )
-                )
-
-
-def _decode_multipliers(
-    metadata: Mapping[str, object], multipliers: list[ModelPriceMultiplier]
-) -> None:
-    provider_values = metadata.get("provider_specific_entry")
-    if isinstance(provider_values, dict):
-        for key, value in provider_values.items():
-            if isinstance(key, str):
-                kind: Literal["inference_geo", "speed", "data_residency"] = (
-                    "speed" if key == "fast" else "inference_geo"
-                )
-                multipliers.append(
-                    ModelPriceMultiplier(kind, key.lower(), _decimal_nonnegative(value))
-                )
-    for key, value in metadata.items():
-        prefix = "regional_processing_uplift_multiplier_"
-        if key.startswith(prefix):
-            multipliers.append(
-                ModelPriceMultiplier(
-                    "data_residency",
-                    key[len(prefix) :].lower(),
-                    _decimal_nonnegative(value),
-                )
-            )
-
-
-def _routing_multiplier(
-    pricing: ModelPricing, billing: ModelPricingBilling
-) -> Decimal | None:
-    if pricing.provider not in {
-        LLMProvider.ANTHROPIC,
-        LLMProvider.AWS_BEDROCK,
-        LLMProvider.GOOGLE_VERTEX_AI,
-    }:
-        return (
-            Decimal(1)
-            if billing.inference_geo is None and billing.speed is None
-            else None
-        )
-    multiplier = Decimal(1)
-    for kind, value in (
-        ("inference_geo", billing.inference_geo),
-        ("speed", billing.speed),
-    ):
-        if value is None or value.lower() in {"global", "not_available", "standard"}:
-            continue
-        matching = [
-            entry
-            for entry in pricing.multipliers
-            if entry.kind == kind and entry.value == value.lower()
-        ]
-        if not matching or matching[0].multiplier is None:
-            return None
-        multiplier *= matching[0].multiplier
-    return multiplier
-
-
-def _residency_multiplier(
-    pricing: ModelPricing, billing: ModelPricingBilling
-) -> Decimal | None:
-    if billing.data_residency is None:
-        return Decimal(1)
-    matching = [
-        entry
-        for entry in pricing.multipliers
-        if entry.kind == "data_residency"
-        and entry.value == billing.data_residency.lower()
-    ]
-    if not matching or matching[0].multiplier is None:
-        return None
-    return matching[0].multiplier

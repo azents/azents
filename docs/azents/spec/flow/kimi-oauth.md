@@ -27,8 +27,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/**
   - typescript/apps/azents-web/src/shared/subscription-usage/**
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
-last_verified_at: 2026-09-30
-spec_version: 4
+last_verified_at: 2026-10-01
+spec_version: 5
 ---
 
 # Kimi OAuth Flow
@@ -197,7 +197,8 @@ or reconstructed execution identifier.
 
 A Kimi integration owns an integration-scoped catalog. Synchronization ensures fresh OAuth
 credentials and requests `GET /models` from the Kimi Code API. The response must contain a top-level
-`data` list. Each valid item is projected directly without requiring matching LiteLLM metadata.
+`data` list. Each valid item is projected directly without requiring a matching generic metadata
+source record.
 
 Projection preserves the provider model id and display name and records Moonshot as model developer.
 The catalog may expose:
@@ -281,6 +282,7 @@ message submission, or integration management.
 
 | Date | Version | Change | Rationale |
 |---|---:|---|---|
+| 2026-10-01 | 5 | Removed the former metadata-source compatibility path while retaining direct account catalog projection | Keep Kimi model visibility independent of optional generic metadata |
 | 2026-09-30 | 4 | Documented public Pydantic AI Chat Completions/SDK execution with raw model IDs | Retain Kimi OAuth device identity and existing engine ownership without the executable shared package |
 | 2026-09-23 | 3 | Documented the shared subscription reauthentication action for connected and failed integrations | Match the current connection-row and management-modal behavior |
 | 2026-09-04 | 2 | Mapped the shared subscription-usage state and container modules | Keep provider usage eligibility, retained-success refresh state, summary, and threshold presentation linked after the frontend boundary relocation |

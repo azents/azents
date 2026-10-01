@@ -42,8 +42,8 @@ def test_openai_client_tool_requires_function_calling_chat_model() -> None:
     )
 
 
-def test_explicit_flag_enables_litellm_routed_provider() -> None:
-    """Accept a trusted explicit flag for a non-OpenAI LiteLLM route."""
+def test_explicit_flag_enables_provider_routed_model() -> None:
+    """Accept a trusted explicit flag for a non-OpenAI provider route."""
     assert supported_builtin_capabilities(
         provider=LLMProvider.ANTHROPIC,
         model_identifier="future-image-model",

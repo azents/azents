@@ -12,7 +12,6 @@ code_paths:
   - python/apps/azents/src/azents/core/credentials.py
   - python/apps/azents/src/azents/core/llm_catalog.py
   - python/apps/azents/src/azents/core/llm_mapping.py
-  - python/apps/azents/src/azents/core/model_source_metadata.py
   - python/apps/azents/src/azents/services/model_metadata.py
   - python/apps/azents/src/azents/core/inference_profile.py
   - python/apps/azents/src/azents/core/model_execution_options.py

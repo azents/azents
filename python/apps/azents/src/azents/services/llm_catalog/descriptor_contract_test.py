@@ -22,6 +22,7 @@ from azents.core.llm_catalog import ModelCapabilities
 from azents.rdb.session import SessionManager
 from azents.repos.llm_catalog import LLMCatalogRepository
 from azents.repos.llm_catalog.data import (
+    CatalogProjectionProvenance,
     LLMCatalog,
     LLMCatalogEntry,
     LLMCatalogEntryCreate,
@@ -101,10 +102,9 @@ async def test_new_selection_diagnostics_preserve_raw_identifier_without_descrip
             provider=integration.provider,
             purpose=LLMCatalogPurpose.CONVERSATION,
         )
-        snapshot_id = await catalog_repository.replace_current_snapshot(
+        snapshot_id = await catalog_repository.create_candidate_snapshot(
             session,
             catalog=catalog,
-            source_snapshot_id=None,
             entries=[
                 LLMCatalogEntryCreate(
                     provider=integration.provider,
@@ -123,6 +123,23 @@ async def test_new_selection_diagnostics_preserve_raw_identifier_without_descrip
                 )
             ],
             diagnostics={"fixture": True},
+            provenance=CatalogProjectionProvenance(
+                source_snapshot_id=None,
+                projection_schema_version="fixture",
+                runtime_profile_resolver_revision="fixture",
+                pydantic_ai_version="fixture",
+                genai_prices_version="fixture",
+                projection_fingerprint="f" * 64,
+            ),
+            catalog_configuration_version=1,
+        )
+        await catalog_repository.publish_candidate_snapshot(
+            session,
+            catalog_id=catalog.id,
+            candidate_snapshot_id=snapshot_id,
+            expected_current_snapshot_id=None,
+            expected_catalog_configuration_version=1,
+            expected_projection_fingerprint="f" * 64,
         )
     result = await ModelCatalogReadService(
         session_manager=rdb_session_manager, catalog_repository=catalog_repository

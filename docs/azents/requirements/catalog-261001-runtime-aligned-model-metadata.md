@@ -2,6 +2,7 @@
 title: "Runtime-Aligned Model Metadata Requirements"
 created: 2026-10-01
 updated: 2026-10-01
+implemented: 2026-10-01
 tags: [model-catalog, backend, engine, scheduler, migration]
 document_role: primary
 document_type: requirements

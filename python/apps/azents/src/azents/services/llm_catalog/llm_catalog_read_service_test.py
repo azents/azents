@@ -78,7 +78,6 @@ async def test_read_service_returns_latest_failed_attempt_without_snapshot() -> 
             purpose=LLMCatalogPurpose.CONVERSATION,
             provider_integration_id="integration-id",
             current_snapshot_id=None,
-            rollback_snapshot_id=None,
             latest_attempt_id="attempt-id",
         ),
         entries=[],
@@ -87,7 +86,7 @@ async def test_read_service_returns_latest_failed_attempt_without_snapshot() -> 
         latest_attempt=LLMCatalogSyncAttempt(
             id="attempt-id",
             catalog_id="catalog-id",
-            source_key="litellm_model_cost",
+            source_key="genai_prices",
             status=LLMCatalogAttemptStatus.FAILED,
             started_at=now,
             finished_at=now,

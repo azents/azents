@@ -11,8 +11,8 @@ from azents.core.enums import AgentSessionStatus
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.llm_catalog import LiteLLMSourceSnapshotRepository
 from azents.repos.mailbox import MailboxRepository
+from azents.repos.model_metadata_source import ModelMetadataSourceRepository
 from azents.repos.subagent_coordination.repository import (
     SubagentCoordinationRepository,
 )
@@ -41,7 +41,7 @@ async def test_subagent_tool_operations_close_before_returning_effect_targets() 
     runs = AsyncMock(spec=AgentRunRepository)
     transcripts = AsyncMock(spec=EventTranscriptRepository)
     mailbox = AsyncMock(spec=MailboxRepository)
-    sources = AsyncMock(spec=LiteLLMSourceSnapshotRepository)
+    sources = AsyncMock(spec=ModelMetadataSourceRepository)
     coordination = AsyncMock(spec=SubagentCoordinationRepository)
     agent = SimpleNamespace(id="agent-1")
     current = SimpleNamespace(
@@ -66,7 +66,7 @@ async def test_subagent_tool_operations_close_before_returning_effect_targets() 
     sessions.resolve_session_agent_path.return_value = target
     sessions.lock_session_agent_by_id.return_value = current
     sessions.lock_by_id.return_value = locked_target
-    sources.get_latest_authoritative.return_value = None
+    sources.get_current.return_value = None
     coordination.project_root_tree.return_value = None
     operations = SubagentToolOperationRepository(
         session_manager=session_manager,

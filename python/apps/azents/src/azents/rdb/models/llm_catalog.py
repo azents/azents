@@ -105,9 +105,6 @@ class RDBLLMCatalog(RDBModel):
     current_snapshot_id: Mapped[str | None] = mapped_column(
         sa.String(32), nullable=True, default=None
     )
-    rollback_snapshot_id: Mapped[str | None] = mapped_column(
-        sa.String(32), nullable=True, default=None
-    )
     latest_attempt_id: Mapped[str | None] = mapped_column(
         sa.String(32), nullable=True, default=None
     )
@@ -128,41 +125,15 @@ class RDBLLMCatalog(RDBModel):
     )
 
 
-class RDBLiteLLMSourceSnapshot(RDBModel):
-    """Current LiteLLM source payload snapshot."""
-
-    __tablename__ = "litellm_source_snapshots"
-
-    UQ_SOURCE_HASH = sa.UniqueConstraint(
-        "source_hash", name="uq_litellm_source_snapshots_source_hash"
-    )
-
-    id: Mapped[str] = mapped_column(sa.String(32), primary_key=True)
-    source_key: Mapped[str] = mapped_column(sa.String(120), nullable=False)
-    source_hash: Mapped[str] = mapped_column(sa.String(64), nullable=False)
-    model_count: Mapped[int] = mapped_column(sa.Integer, nullable=False)
-    loaded_source: Mapped[str] = mapped_column(sa.String(40), nullable=False)
-    payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
-    source_url: Mapped[str | None] = mapped_column(sa.Text, nullable=True, default=None)
-    litellm_version: Mapped[str | None] = mapped_column(
-        sa.String(80), nullable=True, default=None
-    )
-    created_at: Mapped[datetime.datetime] = mapped_column(
-        TimeZoneDateTime, init=False, server_default=sa.func.now()
-    )
-
-    __table_args__ = (UQ_SOURCE_HASH,)
-
-
 class RDBLLMCatalogSnapshot(RDBModel):
     """Current successful catalog projection snapshot."""
 
     __tablename__ = "llm_catalog_snapshots"
 
     IX_CATALOG_ID = sa.Index("ix_llm_catalog_snapshots_catalog_id", "catalog_id")
-    IX_METADATA_SOURCE_SNAPSHOT_ID = sa.Index(
-        "ix_llm_catalog_snapshots_metadata_source_snapshot_id",
-        "metadata_source_snapshot_id",
+    IX_SOURCE_SNAPSHOT_ID = sa.Index(
+        "ix_llm_catalog_snapshots_source_snapshot_id",
+        "source_snapshot_id",
     )
 
     id: Mapped[str] = mapped_column(sa.String(32), primary_key=True)
@@ -175,12 +146,6 @@ class RDBLLMCatalogSnapshot(RDBModel):
     visible_count: Mapped[int] = mapped_column(sa.Integer, nullable=False)
     hidden_count: Mapped[int] = mapped_column(sa.Integer, nullable=False)
     source_snapshot_id: Mapped[str | None] = mapped_column(
-        sa.String(32),
-        sa.ForeignKey("litellm_source_snapshots.id", ondelete="SET NULL"),
-        nullable=True,
-        default=None,
-    )
-    metadata_source_snapshot_id: Mapped[str | None] = mapped_column(
         sa.String(32),
         sa.ForeignKey(
             "model_metadata_source_snapshots.id",
@@ -216,7 +181,7 @@ class RDBLLMCatalogSnapshot(RDBModel):
         TimeZoneDateTime, init=False, server_default=sa.func.now()
     )
 
-    __table_args__ = (IX_CATALOG_ID, IX_METADATA_SOURCE_SNAPSHOT_ID)
+    __table_args__ = (IX_CATALOG_ID, IX_SOURCE_SNAPSHOT_ID)
 
 
 class RDBLLMCatalogEntry(RDBModel):

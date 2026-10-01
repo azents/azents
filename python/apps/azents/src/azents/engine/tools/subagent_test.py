@@ -52,9 +52,9 @@ from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepo
 from azents.repos.agent_execution.data import EventCreate
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession, SessionAgent
-from azents.repos.llm_catalog import LiteLLMSourceSnapshotRepository
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.mailbox.data import MailboxItemCreate
+from azents.repos.model_metadata_source import ModelMetadataSourceRepository
 from azents.repos.subagent_coordination.data import (
     SubagentCoordinationSnapshot,
     SubagentCoordinationSnapshotRow,
@@ -777,7 +777,7 @@ class _SubagentCoordinationRepository:
 class _SourceSnapshotRepository:
     """Model source snapshot repository fake for subagent tool tests."""
 
-    async def get_latest_authoritative(
+    async def get_current(
         self,
         session: AsyncSession,
         *,
@@ -785,7 +785,7 @@ class _SourceSnapshotRepository:
     ) -> None:
         """Return no fallback metadata source."""
         del session
-        assert source_key == "litellm_model_cost"
+        assert source_key == "genai_prices"
         return None
 
 
@@ -831,7 +831,7 @@ async def _make_toolkit() -> _SubagentToolkitFixture:
         mailbox_repository=_typed_fake(mailbox_item_service, MailboxRepository),
         source_snapshot_repository=_typed_fake(
             _SourceSnapshotRepository(),
-            LiteLLMSourceSnapshotRepository,
+            ModelMetadataSourceRepository,
         ),
         coordination_repository=_typed_fake(
             coordination_repository,
