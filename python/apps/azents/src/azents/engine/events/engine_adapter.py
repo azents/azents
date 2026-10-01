@@ -19,7 +19,6 @@ from azents.core.credentials import ChatGPTOAuthSecrets, XaiOAuthSecrets
 from azents.core.enums import (
     AgentRunPhase,
     AgentRunStatus,
-    EventKind,
     LLMProvider,
 )
 from azents.core.image_generation_config import (
@@ -151,7 +150,6 @@ from azents.engine.hooks.types import (
     TurnEndReason,
     TurnStartHookContext,
 )
-from azents.engine.io.user_input import RunUserMessage
 from azents.engine.model_stream import ModelStreamWatchdog, get_model_stream_watchdog
 from azents.engine.run.builtin_tools import (
     ClientBuiltinToolImplementationUnavailableError,
@@ -202,12 +200,12 @@ from azents.engine.tools.xai_image_generation import (
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
-from azents.repos.agent_execution.data import EventCreate
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session_system_prompt_snapshot import (
     AgentSessionSystemPromptSnapshotRepository,
 )
 from azents.repos.chatgpt_oauth_runtime import ChatGPTOAuthRuntimeRepository
+from azents.repos.engine_event_operation import EngineEventOperationRepository
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.llm_provider_integration.deps import (
     get_llm_provider_integration_repository,
@@ -573,22 +571,12 @@ class AgentEngineAdapter:
             session_id=session_id,
             owner_generation=owner_generation,
         )
-        async with owner_session_manager() as session:
-            return await self.transcript_repo.append(
-                session,
-                EventCreate(
-                    session_id=session_id,
-                    kind=EventKind.SYSTEM_ERROR,
-                    payload=SystemErrorPayload(
-                        content=content,
-                        severity="error",
-                        recoverable=True,
-                    ).model_dump(
-                        mode="json",
-                        exclude_none=True,
-                    ),
-                ),
-            )
+        return await self._event_operation_repository(
+            owner_session_manager
+        ).append_system_error(
+            session_id=session_id,
+            content=content,
+        )
 
     async def compact(
         self, request: RunRequest, context: RunContext
@@ -602,18 +590,9 @@ class AgentEngineAdapter:
         )
         compactor = self.compactor.with_session_manager(owner_session_manager)
         yield ephemeral(CompactionStarted())
-        async with owner_session_manager() as session:
-            await _ensure_agent_session(
-                session,
-                request.session_id,
-                agent_session_repo=self.agent_session_repo,
-            )
-            transcript = await _current_model_input_transcript(
-                session,
-                request.session_id,
-                session_repo=self.session_head_repo,
-                transcript_repo=self.transcript_repo,
-            )
+        transcript = await self._event_operation_repository(
+            owner_session_manager
+        ).prepare_compaction(session_id=request.session_id)
 
         hook_dispatcher = RuntimeHookDispatcher()
         hook_providers = _runtime_hook_provider_refs(request.toolkits)
@@ -691,25 +670,16 @@ class AgentEngineAdapter:
             owner_session_manager
         )
         compactor = self.compactor.with_session_manager(owner_session_manager)
-        async with owner_session_manager() as session:
-            await _ensure_agent_session(
-                session,
-                request.session_id,
-                agent_session_repo=self.agent_session_repo,
-            )
-            user_message_events = await _append_run_user_messages(
-                session,
-                request.session_id,
-                request.user_messages,
-                transcript_repo=self.transcript_repo,
-            )
-            run_state = await self.run_repo.get_by_id(session, context.run_id)
-            if run_state is None or run_state.status is not AgentRunStatus.RUNNING:
-                raise RuntimeError(
-                    "AgentRun must be activated before engine invocation"
-                )
-            await session.commit()
-        for event in user_message_events:
+        event_operation_repository = self._event_operation_repository(
+            owner_session_manager
+        )
+        preparation = await event_operation_repository.prepare_run(
+            session_id=request.session_id,
+            run_id=context.run_id,
+            user_messages=request.user_messages,
+        )
+        run_state = preparation.run_state
+        for event in preparation.user_message_events:
             yield durable(event)
         provider = _provider_name(request.provider)
         model_file_resolver = RequestLocalModelFileResolver()
@@ -1298,8 +1268,7 @@ class AgentEngineAdapter:
                 check_stop=check_stop,
                 poll_input_events=_make_input_poller(
                     poll_messages,
-                    session_manager=owner_session_manager,
-                    transcript_repo=self.transcript_repo,
+                    event_operation_repository=event_operation_repository,
                 ),
             )
 
@@ -1340,6 +1309,19 @@ class AgentEngineAdapter:
         else:
             yield ephemeral(RunStopped(run_id=context.run_id))
 
+    def _event_operation_repository(
+        self,
+        session_manager: SessionManager[AsyncSession],
+    ) -> EngineEventOperationRepository:
+        """Bind completed Event operations to one transaction authority."""
+        return EngineEventOperationRepository(
+            session_manager=session_manager,
+            run_repository=self.run_repo,
+            agent_session_repository=self.agent_session_repo,
+            session_head_repository=self.session_head_repo,
+            transcript_repository=self.transcript_repo,
+        )
+
 
 def _cancel_run_task(
     run_task: asyncio.Task[AgentRunStatus],
@@ -1350,25 +1332,6 @@ def _cancel_run_task(
         run_task.cancel(USER_STOP_CANCEL_MESSAGE)
         return
     run_task.cancel()
-
-
-async def _current_model_input_transcript(
-    session: AsyncSession,
-    session_id: str,
-    *,
-    session_repo: SessionHeadRepository,
-    transcript_repo: TranscriptRepository,
-) -> list[Event]:
-    """Return model input transcript based on current event session head."""
-    session_state = await session_repo.get_by_id(session, session_id)
-    head_event_id = (
-        session_state.model_input_head_event_id if session_state is not None else None
-    )
-    return await transcript_repo.list_for_model_input(
-        session,
-        session_id,
-        head_event_id=head_event_id,
-    )
 
 
 async def _emit_phase_change(
@@ -1611,8 +1574,7 @@ def _uses_openai_sdk(provider: LLMProvider) -> bool:
 def _make_input_poller(
     poll_messages: PollMessages | None,
     *,
-    session_manager: SessionManager[AsyncSession],
-    transcript_repo: TranscriptRepository,
+    event_operation_repository: EngineEventOperationRepository,
 ) -> Callable[[str], Awaitable[InputPollResult]] | None:
     """Convert boundary poll to event transcript append callback."""
     if poll_messages is None:
@@ -1629,13 +1591,10 @@ def _make_input_poller(
                 complete_run=result.complete_run,
                 suppress_parent_result=result.suppress_parent_result,
             )
-        async with session_manager() as session:
-            events = await _append_run_user_messages(
-                session,
-                session_id,
-                result.user_messages,
-                transcript_repo=transcript_repo,
-            )
+        events = await event_operation_repository.append_user_messages(
+            session_id=session_id,
+            user_messages=result.user_messages,
+        )
         return InputPollResult(
             events=events,
             context_invalidated=result.context_invalidated,
@@ -1958,49 +1917,3 @@ def _stream_projection_emit(projection: StreamProjection) -> Emit:
             )
         case _:
             assert_never(projection)
-
-
-async def _append_run_user_messages(
-    session: AsyncSession,
-    session_id: str,
-    user_messages: Sequence[RunUserMessage],
-    *,
-    transcript_repo: TranscriptRepository,
-) -> list[Event]:
-    """Append RunRequest event user_message input to transcript."""
-    appended: list[Event] = []
-    for user_message in user_messages:
-        existing = await transcript_repo.get_by_external_id(
-            session,
-            session_id,
-            user_message.external_id,
-        )
-        if existing is not None:
-            continue
-        appended.append(
-            await transcript_repo.append(
-                session,
-                EventCreate(
-                    session_id=session_id,
-                    kind=EventKind.USER_MESSAGE,
-                    payload=user_message.payload.model_dump(
-                        mode="json",
-                        exclude_none=True,
-                    ),
-                    external_id=user_message.external_id,
-                ),
-            )
-        )
-    return appended
-
-
-async def _ensure_agent_session(
-    session: AsyncSession,
-    session_id: str,
-    *,
-    agent_session_repo: AgentSessionRepository,
-) -> None:
-    """Ensure AgentSession row exists before event processing."""
-    agent_session = await agent_session_repo.get_by_id(session, session_id)
-    if agent_session is None:
-        raise ValueError("AgentSession not found")
