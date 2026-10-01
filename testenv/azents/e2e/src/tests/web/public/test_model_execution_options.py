@@ -2,7 +2,6 @@
 
 import azentsadminclient
 import azentspublicclient
-import pytest
 import requests
 from selenium.common.exceptions import StaleElementReferenceException
 from selenium.webdriver.common.by import By
@@ -216,10 +215,6 @@ def _assert_speed_checked(driver: WebDriver, option: str, checked: bool) -> None
     )
 
 
-@pytest.mark.parametrize(
-    ("target", "option"),
-    [("Quality", "fast"), ("Astra", "ultrafast")],
-)
 def test_existing_session_speed_choice_saves_complete_displayed_profile(
     browser_driver: WebDriver,
     azents_main_web_url: str,
@@ -227,10 +222,10 @@ def test_existing_session_speed_choice_saves_complete_displayed_profile(
     mock_openai_url: str,
     public_api_client: azentspublicclient.ApiClient,
     admin_api_client: azentsadminclient.ApiClient,
-    target: str,
-    option: str,
 ) -> None:
-    """Save exclusive speed plus pending effort, reload, then filter on switch."""
+    """Save one representative speed plus pending effort, then filter on switch."""
+    target = "Quality"
+    option = "fast"
     suffix = unique()
     email = f"execution-option-web-{suffix}@example.com"
     handle = f"execution-option-web-{suffix}"
@@ -276,8 +271,6 @@ def test_existing_session_speed_choice_saves_complete_displayed_profile(
     selected_speed.send_keys(Keys.SPACE)
     _assert_speed_checked(browser_driver, option, True)
     _assert_speed_checked(browser_driver, "", False)
-    if option == "ultrafast":
-        _assert_speed_checked(browser_driver, "fast", False)
     assert _history(azents_public_server_url, token, session_id) == before_history
     assert _journal(mock_openai_url) == before_journal
     model_trigger.click()

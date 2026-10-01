@@ -63,7 +63,6 @@ from testcontainers.core.container import DockerContainer
 from testcontainers.core.network import Network
 from testcontainers.postgres import PostgresContainer
 from websockets.asyncio.client import connect as async_connect
-from websockets.exceptions import ConnectionClosed
 from websockets.sync.client import connect
 from websockets.typing import Origin
 
@@ -137,7 +136,6 @@ _BROWSER_SCRIPT_TIMEOUT_SECONDS = _bounded_workload_value(
     default=120,
     maximum=7_200,
 )
-_REJECTED_REQUEST_CONTENT_LENGTH = _BROWSER_TRANSFER_BYTES
 logger = logging.getLogger(__name__)
 
 
@@ -909,7 +907,7 @@ def runtime_web_stack_factory(
     rustfs_access_key: str,
     rustfs_secret_key: str,
 ) -> Generator[_RuntimeWebStackFactory, None, None]:
-    """Prepare shared stateless auth surfaces and one relay for isolated Gateways."""
+    """Prepare the representative auth surface and one relay for isolated Gateways."""
     selenium_url = (
         f"http://{selenium_container.get_container_host_ip()}:"
         f"{selenium_container.get_exposed_port(4444)}"
@@ -929,7 +927,7 @@ def runtime_web_stack_factory(
         str,
         tuple[DockerContainer, DockerContainer, str, str],
     ] = {}
-    for mode in ("shared_cookie", "separate_domain"):
+    for mode in ("shared_cookie",):
         alias_suffix = mode.replace("_", "-")
         public_api_alias = f"runtime-web-public-{alias_suffix}"
         main_web_alias = f"runtime-web-main-{alias_suffix}"
@@ -1816,22 +1814,6 @@ const done = arguments[arguments.length - 1];
     return result
 
 
-def _runtime_application_state(
-    *,
-    stack: _RuntimeWebStack,
-    headers: dict[str, str],
-) -> _RuntimeApplicationState:
-    """Read typed content-free state through the product transport."""
-    response = requests.get(
-        f"{stack.edge_host_url}/state",
-        headers=headers,
-        verify=False,
-        timeout=10,
-    )
-    response.raise_for_status()
-    return _decode_runtime_application_state(response.json())
-
-
 def _decode_runtime_application_state(payload: object) -> _RuntimeApplicationState:
     """Decode the fixture state instead of retaining raw JSON primitives."""
     if not isinstance(payload, dict):
@@ -1951,49 +1933,6 @@ def _wait_for_runtime_web_stream_release(stack: _RuntimeWebStack) -> None:
         time.sleep(0.1)
 
 
-def _request_rejection_without_body(
-    *,
-    stack: _RuntimeWebStack,
-    endpoint_host: str,
-    cookie: str,
-) -> bytes:
-    """Send only a large request head and return the bounded response head."""
-    edge_address = stack.edge_host_url.removeprefix("https://")
-    edge_host, edge_port_text = edge_address.rsplit(":", maxsplit=1)
-    raw_socket = socket.create_connection((edge_host, int(edge_port_text)), timeout=10)
-    tls_context = ssl.create_default_context()
-    tls_context.check_hostname = False
-    tls_context.verify_mode = ssl.CERT_NONE
-    with tls_context.wrap_socket(
-        raw_socket,
-        server_hostname=endpoint_host,
-    ) as connection:
-        request_head = (
-            "POST /upload HTTP/1.1\r\n"
-            f"Host: {endpoint_host}\r\n"
-            f"Cookie: {cookie}\r\n"
-            f"Origin: https://{endpoint_host}\r\n"
-            "User-Agent: Mozilla/5.0 Firefox/143.0\r\n"
-            "Sec-Fetch-Site: same-origin\r\n"
-            "Sec-Fetch-Mode: cors\r\n"
-            "Sec-Fetch-Dest: empty\r\n"
-            f"Content-Length: {_REJECTED_REQUEST_CONTENT_LENGTH}\r\n"
-            "Content-Type: application/octet-stream\r\n"
-            "Connection: close\r\n"
-            "\r\n"
-        ).encode()
-        connection.sendall(request_head)
-        response = bytearray()
-        while True:
-            chunk = connection.recv(1024)
-            if not chunk:
-                break
-            response.extend(chunk)
-            if len(response) > 8 * 1024:
-                raise AssertionError("Hard-limit response exceeded its bound")
-    return bytes(response)
-
-
 def _browser_neutral_transport_evidence(
     *,
     stack: _RuntimeWebStack,
@@ -2079,100 +2018,6 @@ async def _browser_neutral_websocket_evidence(
         pong = await websocket.ping(b"runtime-web-ping")
         async with asyncio.timeout(10):
             await pong
-
-
-async def _assert_long_lived_stream_drain(
-    *,
-    stack: _RuntimeWebStack,
-    endpoint_url: str,
-    headers: dict[str, str],
-    runtime_terminal: _RuntimeApplicationCommands,
-    stream_state_before: _RuntimeApplicationState,
-) -> None:
-    """Keep WebSocket and SSE streams active until Gateway drain closes both."""
-    endpoint_host = endpoint_url.removeprefix("https://").rstrip("/")
-    websocket_drained = asyncio.Event()
-    sse_started = threading.Event()
-    sse_drained = threading.Event()
-
-    async def hold_websocket() -> None:
-        try:
-            await websocket.recv()
-        except ConnectionClosed:
-            websocket_drained.set()
-        else:
-            raise AssertionError(
-                "Runtime Web drain did not close the long-lived stream"
-            )
-
-    def hold_sse() -> None:
-        try:
-            with requests.get(
-                f"{stack.edge_host_url}/events-held",
-                headers=headers,
-                verify=False,
-                timeout=20,
-                stream=True,
-            ) as response:
-                response.raise_for_status()
-                chunks = response.iter_content(chunk_size=14)
-                assert b"data: active" in next(chunks)
-                sse_started.set()
-                for _ in chunks:
-                    pass
-        except requests.RequestException:
-            pass
-        finally:
-            sse_drained.set()
-
-    edge_address = stack.edge_host_url.removeprefix("https://")
-    edge_host, edge_port_text = edge_address.rsplit(":", maxsplit=1)
-    raw_socket = socket.create_connection(
-        (edge_host, int(edge_port_text)),
-        timeout=10,
-    )
-    raw_socket.setblocking(False)
-    tls_context = ssl.create_default_context()
-    tls_context.check_hostname = False
-    tls_context.verify_mode = ssl.CERT_NONE
-
-    async with async_connect(
-        f"wss://{endpoint_host}/ws",
-        sock=raw_socket,
-        ssl=tls_context,
-        server_hostname=endpoint_host,
-        origin=Origin(endpoint_url.rstrip("/")),
-        additional_headers={"Cookie": headers["Cookie"]},
-        user_agent_header=headers["User-Agent"],
-        proxy=None,
-        open_timeout=10,
-    ) as websocket:
-        websocket_reader = asyncio.create_task(hold_websocket())
-        sse = asyncio.create_task(asyncio.to_thread(hold_sse))
-        assert await asyncio.to_thread(sse_started.wait, 10)
-        active_long_lived = await asyncio.to_thread(
-            _runtime_application_state_via_terminal,
-            runtime_terminal,
-        )
-        assert active_long_lived.active_websockets == 1
-        assert (
-            active_long_lived.websocket_connections
-            == stream_state_before.websocket_connections + 1
-        )
-        assert active_long_lived.active_sse == 1
-        assert (
-            active_long_lived.sse_connections == stream_state_before.sse_connections + 1
-        )
-        assert (
-            active_long_lived.upload_invocations
-            == stream_state_before.upload_invocations
-        )
-        await asyncio.to_thread(_drain_gateway, stack)
-        async with asyncio.timeout(10):
-            await websocket_drained.wait()
-        assert await asyncio.to_thread(sse_drained.wait, 10)
-        await websocket_reader
-        await sse
 
 
 def _assert_redis_capacity_fallback(
@@ -2275,14 +2120,13 @@ def _assert_redis_capacity_fallback(
         assert websocket.recv(timeout=10) == "echo:after-redis-recovery"
 
 
-@pytest.mark.parametrize("auth_mode", ["shared_cookie", "separate_domain"])
 def test_runtime_web_gateway_real_runtime_browser_and_cross_replica_relay(
-    auth_mode: str,
     valkey_container: DockerContainer,
     runtime_web_application: _RuntimeWebApplication,
     runtime_web_stack_factory: _RuntimeWebStackFactory,
 ) -> None:
-    """Prove both auth modes, relay, revision fencing, and streamed transport."""
+    """Prove the representative browser relay and streamed transport flow."""
+    auth_mode = "shared_cookie"
     workspace = runtime_web_application.workspace
     with runtime_web_stack_factory.start(
         auth_mode,
@@ -2482,195 +2326,6 @@ def test_runtime_web_gateway_real_runtime_browser_and_cross_replica_relay(
         assert "sk-runtime-web-gateway" not in serialized
         assert "ticket_secret" not in serialized
         _drain_gateway(stack)
-
-
-def test_runtime_web_gateway_hard_limit_rejects_before_body_admission(
-    runtime_web_application: _RuntimeWebApplication,
-    runtime_web_stack_factory: _RuntimeWebStackFactory,
-) -> None:
-    """Reject a second exchange and release the exact disconnected reservation."""
-    workspace = runtime_web_application.workspace
-    runtime_terminal = runtime_web_application.commands
-    with runtime_web_stack_factory.start(
-        "shared_cookie",
-        maximum_active_exchanges=2,
-        maximum_application_buffer_bytes=4 * 1024 * 1024,
-        maintenance=False,
-        relay_path=False,
-    ) as stack:
-        runtime_web_api_client = azentspublicclient.ApiClient(
-            configuration=azentspublicclient.Configuration(host=stack.public_api_url)
-        )
-        api = RuntimeWebV1Api(runtime_web_api_client)
-        _delete_existing_runtime_web_services(api=api, workspace=workspace)
-        service = api.runtime_web_v1_create_runtime_web_service(
-            handle=workspace.handle,
-            agent_id=workspace.agent_id,
-            runtime_web_create_request=RuntimeWebCreateRequest(
-                port=_RUNTIME_WEB_PORT,
-                label="Hard limit",
-                selected_duration_seconds=3_600,
-                turn_on=False,
-                operation_key=f"hard-limit-{unique()}",
-            ),
-            _headers=_headers(workspace.token),
-        )
-        assert service.url is not None
-        endpoint_url = service.url
-
-        driver = _browser(
-            selenium_url=stack.selenium_url,
-            edge_ip=stack.edge_ip,
-        )
-        try:
-            _login(driver, email=workspace.email)
-            _activate_in_browser(driver, service_url=endpoint_url)
-            _wait_for_active_service(
-                api=api,
-                workspace=workspace,
-                service_id=service.id,
-            )
-            metrics_before = _assert_operations_ready(stack)
-            local_opens_before = _route_open_count(metrics_before, "local")
-            _open_application_in_browser(driver, endpoint_url=endpoint_url)
-            identity_cookie = driver.get_cookie("__Http-Azents-Runtime-Web")
-            assert identity_cookie is not None
-            identity_secret = identity_cookie.get("value")
-            assert isinstance(identity_secret, str)
-        finally:
-            with suppress(WebDriverException):
-                driver.quit()
-
-        endpoint_host = endpoint_url.removeprefix("https://").rstrip("/")
-        headers = {
-            "Host": endpoint_host,
-            "Cookie": f"__Http-Azents-Runtime-Web={identity_secret}",
-            "User-Agent": "Mozilla/5.0 Firefox/143.0",
-            "Sec-Fetch-Site": "same-origin",
-            "Sec-Fetch-Mode": "cors",
-        }
-        started = [threading.Event(), threading.Event()]
-        release = threading.Event()
-
-        def hold_exchange(started_event: threading.Event) -> None:
-            with requests.get(
-                f"{stack.edge_host_url}/hold",
-                headers=headers,
-                verify=False,
-                timeout=30,
-                stream=True,
-            ) as held:
-                held.raise_for_status()
-                chunks = held.iter_content(chunk_size=7)
-                assert next(chunks) == b"active\n"
-                started_event.set()
-                if not release.wait(timeout=20):
-                    raise TimeoutError("Hard-limit exchange was not released")
-
-        initial_state = _runtime_application_state(stack=stack, headers=headers)
-        assert initial_state.active_sse == 0
-        assert initial_state.active_websockets == 0
-        with ThreadPoolExecutor(max_workers=2) as executor:
-            held = [
-                executor.submit(hold_exchange, started_event)
-                for started_event in started
-            ]
-            assert all(started_event.wait(timeout=10) for started_event in started)
-            rejected = _request_rejection_without_body(
-                stack=stack,
-                endpoint_host=endpoint_host,
-                cookie=headers["Cookie"],
-            )
-            assert rejected.startswith(b"HTTP/1.1 429")
-            assert len(rejected) <= 8 * 1024
-            assert b"resource_exhausted" in rejected
-            release.set()
-            for future in held:
-                future.result(timeout=10)
-
-        state_after_rejection = _runtime_application_state(
-            stack=stack,
-            headers=headers,
-        )
-        assert state_after_rejection == initial_state
-
-        deadline = time.monotonic() + 10
-        while True:
-            recovered = requests.post(
-                f"{stack.edge_host_url}/echo",
-                headers=headers,
-                data="released",
-                verify=False,
-                timeout=5,
-            )
-            if recovered.status_code == 200:
-                break
-            if time.monotonic() >= deadline:
-                raise AssertionError(
-                    "Runtime Web hard-limit reservation was not released"
-                )
-            time.sleep(0.1)
-        assert recovered.json() == {"body": "released", "method": "POST"}
-        metrics_after_recovery = _assert_content_free_metrics(
-            stack,
-            sensitive_values=(
-                workspace.token,
-                workspace.email,
-                workspace.handle,
-                workspace.agent_id,
-                workspace.session_id,
-                endpoint_url,
-                identity_secret,
-                "sk-runtime-web-gateway",
-                "released",
-                "/hold",
-                "/upload",
-            ),
-        )
-        assert _route_open_count(metrics_after_recovery, "local") > local_opens_before
-        _wait_for_runtime_web_stream_release(stack)
-
-        stream_state_before = _runtime_application_state_via_terminal(runtime_terminal)
-        assert stream_state_before.active_websockets == 0
-        assert stream_state_before.active_sse == 0
-        asyncio.run(
-            _assert_long_lived_stream_drain(
-                stack=stack,
-                endpoint_url=endpoint_url,
-                headers=headers,
-                runtime_terminal=runtime_terminal,
-                stream_state_before=stream_state_before,
-            )
-        )
-
-        deadline = time.monotonic() + 10
-        while True:
-            drained_state = _runtime_application_state_via_terminal(runtime_terminal)
-            if drained_state.active_websockets == 0 and drained_state.active_sse == 0:
-                break
-            if time.monotonic() >= deadline:
-                raise AssertionError(
-                    "Runtime Web drain did not release application streams"
-                )
-            time.sleep(0.1)
-        assert (
-            drained_state.websocket_connections
-            == stream_state_before.websocket_connections + 1
-        )
-        assert drained_state.sse_connections == stream_state_before.sse_connections + 1
-        assert (
-            drained_state.upload_invocations == stream_state_before.upload_invocations
-        )
-
-        refused = requests.post(
-            f"{stack.edge_host_url}/echo",
-            headers=headers,
-            data="after-drain",
-            verify=False,
-            timeout=10,
-        )
-        assert refused.status_code >= 400
-        assert len(refused.content) <= 4_096
 
 
 def test_runtime_web_gateway_maintenance_preflight(

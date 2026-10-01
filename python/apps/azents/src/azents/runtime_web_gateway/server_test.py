@@ -38,6 +38,7 @@ from azents.runtime_web_gateway.operations import (
     RuntimeWebCapacityBackend,
     RuntimeWebDrainCoordinator,
     RuntimeWebDrainPolicy,
+    RuntimeWebDrainStreamKind,
     RuntimeWebGatewayHardLimits,
     RuntimeWebGatewayHealth,
     RuntimeWebGatewayOperationalState,
@@ -235,6 +236,20 @@ class _WebSocketAuthority(_Authority):
     ) -> bool:
         assert authority is self.value
         return True
+
+
+class _HttpAuthority(_WebSocketAuthority):
+    async def authorize(
+        self,
+        *,
+        hostname_key: str,
+        identity_secret: str,
+        protocol: StreamProtocol,
+    ) -> RuntimeWebGatewayAuthority:
+        assert hostname_key == "endpoint"
+        assert identity_secret == "opaque-secret"
+        assert protocol is StreamProtocol.HTTP
+        return self.value
 
 
 class _WebSocketTransport:
@@ -553,6 +568,72 @@ async def test_local_hard_pressure_rejects_before_authority_lookup() -> None:
         assert response.status == 429
         assert (await response.json())["code"] == CloseReason.RESOURCE_EXHAUSTED.value
     finally:
+        await client.close()
+
+
+async def test_active_exchange_limit_rejects_before_request_body_admission() -> None:
+    control_sessions = _ControlSessions()
+    operations, operational_state = _operations()
+    application = create_runtime_web_gateway_application(
+        config=_CONFIG,
+        settings=_SETTINGS,
+        auth=_Auth(),
+        authority=_HttpAuthority(),
+        control_sessions=control_sessions,
+        operations=operations,
+        operational_state=operational_state,
+    )
+    client = TestClient(TestServer(application))
+    await client.start_server()
+    registrations = []
+    reader: asyncio.StreamReader | None = None
+    writer: asyncio.StreamWriter | None = None
+    try:
+        for _ in range(4):
+            registration = await operations.drain_coordinator.register(
+                kind=RuntimeWebDrainStreamKind.FINITE_HTTP,
+                request_graceful_close=_ignore_drain,
+                force_close=_ignore_drain,
+            )
+            assert registration is not None
+            registrations.append(registration)
+
+        server_port = client.server.port
+        assert server_port is not None
+        reader, writer = await asyncio.open_connection("127.0.0.1", server_port)
+        writer.write(
+            b"POST /upload HTTP/1.1\r\n"
+            b"Host: endpoint.services.example.net\r\n"
+            b"Cookie: __Http-Azents-Runtime-Web=opaque-secret\r\n"
+            b"Content-Length: 1048576\r\n"
+            b"Content-Type: application/octet-stream\r\n"
+            b"Connection: close\r\n"
+            b"\r\n"
+        )
+        await writer.drain()
+
+        response_head = await asyncio.wait_for(
+            reader.readuntil(b"\r\n\r\n"),
+            timeout=1,
+        )
+        assert response_head.startswith(b"HTTP/1.1 429")
+        content_length_line = next(
+            line
+            for line in response_head.split(b"\r\n")
+            if line.lower().startswith(b"content-length:")
+        )
+        content_length = int(content_length_line.split(b":", maxsplit=1)[1])
+        response_body = await asyncio.wait_for(
+            reader.readexactly(content_length),
+            timeout=1,
+        )
+        assert b"resource_exhausted" in response_body
+    finally:
+        if writer is not None:
+            writer.close()
+            await writer.wait_closed()
+        for registration in registrations:
+            await operations.drain_coordinator.release(registration)
         await client.close()
 
 
