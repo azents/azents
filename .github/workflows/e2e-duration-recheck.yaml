@@ -1,0 +1,55 @@
+name: E2E duration reevaluation
+
+on:
+  pull_request_target:
+    types: [edited]
+  schedule:
+    - cron: "*/15 * * * *"
+
+permissions:
+  contents: read
+  actions: read
+  pull-requests: read
+  statuses: write
+
+jobs:
+  recheck:
+    if: >-
+      github.event_name == 'schedule'
+      || github.event.changes.base != null
+    runs-on: ubuntu-latest
+    steps:
+      - name: Load trusted gate helper
+        id: helper
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          branch="$(gh api "repos/${GITHUB_REPOSITORY}" --jq .default_branch)"
+          sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${branch}" --jq .object.sha)"
+          mkdir -p trusted/support
+          if ! gh api "repos/${GITHUB_REPOSITORY}/contents/testenv/azents/e2e/src/support/ci_duration_gate.py" \
+            --method GET \
+            --raw-field ref="$sha" \
+            --jq .content \
+            | base64 --decode \
+            > trusted/support/ci_duration_gate.py; then
+            echo 'ready=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo 'ready=true' >> "$GITHUB_OUTPUT"
+      - name: Reevaluate affected pull requests
+        if: steps.helper.outputs.ready == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = 'pull_request_target' ]; then
+            numbers='${{ github.event.pull_request.number }}'
+          else
+            numbers="$(gh api "repos/${GITHUB_REPOSITORY}/pulls?state=open&per_page=100" --jq '.[].number')"
+          fi
+          for number in $numbers; do
+            PYTHONPATH=trusted python -m support.ci_duration_gate recheck \
+              --repository "$GITHUB_REPOSITORY" \
+              --pull-number "$number" \
+              --work-dir "${RUNNER_TEMP}/e2e-duration-${number}"
+          done
