@@ -43,8 +43,14 @@ from azents.repos.agent_execution.data import AgentRunCreate, EventCreate
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSessionCreate
 from azents.repos.agent_session.repository_test import _create_agent, _create_workspace
+from azents.repos.compaction_operation import CompactionOperationRepository
+from azents.repos.model_candidate_health import ModelCandidateHealthRepository
+from azents.repos.model_operation_completion import (
+    ModelOperationCompletionRepository,
+)
 from azents.repos.session_execution import CanonicalExecutionOwnerGenerationStaleError
 from azents.repos.session_execution.ownership import OwnerBoundSessionManager
+from azents.repos.toolkit_state.engine import ToolWorkingSetStore
 from azents.testing.model_stream import make_test_model_stream_watchdog
 
 
@@ -303,9 +309,25 @@ async def test_old_compaction_summary_cannot_move_new_owner_input_head(
         return "This summary was generated under an obsolete owner."
 
     compactor = EventCompactor(
-        session_manager=rdb_session_manager,
-        transcript_repo=EventTranscriptRepository(),
-        session_repo=AgentSessionRepository(),
+        operation_repository=CompactionOperationRepository(
+            session_manager=rdb_session_manager,
+            transcript_repository=EventTranscriptRepository(),
+            agent_session_repository=AgentSessionRepository(),
+            model_operation_completion_repository=(
+                ModelOperationCompletionRepository(
+                    agent_session_repository=AgentSessionRepository(),
+                    agent_run_repository=AgentRunRepository(),
+                    model_candidate_health_repository=(
+                        ModelCandidateHealthRepository(
+                            session_manager=rdb_session_manager
+                        )
+                    ),
+                )
+            ),
+            tool_working_set_store=ToolWorkingSetStore(
+                session_manager=rdb_session_manager
+            ),
+        ),
     ).with_session_manager(state.owner)
     task = asyncio.create_task(
         compactor.compact(

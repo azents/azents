@@ -19,14 +19,11 @@ from azents.engine.events.external_channel_rendering import (
 from azents.engine.events.file_parts import file_output_part_placeholder_text
 from azents.engine.events.output_parts import iter_output_parts
 from azents.engine.events.protocols import (
-    CompactionCommitAction,
-    EventAppendRepository,
     EventPayloadRepository,
     ManualCompactor,
     NativeRequestInspection,
     PostLowerFilter,
     PreLowerFilter,
-    SessionHeadMoveRepository,
     SummaryEnricher,
     SummaryGenerator,
 )
@@ -47,7 +44,6 @@ from azents.engine.events.types import (
     AttachmentOutputPart,
     ClientToolCallPayload,
     ClientToolResultPayload,
-    CompactionMarkerPayload,
     CompactionSummaryPayload,
     Event,
     EventPayload,
@@ -69,11 +65,12 @@ from azents.engine.events.types import (
     UserMessagePayload,
 )
 from azents.engine.run.errors import CompactionFailedError, CompactionPlanStaleError
-from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent_execution import EventTranscriptRepository
-from azents.repos.agent_execution.data import EventCreate
-from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.compaction_operation import (
+    CompactionCommitContext,
+    CompactionOperationRepository,
+)
 from azents.repos.exchange_file import ExchangeFileRepository
 from azents.repos.model_file import ModelFileRepository
 
@@ -265,7 +262,7 @@ class EventAutoCompactionFilter:
         compaction_id_factory: Callable[[], str],
         on_compaction_started: Callable[[], Awaitable[None]] | None = None,
         summary_enricher: SummaryEnricher | None = None,
-        on_committing: CompactionCommitAction | None = None,
+        commit_context: CompactionCommitContext | None = None,
     ) -> None:
         self._session_id = session_id
         self.compactor = compactor
@@ -284,7 +281,7 @@ class EventAutoCompactionFilter:
         self.compaction_id_factory = compaction_id_factory
         self.on_compaction_started = on_compaction_started
         self.summary_enricher = summary_enricher
-        self.on_committing = on_committing
+        self.commit_context = commit_context
         self.was_compacted = False
 
     async def compact(
@@ -314,7 +311,7 @@ class EventAutoCompactionFilter:
             summary_context_window_tokens=self._max_input_tokens,
             reason="auto_threshold_exceeded",
             summary_enricher=self.summary_enricher,
-            on_committing=self.on_committing,
+            commit_context=self.commit_context,
         )
         if summary is None:
             return events
@@ -358,21 +355,22 @@ class PostLowerFilterPipeline[TNativeRequest]:
 class EventCompactor:
     """Append-only event transcript compactor."""
 
-    session_manager: Annotated[
-        SessionManager[AsyncSession],
-        Depends(get_session_manager),
+    operation_repository: Annotated[
+        CompactionOperationRepository,
+        Depends(CompactionOperationRepository),
     ]
-    transcript_repo: Annotated[
-        EventAppendRepository, Depends(EventTranscriptRepository)
-    ]
-    session_repo: Annotated[SessionHeadMoveRepository, Depends(AgentSessionRepository)]
     summary_context_window_tokens: int | None = None
 
     def with_session_manager(
         self, session_manager: SessionManager[AsyncSession]
     ) -> "EventCompactor":
         """Return an execution-local compactor without changing shared state."""
-        return dataclasses.replace(self, session_manager=session_manager)
+        return dataclasses.replace(
+            self,
+            operation_repository=self.operation_repository.with_session_manager(
+                session_manager
+            ),
+        )
 
     async def compact(
         self,
@@ -385,18 +383,14 @@ class EventCompactor:
         summary_context_window_tokens: int | Callable[[], int] | None = None,
         reason: str | None = None,
         summary_enricher: SummaryEnricher | None = None,
-        on_committing: CompactionCommitAction | None = None,
+        commit_context: CompactionCommitContext | None = None,
     ) -> Event | None:
         """Append one successful summary and commit related state atomically."""
         old_events = list(transcript)
         if not old_events:
             return None
 
-        async with self.session_manager() as session:
-            session_state = await self.session_repo.get_by_id(session, session_id)
-        if session_state is None:
-            raise ValueError("AgentSession not found")
-        expected_head_event_id = session_state.model_input_head_event_id
+        plan = await self.operation_repository.prepare(session_id=session_id)
         expected_tail_event_id = old_events[-1].id
 
         if on_started is not None:
@@ -436,49 +430,19 @@ class EventCompactor:
             summary,
             continuity_history,
         )
-        async with self.session_manager() as session:
-            current = await self.session_repo.lock_compaction_plan_if_current(
-                session,
-                session_id=session_id,
-                expected_head_event_id=expected_head_event_id,
-                expected_tail_event_id=expected_tail_event_id,
+        summary_event = await self.operation_repository.finalize(
+            session_id=session_id,
+            plan=plan,
+            expected_tail_event_id=expected_tail_event_id,
+            compaction_id=compaction_id,
+            content=summary_with_continuity,
+            reason=reason,
+            commit_context=commit_context,
+        )
+        if summary_event is None:
+            raise CompactionPlanStaleError(
+                "Compaction plan no longer matches the model-input boundaries."
             )
-            if not current:
-                raise CompactionPlanStaleError(
-                    "Compaction plan no longer matches the model-input boundaries."
-                )
-            await self.transcript_repo.append(
-                session,
-                EventCreate(
-                    session_id=session_id,
-                    kind=EventKind.COMPACTION_MARKER,
-                    payload=CompactionMarkerPayload(
-                        compaction_id=compaction_id,
-                        status="started",
-                        reason=reason,
-                    ).model_dump(mode="json", exclude_none=True),
-                ),
-            )
-            summary_event = await self.transcript_repo.append(
-                session,
-                EventCreate(
-                    session_id=session_id,
-                    kind=EventKind.COMPACTION_SUMMARY,
-                    payload=CompactionSummaryPayload(
-                        compaction_id=compaction_id,
-                        content=summary_with_continuity,
-                        covered_until_event_id=old_events[-1].id,
-                        reason=reason,
-                    ).model_dump(mode="json", exclude_none=True),
-                ),
-            )
-            await self.session_repo.move_model_input_head(
-                session,
-                session_id,
-                summary_event.id,
-            )
-            if on_committing is not None:
-                await on_committing(session)
         return summary_event
 
 

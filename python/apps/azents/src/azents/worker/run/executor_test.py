@@ -910,6 +910,14 @@ class _AgentSessionRepository:
             owner_generation=self.owner_generation,
         )
 
+    async def wait_for_execution_lock_by_id(
+        self,
+        session: AsyncSession,
+        agent_session_id: str,
+    ) -> AgentSession:
+        """Return the configured Session under execution admission."""
+        return await self.lock_by_id(session, agent_session_id)
+
     async def set_inference_state(
         self,
         session: AsyncSession,

@@ -20,6 +20,8 @@ code_paths:
   - python/apps/azents/src/azents/core/engine_tool_state.py
   - python/apps/azents/src/azents/repos/goal/**
   - python/apps/azents/src/azents/repos/toolkit_state/**
+  - python/apps/azents/src/azents/repos/compaction_operation.py
+  - python/apps/azents/src/azents/repos/model_operation_completion.py
   - python/apps/azents/src/azents/engine/tools/scheduled.py
   - python/apps/azents/src/azents/repos/scheduled_task_cycle/**
   - python/apps/azents/src/azents/repos/model_candidate_health/**
@@ -31,7 +33,7 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/agent_run.py
   - python/apps/azents/src/azents/rdb/models/agent.py
 last_verified_at: 2026-10-01
-spec_version: 43
+spec_version: 44
 ---
 
 # Context Compaction
@@ -63,13 +65,18 @@ back to estimating the full selected transcript.
 
 When compaction is required:
 
-1. Select the full ID-ordered model-input transcript and capture its current head and tail event IDs.
+1. Select the full ID-ordered model-input transcript and capture its current
+   head and tail event IDs through a completed repository-owned planning
+   operation.
 2. Publish the Run-scoped live operation `preparing_context` and dispatch the compaction-start lifecycle hook. The external model and hook calls run outside compactor-owned database sessions and hold no active transaction or session-row lock used for event ordering.
 3. Generate the summary through the provider-specific adapter. Provider failures propagate through the common bounded `ModelProviderFailure` contract to the owning Run controller.
 4. Render bounded continuity history from the selected transcript, but keep it separate from the generated summary.
 5. Dispatch the compaction summary enrichment hook pipeline with the generated summary and rendered continuity history.
 6. Append the continuity history after the enriched summary.
-7. In one short database transaction, lock the Session and revalidate both captured boundaries. A changed head or latest non-reverted event ID makes the plan stale and writes no compaction event.
+7. A completed repository-owned finalization operation opens one short database
+   transaction, locks the Session, and revalidates both captured boundaries. A
+   changed head or latest non-reverted event ID makes the plan stale and writes
+   no compaction event.
 8. For a current plan, append adjacent `compaction_marker(status=started)` and `compaction_summary` events with the same `compaction_id` and reason at the physical transcript tail. The summary payload contains the enriched checkpoint followed by bounded `Recent User Messages` and `Recent Transcript` sections.
 9. Move `agent_sessions.model_input_head_event_id` to the summary event, replace the Session's `tool_search/working_set.tool_names` with an empty list, and commit the same transaction. The Tool Search reset applies even when the Agent currently has Tool Search disabled; other Toolkit State identities are unchanged.
 10. Remove the live operation after success, Stop, cancellation, or terminal failure. A skipped, failed, cancelled, or stale attempt appends no compaction marker or summary, does not move the model-input head, and does not reset the Tool Search working set.
@@ -307,6 +314,10 @@ terminalizes.
 
 ## Changelog
 
+- **2026-10-01** (spec_version 44) — Moved compaction plan capture and atomic
+  marker/summary/head, model-operation success, and Tool Search reset
+  finalization into completed repository-owned operations. Summary generation
+  and enrichment remain outside database transactions.
 - **2026-10-01** (spec_version 43) — Moved Tool Search working-set persistence
   into repository-owned operations while retaining the compaction-composed clear
   in the same summary/head transaction.

@@ -82,6 +82,13 @@ commit. Object upload and compensation delete remain outside database
 transactions. Engine execution and compactor/filter ownership remain later
 phases.
 
+Phase 23 moves compaction plan capture and atomic summary finalization into
+completed repository operations. Summary generation and enrichment remain
+between transactions, while stale-plan revalidation, marker/summary append,
+model-input-head movement, compaction model-operation success, and Tool Search
+working-set clearing remain one atomic database operation. Engine execution
+ownership remains a later phase.
+
 ## Delivery Boundaries
 
 1. Correct the title-generation and ChatGPT OAuth persistence boundary as one

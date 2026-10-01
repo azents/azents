@@ -39,14 +39,12 @@ from azents.core.inference_profile import (
     validate_requested_profile_against_options,
 )
 from azents.core.model_operation import (
-    ModelOperationCandidateOutcomeStatus,
     ModelOperationChainExhaustedError,
     ModelOperationKind,
     ModelOperationSnapshot,
     ModelOperationState,
     build_model_operation,
     mark_current_candidate_quota_and_advance,
-    mark_model_operation_succeeded,
 )
 from azents.core.runtime_capabilities import (
     RuntimeCapability,
@@ -177,6 +175,10 @@ from azents.repos.llm_provider_integration.deps import (
 )
 from azents.repos.model_candidate_health import ModelCandidateHealthRepository
 from azents.repos.model_candidate_health.data import ModelCandidateIdentity
+from azents.repos.model_operation_completion import (
+    ModelOperationCompletion,
+    ModelOperationCompletionRepository,
+)
 from azents.repos.toolkit import ToolkitRepository
 from azents.runtime.types import RuntimeDomainConfig
 from azents.services.agent_wait import AgentWaitService
@@ -2952,66 +2954,19 @@ class RunExecutor:
         operation_kind: ModelOperationKind,
     ) -> None:
         """Settle operation success inside the caller's output transaction."""
-        await self.session_lifecycle.assert_owner_generation(
+        await ModelOperationCompletionRepository(
+            agent_session_repository=self.agent_session_repository,
+            agent_run_repository=self.session_lifecycle.agent_run_repository,
+            model_candidate_health_repository=(self.model_candidate_health_repository),
+        ).complete_success_in_session(
             session,
-            session_id=session_id,
-            owner_generation=owner_generation,
-        )
-        locked_run = await self.session_lifecycle.agent_run_repository.lock_by_id(
-            session,
-            run_id,
-        )
-        if locked_run is None or locked_run.model_operation_state is None:
-            return
-        state = locked_run.model_operation_state
-        operation = (
-            state.foreground
-            if operation_kind is ModelOperationKind.FOREGROUND
-            else state.compaction
-        )
-        if operation is None or operation.terminal_reason is not None:
-            return
-        current_outcome = operation.outcomes[operation.cursor]
-        if current_outcome.status is not ModelOperationCandidateOutcomeStatus.ACTIVE:
-            return
-        claim = operation.transferred_probe_claim
-        if claim is not None:
-            candidate = operation.current_candidate
-            selection = candidate.model_selection
-            complete_probe = (
-                self.model_candidate_health_repository.complete_probe_success_in_session
-            )
-            await complete_probe(
-                session,
-                ModelCandidateIdentity(
-                    workspace_id=workspace_id,
-                    llm_provider_integration_id=(selection.llm_provider_integration_id),
-                    model_identifier=selection.model_identifier,
-                ),
-                expected_generation=claim.health_generation,
-                expected_owner_id=claim.claim_owner_id,
-                expected_claim_token=claim.claim_token,
-            )
-        succeeded = mark_model_operation_succeeded(
-            operation,
-            recorded_at=datetime.datetime.now(datetime.UTC),
-        )
-        next_state = ModelOperationState(
-            foreground=(
-                succeeded
-                if operation_kind is ModelOperationKind.FOREGROUND
-                else state.foreground
+            ModelOperationCompletion(
+                workspace_id=workspace_id,
+                session_id=session_id,
+                run_id=run_id,
+                owner_generation=owner_generation,
+                operation_kind=operation_kind,
             ),
-            compaction=(
-                None
-                if operation_kind is ModelOperationKind.COMPACTION
-                else state.compaction
-            ),
-        )
-        await self.session_lifecycle.agent_run_repository.update(
-            session,
-            run_id,
-            AgentRunPatch(model_operation_state=next_state),
         )
 
     async def _capture_compaction_context(

@@ -64,6 +64,12 @@ from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepo
 from azents.repos.agent_execution.data import AgentRunCreate, AgentRunPatch, EventCreate
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSessionCreate
+from azents.repos.compaction_operation import CompactionOperationRepository
+from azents.repos.model_candidate_health import ModelCandidateHealthRepository
+from azents.repos.model_operation_completion import (
+    ModelOperationCompletionRepository,
+)
+from azents.repos.toolkit_state.engine import ToolWorkingSetStore
 from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace.data import WorkspaceCreate
 from azents.testing.model_selection import (
@@ -902,9 +908,25 @@ class TestEventExecutionRepositories:
 
         with pytest.raises(CompactionPlanStaleError):
             await EventCompactor(
-                session_manager=session_manager,
-                transcript_repo=transcript_repo,
-                session_repo=session_repo,
+                operation_repository=CompactionOperationRepository(
+                    session_manager=session_manager,
+                    transcript_repository=transcript_repo,
+                    agent_session_repository=session_repo,
+                    model_operation_completion_repository=(
+                        ModelOperationCompletionRepository(
+                            agent_session_repository=session_repo,
+                            agent_run_repository=AgentRunRepository(),
+                            model_candidate_health_repository=(
+                                ModelCandidateHealthRepository(
+                                    session_manager=session_manager
+                                )
+                            ),
+                        )
+                    ),
+                    tool_working_set_store=ToolWorkingSetStore(
+                        session_manager=session_manager
+                    ),
+                ),
             ).compact(
                 session_id=event_session.id,
                 transcript=[first],

@@ -10,6 +10,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import azents.engine.events.filters as filters
+from azents.core.engine_tool_state import ToolWorkingSetState
 from azents.core.enums import (
     EventKind,
     ExchangeFileStatus,
@@ -52,6 +53,12 @@ from azents.engine.events.types import (
 )
 from azents.engine.run.errors import CompactionFailedError, CompactionPlanStaleError
 from azents.repos.agent_execution.data import EventCreate
+from azents.repos.compaction_operation import (
+    CompactionCommitContext,
+    CompactionOperationRepository,
+)
+from azents.repos.model_operation_completion import ModelOperationCompletion
+from azents.repos.toolkit_state.engine import ToolWorkingSetStore
 from azents.testing.types import is_string_object_dict
 
 
@@ -182,18 +189,92 @@ class _SessionRepo:
         return object()
 
 
+class _ModelOperationCompletionRepo:
+    """Record model-operation completion inside compaction finalization."""
+
+    def __init__(
+        self,
+        *,
+        session_manager: _SessionManager,
+        session_repo: _SessionRepo,
+        error: Exception | None = None,
+    ) -> None:
+        self.session_manager = session_manager
+        self.session_repo = session_repo
+        self.error = error
+        self.completions: list[tuple[AsyncSession, ModelOperationCompletion]] = []
+
+    async def complete_success_in_session(
+        self,
+        session: AsyncSession,
+        completion: ModelOperationCompletion,
+    ) -> None:
+        """Record completion after the model-input head moves and before commit."""
+        assert session is self.session_manager.sessions[-1]
+        assert self.session_repo.model_input_head_event_id is not None
+        assert self.session_manager.sessions[-1].commit_count == 0
+        if self.error is not None:
+            raise self.error
+        self.completions.append((session, completion))
+
+
+class _ToolWorkingSetStore(ToolWorkingSetStore):
+    """Record Tool Search clearing inside compaction finalization."""
+
+    def __init__(self, *, session_manager: _SessionManager) -> None:
+        super().__init__(session_manager=session_manager)
+        self.tracked_session_manager = session_manager
+        self.cleared: list[tuple[AsyncSession, str, str]] = []
+
+    def with_session_manager(
+        self,
+        session_manager: object,
+    ) -> "_ToolWorkingSetStore":
+        """Keep the focused store bound to its tracked manager."""
+        del session_manager
+        return self
+
+    async def clear_in_session(
+        self,
+        session: AsyncSession,
+        agent_id: str,
+        session_id: str,
+    ) -> ToolWorkingSetState:
+        """Record the clear before the final commit."""
+        assert session is self.tracked_session_manager.sessions[-1]
+        assert self.tracked_session_manager.sessions[-1].commit_count == 0
+        self.cleared.append((session, agent_id, session_id))
+        return ToolWorkingSetState()
+
+
 def _compactor(
     *,
     transcript_repo: _TranscriptRepo,
     session_repo: _SessionRepo,
     session_manager: _SessionManager | None = None,
+    model_operation_completion_repo: _ModelOperationCompletionRepo | None = None,
+    tool_working_set_store: _ToolWorkingSetStore | None = None,
 ) -> EventCompactor:
     """Create an EventCompactor with tracked short session scopes."""
+    resolved_session_manager = session_manager or _SessionManager()
     session_repo.events = transcript_repo.events
     return EventCompactor(
-        session_manager=session_manager or _SessionManager(),
-        transcript_repo=transcript_repo,
-        session_repo=session_repo,
+        operation_repository=CompactionOperationRepository(
+            session_manager=resolved_session_manager,
+            transcript_repository=transcript_repo,
+            agent_session_repository=session_repo,
+            model_operation_completion_repository=(
+                model_operation_completion_repo
+                or _ModelOperationCompletionRepo(
+                    session_manager=resolved_session_manager,
+                    session_repo=session_repo,
+                )
+            ),
+            tool_working_set_store=(
+                tool_working_set_store
+                or _ToolWorkingSetStore(session_manager=resolved_session_manager)
+            ),
+        ),
     )
 
 
@@ -985,7 +1066,7 @@ async def test_compactor_summary_enricher_runs_before_continuity_append() -> Non
     )
 
 
-async def test_compactor_runs_commit_action_after_head_move_before_commit() -> None:
+async def test_compactor_commits_run_state_after_head_move_before_commit() -> None:
     events = [
         _event(
             "1",
@@ -996,7 +1077,11 @@ async def test_compactor_runs_commit_action_after_head_move_before_commit() -> N
     transcript_repo = _TranscriptRepo(events)
     session_repo = _SessionRepo()
     session_manager = _SessionManager()
-    commit_action_sessions: list[AsyncSession] = []
+    completion_repo = _ModelOperationCompletionRepo(
+        session_manager=session_manager,
+        session_repo=session_repo,
+    )
+    working_set_store = _ToolWorkingSetStore(session_manager=session_manager)
 
     async def summarize(
         old_events: Sequence[Event],
@@ -1005,30 +1090,37 @@ async def test_compactor_runs_commit_action_after_head_move_before_commit() -> N
         del old_events, summary_budget
         return "summary"
 
-    async def on_committing(session: AsyncSession) -> None:
-        assert session is session_manager.sessions[-1]
-        assert session_repo.model_input_head_event_id is not None
-        assert session_manager.sessions[-1].commit_count == 0
-        commit_action_sessions.append(session)
-
     summary = await _compactor(
         session_manager=session_manager,
         transcript_repo=transcript_repo,
         session_repo=session_repo,
+        model_operation_completion_repo=completion_repo,
+        tool_working_set_store=working_set_store,
     ).compact(
         session_id="session-1",
         transcript=events,
         compaction_id="compact-1",
         summarize=summarize,
-        on_committing=on_committing,
+        commit_context=CompactionCommitContext(
+            workspace_id="workspace-1",
+            agent_id="agent-1",
+            run_id="run-1",
+            owner_generation=1,
+            settle_model_operation=True,
+        ),
     )
 
     assert summary is not None
-    assert commit_action_sessions == [session_manager.sessions[-1]]
+    assert [item[0] for item in completion_repo.completions] == [
+        session_manager.sessions[-1]
+    ]
+    assert working_set_store.cleared == [
+        (session_manager.sessions[-1], "agent-1", "session-1")
+    ]
     assert session_manager.sessions[-1].commit_count == 1
 
 
-async def test_compactor_commit_action_failure_prevents_final_commit() -> None:
+async def test_compactor_commit_state_failure_prevents_final_commit() -> None:
     events = [
         _event(
             "1",
@@ -1037,6 +1129,13 @@ async def test_compactor_commit_action_failure_prevents_final_commit() -> None:
         )
     ]
     session_manager = _SessionManager()
+    session_repo = _SessionRepo()
+    completion_repo = _ModelOperationCompletionRepo(
+        session_manager=session_manager,
+        session_repo=session_repo,
+        error=RuntimeError("state reset failed"),
+    )
+    working_set_store = _ToolWorkingSetStore(session_manager=session_manager)
 
     async def summarize(
         old_events: Sequence[Event],
@@ -1045,24 +1144,29 @@ async def test_compactor_commit_action_failure_prevents_final_commit() -> None:
         del old_events, summary_budget
         return "summary"
 
-    async def fail_commit_action(session: AsyncSession) -> None:
-        del session
-        raise RuntimeError("state reset failed")
-
     with pytest.raises(RuntimeError, match="state reset failed"):
         await _compactor(
             session_manager=session_manager,
             transcript_repo=_TranscriptRepo(events),
-            session_repo=_SessionRepo(),
+            session_repo=session_repo,
+            model_operation_completion_repo=completion_repo,
+            tool_working_set_store=working_set_store,
         ).compact(
             session_id="session-1",
             transcript=events,
             compaction_id="compact-1",
             summarize=summarize,
-            on_committing=fail_commit_action,
+            commit_context=CompactionCommitContext(
+                workspace_id="workspace-1",
+                agent_id="agent-1",
+                run_id="run-1",
+                owner_generation=1,
+                settle_model_operation=True,
+            ),
         )
 
     assert session_manager.sessions[-1].commit_count == 0
+    assert working_set_store.cleared == []
 
 
 async def test_compactor_continuity_uses_last_five_completed_turns() -> None:
@@ -1701,7 +1805,18 @@ async def test_auto_compaction_marks_compacted_only_when_summary_is_created() ->
     transcript_repo = _TranscriptRepo(events)
     session_repo = _SessionRepo()
     session_manager = _SessionManager()
-    commit_action_sessions: list[AsyncSession] = []
+    completion_repo = _ModelOperationCompletionRepo(
+        session_manager=session_manager,
+        session_repo=session_repo,
+    )
+    working_set_store = _ToolWorkingSetStore(session_manager=session_manager)
+    commit_context = CompactionCommitContext(
+        workspace_id="workspace-1",
+        agent_id="agent-1",
+        run_id="run-1",
+        owner_generation=1,
+        settle_model_operation=True,
+    )
 
     async def summarize(
         old_events: Sequence[Event],
@@ -1711,27 +1826,29 @@ async def test_auto_compaction_marks_compacted_only_when_summary_is_created() ->
         del old_events, max_output_tokens
         return "summary"
 
-    async def on_committing(session: AsyncSession) -> None:
-        commit_action_sessions.append(session)
-
     filter_ = EventAutoCompactionFilter(
         session_id="session-1",
         compactor=_compactor(
             session_manager=session_manager,
             transcript_repo=transcript_repo,
             session_repo=session_repo,
+            model_operation_completion_repo=completion_repo,
+            tool_working_set_store=working_set_store,
         ),
         summarize=summarize,
         max_input_tokens=10,
         auto_compaction_threshold_tokens=None,
         compaction_id_factory=lambda: "compact-1",
-        on_committing=on_committing,
+        commit_context=commit_context,
     )
 
     await filter_.compact(events)
 
     assert filter_.was_compacted is True
-    assert commit_action_sessions == [session_manager.sessions[-1]]
+    assert len(completion_repo.completions) == 1
+    assert working_set_store.cleared == [
+        (session_manager.sessions[-1], "agent-1", "session-1")
+    ]
 
 
 async def test_auto_compaction_skips_when_threshold_is_not_exceeded() -> None:
@@ -1744,7 +1861,13 @@ async def test_auto_compaction_skips_when_threshold_is_not_exceeded() -> None:
         )
     ]
     transcript_repo = _TranscriptRepo(events)
-    commit_action_sessions: list[AsyncSession] = []
+    session_manager = _SessionManager()
+    session_repo = _SessionRepo()
+    completion_repo = _ModelOperationCompletionRepo(
+        session_manager=session_manager,
+        session_repo=session_repo,
+    )
+    working_set_store = _ToolWorkingSetStore(session_manager=session_manager)
 
     async def summarize(
         old_events: Sequence[Event],
@@ -1754,24 +1877,31 @@ async def test_auto_compaction_skips_when_threshold_is_not_exceeded() -> None:
         del old_events, summary_budget
         raise AssertionError("summarize should not be called")
 
-    async def on_committing(session: AsyncSession) -> None:
-        commit_action_sessions.append(session)
-
     result = await EventAutoCompactionFilter(
         session_id="session-1",
         compactor=_compactor(
+            session_manager=session_manager,
             transcript_repo=transcript_repo,
-            session_repo=_SessionRepo(),
+            session_repo=session_repo,
+            model_operation_completion_repo=completion_repo,
+            tool_working_set_store=working_set_store,
         ),
         summarize=summarize,
         max_input_tokens=1000,
         auto_compaction_threshold_tokens=None,
         compaction_id_factory=lambda: "compact-1",
-        on_committing=on_committing,
+        commit_context=CompactionCommitContext(
+            workspace_id="workspace-1",
+            agent_id="agent-1",
+            run_id="run-1",
+            owner_generation=1,
+            settle_model_operation=True,
+        ),
     ).compact(events)
 
     assert result == events
-    assert commit_action_sessions == []
+    assert completion_repo.completions == []
+    assert working_set_store.cleared == []
 
 
 async def test_auto_compaction_uses_explicit_threshold_override() -> None:

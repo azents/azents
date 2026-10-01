@@ -37,6 +37,7 @@ from azents.repos.agent_execution.data import (
     AgentRunCreate,
     EventCreate,
 )
+from azents.repos.compaction_operation import CompactionCommitContext
 
 
 class NativeRequestInspection(Protocol):
@@ -517,9 +518,6 @@ class SummaryEnricher(Protocol):
         ...
 
 
-CompactionCommitAction: TypeAlias = Callable[[AsyncSession], Awaitable[None]]
-
-
 class ManualCompactor(Protocol):
     """Manual event compaction protocol."""
 
@@ -540,7 +538,7 @@ class ManualCompactor(Protocol):
         summary_context_window_tokens: int | Callable[[], int] | None = None,
         reason: str | None = None,
         summary_enricher: SummaryEnricher | None = None,
-        on_committing: CompactionCommitAction | None = None,
+        commit_context: CompactionCommitContext | None = None,
     ) -> Event | None:
         """Run append-only compaction."""
         ...
