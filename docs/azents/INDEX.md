@@ -15,12 +15,12 @@ Design documents are accumulated records and are not listed individually in this
 
 | Title | Domain | Owner | Last Verified At | Spec Version |
 |---|---|---|---|---|
-| [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-10-01 | 84 |
+| [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-10-01 | 85 |
 | [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-09-30 | 174 |
 | [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-09-30 | 81 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-08-23 | 15 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-09-26 | 8 |
-| [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-09-30 | 27 |
+| [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-09-30 | 28 |
 | [Runtime Provider](spec/domain/runtime-provider.md) | runtime-provider | - | 2026-09-30 | 34 |
 | [Scheduled Task Domain Spec](spec/domain/scheduled-task.md) | scheduled-task | - | 2026-10-01 | 13 |
 | [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-09-30 | 7 |
@@ -32,7 +32,7 @@ Design documents are accumulated records and are not listed individually in this
 
 | Title | Owner | Last Verified At | Spec Version |
 |---|---|---|---|
-| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-10-01 | 188 |
+| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-10-01 | 189 |
 | [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-10-01 | 90 |
 | [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-09-30 | 40 |
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-09-15 | 52 |
