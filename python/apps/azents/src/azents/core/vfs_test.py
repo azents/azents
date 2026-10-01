@@ -14,6 +14,8 @@ from azents.core.vfs import (
     make_vfs_file_entry,
     make_vfs_projection,
     make_vfs_source_revision,
+    parse_vfs_glob_pattern,
+    parse_vfs_search_uri,
 )
 
 
@@ -49,6 +51,43 @@ def test_canonicalize_vfs_uri_rejects_ambiguous_paths(uri: str) -> None:
     """Traversal, alternate encoding, and non-canonical forms are rejected."""
     with pytest.raises(VfsUriError):
         canonicalize_vfs_uri(uri)
+
+
+def test_search_uri_accepts_mount_root_but_exact_uri_does_not() -> None:
+    """Search can target one mount root while exact reads require a file path."""
+    location = parse_vfs_search_uri("azents://skills")
+
+    assert location.mount == "skills"
+    assert location.path == "/"
+    with pytest.raises(VfsUriError):
+        canonicalize_vfs_uri("azents://skills")
+
+
+@pytest.mark.parametrize(
+    "pattern",
+    [
+        "azents://skills/**/SKILL.md",
+        "azents://skills/{azents,scheduled}/**/*.{md,txt}",
+    ],
+)
+def test_glob_pattern_accepts_canonical_pattern_segments(pattern: str) -> None:
+    """VFS glob validation retains supported wildcard and brace syntax."""
+    assert parse_vfs_glob_pattern(pattern).canonical == pattern
+
+
+@pytest.mark.parametrize(
+    "pattern",
+    [
+        "azents://skills/../*.md",
+        "azents://skills/%2e%2e/*.md",
+        "azents://skills//*.md",
+        "azents://skills/*.md?version=1",
+    ],
+)
+def test_glob_pattern_rejects_ambiguous_locations(pattern: str) -> None:
+    """Glob syntax does not weaken canonical URI or traversal validation."""
+    with pytest.raises(VfsUriError):
+        parse_vfs_glob_pattern(pattern)
 
 
 def test_make_vfs_projection_is_deterministic_and_integrity_checked() -> None:

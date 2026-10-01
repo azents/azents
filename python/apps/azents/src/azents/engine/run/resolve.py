@@ -61,6 +61,7 @@ from azents.engine.tools.builtin import (
     BuiltinToolkitProvider,
     MemoryReadToolkit,
     MemoryWriteToolkit,
+    ReadableStorageToolkit,
     RuntimeToolkit,
 )
 from azents.engine.tools.claude_rules import (
@@ -1588,6 +1589,7 @@ async def resolve_agent_tools(
                 "denied_domains": list(runtime_domain_config.denied_domains),
             }
         )
+        readable_storage_resolved: ReadableStorageToolkit | None = None
         if memory_enabled:
             memory_read_modes = _ROOT_AND_SUBAGENT_EXECUTION_MODES
             if _allows_execution_mode(memory_read_modes, execution_mode):
@@ -1673,6 +1675,50 @@ async def resolve_agent_tools(
                     )
                 )
 
+        readable_storage_modes = _ROOT_AND_SUBAGENT_EXECUTION_MODES
+        if _allows_execution_mode(readable_storage_modes, execution_mode):
+            readable_storage_context = ResolveContext(
+                toolkit_id="",
+                toolkit_name="readable_storage",
+                credentials_json=None,
+                agent_id=context.agent_id,
+                session_id=context.session_id,
+                session=None,
+                web_url=web_url,
+                oauth_secret_key=oauth_secret_key,
+                workspace_id=context.workspace_id,
+                workspace_handle=workspace_handle,
+            )
+            resolved_readable_storage = await _resolve_toolkit_with_logging(
+                agent_id=agent_id,
+                context=context,
+                source="auto",
+                slug="readable_storage",
+                provider=builtin_toolkit_provider,
+                toolkit_name="readable_storage",
+                resolve=builtin_toolkit_provider.resolve_readable_storage(
+                    builtin_config,
+                    readable_storage_context,
+                ),
+            )
+            if isinstance(resolved_readable_storage, ReadableStorageToolkit):
+                resolved_readable_storage.set_runtime_capability_resolver(
+                    capability_resolver
+                )
+                readable_storage_resolved = resolved_readable_storage
+            pending.append(
+                (
+                    builtin_toolkit_provider,
+                    resolved_readable_storage,
+                    builtin_config,
+                    "readable_storage",
+                    None,
+                    False,
+                    None,
+                    readable_storage_modes,
+                )
+            )
+
         if capability_resolver.project(
             (
                 RuntimeCapability.WORKSPACE,
@@ -1726,6 +1772,10 @@ async def resolve_agent_tools(
                         resolved for _, resolved, _, _, _, _, _, _ in pending
                     ]
                     runtime_resolved.set_peer_toolkits(peer_toolkits)
+                    if readable_storage_resolved is not None:
+                        readable_storage_resolved.set_runtime_storage_provider(
+                            runtime_resolved
+                        )
 
                     pending.append(
                         (

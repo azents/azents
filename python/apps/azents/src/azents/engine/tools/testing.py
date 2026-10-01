@@ -10,6 +10,7 @@ from typing import List
 
 from azents.engine.io.attachments import RuntimeAttachment
 from azents.services.file_storage import (
+    GlobResult,
     GrepFileMatch,
     GrepLineMatch,
     GrepResult,
@@ -179,7 +180,7 @@ class FakeSharedStorage:
         agent_id: str | None = None,
         user_id: str | None = None,
         exclude_patterns: List[str] | None,
-    ) -> List[RuntimeAttachment]:
+    ) -> GlobResult:
         """Return entries matching the Runtime-native glob contract."""
         del user_id
         prefix = _extract_glob_dir_prefix(pattern)
@@ -191,11 +192,14 @@ class FakeSharedStorage:
             include_directories=True,
         )
         expanded_patterns = _expand_braces(pattern)
-        return [
-            attachment
-            for attachment in attachments
-            if _match_glob_path(attachment.uri, expanded_patterns)
-        ]
+        return GlobResult(
+            files=tuple(
+                attachment
+                for attachment in attachments
+                if _match_glob_path(attachment.uri, expanded_patterns)
+            ),
+            truncated=False,
+        )
 
     async def list_dirs(
         self,

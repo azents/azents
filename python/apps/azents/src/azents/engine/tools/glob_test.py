@@ -2,6 +2,7 @@
 
 import json
 from typing import List
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -9,6 +10,7 @@ from azents.engine.io.attachments import RuntimeAttachment
 from azents.engine.run.types import FunctionTool, FunctionToolError
 from azents.engine.tools.glob import make_glob_tool
 from azents.engine.tools.testing import FakeSharedStorage
+from azents.services.file_storage import GlobResult
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -51,6 +53,21 @@ class TestGlob:
         assert "file1.txt" in result
         assert "file2.txt" in result
         assert "image.png" not in result
+
+    async def test_renders_backend_deadline_truncation(self) -> None:
+        """Glob never presents a backend-truncated result as complete."""
+        storage = AsyncMock()
+        storage.glob.return_value = GlobResult(
+            files=(),
+            truncated=True,
+            stopped_reason="deadline",
+        )
+        tool = make_glob_tool(session_storage=storage, agent_id="agent-1")
+
+        result = await tool.handler(json.dumps({"pattern": "azents://skills/**/*.md"}))
+
+        assert isinstance(result, str)
+        assert "backend deadline reached" in result
 
     async def test_match_nested_pattern(self) -> None:
         """Match nested pattern (skills/*/SKILL.md)."""

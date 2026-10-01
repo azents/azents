@@ -57,6 +57,7 @@ from azents.engine.tools.builtin import (
     BuiltinToolkitProvider,
     MemoryReadToolkit,
     MemoryWriteToolkit,
+    ReadableStorageToolkit,
     RuntimeRunnerFileStorage,
     RuntimeToolkit,
 )
@@ -171,6 +172,45 @@ async def test_ready_runtime_for_agent_forwards_shared_wait_options() -> None:
         expected_authority=None,
         start_if_stopped=True,
     )
+
+
+async def test_readable_storage_toolkit_exposes_generic_reads_without_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Runtime denial does not remove read, grep, or glob from model context."""
+    monkeypatch.setattr(
+        builtin_module,
+        "_resolve_associated_user_id",
+        AsyncMock(return_value=None),
+    )
+    toolkit = ReadableStorageToolkit(
+        config=ShellToolkitConfig(memory_enabled=True),
+        agent_id="agent-1",
+        session_id="session-1",
+        session_manager=_make_mock_session_manager(),
+        memory_repo=_make_mock_memory_repo(),
+        vfs_read_router=AsyncMock(),
+    )
+    toolkit.set_runtime_capability_resolver(
+        RuntimeCapabilityResolver.from_agent(
+            state=AgentRuntimeCapability.NONE,
+            version=1,
+        )
+    )
+    authority = SessionResourceAuthority(
+        workspace_id="ws-1",
+        agent_id="agent-1",
+        session_id="session-1",
+        root_session_id="session-1",
+        run_id="run-1",
+        run_index=1,
+        owner_generation=1,
+    )
+
+    state = await toolkit.update_context(_make_context(resource_authority=authority))
+
+    assert state.status.value == "enabled"
+    assert {tool.spec.name for tool in state.tools} == {"read", "grep", "glob"}
 
 
 def test_runtime_toolkit_requires_prompt_selected_authority() -> None:
@@ -809,7 +849,7 @@ class _FakeRunnerOperations:
                     ),
                     size_bytes=attachment.size,
                 )
-                for attachment in attachments
+                for attachment in attachments.files
             ),
             final_cursor="0-1",
         )
@@ -1162,6 +1202,7 @@ class TestBuiltinToolkitProviderResolve:
             artifact_service=AsyncMock(spec=ArtifactService),
             model_file_service=AsyncMock(),
             vfs_projection_service=None,
+            vfs_read_router=AsyncMock(),
             agents_store=agents_store,
             session_manager=_make_mock_session_manager(),
             memory_repo=_make_mock_memory_repo(),
@@ -1278,7 +1319,8 @@ class TestRuntimeToolkitUpdateContext:
         assert "bash" not in names
         assert "edit" in names
         assert "apply_patch" in names
-        assert {"read", "write", "delete", "glob", "grep"} <= names
+        assert {"write", "delete"} <= names
+        assert {"read", "glob", "grep"}.isdisjoint(names)
         assert names.isdisjoint({"import_file", "present_file", "read_image"})
 
     @pytest.mark.asyncio
@@ -1442,7 +1484,7 @@ class TestRuntimeToolkitUpdateContext:
 
     @pytest.mark.asyncio
     async def test_update_context_does_not_wait_for_runtime_ready(self) -> None:
-        """A starting Runtime still exposes every required file service."""
+        """A starting Runtime still exposes process and file-mutation services."""
         transfer_service = AsyncMock()
         publication_service = AsyncMock()
         delivery_service = AsyncMock()
@@ -1456,7 +1498,7 @@ class TestRuntimeToolkitUpdateContext:
 
         state = await toolkit.update_context(_make_context())
 
-        assert {"exec_command", "write_stdin", "read"} <= {
+        assert {"exec_command", "write_stdin", "write"} <= {
             tool.spec.name for tool in state.tools
         }
         instruction_context = require_instance(
@@ -1534,7 +1576,7 @@ class TestRuntimeToolkitUpdateContext:
         )
         await storage.delete("/workspace/agent/new.txt", agent_id="agent-1")
 
-        assert [attachment.uri for attachment in globbed] == [
+        assert [attachment.uri for attachment in globbed.files] == [
             "/workspace/agent/dir/item.txt",
             "/workspace/agent/file.txt",
             "/workspace/agent/new.txt",
@@ -1566,8 +1608,11 @@ class TestRuntimeToolkitUpdateContext:
             },
         )
         toolkit.set_runtime_agent_id("parent-agent")
-        state = await toolkit.update_context(_make_context())
-        read_tool = _find_tool(state.tools, "read")
+        await toolkit.update_context(_make_context())
+        read_tool = make_read_text_tool(
+            session_storage=toolkit.make_readable_storage(),
+            agent_id="child-agent",
+        )
         runner_operations = _runner_operations(toolkit)
         runtime_repo = _runtime_repo(toolkit)
 
@@ -1592,11 +1637,11 @@ class TestRuntimeToolkitUpdateContext:
         assert runtime_repo.get_by_agent_id.await_args.args[1] == "parent-agent"
 
     @pytest.mark.asyncio
-    async def test_read_and_agents_appendix_log_runtime_diagnostics(
+    async def test_read_and_agents_appendix_log_appendix_diagnostics(
         self,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
-        """Visible read and AGENTS appendix retain separate Runtime diagnostics."""
+        """Readable Runtime paths retain AGENTS appendix diagnostics."""
         caplog.set_level(logging.INFO)
         toolkit = _make_toolkit(
             storage_files={
@@ -1604,8 +1649,11 @@ class TestRuntimeToolkitUpdateContext:
                 "/workspace/agent/file.txt": b"body",
             }
         )
-        state = await toolkit.update_context(_make_context())
-        read_tool = _find_tool(state.tools, "read")
+        await toolkit.update_context(_make_context())
+        read_tool = make_read_text_tool(
+            session_storage=toolkit.make_readable_storage(),
+            agent_id="agent-1",
+        )
         runtime_repo = _runtime_repo(toolkit)
 
         output = await read_tool.handler(
@@ -1621,17 +1669,6 @@ class TestRuntimeToolkitUpdateContext:
 
         assert decision is not None
         assert runtime_repo.get_by_agent_id.await_count == 2
-        tool_record = next(
-            record
-            for record in caplog.records
-            if record.getMessage() == "Processed Runtime file tool"
-        )
-        tool_fields = vars(tool_record)
-        assert tool_fields["tool_name"] == "read"
-        assert tool_fields["tool_status"] == "completed"
-        assert tool_fields["runtime_operation_count"] == 1
-        assert tool_fields["session_id"] == "session-1"
-        assert tool_fields["tool_duration_ms"] >= 0
         appendix_record = next(
             record
             for record in caplog.records

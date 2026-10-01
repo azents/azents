@@ -2,6 +2,7 @@
 
 import base64
 import binascii
+import dataclasses
 import datetime
 import hashlib
 import json
@@ -16,7 +17,6 @@ from pydantic import BaseModel, ConfigDict, Field
 VFS_SCHEMA_VERSION = 1
 AZENTS_VFS_SCHEME = "azents"
 AZENTS_VFS_SKILLS_MOUNT = "skills"
-AZENTS_VFS_SUPPORTED_MOUNTS = frozenset({AZENTS_VFS_SKILLS_MOUNT})
 VFS_FILE_MAX_BYTES = 2 * 1024 * 1024
 VFS_PROJECTION_MAX_BYTES = 8 * 1024 * 1024
 
@@ -25,6 +25,9 @@ VfsSourceKind = Literal["global_release", "toolkit_release"]
 _MOUNT_PATTERN = re.compile(r"^[a-z][a-z0-9-]{0,62}$")
 _SLUG_PATTERN = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
 _PATH_SEGMENT_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$")
+_GLOB_SEGMENT_PATTERN = re.compile(
+    r"^[A-Za-z0-9*?\[\]{}!,.][A-Za-z0-9._*?\[\]{}!,-]{0,254}$"
+)
 
 
 class VfsUriError(ValueError):
@@ -33,6 +36,15 @@ class VfsUriError(ValueError):
 
 class VfsProjectionCollisionError(ValueError):
     """Multiple VFS sources published the same canonical URI."""
+
+
+@dataclasses.dataclass(frozen=True)
+class VfsLocation:
+    """Parsed canonical Azents VFS location or glob pattern."""
+
+    canonical: str
+    mount: str
+    path: str
 
 
 class VfsSourceRef(BaseModel):
@@ -119,6 +131,44 @@ class VfsSourceSpec(BaseModel):
 
 def canonicalize_vfs_uri(uri: str) -> str:
     """Validate and return the canonical Azents VFS URI string."""
+    return parse_vfs_exact_uri(uri).canonical
+
+
+def parse_vfs_exact_uri(uri: str) -> VfsLocation:
+    """Parse one canonical exact-file URI with a non-empty literal path."""
+    return _parse_vfs_location(
+        uri,
+        allow_mount_root=False,
+        allow_glob=False,
+    )
+
+
+def parse_vfs_search_uri(uri: str) -> VfsLocation:
+    """Parse one canonical file-or-directory URI for bounded search."""
+    return _parse_vfs_location(
+        uri,
+        allow_mount_root=True,
+        allow_glob=False,
+    )
+
+
+def parse_vfs_glob_pattern(pattern: str) -> VfsLocation:
+    """Parse one canonical VFS glob pattern without decoding aliases."""
+    return _parse_vfs_location(
+        pattern,
+        allow_mount_root=True,
+        allow_glob=True,
+    )
+
+
+def _parse_vfs_location(
+    value: str,
+    *,
+    allow_mount_root: bool,
+    allow_glob: bool,
+) -> VfsLocation:
+    """Parse an exact/search/glob VFS location under one canonical policy."""
+    uri = value
     if not uri or "%" in uri or "\\" in uri:
         raise VfsUriError("Invalid azents:// URI")
     parsed = urlsplit(uri)
@@ -135,20 +185,37 @@ def canonicalize_vfs_uri(uri: str) -> str:
     mount = parsed.hostname
     if mount is None or parsed.netloc != mount or not _MOUNT_PATTERN.fullmatch(mount):
         raise VfsUriError("azents:// URI has an invalid mount")
-    if not parsed.path.startswith("/"):
-        raise VfsUriError("azents:// URI path must be absolute")
-    segments = parsed.path.split("/")[1:]
-    if not segments or any(
-        not segment
-        or segment in {".", ".."}
-        or not _PATH_SEGMENT_PATTERN.fullmatch(segment)
+    if not parsed.path:
+        if not allow_mount_root:
+            raise VfsUriError("azents:// URI path must not be empty")
+        segments: list[str] = []
+    else:
+        if not parsed.path.startswith("/"):
+            raise VfsUriError("azents:// URI path must be absolute")
+        segments = parsed.path.split("/")[1:]
+        if segments == [""] and allow_mount_root:
+            segments = []
+    segment_pattern = _GLOB_SEGMENT_PATTERN if allow_glob else _PATH_SEGMENT_PATTERN
+    if (not segments and not allow_mount_root) or any(
+        not segment or segment in {".", ".."} or not segment_pattern.fullmatch(segment)
         for segment in segments
     ):
         raise VfsUriError("azents:// URI has an invalid path")
-    canonical = f"{AZENTS_VFS_SCHEME}://{mount}/{'/'.join(segments)}"
+    if not allow_glob and any(
+        any(char in segment for char in ("*", "?", "[", "]", "{", "}"))
+        for segment in segments
+    ):
+        raise VfsUriError("azents:// URI path must not contain glob syntax")
+    canonical = f"{AZENTS_VFS_SCHEME}://{mount}"
+    if segments:
+        canonical = f"{canonical}/{'/'.join(segments)}"
     if canonical != uri:
         raise VfsUriError("azents:// URI is not canonical")
-    return canonical
+    return VfsLocation(
+        canonical=canonical,
+        mount=mount,
+        path="/" + "/".join(segments) if segments else "/",
+    )
 
 
 def make_vfs_uri(mount: str, namespace: str, relative_path: str) -> str:
