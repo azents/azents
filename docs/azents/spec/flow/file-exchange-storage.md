@@ -24,6 +24,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/model_file/**
   - python/apps/azents/src/azents/repos/exchange_file/**
   - python/apps/azents/src/azents/repos/file_metadata_authority.py
+  - python/apps/azents/src/azents/repos/provider_output_operation.py
   - python/apps/azents/src/azents/repos/external_channel/file_access.py
   - python/apps/azents/src/azents/repos/agent_session/**
   - python/apps/azents/src/azents/repos/archived_session_retention/**
@@ -68,7 +69,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ToolCallCard.tsx
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
 last_verified_at: 2026-10-01
-spec_version: 53
+spec_version: 54
 ---
 
 # File Exchange Storage
@@ -303,11 +304,14 @@ A completed `image_generation` result creates two resources from one transient v
 
 Provider-hosted execution stores both references in the durable provider call semantic output as `FileOutputPart` and `AttachmentOutputPart`. xAI Imagine execution stores the same output-part kinds on the durable client tool result after its transient generated-file bytes are admitted. Neither event contains Base64, a data URL, raw bytes, provider-native result bytes, or credentials. Exchange and ModelFile media type, size, hash, storage key, authorization, and lifecycle remain independent; neither identity is inferred from the other URI or metadata.
 
-The Engine validates canonical Session/Run resource authority before object upload, closes that
-database session, uploads the original, optional preview, and normalized ModelFile object, then
-revalidates the same authority while admitting all metadata and the updated tool result in the owning
-output transaction. No authenticated actor is required for this internal output path. Partial
-materialization is failure. Failed admission compensation deletes only unowned prepared keys.
+The Engine validates canonical Session/Run resource authority through a completed
+repository operation before object upload, uploads the original, optional preview,
+and normalized ModelFile object, then revalidates the same authority while admitting
+all metadata and the updated tool result in the owning output transaction. Retry
+metadata and compensation-protection reads are also completed repository operations;
+object upload and compensation delete never run with a database transaction open. No
+authenticated actor is required for this internal output path. Partial materialization
+is failure. Failed admission compensation deletes only unowned prepared keys.
 Deterministic run/owner-generation/call/output identities make retry admission idempotent within
 one execution generation, reject identity collisions, and preserve objects already referenced by
 committed metadata. An old owner's upload or compensation cannot overwrite or delete a new owner's
@@ -453,6 +457,10 @@ later `import_file` must explicitly copy them into the new Runtime.
 
 ## Changelog
 
+- **2026-10-01** (spec_version 54) — Moved generated provider-output scope,
+  retry-metadata, and cleanup-protection reads behind completed repository
+  operations while preserving atomic Event/metadata admission and
+  transaction-free object upload/compensation.
 - **2026-09-30** (spec_version 53) — Made the general-file limit injectable across
   consumers for small boundary tests with a lowering-only gated testenv override;
   retained the production 128 MiB default and independent semantic limits.
