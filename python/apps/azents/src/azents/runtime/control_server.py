@@ -62,6 +62,7 @@ from azents.repos.runtime_connection_generation.repository import (
     CURRENT_ALLOCATOR_VERSION,
     RuntimeConnectionGenerationRepository,
 )
+from azents.repos.runtime_control_read import RuntimeControlReadRepository
 from azents.repos.runtime_lifecycle_dispatch.repository import (
     RuntimeLifecycleDispatchRepository,
 )
@@ -315,13 +316,11 @@ class _OwnerRuntimeStreamSessionOfferProvider:
     def __init__(
         self,
         *,
-        session_manager: SessionManager[AsyncSession],
-        runtime_repository: AgentRuntimeRepository,
+        read_repository: RuntimeControlReadRepository,
         owner_manager: RuntimeStreamSessionOwnerManager,
         generation_gate: _RuntimeWebRunnerGenerationGate,
     ) -> None:
-        self.session_manager = session_manager
-        self.runtime_repository = runtime_repository
+        self.read_repository = read_repository
         self.owner_manager = owner_manager
         self.generation_gate = generation_gate
         self.owned: dict[str, RuntimeStreamOwnedSession] = {}
@@ -348,8 +347,7 @@ class _OwnerRuntimeStreamSessionOfferProvider:
             runner_generation=runner_generation,
             timeout_seconds=_RUNTIME_STREAM_SESSION_OFFER_WAIT_SECONDS,
         )
-        async with self.session_manager() as session:
-            runtime = await self.runtime_repository.get_by_id(session, runtime_id)
+        runtime = await self.read_repository.get_runtime(runtime_id)
         if (
             not ready
             or runtime is None
@@ -859,12 +857,16 @@ async def runtime_control_server_lifespan(
     engine = _create_engine(settings)
     session_manager = _session_manager(engine)
     generation_repository = RuntimeConnectionGenerationRepository()
-    async with session_manager() as session:
-        cutover = await generation_repository.get_cutover(session)
+    runtime_repository = AgentRuntimeRepository()
+    control_read_repository = RuntimeControlReadRepository(
+        session_manager=session_manager,
+        runtime_repository=runtime_repository,
+        generation_repository=generation_repository,
+    )
+    cutover = await control_read_repository.get_generation_cutover()
     if cutover is None or cutover.allocator_version != CURRENT_ALLOCATOR_VERSION:
         raise RuntimeError("Runtime connection generation authority is not activated")
     agent_repository = AgentRepository()
-    runtime_repository = AgentRuntimeRepository()
     policy_repository = RuntimeProviderPolicyRepository()
     profile_repository = RuntimeProfileRepository()
     provider_repository = RuntimeProviderRepository()
@@ -968,8 +970,7 @@ async def runtime_control_server_lifespan(
             clock=clock,
         )
         owner_offer_provider = _OwnerRuntimeStreamSessionOfferProvider(
-            session_manager=session_manager,
-            runtime_repository=runtime_repository,
+            read_repository=control_read_repository,
             owner_manager=owner_manager,
             generation_gate=web_runner_generation_gate,
         )
