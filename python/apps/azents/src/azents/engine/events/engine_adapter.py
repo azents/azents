@@ -148,7 +148,6 @@ from azents.engine.hooks.types import (
     TurnEndReason,
     TurnStartHookContext,
 )
-from azents.engine.io.user_input import RunUserMessage
 from azents.engine.model_assembly import ModelAssemblyMetadata
 from azents.engine.model_factories import get_model_sdk_factories
 from azents.engine.model_factory_types import ModelSDKFactories
