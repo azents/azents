@@ -67,6 +67,14 @@ database transactions, and stale credential snapshots still yield to concurrent
 refresh. Scheduled/Subagent tools, model execution, provider output, and
 compactor ownership remain later phases.
 
+Phase 21 moves the five Scheduled Toolkit and eight Subagent Toolkit direct
+session contexts behind completed repository operations. Scheduled channel
+registration/deletion and Subagent broker wake/stop plus tree invalidation remain
+post-commit effects. Spawn retains one final atomic child-creation transaction
+that revalidates the invoking Run and root-tree capacity after detached pure
+inference/fork preparation. Model execution, provider output, and compactor
+ownership remain later phases.
+
 ## Delivery Boundaries
 
 1. Correct the title-generation and ChatGPT OAuth persistence boundary as one

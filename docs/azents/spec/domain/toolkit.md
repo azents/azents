@@ -39,6 +39,7 @@ code_paths:
   - python/apps/azents/src/azents/services/subagent_terminal_result.py
   - python/apps/azents/src/azents/services/subagent_coordination.py
   - python/apps/azents/src/azents/repos/subagent_coordination/**
+  - python/apps/azents/src/azents/repos/subagent_tool_operations.py
   - python/apps/azents/src/azents/engine/run/resolve.py
   - python/apps/azents/src/azents/engine/run/tool_budget.py
   - python/apps/azents/src/azents/engine/tooling/tool_search.py
@@ -74,7 +75,7 @@ code_paths:
 api_routes:
   - /toolkit/v1
 last_verified_at: 2026-10-01
-spec_version: 124
+spec_version: 125
 ---
 
 # Toolkit
@@ -712,6 +713,18 @@ assigning more work to an already-active target remains allowed at capacity, whi
 target that would exceed `max_subagents` fails before input or broker side effects. `max_depth` limits
 child creation by depth below `/root`. Limit failures are returned as clear tool errors and do not
 queue the requested task.
+
+Subagent policy and tree reads use completed repository operations. Spawn loads a
+detached policy, parent Run, parent Session, and fork-history snapshot for pure
+inference/fork projection, then enters one final database-only operation. That
+operation revalidates the invoking running Run, locks the root tree, rechecks
+depth and capacity, and atomically creates the child SessionAgent and Session,
+pending Run, inference state, fork transcript, and initial wake-producing
+mailbox item. Message, follow-up, interrupt, and bounded-list operations likewise
+finish their database transaction before returning. Broker wake/stop signals,
+queue-only mailbox activity notification, and `SubagentTreeChanged` publication
+run only after the operation returns.
+
 The static toolkit prompt selects the Codex Multi-Agent V2 root or child usage hint from the current
 `SessionAgent.kind`. Both variants append the shared direct-tool-call and shared-workspace hint, the
 configured concurrency slot count as `max_subagents + 1`, and the explicit-request-only delegation
@@ -1053,8 +1066,20 @@ The Toolkit also owns the release-bundled `scheduled-task` managed Skill under
 the immutable `azents://` VFS. The Skill is projected for eligible root Runs
 without requiring a separate Toolkit setup row.
 
+Scheduled Toolkit active-cycle resolution, started-cycle continuity reads, Task
+creation, Task listing with execution-state derivation, and Task deletion use
+completed repository operations. Creation and deletion validate the existing
+Session, Agent, and optional Binding predicates inside the operation. Deletion
+retains the canonical Mailbox, cycle, and Task lock order and atomically removes
+an admitted trigger/cycle with its Task. Channel registration and deletion
+notification execute only after the operation returns.
+
 ## Changelog
 
+- **2026-10-01** (spec_version 125) — Moved Scheduled and Subagent Toolkit
+  reads and atomic mutations behind repository-owned completed operations while
+  preserving lock order, fork/capacity authority, and post-commit channel,
+  broker, and tree effects.
 - **2026-10-01** (spec_version 124) — Moved MCP/AWS/GCP/GitHub tool snapshots
   and GitHub selected-installation persistence behind repository-owned completed
   operations while preserving hashes, filtering, and owner fencing.

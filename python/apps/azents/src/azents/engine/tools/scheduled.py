@@ -1,11 +1,11 @@
 """Root-only Scheduled Task management and execution Toolkit."""
 
+import dataclasses
 import datetime
 import json
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.external_channel_file import (
     MAX_EXTERNAL_CHANNEL_FILES,
@@ -35,8 +35,6 @@ from azents.engine.tooling.make_tool import make_tool
 from azents.engine.tools.runtime_instruction_context import (
     RuntimeInstructionContextStore,
 )
-from azents.rdb.session import SessionManager
-from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.scheduled_task.data import (
     MAX_SCHEDULED_TASK_OBJECTIVE_LENGTH,
     ScheduledTask,
@@ -47,7 +45,9 @@ from azents.repos.scheduled_task.presentation import (
     render_scheduled_task_runtime_message,
     replace_scheduled_compaction_snapshot,
 )
-from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
+from azents.repos.scheduled_task.tool_operations import (
+    ScheduledTaskToolOperationRepository,
+)
 from azents.repos.scheduled_task_cycle.data import (
     ScheduledTaskCycleRecord,
     ScheduledTaskCycleState,
@@ -57,7 +57,6 @@ from azents.services.external_channel.file_transfer import (
     ExternalChannelFileTransferService,
 )
 from azents.services.scheduled_task.channel import ScheduledTaskChannelService
-from azents.services.scheduled_task.service import ScheduledTaskService
 from azents.services.scheduled_task.terminal import ScheduledTaskTerminalService
 from azents.services.session_resource_authority import (
     SessionExecutionOwner,
@@ -148,24 +147,18 @@ class ScheduledToolkit(Toolkit[ScheduledToolkitConfig]):
     def __init__(
         self,
         *,
-        session_manager: SessionManager[AsyncSession],
-        service: ScheduledTaskService,
+        operations: ScheduledTaskToolOperationRepository,
         terminal_service: ScheduledTaskTerminalService,
         channel_service: ScheduledTaskChannelService,
         file_transfer_service: ExternalChannelFileTransferService,
-        cycle_repository: ScheduledTaskCycleRepository,
-        run_repository: AgentRunRepository,
         workspace_id: str,
         agent_id: str,
         session_id: str,
     ) -> None:
-        self.session_manager = session_manager
-        self.service = service
+        self.operations = operations
         self.terminal_service = terminal_service
         self.channel_service = channel_service
         self.file_transfer_service = file_transfer_service
-        self.cycle_repository = cycle_repository
-        self.run_repository = run_repository
         self.workspace_id = workspace_id
         self.agent_id = agent_id
         self.session_id = session_id
@@ -180,10 +173,13 @@ class ScheduledToolkit(Toolkit[ScheduledToolkitConfig]):
             owner,
             session_id=self.session_id,
         ):
-            self.session_manager = OwnerBoundSessionManager(
-                session_manager=self.session_manager,
-                session_id=owner.session_id,
-                owner_generation=owner.owner_generation,
+            self.operations = dataclasses.replace(
+                self.operations,
+                session_manager=OwnerBoundSessionManager(
+                    session_manager=self.operations.session_manager,
+                    session_id=owner.session_id,
+                    owner_generation=owner.owner_generation,
+                ),
             )
             self.terminal_service = self.terminal_service.for_execution(owner)
             self.channel_service = self.channel_service.for_execution(owner)
@@ -268,55 +264,35 @@ class ScheduledToolkit(Toolkit[ScheduledToolkitConfig]):
         run_id: str,
     ) -> ScheduledTaskCycleRecord | None:
         """Resolve the current Run's valid started cycle binding."""
-        async with self.session_manager() as session:
-            run = await self.run_repository.get_by_id(session, run_id)
-            if (
-                run is None
-                or run.session_id != self.session_id
-                or run.scheduled_task_cycle_id is None
-            ):
-                return None
-            cycle = await self.cycle_repository.get_started(
-                session,
-                agent_id=self.agent_id,
-                session_id=self.session_id,
-                cycle_id=run.scheduled_task_cycle_id,
-            )
-        if (
-            cycle is None
-            or cycle.state.workspace_id != self.workspace_id
-            or cycle.state.current_run_id != run_id
-        ):
-            return None
-        return cycle
+        return await self.operations.active_cycle(
+            workspace_id=self.workspace_id,
+            agent_id=self.agent_id,
+            session_id=self.session_id,
+            run_id=run_id,
+        )
 
     async def _started_cycle_states(self) -> list[ScheduledTaskCycleState]:
         """Read current started Session cycles without locking."""
-        async with self.session_manager() as session:
-            records = await self.cycle_repository.list_started(
-                session,
-                agent_id=self.agent_id,
-                session_id=self.session_id,
-            )
-        return [record.state for record in records]
+        return await self.operations.list_started_cycle_states(
+            agent_id=self.agent_id,
+            session_id=self.session_id,
+        )
 
     def _make_add_tool(self) -> FunctionTool:
         async def add_scheduled_task(args: AddScheduledTaskInput) -> str:
             """Create one exact Scheduled Task definition."""
             try:
-                async with self.session_manager() as session:
-                    task = await self.service.create(
-                        session,
-                        workspace_id=self.workspace_id,
-                        agent_id=self.agent_id,
-                        session_id=self.session_id,
-                        title=args.title,
-                        objective=args.objective,
-                        at=args.at,
-                        cron=args.cron,
-                        timezone=args.timezone,
-                        binding_id=args.channel_id,
-                    )
+                task = await self.operations.create(
+                    workspace_id=self.workspace_id,
+                    agent_id=self.agent_id,
+                    session_id=self.session_id,
+                    title=args.title,
+                    objective=args.objective,
+                    at=args.at,
+                    cron=args.cron,
+                    timezone=args.timezone,
+                    binding_id=args.channel_id,
+                )
             except ValueError as exc:
                 raise FunctionToolError(str(exc)) from None
             registration = await self.channel_service.execute_registration(task)
@@ -341,15 +317,21 @@ class ScheduledToolkit(Toolkit[ScheduledToolkitConfig]):
     def _make_list_tool(self) -> FunctionTool:
         async def list_scheduled_tasks() -> str:
             """List current Session-owned Scheduled Tasks."""
-            async with self.session_manager() as session:
-                tasks = await self.service.list_tasks(
-                    session,
-                    session_id=self.session_id,
-                )
-                projections = [
-                    await self._task_projection(session, task) for task in tasks
-                ]
-            return _json({"tasks": projections})
+            projections = await self.operations.list_tasks(
+                agent_id=self.agent_id,
+                session_id=self.session_id,
+            )
+            return _json(
+                {
+                    "tasks": [
+                        {
+                            **_task_definition(projection.task),
+                            "execution_state": projection.execution_state,
+                        }
+                        for projection in projections
+                    ]
+                }
+            )
 
         return make_tool(
             list_scheduled_tasks,
@@ -360,12 +342,10 @@ class ScheduledToolkit(Toolkit[ScheduledToolkitConfig]):
         async def delete_scheduled_task(args: DeleteScheduledTaskInput) -> str:
             """Delete one exact Session-owned Scheduled Task."""
             try:
-                async with self.session_manager() as session:
-                    task = await self.service.delete_with_snapshot(
-                        session,
-                        session_id=self.session_id,
-                        task_id=args.task_id,
-                    )
+                task = await self.operations.delete(
+                    session_id=self.session_id,
+                    task_id=args.task_id,
+                )
             except ValueError as exc:
                 raise FunctionToolError(str(exc)) from None
             notification = (
@@ -498,38 +478,6 @@ class ScheduledToolkit(Toolkit[ScheduledToolkitConfig]):
             input_model=SubmitScheduledTaskResultInput,
         )
 
-    async def _task_projection(
-        self,
-        session: AsyncSession,
-        task: ScheduledTask,
-    ) -> dict[str, object]:
-        """Build one management response with derived execution state."""
-        execution_state: Literal[
-            "idle",
-            "admitted",
-            "running",
-            "running_with_pending",
-        ] = "idle"
-        if task.active_cycle_id is not None:
-            cycle = await self.cycle_repository.get(
-                session,
-                agent_id=self.agent_id,
-                session_id=self.session_id,
-                cycle_id=task.active_cycle_id,
-            )
-            if cycle is None:
-                raise RuntimeError("Scheduled Task active cycle state is missing.")
-            if cycle.state.phase == "admitted":
-                execution_state = "admitted"
-            elif task.pending_scheduled_for is not None:
-                execution_state = "running_with_pending"
-            else:
-                execution_state = "running"
-        return {
-            **_task_definition(task),
-            "execution_state": execution_state,
-        }
-
 
 class ScheduledToolkitProvider(ToolkitProvider[ScheduledToolkitConfig]):
     """Provide the root-only auto-bound Scheduled Toolkit."""
@@ -544,21 +492,15 @@ class ScheduledToolkitProvider(ToolkitProvider[ScheduledToolkitConfig]):
     def __init__(
         self,
         *,
-        session_manager: SessionManager[AsyncSession],
-        service: ScheduledTaskService,
+        operations: ScheduledTaskToolOperationRepository,
         terminal_service: ScheduledTaskTerminalService,
         channel_service: ScheduledTaskChannelService,
         file_transfer_service: ExternalChannelFileTransferService,
-        cycle_repository: ScheduledTaskCycleRepository,
-        run_repository: AgentRunRepository,
     ) -> None:
-        self.session_manager = session_manager
-        self.service = service
+        self.operations = operations
         self.terminal_service = terminal_service
         self.channel_service = channel_service
         self.file_transfer_service = file_transfer_service
-        self.cycle_repository = cycle_repository
-        self.run_repository = run_repository
 
     async def resolve(
         self,
@@ -568,13 +510,10 @@ class ScheduledToolkitProvider(ToolkitProvider[ScheduledToolkitConfig]):
         """Return one Session-bound Scheduled Toolkit."""
         del config
         return ScheduledToolkit(
-            session_manager=self.session_manager,
-            service=self.service,
+            operations=self.operations,
             terminal_service=self.terminal_service,
             channel_service=self.channel_service,
             file_transfer_service=self.file_transfer_service,
-            cycle_repository=self.cycle_repository,
-            run_repository=self.run_repository,
             workspace_id=context.workspace_id,
             agent_id=context.agent_id,
             session_id=context.session_id,

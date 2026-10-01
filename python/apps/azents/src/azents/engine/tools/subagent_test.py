@@ -6,7 +6,6 @@ import datetime
 import json
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from types import SimpleNamespace
 from typing import Any, NamedTuple, TypeVar
 from unittest.mock import MagicMock
 
@@ -53,14 +52,17 @@ from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepo
 from azents.repos.agent_execution.data import EventCreate
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession, SessionAgent
-from azents.services.agent_mailbox import AgentMailboxService
-from azents.services.mailbox import MailboxEnqueue, MailboxService
-from azents.services.subagent_coordination import (
-    ListedAgent,
-    SubagentCoordinationService,
-    SubagentListProjection,
+from azents.repos.llm_catalog import LiteLLMSourceSnapshotRepository
+from azents.repos.mailbox import MailboxRepository
+from azents.repos.mailbox.data import MailboxItemCreate
+from azents.repos.subagent_coordination.data import (
+    SubagentCoordinationSnapshot,
+    SubagentCoordinationSnapshotRow,
 )
-from azents.testing.model_metadata import make_test_model_metadata_service
+from azents.repos.subagent_coordination.repository import (
+    SubagentCoordinationRepository,
+)
+from azents.repos.subagent_tool_operations import SubagentToolOperationRepository
 from azents.testing.model_selection import (
     make_test_model_selection,
     make_test_model_settings,
@@ -671,23 +673,23 @@ class _EventTranscriptRepository:
 
 
 class _MailboxService:
-    """MailboxService fake for subagent tool tests."""
+    """MailboxRepository fake for subagent tool tests."""
 
     def __init__(self) -> None:
         """Initialize fake state."""
-        self.enqueued: list[MailboxEnqueue] = []
+        self.enqueued: list[MailboxItemCreate] = []
         self.pending_agent_message_session_ids: set[str] = set()
         self.pending_wake_session_ids: set[str] = set()
 
-    async def enqueue(
+    async def create(
         self,
         session: AsyncSession,
-        input: MailboxEnqueue,
+        create: MailboxItemCreate,
     ) -> object:
         """Record enqueued mailbox input."""
         del session
-        self.enqueued.append(input)
-        return SimpleNamespace(mailbox_item=object())
+        self.enqueued.append(create)
+        return object()
 
     async def has_pending_agent_messages(self, session_id: str) -> bool:
         """Return test-controlled mailbox activity."""
@@ -718,34 +720,73 @@ class _Broker:
         self.activities.append(session_id)
 
 
-class _SubagentCoordinationService:
-    """Subagent coordination projection fake for Toolkit tests."""
+class _SubagentCoordinationRepository:
+    """Subagent coordination repository fake for Toolkit tests."""
 
     def __init__(self) -> None:
         """Initialize the default root-tree projection."""
         self.calls: list[tuple[str, int]] = []
-        self.projection: SubagentListProjection | None = SubagentListProjection(
-            agents=(
-                ListedAgent(agent_name="/root", agent_status="running"),
-                ListedAgent(agent_name="/root/child", agent_status="completed"),
-            ),
-            configured_capacity=3,
-            required_count=0,
-            selected_inactive_count=1,
-            omitted_inactive_count=0,
+        self.projection: SubagentCoordinationSnapshot | None = (
+            SubagentCoordinationSnapshot(
+                rows=(
+                    SubagentCoordinationSnapshotRow(
+                        session_agent_id="root-agent",
+                        agent_session_id="root-session",
+                        kind=SessionAgentKind.ROOT,
+                        path="/root",
+                        last_message_at=None,
+                        created_at=_NOW,
+                        session_run_state=AgentSessionRunState.RUNNING,
+                        latest_run_status=AgentRunStatus.RUNNING,
+                        wake_pending=False,
+                        required=False,
+                    ),
+                    SubagentCoordinationSnapshotRow(
+                        session_agent_id="child-agent",
+                        agent_session_id="child-session",
+                        kind=SessionAgentKind.SUBAGENT,
+                        path="/root/child",
+                        last_message_at=None,
+                        created_at=_NOW,
+                        session_run_state=AgentSessionRunState.IDLE,
+                        latest_run_status=AgentRunStatus.COMPLETED,
+                        wake_pending=False,
+                        required=False,
+                    ),
+                ),
+                configured_capacity=3,
+                required_count=0,
+                selected_inactive_count=1,
+                omitted_inactive_count=0,
+            )
         )
 
-    async def list_agents(
+    async def project_root_tree(
         self,
         session: AsyncSession,
         *,
         current_session_id: str,
         configured_capacity: int,
-    ) -> SubagentListProjection | None:
+    ) -> SubagentCoordinationSnapshot | None:
         """Return the configured bounded projection."""
         del session
         self.calls.append((current_session_id, configured_capacity))
         return self.projection
+
+
+class _SourceSnapshotRepository:
+    """Model source snapshot repository fake for subagent tool tests."""
+
+    async def get_latest_authoritative(
+        self,
+        session: AsyncSession,
+        *,
+        source_key: str,
+    ) -> None:
+        """Return no fallback metadata source."""
+        del session
+        assert source_key == "litellm_model_cost"
+        return None
 
 
 class _SubagentToolkitFixture(NamedTuple):
@@ -765,7 +806,7 @@ async def _make_toolkit() -> _SubagentToolkitFixture:
     mailbox_item_service = _MailboxService()
     broker = _Broker()
     run_repository = _AgentRunRepository()
-    coordination_service = _SubagentCoordinationService()
+    coordination_repository = _SubagentCoordinationRepository()
     agent = _agent()
     agent_repository = _AgentRepository(agent)
     event_transcript_repository = _EventTranscriptRepository()
@@ -775,9 +816,9 @@ async def _make_toolkit() -> _SubagentToolkitFixture:
         assert isinstance(event, SubagentTreeChanged)
         published_events.append(event)
 
-    toolkit = SubagentToolkit(
-        model_metadata_service=make_test_model_metadata_service(snapshot=None),
+    operations = SubagentToolOperationRepository(
         session_manager=_session_manager,
+        agent_repository=_typed_fake(agent_repository, AgentRepository),
         agent_session_repository=_typed_fake(
             agent_session_repository,
             AgentSessionRepository,
@@ -787,20 +828,19 @@ async def _make_toolkit() -> _SubagentToolkitFixture:
             event_transcript_repository,
             EventTranscriptRepository,
         ),
-        subagent_coordination_service=_typed_fake(
-            coordination_service,
-            SubagentCoordinationService,
+        mailbox_repository=_typed_fake(mailbox_item_service, MailboxRepository),
+        source_snapshot_repository=_typed_fake(
+            _SourceSnapshotRepository(),
+            LiteLLMSourceSnapshotRepository,
         ),
-        agent_mailbox_service=AgentMailboxService(
-            mailbox_item_service=_typed_fake(mailbox_item_service, MailboxService),
-            agent_session_repository=_typed_fake(
-                agent_session_repository,
-                AgentSessionRepository,
-            ),
+        coordination_repository=_typed_fake(
+            coordination_repository,
+            SubagentCoordinationRepository,
         ),
-        mailbox_item_service=_typed_fake(mailbox_item_service, MailboxService),
+    )
+    toolkit = SubagentToolkit(
+        operations=operations,
         broker=_typed_fake(broker, SessionBroker),
-        agent_repository=_typed_fake(agent_repository, AgentRepository),
         agent=agent,
         subagent_settings=SubagentSettings(),
     )
@@ -1181,7 +1221,7 @@ async def test_followup_task_wakes_target_child() -> None:
     assert input_service.enqueued[0].content == "work"
     assert input_service.enqueued[0].sender_user_id is None
     assert repo.last_task_updates == [("child-agent", "work")]
-    assert repo.marked_running == []
+    assert repo.marked_running == ["child-session"]
     assert len(broker.messages) == 1
     wake = broker.messages[0]
     assert isinstance(wake, SessionWakeUp)
@@ -1254,7 +1294,7 @@ async def test_followup_task_allows_already_active_target_at_capacity() -> None:
 
     assert json.loads(_text_result(result))["status"] == "assigned"
     assert len(input_service.enqueued) == 1
-    assert repo.marked_running == []
+    assert repo.marked_running == ["child-session"]
     assert len(broker.messages) == 1
 
 
@@ -1352,25 +1392,25 @@ async def test_list_agents_from_child_includes_root_tree() -> None:
             {"agent_name": "/root/child", "agent_status": "completed"},
         ]
     }
-    service = toolkit.subagent_coordination_service
-    assert isinstance(service, MagicMock)
-    coordination_service = require_instance(
-        service._mock_wraps,
-        _SubagentCoordinationService,
+    repository = toolkit.operations.coordination_repository
+    assert isinstance(repository, MagicMock)
+    coordination_repository = require_instance(
+        repository._mock_wraps,
+        _SubagentCoordinationRepository,
     )
-    assert coordination_service.calls == [("child-session", 3)]
+    assert coordination_repository.calls == [("child-session", 3)]
 
 
 async def test_list_agents_rejects_missing_current_projection() -> None:
     """list_agents raises when the current SessionAgent cannot be projected."""
     toolkit, _repo, _input_service, _broker, _run_repo, _events = await _make_toolkit()
-    service = toolkit.subagent_coordination_service
-    assert isinstance(service, MagicMock)
-    coordination_service = require_instance(
-        service._mock_wraps,
-        _SubagentCoordinationService,
+    repository = toolkit.operations.coordination_repository
+    assert isinstance(repository, MagicMock)
+    coordination_repository = require_instance(
+        repository._mock_wraps,
+        _SubagentCoordinationRepository,
     )
-    coordination_service.projection = None
+    coordination_repository.projection = None
     state = await toolkit.update_context(
         TurnContext(
             workspace_id="workspace-1",
@@ -1420,7 +1460,7 @@ async def test_spawn_agent_creates_and_wakes_child_within_limits() -> None:
         "status": "spawned",
     }
     assert repo.locked_session_agents == ["root-agent", "root-agent"]
-    assert run_repo.get_by_id_calls == [_PARENT_RUN_ID]
+    assert run_repo.get_by_id_calls == [_PARENT_RUN_ID, _PARENT_RUN_ID]
     assert run_repo.pending_creates == [
         {
             "session_id": child.agent_session_id,
@@ -1448,7 +1488,7 @@ async def test_spawn_agent_creates_and_wakes_child_within_limits() -> None:
     assert input_service.enqueued[0].content == "Review it"
     assert input_service.enqueued[0].sender_user_id is None
     assert repo.locked_session_agents == ["root-agent", "root-agent"]
-    assert repo.marked_running == []
+    assert repo.marked_running == [child.agent_session_id]
     assert len(broker.messages) == 1
     assert isinstance(broker.messages[0], SessionWakeUp)
     assert [event.type for event in published_events] == ["subagent_tree_changed"]
@@ -1622,9 +1662,9 @@ async def test_spawn_agent_reloads_current_policy_before_explicit_override() -> 
     tool = next(tool for tool in state.tools if tool.spec.name == "spawn_agent")
     assert "`Quality` Reasoning efforts" in tool.spec.description
 
-    assert isinstance(toolkit.agent_repository, MagicMock)
+    assert isinstance(toolkit.operations.agent_repository, MagicMock)
     agent_repository = require_instance(
-        toolkit.agent_repository._mock_wraps,
+        toolkit.operations.agent_repository._mock_wraps,
         _AgentRepository,
     )
     current_agent = agent_repository.agent.model_copy(deep=True)
@@ -1784,9 +1824,9 @@ async def test_spawn_agent_inserts_boundary_after_forked_history() -> None:
         _run_repo,
         _published_events,
     ) = await _make_toolkit()
-    assert isinstance(toolkit.event_transcript_repository, MagicMock)
+    assert isinstance(toolkit.operations.event_transcript_repository, MagicMock)
     event_repo = require_instance(
-        toolkit.event_transcript_repository._mock_wraps,
+        toolkit.operations.event_transcript_repository._mock_wraps,
         _EventTranscriptRepository,
     )
     event_repo.forked_events = [
@@ -1834,9 +1874,9 @@ async def test_spawn_agent_does_not_insert_boundary_without_forked_history() -> 
         _run_repo,
         _published_events,
     ) = await _make_toolkit()
-    assert isinstance(toolkit.event_transcript_repository, MagicMock)
+    assert isinstance(toolkit.operations.event_transcript_repository, MagicMock)
     event_repo = require_instance(
-        toolkit.event_transcript_repository._mock_wraps,
+        toolkit.operations.event_transcript_repository._mock_wraps,
         _EventTranscriptRepository,
     )
     state = await toolkit.update_context(

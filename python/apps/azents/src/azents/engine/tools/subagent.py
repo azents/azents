@@ -9,20 +9,18 @@ import logging
 from textwrap import dedent
 from typing import Literal
 
-from pydantic import BaseModel, Field, TypeAdapter
-from sqlalchemy.ext.asyncio import AsyncSession
+from pydantic import BaseModel, Field
 
 from azents.broker.types import SessionBroker, SessionStopSignal, SessionWakeUp
 from azents.core.agent import SelectableModelOption, SubagentSettings
-from azents.core.enums import (
-    AgentRunStatus,
-    AgentSessionRunState,
-    EventKind,
-    SessionAgentKind,
-)
+from azents.core.enums import AgentRunStatus, AgentSessionRunState, SessionAgentKind
 from azents.core.inference_profile import SessionInferenceState
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.core.model_execution_options import validate_execution_options
+from azents.core.model_source_metadata import (
+    lookup_model_source_metadata,
+    source_max_input_tokens,
+)
 from azents.core.tools import (
     PublishEventFn,
     ResolveContext,
@@ -45,29 +43,19 @@ from azents.engine.events.fork_context import (
     parse_fork_turns,
     select_fork_events,
 )
-from azents.engine.events.types import AgentRunState, Event, SystemReminderPayload
 from azents.engine.run.types import FunctionTool, FunctionToolError
 from azents.engine.tooling.make_tool import make_tool
-from azents.rdb.models.event import JSONValue
-from azents.rdb.session import SessionManager
-from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
-from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
-from azents.repos.agent_execution.data import EventCreate
-from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession, SessionAgent
 from azents.repos.session_execution.ownership import OwnerBoundSessionManager
-from azents.repos.subagent_coordination.repository import (
-    SubagentCoordinationRepository,
+from azents.repos.subagent_tool_operations import (
+    SubagentToolOperationError,
+    SubagentToolOperationRepository,
 )
-from azents.services.agent_mailbox import AgentMailboxService
-from azents.services.mailbox import MailboxService
-from azents.services.model_metadata import ModelMetadataService
 from azents.services.session_resource_authority import (
     SessionExecutionOwner,
     accepts_execution_owner,
 )
-from azents.services.subagent_coordination import SubagentCoordinationService
 
 logger = logging.getLogger(__name__)
 
@@ -178,15 +166,6 @@ class InterruptAgentInput(BaseModel):
     agent_name: str = Field(description="Target agent path or name")
 
 
-_JSON_OBJECT_ADAPTER = TypeAdapter[dict[str, JSONValue]](dict[str, JSONValue])
-
-
-@dataclasses.dataclass(frozen=True)
-class _TargetResolution:
-    current: SessionAgent
-    target: SessionAgent | None
-
-
 @dataclasses.dataclass(frozen=True)
 class _SpawnInferenceProfile:
     state: SessionInferenceState
@@ -198,29 +177,13 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
     def __init__(
         self,
         *,
-        session_manager: SessionManager[AsyncSession],
-        model_metadata_service: ModelMetadataService,
-        agent_session_repository: AgentSessionRepository,
-        agent_run_repository: AgentRunRepository,
-        event_transcript_repository: EventTranscriptRepository,
-        subagent_coordination_service: SubagentCoordinationService,
-        agent_mailbox_service: AgentMailboxService,
-        mailbox_item_service: MailboxService,
+        operations: SubagentToolOperationRepository,
         broker: SessionBroker,
-        agent_repository: AgentRepository,
         agent: Agent,
         subagent_settings: SubagentSettings,
     ) -> None:
-        self.session_manager = session_manager
-        self.model_metadata_service = model_metadata_service
-        self.agent_session_repository = agent_session_repository
-        self.agent_run_repository = agent_run_repository
-        self.event_transcript_repository = event_transcript_repository
-        self.subagent_coordination_service = subagent_coordination_service
-        self.agent_mailbox_service = agent_mailbox_service
-        self.mailbox_item_service = mailbox_item_service
+        self.operations = operations
         self.broker = broker
-        self.agent_repository = agent_repository
         self.agent = agent
         self.subagent_settings = subagent_settings
         self.session_id: str | None = None
@@ -237,10 +200,13 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
             owner,
             session_id=session_id,
         ):
-            self.session_manager = OwnerBoundSessionManager(
-                session_manager=self.session_manager,
-                session_id=owner.session_id,
-                owner_generation=owner.owner_generation,
+            self.operations = dataclasses.replace(
+                self.operations,
+                session_manager=OwnerBoundSessionManager(
+                    session_manager=self.operations.session_manager,
+                    session_id=owner.session_id,
+                    owner_generation=owner.owner_generation,
+                ),
             )
             self._execution_owner = owner
 
@@ -252,9 +218,11 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
         """Return subagent collaboration tools."""
         self.session_id = context.session_id or self.session_id
         self.publish_event = context.publish_event
-        async with self.session_manager() as session:
-            self.agent = await self._current_agent(session)
-            self.subagent_settings = self.agent.subagent_settings
+        agent = await self.operations.get_agent(self.agent.id)
+        if agent is None:
+            raise FunctionToolError("Agent was not found")
+        self.agent = agent
+        self.subagent_settings = agent.subagent_settings
         return ToolkitState(
             status=ToolkitStatus.ENABLED,
             tools=[
@@ -269,8 +237,11 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
     async def get_static_prompt(self, context: TurnContext) -> str:
         """Return role-specific Codex V2 collaboration guidance."""
         self.session_id = context.session_id or self.session_id
-        async with self.session_manager() as session:
-            current = await self._current_session_agent(session)
+        current = await self.operations.get_current_session_agent(
+            self._current_session_id()
+        )
+        if current is None:
+            raise FunctionToolError("Current SessionAgent was not found")
         usage_hint = (
             _ROOT_AGENT_USAGE_HINT_TEXT
             if current.kind == SessionAgentKind.ROOT
@@ -289,13 +260,6 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
                 _EXPLICIT_REQUEST_ONLY_MODE_TEXT,
             ]
         )
-
-    async def _current_agent(self, session: AsyncSession) -> Agent:
-        """Load the current owning Agent policy snapshot."""
-        agent = await self.agent_repository.get_by_id(session, self.agent.id)
-        if agent is None:
-            raise FunctionToolError("Agent was not found")
-        return agent
 
     @staticmethod
     def _subagent_override_options(agent: Agent) -> list[SelectableModelOption]:
@@ -354,96 +318,55 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
             if not input.task.strip():
                 raise FunctionToolError("task is required")
 
-            async with self.session_manager() as session:
-                current = await self._current_session_agent(session)
-                await self._enforce_spawn_limits(session, current)
-                parent_run = await self._validated_spawn_parent_run(
-                    session,
-                    current=current,
+            try:
+                preparation = await self.operations.prepare_spawn(
+                    session_id=self._current_session_id(),
+                    agent_id=self.agent.id,
                     parent_run_id=parent_run_id,
+                    settings=self.subagent_settings,
                 )
-                parent_session = await self._session_or_error(
-                    session, current.agent_session_id
+            except SubagentToolOperationError as exc:
+                raise FunctionToolError(str(exc)) from None
+            parent_state = preparation.parent_session.inference_state
+            if parent_state is None:
+                raise FunctionToolError(
+                    "Current Session has no prepared inference state"
                 )
-                if parent_session.inference_state is None:
-                    raise FunctionToolError(
-                        "Current Session has no prepared inference state"
-                    )
-                current_agent = await self._current_agent(session)
-                profile = await self._derive_spawn_inference_profile(
-                    agent=current_agent,
-                    parent_state=parent_session.inference_state,
-                    fork_selection=fork_selection,
-                    model_target_label=input.model_target_label,
-                    reasoning_effort=input.reasoning_effort,
+            self.agent = preparation.agent
+            self.subagent_settings = preparation.agent.subagent_settings
+            profile = await self._derive_spawn_inference_profile(
+                agent=preparation.agent,
+                parent_state=parent_state,
+                fork_selection=fork_selection,
+                model_target_label=input.model_target_label,
+                reasoning_effort=input.reasoning_effort,
+            )
+            selected = select_fork_events(
+                preparation.events,
+                fork_selection,
+                head_event_id=preparation.parent_session.model_input_head_event_id,
+            )
+            forked = degrade_file_parts_for_fork(selected)
+            try:
+                result = await self.operations.spawn(
+                    session_id=self._current_session_id(),
+                    parent_run_id=parent_run_id,
+                    settings=self.subagent_settings,
+                    name=input.name,
+                    agent_type=input.agent_type,
+                    task=input.task,
+                    profile=profile.state,
+                    forked_events=forked,
                 )
-                try:
-                    child = (
-                        await self.agent_session_repository.create_child_session_agent(
-                            session,
-                            parent_session_agent_id=current.id,
-                            name=input.name,
-                            agent_type=input.agent_type,
-                            title=input.name,
-                            last_task_message=input.task,
-                        )
-                    )
-                except ValueError as exc:
-                    raise FunctionToolError(str(exc)) from None
-                child_session = await self._session_or_error(
-                    session, child.agent_session_id
-                )
-                await self.agent_run_repository.create_pending(
-                    session,
-                    session_id=child.agent_session_id,
-                    parent_agent_run_id=parent_run.id,
-                    scheduled_task_cycle_id=None,
-                )
-                await self.agent_session_repository.set_applied_inference_profile(
-                    session,
-                    session_id=child.agent_session_id,
-                    model_target_label=profile.state.model_target_label,
-                    reasoning_effort=profile.state.reasoning_effort,
-                    enabled_execution_options=(profile.state.enabled_execution_options),
-                )
-                await self.agent_session_repository.set_inference_state(
-                    session,
-                    session_id=child.agent_session_id,
-                    inference_state=profile.state,
-                )
-                forked = await self._fork_events(
-                    session,
-                    parent_session_id=current.agent_session_id,
-                    head_event_id=parent_session.model_input_head_event_id,
-                    selection=fork_selection,
-                )
-                for event in forked:
-                    await self.event_transcript_repository.append(
-                        session,
-                        EventCreate(
-                            session_id=child.agent_session_id,
-                            kind=event.kind,
-                            payload=_payload_json(event),
-                        ),
-                    )
-                if forked:
-                    await self._append_forked_history_boundary_reminder(
-                        session,
-                        child,
-                    )
-                await self.agent_mailbox_service.enqueue_spawn_assignment(
-                    session,
-                    source=current,
-                    target=child,
-                    content=input.task,
-                )
+            except SubagentToolOperationError as exc:
+                raise FunctionToolError(str(exc)) from None
 
-            await self._wake_session(child_session)
-            await self._publish_tree_changed(child)
+            await self._wake_session(result.child_session)
+            await self._publish_tree_changed(result.child)
             return _json(
                 {
-                    "agent_name": child.name,
-                    "agent_path": child.path,
+                    "agent_name": result.child.name,
+                    "agent_path": result.child.path,
                     "status": "spawned",
                 }
             )
@@ -546,29 +469,40 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
             if lightweight_option is None:
                 raise FunctionToolError("Agent lightweight model target was not found")
             lightweight = lightweight_option.candidates[0].model_selection
-            source_snapshot = await self.model_metadata_service.capture_for_context(
-                capability_maximums=[
-                    selection.normalized_capabilities.context_window.max_input_tokens,
-                    lightweight.normalized_capabilities.context_window.max_input_tokens,
-                ]
+            capability_maximums = [
+                selection.normalized_capabilities.context_window.max_input_tokens,
+                lightweight.normalized_capabilities.context_window.max_input_tokens,
+            ]
+            source_snapshot = (
+                None
+                if all(maximum is not None for maximum in capability_maximums)
+                else await self.operations.load_model_source_snapshot()
             )
             compaction_input_tokens = resolve_model_input_tokens(
                 lightweight.normalized_capabilities.context_window.default_input_tokens,
                 lightweight.normalized_capabilities.context_window.max_input_tokens,
-                self.model_metadata_service.maximum_input_tokens(
-                    source_snapshot,
-                    provider=lightweight.provider,
-                    model_identifier=lightweight.model_identifier,
+                source_max_input_tokens(
+                    None
+                    if source_snapshot is None
+                    else lookup_model_source_metadata(
+                        provider=lightweight.provider,
+                        model_identifier=lightweight.model_identifier,
+                        payload=source_snapshot.payload,
+                    )
                 ),
                 lightweight_option.candidates[0].settings.context_window_tokens,
             )
             main_input_tokens = resolve_model_input_tokens(
                 selection.normalized_capabilities.context_window.default_input_tokens,
                 selection.normalized_capabilities.context_window.max_input_tokens,
-                self.model_metadata_service.maximum_input_tokens(
-                    source_snapshot,
-                    provider=selection.provider,
-                    model_identifier=selection.model_identifier,
+                source_max_input_tokens(
+                    None
+                    if source_snapshot is None
+                    else lookup_model_source_metadata(
+                        provider=selection.provider,
+                        model_identifier=selection.model_identifier,
+                        payload=source_snapshot.payload,
+                    )
                 ),
                 settings.context_window_tokens,
             )
@@ -605,33 +539,24 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
             """Queue a message for a target agent without waking it."""
             if not input.message.strip():
                 raise FunctionToolError("message is required")
-            async with self.session_manager() as session:
-                resolution = await self._resolve_target(session, input.agent_name)
-                if resolution.target is None:
-                    return _json(
-                        {"status": "not_found", "agent_name": input.agent_name}
-                    )
-                await self.agent_mailbox_service.enqueue_message(
-                    session,
-                    source=resolution.current,
-                    target=resolution.target,
+            try:
+                result = await self.operations.send_message(
+                    session_id=self._current_session_id(),
+                    agent_name=input.agent_name,
                     content=input.message,
                 )
-                session_agent_repo = self.agent_session_repository
-                await session_agent_repo.update_session_agent_last_task_message(
-                    session,
-                    session_agent_id=resolution.target.id,
-                    last_task_message=input.message,
-                )
-            await self.broker.notify_mailbox_activity(
-                resolution.target.agent_session_id
-            )
-            await self._publish_tree_changed(resolution.target)
+            except SubagentToolOperationError as exc:
+                raise FunctionToolError(str(exc)) from None
+            target = result.target
+            if target is None:
+                return _json({"status": "not_found", "agent_name": input.agent_name})
+            await self.broker.notify_mailbox_activity(target.agent_session_id)
+            await self._publish_tree_changed(target)
             return _json(
                 {
                     "status": "queued",
-                    "agent_name": resolution.target.name,
-                    "agent_path": resolution.target.path,
+                    "agent_name": target.name,
+                    "agent_path": target.path,
                 }
             )
 
@@ -642,44 +567,28 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
             """Assign a follow-up task to an existing agent and wake it."""
             if not input.task.strip():
                 raise FunctionToolError("task is required")
-            async with self.session_manager() as session:
-                resolution = await self._resolve_target(session, input.agent_name)
-                if resolution.target is None:
-                    return _json(
-                        {"status": "not_found", "agent_name": input.agent_name}
-                    )
-                if resolution.target.kind == SessionAgentKind.ROOT:
-                    raise FunctionToolError(
-                        "Follow-up tasks can't target the root agent"
-                    )
-                await self._enforce_followup_limit(
-                    session,
-                    current=resolution.current,
-                    target=resolution.target,
-                )
-                target_session = await self._session_or_error(
-                    session,
-                    resolution.target.agent_session_id,
-                )
-                await self.agent_mailbox_service.enqueue_followup_task(
-                    session,
-                    source=resolution.current,
-                    target=resolution.target,
+            try:
+                result = await self.operations.followup_task(
+                    session_id=self._current_session_id(),
+                    agent_name=input.agent_name,
                     content=input.task,
+                    max_subagents=self.subagent_settings.max_subagents,
                 )
-                session_agent_repo = self.agent_session_repository
-                await session_agent_repo.update_session_agent_last_task_message(
-                    session,
-                    session_agent_id=resolution.target.id,
-                    last_task_message=input.task,
-                )
+            except SubagentToolOperationError as exc:
+                raise FunctionToolError(str(exc)) from None
+            target = result.target
+            if target is None:
+                return _json({"status": "not_found", "agent_name": input.agent_name})
+            target_session = result.target_session
+            if target_session is None:
+                raise RuntimeError("Follow-up target Session is missing.")
             await self._wake_session(target_session)
-            await self._publish_tree_changed(resolution.target)
+            await self._publish_tree_changed(target)
             return _json(
                 {
                     "status": "assigned",
-                    "agent_name": resolution.target.name,
-                    "agent_path": resolution.target.path,
+                    "agent_name": target.name,
+                    "agent_path": target.path,
                 }
             )
 
@@ -688,61 +597,37 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
     def _interrupt_agent_tool(self) -> FunctionTool:
         async def interrupt_agent(input: InterruptAgentInput) -> str:
             """Interrupt the target agent's current run without deleting it."""
-            async with self.session_manager() as session:
-                resolution = await self._resolve_target(session, input.agent_name)
-                if resolution.target is None:
-                    return _json({"previous_status": "not_found"})
-                if resolution.target.kind == SessionAgentKind.ROOT:
-                    raise FunctionToolError("root is not a spawned agent")
-                if resolution.target.id == resolution.current.id:
-                    raise FunctionToolError(
-                        "an agent cannot interrupt itself; return your result and let "
-                        "the parent interrupt you if needed"
-                    )
-                locked_root = (
-                    await self.agent_session_repository.lock_session_agent_by_id(
-                        session,
-                        resolution.current.root_session_agent_id,
-                    )
+            try:
+                result = await self.operations.interrupt(
+                    session_id=self._current_session_id(),
+                    agent_name=input.agent_name,
                 )
-                if locked_root is None:
-                    raise FunctionToolError("Root SessionAgent was not found")
-                target_session = await self.agent_session_repository.lock_by_id(
-                    session,
-                    resolution.target.agent_session_id,
-                )
-                if target_session is None:
-                    raise FunctionToolError("AgentSession was not found")
-                previous_status = await self._project_agent_status(
-                    session, resolution.target
-                )
-                if target_session.run_state == AgentSessionRunState.RUNNING:
-                    await self.agent_session_repository.request_stop(
-                        session,
-                        session_id=target_session.id,
-                        stop_request_id="subagent_interrupt",
-                        stop_requester_user_id=None,
-                    )
-            if target_session.run_state == AgentSessionRunState.RUNNING:
+            except SubagentToolOperationError as exc:
+                raise FunctionToolError(str(exc)) from None
+            target = result.target
+            if target is None:
+                return _json({"previous_status": "not_found"})
+            target_session = result.target_session
+            if target_session is None or result.previous_status is None:
+                raise RuntimeError("Interrupt target projection is incomplete.")
+            if result.signal_stop:
                 await self.broker.send_message(
                     SessionStopSignal(session_id=target_session.id)
                 )
-            await self._publish_tree_changed(resolution.target)
-            return _json({"previous_status": previous_status})
+            await self._publish_tree_changed(target)
+            return _json({"previous_status": result.previous_status})
 
         return make_tool(interrupt_agent, name="interrupt_agent")
 
     def _list_agents_tool(self) -> FunctionTool:
         async def list_agents() -> str:
             """List bounded agents in the current root SessionAgent tree."""
-            async with self.session_manager() as session:
-                projection = await self.subagent_coordination_service.list_agents(
-                    session,
-                    current_session_id=self._current_session_id(),
-                    configured_capacity=self.subagent_settings.max_subagents,
-                )
-                if projection is None:
-                    raise FunctionToolError("Current SessionAgent was not found")
+            projection = await self.operations.list_agents(
+                session_id=self._current_session_id(),
+                configured_capacity=self.subagent_settings.max_subagents,
+            )
+            if projection is None:
+                raise FunctionToolError("Current SessionAgent was not found")
             logger.debug(
                 "Projected bounded subagent coordination list",
                 extra={
@@ -750,7 +635,7 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
                     "required_count": projection.required_count,
                     "selected_inactive_count": projection.selected_inactive_count,
                     "omitted_inactive_count": projection.omitted_inactive_count,
-                    "emitted_count": len(projection.agents),
+                    "emitted_count": len(projection.rows),
                     "capacity_converging": (
                         projection.required_count > projection.configured_capacity
                     ),
@@ -760,10 +645,13 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
                 {
                     "agents": [
                         {
-                            "agent_name": agent.agent_name,
-                            "agent_status": agent.agent_status,
+                            "agent_name": row.path,
+                            "agent_status": _coordination_status(
+                                row.session_run_state,
+                                row.latest_run_status,
+                            ),
                         }
-                        for agent in projection.agents
+                        for row in projection.rows
                     ]
                 }
             )
@@ -775,166 +663,6 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
         if self.session_id is None:
             raise FunctionToolError("Current AgentSession ID was not provided")
         return self.session_id
-
-    async def _current_session_agent(self, session: AsyncSession) -> SessionAgent:
-        current = await self.agent_session_repository.get_session_agent_by_session_id(
-            session,
-            self._current_session_id(),
-        )
-        if current is None:
-            raise FunctionToolError("Current SessionAgent was not found")
-        return current
-
-    async def _validated_spawn_parent_run(
-        self,
-        session: AsyncSession,
-        *,
-        current: SessionAgent,
-        parent_run_id: str,
-    ) -> AgentRunState:
-        """Load and validate the exact run invoking ``spawn_agent``."""
-        parent_run = await self.agent_run_repository.get_by_id(
-            session,
-            parent_run_id,
-        )
-        if parent_run is None or parent_run.session_id != current.agent_session_id:
-            raise FunctionToolError("Current AgentRun was not found")
-        if parent_run.status != AgentRunStatus.RUNNING:
-            raise FunctionToolError("Current AgentRun is not running")
-        return parent_run
-
-    async def _resolve_target(
-        self,
-        session: AsyncSession,
-        agent_name: str,
-    ) -> _TargetResolution:
-        current = await self._current_session_agent(session)
-        try:
-            target = await self.agent_session_repository.resolve_session_agent_path(
-                session,
-                current_session_agent_id=current.id,
-                path=agent_name,
-            )
-        except ValueError:
-            target = None
-        return _TargetResolution(current=current, target=target)
-
-    async def _enforce_spawn_limits(
-        self,
-        session: AsyncSession,
-        current: SessionAgent,
-    ) -> None:
-        """Raise a tool error when spawning would exceed configured limits."""
-        next_depth = _session_agent_depth(current) + 1
-        max_depth = self.subagent_settings.max_depth
-        if next_depth > max_depth:
-            raise FunctionToolError(
-                "Cannot spawn subagent: max_depth "
-                f"{max_depth} would be exceeded by child depth {next_depth}."
-            )
-
-        active_subagent_ids = await self._lock_and_list_active_subagent_ids(
-            session,
-            current=current,
-        )
-        max_subagents = self.subagent_settings.max_subagents
-        if len(active_subagent_ids) >= max_subagents:
-            raise FunctionToolError(
-                "Cannot spawn subagent: max_subagents "
-                f"{max_subagents} is already reached for this root session."
-            )
-
-    async def _enforce_followup_limit(
-        self,
-        session: AsyncSession,
-        *,
-        current: SessionAgent,
-        target: SessionAgent,
-    ) -> None:
-        """Reject a follow-up that would activate a new over-capacity child."""
-        active_subagent_ids = await self._lock_and_list_active_subagent_ids(
-            session,
-            current=current,
-        )
-        max_subagents = self.subagent_settings.max_subagents
-        if (
-            target.id not in active_subagent_ids
-            and len(active_subagent_ids) >= max_subagents
-        ):
-            raise FunctionToolError(
-                "Cannot assign follow-up task: max_subagents "
-                f"{max_subagents} is already reached for this root session."
-            )
-
-    async def _lock_and_list_active_subagent_ids(
-        self,
-        session: AsyncSession,
-        *,
-        current: SessionAgent,
-    ) -> set[str]:
-        """Lock the root tree and return active child SessionAgent IDs."""
-        locked_root = await self.agent_session_repository.lock_session_agent_by_id(
-            session,
-            current.root_session_agent_id,
-        )
-        if locked_root is None:
-            raise FunctionToolError("Root SessionAgent was not found")
-        tree = await self.agent_session_repository.list_session_agent_tree(
-            session,
-            root_session_agent_id=current.root_session_agent_id,
-        )
-        subagents = [
-            agent for agent in tree if agent.id != current.root_session_agent_id
-        ]
-        sessions = await self.agent_session_repository.list_by_ids(
-            session,
-            agent_session_ids=[agent.agent_session_id for agent in subagents],
-        )
-        latest_runs = await self.agent_run_repository.list_latest_by_session_ids(
-            session,
-            session_ids=[agent.agent_session_id for agent in subagents],
-        )
-        return {
-            agent.id
-            for agent in subagents
-            if _session_agent_active(
-                sessions.get(agent.agent_session_id),
-                latest_runs.get(agent.agent_session_id),
-            )
-        }
-
-    async def _append_forked_history_boundary_reminder(
-        self,
-        session: AsyncSession,
-        child: SessionAgent,
-    ) -> None:
-        """Append the model-visible boundary after copied parent history."""
-        text = dedent(
-            f"""\
-            The messages above are inherited conversation history from the parent
-            agent. They reflect the parent agent's earlier perspective and are
-            background context only.
-
-            You are the subagent named "{child.name}".
-            Your full agent path is "{child.path}".
-            The next message is your current direct assignment.
-
-            Do not treat agent identities or tool calls in the inherited history as
-            your own actions. Never call wait on yourself. wait is only
-            for observing your descendants.
-            """
-        )
-        payload = SystemReminderPayload(text=text)
-        await self.event_transcript_repository.append(
-            session,
-            EventCreate(
-                session_id=child.agent_session_id,
-                kind=EventKind.SYSTEM_REMINDER,
-                payload=_JSON_OBJECT_ADAPTER.validate_python(
-                    payload.model_dump(mode="json")
-                ),
-            ),
-        )
 
     async def _publish_tree_changed(self, changed: SessionAgent) -> None:
         """Publish a non-durable Subagent Tree invalidation event."""
@@ -950,72 +678,6 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
     async def _wake_session(self, session: AgentSession) -> None:
         await self.broker.send_message(SessionWakeUp(session_id=session.id))
 
-    async def _session_or_error(
-        self,
-        session: AsyncSession,
-        agent_session_id: str,
-    ) -> AgentSession:
-        agent_session = await self.agent_session_repository.get_by_id(
-            session,
-            agent_session_id,
-        )
-        if agent_session is None:
-            raise FunctionToolError("AgentSession was not found")
-        return agent_session
-
-    async def _fork_events(
-        self,
-        session: AsyncSession,
-        *,
-        parent_session_id: str,
-        head_event_id: str | None,
-        selection: ForkTurnsSelection,
-    ) -> list[Event]:
-        events = await self.event_transcript_repository.list_for_model_input(
-            session,
-            parent_session_id,
-            head_event_id=head_event_id,
-        )
-        selected = select_fork_events(
-            events,
-            selection,
-            head_event_id=head_event_id,
-        )
-        return degrade_file_parts_for_fork(selected)
-
-    async def _project_agent_status(
-        self,
-        session: AsyncSession,
-        agent: SessionAgent,
-    ) -> str:
-        """Project one target status for the interrupt response."""
-        agent_session = await self.agent_session_repository.get_by_id(
-            session,
-            agent.agent_session_id,
-        )
-        if agent_session is None:
-            return "not_found"
-        if agent_session.run_state == AgentSessionRunState.RUNNING:
-            return "running"
-        latest = await self.agent_run_repository.list_latest_by_session_ids(
-            session,
-            session_ids=[agent.agent_session_id],
-        )
-        run = latest.get(agent.agent_session_id)
-        if run is None:
-            return "idle"
-        if run.status == AgentRunStatus.COMPLETED:
-            return "completed"
-        if run.status == AgentRunStatus.FAILED:
-            return "errored"
-        if run.status in {
-            AgentRunStatus.STOPPED,
-            AgentRunStatus.INTERRUPTED,
-            AgentRunStatus.CANCELLED,
-        }:
-            return "interrupted"
-        return run.status.value
-
 
 class SubagentToolkitProvider(ToolkitProvider[SubagentToolkitConfig]):
     """Resolve the subagent collaboration Toolkit."""
@@ -1029,17 +691,11 @@ class SubagentToolkitProvider(ToolkitProvider[SubagentToolkitConfig]):
     def __init__(
         self,
         *,
-        session_manager: SessionManager[AsyncSession],
-        model_metadata_service: ModelMetadataService,
+        operations: SubagentToolOperationRepository,
         broker: SessionBroker,
-        mailbox_item_service: MailboxService,
-        agent_repository: AgentRepository,
     ) -> None:
-        self.session_manager = session_manager
-        self.model_metadata_service = model_metadata_service
+        self.operations = operations
         self.broker = broker
-        self.mailbox_item_service = mailbox_item_service
-        self.agent_repository = agent_repository
 
     async def resolve(
         self,
@@ -1048,30 +704,13 @@ class SubagentToolkitProvider(ToolkitProvider[SubagentToolkitConfig]):
     ) -> SubagentToolkit:
         """Resolve per-session subagent collaboration tools."""
         del config
-        async with self.session_manager() as session:
-            agent = await self.agent_repository.get_by_id(session, context.agent_id)
+        agent = await self.operations.get_agent(context.agent_id)
         if agent is None:
             raise ValueError("Agent not found while resolving subagent Toolkit")
         subagent_settings = agent.subagent_settings
-        agent_session_repository = AgentSessionRepository()
-        agent_run_repository = AgentRunRepository()
-        agent_mailbox_service = AgentMailboxService(
-            mailbox_item_service=self.mailbox_item_service,
-            agent_session_repository=agent_session_repository,
-        )
         toolkit = SubagentToolkit(
-            session_manager=self.session_manager,
-            model_metadata_service=self.model_metadata_service,
-            agent_session_repository=agent_session_repository,
-            agent_run_repository=agent_run_repository,
-            event_transcript_repository=EventTranscriptRepository(),
-            subagent_coordination_service=SubagentCoordinationService(
-                repository=SubagentCoordinationRepository(),
-            ),
-            agent_mailbox_service=agent_mailbox_service,
-            mailbox_item_service=self.mailbox_item_service,
+            operations=self.operations,
             broker=self.broker,
-            agent_repository=self.agent_repository,
             agent=agent,
             subagent_settings=subagent_settings,
         )
@@ -1097,29 +736,27 @@ def normalize_spawn_reasoning_effort(
     return min(supported, key=ordering.index)
 
 
-def _session_agent_depth(agent: SessionAgent) -> int:
-    """Return depth below /root for a SessionAgent path."""
-    if agent.path == "/root":
-        return 0
-    return len([segment for segment in agent.path.split("/") if segment]) - 1
-
-
-def _session_agent_active(
-    session: AgentSession | None,
-    latest_run: AgentRunState | None,
-) -> bool:
-    """Return whether a SessionAgent should count against active capacity."""
-    if session is None:
-        return False
-    return session.run_state == AgentSessionRunState.RUNNING or (
-        latest_run is not None
-        and latest_run.status in {AgentRunStatus.PENDING, AgentRunStatus.RUNNING}
-    )
+def _coordination_status(
+    session_run_state: AgentSessionRunState,
+    latest_run_status: AgentRunStatus | None,
+) -> str:
+    """Project one bounded model-facing coordination status."""
+    if session_run_state == AgentSessionRunState.RUNNING:
+        return "running"
+    if latest_run_status is None:
+        return "idle"
+    if latest_run_status == AgentRunStatus.COMPLETED:
+        return "completed"
+    if latest_run_status == AgentRunStatus.FAILED:
+        return "errored"
+    if latest_run_status in {
+        AgentRunStatus.STOPPED,
+        AgentRunStatus.INTERRUPTED,
+        AgentRunStatus.CANCELLED,
+    }:
+        return "interrupted"
+    return latest_run_status.value
 
 
 def _json(value: dict[str, object]) -> str:
     return json.dumps(value, ensure_ascii=False)
-
-
-def _payload_json(event: Event) -> dict[str, JSONValue]:
-    return event.payload.model_dump(mode="json", exclude_none=True)
