@@ -1,5 +1,6 @@
 import { rem } from "@mantine/core";
 import { useForm } from "@mantine/form";
+import { expect, within } from "storybook/test";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import { ToolkitForm } from "./ToolkitForm";
 import type { ToolkitFormValues } from "../schemas";
@@ -14,8 +15,8 @@ function ToolkitFormStory(props: ToolkitFormStoryProps): ReactElement {
     mode: "controlled",
     initialValues: {
       toolkitType: props.currentToolSlug,
-      slug: props.currentToolSlug,
-      name: "Shell access",
+      slug: "",
+      name: "",
       description: "Read-only shell access for workspace diagnostics.",
       prompt: "Use the available shell tools for diagnostics.",
       config: { allowed_domains: [], denied_domains: [] },
@@ -56,6 +57,9 @@ const meta = {
     backPath: "/w/acme/toolkits",
     toolOptions: [{ value: "shell", label: "Shell" }],
     currentToolSlug: "shell",
+    namePlaceholder: "Shell",
+    slugPlaceholder: "shell",
+    nameRequired: false,
     showOauthConnection: false,
     oauthConnectionPending: { connect: false, disconnect: false },
     onToolSelect: () => {},
@@ -73,7 +77,38 @@ export default meta;
 
 type Story = StoryObj<typeof meta>;
 
-export const Create = {} satisfies Story;
+export const Create = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByLabelText("Name")).toHaveAttribute(
+      "placeholder",
+      "Shell",
+    );
+    await expect(canvas.getByLabelText("Slug")).toHaveAttribute(
+      "placeholder",
+      "shell",
+    );
+  },
+} satisfies Story;
+
+export const GenericMcpRequiresName = {
+  args: {
+    currentToolSlug: "mcp",
+    toolOptions: [{ value: "mcp", label: "MCP" }],
+    namePlaceholder: "",
+    slugPlaceholder: "mcp",
+    nameRequired: true,
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByLabelText("Name")).toBeRequired();
+    await expect(canvas.getByLabelText("Name")).toHaveAttribute(
+      "placeholder",
+      "Enter a name for this MCP connection",
+    );
+    await expect(canvas.getByLabelText("Slug")).not.toBeRequired();
+  },
+} satisfies Story;
 
 export const Loading = {
   args: {

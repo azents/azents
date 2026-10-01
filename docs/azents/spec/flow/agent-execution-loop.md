@@ -117,7 +117,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
   - typescript/apps/azents-web/messages/*/chat.json
 last_verified_at: 2026-10-01
-spec_version: 195
+spec_version: 196
 ---
 
 # Agent Execution Loop
@@ -178,7 +178,7 @@ Main steps:
    provider-neutral UI stream projections while retaining only the state needed to build durable
    output at completion. Provider-native hosted-tool stages are adapter-local and become canonical
    provider-tool activity snapshots when observed.
-10. Before a normalized client-tool call is appended or admitted for execution, the immutable prepared Tool Catalog snapshots its DB-attached Toolkit source (`toolkit_config_id`, `toolkit_type`, `toolkit_name`, and `toolkit_slug`) onto the call. The same snapshot is retained by `active_tool_calls` and their live projections; built-in and auto-bound calls remain source-less.
+10. Before a normalized client-tool call is appended or admitted for execution, the immutable prepared Tool Catalog snapshots its DB-attached Toolkit source (`toolkit_config_id`, `toolkit_type`, `toolkit_name`, stored `toolkit_slug`, effective `toolkit_namespace`, and bounded safe connection identity) onto the call. The same snapshot is retained by `active_tool_calls` and their live projections; built-in and auto-bound calls remain source-less.
 11. Foreground client tools execute in parallel and results are appended as event `client_tool_result`.
     Runtime Web calls are server-side auto-bound client tools available only for an
     Agent with managed Runtime capability. They may request, list, or close
@@ -1118,6 +1118,12 @@ and an immutable tuple of wire variants. Each variant declares its dialect and o
 Ordinary tools implicitly declare one JSON-function variant. Prefixing changes only the model-visible
 name and preserves the profile, variants, schema identity, handler, and cancellation route.
 
+Registered Toolkit candidates carry the stored base Slug separately from their durable
+Agent+Toolkit effective namespace. Catalog construction prefixes local names only with the effective
+namespace, rejects duplicate final names before publication, and freezes that same source for Tool
+Search, executor routing, hooks, events, and activity. Duplicate stored Slugs therefore remain
+management metadata and never create an ambiguous prepared catalog.
+
 Preparation resolves semantic model profiles from the immutable selected-model snapshot using
 normalized developer, family, and exact model identifier rules; exact-model rules take precedence
 over family rules. It separately resolves an adapter profile from provider, adapter, and native
@@ -1630,6 +1636,10 @@ icon.
 
 ## Changelog
 
+- **2026-10-01** (spec_version 196) — Promoted durable effective Toolkit
+  namespaces and source snapshots as the shared final-name, Tool Search,
+  routing, hook, event, and activity authority while allowing duplicate stored
+  base Slugs.
 - **2026-10-01** (spec_version 195) — Made the selected generic `genai_prices`
   snapshot the sole local pricing authority and documented nullable premium-tier
   estimates after removal of the former source schema and calculator.

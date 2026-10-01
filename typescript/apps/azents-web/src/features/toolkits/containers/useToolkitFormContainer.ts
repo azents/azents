@@ -19,6 +19,10 @@ import {
 } from "react";
 import { normalizeCredentialEdits } from "@/shared/lib/redacted-credentials";
 import {
+  resolveDefaultToolkitSlug,
+  trimToolkitWhitespace,
+} from "@/shared/lib/toolkit-identifiers";
+import {
   getArray,
   getString,
   getStringArray,
@@ -57,6 +61,9 @@ export interface ToolkitFormContainerOutput {
   backPath: string;
   toolOptions: Array<{ value: string; label: string }>;
   currentToolSlug: string;
+  namePlaceholder: string;
+  slugPlaceholder: string;
+  nameRequired: boolean;
   showOauthConnection: boolean;
   oauthConnectionPending: {
     connect: boolean;
@@ -165,7 +172,7 @@ export function useToolkitFormContainer(
     mode: "controlled",
     initialValues: {
       toolkitType: initialToolkitType ?? "",
-      slug: initialToolkitType ?? "",
+      slug: "",
       name: "",
       description: "",
       prompt: "",
@@ -234,7 +241,7 @@ export function useToolkitFormContainer(
     if (
       initialToolkitType == null ||
       toolkitListState.type !== "READY" ||
-      form.getValues().name
+      form.getValues().description
     ) {
       return;
     }
@@ -242,7 +249,6 @@ export function useToolkitFormContainer(
       (toolkit) => toolkit.slug === initialToolkitType,
     );
     if (definition) {
-      form.setFieldValue("name", definition.name);
       form.setFieldValue("description", definition.description);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- form is a stable Mantine ref.
@@ -286,7 +292,8 @@ export function useToolkitFormContainer(
   ]);
 
   const createMutation = trpc.toolkit.createConfig.useMutation({
-    onSuccess: () => {
+    onSuccess: (data) => {
+      form.setValues({ name: data.name, slug: data.slug });
       setMutationState({ type: "IDLE", error: null });
       void utils.toolkit.listConfigs.invalidate({ handle });
       if (embedded) {
@@ -317,7 +324,8 @@ export function useToolkitFormContainer(
     },
   });
   const createAgentMutation = trpc.toolkit.createAgentConfig.useMutation({
-    onSuccess: async () => {
+    onSuccess: async (data) => {
+      form.setValues({ name: data.name, slug: data.slug });
       setMutationState({ type: "IDLE", error: null });
       if (agentId) {
         await utils.toolkit.listAgentManagement.invalidate({ handle, agentId });
@@ -427,8 +435,8 @@ export function useToolkitFormContainer(
           handle,
           agentId,
           toolkitType: values.toolkitType,
-          slug: values.slug,
-          name: values.name,
+          ...(trimToolkitWhitespace(values.slug) && { slug: values.slug }),
+          ...(trimToolkitWhitespace(values.name) && { name: values.name }),
           description: values.description,
           prompt: values.prompt,
           config: values.config,
@@ -458,8 +466,8 @@ export function useToolkitFormContainer(
       createMutation.mutate({
         handle,
         toolkitType: values.toolkitType,
-        slug: values.slug,
-        name: values.name,
+        ...(trimToolkitWhitespace(values.slug) && { slug: values.slug }),
+        ...(trimToolkitWhitespace(values.name) && { name: values.name }),
         description: values.description,
         prompt: values.prompt,
         config: values.config,
@@ -490,15 +498,11 @@ export function useToolkitFormContainer(
       form.setFieldValue("config", DEFAULT_CONFIGS[toolSlug] ?? {});
       form.setFieldValue("credentials", DEFAULT_CREDENTIALS[toolSlug] ?? null);
 
-      if (!isEditMode && !form.getValues().slug) {
-        form.setFieldValue("slug", toolSlug);
-      }
-      if (toolkitListState.type === "READY" && !form.getValues().name) {
+      if (toolkitListState.type === "READY" && !form.getValues().description) {
         const definition = toolkitListState.toolkits.find(
           (toolkit) => toolkit.slug === toolSlug,
         );
         if (definition) {
-          form.setFieldValue("name", definition.name);
           form.setFieldValue("description", definition.description);
         }
       }
@@ -711,6 +715,20 @@ export function useToolkitFormContainer(
     [agentId, toolkitListState],
   );
   const currentToolSlug = form.getValues().toolkitType;
+  const currentDefinition =
+    toolkitListState.type === "READY"
+      ? (toolkitListState.toolkits.find(
+          (toolkit) => toolkit.slug === currentToolSlug,
+        ) ?? null)
+      : null;
+  const canonicalName = currentDefinition?.name ?? "";
+  const namePlaceholder = currentToolSlug === "mcp" ? "" : canonicalName;
+  const slugPlaceholder = canonicalName
+    ? resolveDefaultToolkitSlug(
+        trimToolkitWhitespace(form.getValues().name) || canonicalName,
+        canonicalName,
+      )
+    : "";
   const showOauthConnection =
     formState.type === "EDIT" &&
     ["mcp", "notion", "sentry"].includes(currentToolSlug) &&
@@ -746,6 +764,9 @@ export function useToolkitFormContainer(
     backPath,
     toolOptions,
     currentToolSlug,
+    namePlaceholder,
+    slugPlaceholder,
+    nameRequired: currentToolSlug === "mcp",
     showOauthConnection,
     oauthConnectionPending: {
       connect:

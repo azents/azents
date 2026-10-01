@@ -1535,6 +1535,7 @@
     "toolLabel": "Outil",
     "toolPlaceholder": "Sélectionner un outil",
     "nameLabel": "Nom",
+    "mcpNamePlaceholder": "Saisissez un nom pour cette connexion MCP",
     "descriptionLabel": "Description",
     "descriptionPlaceholder": "Décrivez brièvement le rôle de ce toolkit",
     "allowedDomainsLabel": "Domaines autorisés",
@@ -1555,8 +1556,8 @@
     "save": "Enregistrer",
     "create": "Ajouter",
     "slugLabel": "Slug",
-    "slugDescription": "Identifiant unique utilisé comme préfixe du nom d'outil",
-    "slugPlaceholder": "ex. my-shell",
+    "slugDescription": "Alias de base facultatif utilisé comme préfixe du nom d’outil. Les doublons sont autorisés.",
+    "slugPlaceholder": "Dérivé du nom",
     "customPromptLabel": "Prompt personnalisé",
     "customPromptDescription": "Prompt optionnel ajouté au message système",
     "customPromptPlaceholder": "Instructions supplémentaires pour l'IA lors de l'utilisation de ce toolkit...",
@@ -1669,7 +1670,7 @@
       "reconnect": "Reconnecter",
       "disconnect": "Déconnecter"
     },
-    "agentSlugDescription": "Doit être unique parmi les toolkits effectifs de cet agent. Utilisez uniquement des lettres minuscules, des chiffres et des traits de soulignement."
+    "agentSlugDescription": "Alias de base facultatif utilisé comme préfixe du nom d’outil. Les noms d’exécution finaux restent automatiquement uniques."
   },
   "dashboard": {
     "headline": "Espace de travail",

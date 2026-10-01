@@ -17,7 +17,7 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictStr, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
 from typing_extensions import Annotated
 from typing import Optional, Set
@@ -28,8 +28,8 @@ class ToolkitConfigCreateRequest(BaseModel):
     Toolkit Config creation request.
     """ # noqa: E501
     toolkit_type: StrictStr = Field(description="Tool slug")
-    slug: Optional[Annotated[str, Field(min_length=1, strict=True, max_length=100)]] = Field(default=None, description="Workspace-unique slug. Use lowercase letters, numbers, and underscores only.")
-    name: StrictStr = Field(description="Display name")
+    slug: Optional[StrictStr] = Field(default=None, description="Optional base alias. Explicit values are normalized to lowercase ASCII letters, numbers, and underscores.")
+    name: Optional[Annotated[str, Field(strict=True, max_length=255)]] = Field(default=None, description="Display name")
     description: Optional[StrictStr] = None
     config: Dict[str, Any] = Field(description="Tool configuration")
     prompt: Optional[StrictStr] = None
@@ -38,16 +38,6 @@ class ToolkitConfigCreateRequest(BaseModel):
     always_expose_tools: Optional[StrictBool] = Field(default=False, description="Expose every toolkit tool directly instead of through Tool Search")
     additional_properties: Dict[str, Any] = {}
     __properties: ClassVar[List[str]] = ["toolkit_type", "slug", "name", "description", "config", "prompt", "credentials", "enabled", "always_expose_tools"]
-
-    @field_validator('slug')
-    def slug_validate_regular_expression(cls, value):
-        """Validates the regular expression"""
-        if value is None:
-            return value
-
-        if not re.match(r"^[a-z0-9_]+$", value):
-            raise ValueError(r"must validate the regular expression /^[a-z0-9_]+$/")
-        return value
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -99,6 +89,11 @@ class ToolkitConfigCreateRequest(BaseModel):
         # and model_fields_set contains the field
         if self.slug is None and "slug" in self.model_fields_set:
             _dict['slug'] = None
+
+        # set to None if name (nullable) is None
+        # and model_fields_set contains the field
+        if self.name is None and "name" in self.model_fields_set:
+            _dict['name'] = None
 
         # set to None if description (nullable) is None
         # and model_fields_set contains the field

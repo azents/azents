@@ -11,6 +11,13 @@ from pydantic import TypeAdapter, ValidationError
 from azents.core.enums import MCPOAuthConnectionStatus, WorkspaceUserRole
 from azents.core.github_credentials import GitHubSecrets, GitHubSecretsAppPlatform
 from azents.core.mcp_credentials import McpSecrets
+from azents.core.toolkit_identifiers import (
+    IdentifierValidationError,
+    ResolvedToolkitIdentifiers,
+    normalize_explicit_toolkit_slug,
+    resolve_create_identifiers,
+    resolve_toolkit_name,
+)
 from azents.core.tools import McpToolkitConfig, ToolkitProvider, ToolkitType
 from azents.engine.tools.deps import get_toolkit_registry
 from azents.engine.tools.envvar import EnvVarToolkitSecrets
@@ -24,7 +31,6 @@ from azents.repos.toolkit.data import (
     ToolkitCreate,
     ToolkitUpdate,
 )
-from azents.repos.toolkit.data import DuplicateSlug as RepoDuplicateSlug
 from azents.repos.toolkit_operations import ToolkitOperationsRepository
 from azents.repos.toolkit_operations.data import (
     AgentToolkitMismatch,
@@ -35,9 +41,6 @@ from azents.repos.toolkit_operations.data import (
     ToolkitUnavailable,
     ToolkitWithOAuth,
     ToolkitWorkspaceMismatch,
-)
-from azents.repos.toolkit_operations.data import (
-    EffectiveSlugConflict as RepoEffectiveSlugConflict,
 )
 from azents.repos.toolkit_operations.owned import AgentToolkitOperationsRepository
 from azents.repos.toolkit_operations.owned_data import (
@@ -60,10 +63,9 @@ from .data import (
     AgentToolkitOAuthConnectionInput,
     AgentToolkitOAuthContext,
     AgentToolkitOutput,
-    DuplicateSlug,
-    EffectiveSlugConflict,
     InvalidConfig,
     InvalidCredentials,
+    InvalidIdentifier,
     InvalidToolkitType,
     NotBelongToWorkspace,
     ScopeNotBelongToToolkit,
@@ -91,6 +93,14 @@ class _PreparedCredentials:
 
     credentials: dict[str, object] | None
     platform: ResolvedPlatformGitHubApp | None
+
+
+@dataclasses.dataclass(frozen=True)
+class _ResolvedToolkitUpdate:
+    """Normalized patch plus a transaction-time default-Slug request."""
+
+    update: ToolkitUpdateInput
+    slug_reset_canonical_name: str | None
 
 
 def _resolve_mcp_config(
@@ -164,12 +174,15 @@ class ToolkitService:
         self, create: ToolkitCreateInput, *, user_id: str
     ) -> Result[
         ToolkitOutput,
-        InvalidToolkitType | InvalidConfig | DuplicateSlug | InvalidCredentials,
+        InvalidToolkitType | InvalidConfig | InvalidIdentifier | InvalidCredentials,
     ]:
         """Create a Toolkit and its Workspace scope atomically."""
         type_error = self._validate_toolkit_type(create.toolkit_type)
         if type_error is not None:
             return Failure(type_error)
+        identifiers = self._resolve_create_identifiers(create)
+        if isinstance(identifiers, InvalidIdentifier):
+            return Failure(identifiers)
         config_error = self._validate_config(create.toolkit_type, create.config)
         if config_error is not None:
             return Failure(config_error)
@@ -190,7 +203,6 @@ class ToolkitService:
         if provider_error is not None:
             return Failure(provider_error)
 
-        slug = create.slug if create.slug is not None else create.toolkit_type
         credentials_json = (
             json.dumps(prepared.credentials)
             if prepared.credentials is not None
@@ -201,8 +213,8 @@ class ToolkitService:
                 workspace_id=create.workspace_id,
                 owner_agent_id=None,
                 toolkit_type=create.toolkit_type,
-                slug=slug,
-                name=create.name,
+                slug=identifiers.slug,
+                name=identifiers.name,
                 description=create.description,
                 config=create.config,
                 prompt=create.prompt,
@@ -222,8 +234,6 @@ class ToolkitService:
                     self._attach_platform_authorization(output, prepared.platform)
                 )
             case Failure(error):
-                if isinstance(error, RepoDuplicateSlug):
-                    return Failure(DuplicateSlug(slug=error.slug))
                 return Failure(InvalidCredentials(error.detail))
             case _:
                 assert_never(result)
@@ -259,8 +269,7 @@ class ToolkitService:
         NotFound
         | NotBelongToWorkspace
         | InvalidConfig
-        | DuplicateSlug
-        | EffectiveSlugConflict
+        | InvalidIdentifier
         | InvalidCredentials,
     ]:
         """Update one Toolkit after external preparation and final revalidation."""
@@ -271,6 +280,10 @@ class ToolkitService:
         if isinstance(existing_result, Failure):
             return Failure(self._map_toolkit_read_error(existing_result.error))
         existing = existing_result.value
+        identifier_update = self._resolve_update_identifiers(update, existing=existing)
+        if isinstance(identifier_update, InvalidIdentifier):
+            return Failure(identifier_update)
+        update = identifier_update.update
 
         if "config" in update:
             config_error = self._validate_config(
@@ -369,6 +382,7 @@ class ToolkitService:
             repo_update,
             workspace_id=workspace_id,
             expected_toolkit_type=existing.toolkit_type,
+            slug_reset_canonical_name=identifier_update.slug_reset_canonical_name,
             platform_authority=self._platform_authority(
                 prepared_for_authority,
                 user_id=user_id,
@@ -379,10 +393,6 @@ class ToolkitService:
                 output = ToolkitOutput.model_validate(value, from_attributes=True)
                 return Success(await self._attach_oauth_connection(output))
             case Failure(error):
-                if isinstance(error, RepoDuplicateSlug):
-                    return Failure(DuplicateSlug(slug=error.slug))
-                if isinstance(error, RepoEffectiveSlugConflict):
-                    return Failure(EffectiveSlugConflict(slug=error.slug))
                 if isinstance(error, PlatformAuthorityRejected):
                     return Failure(InvalidCredentials(error.detail))
                 return Failure(self._map_toolkit_read_error(error))
@@ -500,7 +510,6 @@ class ToolkitService:
         | NotBelongToWorkspace
         | ToolkitNotAvailable
         | DuplicateAgentToolkit
-        | EffectiveSlugConflict
         | AgentNotBelongToWorkspace,
     ]:
         """Attach one currently available Toolkit to an Agent atomically."""
@@ -519,8 +528,6 @@ class ToolkitService:
             return Failure(AgentNotBelongToWorkspace(agent_id=agent_id))
         if isinstance(error, ToolkitWorkspaceMismatch):
             return Failure(NotBelongToWorkspace(toolkit_id=toolkit_id))
-        if isinstance(error, RepoEffectiveSlugConflict):
-            return Failure(EffectiveSlugConflict(slug=error.slug))
         if isinstance(error, ToolkitUnavailable):
             return Failure(ToolkitNotAvailable(toolkit_id=toolkit_id))
         return Failure(error)
@@ -730,6 +737,68 @@ class ToolkitService:
         if toolkit_type not in self.toolkit_registry:
             return InvalidToolkitType(toolkit_type=toolkit_type)
         return None
+
+    def _resolve_create_identifiers(
+        self,
+        create: ToolkitCreateInput,
+    ) -> ResolvedToolkitIdentifiers | InvalidIdentifier:
+        """Materialize non-null create identifiers from Provider metadata."""
+        provider = self.toolkit_registry[create.toolkit_type]
+        result = resolve_create_identifiers(
+            toolkit_type=create.toolkit_type,
+            canonical_name=provider.name,
+            submitted_name=create.name,
+            submitted_slug=create.slug,
+        )
+        if isinstance(result, IdentifierValidationError):
+            return InvalidIdentifier(field=result.field, detail=result.detail)
+        return result
+
+    def _resolve_update_identifiers(
+        self,
+        update: ToolkitUpdateInput,
+        *,
+        existing: ToolkitConfig,
+    ) -> _ResolvedToolkitUpdate | InvalidIdentifier:
+        """Normalize explicit patch identifiers while preserving omitted fields."""
+        normalized: ToolkitUpdateInput = {**update}
+        provider = None
+        slug_reset_canonical_name: str | None = None
+        if "name" in update:
+            provider = self.toolkit_registry.get(existing.toolkit_type)
+            if provider is None:
+                raise RuntimeError("Persisted Toolkit Provider is not registered.")
+            resolved_name = resolve_toolkit_name(
+                existing.toolkit_type,
+                provider.name,
+                update["name"],
+            )
+            if isinstance(resolved_name, IdentifierValidationError):
+                return InvalidIdentifier(
+                    field=resolved_name.field,
+                    detail=resolved_name.detail,
+                )
+            normalized["name"] = resolved_name
+        if "slug" in update:
+            resolved_slug = normalize_explicit_toolkit_slug(update["slug"])
+            if isinstance(resolved_slug, IdentifierValidationError):
+                return InvalidIdentifier(
+                    field=resolved_slug.field,
+                    detail=resolved_slug.detail,
+                )
+            if resolved_slug is None:
+                if provider is None:
+                    provider = self.toolkit_registry.get(existing.toolkit_type)
+                if provider is None:
+                    raise RuntimeError("Persisted Toolkit Provider is not registered.")
+                normalized.pop("slug")
+                slug_reset_canonical_name = provider.name
+            else:
+                normalized["slug"] = resolved_slug
+        return _ResolvedToolkitUpdate(
+            update=normalized,
+            slug_reset_canonical_name=slug_reset_canonical_name,
+        )
 
     def _validate_config(
         self, toolkit_type: str, config: dict[str, object]
@@ -1057,8 +1126,7 @@ class ToolkitService:
         | NotAdmin
         | InvalidToolkitType
         | InvalidConfig
-        | DuplicateSlug
-        | EffectiveSlugConflict
+        | InvalidIdentifier
         | InvalidCredentials,
     ]:
         """Create an Agent-owned ToolkitConfig without a scope or attachment."""
@@ -1073,6 +1141,9 @@ class ToolkitService:
         type_error = self._validate_toolkit_type(create.toolkit_type)
         if type_error is not None:
             return Failure(type_error)
+        identifiers = self._resolve_create_identifiers(create)
+        if isinstance(identifiers, InvalidIdentifier):
+            return Failure(identifiers)
         config_error = self._validate_config(create.toolkit_type, create.config)
         if config_error is not None:
             return Failure(config_error)
@@ -1092,7 +1163,6 @@ class ToolkitService:
         if provider_error is not None:
             return Failure(provider_error)
 
-        slug = create.slug if create.slug is not None else create.toolkit_type
         credentials_json = json.dumps(credentials) if credentials is not None else None
         result = await self.owned_operations.create_agent_owned(
             agent_id,
@@ -1100,8 +1170,8 @@ class ToolkitService:
                 workspace_id=workspace_id,
                 owner_agent_id=agent_id,
                 toolkit_type=create.toolkit_type,
-                slug=slug,
-                name=create.name,
+                slug=identifiers.slug,
+                name=identifiers.name,
                 description=create.description,
                 config=create.config,
                 prompt=create.prompt,
@@ -1139,8 +1209,7 @@ class ToolkitService:
         | NotAdmin
         | NotFound
         | InvalidConfig
-        | DuplicateSlug
-        | EffectiveSlugConflict
+        | InvalidIdentifier
         | InvalidCredentials,
     ]:
         """Update one ToolkitConfig owned by the exact managed Agent."""
@@ -1158,6 +1227,11 @@ class ToolkitService:
                 pass
             case _:
                 assert_never(existing_result)
+
+        identifier_update = self._resolve_update_identifiers(update, existing=existing)
+        if isinstance(identifier_update, InvalidIdentifier):
+            return Failure(identifier_update)
+        update = identifier_update.update
 
         if "config" in update:
             config_error = self._validate_config(
@@ -1276,6 +1350,7 @@ class ToolkitService:
             workspace_id=workspace_id,
             workspace_user_id=workspace_user_id,
             role=role,
+            slug_reset_canonical_name=identifier_update.slug_reset_canonical_name,
             platform_authority=self._platform_authority(prepared, user_id=user_id),
         )
         match result:
@@ -1333,16 +1408,8 @@ class ToolkitService:
     def _map_owned_mutation_error(
         error: AgentWorkspaceMismatch
         | AgentManagementDenied
-        | RepoDuplicateSlug
-        | RepoEffectiveSlugConflict
         | PlatformAuthorityRejected,
-    ) -> (
-        AgentNotBelongToWorkspace
-        | NotAdmin
-        | DuplicateSlug
-        | EffectiveSlugConflict
-        | InvalidCredentials
-    ): ...
+    ) -> AgentNotBelongToWorkspace | NotAdmin | InvalidCredentials: ...
 
     @staticmethod
     @overload
@@ -1350,39 +1417,17 @@ class ToolkitService:
         error: AgentWorkspaceMismatch
         | AgentManagementDenied
         | NotFound
-        | RepoDuplicateSlug
-        | RepoEffectiveSlugConflict
         | PlatformAuthorityRejected,
-    ) -> (
-        AgentNotBelongToWorkspace
-        | NotAdmin
-        | NotFound
-        | DuplicateSlug
-        | EffectiveSlugConflict
-        | InvalidCredentials
-    ): ...
+    ) -> AgentNotBelongToWorkspace | NotAdmin | NotFound | InvalidCredentials: ...
 
     @staticmethod
     def _map_owned_mutation_error(
         error: AgentWorkspaceMismatch
         | AgentManagementDenied
         | NotFound
-        | RepoDuplicateSlug
-        | RepoEffectiveSlugConflict
         | PlatformAuthorityRejected,
-    ) -> (
-        AgentNotBelongToWorkspace
-        | NotAdmin
-        | NotFound
-        | DuplicateSlug
-        | EffectiveSlugConflict
-        | InvalidCredentials
-    ):
+    ) -> AgentNotBelongToWorkspace | NotAdmin | NotFound | InvalidCredentials:
         """Translate repository failures without changing mutation contracts."""
-        if isinstance(error, RepoDuplicateSlug):
-            return DuplicateSlug(slug=error.slug)
-        if isinstance(error, RepoEffectiveSlugConflict):
-            return EffectiveSlugConflict(slug=error.slug)
         if isinstance(error, PlatformAuthorityRejected):
             return InvalidCredentials(error.detail)
         return ToolkitService._map_agent_management_error(error)

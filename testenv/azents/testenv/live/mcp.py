@@ -16,6 +16,8 @@ Provided helpers:
 - ``Mcp.toolkit_config(server_url)`` — returns the public API
   ``ToolkitConfigCreateRequest.config`` dict
   (``{"server_url", "auth_type"}``)
+- Set ``MOCK_MCP_INSTANCE`` per server process to make the ``instance`` tool
+  return a deterministic routing identity.
 
 This module does not start or stop the mock server. The caller should run it,
 for example with ``uv run python fixtures/mock_mcp_server.py`` or

@@ -8,6 +8,7 @@ from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import AgentLifecycleStatus, WorkspaceUserRole
+from azents.core.toolkit_identifiers import resolve_default_toolkit_slug
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
@@ -17,7 +18,6 @@ from azents.repos.github_user_installation import GithubUserInstallationReposito
 from azents.repos.mcp_oauth_connection import MCPOAuthConnectionRepository
 from azents.repos.toolkit import ToolkitRepository
 from azents.repos.toolkit.data import (
-    DuplicateSlug,
     NotFound,
     ToolkitConfig,
     ToolkitCreate,
@@ -31,7 +31,6 @@ from azents.repos.toolkit_operations import (
 )
 from azents.repos.toolkit_operations.data import (
     AgentWorkspaceMismatch,
-    EffectiveSlugConflict,
     PlatformAuthorityRejected,
     PlatformToolkitAuthority,
 )
@@ -163,11 +162,7 @@ class AgentToolkitOperationsRepository:
         platform_authority: PlatformToolkitAuthority | None,
     ) -> Result[
         ToolkitConfig,
-        AgentWorkspaceMismatch
-        | AgentManagementDenied
-        | DuplicateSlug
-        | EffectiveSlugConflict
-        | PlatformAuthorityRejected,
+        AgentWorkspaceMismatch | AgentManagementDenied | PlatformAuthorityRejected,
     ]:
         """Revalidate owner and namespace; create without a Scope or attachment."""
         if create.owner_agent_id != agent_id or create.workspace_id != workspace_id:
@@ -190,39 +185,14 @@ class AgentToolkitOperationsRepository:
                 )
                 if error is not None:
                     return Failure(error)
-            if await self.toolkit_repo.has_effective_slug_conflict(
-                session,
-                agent_id=agent_id,
-                workspace_id=workspace_id,
-                toolkit_id="",
-                slug=create.slug,
-                enabled=create.enabled,
-            ):
-                return Failure(EffectiveSlugConflict(slug=create.slug))
-            if await self.toolkit_repo.has_ownership_slug_conflict(
-                session,
-                workspace_id=workspace_id,
-                owner_agent_id=agent_id,
-                toolkit_id="",
-                slug=create.slug,
-            ):
-                return Failure(
-                    DuplicateSlug(
-                        workspace_id=workspace_id,
-                        owner_agent_id=agent_id,
-                        slug=create.slug,
-                    )
-                )
-            result = await self.toolkit_repo.create(session, create)
-            if isinstance(result, Failure):
-                return Failure(result.error)
+            toolkit = await self.toolkit_repo.create(session, create)
             await self.namespace_repo.ensure_active(
                 session,
                 agent_id=agent_id,
-                toolkit_id=result.value.id,
+                toolkit_id=toolkit.id,
                 base_slug=create.slug,
             )
-            return Success(result.value)
+            return Success(toolkit)
 
     async def update_agent_owned(
         self,
@@ -233,17 +203,16 @@ class AgentToolkitOperationsRepository:
         workspace_id: str,
         workspace_user_id: str,
         role: WorkspaceUserRole,
+        slug_reset_canonical_name: str | None,
         platform_authority: PlatformToolkitAuthority | None,
     ) -> Result[
         ToolkitConfig,
         AgentWorkspaceMismatch
         | AgentManagementDenied
         | NotFound
-        | DuplicateSlug
-        | EffectiveSlugConflict
         | PlatformAuthorityRejected,
     ]:
-        """Preserve Toolkit-before-Agent locking and final effective slug validation."""
+        """Preserve Toolkit-before-Agent locking and final namespace mutation."""
         async with self.session_manager() as session:
             toolkit = await self.toolkit_repo.get_by_id_for_update(session, toolkit_id)
             if (
@@ -269,35 +238,18 @@ class AgentToolkitOperationsRepository:
                 )
                 if error is not None:
                     return Failure(error)
-            slug = update.get("slug", toolkit.slug)
-            enabled = update.get("enabled", toolkit.enabled)
-            if await self.toolkit_repo.has_effective_slug_conflict(
+            transaction_update = ToolkitUpdate(**update)
+            if slug_reset_canonical_name is not None:
+                transaction_update["slug"] = resolve_default_toolkit_slug(
+                    transaction_update.get("name", toolkit.name),
+                    slug_reset_canonical_name,
+                )
+            slug = transaction_update.get("slug", toolkit.slug)
+            result = await self.toolkit_repo.update_by_id(
                 session,
-                agent_id=agent_id,
-                workspace_id=workspace_id,
-                toolkit_id=toolkit_id,
-                slug=slug,
-                enabled=enabled,
-            ):
-                return Failure(EffectiveSlugConflict(slug=slug))
-            if (
-                slug != toolkit.slug
-                and await self.toolkit_repo.has_ownership_slug_conflict(
-                    session,
-                    workspace_id=workspace_id,
-                    owner_agent_id=agent_id,
-                    toolkit_id=toolkit_id,
-                    slug=slug,
-                )
-            ):
-                return Failure(
-                    DuplicateSlug(
-                        workspace_id=workspace_id,
-                        owner_agent_id=agent_id,
-                        slug=slug,
-                    )
-                )
-            result = await self.toolkit_repo.update_by_id(session, toolkit_id, update)
+                toolkit_id,
+                transaction_update,
+            )
             if isinstance(result, Failure):
                 return Failure(result.error)
             if slug != toolkit.slug:

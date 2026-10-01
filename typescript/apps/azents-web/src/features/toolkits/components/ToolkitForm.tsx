@@ -62,6 +62,9 @@ export interface ToolkitFormProps {
   backPath: string;
   toolOptions: Array<{ value: string; label: string }>;
   currentToolSlug: string;
+  namePlaceholder: string;
+  slugPlaceholder: string;
+  nameRequired: boolean;
   showOauthConnection: boolean;
   oauthConnectionPending: {
     connect: boolean;
@@ -91,6 +94,9 @@ export function ToolkitForm({
   backPath,
   toolOptions,
   currentToolSlug,
+  namePlaceholder,
+  slugPlaceholder,
+  nameRequired,
   showOauthConnection,
   oauthConnectionPending,
   onSubmit,
@@ -155,23 +161,27 @@ export function ToolkitForm({
             />
 
             <TextInput
+              label={t("nameLabel")}
+              placeholder={
+                currentToolSlug === "mcp"
+                  ? t("mcpNamePlaceholder")
+                  : namePlaceholder
+              }
+              required={nameRequired}
+              key={form.key("name")}
+              {...form.getInputProps("name")}
+            />
+
+            <TextInput
               label={t("slugLabel")}
               description={
                 agentId == null
                   ? t("slugDescription")
                   : t("agentSlugDescription")
               }
-              placeholder={t("slugPlaceholder")}
-              required
+              placeholder={slugPlaceholder || t("slugPlaceholder")}
               key={form.key("slug")}
               {...form.getInputProps("slug")}
-            />
-
-            <TextInput
-              label={t("nameLabel")}
-              required
-              key={form.key("name")}
-              {...form.getInputProps("name")}
             />
 
             <Textarea

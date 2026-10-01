@@ -1,0 +1,151 @@
+{
+  "version": 1,
+  "name_cases": [
+    {
+      "id": "non-mcp-omitted",
+      "toolkit_type": "github",
+      "canonical_name": "GitHub",
+      "submitted": null,
+      "expected": "GitHub"
+    },
+    {
+      "id": "non-mcp-blank",
+      "toolkit_type": "github",
+      "canonical_name": "GitHub",
+      "submitted": "   ",
+      "expected": "GitHub"
+    },
+    {
+      "id": "explicit-trimmed",
+      "toolkit_type": "github",
+      "canonical_name": "GitHub",
+      "submitted": "  Production GitHub  ",
+      "expected": "Production GitHub"
+    },
+    {
+      "id": "unicode-whitespace-trimmed",
+      "toolkit_type": "github",
+      "canonical_name": "GitHub",
+      "submitted": "Production GitHub",
+      "expected": "Production GitHub"
+    },
+    {
+      "id": "mcp-explicit",
+      "toolkit_type": "mcp",
+      "canonical_name": "MCP",
+      "submitted": "  Internal Search  ",
+      "expected": "Internal Search"
+    },
+    {
+      "id": "mcp-omitted",
+      "toolkit_type": "mcp",
+      "canonical_name": "MCP",
+      "submitted": null,
+      "error_field": "name"
+    },
+    {
+      "id": "mcp-blank",
+      "toolkit_type": "mcp",
+      "canonical_name": "MCP",
+      "submitted": "\t ",
+      "error_field": "name"
+    }
+  ],
+  "default_slug_cases": [
+    {
+      "id": "canonical-default",
+      "effective_name": "GitHub",
+      "canonical_name": "GitHub",
+      "expected": "github"
+    },
+    {
+      "id": "ascii-separators",
+      "effective_name": "Production GitHub / Europe",
+      "canonical_name": "GitHub",
+      "expected": "production_github_europe"
+    },
+    {
+      "id": "accented-ascii-projection",
+      "effective_name": "Crème Brûlée",
+      "canonical_name": "GitHub",
+      "expected": "creme_brulee"
+    },
+    {
+      "id": "non-latin-fallback",
+      "effective_name": "내부 검색",
+      "canonical_name": "MCP",
+      "expected": "mcp"
+    },
+    {
+      "id": "mixed-script",
+      "effective_name": "東京 Analytics",
+      "canonical_name": "Google Analytics",
+      "expected": "analytics"
+    },
+    {
+      "id": "separator-collapse",
+      "effective_name": "  Data---Warehouse___Read  ",
+      "canonical_name": "GCP",
+      "expected": "data_warehouse_read"
+    },
+    {
+      "id": "length-boundary",
+      "effective_name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "canonical_name": "GitHub",
+      "expected": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "id": "truncate-with-trailing-separator",
+      "effective_name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa b",
+      "canonical_name": "GitHub",
+      "expected": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  ],
+  "explicit_slug_cases": [
+    {
+      "id": "preserve-valid",
+      "submitted": "production_github",
+      "expected": "production_github"
+    },
+    {
+      "id": "trim-lower-and-separators",
+      "submitted": "  Production--GitHub  ",
+      "expected": "production_github"
+    },
+    {
+      "id": "collapse-whitespace-and-underscores",
+      "submitted": "north \t america___search",
+      "expected": "north_america_search"
+    },
+    {
+      "id": "unicode-whitespace-separator",
+      "submitted": "northamerica",
+      "expected": "north_america"
+    },
+    {
+      "id": "raw-over-100-normalized-at-boundary",
+      "submitted": " aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+      "expected": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "id": "blank-reset",
+      "submitted": "   ",
+      "reset": true
+    },
+    {
+      "id": "reject-non-latin",
+      "submitted": "검색",
+      "error_field": "slug"
+    },
+    {
+      "id": "reject-punctuation",
+      "submitted": "github.prod",
+      "error_field": "slug"
+    },
+    {
+      "id": "reject-too-long",
+      "submitted": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "error_field": "slug"
+    }
+  ]
+}

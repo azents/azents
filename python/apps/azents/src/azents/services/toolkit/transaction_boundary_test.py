@@ -75,6 +75,8 @@ def _github_toolkit() -> ToolkitConfig:
 class _DatabaseFreeProvider:
     """Provider double that observes the transaction boundary."""
 
+    name = "GitHub"
+
     def __init__(self, active: list[bool], events: list[str]) -> None:
         self.active = active
         self.events = events

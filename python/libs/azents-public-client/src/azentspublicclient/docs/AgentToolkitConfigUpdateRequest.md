@@ -6,7 +6,7 @@ Agent-owned Toolkit Config partial update request.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**slug** | **str** | Unique within the owning Agent&#39;s effective Toolkit namespace. Use lowercase letters, numbers, and underscores only. | [optional] 
+**slug** | **str** | Optional base alias. Explicit values are normalized to lowercase ASCII letters, numbers, and underscores. | [optional] 
 **name** | **str** | Display name | [optional] 
 **description** | **str** |  | [optional] 
 **config** | **Dict[str, object]** | Tool settings | [optional] 

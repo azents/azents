@@ -23,6 +23,7 @@ code_paths:
   - python/apps/azents/src/azents/services/github_platform_system_setting/binding.py
   - python/apps/azents/src/azents/api/public/toolkit/v1/**
   - python/apps/azents/src/azents/rdb/models/toolkit.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/cda14157c46c_allow_duplicate_toolkit_slugs.py
   - python/apps/azents/src/azents/rdb/models/github_user_installation.py
   - python/apps/azents/src/azents/services/agent_runtime/**
   - python/apps/azents/src/azents/services/runtime_web/**
@@ -71,11 +72,12 @@ code_paths:
   - typescript/apps/azents-web/src/features/toolkits/**
   - typescript/apps/azents-web/src/features/toolkit-setup/**
   - typescript/apps/azents-web/src/shared/lib/redacted-credentials.ts
+  - typescript/apps/azents-web/src/shared/lib/toolkit-identifiers.ts
   - typescript/apps/azents-web/src/trpc/routers/toolkit.ts
 api_routes:
   - /toolkit/v1
 last_verified_at: 2026-10-01
-spec_version: 125
+spec_version: 126
 ---
 
 # Toolkit
@@ -168,13 +170,18 @@ erDiagram
     TOOLKIT_CONFIG ||--o{ AGENT_TOOLKIT : attached_to
     TOOLKIT_CONFIG ||--o| MCP_OAUTH_CONNECTION : oauth_connection
     AGENT ||--o{ AGENT_TOOLKIT : mounts
+    AGENT ||--o{ TOOLKIT_NAMESPACE_RESERVATION : reserves
+    AGENT ||--o{ TOOLKIT_NAMESPACE_SEQUENCE : allocates
+    TOOLKIT_CONFIG o|--o| TOOLKIT_NAMESPACE_RESERVATION : active_mapping
 ```
 
 ### Entities
 
-- **ToolkitConfig** — a Workspace-resident tool + setting bundle with a nullable canonical `owner_agent_id`. A null owner is `Workspace shared`; it can be mounted by multiple Agents through `AgentToolkit` and has a WORKSPACE scope. A non-null owner is `This Agent only`; it has no `AgentToolkit` or `ToolkitScope` projection and is reachable only through its exact owning Agent. Its local slug indexes are `(workspace_id, slug)` for shared rows and `(owner_agent_id, slug)` for Agent-owned rows. `revision` starts at `1` and increments whenever persisted ToolkitConfig state changes. ([`rdb/models/toolkit.py`](../../../../python/apps/azents/src/azents/rdb/models/toolkit.py))
+- **ToolkitConfig** — a Workspace-resident tool + setting bundle with a nullable canonical `owner_agent_id`. A null owner is `Workspace shared`; it can be mounted by multiple Agents through `AgentToolkit` and has a WORKSPACE scope. A non-null owner is `This Agent only`; it has no `AgentToolkit` or `ToolkitScope` projection and is reachable only through its exact owning Agent. `slug` is a non-empty, non-unique stored base alias; duplicate Slugs are allowed within both ownership kinds and among Toolkits effective for one Agent. `revision` starts at `1` and increments whenever persisted ToolkitConfig state changes. ([`rdb/models/toolkit.py`](../../../../python/apps/azents/src/azents/rdb/models/toolkit.py))
 - **ToolkitScope** — Workspace visibility scope for a Workspace-shared ToolkitConfig only. `scope_type` is `WORKSPACE`; `scope_id` is the Workspace ID. The common Workspace create path automatically adds this scope. ([`services/toolkit/__init__.py`](../../../../python/apps/azents/src/azents/services/toolkit/__init__.py))
 - **AgentToolkit** — shared Workspace ToolkitConfig ↔ Agent attachment. `(agent_id, toolkit_id)` is UNIQUE. It is not created for Agent-owned ToolkitConfigs.
+- **ToolkitNamespaceReservation** — durable namespace authority for one Agent and ToolkitConfig. Active rows have a non-null `toolkit_id`; retired rows keep `toolkit_id = NULL` so a prior executable namespace is never reassigned within the Agent. The row stores the base Slug, monotonic ordinal, and final namespace. `(agent_id, namespace)`, active `(agent_id, toolkit_id)`, and `(agent_id, base_slug, ordinal)` are unique.
+- **ToolkitNamespaceSequence** — one durable monotonic counter per `(agent_id, base_slug)`. It survives Toolkit deletion and reservation retirement until the Agent is deleted.
 - **MCPOAuthConnection** — Toolkit-level MCP OAuth client registration and token state. `toolkit_id` is UNIQUE; client IDs, client secrets, access tokens, and refresh tokens are encrypted. Status is `connected` or `reconnect_required`.
 
 ### Enum / Type
@@ -206,6 +213,20 @@ erDiagram
 
 ## Behavior
 
+### Name and Slug Materialization
+
+Toolkit create requests may omit or send blank `name` and `slug` values. The Toolkit service is the persistence authority:
+
+- generic `mcp` requires a non-blank trimmed Name;
+- every other registered Provider defaults a blank or omitted Name to its canonical Provider Name;
+- a blank or omitted Slug is derived from the effective Name through Unicode NFKD, ASCII projection, lowercase conversion, separator collapse, edge trimming, and a 100-character bound;
+- when the effective Name produces no ASCII identifier, Slug derivation falls back to the canonical Provider Name; and
+- an explicit Slug trims surrounding whitespace, lowercases ASCII, converts whitespace and hyphen runs to underscores, collapses underscores, and then validates the lowercase ASCII identifier format.
+
+Patch omission preserves the stored value. An included blank Name requests the Provider default and remains invalid for generic MCP. An included blank Slug requests recomputation from the patch's effective Name, using the current stored Name when Name is omitted. Persisted and response Names and Slugs remain non-null.
+
+The Web create form keeps Name and Slug inputs empty and previews the same policy through placeholders in Toolkit Type → Name → Slug order. Untouched empty values are omitted from create mutations; edit forms load persisted values and submit deliberate blank clears. Python and TypeScript policy tests consume the same versioned language-neutral conformance corpus.
+
 ### Toolkit Type & Scope
 
 Every ToolkitConfig belongs to one Workspace and has one explicit ownership kind:
@@ -221,27 +242,29 @@ To mount a Workspace-shared Toolkit on an Agent:
 2. Service checks Agent → Workspace ownership, Toolkit → Workspace ownership, and whether toolkit is in user's available list.
 3. INSERT `AgentToolkit` row. UNIQUE violation on `(agent_id, toolkit_id)` returns `DuplicateAgentToolkit`.
 
-`effective_agent_toolkit_relation(enabled_only=True)` is the canonical runtime and VFS relation. It unions enabled shared `AgentToolkit` attachments with enabled Agent-owned ToolkitConfigs whose `owner_agent_id` equals the Agent, carries a stable source discriminator, and rejects duplicate effective slugs before any partial catalog or VFS projection is published. Disabling or deleting an Agent-only Toolkit removes it from later effective reads; already-prepared calls and immutable AgentRun VFS projections retain their normal snapshot semantics.
+`effective_agent_toolkit_relation(enabled_only=True)` is the canonical runtime and VFS relation. It unions enabled shared `AgentToolkit` attachments with enabled Agent-owned ToolkitConfigs whose `owner_agent_id` equals the Agent, carries a stable source discriminator, and joins exactly one active namespace reservation for every relation row. Missing, duplicate, or base-Slug-mismatched active reservations are invariant failures; runtime reads never allocate or guess a fallback. Disabling or detaching a Toolkit keeps its reservation for later reuse. Deleting a Toolkit retires the active mapping while retaining the reserved namespace and sequence history. Disabling or deleting an Agent-only Toolkit removes it from later effective reads; already-prepared calls and immutable AgentRun VFS projections retain their normal snapshot semantics.
 
 ### Tool Name Prefixing
 
-ToolkitConfig `slug` is the DB-registered toolkit's model-visible namespace. It is locally unique within the shared Workspace or owning Agent, and it must also be unique among every enabled effective Toolkit for one Agent. It is used as the outer tool-name prefix for DB-registered toolkits.
+ToolkitConfig `slug` is the administrator-visible, non-unique base alias. One Agent+Toolkit namespace reservation owns the effective outer tool-name prefix. The first allocation for a base Slug uses the base unchanged; later allocations use `_2`, `_3`, and increasing monotonic ordinals. Candidate collisions with already reserved namespaces consume the next ordinal instead of reassigning an old name.
 
-`resolve_agent_tools()` resolves the canonical effective relation into `ToolkitBinding` records with `slug=ToolkitConfig.slug` and `use_prefix=True`. During `build_tool_catalog()`, every `FunctionTool` returned by an enabled binding is renamed with `tool.with_prefix(f"{slug}__")` when `use_prefix=True`. The final model-visible name is therefore:
+`resolve_agent_tools()` resolves the canonical effective relation into `ToolkitBinding` records that carry both stored `slug` and `effective_namespace`, with `use_prefix=True`. During `build_tool_catalog()`, every `FunctionTool` returned by an enabled binding is renamed with `tool.with_prefix(f"{effective_namespace}__")` when `use_prefix=True`. The final model-visible name is therefore:
 
 ```text
-{toolkit_slug}__{tool_name}
+{effective_namespace}__{tool_name}
 ```
+
+Catalog construction rejects duplicate final names before publication and reports both source ToolkitConfig IDs; dictionary overwrite is never collision handling. The catalog source retains ToolkitConfig ID, Type, persisted Name, base Slug, effective namespace, revision, and a bounded allowlisted non-secret connection identity. Tool Search, executor routing, runtime hooks, durable source snapshots, and activity projections consume that exact selected source rather than parsing the final name.
 
 Auto-bound single-instance toolkits use `use_prefix=False`; their tool names are exposed as-is. This applies to Memory Read, Memory Write, Runtime file/process tools, Subagent collaboration tools, and the session-bound Goal/Todo tools. For example, `list_memories`, `save_memory`, `exec_command`, `write_stdin`, `read`, `run_tool_to_file`, `spawn_agent`, `wait_agent`, `get_goal`, and `update_todo` are not prefixed.
 
-Some toolkits may add their own internal segment before the outer ToolkitConfig slug is applied. GitHub multi-installation routing does this by prefixing each installation's MCP tools with a safe account-login segment. With ToolkitConfig slug `github`, installation `azents`, and MCP tool `get_file_contents`, the final model-visible name becomes:
+Some toolkits may add their own internal segment before the outer effective namespace is applied. GitHub multi-installation routing does this by prefixing each installation's MCP tools with a safe account-login segment. With effective namespace `github`, installation `azents`, and MCP tool `get_file_contents`, the final model-visible name becomes:
 
 ```text
 github__azents__get_file_contents
 ```
 
-The slug prefix is only a tool-call namespace. Toolkit State uses its own `toolkit_namespace` field and is not derived automatically from the model-visible tool name.
+The effective prefix is only a tool-call namespace. Toolkit State uses its own `toolkit_namespace` field and is not derived automatically from the model-visible tool name.
 
 Toolkit State identity and payload models are pure core types. Database handles
 and optimistic compare-and-set storage live in the repository layer. Goal and
@@ -809,8 +832,8 @@ credential injection path.
 
 ## Business Rules
 
-- `[effective-toolkit-relation]` The canonical effective relation is the ordered union of Workspace-shared `AgentToolkit` attachments and direct Agent-owned ToolkitConfigs. Runtime, VFS, impact, and effective-slug checks consume this relation rather than constructing their own ownership lookup.
-- `[toolkit-slug-local-and-effective-unique]` Shared `(workspace_id, slug)` and Agent-owned `(owner_agent_id, slug)` values use separate partial unique indexes. Slug allows lowercase letters, numbers, and underscores only (`^[a-z0-9_]+$`); dashes are rejected because the slug becomes the outer model-visible tool namespace before the `__` tool separator. A create, attach, update, or enable operation also rejects a duplicate enabled slug in the Agent's effective relation. If omitted, a slug defaults to `toolkit_type`.
+- `[effective-toolkit-relation]` The canonical effective relation is the ordered union of Workspace-shared `AgentToolkit` attachments and direct Agent-owned ToolkitConfigs. Runtime, VFS, impact, and namespace reads consume this relation rather than constructing their own ownership lookup. Every persisted relation row must join exactly one active Agent+Toolkit namespace reservation with the current stored base Slug.
+- `[toolkit-slug-base-alias]` Stored Slug is a non-unique base alias. Create requests may omit or blank Name and Slug for backend materialization, except that generic MCP requires a Name. Explicit Slugs normalize surrounding language-neutral whitespace, ASCII case, whitespace/hyphen separators, and repeated underscores before `^[a-z0-9_]+$` and 100-character validation. Blank Slug patches derive from the Name in the locked current mutation snapshot. Duplicate create, update, attach, and enable operations are allowed; executable uniqueness comes only from the durable effective namespace.
 - `[workspace-scope-access]` Only a Workspace-shared Toolkit has a WORKSPACE scope and can be attached by workspace members. Agent-only Toolkit visibility is the direct owning-Agent relation and has no scope or attachment row.
 - `[agent-toolkit-management-authority]` Agent-only management requires the Workspace Owner or an explicit AgentAdmin of the exact active Agent. Workspace Manager and Member roles alone grant neither item disclosure nor Agent-only action authority. Unauthorized Agent-owned item access uses the common not-found boundary.
 - `[shell-is-not-toolkit-config]` Request creating ToolkitConfig with `toolkit_type="shell"` returns 400. Runtime tool availability is managed through Agent Runtime settings and Runtime Profile authority, not a persisted ToolkitConfig. ([`api/public/toolkit/v1/__init__.py` L82-87](../../../../python/apps/azents/src/azents/api/public/toolkit/v1/__init__.py))
@@ -1076,6 +1099,11 @@ notification execute only after the operation returns.
 
 ## Changelog
 
+- **2026-10-01** (spec_version 126) — Made Toolkit Name and Slug create inputs
+  backend-defaulted, added shared Python/TypeScript conformance vectors and
+  placeholder-only Web previews, made stored Slugs non-unique, and promoted
+  durable Agent+Toolkit effective namespaces as the sole registered-tool prefix
+  and routing authority.
 - **2026-10-01** (spec_version 125) — Moved Scheduled and Subagent Toolkit
   reads and atomic mutations behind repository-owned completed operations while
   preserving lock order, fork/capacity authority, and post-commit channel,
