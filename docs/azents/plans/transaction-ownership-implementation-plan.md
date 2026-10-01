@@ -89,6 +89,12 @@ model-input-head movement, compaction model-operation success, and Tool Search
 working-set clearing remain one atomic database operation. Engine execution
 ownership remains a later phase.
 
+Phase 24 moves standalone execution phase updates, conditional STOPPING
+transitions, and ModelFile pin admission into completed repository operations.
+Phase publication remains post-commit, and the obsolete session scope around
+pure cancelled-result projection is removed. Model-input preparation, output and
+tool-result admission, and terminal finalization remain later execution phases.
+
 ## Delivery Boundaries
 
 1. Correct the title-generation and ChatGPT OAuth persistence boundary as one

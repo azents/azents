@@ -89,6 +89,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/model_file/**
   - python/apps/azents/src/azents/repos/engine_read.py
   - python/apps/azents/src/azents/repos/engine_event_operation.py
+  - python/apps/azents/src/azents/repos/engine_execution_operation.py
   - python/apps/azents/src/azents/repos/session_execution/**
   - python/apps/azents/src/azents/repos/model_candidate_health/**
   - python/apps/azents/src/azents/services/model_listing/**
@@ -115,7 +116,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
   - typescript/apps/azents-web/messages/*/chat.json
 last_verified_at: 2026-10-01
-spec_version: 192
+spec_version: 193
 ---
 
 # Agent Execution Loop
@@ -1447,6 +1448,12 @@ likewise runs after its snapshot session closes; promotion then locks and revali
 before applying any durable changes. Flush reuses only the FileParts stored at the input boundary and
 never downloads an attachment or creates a ModelFile while holding the Session/FIFO lock.
 
+Standalone Run phase updates, conditional STOPPING transitions, and active
+ModelFile pin admission complete inside repository-owned transactions. Phase
+publication remains after the phase transaction closes. Cancelled tool-result
+projection is pure and opens no database session before its ordinary fenced
+result-finalization operation.
+
 ExchangeFile, ModelFile, and Artifact creation preallocates the entity ID and object key, closes its
 authorization snapshot, uploads the blob without an open database session, and then revalidates
 ownership in the short metadata transaction. A failed revalidation or metadata commit deletes the
@@ -1615,6 +1622,10 @@ icon.
 
 ## Changelog
 
+- **2026-10-01** (spec_version 193) — Moved standalone execution phase updates,
+  conditional STOPPING transitions, and ModelFile pin admission into completed
+  repository operations, and removed the obsolete database scope around pure
+  cancelled-result projection.
 - **2026-10-01** (spec_version 192) — Moved Memory CRUD/search, prompt scope and
   summary reads, and Session-history authorization/read compositions behind
   repository-owned completed transactions.

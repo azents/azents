@@ -59,6 +59,9 @@ from azents.repos.agent_execution import (
     EventTranscriptRepository,
 )
 from azents.repos.agent_execution.data import EventCreate
+from azents.repos.engine_execution_operation import (
+    EngineExecutionOperationRepository,
+)
 from azents.repos.session_execution import (
     CanonicalExecutionOwnerGenerationStaleError,
 )
@@ -339,6 +342,11 @@ class AgentRunExecution[
         self.pre_model_lower_hook = pre_model_lower_hook
         self.model_file_pin_repo = model_file_pin_repo
         self.run_repo = run_repo or AgentRunRepository()
+        self.operation_repository = EngineExecutionOperationRepository(
+            session_manager=session_manager,
+            run_repository=self.run_repo,
+            model_file_pin_repository=model_file_pin_repo,
+        )
         self.transcript_repo = transcript_repo or EventTranscriptRepository()
         self.session_repo = session_repo
         self.terminal_finalization_coordinator = terminal_finalization_coordinator
@@ -453,14 +461,11 @@ class AgentRunExecution[
                             request.run_id,
                             AgentRunPhase.PREPARING_INPUT,
                         )
-                if self.model_file_pin_repo is not None:
-                    async with self.session_manager() as session:
-                        await self.model_file_pin_repo.pin_many(
-                            session,
-                            session_id=request.session_id,
-                            run_id=request.run_id,
-                            model_file_ids=unique_model_file_ids(transcript),
-                        )
+                await self.operation_repository.pin_model_files(
+                    session_id=request.session_id,
+                    run_id=request.run_id,
+                    model_file_ids=unique_model_file_ids(transcript),
+                )
                 if self.pre_model_lower_hook is not None:
                     await self.pre_model_lower_hook(transcript=transcript)
                 model_input_transcript = (
@@ -1004,25 +1009,15 @@ class AgentRunExecution[
                 run_id=run_id,
             )
             if _is_user_stop_cancellation(exc):
-                stopping_updated = False
-                stopping_started_at: datetime.datetime | None = None
-                async with self.session_manager() as session:
-                    run_state = await self.run_repo.get_by_id(session, run_id)
-                    if (
-                        run_state is not None
-                        and run_state.status == AgentRunStatus.RUNNING
-                    ):
-                        stopping_started_at = await self._update_phase_in_session(
-                            session,
-                            run_id,
-                            AgentRunPhase.STOPPING,
-                            active_tool_calls=[],
-                        )
-                        stopping_updated = True
-                if stopping_updated:
+                stopping = await self.operation_repository.update_phase_if_running(
+                    run_id=run_id,
+                    phase=AgentRunPhase.STOPPING,
+                    active_tool_calls=[],
+                )
+                if stopping.updated:
                     await self._publish_phase(
                         AgentRunPhase.STOPPING,
-                        stopping_started_at,
+                        stopping.model_call_started_at,
                     )
                 raise _ToolExecutionUserInterrupted from exc
             raise
@@ -1320,13 +1315,7 @@ class AgentRunExecution[
         """Idempotently cancel calls and remove their active ownership entries."""
         appended: list[Event] = []
         for call in tool_calls:
-            async with self.session_manager() as session:
-                payload = await self._cancelled_tool_result_payload(
-                    session,
-                    session_id=session_id,
-                    call=call,
-                )
-                await session.commit()
+            payload = await self._cancelled_tool_result_payload(call=call)
             appended.append(
                 await self._finalize_tool_result(
                     run_id=run_id,
@@ -1348,11 +1337,7 @@ class AgentRunExecution[
         """Cancel calls atomically inside the caller's DB transaction."""
         appended: list[Event] = []
         for call in tool_calls:
-            payload = await self._cancelled_tool_result_payload(
-                session,
-                session_id=session_id,
-                call=call,
-            )
+            payload = await self._cancelled_tool_result_payload(call=call)
             appended.append(
                 await self._finalize_tool_result_in_session(
                     session,
@@ -1366,13 +1351,10 @@ class AgentRunExecution[
 
     async def _cancelled_tool_result_payload(
         self,
-        session: AsyncSession,
         *,
-        session_id: str,
         call: ClientToolCallPayload,
     ) -> ClientToolResultPayload:
         """Build the generic cancelled Tool result."""
-        del session, session_id
         return ClientToolResultPayload(
             call_id=call.call_id,
             name=call.name,
@@ -1556,13 +1538,11 @@ class AgentRunExecution[
         active_tool_calls: list[ActiveToolCall] | None = None,
     ) -> None:
         """Reflect run phase in durable state and UI projection."""
-        async with self.session_manager() as session:
-            model_call_started_at = await self._update_phase_in_session(
-                session,
-                run_id,
-                phase,
-                active_tool_calls=active_tool_calls,
-            )
+        model_call_started_at = await self.operation_repository.update_phase(
+            run_id=run_id,
+            phase=phase,
+            active_tool_calls=active_tool_calls,
+        )
         await self._publish_phase(phase, model_call_started_at)
 
     async def _update_phase_in_session(
