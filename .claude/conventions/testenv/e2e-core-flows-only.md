@@ -1,12 +1,13 @@
 ---
-title: "Use E2E only for critical user journeys and real system boundaries; cover condition matrices, branches, and edge cases in unit or integration tests instead of preserving E2E counts."
+title: "Use representative E2E flows to verify each feature's core behavior; cover condition matrices, branches, and edge cases in unit or integration tests instead of preserving E2E counts."
 ---
 
-# Keep E2E Focused on Critical Flows
+# Verify Core Behavior with Representative E2E Flows
 
-E2E proves that independently deployed parts work together. It is not the exhaustive home for product logic.
+E2E proves that a feature's core behavior works through the assembled product. It is not the exhaustive home for product logic.
 
-- ALWAYS keep E2E coverage for critical user-visible flows and behavior that requires a real browser, network, process, image, provider, restart, or deployment boundary.
+- ALWAYS keep representative E2E coverage for each feature's core behavior, including its critical user-visible outcome.
+- Use E2E when the behavior requires the assembled product or a real browser, network, process, image, provider, restart, or deployment boundary.
 - ALWAYS cover condition combinations, internal branches, validation permutations, and edge cases at the narrowest unit or integration layer that can prove them.
 - Preserve behavioral coverage when moving a scenario to a faster layer; do not retain an E2E case merely to keep the E2E test count unchanged.
 
