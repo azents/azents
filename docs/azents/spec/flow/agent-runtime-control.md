@@ -55,6 +55,7 @@ code_paths:
   - python/apps/azents/src/azents/services/browser_file_download.py
   - python/apps/azents/src/azents/core/file_transfer.py
   - python/apps/azents/src/azents/runtime/control_server.py
+  - python/apps/azents/src/azents/repos/runtime_control_read.py
   - python/apps/azents/src/cli/devserver.py
   - python/apps/azents/src/cli/runtime_control_server.py
   - python/apps/azents-runtime-runner/**
@@ -79,7 +80,7 @@ code_paths:
   - testenv/azents/e2e/src/tests/web/public/test_runtime_capability_web.py
   - testenv/azents/e2e/src/tests/web/public/test_runtime_web_gateway.py
   - infra/charts/azents/**
-last_verified_at: 2026-09-30
+last_verified_at: 2026-10-01
 spec_version: 90
 ---
 

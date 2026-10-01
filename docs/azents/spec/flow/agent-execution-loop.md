@@ -79,6 +79,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/archived_session_retention/**
   - python/apps/azents/src/azents/repos/action_execution/**
   - python/apps/azents/src/azents/repos/model_file/**
+  - python/apps/azents/src/azents/repos/engine_read.py
+  - python/apps/azents/src/azents/repos/engine_event_operation.py
   - python/apps/azents/src/azents/repos/session_execution/**
   - python/apps/azents/src/azents/repos/model_candidate_health/**
   - python/apps/azents/src/azents/services/model_listing/**
@@ -104,7 +106,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/toolCallActionPresentation.ts
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
   - typescript/apps/azents-web/messages/*/chat.json
-last_verified_at: 2026-09-30
+last_verified_at: 2026-10-01
 spec_version: 188
 ---
 

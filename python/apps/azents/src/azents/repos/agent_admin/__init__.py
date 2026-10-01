@@ -84,6 +84,23 @@ class AgentAdminRepository:
         )
         return result.scalar_one() > 0
 
+    async def is_admin_for_update(
+        self,
+        session: AsyncSession,
+        agent_id: str,
+        workspace_user_id: str,
+    ) -> bool:
+        """Lock and check one Agent administrator membership."""
+        result = await session.execute(
+            sa.select(RDBAgentAdmin.id)
+            .where(
+                RDBAgentAdmin.agent_id == agent_id,
+                RDBAgentAdmin.workspace_user_id == workspace_user_id,
+            )
+            .with_for_update()
+        )
+        return result.scalar_one_or_none() is not None
+
     async def list_admin_agent_ids(
         self,
         session: AsyncSession,
