@@ -8,6 +8,8 @@ import azentsadminclient
 import azentspublicclient
 import pytest
 import requests
+from azentsadminclient.api.model_catalog_v1_api import ModelCatalogV1Api
+from azentsadminclient.models.system_catalog_provider import SystemCatalogProvider
 from azentspublicclient.api.llm_provider_integration_v1_api import (
     LLMProviderIntegrationV1Api,
 )
@@ -813,6 +815,12 @@ def profile_agent_setup(
             host=azents_admin_server_url,
             access_token=system_bootstrap_evidence.access_token,
         )
+    )
+    # Persist real validated-source authority before any priced model call.
+    # SDK/install price maps and direct database seeding are not fixture inputs.
+    ModelCatalogV1Api(admin_api_client).model_catalog_v1_refresh_system_model_catalog(
+        provider=SystemCatalogProvider.OPENAI,
+        _request_timeout=20,
     )
     return _setup_profile_agent(
         public_api_client,

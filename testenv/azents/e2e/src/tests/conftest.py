@@ -1670,6 +1670,10 @@ def azents_core_service_containers(
             "AZ_TESTENV_GITHUB_PLATFORM_VALIDATION_BASE_URL",
             _GITHUB_VALIDATION_INTERNAL_URL,
         )
+        .with_env(
+            "LITELLM_MODEL_COST_MAP_URL",
+            "http://openai-proxy:8081/inference-profile/catalog-source",
+        )
         .with_env("AZ_TESTENV_API_ENABLED", "true")
         .with_env(
             "AZ_RUNTIME_PROVIDER_BOOTSTRAP_SOURCE_KEY",
