@@ -197,30 +197,61 @@ def unavailable(
 
 
 def render(report: Mapping[str, object]) -> str:
-    """Keep the verdict short and put raw evidence behind details."""
+    """Render a scan-first verdict before exposing raw evidence."""
     outcome = str(report["outcome"])
-    observed = report.get("observed_seconds") or "?"
-    reference = report.get("reference_seconds") or "?"
+    observed = report.get("observed_seconds")
+    reference = report.get("reference_seconds")
     increase = report.get("increase_percent")
     threshold = report.get("threshold_seconds")
-    label = outcome.replace("_", " ").upper()
-    line = f"**{label}** — candidate `{observed}s` vs base `{reference}s`"
-    if increase is not None:
-        line += f" · `{increase}%`"
+    lane = html.escape(str(report.get("critical_lane") or "unknown"))
+    change = (
+        f"{Decimal(str(increase)):+.2f}".rstrip("0").rstrip(".")
+        if increase is not None
+        else None
+    )
+    status = {
+        "pass": "✅ Within limit",
+        "regression": "❌ Over 10% limit",
+        "comparison_unavailable": "⚠️ Comparison unavailable",
+    }.get(outcome, "⚠️ Unknown result")
+    values = [
+        f"Candidate `{observed}s`"
+        if observed is not None
+        else "Candidate `unavailable`",
+        f"Base `{reference}s`" if reference is not None else "Base `unavailable`",
+    ]
+    if change is not None:
+        values.append(f"Change `{change}%`")
     if threshold is not None:
-        line += f" · fail at `{threshold}s`"
-    lines = ["## E2E duration", "", line]
-    if outcome != "pass":
-        lines.extend(["", f"Reason: `{html.escape(str(report['reason']))}`"])
+        values.append(f"Limit `{threshold}s`")
+    lines = ["## E2E duration", "", f"**{status}**", "", " · ".join(values)]
+    if outcome == "comparison_unavailable":
+        reason = {
+            "compatible_base_run_unavailable": "Base timing artifact unavailable",
+            "github_evidence_unavailable": "GitHub timing evidence unavailable",
+            "lane_evidence_unavailable": "Current lane timing unavailable",
+        }.get(str(report.get("reason")), "Required timing evidence unavailable")
+        lines.extend(["", f"`{reason}`"])
     lines.extend(
         [
             "",
             "<details>",
-            "<summary>Duration evidence</summary>",
+            "<summary>Details</summary>",
+            "",
+            f"- Candidate maximum: **{observed or 'unavailable'}s** (`{lane}`)",
+            f"- Base maximum: **{reference or 'unavailable'}s**",
+            f"- Change: **{change if change is not None else 'unavailable'}%**",
+            f"- Failure threshold: **{threshold or 'unavailable'}s**",
+            f"- Base workflow run: `{report.get('base_run_id') or 'unavailable'}`",
+            "",
+            "<details>",
+            "<summary>Raw JSON</summary>",
             "",
             "```json",
             json.dumps(report, indent=2, sort_keys=True),
             "```",
+            "",
+            "</details>",
             "",
             "</details>",
             "",

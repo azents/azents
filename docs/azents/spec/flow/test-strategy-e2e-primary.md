@@ -528,8 +528,9 @@ Always-on required CI does not depend on external credentials.
   node IDs, slow-test timing, wall-clock pytest execution time per lane, lane job
   results, and a link to the workflow artifacts. Test execution jobs retain read-only
   permissions; only the dedicated comment job receives `pull-requests: write`. Fork
-  pull requests remain read-only and skip comment publication. The default view is
-  compact; duration evidence and lane diagnostics remain in expandable sections.
+  pull requests remain read-only and skip comment publication. The default view uses
+  short status labels and key metrics for scanning; raw evidence and timing diagnostics
+  remain in expandable sections.
 - Web Surface path filtering includes backend/E2E dependencies, both web Dockerfiles, and the TypeScript workspace.
 - testenv fixture/prerequisite unit, contract lint.
 
