@@ -20,7 +20,7 @@ Design documents are accumulated records and are not listed individually in this
 | [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-09-30 | 81 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-08-23 | 15 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-09-26 | 8 |
-| [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-09-29 | 27 |
+| [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-09-30 | 27 |
 | [Runtime Provider](spec/domain/runtime-provider.md) | runtime-provider | - | 2026-09-30 | 34 |
 | [Scheduled Task Domain Spec](spec/domain/scheduled-task.md) | scheduled-task | - | 2026-10-01 | 13 |
 | [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-09-30 | 7 |
@@ -245,6 +245,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Store Requested Inference Profiles as Typed Durable Data Historical Requirements Reconstruction](requirements/inference-260710-inference-profile.md) | inference-260710 | 2026-07-10 | - |
 | [Keep Resolved Inference Provenance Run-Owned Historical Requirements Reconstruction](requirements/inference-260711-inference-provenance.md) | inference-260711 | 2026-07-11 | - |
 | [Use Session Current Inference State Per Turn Historical Requirements Reconstruction](requirements/inference-260712-inference-turn.md) | inference-260712 | 2026-07-12 | - |
+| [Provider-Library Replacement Requirements](requirements/inference-260930-provider-replacement.md) | inference-260930 | 2026-09-30 | - |
 | [Reliable External Channel Execution Requirements](requirements/ingress-260801-reliable-external-channel-execution.md) | ingress-260801 | 2026-08-01 | 2026-08-01 |
 | [Session Initialization Lifecycle Historical Requirements Reconstruction](requirements/initialization-260703-initialization-lifecycle.md) | initialization-260703 | 2026-07-03 | - |
 | [Project Compact Inference Summaries with User Messages Historical Requirements Reconstruction](requirements/inline-260710-inline-message-inference-summary.md) | inline-260710 | 2026-07-10 | - |
@@ -692,6 +693,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Store Requested Inference Profiles as Typed Durable Data](adr/inference-260710-inference-profile.md)
 - [Keep Resolved Inference Provenance Run-Owned](adr/inference-260711-inference-provenance.md)
 - [Use Session Current Inference State Per Turn](adr/inference-260712-inference-turn.md)
+- [Provider-Library Replacement Decisions](adr/inference-260930-provider-replacement.md)
 - [Reliable External Channel Execution](adr/ingress-260801-reliable-external-channel-execution.md)
 - [Session Initialization Lifecycle](adr/initialization-260703-initialization-lifecycle.md)
 - [Project Compact Inference Summaries with User Messages](adr/inline-260710-inline-message-inference-summary.md)

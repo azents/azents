@@ -5,7 +5,6 @@ import dataclasses
 import json
 import logging
 import math
-import os
 from collections.abc import (
     AsyncIterable,
     AsyncIterator,
@@ -77,6 +76,11 @@ from azents.core.chatgpt_oauth import CHATGPT_OAUTH_BACKEND_BASE_URL
 from azents.core.enums import LLMModelDeveloper, LLMProvider
 from azents.core.llm_catalog import ModelCapabilities
 from azents.core.model_execution_options import ModelExecutionOptionId
+from azents.core.openai_client_config import (
+    OpenAIResponsesClientConfig,
+    openai_credential_headers,
+    openai_responses_client_config,
+)
 from azents.core.type_guards import is_string_object_dict
 from azents.engine.events.file_parts import ModelFileResolver
 from azents.engine.events.protocols import (
@@ -276,7 +280,7 @@ class OpenAIResponsesLowerer:
         historical_plaintext_custom_supported: bool = False,
     ) -> None:
         """Configure shared event lowering and SDK-owned request validation."""
-        self.request_extra_headers = _optional_credential_headers(
+        self.request_extra_headers = openai_credential_headers(
             (kwargs or {}).get("extra_headers")
         )
         self._lowerer = _OpenAIResponsesRequestLowerer(
@@ -352,17 +356,6 @@ def _validate_openai_tools(tools: Sequence[dict[str, object]]) -> None:
             raise ValueError(f"Unsupported OpenAI tool options: {unsupported}")
 
 
-@dataclasses.dataclass(frozen=True)
-class OpenAIResponsesClientConfig:
-    """Credential-bearing configuration kept outside logical requests."""
-
-    api_key: str | None
-    base_url: str | None
-    organization: str | None
-    project: str | None
-    default_headers: dict[str, str] | None
-
-
 class _OpenAIResponsesWebSocketFailure(Exception):
     """Internal classified WebSocket failure before public error conversion."""
 
@@ -375,43 +368,6 @@ class _OpenAIResponsesWebSocketFailure(Exception):
         super().__init__(stage)
         self.stage: OpenAIResponsesWebSocketFailureStage = stage
         self.status_code = status_code
-
-
-def openai_responses_client_config(
-    *,
-    provider: LLMProvider,
-    credential_kwargs: Mapping[str, object],
-) -> OpenAIResponsesClientConfig:
-    """Build official SDK client configuration from resolved credentials."""
-    api_key = _optional_credential_string(credential_kwargs, "api_key")
-    base_url = _optional_credential_string(credential_kwargs, "base_url")
-    if base_url is None:
-        base_url = _optional_credential_string(credential_kwargs, "api_base")
-    if base_url is None and provider == LLMProvider.OPENAI:
-        base_url = os.environ.get("AZ_OPENAI_BASE_URL")
-    if base_url is None:
-        base_url = os.environ.get("OPENAI_BASE_URL")
-    organization = _optional_credential_string(credential_kwargs, "organization")
-    if organization is None:
-        organization = os.environ.get("OPENAI_ORG_ID")
-    project = _optional_credential_string(credential_kwargs, "project")
-    if project is None:
-        project = os.environ.get("OPENAI_PROJECT_ID")
-    environment_headers = _openai_custom_headers_from_environment()
-    credential_headers = _optional_credential_headers(
-        credential_kwargs.get("extra_headers")
-    )
-    default_headers = {
-        **(environment_headers or {}),
-        **(credential_headers or {}),
-    } or None
-    return OpenAIResponsesClientConfig(
-        api_key=api_key,
-        base_url=base_url,
-        organization=organization,
-        project=project,
-        default_headers=default_headers,
-    )
 
 
 def openai_responses_websocket_endpoint_eligible(
@@ -2148,39 +2104,6 @@ def _sdk_model_dump(value: object) -> dict[str, object]:
             warnings=False,
         )
     return {}
-
-
-def _optional_credential_string(
-    values: Mapping[str, object],
-    key: str,
-) -> str | None:
-    value = values.get(key)
-    if value is None:
-        return None
-    if not isinstance(value, str):
-        raise TypeError(f"OpenAI client option {key} must be a string")
-    return value
-
-
-def _optional_credential_headers(value: object) -> dict[str, str] | None:
-    if value is None:
-        return None
-    if not _is_string_string_dict(value):
-        raise TypeError("OpenAI client extra_headers must be dict[str, str]")
-    return dict(value)
-
-
-def _openai_custom_headers_from_environment() -> dict[str, str] | None:
-    """Parse the public SDK's newline-delimited custom-header environment form."""
-    raw_headers = os.environ.get("OPENAI_CUSTOM_HEADERS")
-    if raw_headers is None:
-        return None
-    headers: dict[str, str] = {}
-    for line in raw_headers.split("\n"):
-        separator = line.find(":")
-        if separator >= 0:
-            headers[line[:separator].strip()] = line[separator + 1 :].strip()
-    return headers or None
 
 
 def _optional_str(

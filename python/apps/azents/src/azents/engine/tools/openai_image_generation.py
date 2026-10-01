@@ -14,7 +14,7 @@ from openai import (
 )
 from pydantic import BaseModel, ConfigDict, Field
 
-from azents.engine.events.openai_responses import OpenAIResponsesClientConfig
+from azents.core.openai_client_config import OpenAIResponsesClientConfig
 from azents.engine.events.provider_output import generated_image_output
 from azents.engine.run.errors import ModelCallError
 from azents.engine.run.types import FunctionTool, FunctionToolError, FunctionToolResult

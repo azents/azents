@@ -55,7 +55,6 @@ def _service(
             source_loader=LiteLLMSourceLoader(
                 http_client=client,
                 source_url=_SOURCE_URL,
-                litellm_version="1.91.3",
             ),
         ),
         client,
@@ -79,6 +78,7 @@ async def test_successful_remote_ingestion_publishes_authoritative_snapshot(
     assert snapshot.source_url == _SOURCE_URL
     assert snapshot.model_count == 100
     assert snapshot.source_hash == _source_hash(payload)
+    assert snapshot.litellm_version is None
 
     async with rdb_session_manager() as session:
         attempt = await LiteLLMSourceSnapshotRepository().get_latest_attempt(
@@ -122,6 +122,8 @@ async def test_remote_ingestion_promotes_matching_runtime_snapshot(
 
     assert snapshot.id == legacy.id
     assert snapshot.loaded_source == "remote"
+    assert snapshot.litellm_version == legacy.litellm_version == "1.91.3"
+    assert snapshot.payload == legacy.payload
 
 
 async def test_new_source_attempt_recovers_unfinished_attempt(
@@ -157,6 +159,71 @@ async def test_new_source_attempt_recovers_unfinished_attempt(
     assert abandoned.finished_at is not None
 
 
+async def test_same_hash_refresh_preserves_historical_package_provenance(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """Refresh validated authority without erasing a historical version."""
+    payload = _payload(100)
+    repository = LiteLLMSourceSnapshotRepository()
+    async with rdb_session_manager() as session:
+        previous = await repository.upsert_validated_remote(
+            session,
+            source_key="litellm_model_cost",
+            source_url=_SOURCE_URL,
+            source_hash=_source_hash(payload),
+            model_count=len(payload),
+            litellm_version="historical-package-version",
+            payload=payload,
+        )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=payload, request=request)
+
+    service, client = _service(rdb_session_manager, handler)
+    async with client:
+        refreshed = await service.sync_current_source()
+        authoritative = await service.get_authoritative_source()
+
+    assert refreshed.id == previous.id == authoritative.id
+    assert refreshed.source_hash == previous.source_hash
+    assert refreshed.payload == previous.payload
+    assert refreshed.litellm_version == "historical-package-version"
+    async with rdb_session_manager() as session:
+        attempt = await repository.get_latest_attempt(
+            session,
+            source_key="litellm_model_cost",
+        )
+    assert attempt is not None
+    assert attempt.status == LLMCatalogAttemptStatus.SUCCEEDED
+    assert attempt.produced_snapshot_id == previous.id
+
+
+async def test_remote_ingestion_retains_unconsumed_source_metadata(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """Snapshot collection does not strip prices or provider source extensions."""
+    payload = {
+        "openai/canonical": {
+            "litellm_provider": "openai",
+            "mode": "chat",
+            "aliases": ["openai/alias"],
+            "input_cost_per_token_priority": 0.000004,
+            "source_extension": {"nested": ["untouched", 5]},
+        }
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=payload, request=request)
+
+    service, client = _service(rdb_session_manager, handler)
+    async with client:
+        snapshot = await service.sync_current_source()
+    for model_key in ("openai/canonical", "openai/alias"):
+        metadata = snapshot.payload[model_key]
+        assert metadata["input_cost_per_token_priority"] == 0.000004
+        assert metadata["source_extension"] == {"nested": ["untouched", 5]}
+
+
 async def test_remote_ingestion_expands_litellm_aliases(
     rdb_session_manager: SessionManager[AsyncSession],
 ) -> None:
@@ -181,10 +248,10 @@ async def test_remote_ingestion_expands_litellm_aliases(
     assert snapshot.payload["openai/alias"] == snapshot.payload["openai/canonical"]
 
 
-async def test_remote_failure_keeps_authority_and_records_bundled_fallback(
+async def test_remote_failure_keeps_authority_without_package_fallback(
     rdb_session_manager: SessionManager[AsyncSession],
 ) -> None:
-    """Do not replace validated remote content with the package fallback."""
+    """Keep validated remote authority and record only the failed fetch."""
     payload = _payload(100)
 
     def success_handler(request: httpx.Request) -> httpx.Response:
@@ -215,9 +282,13 @@ async def test_remote_failure_keeps_authority_and_records_bundled_fallback(
     assert attempt is not None
     assert attempt.status == LLMCatalogAttemptStatus.FAILED
     assert attempt.diagnostics is not None
-    assert attempt.diagnostics["source_kind"] == "bundled_fallback"
-    assert attempt.diagnostics["fallback_model_count"] > 0
-    assert "remote unavailable" in attempt.diagnostics["fetch_failure_reason"]
+    assert attempt.diagnostics["source_kind"] == "remote"
+    assert attempt.diagnostics["litellm_version"] is None
+    assert not any(key.startswith("fallback_") for key in attempt.diagnostics)
+    assert attempt.failure_code == "ConnectError"
+    assert attempt.diagnostics["fetch_failure_reason"] == (
+        "The remote LiteLLM model catalog could not be ingested."
+    )
 
 
 async def test_malformed_remote_payload_keeps_authoritative_snapshot(
@@ -255,7 +326,8 @@ async def test_malformed_remote_payload_keeps_authoritative_snapshot(
     assert attempt is not None
     assert attempt.status == LLMCatalogAttemptStatus.FAILED
     assert attempt.diagnostics is not None
-    assert attempt.diagnostics["source_kind"] == "bundled_fallback"
+    assert attempt.diagnostics["source_kind"] == "remote"
+    assert not any(key.startswith("fallback_") for key in attempt.diagnostics)
 
 
 async def test_invalid_utf8_remote_payload_records_failed_attempt(
@@ -287,36 +359,22 @@ async def test_invalid_utf8_remote_payload_records_failed_attempt(
     assert attempt.finished_at is not None
 
 
-async def test_invalid_utf8_bundled_fallback_records_failed_attempt(
+async def test_remote_failure_does_not_persist_untrusted_exception_text(
     rdb_session_manager: SessionManager[AsyncSession],
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Terminalize source attempts when the diagnostic fallback cannot decode."""
-
-    def invalid_utf8_fallback(
-        _loader: LiteLLMSourceLoader,
-    ) -> dict[str, dict[str, Any]]:
-        raise UnicodeDecodeError(
-            "utf-8",
-            b"\xff",
-            0,
-            1,
-            "invalid start byte",
-        )
-
-    monkeypatch.setattr(
-        LiteLLMSourceLoader,
-        "load_bundled_fallback",
-        invalid_utf8_fallback,
-    )
+    """Provider or parser text cannot become a durable source diagnostic."""
+    canary = "untrusted-source-body-and-credential-canary"
 
     def failure_handler(request: httpx.Request) -> httpx.Response:
-        raise httpx.ConnectError("remote unavailable", request=request)
+        raise httpx.ConnectError(canary, request=request)
 
     service, client = _service(rdb_session_manager, failure_handler)
     async with client:
-        with pytest.raises(LiteLLMSourceSyncError):
+        with pytest.raises(LiteLLMSourceSyncError) as raised:
             await service.sync_current_source()
+        assert canary not in str(raised.value)
+        assert raised.value.__cause__ is None
+        assert raised.value.__suppress_context__
 
     async with rdb_session_manager() as session:
         attempt = await LiteLLMSourceSnapshotRepository().get_latest_attempt(
@@ -328,7 +386,9 @@ async def test_invalid_utf8_bundled_fallback_records_failed_attempt(
     assert attempt.status == LLMCatalogAttemptStatus.FAILED
     assert attempt.finished_at is not None
     assert attempt.diagnostics is not None
-    assert "invalid start byte" in attempt.diagnostics["fallback_failure_reason"]
+    assert canary not in json.dumps(attempt.diagnostics)
+    assert canary not in (attempt.failure_message or "")
+    assert attempt.failure_code == "ConnectError"
 
 
 async def test_materially_smaller_remote_payload_is_blocked(

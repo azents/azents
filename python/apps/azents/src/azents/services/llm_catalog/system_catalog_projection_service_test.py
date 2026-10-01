@@ -33,7 +33,6 @@ async def test_system_catalogs_exclude_integration_scoped_providers(
                 source_loader=LiteLLMSourceLoader(
                     http_client=client,
                     source_url="https://catalog.example.test/models.json",
-                    litellm_version="1.91.3",
                 ),
             ),
         )
@@ -76,7 +75,6 @@ async def test_blocked_source_does_not_replace_current_system_catalog(
                 source_loader=LiteLLMSourceLoader(
                     http_client=client,
                     source_url="https://catalog.example.test/models.json",
-                    litellm_version="1.91.3",
                 ),
             ),
         )

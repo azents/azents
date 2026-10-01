@@ -26,6 +26,7 @@ from azents.core.image_generation_config import (
     decode_image_generation_model_config,
 )
 from azents.core.model_operation import ModelOperationKind
+from azents.core.openai_client_config import openai_responses_client_config
 from azents.core.tools import TurnContext
 from azents.core.xai import resolve_xai_api_base_url
 from azents.engine.context.compaction import (
@@ -79,7 +80,6 @@ from azents.engine.events.openai_responses import (
     OpenAIResponsesOutputNormalizer,
     OpenAIResponsesRequest,
     create_openai_responses_client,
-    openai_responses_client_config,
     openai_responses_websocket_endpoint_eligible,
 )
 from azents.engine.events.output_parts import (
