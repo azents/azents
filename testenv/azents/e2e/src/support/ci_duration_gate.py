@@ -8,12 +8,13 @@ import json
 import re
 import subprocess
 import sys
+import xml.etree.ElementTree as element_tree
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
-METRIC = "pytest-lane-wall-v1"
+METRIC = "pytest-call-total-v1"
 _LANE = re.compile(r"[a-z][a-z0-9-]*-[1-9][0-9]*")
 _SUMMARY_LANE = re.compile(
     r"^### (?P<lane>[a-z][a-z0-9-]*-[1-9][0-9]*) — ",
@@ -33,6 +34,15 @@ class Sample:
 
     run_id: int
     lanes: Mapping[str, Decimal]
+    diagnostics: Mapping[str, Mapping[str, Decimal]] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class LaneEvidence:
+    """Blocking call totals plus non-blocking phase and wall diagnostics."""
+
+    lanes: Mapping[str, Decimal]
+    diagnostics: Mapping[str, Mapping[str, Decimal]]
 
 
 def _run(arguments: Sequence[str]) -> str:
@@ -77,17 +87,50 @@ def _lane_name(path: Path, root: Path) -> str:
     return matches[0]
 
 
-def load_lanes(root: Path) -> dict[str, Decimal]:
-    """Read the raw files already used by the sticky CI comment."""
+def load_lanes(root: Path) -> LaneEvidence:
+    """Read complete pytest call totals and retain setup/wall diagnostics."""
     lanes: dict[str, Decimal] = {}
-    for path in root.glob("**/lane-duration-seconds.txt"):
+    diagnostics: dict[str, Mapping[str, Decimal]] = {}
+    for path in root.glob("**/pytest-timings.jsonl"):
         lane = _lane_name(path, root)
         if lane in lanes:
             raise EvidenceError("invalid_lane_artifacts")
-        lanes[lane] = _seconds(path.read_text(encoding="utf-8"))
+        phases = {phase: Decimal(0) for phase in ("setup", "call", "teardown")}
+        seen: set[tuple[str, str]] = set()
+        call_count = 0
+        for line in path.read_text(encoding="utf-8").splitlines():
+            payload = _object(line)
+            if payload.get("record_type") != "test_phase":
+                continue
+            node_id, phase = payload.get("node_id"), payload.get("phase")
+            if (
+                not isinstance(node_id, str)
+                or not node_id
+                or phase not in phases
+                or (node_id, str(phase)) in seen
+            ):
+                raise EvidenceError("invalid_test_phase_timing")
+            seen.add((node_id, str(phase)))
+            phases[str(phase)] += _seconds(str(payload.get("duration_seconds")))
+            if phase == "call":
+                call_count += 1
+        try:
+            junit = element_tree.parse(path.parent / "junit.xml").getroot()
+        except (OSError, element_tree.ParseError) as error:
+            raise EvidenceError("junit_evidence_unavailable") from error
+        expected_calls = sum(
+            case.find("skipped") is None for case in junit.iter("testcase")
+        )
+        if not call_count or call_count != expected_calls:
+            raise EvidenceError("incomplete_call_timing")
+        wall = _seconds(
+            (path.parent / "lane-duration-seconds.txt").read_text(encoding="utf-8")
+        )
+        lanes[lane] = phases["call"]
+        diagnostics[lane] = {**phases, "wall": wall}
     if not lanes:
-        raise EvidenceError("lane_evidence_unavailable")
-    return lanes
+        raise EvidenceError("call_timing_unavailable")
+    return LaneEvidence(lanes, diagnostics)
 
 
 def _runs(repository: str, sha: str, command: Runner) -> list[int]:
@@ -143,11 +186,15 @@ def find_sample(
                     str(destination),
                 ]
             )
-            lanes = load_lanes(destination)
+            evidence = load_lanes(destination)
         except (EvidenceError, OSError):
             continue
-        if expected_lanes <= set(lanes):
-            return Sample(run_id, {lane: lanes[lane] for lane in expected_lanes})
+        if expected_lanes <= set(evidence.lanes):
+            return Sample(
+                run_id,
+                {lane: evidence.lanes[lane] for lane in expected_lanes},
+                {lane: evidence.diagnostics[lane] for lane in expected_lanes},
+            )
     raise EvidenceError("compatible_base_run_unavailable")
 
 
@@ -158,11 +205,25 @@ def _number(value: Decimal | None) -> str | None:
     return text.rstrip("0").rstrip(".") if "." in text else text
 
 
+def _diagnostics_wire(
+    diagnostics: Mapping[str, Mapping[str, Decimal]],
+) -> dict[str, dict[str, str | None]]:
+    return {
+        lane: {name: _number(value) for name, value in values.items()}
+        for lane, values in sorted(diagnostics.items())
+    }
+
+
 def compare(
-    lanes: Mapping[str, Decimal], base: Sample, head_sha: str, base_sha: str
+    lanes: Mapping[str, Decimal],
+    base: Sample,
+    head_sha: str,
+    base_sha: str,
+    diagnostics: Mapping[str, Mapping[str, Decimal]] | None = None,
 ) -> dict[str, object]:
     """Compute the exact twenty-percent verdict."""
-    critical = max(lanes, key=lambda lane: lanes[lane])
+    critical = max(lanes.items(), key=lambda item: item[1])[0]
+    base_critical = max(base.lanes.items(), key=lambda item: item[1])[0]
     observed = lanes[critical]
     reference = max(base.lanes.values())
     threshold = reference * Decimal("1.20")
@@ -182,7 +243,10 @@ def compare(
         "base_lanes": {
             lane: _number(value) for lane, value in sorted(base.lanes.items())
         },
+        "lane_diagnostics": _diagnostics_wire(diagnostics or {}),
+        "base_lane_diagnostics": _diagnostics_wire(base.diagnostics),
         "critical_lane": critical,
+        "base_critical_lane": base_critical,
         "observed_seconds": _number(observed),
         "reference_seconds": _number(reference),
         "threshold_seconds": _number(threshold),
@@ -193,7 +257,11 @@ def compare(
 
 
 def unavailable(
-    lanes: Mapping[str, Decimal], reason: str, head: str, base: str
+    lanes: Mapping[str, Decimal],
+    reason: str,
+    head: str,
+    base: str,
+    diagnostics: Mapping[str, Mapping[str, Decimal]] | None = None,
 ) -> dict[str, object]:
     """Keep current measurements visible while failing closed."""
     return {
@@ -206,9 +274,12 @@ def unavailable(
         "base_run_id": None,
         "lanes": {lane: _number(value) for lane, value in sorted(lanes.items())},
         "base_lanes": {},
+        "lane_diagnostics": _diagnostics_wire(diagnostics or {}),
+        "base_lane_diagnostics": {},
         "critical_lane": max(lanes.items(), key=lambda item: item[1])[0]
         if lanes
         else None,
+        "base_critical_lane": None,
         "observed_seconds": _number(max(lanes.values())) if lanes else None,
         "reference_seconds": None,
         "threshold_seconds": None,
@@ -234,22 +305,29 @@ def render(report: Mapping[str, object]) -> str:
         "regression": "❌ Over 20% limit",
         "comparison_unavailable": "⚠️ Comparison unavailable",
     }.get(outcome, "⚠️ Unknown result")
+    observed_display = _display_seconds(observed)
+    reference_display = _display_seconds(reference)
+    threshold_display = _display_seconds(threshold)
     values = [
-        f"Candidate `{observed}s`"
+        f"Candidate test `{observed_display}s`"
         if observed is not None
-        else "Candidate `unavailable`",
-        f"Base `{reference}s`" if reference is not None else "Base `unavailable`",
+        else "Candidate test `unavailable`",
+        f"Base test `{reference_display}s`"
+        if reference is not None
+        else "Base test `unavailable`",
     ]
     if change is not None:
         values.append(f"Change `{change}%`")
     if threshold is not None:
-        values.append(f"Limit `{threshold}s`")
+        values.append(f"Limit `{threshold_display}s`")
     lines = ["## E2E duration", "", f"**{status}**", "", " · ".join(values)]
     if outcome == "comparison_unavailable":
         reason = {
             "compatible_base_run_unavailable": "Base timing artifact unavailable",
             "github_evidence_unavailable": "GitHub timing evidence unavailable",
             "lane_evidence_unavailable": "Current lane timing unavailable",
+            "call_timing_unavailable": "Current test timing unavailable",
+            "incomplete_call_timing": "Test timing evidence incomplete",
         }.get(str(report.get("reason")), "Required timing evidence unavailable")
         lines.extend(["", f"`{reason}`"])
     lines.extend(
@@ -258,10 +336,17 @@ def render(report: Mapping[str, object]) -> str:
             "<details>",
             "<summary>Details</summary>",
             "",
-            f"- Candidate maximum: **{observed or 'unavailable'}s** (`{lane}`)",
-            f"- Base maximum: **{reference or 'unavailable'}s**",
+            "| Run | Lane | Test | Setup | Teardown | Total |",
+            "| --- | --- | ---: | ---: | ---: | ---: |",
+            _diagnostic_row("Candidate", lane, report.get("lane_diagnostics")),
+            _diagnostic_row(
+                "Base",
+                html.escape(str(report.get("base_critical_lane") or "unknown")),
+                report.get("base_lane_diagnostics"),
+            ),
+            "",
             f"- Change: **{change if change is not None else 'unavailable'}%**",
-            f"- Failure threshold: **{threshold or 'unavailable'}s**",
+            f"- Failure threshold: **{threshold_display}s**",
             f"- Base workflow run: `{report.get('base_run_id') or 'unavailable'}`",
             "",
             "<details>",
@@ -280,6 +365,27 @@ def render(report: Mapping[str, object]) -> str:
     return "\n".join(lines)
 
 
+def _diagnostic_row(label: str, lane: str, raw: object) -> str:
+    values = raw.get(lane) if isinstance(raw, dict) else None
+    if not isinstance(values, dict):
+        unavailable = " | ".join(["unavailable"] * 4)
+        return f"| {label} | `{lane}` | {unavailable} |"
+    cells = [
+        f"{_display_seconds(values.get(name))}s"
+        if values.get(name) is not None
+        else "unavailable"
+        for name in ("call", "setup", "teardown", "wall")
+    ]
+    return f"| {label} | `{lane}` | " + " | ".join(cells) + " |"
+
+
+def _display_seconds(value: object) -> str:
+    if value is None:
+        return "unavailable"
+    number = Decimal(str(value)).quantize(Decimal("0.1"))
+    return _number(number) or "0"
+
+
 def evaluate(
     artifacts_root: Path,
     repository: str,
@@ -290,13 +396,27 @@ def evaluate(
     command: Runner,
 ) -> dict[str, object]:
     """Evaluate current local artifacts against an existing base run."""
-    lanes: dict[str, Decimal] = {}
+    evidence = LaneEvidence({}, {})
     try:
-        lanes = load_lanes(artifacts_root)
-        base = find_sample(repository, base_sha, set(lanes), run_id, work_dir, command)
-        return compare(lanes, base, head_sha, base_sha)
+        evidence = load_lanes(artifacts_root)
+        base = find_sample(
+            repository, base_sha, set(evidence.lanes), run_id, work_dir, command
+        )
+        return compare(
+            evidence.lanes,
+            base,
+            head_sha,
+            base_sha,
+            diagnostics=evidence.diagnostics,
+        )
     except (EvidenceError, OSError, ValueError) as error:
-        return unavailable(lanes, str(error), head_sha, base_sha)
+        return unavailable(
+            evidence.lanes,
+            str(error),
+            head_sha,
+            base_sha,
+            diagnostics=evidence.diagnostics,
+        )
 
 
 def _candidate_report(

@@ -18,6 +18,12 @@ from azents.core.inference_profile import (
     RequestedInferenceProfile,
     SessionInferenceState,
 )
+from azents.core.model_metadata_source import (
+    ModelMetadataSourcePayload,
+    SourceEqualsClause,
+    SourceModelRecord,
+    SourceProviderRecord,
+)
 from azents.core.model_operation import (
     ModelOperationKind,
     ModelOperationState,
@@ -36,8 +42,8 @@ from azents.engine.run.resolve import (
 )
 from azents.engine.run.types import PollMessages
 from azents.repos.agent.data import Agent
-from azents.repos.llm_catalog import LiteLLMSourceSnapshotRepository
-from azents.repos.llm_catalog.data import LiteLLMSourceSnapshot
+from azents.repos.model_metadata_source import ModelMetadataSourceRepository
+from azents.repos.model_metadata_source_data import ModelMetadataSourceSnapshot
 from azents.services.model_metadata import CapturedContextSource, ModelMetadataService
 from azents.testing.model_metadata import make_test_model_metadata_service
 from azents.testing.model_selection import (
@@ -49,21 +55,50 @@ from azents.worker.run.executor import RunExecutor, RunInputPollResult
 from azents.worker.session.supervisor import ToolAdmissionBarrier
 
 
-def _snapshot(identifier: str, *, main: int, compaction: int) -> LiteLLMSourceSnapshot:
-    return LiteLLMSourceSnapshot(
+def _snapshot(
+    identifier: str, *, main: int, compaction: int
+) -> ModelMetadataSourceSnapshot:
+    models = [
+        SourceModelRecord(
+            id=model_id,
+            name=model_id,
+            match=SourceEqualsClause(value=model_id),
+            context_window=context_window,
+            deprecated=False,
+            prices=[],
+        )
+        for model_id, context_window in (
+            ("gpt-main", main),
+            ("gpt-main-fallback", main),
+            ("gpt-compaction", compaction),
+            ("gpt-compaction-fallback", compaction),
+        )
+    ]
+    payload = ModelMetadataSourcePayload(
+        providers=[
+            SourceProviderRecord(
+                id="openai",
+                name="OpenAI",
+                api_pattern=r"https://api\.openai\.com/.*",
+                model_match=None,
+                provider_match=None,
+                fallback_model_providers=None,
+                models=models,
+            )
+        ]
+    )
+    return ModelMetadataSourceSnapshot(
         id=identifier,
-        source_key="litellm_model_cost",
-        source_url=None,
-        source_hash=f"hash-{identifier}",
-        model_count=4,
-        litellm_version=None,
-        loaded_source="remote",
-        payload={
-            "openai/gpt-main": {"max_input_tokens": main},
-            "openai/gpt-main-fallback": {"max_input_tokens": main},
-            "openai/gpt-compaction": {"max_input_tokens": compaction},
-            "openai/gpt-compaction-fallback": {"max_input_tokens": compaction},
-        },
+        source_key="genai_prices",
+        source_kind="genai_prices",
+        source_schema_version="1",
+        source_url="https://source.example.test/models.json",
+        source_hash=payload.content_hash(),
+        producer_name="genai-prices",
+        producer_version="0.1.9",
+        provider_count=payload.provider_count,
+        model_count=payload.model_count,
+        payload=payload,
         created_at=datetime.datetime.now(datetime.UTC),
     )
 
@@ -129,26 +164,26 @@ class _TrackedSelectionSessions(fixtures._SessionManager):
         return _TrackedSelectionScope(self)
 
 
-class _RefreshingSourceRepository(LiteLLMSourceSnapshotRepository):
+class _RefreshingSourceRepository(ModelMetadataSourceRepository):
     """Publish the next source immediately after each authoritative read."""
 
     def __init__(
         self,
-        snapshots: tuple[LiteLLMSourceSnapshot | None, ...],
+        snapshots: tuple[ModelMetadataSourceSnapshot | None, ...],
         selection_transaction_open: Callable[[], bool],
     ) -> None:
         self.snapshots = snapshots
         self.selection_transaction_open = selection_transaction_open
         self.captures = 0
 
-    async def get_latest_authoritative(
+    async def get_current(
         self,
         session: AsyncSession,
         *,
         source_key: str,
-    ) -> LiteLLMSourceSnapshot | None:
+    ) -> ModelMetadataSourceSnapshot | None:
         del session
-        assert source_key == "litellm_model_cost"
+        assert source_key == "genai_prices"
         assert not self.selection_transaction_open()
         selected = self.snapshots[min(self.captures, len(self.snapshots) - 1)]
         self.captures += 1
@@ -157,7 +192,7 @@ class _RefreshingSourceRepository(LiteLLMSourceSnapshotRepository):
 
 def _install_sources(
     executor: RunExecutor,
-    snapshots: tuple[LiteLLMSourceSnapshot | None, ...],
+    snapshots: tuple[ModelMetadataSourceSnapshot | None, ...],
 ) -> _RefreshingSourceRepository:
     sessions = _TrackedSelectionSessions()
     executor.session_manager = sessions
@@ -920,11 +955,34 @@ async def test_compaction_context_uses_saved_semantic_model_not_dispatch_encodin
         effective_auto_compaction_threshold_tokens=18_000,
         resolved_at=datetime.datetime.now(datetime.UTC),
     )
+    payload = ModelMetadataSourcePayload(
+        providers=[
+            SourceProviderRecord(
+                id="aws",
+                name="AWS Bedrock",
+                api_pattern=r"https://bedrock-runtime\\..*",
+                model_match=None,
+                provider_match=None,
+                fallback_model_providers=None,
+                models=[
+                    SourceModelRecord(
+                        id="anthropic.claude-fixture-v1:0",
+                        name="Claude fixture",
+                        match=SourceEqualsClause(value="anthropic.claude-fixture-v1:0"),
+                        context_window=100_000,
+                        deprecated=False,
+                        prices=[],
+                    )
+                ],
+            )
+        ]
+    )
     source = dataclasses.replace(
         _snapshot("semantic", main=100_000, compaction=80_000),
-        payload={
-            "bedrock/anthropic.claude-fixture-v1:0": {"max_input_tokens": 100_000}
-        },
+        source_hash=payload.content_hash(),
+        provider_count=payload.provider_count,
+        model_count=payload.model_count,
+        payload=payload,
     )
     request = dataclasses.replace(
         previous.value.run_request,

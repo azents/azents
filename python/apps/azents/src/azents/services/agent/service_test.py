@@ -26,14 +26,20 @@ from azents.core.enums import (
     ExternalChannelResponseMode,
     WorkspaceUserRole,
 )
+from azents.core.model_metadata_source import (
+    ModelMetadataSourcePayload,
+    SourceEqualsClause,
+    SourceModelRecord,
+    SourceProviderRecord,
+)
 from azents.repos.agent.data import Agent
 from azents.repos.agent_operations import (
     AgentOperationNotAdmin,
     AgentOperationRuntimeProfileInvalid,
     AgentOperationsRepository,
 )
-from azents.repos.llm_catalog import LiteLLMSourceSnapshotRepository
-from azents.repos.llm_catalog.data import LiteLLMSourceSnapshot
+from azents.repos.model_metadata_source import ModelMetadataSourceRepository
+from azents.repos.model_metadata_source_data import ModelMetadataSourceSnapshot
 from azents.services.model_metadata import ModelMetadataService
 from azents.services.terminal_policy.invalidation import (
     NoopTerminalPolicyInvalidationPublisher,
@@ -72,20 +78,68 @@ def test_agent_service_dependency_graph_is_valid() -> None:
     assert get_dependant(path="/", call=endpoint).dependencies
 
 
-class _CountingMetadataRepository(LiteLLMSourceSnapshotRepository):
+class _CountingMetadataRepository(ModelMetadataSourceRepository):
     """Supply one local source fixture and count reads."""
 
-    def __init__(self, snapshot: LiteLLMSourceSnapshot) -> None:
+    def __init__(self, snapshot: ModelMetadataSourceSnapshot) -> None:
         self.snapshot = snapshot
         self.capture_count = 0
 
-    async def get_latest_authoritative(
+    async def get_current(
         self, session: AsyncSession, *, source_key: str
-    ) -> LiteLLMSourceSnapshot:
+    ) -> ModelMetadataSourceSnapshot:
         del session
-        assert source_key == "litellm_model_cost"
+        assert source_key == "genai_prices"
         self.capture_count += 1
         return self.snapshot
+
+
+def _metadata_snapshot(
+    *,
+    model_id: str | None,
+    context_window: int | None,
+) -> ModelMetadataSourceSnapshot:
+    models = (
+        [
+            SourceModelRecord(
+                id=model_id,
+                name=model_id,
+                match=SourceEqualsClause(value=model_id),
+                context_window=context_window,
+                deprecated=False,
+                prices=[],
+            )
+        ]
+        if model_id is not None
+        else []
+    )
+    payload = ModelMetadataSourcePayload(
+        providers=[
+            SourceProviderRecord(
+                id="openai",
+                name="OpenAI",
+                api_pattern=r"https://api\.openai\.com/.*",
+                model_match=None,
+                provider_match=None,
+                fallback_model_providers=None,
+                models=models,
+            )
+        ]
+    )
+    return ModelMetadataSourceSnapshot(
+        id="source-id",
+        source_key="genai_prices",
+        source_kind="genai_prices",
+        source_schema_version="1",
+        source_url="https://metadata.example/data.json",
+        source_hash=payload.content_hash(),
+        producer_name="genai-prices",
+        producer_version="0.1.9",
+        provider_count=payload.provider_count,
+        model_count=payload.model_count,
+        payload=payload,
+        created_at=_NOW,
+    )
 
 
 def test_terminal_denied_scope_reports_each_policy_owner() -> None:
@@ -362,16 +416,9 @@ class TestAgentServiceSourceContext:
                 )
             )
         source_key = agents[0].model_selection.model_identifier
-        snapshot = LiteLLMSourceSnapshot(
-            id="source-id",
-            source_key="litellm_model_cost",
-            source_url=None,
-            source_hash="source-hash",
-            model_count=1,
-            litellm_version=None,
-            loaded_source="remote",
-            payload={source_key: {"max_input_tokens": 256_000}},
-            created_at=_NOW,
+        snapshot = _metadata_snapshot(
+            model_id=source_key,
+            context_window=256_000,
         )
         repository = _CountingMetadataRepository(snapshot)
         static_service = make_test_model_metadata_service(snapshot=snapshot)
@@ -426,16 +473,9 @@ class TestAgentServiceSourceContext:
                 ]
             }
         )
-        snapshot = LiteLLMSourceSnapshot(
-            id="source-id",
-            source_key="litellm_model_cost",
-            source_url=None,
-            source_hash="source-hash",
-            model_count=0,
-            litellm_version=None,
-            loaded_source="remote",
-            payload={},
-            created_at=_NOW,
+        snapshot = _metadata_snapshot(
+            model_id=None,
+            context_window=None,
         )
         repository = _CountingMetadataRepository(snapshot)
         static_service = make_test_model_metadata_service(snapshot=snapshot)

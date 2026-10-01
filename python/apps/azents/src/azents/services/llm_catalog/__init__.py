@@ -3,9 +3,9 @@
 import dataclasses
 import datetime
 import hashlib
+import importlib.metadata
 import json
 import os
-import re
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Annotated, Any, assert_never
 
@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent import AgentModelSelection, AgentModelSelectionInput
+from azents.core.builtin_tools import supported_builtin_capabilities
 from azents.core.crypto import CredentialCipher
 from azents.core.deps import get_credential_cipher
 from azents.core.enums import (
@@ -37,6 +38,7 @@ from azents.core.llm_catalog import (
     ModelReasoningCapabilities,
     ModelReasoningEffort,
     ModelToolCallingCapabilities,
+    model_freshness_rank,
 )
 from azents.core.llm_catalog_sync import (
     CatalogSyncAttemptState,
@@ -47,6 +49,9 @@ from azents.core.llm_catalog_sync import (
     evaluate_integration_catalog_sync_policy,
 )
 from azents.core.model_execution_options import ModelExecutionOptionId
+from azents.engine.providers.model_profiles import (
+    RUNTIME_MODEL_PROFILE_RESOLVER_REVISION,
+)
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.chatgpt_oauth_runtime import ChatGPTOAuthRuntimeRepository
@@ -56,7 +61,7 @@ from azents.repos.llm_catalog import (
 )
 from azents.repos.llm_catalog.data import (
     CatalogNotFound,
-    CatalogSyncAlreadyRunning,
+    CatalogProjectionProvenance,
     LiteLLMSourceSnapshot,
     LLMCatalogEntry,
     LLMCatalogEntryCreate,
@@ -64,8 +69,8 @@ from azents.repos.llm_catalog.data import (
 )
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.llm_provider_integration.data import LLMProviderIntegrationWithSecrets
+from azents.repos.model_metadata_source_data import ModelMetadataSourceSnapshot
 from azents.repos.xai_oauth_runtime import XaiOAuthRuntimeRepository
-from azents.services.builtin_capabilities import supported_builtin_capabilities
 from azents.services.chatgpt_oauth.data import ProviderRejected, ProviderUnavailable
 from azents.services.chatgpt_oauth.runtime import ensure_runtime_tokens
 from azents.services.kimi_oauth.data import ProviderRejected as KimiProviderRejected
@@ -90,6 +95,16 @@ from azents.services.model_listing.providers import (
     list_openrouter_models_for_integration,
     list_vertex_models_for_integration,
     list_xai_models_for_integration,
+)
+from azents.services.model_metadata_projection import (
+    MODEL_METADATA_PROJECTION_SCHEMA_VERSION,
+    SystemCatalogShadowProjectionService,
+    integration_projection_fingerprint,
+    project_integration_replacement_entries,
+)
+from azents.services.model_metadata_source import (
+    GENAI_PRICES_SOURCE_KEY,
+    ModelMetadataSourceSyncService,
 )
 from azents.services.xai_oauth.data import (
     ProviderEntitlementDenied as XaiProviderEntitlementDenied,
@@ -155,6 +170,11 @@ def _get_integration_repository(
     return LLMProviderIntegrationRepository(cipher=cipher)
 
 
+_SYSTEM_CATALOG_PROVIDERS = (
+    LLMProvider.OPENAI,
+    LLMProvider.ANTHROPIC,
+    LLMProvider.GOOGLE_GEMINI,
+)
 _SYSTEM_PROVIDER_TO_LITELLM_PROVIDER: dict[LLMProvider, tuple[str, ...]] = {
     LLMProvider.OPENAI: ("openai",),
     LLMProvider.ANTHROPIC: ("anthropic",),
@@ -729,21 +749,22 @@ class LiteLLMSourceSyncService:
 
 @dataclasses.dataclass(frozen=True)
 class SystemCatalogProjectionService:
-    """Project system catalogs from the latest LiteLLM source snapshot."""
+    """Publish replacement system catalogs from generic metadata authority."""
 
     session_manager: Annotated[
         SessionManager[AsyncSession], Depends(get_session_manager)
     ]
     catalog_repository: Annotated[LLMCatalogRepository, Depends(LLMCatalogRepository)]
-    source_sync_service: Annotated[
-        LiteLLMSourceSyncService, Depends(LiteLLMSourceSyncService)
+    replacement_projection_service: Annotated[
+        SystemCatalogShadowProjectionService,
+        Depends(SystemCatalogShadowProjectionService),
     ]
 
     async def list_system_catalogs(self) -> list[SystemCatalogListItem]:
         """List supported system catalog states."""
         items: list[SystemCatalogListItem] = []
         async with self.session_manager() as session:
-            for provider in _SYSTEM_PROVIDER_TO_LITELLM_PROVIDER:
+            for provider in _SYSTEM_CATALOG_PROVIDERS:
                 catalog = await self.catalog_repository.get_system_catalog(
                     session,
                     provider=provider,
@@ -786,114 +807,66 @@ class SystemCatalogProjectionService:
         return items
 
     async def sync_system_catalogs(self) -> list[SystemCatalogProjectionSummary]:
-        """Refresh all system catalog projections from current LiteLLM metadata."""
-        source_snapshot = await self.source_sync_service.sync_current_source()
-        summaries: list[SystemCatalogProjectionSummary] = []
-        for provider in _SYSTEM_PROVIDER_TO_LITELLM_PROVIDER:
-            summaries.append(
-                await self._sync_system_catalog(
-                    provider=provider,
-                    source_snapshot=source_snapshot,
-                )
+        """Refresh and publish all replacement system catalog projections."""
+        summaries = (
+            await self.replacement_projection_service.prepare_and_publish_cutover(
+                provider=None
             )
-        return summaries
+        )
+        return [
+            SystemCatalogProjectionSummary(
+                provider=summary.provider,
+                catalog_id=summary.catalog_id,
+                snapshot_id=summary.snapshot_id,
+                visible_count=summary.visible_count,
+                hidden_count=summary.hidden_count,
+                status=summary.status,
+            )
+            for summary in summaries
+        ]
 
     async def sync_system_catalog(
         self,
         *,
         provider: LLMProvider,
     ) -> SystemCatalogProjectionSummary:
-        """Refresh one system catalog projection from current LiteLLM metadata."""
-        if provider not in _SYSTEM_PROVIDER_TO_LITELLM_PROVIDER:
+        """Refresh and publish one replacement system catalog projection."""
+        if provider not in _SYSTEM_CATALOG_PROVIDERS:
             raise ValueError("Unsupported system catalog provider.")
-        source_snapshot = await self.source_sync_service.sync_current_source()
-        return await self._sync_system_catalog(
-            provider=provider,
-            source_snapshot=source_snapshot,
+        summaries = (
+            await self.replacement_projection_service.prepare_and_publish_cutover(
+                provider=provider
+            )
+        )
+        summary = summaries[0]
+        return SystemCatalogProjectionSummary(
+            provider=summary.provider,
+            catalog_id=summary.catalog_id,
+            snapshot_id=summary.snapshot_id,
+            visible_count=summary.visible_count,
+            hidden_count=summary.hidden_count,
+            status=summary.status,
         )
 
-    async def _sync_system_catalog(
+    async def rollback_system_catalogs(
         self,
-        *,
-        provider: LLMProvider,
-        source_snapshot: LiteLLMSourceSnapshot,
-    ) -> SystemCatalogProjectionSummary:
-        """Refresh one system catalog in a short transaction."""
-        async with self.session_manager() as session:
-            catalog = await self.catalog_repository.ensure_system_catalog(
-                session,
-                provider=provider,
-                purpose=LLMCatalogPurpose.CONVERSATION,
+    ) -> list[SystemCatalogProjectionSummary]:
+        """Atomically restore all pinned pre-cutover system catalogs."""
+        restored = await self.replacement_projection_service.rollback_cutover(
+            provider=None
+        )
+        current = {item.provider: item for item in await self.list_system_catalogs()}
+        return [
+            SystemCatalogProjectionSummary(
+                provider=summary.provider,
+                catalog_id=summary.catalog_id,
+                snapshot_id=summary.snapshot_id,
+                visible_count=current[summary.provider].visible_count,
+                hidden_count=current[summary.provider].hidden_count,
+                status="rolled_back",
             )
-            attempt = await self.catalog_repository.begin_attempt(
-                session,
-                catalog_id=catalog.id,
-                source_key=source_snapshot.source_key,
-                started_at=_utcnow(),
-            )
-            if isinstance(attempt, CatalogSyncAlreadyRunning):
-                return SystemCatalogProjectionSummary(
-                    provider=provider,
-                    catalog_id=catalog.id,
-                    snapshot_id=catalog.current_snapshot_id,
-                    visible_count=0,
-                    hidden_count=0,
-                    status="running",
-                )
-            attempt_id = attempt
-            try:
-                entries = project_system_entries(
-                    provider=provider,
-                    source_snapshot=source_snapshot,
-                )
-                snapshot_id = await (self.catalog_repository.replace_current_snapshot)(
-                    session,
-                    catalog=catalog,
-                    source_snapshot_id=source_snapshot.id,
-                    entries=entries,
-                    diagnostics=_projection_diagnostics(
-                        entries=entries,
-                        listing=None,
-                        context={"source_key": source_snapshot.source_key},
-                    ),
-                )
-                visible_count = sum(
-                    entry.visibility_status == LLMCatalogEntryVisibility.SELECTABLE
-                    for entry in entries
-                )
-            except Exception as exc:
-                await self.catalog_repository.mark_attempt_failed(
-                    session,
-                    attempt_id=attempt_id,
-                    finished_at=_utcnow(),
-                    failure_code=type(exc).__name__,
-                    failure_message=str(exc),
-                    action_hint="Check LiteLLM source payload and projection code.",
-                    diagnostics={"provider": provider.value},
-                )
-                raise
-            await self.catalog_repository.mark_attempt_succeeded(
-                session,
-                attempt_id=attempt_id,
-                finished_at=_utcnow(),
-                produced_snapshot_id=snapshot_id,
-                fetched_count=source_snapshot.model_count,
-                matched_count=len(entries),
-                skipped_count=0,
-                hidden_count=len(entries) - visible_count,
-                diagnostics=_projection_diagnostics(
-                    entries=entries,
-                    listing=None,
-                    context={"provider": provider.value},
-                ),
-            )
-            return SystemCatalogProjectionSummary(
-                provider=provider,
-                catalog_id=catalog.id,
-                snapshot_id=snapshot_id,
-                visible_count=visible_count,
-                hidden_count=len(entries) - visible_count,
-            )
+            for summary in restored
+        ]
 
 
 type IntegrationModelListing = Callable[
@@ -931,7 +904,7 @@ class IntegrationCatalogProjectionService:
         XaiOAuthRuntimeRepository, Depends(XaiOAuthRuntimeRepository)
     ]
     source_sync_service: Annotated[
-        LiteLLMSourceSyncService, Depends(LiteLLMSourceSyncService)
+        ModelMetadataSourceSyncService, Depends(ModelMetadataSourceSyncService)
     ]
     provider_listing: Annotated[
         IntegrationModelListing, Depends(get_integration_model_listing)
@@ -986,23 +959,43 @@ class IntegrationCatalogProjectionService:
                 session,
                 catalog_id=catalog.id,
                 workspace_id=workspace_id,
-                source_key=_LITELLM_SOURCE_KEY,
+                source_key=GENAI_PRICES_SOURCE_KEY,
                 started_at=started_at,
                 trigger=trigger,
             )
         if isinstance(claim, IntegrationCatalogSyncPolicyDecision):
             return Failure(_sync_policy_failure(catalog.id, claim))
-        attempt_id = claim
+        attempt_id = claim.attempt_id
 
         try:
-            source_snapshot: LiteLLMSourceSnapshot | None = None
-            if deterministic_listing is None and integration.provider in (
-                LLMProvider.AWS_BEDROCK,
-                LLMProvider.GOOGLE_VERTEX_AI,
-            ):
-                source_snapshot = (
-                    await self.source_sync_service.get_authoritative_source()
+            async with self.session_manager() as session:
+                refreshed_integration = (
+                    await self.integration_repository.get_by_id_with_secrets(
+                        session,
+                        integration_id,
+                    )
                 )
+            if (
+                refreshed_integration is None
+                or refreshed_integration.workspace_id != workspace_id
+            ):
+                raise ListingProviderError(
+                    "The integration disappeared after synchronization started.",
+                    automatic_retry_blocked=True,
+                )
+            if (
+                refreshed_integration.catalog_configuration_version
+                != claim.catalog_configuration_version
+            ):
+                raise ListingProviderError(
+                    "The integration configuration changed after synchronization "
+                    "started.",
+                    automatic_retry_blocked=False,
+                )
+            integration = refreshed_integration
+            source_snapshot: (
+                ModelMetadataSourceSnapshot | None
+            ) = await self.source_sync_service.get_current_source()
             if deterministic_failure:
                 raise ListingProviderError(
                     "Deterministic user catalog listing failed.",
@@ -1080,13 +1073,6 @@ class IntegrationCatalogProjectionService:
                             )
                         case _:
                             assert_never(error)
-            if integration.provider in {LLMProvider.XAI, LLMProvider.XAI_OAUTH}:
-                try:
-                    source_snapshot = (
-                        await self.source_sync_service.get_authoritative_source()
-                    )
-                except LiteLLMSourceSyncError:
-                    source_snapshot = None
             listing = deterministic_listing or await self.provider_listing(integration)
             if deterministic_listing is not None:
                 entries = project_deterministic_integration_entries(
@@ -1094,39 +1080,32 @@ class IntegrationCatalogProjectionService:
                     provider=integration.provider,
                     listing=deterministic_listing,
                 )
-            elif integration.provider == LLMProvider.CHATGPT_OAUTH:
-                entries = project_chatgpt_integration_entries(
-                    integration_id=integration.id,
-                    listing=listing,
-                )
-            elif integration.provider == LLMProvider.KIMI_OAUTH:
-                entries = project_kimi_integration_entries(
-                    integration_id=integration.id,
-                    listing=listing,
-                )
-            elif integration.provider == LLMProvider.OPENROUTER:
-                entries = project_openrouter_integration_entries(
-                    integration_id=integration.id,
-                    listing=listing,
-                )
-            elif integration.provider in {LLMProvider.XAI, LLMProvider.XAI_OAUTH}:
-                entries = project_xai_integration_entries(
-                    integration_id=integration.id,
-                    provider=integration.provider,
-                    listing=listing,
-                    source_snapshot=source_snapshot,
-                )
             else:
-                if source_snapshot is None:
-                    raise RuntimeError(
-                        "Integration projection requires a LiteLLM source snapshot."
-                    )
-                entries = project_integration_entries(
+                entries = project_integration_replacement_entries(
                     integration_id=integration.id,
                     provider=integration.provider,
-                    listing=listing,
-                    source_snapshot=source_snapshot,
+                    candidates=listing.models,
+                    source=source_snapshot,
+                    provider_listing_source=listing.summary.source,
                 )
+            fingerprint = integration_projection_fingerprint(
+                provider=integration.provider,
+                source=source_snapshot,
+                entries=entries,
+                catalog_configuration_version=claim.catalog_configuration_version,
+            )
+            provenance = CatalogProjectionProvenance(
+                metadata_source_snapshot_id=(
+                    source_snapshot.id if source_snapshot is not None else None
+                ),
+                projection_schema_version=(MODEL_METADATA_PROJECTION_SCHEMA_VERSION),
+                runtime_profile_resolver_revision=(
+                    RUNTIME_MODEL_PROFILE_RESOLVER_REVISION
+                ),
+                pydantic_ai_version=importlib.metadata.version("pydantic-ai-slim"),
+                genai_prices_version=importlib.metadata.version("genai-prices"),
+                projection_fingerprint=fingerprint,
+            )
             async with self.session_manager() as session:
                 current_attempt_id = await (
                     self.catalog_repository.lock_catalog_for_attempt_completion
@@ -1145,25 +1124,41 @@ class IntegrationCatalogProjectionService:
                             superseding_attempt_id=current_attempt_id,
                         )
                     )
-                snapshot_id = await self.catalog_repository.replace_current_snapshot(
-                    session,
-                    catalog=catalog,
-                    source_snapshot_id=(
-                        source_snapshot.id if source_snapshot is not None else None
-                    ),
-                    entries=entries,
-                    diagnostics=_projection_diagnostics(
+                candidate_snapshot_id = (
+                    await self.catalog_repository.create_candidate_snapshot(
+                        session,
+                        catalog=catalog,
                         entries=entries,
-                        listing=listing,
-                        context={
-                            "integration_id": integration.id,
-                            "source_key": (
-                                source_snapshot.source_key
-                                if source_snapshot is not None
-                                else None
-                            ),
-                        },
+                        diagnostics=_projection_diagnostics(
+                            entries=entries,
+                            listing=listing,
+                            context={
+                                "integration_id": integration.id,
+                                "source_key": (
+                                    source_snapshot.source_key
+                                    if source_snapshot is not None
+                                    else None
+                                ),
+                                "projection_fingerprint": fingerprint,
+                            },
+                        ),
+                        provenance=provenance,
+                        catalog_configuration_version=(
+                            claim.catalog_configuration_version
+                        ),
+                    )
+                )
+                snapshot_id = await self.catalog_repository.publish_candidate_snapshot(
+                    session,
+                    catalog_id=catalog.id,
+                    candidate_snapshot_id=candidate_snapshot_id,
+                    expected_current_snapshot_id=(claim.expected_current_snapshot_id),
+                    expected_catalog_configuration_version=(
+                        claim.catalog_configuration_version
                     ),
+                    expected_projection_fingerprint=fingerprint,
+                    fence_latest_attempt=True,
+                    expected_latest_attempt_id=attempt_id,
                 )
                 visible_count = sum(
                     entry.visibility_status == LLMCatalogEntryVisibility.SELECTABLE
@@ -1865,17 +1860,6 @@ def _family(model_key: str) -> str | None:
     if not name:
         return None
     return name.split("-", maxsplit=1)[0]
-
-
-def model_freshness_rank(model_identifier: str) -> int:
-    """Rank model identifiers so newer generations sort first."""
-    match = re.search(r"(\d+)(?:\.(\d+))?", model_identifier)
-    if match is None:
-        return 0
-    major = int(match.group(1))
-    minor = int(match.group(2) or "0")
-    preview_bonus = 1 if "preview" in model_identifier.lower() else 0
-    return major * 1000 + minor * 10 + preview_bonus
 
 
 def _projection_diagnostics(

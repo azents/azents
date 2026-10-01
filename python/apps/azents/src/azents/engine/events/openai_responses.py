@@ -77,7 +77,7 @@ from azents.core.chatgpt_oauth import CHATGPT_OAUTH_BACKEND_BASE_URL
 from azents.core.enums import LLMModelDeveloper, LLMProvider
 from azents.core.llm_catalog import ModelCapabilities
 from azents.core.model_execution_options import ModelExecutionOptionId
-from azents.core.model_pricing import ModelPricing
+from azents.core.model_pricing import CapturedModelPricing
 from azents.core.openai_client_config import (
     OpenAIResponsesClientConfig,
     openai_credential_headers,
@@ -1127,7 +1127,7 @@ class OpenAIResponsesOutputNormalizer:
         *,
         provider: str,
         model: str,
-        pricing: ModelPricing | None,
+        pricing: CapturedModelPricing | None,
         operation: ModelStreamCallKind,
         integration: str | None,
         requested_service_tier: str | None,
@@ -1135,7 +1135,7 @@ class OpenAIResponsesOutputNormalizer:
         """Configure OpenAI-native artifact and failure ownership."""
         self.provider: str = provider
         self.model: str = model
-        self.pricing: ModelPricing | None = pricing
+        self.pricing: CapturedModelPricing | None = pricing
         self.service_tier: str | None = requested_service_tier
         self.operation: ModelStreamCallKind = operation
         self.integration: str | None = integration
@@ -1754,7 +1754,7 @@ def _normalize_openai_usage(
     *,
     provider: str,
     model: str,
-    pricing: ModelPricing | None,
+    pricing: CapturedModelPricing | None,
     requested_service_tier: str | None,
     completed_output_items: Sequence[dict[str, object]],
 ) -> TokenUsagePayload | None:

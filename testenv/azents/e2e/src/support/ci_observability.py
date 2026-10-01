@@ -136,18 +136,23 @@ def render_summary(
     duration_text = (
         _format_duration(duration) if duration is not None else "time unavailable"
     )
+    call_text = _phase_duration(timing_records, "call")
+    setup_text = _phase_duration(timing_records, "setup")
     if summary is None:
         state = "⚠️ Results unavailable"
-        metrics = f"Job `{_escape_text(job_result)}` · {duration_text}"
+        metrics = (
+            f"Job `{_escape_text(job_result)}` · Test {call_text} · "
+            f"Setup {setup_text} · Total {duration_text}"
+        )
     elif summary.failures or summary.errors:
         state = "❌ Failed"
-        metrics = _lane_metrics(summary, duration_text)
+        metrics = _lane_metrics(summary, call_text, setup_text, duration_text)
     elif job_result != "success":
         state = f"⚠️ Job {_escape_text(job_result)}"
-        metrics = _lane_metrics(summary, duration_text)
+        metrics = _lane_metrics(summary, call_text, setup_text, duration_text)
     else:
         state = "✅ Passed"
-        metrics = _lane_metrics(summary, duration_text)
+        metrics = _lane_metrics(summary, call_text, setup_text, duration_text)
     lines = [
         f"### {_escape_text(lane)} — {state}",
         "",
@@ -561,11 +566,21 @@ def _format_duration(duration_seconds: float) -> str:
     return f"{seconds}s"
 
 
-def _lane_metrics(summary: JUnitSummary, duration: str) -> str:
+def _phase_duration(records: tuple[TimingRecord, ...] | None, phase: str) -> str:
+    if records is None:
+        return "unavailable"
+    durations = [
+        record["duration_seconds"]
+        for record in records
+        if record["record_type"] == "test_phase" and record["phase"] == phase
+    ]
+    return _format_duration(sum(durations)) if durations else "unavailable"
+
+
+def _lane_metrics(summary: JUnitSummary, call: str, setup: str, duration: str) -> str:
     if not summary.failures and not summary.errors and not summary.skipped:
-        return (
-            f"{summary.tests} {'test' if summary.tests == 1 else 'tests'} · {duration}"
-        )
+        count = f"{summary.tests} {'test' if summary.tests == 1 else 'tests'}"
+        return f"{count} · Test {call} · Setup {setup} · Total {duration}"
     values = [f"{summary.passed} passed"]
     if summary.failures:
         values.append(f"{summary.failures} failed")
@@ -573,7 +588,7 @@ def _lane_metrics(summary: JUnitSummary, duration: str) -> str:
         values.append(f"{summary.errors} errors")
     if summary.skipped:
         values.append(f"{summary.skipped} skipped")
-    values.append(duration)
+    values.extend((f"Test {call}", f"Setup {setup}", f"Total {duration}"))
     return " · ".join(values)
 
 

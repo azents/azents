@@ -31,6 +31,7 @@ from google.oauth2 import service_account
 from openai import APIStatusError, AsyncOpenAI, OpenAIError
 from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
 
+from azents.core.builtin_tools import supported_builtin_capabilities
 from azents.core.chatgpt_oauth import (
     CHATGPT_MODEL_CATALOG_CLIENT_VERSION,
     CHATGPT_OAUTH_BACKEND_BASE_URL,
@@ -80,7 +81,6 @@ from azents.core.xai_oauth import (
 from azents.repos.llm_provider_integration.data import (
     LLMProviderIntegrationWithSecrets,
 )
-from azents.services.builtin_capabilities import supported_builtin_capabilities
 
 from .data import (
     ImageGenerationModelListingOutput,

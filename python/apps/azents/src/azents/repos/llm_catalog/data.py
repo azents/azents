@@ -24,6 +24,7 @@ class LLMCatalog:
     purpose: LLMCatalogPurpose
     provider_integration_id: str | None
     current_snapshot_id: str | None
+    rollback_snapshot_id: str | None
     latest_attempt_id: str | None
 
 
@@ -67,6 +68,28 @@ class LLMCatalogEntryCreate:
     source_metadata: dict[str, Any] | None
     projection_metadata: dict[str, Any] | None
     hidden_reason: str | None
+
+
+@dataclass(frozen=True)
+class CatalogProjectionProvenance:
+    """Versioned evidence used to create one replacement projection."""
+
+    metadata_source_snapshot_id: str | None
+    projection_schema_version: str
+    runtime_profile_resolver_revision: str
+    pydantic_ai_version: str
+    genai_prices_version: str
+    projection_fingerprint: str
+
+
+@dataclass(frozen=True)
+class IntegrationCatalogReprojectionTarget:
+    """One current integration catalog requiring replacement provenance."""
+
+    catalog: LLMCatalog
+    current_snapshot_id: str
+    catalog_configuration_version: int
+    entries: list[LLMCatalogEntry]
 
 
 @dataclass(frozen=True)
@@ -152,6 +175,15 @@ class CatalogSyncAlreadyRunning:
 
     catalog_id: str
     attempt_id: str
+
+
+@dataclass(frozen=True)
+class IntegrationCatalogSyncClaim:
+    """Authoritative publication fence captured when integration sync starts."""
+
+    attempt_id: str
+    expected_current_snapshot_id: str | None
+    catalog_configuration_version: int
 
 
 @dataclass(frozen=True)

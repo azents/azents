@@ -1,6 +1,6 @@
 """LLM catalog projection ordering tests."""
 
-from azents.services.llm_catalog import model_freshness_rank
+from azents.core.llm_catalog import model_freshness_rank
 
 
 def test_freshness_rank_prefers_newer_model_generation() -> None:

@@ -28,7 +28,6 @@ from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.llm_catalog import (
     RDBImageGenerationCatalogEntry,
     RDBLiteLLMSourceSnapshot,
-    RDBLLMCatalogSnapshot,
     RDBLLMCatalogSyncAttempt,
 )
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
@@ -36,6 +35,7 @@ from azents.rdb.models.workspace import RDBWorkspace
 
 _OLD_REVISION = "841e7188d527"
 _CUTOVER_REVISION = "4550a9c9083a"
+_SHADOW_REVISION = "91dd4bb71ef6"
 _MAIN_REVISION = "43a0fbdc96fe"
 _TABLES = (
     "workspaces",
@@ -169,17 +169,20 @@ def _seed_upgrade(engine: Engine) -> str:
             ("h" * 32, "c" * 32, source.id),
             ("m" * 32, "i" * 32, None),
         ):
-            session.add(
-                RDBLLMCatalogSnapshot(
-                    id=identifier,
-                    catalog_id=catalog,
-                    entry_count=1,
-                    visible_count=1,
-                    hidden_count=0,
-                    source_snapshot_id=source_id,
-                    catalog_configuration_version=7,
-                    diagnostics={"historical": "lowerer_target"},
-                )
+            connection.execute(
+                sa.text(
+                    "INSERT INTO llm_catalog_snapshots "
+                    "(id, catalog_id, entry_count, visible_count, hidden_count, "
+                    "source_snapshot_id, diagnostics, catalog_configuration_version) "
+                    "VALUES (:id, :catalog, 1, 1, 0, :source, "
+                    "CAST(:diagnostics AS jsonb), 7)"
+                ),
+                {
+                    "id": identifier,
+                    "catalog": catalog,
+                    "source": source_id,
+                    "diagnostics": json.dumps({"historical": "lowerer_target"}),
+                },
             )
         session.flush()
         for identifier, snapshot in (("e" * 32, "p" * 32), ("o" * 32, "h" * 32)):
@@ -309,7 +312,10 @@ def test_fresh_database_includes_current_main_and_catalog_cutover(
 ) -> None:
     """The new cutover extends current main as one linear migration chain."""
     scripts = ScriptDirectory.from_config(migration_database.config)
-    assert scripts.get_heads() == [_CUTOVER_REVISION]
+    assert scripts.get_heads() == [_SHADOW_REVISION]
+    shadow = scripts.get_revision(_SHADOW_REVISION)
+    assert shadow is not None
+    assert shadow.down_revision == _CUTOVER_REVISION
     cutover = scripts.get_revision(_CUTOVER_REVISION)
     assert cutover is not None
     assert cutover.down_revision == _MAIN_REVISION
@@ -318,7 +324,27 @@ def test_fresh_database_includes_current_main_and_catalog_cutover(
         for revision in scripts.walk_revisions()
     )
     command.upgrade(migration_database.config, "head")
-    _assert_semantic_schema(migration_database.engine, revision=_CUTOVER_REVISION)
+    _assert_semantic_schema(migration_database.engine, revision=_SHADOW_REVISION)
+    inspector = sa.inspect(migration_database.engine)
+    assert {
+        "model_metadata_sources",
+        "model_metadata_source_snapshots",
+    }.issubset(inspector.get_table_names())
+    catalog_columns = {
+        column["name"] for column in inspector.get_columns("llm_catalogs")
+    }
+    snapshot_columns = {
+        column["name"] for column in inspector.get_columns("llm_catalog_snapshots")
+    }
+    assert "rollback_snapshot_id" in catalog_columns
+    assert {
+        "metadata_source_snapshot_id",
+        "projection_schema_version",
+        "runtime_profile_resolver_revision",
+        "pydantic_ai_version",
+        "genai_prices_version",
+        "projection_fingerprint",
+    }.issubset(snapshot_columns)
 
 
 @pytest.mark.parametrize("starting_revision", [_OLD_REVISION, _MAIN_REVISION])

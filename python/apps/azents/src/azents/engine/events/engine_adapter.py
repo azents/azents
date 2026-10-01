@@ -25,7 +25,10 @@ from azents.core.image_generation_config import (
     ExplicitImageGenerationModel,
     decode_image_generation_model_config,
 )
-from azents.core.model_pricing import ModelPricing, normalize_model_pricing
+from azents.core.model_pricing import (
+    CapturedModelPricing,
+    normalize_genai_model_pricing,
+)
 from azents.core.openai_client_config import openai_responses_client_config
 from azents.core.tools import TurnContext
 from azents.core.xai import resolve_xai_api_base_url
@@ -1369,7 +1372,7 @@ async def _capture_model_pricing(
     metadata_service: ModelMetadataService,
     provider: LLMProvider,
     model_identifier: str,
-) -> ModelPricing:
+) -> CapturedModelPricing:
     """Capture validated price authority before one physical model dispatch.
 
     :param metadata_service: injected local validated-source reader
@@ -1383,13 +1386,14 @@ async def _capture_model_pricing(
         provider=provider,
         model_identifier=model_identifier,
     )
-    return normalize_model_pricing(
+    return normalize_genai_model_pricing(
         provider=provider,
         model_identifier=model_identifier,
         source_snapshot_id=snapshot.id if snapshot is not None else None,
         source_hash=snapshot.source_hash if snapshot is not None else None,
-        source_model_key=(metadata.source_model_key if metadata is not None else None),
-        metadata=metadata.metadata if metadata is not None else None,
+        source_provider=metadata.provider if metadata is not None else None,
+        source_model=metadata.model if metadata is not None else None,
+        request_timestamp=datetime.datetime.now(datetime.UTC),
     )
 
 

@@ -6,7 +6,7 @@ import math
 from collections.abc import Mapping, Sequence
 
 from azents.core.model_pricing import (
-    ModelPricing,
+    CapturedModelPricing,
     ModelPricingBilling,
     ModelPricingComponentUsage,
     ModelPricingUsage,
@@ -119,7 +119,7 @@ def apply_model_usage_pricing(
     *,
     provider: str,
     model_identifier: str,
-    pricing: ModelPricing | None,
+    pricing: CapturedModelPricing | None,
     service_tier: str | None,
     output_item_types: Sequence[str],
     reported_charge: float | None,

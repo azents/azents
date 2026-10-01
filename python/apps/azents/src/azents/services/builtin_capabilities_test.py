@@ -1,7 +1,7 @@
 """Trusted effective built-in tool capability policy tests."""
 
+from azents.core.builtin_tools import supported_builtin_capabilities
 from azents.core.enums import LLMProvider
-from azents.services.builtin_capabilities import supported_builtin_capabilities
 
 
 def test_openai_supported_family_gets_image_generation() -> None:

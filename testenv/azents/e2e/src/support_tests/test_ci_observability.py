@@ -75,7 +75,10 @@ def test_render_summary_lists_bounded_failures_and_slowest_tests(
     assert "do not publish this detail" not in rendered
     assert "traceback" not in rendered
     assert "### Deterministic E2E — ❌ Failed" in rendered
-    assert "1 passed · 1 failed · time unavailable" in rendered
+    assert (
+        "1 passed · 1 failed · Test unavailable · Setup unavailable · "
+        "Total time unavailable"
+    ) in rendered
     assert "<summary>Details</summary>" in rendered
 
 
@@ -98,7 +101,7 @@ def test_render_summary_reports_lane_execution_time(tmp_path: Path) -> None:
     )
 
     assert "### Deterministic E2E — ✅ Passed" in rendered
-    assert "1 test · 10m 5s" in rendered
+    assert ("1 test · Test unavailable · Setup unavailable · Total 10m 5s") in rendered
     assert "| 1 | 1 | 0 | 0 | 0 | 100.0s |" in rendered
     assert "<summary>Details</summary>" in rendered
     assert rendered.count("<details>") == rendered.count("</details>")
@@ -126,7 +129,9 @@ def test_render_summary_reports_missing_junit(tmp_path: Path) -> None:
     )
 
     assert "### Web Surface E2E — ⚠️ Results unavailable" in rendered
-    assert "Job `failure` · 1m 5s" in rendered
+    assert (
+        "Job `failure` · Test unavailable · Setup unavailable · Total 1m 5s"
+    ) in rendered
     assert "JUnit XML was not produced" in rendered
     assert "setup or infrastructure failures" in rendered
     assert "service_container (setup)" in rendered
@@ -182,6 +187,7 @@ def test_parse_timings_and_render_detailed_summary(tmp_path: Path) -> None:
     assert "| `teardown` | 0.00s | 0 |" in rendered
     assert "| `session` | `setup` | 1.25s | 1 |" in rendered
     assert "service_container (setup)" in rendered
+    assert "1 test · Test 2s · Setup 2s · Total time unavailable" in rendered
     assert "`session`" in rendered
 
 

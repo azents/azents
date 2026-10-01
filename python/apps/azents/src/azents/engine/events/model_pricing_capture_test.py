@@ -1,12 +1,21 @@
-"""Operation pricing capture uses only explicit local source authority."""
+"""Operation pricing capture uses only explicit local generic source authority."""
 
 import dataclasses
 import datetime
+from decimal import Decimal
 
 from azents.core.enums import LLMProvider
+from azents.core.model_metadata_source import (
+    ModelMetadataSourcePayload,
+    SourceEqualsClause,
+    SourceModelRecord,
+    SourcePriceSet,
+    SourceProviderRecord,
+    SourceScalarPrice,
+)
 from azents.core.model_pricing import ModelPricingUnavailableReason
 from azents.engine.events.engine_adapter import _capture_model_pricing
-from azents.repos.llm_catalog.data import LiteLLMSourceSnapshot
+from azents.repos.model_metadata_source_data import ModelMetadataSourceSnapshot
 from azents.services.model_metadata import ModelMetadataService
 from azents.testing.model_metadata import make_test_model_metadata_service
 
@@ -17,14 +26,67 @@ class _ObservedMetadataService(ModelMetadataService):
 
     captures: list[str]
 
-    async def capture(self) -> LiteLLMSourceSnapshot | None:
+    async def capture(self) -> ModelMetadataSourceSnapshot | None:
         """Observe one call and delegate to the static test source."""
         self.captures.append("capture")
         return await super().capture()
 
 
+def _source(
+    *,
+    provider_id: str = "openai",
+    model_id: str = "model",
+) -> ModelMetadataSourceSnapshot:
+    payload = ModelMetadataSourcePayload(
+        providers=[
+            SourceProviderRecord(
+                id=provider_id,
+                name=provider_id,
+                api_pattern=f"https://{provider_id}.example/.*",
+                model_match=None,
+                provider_match=None,
+                fallback_model_providers=None,
+                models=[
+                    SourceModelRecord(
+                        id=model_id,
+                        name=model_id,
+                        match=SourceEqualsClause(value=model_id),
+                        context_window=128_000,
+                        deprecated=False,
+                        prices=[
+                            SourcePriceSet(
+                                constraint=None,
+                                prices={
+                                    "input_mtok": SourceScalarPrice(value=Decimal("1")),
+                                    "output_mtok": SourceScalarPrice(
+                                        value=Decimal("2")
+                                    ),
+                                },
+                            )
+                        ],
+                    )
+                ],
+            )
+        ]
+    )
+    return ModelMetadataSourceSnapshot(
+        id="a" * 32,
+        source_key="genai_prices",
+        source_kind="genai_prices",
+        source_schema_version="1",
+        source_url="https://metadata.example/data.json",
+        source_hash=payload.content_hash(),
+        producer_name="genai-prices",
+        producer_version="0.1.9",
+        provider_count=payload.provider_count,
+        model_count=payload.model_count,
+        payload=payload,
+        created_at=datetime.datetime.now(datetime.UTC),
+    )
+
+
 def _observed_source(
-    snapshot: LiteLLMSourceSnapshot | None,
+    snapshot: ModelMetadataSourceSnapshot | None,
 ) -> _ObservedMetadataService:
     """Build a deterministic explicit source reader for operation tests."""
     base = make_test_model_metadata_service(snapshot=snapshot)
@@ -37,22 +99,7 @@ def _observed_source(
 
 async def test_pricing_captures_source_once_with_semantic_identity() -> None:
     """The estimator input uses exact selected model and snapshot provenance."""
-    source = LiteLLMSourceSnapshot(
-        id="a" * 32,
-        source_key="litellm_model_cost",
-        source_url=None,
-        source_hash="b" * 64,
-        model_count=1,
-        litellm_version=None,
-        loaded_source="remote",
-        payload={
-            "openai/model": {
-                "input_cost_per_token": 0.000001,
-                "output_cost_per_token": 0.000002,
-            }
-        },
-        created_at=datetime.datetime.now(datetime.UTC),
-    )
+    source = _source()
     metadata = _observed_source(source)
     pricing = await _capture_model_pricing(
         metadata_service=metadata,
@@ -85,29 +132,9 @@ async def test_missing_source_preserves_semantic_charge_identity() -> None:
     assert pricing.unavailable_reason is not None
 
 
-async def test_conflicting_bare_candidate_does_not_hide_correct_price_source() -> None:
-    source = LiteLLMSourceSnapshot(
-        id="a" * 32,
-        source_key="litellm_model_cost",
-        source_url=None,
-        source_hash="b" * 64,
-        model_count=2,
-        litellm_version=None,
-        loaded_source="remote",
-        payload={
-            "same": {
-                "litellm_provider": "anthropic",
-                "input_cost_per_token": 99.0,
-                "output_cost_per_token": 99.0,
-            },
-            "openai/same": {
-                "litellm_provider": "openai",
-                "input_cost_per_token": 0.000001,
-                "output_cost_per_token": 0.000002,
-            },
-        },
-        created_at=datetime.datetime.now(datetime.UTC),
-    )
+async def test_conflicting_provider_does_not_borrow_price_source() -> None:
+    """One provider cannot borrow another provider's canonical model price."""
+    source = _source(model_id="same")
     metadata = _observed_source(source)
     pricing = await _capture_model_pricing(
         metadata_service=metadata,

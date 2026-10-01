@@ -29,6 +29,7 @@ code_paths:
   - python/apps/azents/src/azents/services/agent_runtime_removal/**
   - python/apps/azents/src/azents/services/owner_lifecycle.py
   - python/apps/azents/src/azents/services/llm_catalog/**
+  - python/apps/azents/src/azents/services/model_metadata_projection.py
   - python/apps/azents/src/azents/repos/archived_session_retention/**
   - python/apps/azents/src/azents/repos/scheduled_task_state/__init__.py
   - python/apps/azents/src/azents/repos/scheduled_task_state/data.py
@@ -43,8 +44,8 @@ code_paths:
   - python/apps/azents/bin/scheduler.sh
   - infra/charts/azents/templates/server/scheduler-deployment.yaml.tpl
   - infra/charts/azents/templates/server/scheduler-pdb.yaml.tpl
-last_verified_at: 2026-09-15
-spec_version: 20
+last_verified_at: 2026-10-01
+spec_version: 21
 ---
 
 # Periodic Execution Flow Spec
@@ -87,8 +88,9 @@ in `scheduled_tasks`; the maintenance registry stores only the dispatcher
 definition that scans that domain.
 
 Registered tasks include `scheduler_heartbeat`, `model_catalog_system_projection`,
-`archived_session_retention_recalculation`, `archived_session_purge`, `session_auto_archive`,
-`agent_decommission`, `agent_runtime_removal`, `owner_lifecycle`,
+`model_catalog_integration_reprojection`,
+`archived_session_retention_recalculation`, `archived_session_purge`,
+`session_auto_archive`, `agent_decommission`, `agent_runtime_removal`, `owner_lifecycle`,
 `file_lifecycle_cleanup`, `external_account_oauth_cleanup`, plus the user Scheduled
 Task dispatcher definition.
 `scheduler_heartbeat` is a no-op heartbeat that returns a small execution
@@ -377,6 +379,9 @@ Model catalog source sync is a later consumer of this scheduler.
 
 ## Changelog
 
+- **2026-10-01** (spec_version 21) — Made the existing system catalog task
+  publish generic metadata authority and added bounded, network-free integration
+  catalog reprojection from stored current entries.
 - **2026-09-13** (spec_version 20) — Replaced legacy origin/candidate proof
   reclamation with the hourly `external_account_oauth_cleanup` task for retained
   OAuth attempts.
