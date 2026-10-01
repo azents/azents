@@ -66,6 +66,7 @@ dependencies = [
     "discord-py==2.7.1",
     "slack-sdk==3.44.1",
     "authlib==1.8.0",
+    "genai-prices==0.1.9",
 ]
 
 [project.scripts]

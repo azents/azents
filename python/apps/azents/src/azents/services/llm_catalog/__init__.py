@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent import AgentModelSelection, AgentModelSelectionInput
+from azents.core.builtin_tools import supported_builtin_capabilities
 from azents.core.crypto import CredentialCipher
 from azents.core.deps import get_credential_cipher
 from azents.core.enums import (
@@ -65,7 +66,6 @@ from azents.repos.llm_catalog.data import (
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.llm_provider_integration.data import LLMProviderIntegrationWithSecrets
 from azents.repos.xai_oauth_runtime import XaiOAuthRuntimeRepository
-from azents.services.builtin_capabilities import supported_builtin_capabilities
 from azents.services.chatgpt_oauth.data import ProviderRejected, ProviderUnavailable
 from azents.services.chatgpt_oauth.runtime import ensure_runtime_tokens
 from azents.services.kimi_oauth.data import ProviderRejected as KimiProviderRejected

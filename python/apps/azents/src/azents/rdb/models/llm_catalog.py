@@ -105,6 +105,9 @@ class RDBLLMCatalog(RDBModel):
     current_snapshot_id: Mapped[str | None] = mapped_column(
         sa.String(32), nullable=True, default=None
     )
+    rollback_snapshot_id: Mapped[str | None] = mapped_column(
+        sa.String(32), nullable=True, default=None
+    )
     latest_attempt_id: Mapped[str | None] = mapped_column(
         sa.String(32), nullable=True, default=None
     )
@@ -157,6 +160,10 @@ class RDBLLMCatalogSnapshot(RDBModel):
     __tablename__ = "llm_catalog_snapshots"
 
     IX_CATALOG_ID = sa.Index("ix_llm_catalog_snapshots_catalog_id", "catalog_id")
+    IX_METADATA_SOURCE_SNAPSHOT_ID = sa.Index(
+        "ix_llm_catalog_snapshots_metadata_source_snapshot_id",
+        "metadata_source_snapshot_id",
+    )
 
     id: Mapped[str] = mapped_column(sa.String(32), primary_key=True)
     catalog_id: Mapped[str] = mapped_column(
@@ -173,6 +180,30 @@ class RDBLLMCatalogSnapshot(RDBModel):
         nullable=True,
         default=None,
     )
+    metadata_source_snapshot_id: Mapped[str | None] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey(
+            "model_metadata_source_snapshots.id",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+        default=None,
+    )
+    projection_schema_version: Mapped[str | None] = mapped_column(
+        sa.String(20), nullable=True, default=None
+    )
+    runtime_profile_resolver_revision: Mapped[str | None] = mapped_column(
+        sa.String(80), nullable=True, default=None
+    )
+    pydantic_ai_version: Mapped[str | None] = mapped_column(
+        sa.String(80), nullable=True, default=None
+    )
+    genai_prices_version: Mapped[str | None] = mapped_column(
+        sa.String(80), nullable=True, default=None
+    )
+    projection_fingerprint: Mapped[str | None] = mapped_column(
+        sa.String(64), nullable=True, default=None
+    )
     diagnostics: Mapped[dict[str, Any] | None] = mapped_column(
         JSONB, nullable=True, default=None
     )
@@ -185,7 +216,7 @@ class RDBLLMCatalogSnapshot(RDBModel):
         TimeZoneDateTime, init=False, server_default=sa.func.now()
     )
 
-    __table_args__ = (IX_CATALOG_ID,)
+    __table_args__ = (IX_CATALOG_ID, IX_METADATA_SOURCE_SNAPSHOT_ID)
 
 
 class RDBLLMCatalogEntry(RDBModel):

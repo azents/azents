@@ -35,6 +35,7 @@ from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.models.workspace import RDBWorkspace
 
 from .data import (
+    CatalogProjectionProvenance,
     CatalogSyncAlreadyRunning,
     ImageGenerationCatalogEntry,
     ImageGenerationCatalogEntryCreate,
@@ -394,6 +395,15 @@ class LLMCatalogRepository:
         diagnostics: dict[str, Any] | None,
     ) -> str:
         """Replace the current successful snapshot for a catalog."""
+        pointer_result = await session.execute(
+            sa.select(
+                RDBLLMCatalog.current_snapshot_id,
+                RDBLLMCatalog.rollback_snapshot_id,
+            )
+            .where(RDBLLMCatalog.id == catalog.id)
+            .with_for_update()
+        )
+        previous_snapshot_id, rollback_snapshot_id = pointer_result.one()
         snapshot_id = uuid7().hex
         visible_count = sum(
             entry.visibility_status == LLMCatalogEntryVisibility.SELECTABLE
@@ -404,6 +414,12 @@ class LLMCatalogRepository:
                 id=snapshot_id,
                 catalog_id=catalog.id,
                 source_snapshot_id=source_snapshot_id,
+                metadata_source_snapshot_id=None,
+                projection_schema_version=None,
+                runtime_profile_resolver_revision=None,
+                pydantic_ai_version=None,
+                genai_prices_version=None,
+                projection_fingerprint=None,
                 entry_count=len(entries),
                 visible_count=visible_count,
                 hidden_count=len(entries) - visible_count,
@@ -438,10 +454,92 @@ class LLMCatalogRepository:
             .where(RDBLLMCatalog.id == catalog.id)
             .values(current_snapshot_id=snapshot_id)
         )
-        if catalog.current_snapshot_id is not None:
+        if (
+            previous_snapshot_id is not None
+            and previous_snapshot_id != rollback_snapshot_id
+        ):
             await session.execute(
                 sa.delete(RDBLLMCatalogSnapshot).where(
-                    RDBLLMCatalogSnapshot.id == catalog.current_snapshot_id
+                    RDBLLMCatalogSnapshot.id == previous_snapshot_id
+                )
+            )
+        await session.flush()
+        return snapshot_id
+
+    async def create_candidate_snapshot(
+        self,
+        session: AsyncSession,
+        *,
+        catalog: LLMCatalog,
+        entries: list[LLMCatalogEntryCreate],
+        diagnostics: dict[str, Any] | None,
+        provenance: CatalogProjectionProvenance,
+        catalog_configuration_version: int | None,
+    ) -> str:
+        """Create or reuse one complete non-current replacement projection."""
+        await session.execute(
+            sa.select(RDBLLMCatalog.id)
+            .where(RDBLLMCatalog.id == catalog.id)
+            .with_for_update()
+        )
+        existing = await session.execute(
+            sa.select(RDBLLMCatalogSnapshot.id).where(
+                RDBLLMCatalogSnapshot.catalog_id == catalog.id,
+                RDBLLMCatalogSnapshot.projection_fingerprint
+                == provenance.projection_fingerprint,
+                RDBLLMCatalogSnapshot.metadata_source_snapshot_id
+                == provenance.metadata_source_snapshot_id,
+            )
+        )
+        existing_id = existing.scalar_one_or_none()
+        if existing_id is not None:
+            return existing_id
+
+        snapshot_id = uuid7().hex
+        visible_count = sum(
+            entry.visibility_status == LLMCatalogEntryVisibility.SELECTABLE
+            for entry in entries
+        )
+        session.add(
+            RDBLLMCatalogSnapshot(
+                id=snapshot_id,
+                catalog_id=catalog.id,
+                source_snapshot_id=None,
+                metadata_source_snapshot_id=(provenance.metadata_source_snapshot_id),
+                projection_schema_version=provenance.projection_schema_version,
+                runtime_profile_resolver_revision=(
+                    provenance.runtime_profile_resolver_revision
+                ),
+                pydantic_ai_version=provenance.pydantic_ai_version,
+                genai_prices_version=provenance.genai_prices_version,
+                projection_fingerprint=provenance.projection_fingerprint,
+                entry_count=len(entries),
+                visible_count=visible_count,
+                hidden_count=len(entries) - visible_count,
+                diagnostics=diagnostics,
+                catalog_configuration_version=catalog_configuration_version,
+            )
+        )
+        await session.flush()
+        for entry in entries:
+            session.add(
+                RDBLLMCatalogEntry(
+                    id=uuid7().hex,
+                    catalog_id=catalog.id,
+                    snapshot_id=snapshot_id,
+                    provider=entry.provider,
+                    provider_model_identifier=entry.provider_model_identifier,
+                    display_name=entry.display_name,
+                    normalized_capabilities=entry.normalized_capabilities,
+                    supported_execution_options=entry.supported_execution_options,
+                    lifecycle_status=entry.lifecycle_status,
+                    visibility_status=entry.visibility_status,
+                    provider_integration_id=entry.provider_integration_id,
+                    publisher=entry.publisher,
+                    family=entry.family,
+                    source_metadata=entry.source_metadata,
+                    projection_metadata=entry.projection_metadata,
+                    hidden_reason=entry.hidden_reason,
                 )
             )
         await session.flush()
@@ -501,6 +599,12 @@ class LLMCatalogRepository:
                 id=snapshot_id,
                 catalog_id=catalog.id,
                 source_snapshot_id=None,
+                metadata_source_snapshot_id=None,
+                projection_schema_version=None,
+                runtime_profile_resolver_revision=None,
+                pydantic_ai_version=None,
+                genai_prices_version=None,
+                projection_fingerprint=None,
                 entry_count=len(entries),
                 visible_count=visible_count,
                 hidden_count=len(entries) - visible_count,
@@ -530,7 +634,10 @@ class LLMCatalogRepository:
             )
         previous_snapshot_id = catalog_rdb.current_snapshot_id
         catalog_rdb.current_snapshot_id = snapshot_id
-        if previous_snapshot_id is not None:
+        if (
+            previous_snapshot_id is not None
+            and previous_snapshot_id != catalog_rdb.rollback_snapshot_id
+        ):
             await session.execute(
                 sa.delete(RDBLLMCatalogSnapshot).where(
                     RDBLLMCatalogSnapshot.id == previous_snapshot_id
@@ -965,6 +1072,7 @@ class LLMCatalogRepository:
             purpose=rdb.purpose,
             provider_integration_id=rdb.provider_integration_id,
             current_snapshot_id=rdb.current_snapshot_id,
+            rollback_snapshot_id=rdb.rollback_snapshot_id,
             latest_attempt_id=rdb.latest_attempt_id,
         )
 

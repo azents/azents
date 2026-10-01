@@ -57,7 +57,6 @@ code_paths:
   - python/apps/azents/src/azents/services/runtime_directory_validation.py
   - python/apps/azents/src/azents/services/runtime_profile_resolution/**
   - python/apps/azents/src/azents/services/runtime_profile_workspace/**
-  - python/apps/azents/src/azents/services/builtin_capabilities.py
   - python/apps/azents/src/azents/services/workspace_model_settings/**
   - python/apps/azents/src/azents/api/public/agent/**
   - python/apps/azents/src/azents/api/public/agent_runtime/**
@@ -119,7 +118,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack
 last_verified_at: 2026-10-01
-spec_version: 85
+spec_version: 86
 ---
 
 # Agent Domain Spec
@@ -725,6 +724,7 @@ Following contracts do not exist in current system.
 
 ## 8. Change History
 
+- **2026-10-01** (spec_version 86) — Moved effective built-in model capability policy into the core validation authority shared by catalog projection and Agent settings.
 - **2026-09-29** (spec_version 84) — Added registry-owned exclusive processing
   speeds while preserving saved support, inference snapshots, and inheritance.
 - **2026-09-29** (spec_version 83) — Corrected OpenAI API-key and ChatGPT OAuth

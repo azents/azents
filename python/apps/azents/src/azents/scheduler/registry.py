@@ -26,6 +26,9 @@ from azents.services.external_account_oauth.service import (
 )
 from azents.services.file_lifecycle_cleanup import FileLifecycleCleanupService
 from azents.services.llm_catalog import SystemCatalogProjectionService
+from azents.services.model_metadata_projection import (
+    SystemCatalogShadowProjectionService,
+)
 from azents.services.owner_lifecycle import OwnerLifecycleService
 
 logger = logging.getLogger(__name__)
@@ -58,6 +61,32 @@ async def system_catalog_projection_handler(context: TaskContext) -> TaskResult:
                     "snapshot_id": summary.snapshot_id,
                     "visible_count": summary.visible_count,
                     "hidden_count": summary.hidden_count,
+                }
+                for summary in summaries
+            ],
+        }
+    )
+
+
+async def model_metadata_shadow_projection_handler(
+    context: TaskContext,
+) -> TaskResult:
+    """Prepare replacement metadata and non-current system projections."""
+    service = await context.container.solve(SystemCatalogShadowProjectionService)
+    summaries = await service.prepare_candidates()
+    return TaskResult(
+        summary={
+            "task_key": context.task_key,
+            "attempt_started_at": context.attempt_started_at.isoformat(),
+            "manual_triggered": context.manual_triggered,
+            "replacement_candidates": [
+                {
+                    "provider": summary.provider.value,
+                    "catalog_id": summary.catalog_id,
+                    "candidate_snapshot_id": summary.candidate_snapshot_id,
+                    "visible_count": summary.visible_count,
+                    "hidden_count": summary.hidden_count,
+                    "projection_fingerprint": summary.projection_fingerprint,
                 }
                 for summary in summaries
             ],
@@ -236,6 +265,20 @@ SYSTEM_CATALOG_PROJECTION_TASK = ScheduledTaskDefinition(
     enabled_by_default=True,
 )
 
+MODEL_METADATA_SHADOW_PROJECTION_TASK = ScheduledTaskDefinition(
+    key="model_metadata_shadow_projection",
+    description="Prepare replacement metadata and non-current catalog projections.",
+    interval=datetime.timedelta(hours=6),
+    timeout=datetime.timedelta(minutes=5),
+    retry_policy=RetryPolicy(
+        kind="bounded_backoff",
+        min_delay=datetime.timedelta(minutes=5),
+        max_delay=datetime.timedelta(hours=1),
+    ),
+    handler=model_metadata_shadow_projection_handler,
+    enabled_by_default=True,
+)
+
 ARCHIVED_SESSION_RETENTION_RECALCULATION_TASK = ScheduledTaskDefinition(
     key="archived_session_retention_recalculation",
     description="Apply retention revisions to existing archived sessions.",
@@ -368,6 +411,7 @@ USER_SCHEDULED_TASK_DISPATCH_TASK = ScheduledTaskDefinition(
 SCHEDULED_TASK_DEFINITIONS: tuple[ScheduledTaskDefinition, ...] = (
     HEARTBEAT_TASK,
     SYSTEM_CATALOG_PROJECTION_TASK,
+    MODEL_METADATA_SHADOW_PROJECTION_TASK,
     ARCHIVED_SESSION_RETENTION_RECALCULATION_TASK,
     ARCHIVED_SESSION_PURGE_TASK,
     SESSION_AUTO_ARCHIVE_TASK,

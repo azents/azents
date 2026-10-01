@@ -27,9 +27,18 @@ from azents.core.llm_catalog_sync import (
     IntegrationCatalogSyncPolicyDecision,
     IntegrationCatalogSyncTrigger,
 )
-from azents.rdb.models.llm_catalog import RDBLLMCatalogEntry, RDBLLMCatalogSnapshot
+from azents.rdb.models.llm_catalog import (
+    RDBLLMCatalog,
+    RDBLLMCatalogEntry,
+    RDBLLMCatalogSnapshot,
+)
+from azents.rdb.models.model_metadata_source import (
+    RDBModelMetadataSource,
+    RDBModelMetadataSourceSnapshot,
+)
 from azents.repos.llm_catalog import LLMCatalogRepository
 from azents.repos.llm_catalog.data import (
+    CatalogProjectionProvenance,
     ImageGenerationCatalogEntryCreate,
     LLMCatalogEntryCreate,
 )
@@ -134,6 +143,134 @@ async def test_replace_current_snapshot_persists_snapshot_before_entries(
     assert snapshot_id is not None
     assert snapshot_count == 1
     assert entry_count == 1
+
+
+async def test_candidate_snapshot_is_complete_and_does_not_publish(
+    rdb_session: AsyncSession,
+) -> None:
+    """Shadow projection remains non-current and is reused by fingerprint."""
+    repository = LLMCatalogRepository()
+    catalog = await repository.ensure_system_catalog(
+        rdb_session,
+        provider=LLMProvider.OPENAI,
+        purpose=LLMCatalogPurpose.CONVERSATION,
+    )
+    entry = LLMCatalogEntryCreate(
+        provider=LLMProvider.OPENAI,
+        provider_model_identifier="gpt-shadow",
+        display_name="GPT Shadow",
+        normalized_capabilities=ModelCapabilities().model_dump(mode="json"),
+        supported_execution_options=[],
+        lifecycle_status=LLMModelLifecycleStatus.ACTIVE,
+        visibility_status=LLMCatalogEntryVisibility.SELECTABLE,
+        provider_integration_id=None,
+        publisher="openai",
+        family="gpt",
+        source_metadata={"source_kind": "genai_prices"},
+        projection_metadata={"resolver_revision": "1"},
+        hidden_reason=None,
+    )
+    source_id = "s" * 32
+    rdb_session.add(
+        RDBModelMetadataSource(
+            source_key="genai_prices",
+            current_snapshot_id=source_id,
+            latest_attempt_id=None,
+        )
+    )
+    rdb_session.add(
+        RDBModelMetadataSourceSnapshot(
+            id=source_id,
+            source_key="genai_prices",
+            source_kind="genai_prices",
+            source_schema_version="1",
+            source_url="https://metadata.example/data.json",
+            source_hash="b" * 64,
+            producer_name="genai-prices",
+            producer_version="0.1.9",
+            provider_count=0,
+            model_count=0,
+            payload={"schema_version": "1", "providers": []},
+        )
+    )
+    await rdb_session.flush()
+    provenance = CatalogProjectionProvenance(
+        metadata_source_snapshot_id=source_id,
+        projection_schema_version="1",
+        runtime_profile_resolver_revision="1",
+        pydantic_ai_version="2.52.0",
+        genai_prices_version="0.1.9",
+        projection_fingerprint="a" * 64,
+    )
+
+    candidate_id = await repository.create_candidate_snapshot(
+        rdb_session,
+        catalog=catalog,
+        entries=[entry],
+        diagnostics={"shadow": True},
+        provenance=provenance,
+        catalog_configuration_version=None,
+    )
+    reused_id = await repository.create_candidate_snapshot(
+        rdb_session,
+        catalog=catalog,
+        entries=[entry],
+        diagnostics={"shadow": True},
+        provenance=provenance,
+        catalog_configuration_version=None,
+    )
+
+    catalog_row = await rdb_session.get(RDBLLMCatalog, catalog.id)
+    snapshot = await rdb_session.get(RDBLLMCatalogSnapshot, candidate_id)
+    assert reused_id == candidate_id
+    assert catalog_row is not None
+    assert catalog_row.current_snapshot_id is None
+    assert catalog_row.rollback_snapshot_id is None
+    assert snapshot is not None
+    assert snapshot.metadata_source_snapshot_id == source_id
+    assert snapshot.projection_fingerprint == "a" * 64
+
+
+async def test_ordinary_publication_preserves_pinned_rollback_snapshot(
+    rdb_session: AsyncSession,
+) -> None:
+    """A later publication cannot delete the explicit rollback snapshot."""
+    repository = LLMCatalogRepository()
+    catalog = await repository.ensure_system_catalog(
+        rdb_session,
+        provider=LLMProvider.OPENAI,
+        purpose=LLMCatalogPurpose.CONVERSATION,
+    )
+    first_id = await repository.replace_current_snapshot(
+        rdb_session,
+        catalog=catalog,
+        source_snapshot_id=None,
+        entries=[],
+        diagnostics={"generation": 1},
+    )
+    stale_catalog = await repository.get_system_catalog(
+        rdb_session,
+        provider=LLMProvider.OPENAI,
+        purpose=LLMCatalogPurpose.CONVERSATION,
+    )
+    assert stale_catalog is not None
+    assert stale_catalog.rollback_snapshot_id is None
+    catalog_row = await rdb_session.get(RDBLLMCatalog, catalog.id)
+    assert catalog_row is not None
+    catalog_row.rollback_snapshot_id = first_id
+    await rdb_session.flush()
+
+    second_id = await repository.replace_current_snapshot(
+        rdb_session,
+        catalog=stale_catalog,
+        source_snapshot_id=None,
+        entries=[],
+        diagnostics={"generation": 2},
+    )
+
+    assert second_id != first_id
+    assert await rdb_session.get(RDBLLMCatalogSnapshot, first_id) is not None
+    assert await rdb_session.get(RDBLLMCatalogSnapshot, second_id) is not None
 
 
 async def test_partial_catalog_upserts_survive_prepared_statement_reuse(

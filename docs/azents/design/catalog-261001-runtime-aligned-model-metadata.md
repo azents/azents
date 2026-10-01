@@ -199,6 +199,13 @@ A new logical authority and snapshot replace `litellm_source_snapshots`:
 
 ### Catalog projection provenance
 
+`llm_catalogs` gains a nullable `rollback_snapshot_id` used only during the
+approved cutover window. It points to the exact pre-cutover current snapshot for
+that catalog and is not returned by normal read APIs. Ordinary publication before
+cutover leaves it null. Cutover publication assigns it once while switching the
+current pointer; later replacement publications preserve the pinned rollback
+snapshot until cleanup.
+
 `llm_catalog_snapshots` gains a nullable replacement source FK during the shadow stage and explicit projection provenance:
 
 - metadata source snapshot ID;
@@ -210,7 +217,17 @@ A new logical authority and snapshot replace `litellm_source_snapshots`:
 
 The projection fingerprint hashes the source snapshot identity and hash, resolver revision, dependency versions, provider projection policy revision, and catalog scope/provider/configuration generation. A source hash match does not suppress reprojection when runtime compatibility or Azents policy changes.
 
-A candidate snapshot is a complete `llm_catalog_snapshots` row with entries that is not yet referenced by `llm_catalogs.current_snapshot_id`. Publication locks the catalog, verifies the candidate fingerprint and any integration configuration generation, points the catalog to the candidate, then deletes the prior current snapshot and obsolete candidates in the same transaction.
+A candidate snapshot is a complete `llm_catalog_snapshots` row with entries that
+is not yet referenced by `llm_catalogs.current_snapshot_id`. Ordinary publication
+locks the catalog, verifies the candidate fingerprint and any integration
+configuration generation, points the catalog to the candidate, and deletes only
+superseded snapshots that are not protected by `rollback_snapshot_id`.
+
+Cutover publication additionally requires `rollback_snapshot_id` to be null. It
+pins the exact prior current snapshot in `rollback_snapshot_id`, points current to
+the replacement candidate, and retains the pinned snapshot and entries through the
+entire post-cutover/pre-cleanup window. A catalog with an existing rollback pin
+cannot start a second cutover. Obsolete shadow candidates remain deletable.
 
 ### Public and persisted entry metadata
 
@@ -286,14 +303,19 @@ A readiness gate requires a current validated `genai_prices` source and a candid
 The cutover release:
 
 - changes `ModelMetadataService` and runtime pricing capture to the generic source authority with no legacy fallback;
-- publishes the prepared system candidates;
+- publishes the prepared system candidates while pinning each exact pre-cutover
+  current snapshot as its rollback snapshot;
 - changes scheduler/Admin system refresh to the replacement path only;
 - changes normal integration projection to the replacement resolver and source;
 - runs an idempotent, bounded integration reprojection coordinator.
 
 The coordinator locks one catalog at a time and uses its current entries as the last stored provider-visibility evidence. It re-resolves exact provider/model identities without provider network calls, creates a replacement snapshot, and publishes only if the catalog configuration generation and current snapshot remain unchanged. A concurrently completed normal provider sync wins through the existing latest-attempt and generation rules. Batches continue until every current conversation catalog has replacement provenance.
 
-Before cleanup, a coordinated rollback may explicitly repoint catalogs to retained pre-cutover snapshots and deploy the prior source reader. Runtime never performs this fallback automatically.
+Before cleanup, a coordinated rollback locks each catalog, verifies that its
+rollback pin still names the retained pre-cutover snapshot, repoints current to
+that snapshot, deletes replacement current and shadow snapshots, clears the pin,
+and deploys the prior source reader. Runtime never performs this fallback
+automatically.
 
 ### Phase 3: cleanup
 
@@ -306,6 +328,9 @@ Cleanup begins only when queries and API probes prove:
 - repository search finds no active LiteLLM code, configuration, diagnostic, fixture, or scheduler identity outside factual historical records.
 
 The cleanup migration removes the legacy source table and constraints, old source FK/column, legacy rows and attempts, temporary shadow code, environment variable, failure codes, tests, and fixtures. The replacement catalog source FK becomes the final generic `source_snapshot_id` contract if a temporary migration name was required.
+
+The same cleanup transaction clears every rollback pin and deletes its retained
+pre-cutover snapshot only after the final absence and backup gates pass.
 
 After cleanup, rollback requires the matching pre-cleanup database backup and previous application release. Application-only rollback is unsupported.
 
@@ -322,7 +347,10 @@ After cleanup, rollback requires the matching pre-cleanup database backup and pr
 ## Security and Permissions
 
 - The source URL is deployment configuration and never accepts workspace or request input.
-- Source fetch follows the configured fixed URL only; redirects and response size are bounded by the adapter policy.
+- Source fetch follows one deployment-controlled HTTPS URL with the public
+  genai-prices client's redirects-disabled behavior and bounded request timeout.
+  The public client buffers the complete response and does not expose a
+  response-size control, so the adapter does not claim one.
 - Payload validation occurs before persistence or projection.
 - Admin catalog operations retain live persisted `system_admin` authorization.
 - Integration listing continues to use the integration's existing credential boundary; metadata source synchronization never receives customer credentials.
@@ -375,7 +403,7 @@ Required CI runs the normal model-selection suite, Admin system-catalog refresh 
 - Source service tests cover unchanged hash, supersession, abandoned attempt recovery, remote failure, malformed source, global reduction, provider-specific reduction, and last-success retention.
 - Repository tests cover authority pointers, content-addressed uniqueness, candidate creation, publication atomicity, and integration generation fencing.
 - Pricing tests compare supported canonical fixtures with typed genai-prices results and cover concurrent different-snapshot evaluation.
-- Migration tests seed legacy source rows, current system and integration snapshots, xAI enrichment metadata, source-only attempts, and cost provenance references.
+- Migration tests seed legacy source rows, current system and integration snapshots, xAI enrichment metadata, source-only attempts, cost provenance references, and pinned pre-cutover rollback snapshots.
 - Cleanup tests assert schema and active-row absence plus repository-wide tracked search exclusions limited to historical documents and executed migration history.
 
 ### Fixture and evidence requirements
@@ -391,9 +419,14 @@ The Admin page continues to show provider-level status and refresh controls. Det
 ## Assumptions and Non-Blocking Risks
 
 - `genai-prices` public fetch and typed model can evolve. Exact dependency pinning, canonical adapter schema versions, and golden fixtures bound that risk.
+- The public source fetch buffers the complete response before decoding. The
+  source URL is therefore restricted to the trusted operator-controlled artifact,
+  and process/runtime resource limits remain the outer memory bound; a future
+  public streaming API can replace this boundary without changing source
+  authority.
 - `genai-prices` does not provide every modality, output limit, or provider-specific runtime constraint. The shared resolver, provider listing, and Azents product policy supply execution facts; unknown values remain conservative.
 - New remote models can arrive before a Pydantic/Azents profile recognizes their complete behavior. System projection can hide a non-projectable model, while provider-visible integration models remain selectable only under their existing conservative policy.
-- Large source payload decoding and pricing-view construction require bounded payload size and cache limits. The source task timeout and process-local view cache are implementation tuning, not additional authority.
+- Post-fetch canonical decoding enforces bounded provider/model counts and process-local pricing-view cache limits. The public fetch still buffers the complete transport response, so these bounds do not claim a transport peak-memory cap. The source task timeout and cache sizing are implementation tuning, not additional authority.
 - Foundation, cutover, and cleanup require separate reviewable delivery phases; implementation plans may decompose them but cannot change this Design's authority.
 
 ## Feasibility Assessment
@@ -413,7 +446,7 @@ No feasibility blocker remains. The principal implementation risk is adapter fid
 
 ## Design Authority
 
-- Design revision: `1`
+- Design revision: `2`
 
 | ID | Material design mechanism | Authority | Classification |
 | --- | --- | --- | --- |
@@ -425,7 +458,7 @@ No feasibility blocker remains. The principal implementation risk is adapter fid
 | M6 | Projection fingerprint includes source, resolver, dependency, policy, and integration-generation inputs | `catalog-261001/REQ-3`, `catalog-261001/ADR-D1`, `ADR-D3` | `derived` |
 | M7 | Context fallback and estimated cost use one captured generic source snapshot with nullable outcomes | `catalog-261001/REQ-5`, `catalog-261001/ADR-D3` | `decided` |
 | M8 | Existing saved selection snapshot semantics remain unchanged | `catalog-261001/REQ-6`, current Model Catalog Spec | `existing` |
-| M9 | Shadow preparation, explicit cutover, network-free bounded integration reprojection, and cleanup gate | `catalog-261001/REQ-8`, `catalog-261001/ADR-D4` | `decided` |
+| M9 | Shadow preparation, explicit cutover with one pinned pre-cutover rollback snapshot per catalog, network-free bounded integration reprojection, coordinated rollback, and cleanup gate | `catalog-261001/REQ-8`, `catalog-261001/ADR-D4` | `decided` |
 | M10 | Final active schema, runtime, config, diagnostics, telemetry, API fixtures, and persisted current metadata contain no LiteLLM identity or fallback | `catalog-261001/REQ-7`, `catalog-261001/ADR-D4` | `required` |
 | M11 | Public/Admin catalog response shapes and integration-first picker behavior remain stable | `catalog-261001/REQ-4`, current Model Catalog Spec | `existing` |
 | M12 | Remote-source and provider work remains outside normal read and dispatch paths | `catalog-261001/REQ-2`, `REQ-4`, current Model Catalog Spec | `required` |
@@ -449,11 +482,12 @@ No feasibility blocker remains. The principal implementation risk is adapter fid
 - Mode: `Collaborative`
 - Decision owner: Requester
 - Approved on: `2026-10-01`
-- Approved Design revision: `1`
+- Approved Design revision: `2`
 - Approved authority IDs: `M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M12`
 - Approved scope: Replace the active LiteLLM metadata authority with Azents-owned
   durable genai-prices source snapshots and a shared runtime profile resolver;
   preserve stored catalog, selection, context, pricing, and synchronization
-  behavior; use staged shadow, cutover, bounded reprojection, and cleanup phases;
-  and remove every active LiteLLM schema, runtime, configuration, diagnostic, and
-  fixture identity without a legacy fallback.
+  behavior; use staged shadow preparation, cutover with one pinned pre-cutover
+  rollback snapshot per catalog, bounded reprojection, coordinated rollback, and
+  cleanup; and remove every active LiteLLM schema, runtime, configuration,
+  diagnostic, and fixture identity without a legacy fallback.
