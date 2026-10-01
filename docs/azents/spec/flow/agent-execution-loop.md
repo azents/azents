@@ -117,7 +117,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
   - typescript/apps/azents-web/messages/*/chat.json
 last_verified_at: 2026-10-01
-spec_version: 194
+spec_version: 195
 ---
 
 # Agent Execution Loop
@@ -726,17 +726,17 @@ default or the exact validated explicit image-model identifier. Neither choice
 is forwarded as a provider-hosted image tool or placed in model-visible arguments.
 
 OpenAI SDK completion usage maps directly into the existing turn-marker token fields. Its raw usage is
-the SDK usage object serialized to plain JSON and does not synthesize LiteLLM hidden parameters.
-Azents captures the validated retained-source DB snapshot before each physical model call and
+the SDK usage object serialized to plain JSON and does not synthesize adapter-private hidden parameters.
+Azents captures the selected generic `genai_prices` DB snapshot before each physical model call and
 normalizes immutable pricing using the exact semantic provider/model and source key. The output
 stream freezes this view and the requested tier at start; a source refresh or later call cannot
-change an in-flight operation's price provenance. `cost_usd` is calculated from normalized usage,
-cache/reasoning/TTL/media quantities, service tier and necessary billable categories without model
-output content. Concrete provider-returned tier wins; a missing or `auto` tier on an explicitly
-priority request uses captured priority rules or remains unknown, never standard pricing.
-Actual Ultrafast and unmapped premium tiers remain unpriced; a missing, empty, or
-`auto` actual tier on an Ultrafast request also leaves cost unavailable. Explicit
-supported response tiers take precedence, and the `fast` response alias maps to Priority.
+change an in-flight operation's price provenance. Local `cost_usd` estimation uses normalized usage
+and the captured generic source's conditional token, cache, context-threshold, tool, and media rules
+without model output content. The current generic contract has no provider service-tier price
+dimension, so actual Priority, Ultrafast, and other premium tiers remain unpriced rather than using
+Standard prices. A missing, empty, or `auto` actual tier on an explicitly Fast or Ultrafast request
+also leaves local cost unavailable. The `fast` response alias still normalizes to Priority for
+nullable provenance. An explicitly mapped provider-reported charge remains authoritative.
 Missing, unmapped, invalid or unsupported required prices/quantities leave cost unset without
 failing completed output. Unexpected estimator defects retain the ordinary internal-error path.
 Installed price maps, SDK estimates and private hidden-response costs are not estimation authority.
@@ -1630,6 +1630,9 @@ icon.
 
 ## Changelog
 
+- **2026-10-01** (spec_version 195) — Made the selected generic `genai_prices`
+  snapshot the sole local pricing authority and documented nullable premium-tier
+  estimates after removal of the former source schema and calculator.
 - **2026-10-01** (spec_version 194) — Moved ordinary and
   generated-file-failure tool-result admission into completed repository
   operations while retaining the same database-only primitive for atomic

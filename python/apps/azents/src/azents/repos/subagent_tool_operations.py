@@ -24,14 +24,15 @@ from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepo
 from azents.repos.agent_execution.data import EventCreate
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession, SessionAgent
-from azents.repos.llm_catalog import LiteLLMSourceSnapshotRepository
-from azents.repos.llm_catalog.data import LiteLLMSourceSnapshot
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.mailbox.data import MailboxItemCreate
+from azents.repos.model_metadata_source import ModelMetadataSourceRepository
+from azents.repos.model_metadata_source_data import ModelMetadataSourceSnapshot
 from azents.repos.subagent_coordination.data import SubagentCoordinationSnapshot
 from azents.repos.subagent_coordination.repository import (
     SubagentCoordinationRepository,
 )
+from azents.services.model_metadata_source import GENAI_PRICES_SOURCE_KEY
 
 
 class SubagentToolOperationError(ValueError):
@@ -77,7 +78,7 @@ class SubagentToolOperationRepository:
     agent_run_repository: AgentRunRepository
     event_transcript_repository: EventTranscriptRepository
     mailbox_repository: MailboxRepository
-    source_snapshot_repository: LiteLLMSourceSnapshotRepository
+    source_snapshot_repository: ModelMetadataSourceRepository
     coordination_repository: SubagentCoordinationRepository
 
     async def get_agent(self, agent_id: str) -> Agent | None:
@@ -96,12 +97,12 @@ class SubagentToolOperationRepository:
                 session_id,
             )
 
-    async def load_model_source_snapshot(self) -> LiteLLMSourceSnapshot | None:
+    async def load_model_source_snapshot(self) -> ModelMetadataSourceSnapshot | None:
         """Return the latest validated model metadata source snapshot."""
         async with self.session_manager() as session:
-            return await self.source_snapshot_repository.get_latest_authoritative(
+            return await self.source_snapshot_repository.get_current(
                 session,
-                source_key="litellm_model_cost",
+                source_key=GENAI_PRICES_SOURCE_KEY,
             )
 
     async def prepare_spawn(

@@ -20,7 +20,7 @@ Design documents are accumulated records and are not listed individually in this
 | [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-09-30 | 81 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-09-30 | 16 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-10-01 | 9 |
-| [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-10-01 | 32 |
+| [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-10-01 | 33 |
 | [Runtime Provider](spec/domain/runtime-provider.md) | runtime-provider | - | 2026-09-30 | 34 |
 | [Scheduled Task Domain Spec](spec/domain/scheduled-task.md) | scheduled-task | - | 2026-10-01 | 14 |
 | [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-09-30 | 7 |
@@ -32,24 +32,24 @@ Design documents are accumulated records and are not listed individually in this
 
 | Title | Owner | Last Verified At | Spec Version |
 |---|---|---|---|
-| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-10-01 | 194 |
+| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-10-01 | 195 |
 | [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-10-01 | 91 |
 | [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-09-30 | 40 |
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-09-15 | 52 |
-| [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-09-30 | 28 |
+| [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-10-01 | 29 |
 | [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-10-01 | 44 |
 | [External Channel Authorization](spec/flow/external-channel-authorization.md) | @Hardtack | 2026-09-29 | 27 |
 | [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-10-01 | 63 |
 | [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-10-01 | 45 |
 | [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-10-01 | 63 |
 | [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-10-01 | 54 |
-| [Kimi OAuth Flow](spec/flow/kimi-oauth.md) | @Hardtack | 2026-09-30 | 4 |
+| [Kimi OAuth Flow](spec/flow/kimi-oauth.md) | @Hardtack | 2026-10-01 | 5 |
 | [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-10-01 | 8 |
-| [OpenRouter API Key Provider Flow](spec/flow/openrouter-api-key.md) | @Hardtack | 2026-09-30 | 5 |
-| [Periodic Execution Flow Spec](spec/flow/periodic-execution.md) | - | 2026-10-01 | 21 |
+| [OpenRouter API Key Provider Flow](spec/flow/openrouter-api-key.md) | @Hardtack | 2026-10-01 | 6 |
+| [Periodic Execution Flow Spec](spec/flow/periodic-execution.md) | - | 2026-10-01 | 22 |
 | [Public Release Publication](spec/flow/public-release.md) | @Hardtack | 2026-09-18 | 3 |
 | [Run Resume](spec/flow/run-resume.md) | @Hardtack | 2026-09-13 | 37 |
-| [Session Context Inspector](spec/flow/session-context-inspector.md) | @Hardtack | 2026-09-30 | 24 |
+| [Session Context Inspector](spec/flow/session-context-inspector.md) | @Hardtack | 2026-10-01 | 25 |
 | [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-10-01 | 77 |
 | [xAI API Key Provider Flow](spec/flow/xai-api-key.md) | @Hardtack | 2026-09-30 | 5 |
 | [xAI OAuth Flow](spec/flow/xai-oauth.md) | @Hardtack | 2026-10-01 | 10 |
@@ -96,7 +96,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Run-Scoped Azents Virtual Filesystem for Managed Skills and Resources Historical Requirements Reconstruction](requirements/bundled-260719-bundled-and-backed-skill-sources.md) | bundled-260719 | 2026-07-19 | - |
 | [Discord Callback SDK Gap Requirements](requirements/callback-260809-discord-sdk-gap.md) | callback-260809 | 2026-08-09 | 2026-08-09 |
 | [Model Catalog Projection and Sync Historical Requirements Reconstruction](requirements/catalog-260620-catalog-projection-sync.md) | catalog-260620 | 2026-06-20 | - |
-| [Runtime-Aligned Model Metadata Requirements](requirements/catalog-261001-runtime-aligned-model-metadata.md) | catalog-261001 | 2026-10-01 | - |
+| [Runtime-Aligned Model Metadata Requirements](requirements/catalog-261001-runtime-aligned-model-metadata.md) | catalog-261001 | 2026-10-01 | 2026-10-01 |
 | [Responsive Context-Preserving External Conversations Requirements](requirements/channel-260729-responsive-context-preserving-conversations.md) | channel-260729 | 2026-07-29 | 2026-07-30 |
 | [Reliable External Channel Provider Connections Requirements](requirements/channel-260731-reliable-provider-connections.md) | channel-260731 | 2026-07-31 | 2026-07-31 |
 | [External Channel Binding Response Modes Requirements](requirements/channel-260801-binding-response-modes.md) | channel-260801 | 2026-08-01 | 2026-08-01 |

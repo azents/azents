@@ -8,7 +8,6 @@ code_paths:
   - python/apps/azents/src/azents/core/model_execution_options.py
   - python/apps/azents/src/azents/core/openai_client_config.py
   - python/apps/azents/src/azents/core/model_metadata_source.py
-  - python/apps/azents/src/azents/core/model_source_metadata.py
   - python/apps/azents/src/azents/core/model_pricing.py
   - python/apps/azents/src/azents/services/model_metadata.py
   - python/apps/azents/src/azents/services/model_metadata_source.py
@@ -19,7 +18,6 @@ code_paths:
   - python/apps/azents/src/azents/core/image_generation_catalog.py
   - python/apps/azents/src/azents/core/image_generation_config.py
   - python/apps/azents/src/azents/services/llm_catalog/__init__.py
-  - python/apps/azents/src/azents/services/llm_catalog/source_metadata.py
   - python/apps/azents/src/azents/services/image_generation_catalog/**
   - python/apps/azents/src/azents/services/llm_provider_integration/__init__.py
   - python/apps/azents/src/azents/services/chatgpt_oauth/__init__.py
@@ -35,6 +33,7 @@ code_paths:
   - python/apps/azents/db-schemas/rdb/migrations/versions/097a97177350_create_operational_schema_baseline.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/4550a9c9083a_remove_catalog_execution_descriptors.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/91dd4bb71ef6_add_model_metadata_source_shadow_schema.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/d29225579621_remove_legacy_litellm_metadata_authority.py
   - python/apps/azents/src/azents/api/public/llm_provider_integration/v1/__init__.py
   - python/apps/azents/src/azents/api/public/llm_provider_integration/v1/data.py
   - python/apps/azents/src/azents/api/admin/model_catalog/v1/__init__.py
@@ -56,7 +55,7 @@ code_paths:
   - typescript/apps/azents-web/src/trpc/routers/workspace-model-settings.ts
   - typescript/apps/azents-admin-web/src/features/model-catalog/containers/useModelCatalogPageContainer.ts
 last_verified_at: 2026-10-01
-spec_version: 32
+spec_version: 33
 ---
 
 # Model Catalog Domain Spec
@@ -72,7 +71,7 @@ includes `purpose = conversation | image_generation`, so one integration can own
 independent conversation and image-generation snapshots without sharing entries,
 attempts, or publication state.
 
-- System catalog: managed by Azents for providers whose selectable models are not scoped to a customer integration. Current system catalogs cover OpenAI, Anthropic, and Google Gemini using the retained validated metadata source.
+- System catalog: managed by Azents for providers whose selectable models are not scoped to a customer integration. Current system catalogs cover OpenAI, Anthropic, and Google Gemini using the selected generic `genai_prices` source snapshot.
 - Integration catalog: scoped to a provider integration for providers whose visible models depend on customer credential, account, region, or project. Current user-scoped integration catalogs cover AWS Bedrock, ChatGPT OAuth, xAI API key, xAI OAuth, Kimi OAuth, Google Vertex AI, and OpenRouter.
 
 An integration-scoped catalog is created in the same transaction as its provider integration. Public reads for integration-scoped providers use only that catalog and never fall back to a system catalog. For providers with system-owned model visibility, the picker resolves the provider system catalog through the enabled integration.
@@ -202,10 +201,8 @@ The latest explicitly selected generic DB snapshot is authoritative. Transport,
 decoding, validation, supersession, or material-reduction failure records bounded
 attempt diagnostics and leaves the previous successful snapshot authoritative.
 The adapter never makes normal reads depend on package-global state or a remote
-fetch. Legacy LiteLLM source snapshots and their ingestion code remain temporarily
-available only for the pinned rollback window and are not consulted by active
-system publication, integration publication, context fallback, or pricing
-capture.
+fetch. The previous metadata source schema, rows, configuration, and projection
+code are absent from the active system.
 
 The six-hour `model_catalog_system_projection` task calls the public
 `genai-prices` fetch operation through the Azents-owned adapter, validates and
@@ -218,30 +215,17 @@ state.
 System refresh resolves OpenAI, Anthropic, and Gemini through the same
 credential-free runtime profile resolver used by model construction. It creates a
 complete candidate with source, dependency, resolver, and policy provenance, then
-publishes it atomically. The first replacement publication pins the exact prior
-current snapshot in `rollback_snapshot_id`; a fresh catalog with no prior snapshot
-publishes without a pin. Ordinary later publication cannot delete a pinned
-rollback snapshot. A provenance mismatch or publication failure leaves the current
-pointer unchanged.
-
-During the bounded rollback window, an internal all-provider rollback operation
-verifies and restores every pinned pre-cutover system snapshot in one database
-transaction, clears the pins, and deletes replacement system snapshots. Any
-missing or invalid pin aborts the whole operation without a partial rollback.
-Public and Admin API shapes remain unchanged. Restoring the prior application
-release and source reader remains a coordinated deployment action rather than an
-automatic runtime fallback.
+publishes it atomically. A provenance mismatch or publication failure leaves the
+current pointer unchanged. Superseded snapshots are deleted after successful
+publication.
 
 Integration sync retains provider listing as visibility authority, captures the
 current generic source locally, and projects every provider-visible exact model
 through the shared runtime resolver. A missing source match never hides a
 provider-visible model. Publication records generic projection provenance and is
 fenced by the claimed attempt, the current snapshot, and the integration's
-`catalog_configuration_version`. The one-minute
-`model_catalog_integration_reprojection` task processes bounded batches of legacy
-current integration snapshots from their stored entries without provider calls.
-A concurrent normal provider sync or configuration change wins, and a completed
-replacement snapshot leaves the catalog outside the reprojection backlog.
+`catalog_configuration_version`. The temporary migration reprojection task is
+removed after every current conversation catalog carries generic provenance.
 
 Runtime context fallback and estimated cost capture the same generic source
 snapshot once per logical operation. Matching uses the persisted canonical source
@@ -278,11 +262,13 @@ not stripped. Saved normalized capabilities retain their existing precedence and
 floor. Paired context calculations share one snapshot, and known maxima skip source reads.
 
 Pricing normalization is separate from capability projection. It captures snapshot identity,
-exact model/source key and explicit token/cache/tier/context/tool/media rules for the
-operation. Unavailable or unsupported required pricing remains `null` rather than a zero,
-partial total or execution failure. Provider-returned charges and estimates retain
-distinct provenance. Optional metadata/pricing misses do not change model visibility or
-saved selections.
+exact model/source key and the generic source's conditional token, cache, context-threshold,
+tool, and media rules for the operation. The current generic contract has no provider
+service-tier price dimension, so local Priority, Ultrafast, and other premium estimates
+remain `null` rather than using Standard prices. Unavailable or unsupported required
+pricing remains `null` rather than a zero, partial total, or execution failure.
+Provider-returned charges and estimates retain distinct provenance. Optional
+metadata/pricing misses do not change model visibility or saved selections.
 
 ## Public read API
 
@@ -301,7 +287,7 @@ A catalog with no current snapshot still returns a successful status-aware respo
 
 Selectable entries are ordered by a stored or derived freshness rank before display name and model identifier tie breakers so newer model generations appear first.
 
-The read path must not call provider listing APIs, models.dev, or remote LiteLLM source fetch. It returns the stored response first. When an integration-scoped projection is stale, the route queues a best-effort background refresh whose synchronization policy rechecks eligibility before provider work begins.
+The read path must not call provider listing APIs, models.dev, or the remote metadata source. It returns the stored response first. When an integration-scoped projection is stale, the route queues a best-effort background refresh whose synchronization policy rechecks eligibility before provider work begins.
 
 The image-generation catalog read endpoint returns `default_available`,
 `explicit_selection_supported`, generation/version state, the latest attempt, and
@@ -320,7 +306,7 @@ superseded-completion policy as the conversation catalog. Enabled integration
 creation and catalog-affecting updates trigger initial image sync in addition to
 conversation sync; name-only updates and disable operations do not.
 
-For AWS Bedrock and Google Vertex AI, sync fetches the provider-visible model list and projects it against the stored LiteLLM source snapshot. For ChatGPT OAuth, sync refreshes the OAuth token when necessary, calls the account-scoped Codex model endpoint with the fixed compatibility client version, and projects backend-visible models directly. For xAI API key, sync calls the developer model endpoint with that integration's key. For xAI OAuth, sync refreshes the token when necessary and calls the Grok account model endpoint. Both xAI paths project provider visibility directly and use LiteLLM only as optional fill-only enrichment. For Kimi OAuth, sync refreshes the token when necessary, calls the authenticated Kimi Code model endpoint with the encrypted device identity, and directly projects valid account-visible models. For OpenRouter, sync calls the fixed authenticated account-model endpoint and projects every valid text-output model directly without requiring a LiteLLM metadata match.
+For AWS Bedrock and Google Vertex AI, sync fetches the provider-visible model list and projects it against the stored generic metadata source snapshot. For ChatGPT OAuth, sync refreshes the OAuth token when necessary, calls the account-scoped Codex model endpoint with the fixed compatibility client version, and projects backend-visible models directly. For xAI API key, sync calls the developer model endpoint with that integration's key. For xAI OAuth, sync refreshes the token when necessary and calls the Grok account model endpoint. Both xAI paths project provider visibility directly and use generic metadata only as optional fill-only enrichment. For Kimi OAuth, sync refreshes the token when necessary, calls the authenticated Kimi Code model endpoint with the encrypted device identity, and directly projects valid account-visible models. For OpenRouter, sync calls the fixed authenticated account-model endpoint and projects every valid text-output model directly without requiring a generic metadata match.
 
 Integration catalog synchronization has four triggers:
 
@@ -407,6 +393,7 @@ Only Workspace Owners receive the explicit image sync action.
 
 | Date | Version | Change |
 |---|---:|---|
+| 2026-10-01 | 33 | Removed the former metadata source schema, rollback pins, temporary reprojection task, and compatibility code after validating generic provenance on every current conversation catalog. |
 | 2026-10-01 | 32 | Cut over system publication, integration projection, runtime context fallback, and estimated pricing to generic genai-prices authority with rollback pins and bounded network-free integration reprojection. |
 | 2026-10-01 | 31 | Added independent genai-prices source shadow collection, shared runtime profile resolution, generic source persistence, non-current replacement candidates, and inert rollback/projection provenance without changing current catalog authority. |
 | 2026-09-30 | 29 | Removed active execution-library catalog descriptors and documented semantic identity, preserved historical/source links, and exact raw provider IDs. |
@@ -443,7 +430,7 @@ OpenAI and Anthropic provider API listing are not part of the system conversatio
 catalog path. OpenAI provider listing is used only for the purpose-separated
 credential-visible image-generation registry intersection. Current conversation
 metadata authority is the explicitly selected generic `genai_prices` source plus
-the shared runtime profile resolver. No executable LiteLLM package,
+the shared runtime profile resolver. No executable former-source compatibility dependency,
 process-local price map, package-bundled fallback, or normal-read remote fetch
 supplies catalog, context, or pricing authority.
 
@@ -451,7 +438,6 @@ ChatGPT OAuth, OpenRouter, xAI API key, and xAI OAuth have no system catalog; th
 authenticated integration catalogs remain authoritative for conversation-model
 visibility. Generic source matching is optional enrichment and never a visibility
 gate. Provider-facing and runtime identifiers remain the exact raw provider IDs.
-Legacy source rows and code remain only for the explicitly bounded rollback window
-and are removed by the subsequent cleanup phase; active system publication,
-integration publication, context fallback, and pricing capture no longer read or
-publish from that legacy authority.
+The former metadata source rows, schema, configuration, and code are absent.
+Application-only rollback across the destructive cleanup boundary is unsupported;
+restoration requires the matching database backup and prior release.

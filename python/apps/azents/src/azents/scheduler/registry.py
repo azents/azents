@@ -26,9 +26,6 @@ from azents.services.external_account_oauth.service import (
 )
 from azents.services.file_lifecycle_cleanup import FileLifecycleCleanupService
 from azents.services.llm_catalog import SystemCatalogProjectionService
-from azents.services.model_metadata_projection import (
-    IntegrationCatalogReprojectionService,
-)
 from azents.services.owner_lifecycle import OwnerLifecycleService
 
 logger = logging.getLogger(__name__)
@@ -64,22 +61,6 @@ async def system_catalog_projection_handler(context: TaskContext) -> TaskResult:
                 }
                 for summary in summaries
             ],
-        }
-    )
-
-
-async def integration_catalog_reprojection_handler(
-    context: TaskContext,
-) -> TaskResult:
-    """Reproject one bounded integration catalog batch without provider I/O."""
-    service = await context.container.solve(IntegrationCatalogReprojectionService)
-    summary = await service.reproject_batch(limit=25)
-    return TaskResult(
-        summary={
-            "task_key": context.task_key,
-            "attempt_started_at": context.attempt_started_at.isoformat(),
-            "manual_triggered": context.manual_triggered,
-            **dataclasses.asdict(summary),
         }
     )
 
@@ -255,20 +236,6 @@ SYSTEM_CATALOG_PROJECTION_TASK = ScheduledTaskDefinition(
     enabled_by_default=True,
 )
 
-INTEGRATION_CATALOG_REPROJECTION_TASK = ScheduledTaskDefinition(
-    key="model_catalog_integration_reprojection",
-    description="Reproject stored integration catalogs onto generic metadata.",
-    interval=datetime.timedelta(minutes=1),
-    timeout=datetime.timedelta(minutes=5),
-    retry_policy=RetryPolicy(
-        kind="bounded_backoff",
-        min_delay=datetime.timedelta(minutes=1),
-        max_delay=datetime.timedelta(minutes=30),
-    ),
-    handler=integration_catalog_reprojection_handler,
-    enabled_by_default=True,
-)
-
 ARCHIVED_SESSION_RETENTION_RECALCULATION_TASK = ScheduledTaskDefinition(
     key="archived_session_retention_recalculation",
     description="Apply retention revisions to existing archived sessions.",
@@ -401,7 +368,6 @@ USER_SCHEDULED_TASK_DISPATCH_TASK = ScheduledTaskDefinition(
 SCHEDULED_TASK_DEFINITIONS: tuple[ScheduledTaskDefinition, ...] = (
     HEARTBEAT_TASK,
     SYSTEM_CATALOG_PROJECTION_TASK,
-    INTEGRATION_CATALOG_REPROJECTION_TASK,
     ARCHIVED_SESSION_RETENTION_RECALCULATION_TASK,
     ARCHIVED_SESSION_PURGE_TASK,
     SESSION_AUTO_ARCHIVE_TASK,

@@ -53,9 +53,9 @@ from azents.repos.exchange_file.operations import ExchangeFileOperationRepositor
 from azents.repos.external_channel.file_access import (
     ExternalChannelFileAccessRepository,
 )
-from azents.repos.llm_catalog import LiteLLMSourceSnapshotRepository
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.memory import MemoryRepository
+from azents.repos.model_metadata_source import ModelMetadataSourceRepository
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 from azents.repos.session_workspace_project_operations import (
     SessionWorkspaceProjectOperationsRepository,
@@ -530,7 +530,7 @@ def get_subagent_toolkit_provider(
             agent_run_repository=AgentRunRepository(),
             event_transcript_repository=EventTranscriptRepository(),
             mailbox_repository=MailboxRepository(),
-            source_snapshot_repository=LiteLLMSourceSnapshotRepository(),
+            source_snapshot_repository=ModelMetadataSourceRepository(),
             coordination_repository=SubagentCoordinationRepository(),
         ),
         broker=broker,

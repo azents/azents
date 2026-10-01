@@ -26,8 +26,8 @@ code_paths:
   - typescript/apps/azents-web/src/shared/subscription-usage/**
   - testenv/azents/e2e/src/tests/required/public/test_llm_provider_integration.py
   - testenv/azents/e2e/src/tests/required/public/test_model_selection.py
-last_verified_at: 2026-09-30
-spec_version: 5
+last_verified_at: 2026-10-01
+spec_version: 6
 ---
 
 # OpenRouter API Key Provider Flow
@@ -90,7 +90,7 @@ The provider response is normalized under these rules:
 
 - Every valid account-visible model with text output is eligible for selection.
 - The provider model identifier is preserved exactly, for example `anthropic/claude-sonnet-4.6`.
-- A LiteLLM metadata match is not required for visibility.
+- A generic metadata source match is not required for visibility.
 - Unknown publishers map to `model_developer=other`; they never fall back to Anthropic.
 - Invalid records are skipped with bounded aggregate diagnostics instead of exposing raw provider payloads.
 - Catalog reads use the stored projection and never call OpenRouter on the picker read path.
@@ -165,6 +165,7 @@ Later OpenRouter catalog changes do not mutate existing Agent or Workspace snaps
 
 | Date | Version | Change | Rationale |
 |---|---:|---|---|
+| 2026-10-01 | 6 | Removed the former metadata-source compatibility path while retaining direct account catalog projection | Keep every valid account-visible text model independent of optional generic metadata |
 | 2026-09-30 | 5 | Replaced executable transport with the public Pydantic AI Responses/SDK boundary and exact raw model identity | Preserve the existing account, envelope and execution-control contracts |
 | 2026-09-04 | 4 | Mapped the shared subscription-usage state and container modules | Keep bounded-key usage eligibility, retained-success refresh state, summary, and threshold presentation linked after the frontend boundary relocation |
 | 2026-07-19 | 3 | Added API-key credit usage with bounded-key percentage and manager financial details; unlimited keys remain hidden | Reuse the shared usage surface without presenting a meaningless limit for `null` OpenRouter key limits |

@@ -112,6 +112,11 @@ def validate_genai_prices_source_url(source_url: str) -> None:
     if parsed.scheme == "https" and parsed.hostname is not None:
         return
     if parsed.scheme == "http" and parsed.hostname is not None:
+        if (
+            os.environ.get("AZ_TESTENV_API_ENABLED") == "true"
+            and parsed.hostname == "openai-proxy"
+        ):
+            return
         try:
             address = ipaddress.ip_address(parsed.hostname)
         except ValueError:

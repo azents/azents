@@ -993,27 +993,35 @@ _PROVIDER_TOOL_LIVE_BARRIER = _ProviderToolLiveBarrier()
 _INFERENCE_PROFILE_BARRIER = _ProviderToolLiveBarrier()
 
 
-def _inference_profile_source_payload() -> dict[str, dict[str, object]]:
+def _inference_profile_source_payload() -> list[dict[str, object]]:
     """Supply synthetic prices through the ordinary validated-source API."""
-    return {
-        model: {
-            "litellm_provider": "openai",
-            "mode": "chat",
-            "max_input_tokens": 128_000,
-            "max_output_tokens": 16_384,
-            "supports_function_calling": True,
-            "supports_reasoning": True,
-            "input_cost_per_token": 0.000001,
-            "cache_read_input_token_cost": 0.0000001,
-            "cache_creation_input_token_cost": 0.000001,
-            "output_cost_per_token": 0.000002,
-            "input_cost_per_token_priority": 0.000002,
-            "cache_read_input_token_cost_priority": 0.0000002,
-            "cache_creation_input_token_cost_priority": 0.000002,
-            "output_cost_per_token_priority": 0.000004,
+    return [
+        {
+            "id": "openai",
+            "name": "OpenAI",
+            "api_pattern": r"https://api\.openai\.com",
+            "models": [
+                {
+                    "id": model,
+                    "name": model,
+                    "match": {"equals": model},
+                    "context_window": 128_000,
+                    "prices": {
+                        "input_mtok": 1,
+                        "cache_read_mtok": 0.1,
+                        "cache_write_mtok": 1,
+                        "output_mtok": 2,
+                    },
+                }
+                for model in (
+                    "gpt-5.5",
+                    "gpt-5.5-mini",
+                    "gpt-6-astra",
+                    "gpt-5.6-sol",
+                )
+            ],
         }
-        for model in ("gpt-5.5", "gpt-5.5-mini", "gpt-6-astra", "gpt-5.6-sol")
-    }
+    ]
 
 
 def inference_profile_scenario(user_text: str | None) -> str | None:

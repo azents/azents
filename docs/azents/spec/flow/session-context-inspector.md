@@ -5,8 +5,8 @@ created: 2026-05-30
 spec_type: flow
 owner: "@Hardtack"
 touches_domains: [agent, conversation]
-last_verified_at: 2026-09-30
-spec_version: 24
+last_verified_at: 2026-10-01
+spec_version: 25
 code_paths:
   - python/apps/azents/src/azents/services/agent/**
   - python/apps/azents/src/azents/api/public/agent/**
@@ -81,9 +81,9 @@ Latest usage comes from event `TurnMarkerPayload.usage`. Usage is value returned
 - raw provider usage payload
 
 For OpenAI API-key and ChatGPT OAuth turns, token fields and raw usage come directly from the official
-OpenAI SDK completed `ResponseUsage`; raw usage does not contain synthetic LiteLLM hidden parameters.
-Their `cost_usd` is a content-free Azents estimate from the operation's captured validated-source
-pricing view, with optional typed method/source/tier provenance.
+OpenAI SDK completed `ResponseUsage`; raw usage does not contain synthetic adapter-private hidden parameters.
+Their `cost_usd` is a content-free Azents estimate from the operation's captured generic
+`genai_prices` pricing view, with optional typed method/source/tier provenance.
 Actual Ultrafast and unknown premium tiers leave cost unavailable; an Ultrafast request with
 missing, empty, or `auto` actual tier also cannot be priced as Standard. This does not fail
 successful output or remove provider token usage. REST history omits unavailable cost fields,
@@ -166,6 +166,8 @@ cd typescript && corepack pnpm --filter @azents/web typecheck
 
 ## Changelog
 
+- **2026-10-01** — v25. Made the captured generic `genai_prices` snapshot the
+  sole local estimate authority after removal of the former source schema.
 - **2026-09-30** — v24. Documented captured-source cost estimation and truthful usage provenance
   without changing the Context inspector's amount display or historical inference snapshot rules.
 - **2026-09-29** — v23. Added processing-speed intent and unavailable Ultrafast

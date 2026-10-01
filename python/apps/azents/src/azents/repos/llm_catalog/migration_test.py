@@ -1,7 +1,5 @@
-"""Local-only catalog cutover migration and preservation tests."""
+"""Model metadata cleanup migration tests."""
 
-import datetime
-import json
 from collections.abc import Generator
 from dataclasses import dataclass
 from uuid import uuid4
@@ -10,44 +8,14 @@ import pytest
 import sqlalchemy as sa
 from alembic import command
 from alembic.config import Config as AlembicConfig
-from alembic.script import ScriptDirectory
 from sqlalchemy.engine import Engine
-from sqlalchemy.orm import Session
+from sqlalchemy.exc import ProgrammingError
 from testcontainers.postgres import PostgresContainer
 
 from azents.consts import PROJECT_ROOT
-from azents.core.agent import AgentModelSelection
-from azents.core.enums import (
-    LLMCatalogAttemptStatus,
-    LLMCatalogEntryVisibility,
-    LLMModelLifecycleStatus,
-    LLMProvider,
-)
-from azents.core.llm_catalog import ModelCapabilities
-from azents.rdb.models.agent import RDBAgent
-from azents.rdb.models.llm_catalog import (
-    RDBImageGenerationCatalogEntry,
-    RDBLiteLLMSourceSnapshot,
-    RDBLLMCatalogSyncAttempt,
-)
-from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
-from azents.rdb.models.workspace import RDBWorkspace
 
-_OLD_REVISION = "841e7188d527"
-_CUTOVER_REVISION = "4550a9c9083a"
 _SHADOW_REVISION = "91dd4bb71ef6"
-_MAIN_REVISION = "43a0fbdc96fe"
-_TABLES = (
-    "workspaces",
-    "llm_provider_integrations",
-    "agents",
-    "litellm_source_snapshots",
-    "llm_catalogs",
-    "llm_catalog_snapshots",
-    "llm_catalog_sync_attempts",
-    "llm_catalog_entries",
-    "image_generation_catalog_entries",
-)
+_CLEANUP_REVISION = "d29225579621"
 
 
 @dataclass(frozen=True)
@@ -61,7 +29,7 @@ def migration_database(
     postgres_container: PostgresContainer,
 ) -> Generator[_MigrationDatabase, None, None]:
     """Allocate a disposable database within the isolated test container."""
-    database_name = "catalog_cutover_" + uuid4().hex
+    database_name = "catalog_cleanup_" + uuid4().hex
     admin = sa.create_engine(
         postgres_container.get_connection_url(), isolation_level="AUTOCOMMIT"
     )
@@ -84,32 +52,28 @@ def migration_database(
         admin.dispose()
 
 
-def _assert_semantic_schema(engine: Engine, *, revision: str) -> None:
-    """Check all removed dimensions and replacement uniqueness predicates."""
+def _assert_cleanup_schema(engine: Engine) -> None:
     inspector = sa.inspect(engine)
+    assert "litellm_source_snapshots" not in inspector.get_table_names()
     catalog_columns = {
         column["name"] for column in inspector.get_columns("llm_catalogs")
     }
-    entry_columns = {
-        column["name"] for column in inspector.get_columns("llm_catalog_entries")
+    snapshot_columns = {
+        column["name"] for column in inspector.get_columns("llm_catalog_snapshots")
     }
-    assert "lowerer_target" not in catalog_columns | entry_columns
-    assert "runtime_model_identifier" not in entry_columns
-    indices = {index["name"]: index for index in inspector.get_indexes("llm_catalogs")}
-    system = indices["uq_llm_catalogs_system_scope_provider_purpose"]
-    integration = indices["uq_llm_catalogs_integration_purpose"]
-    assert system["column_names"] == ["provider", "purpose"]
-    assert integration["column_names"] == ["provider_integration_id", "purpose"]
-    assert system["unique"] and integration["unique"]
-    assert "system" in str(system["dialect_options"]["postgresql_where"])
-    assert "integration" in str(integration["dialect_options"]["postgresql_where"])
+    assert "rollback_snapshot_id" not in catalog_columns
+    assert "metadata_source_snapshot_id" not in snapshot_columns
+    assert "source_snapshot_id" in snapshot_columns
+    indexes = {
+        index["name"]: index for index in inspector.get_indexes("llm_catalog_snapshots")
+    }
+    assert indexes["ix_llm_catalog_snapshots_source_snapshot_id"]["column_names"] == [
+        "source_snapshot_id"
+    ]
+
+
+def _assert_revision(engine: Engine, revision: str) -> None:
     with engine.connect() as connection:
-        assert not connection.execute(
-            sa.text(
-                "SELECT EXISTS (SELECT 1 FROM pg_type "
-                "WHERE typname = 'llm_catalog_lowerer_target')"
-            )
-        ).scalar_one()
         assert (
             connection.execute(
                 sa.text("SELECT version_num FROM alembic_version")
@@ -118,317 +82,354 @@ def _assert_semantic_schema(engine: Engine, *, revision: str) -> None:
         )
 
 
-def _seed_upgrade(engine: Engine) -> str:
-    """Seed real pre-cutover tables, opaque history, and shared image state."""
-    with engine.begin() as connection, Session(bind=connection) as session:
-        workspace = RDBWorkspace(name="Migration fixture", handle="migration-fixture")
-        session.add(workspace)
-        session.flush()
-        integration = RDBLLMProviderIntegration(
-            workspace_id=workspace.id,
-            provider=LLMProvider.OPENAI,
-            name="Synthetic integration",
-            encrypted_credentials="synthetic-unused-credential",
-            config=None,
-            catalog_configuration_version=7,
+def _assert_upgrade_rejected(
+    migration_database: _MigrationDatabase,
+    *,
+    message: str,
+) -> None:
+    with pytest.raises(ProgrammingError) as failure:
+        command.upgrade(migration_database.config, _CLEANUP_REVISION)
+    assert message in str(failure.value.orig)
+
+
+def _seed_ready_cutover(engine: Engine) -> None:
+    """Seed generic current state plus removable legacy rollback evidence."""
+    with engine.begin() as connection:
+        connection.execute(
+            sa.text(
+                "INSERT INTO model_metadata_sources "
+                "(source_key, current_snapshot_id, latest_attempt_id) "
+                "VALUES ('genai_prices', :source, NULL)"
+            ),
+            {"source": "g" * 32},
         )
-        session.add(integration)
-        session.flush()
-        for identifier, purpose in (
-            ("c" * 32, "conversation"),
-            ("i" * 32, "image_generation"),
-        ):
-            connection.execute(
-                sa.text(
-                    "INSERT INTO llm_catalogs "
-                    "(id, scope, provider, purpose, lowerer_target, "
-                    "provider_integration_id) VALUES "
-                    "(:id, 'integration', 'openai', :purpose, 'litellm', :integration)"
-                ),
-                {"id": identifier, "purpose": purpose, "integration": integration.id},
-            )
-        source = RDBLiteLLMSourceSnapshot(
-            id="s" * 32,
-            source_key="litellm_model_cost",
-            source_hash="a" * 64,
-            model_count=1,
-            loaded_source="remote",
-            payload={
-                "gpt-4o": {
-                    "lowerer_target": "historical-source-evidence",
-                    "input_cost_per_token": 0.00001,
-                }
+        connection.execute(
+            sa.text(
+                "INSERT INTO model_metadata_source_snapshots "
+                "(id, source_key, source_kind, source_schema_version, source_url, "
+                "source_hash, producer_name, producer_version, provider_count, "
+                "model_count, payload) VALUES "
+                "(:id, 'genai_prices', 'genai_prices', '1', "
+                "'https://metadata.example/source.json', :hash, 'genai-prices', "
+                "'0.1.9', 1, 1, '{\"providers\": []}'::jsonb)"
+            ),
+            {"id": "g" * 32, "hash": "g" * 64},
+        )
+        connection.execute(
+            sa.text(
+                "INSERT INTO litellm_source_snapshots "
+                "(id, source_key, source_hash, model_count, loaded_source, payload) "
+                "VALUES (:id, 'litellm_model_cost', :hash, 1, 'remote', '{}'::jsonb)"
+            ),
+            {"id": "l" * 32, "hash": "l" * 64},
+        )
+        connection.execute(
+            sa.text(
+                "INSERT INTO llm_catalogs "
+                "(id, scope, provider, purpose, current_snapshot_id, "
+                "rollback_snapshot_id, latest_attempt_id) VALUES "
+                "(:id, 'system', 'openai', 'conversation', :current, :rollback, NULL)"
+            ),
+            {"id": "c" * 32, "current": "n" * 32, "rollback": "o" * 32},
+        )
+        connection.execute(
+            sa.text(
+                "INSERT INTO llm_catalog_snapshots "
+                "(id, catalog_id, entry_count, visible_count, hidden_count, "
+                "source_snapshot_id, metadata_source_snapshot_id, "
+                "projection_schema_version, runtime_profile_resolver_revision, "
+                "pydantic_ai_version, genai_prices_version, projection_fingerprint) "
+                "VALUES (:legacy, :catalog, 0, 0, 0, :old_source, NULL, NULL, NULL, "
+                "NULL, NULL, NULL), (:current, :catalog, 0, 0, 0, NULL, :source, "
+                "'1', '1', '2.52.0', '0.1.9', :fingerprint)"
+            ),
+            {
+                "legacy": "o" * 32,
+                "current": "n" * 32,
+                "catalog": "c" * 32,
+                "old_source": "l" * 32,
+                "source": "g" * 32,
+                "fingerprint": "f" * 64,
             },
-            source_url="https://example.test/validated-source.json",
-            litellm_version="1.91.3",
         )
-        session.add(source)
-        session.flush()
-        for identifier, catalog, source_id in (
-            ("p" * 32, "c" * 32, source.id),
-            ("h" * 32, "c" * 32, source.id),
-            ("m" * 32, "i" * 32, None),
-        ):
-            connection.execute(
-                sa.text(
-                    "INSERT INTO llm_catalog_snapshots "
-                    "(id, catalog_id, entry_count, visible_count, hidden_count, "
-                    "source_snapshot_id, diagnostics, catalog_configuration_version) "
-                    "VALUES (:id, :catalog, 1, 1, 0, :source, "
-                    "CAST(:diagnostics AS jsonb), 7)"
-                ),
-                {
-                    "id": identifier,
-                    "catalog": catalog,
-                    "source": source_id,
-                    "diagnostics": json.dumps({"historical": "lowerer_target"}),
-                },
-            )
-        session.flush()
-        for identifier, snapshot in (("e" * 32, "p" * 32), ("o" * 32, "h" * 32)):
-            connection.execute(
-                sa.text(
-                    "INSERT INTO llm_catalog_entries "
-                    "(id, catalog_id, snapshot_id, provider, "
-                    "provider_model_identifier, "
-                    "lowerer_target, runtime_model_identifier, display_name, "
-                    "normalized_capabilities, "
-                    "lifecycle_status, visibility_status, projection_metadata) VALUES "
-                    "(:id, :catalog, :snapshot, 'openai', "
-                    "'publisher/model/with/slashes', 'litellm', 'encoded/old/model', "
-                    "'Semantic model', '{}'::jsonb, 'active', 'selectable', "
-                    "CAST(:projection AS jsonb))"
-                ),
-                {
-                    "id": identifier,
-                    "catalog": "c" * 32,
-                    "snapshot": snapshot,
-                    "projection": json.dumps(
-                        {
-                            "lowerer_target": "litellm",
-                            "runtime_model_identifier": "encoded/old/model",
-                            "source_hash": source.source_hash,
-                            "nested": {"lowerer_target": "opaque-nested-evidence"},
-                        }
-                    ),
-                },
-            )
-        session.add(
-            RDBImageGenerationCatalogEntry(
-                id="g" * 32,
-                catalog_id="i" * 32,
-                snapshot_id="m" * 32,
-                provider=LLMProvider.OPENAI,
-                provider_model_identifier="gpt-image-1",
-                display_name="Image fixture",
-                description="Preserved image model",
-                recommendation_rank=1,
-                lifecycle_status=LLMModelLifecycleStatus.ACTIVE,
-                visibility_status=LLMCatalogEntryVisibility.SELECTABLE,
-                provider_integration_id=integration.id,
-                source_metadata={"image_registry": "fixture"},
-                projection_metadata={"registry_revision": "fixture"},
-                hidden_reason=None,
-            )
-        )
-        for identifier, catalog in (("f" * 32, "c" * 32), ("j" * 32, "i" * 32)):
-            session.add(
-                RDBLLMCatalogSyncAttempt(
-                    id=identifier,
-                    catalog_id=catalog,
-                    source_key=source.source_key,
-                    status=LLMCatalogAttemptStatus.FAILED,
-                    started_at=datetime.datetime.now(datetime.UTC),
-                    fetched_count=0,
-                    matched_count=0,
-                    skipped_count=0,
-                    hidden_count=0,
-                    catalog_configuration_version=7,
-                    failure_code="fixture_failure",
-                )
-            )
-        historical_selection = {
-            "llm_provider_integration_id": integration.id,
-            "provider": "openai",
-            "model_identifier": "publisher/model/with/slashes",
-            "model_display_name": "Semantic model",
-            "model_developer": "openai",
-            "normalized_capabilities": ModelCapabilities().model_dump(mode="json"),
-            "model_snapshot": {
-                "lowerer_target": "litellm",
-                "runtime_model_identifier": "encoded/old/model",
+        connection.execute(
+            sa.text(
+                "INSERT INTO llm_catalog_sync_attempts "
+                "(id, catalog_id, source_key, status, started_at, fetched_count, "
+                "matched_count, skipped_count, hidden_count) VALUES "
+                "(:legacy, :catalog, 'litellm_model_cost', 'succeeded', now(), "
+                "1, 1, 0, 0), "
+                "(:generic, :catalog, 'genai_prices', 'succeeded', "
+                "now() - interval '1 second', 1, 1, 0, 0)"
+            ),
+            {
+                "legacy": "a" * 32,
+                "generic": "b" * 32,
+                "catalog": "c" * 32,
             },
-        }
-        session.add(
-            RDBAgent(
-                workspace_id=workspace.id,
-                name="Historical selection fixture",
-                model_selection=historical_selection,
-                lightweight_model_selection=historical_selection,
-                selectable_model_options=[{"candidates": [historical_selection]}],
-                main_model_label="model",
-                lightweight_model_label="model",
+        )
+        connection.execute(
+            sa.text(
+                "UPDATE llm_catalogs SET latest_attempt_id = :attempt WHERE id = :id"
+            ),
+            {"attempt": "a" * 32, "id": "c" * 32},
+        )
+        connection.execute(
+            sa.text(
+                "INSERT INTO scheduled_task_states (task_key, next_run_at) VALUES "
+                "('model_catalog_integration_reprojection', now()), "
+                "('model_metadata_shadow_projection', now())"
             )
         )
-        session.flush()
-        for catalog, snapshot, attempt in (
-            ("c" * 32, "p" * 32, "f" * 32),
-            ("i" * 32, "m" * 32, "j" * 32),
-        ):
-            connection.execute(
-                sa.text(
-                    "UPDATE llm_catalogs SET current_snapshot_id=:snapshot, "
-                    "latest_attempt_id=:attempt WHERE id=:catalog"
-                ),
-                {"catalog": catalog, "snapshot": snapshot, "attempt": attempt},
-            )
-        return integration.id
 
 
-def _capture_state(engine: Engine) -> dict[str, list[dict[str, object]]]:
-    """Capture full row values without logging credential or native contents."""
-    with engine.connect() as connection:
-        return {
-            table: [
-                dict(row)
-                for row in connection.execute(
-                    sa.text(f"SELECT * FROM {table} ORDER BY id")
-                ).mappings()
-            ]
-            for table in _TABLES
-        }
-
-
-def test_fresh_database_has_only_semantic_catalog_identity(
+def test_fresh_upgrade_has_only_generic_source_schema(
     migration_database: _MigrationDatabase,
 ) -> None:
-    """The complete migration chain creates a descriptor-free new database."""
-    command.upgrade(migration_database.config, _CUTOVER_REVISION)
-    _assert_semantic_schema(migration_database.engine, revision=_CUTOVER_REVISION)
-
-
-def test_fresh_database_includes_current_main_and_catalog_cutover(
-    migration_database: _MigrationDatabase,
-) -> None:
-    """The new cutover extends current main as one linear migration chain."""
-    scripts = ScriptDirectory.from_config(migration_database.config)
-    assert scripts.get_heads() == [_SHADOW_REVISION]
-    shadow = scripts.get_revision(_SHADOW_REVISION)
-    assert shadow is not None
-    assert shadow.down_revision == _CUTOVER_REVISION
-    cutover = scripts.get_revision(_CUTOVER_REVISION)
-    assert cutover is not None
-    assert cutover.down_revision == _MAIN_REVISION
-    assert all(
-        isinstance(revision.down_revision, str) or revision.down_revision is None
-        for revision in scripts.walk_revisions()
-    )
+    """A fresh database reaches the cleanup head without legacy objects."""
     command.upgrade(migration_database.config, "head")
-    _assert_semantic_schema(migration_database.engine, revision=_SHADOW_REVISION)
-    inspector = sa.inspect(migration_database.engine)
-    assert {
-        "model_metadata_sources",
-        "model_metadata_source_snapshots",
-    }.issubset(inspector.get_table_names())
-    catalog_columns = {
-        column["name"] for column in inspector.get_columns("llm_catalogs")
-    }
-    snapshot_columns = {
-        column["name"] for column in inspector.get_columns("llm_catalog_snapshots")
-    }
-    assert "rollback_snapshot_id" in catalog_columns
-    assert {
-        "metadata_source_snapshot_id",
-        "projection_schema_version",
-        "runtime_profile_resolver_revision",
-        "pydantic_ai_version",
-        "genai_prices_version",
-        "projection_fingerprint",
-    }.issubset(snapshot_columns)
+    _assert_cleanup_schema(migration_database.engine)
 
 
-@pytest.mark.parametrize("starting_revision", [_OLD_REVISION, _MAIN_REVISION])
-def test_upgrade_preserves_state_and_cleans_only_active_projection_keys(
+def test_ready_cutover_upgrade_removes_legacy_state_and_preserves_current(
     migration_database: _MigrationDatabase,
-    monkeypatch: pytest.MonkeyPatch,
-    starting_revision: str,
 ) -> None:
-    """Existing selections, snapshots and image state survive without remote fetch."""
-    command.upgrade(migration_database.config, starting_revision)
-    _seed_upgrade(migration_database.engine)
-    before = _capture_state(migration_database.engine)
-
-    # No source/provider client is allowed during the database transition.
-    def forbidden_remote(*args: object, **kwargs: object) -> None:
-        raise AssertionError("Migration must not fetch remote source/provider data")
-
-    monkeypatch.setattr("httpx.AsyncClient.request", forbidden_remote)
-    monkeypatch.setattr("httpx.Client.request", forbidden_remote)
-    command.upgrade(migration_database.config, _CUTOVER_REVISION)
-    _assert_semantic_schema(migration_database.engine, revision=_CUTOVER_REVISION)
-    expected = before
-    for row in expected["llm_catalogs"]:
-        row.pop("lowerer_target")
-    for row in expected["llm_catalog_entries"]:
-        row.pop("lowerer_target")
-        row.pop("runtime_model_identifier")
-        if row["id"] == "e" * 32:
-            projection = row["projection_metadata"]
-            assert isinstance(projection, dict)
-            projection.pop("lowerer_target")
-            projection.pop("runtime_model_identifier")
-    assert _capture_state(migration_database.engine) == expected
-    selection = expected["agents"][0]["model_selection"]
-    restored_selection = AgentModelSelection.model_validate(selection)
-    assert restored_selection.model_identifier == "publisher/model/with/slashes"
-    assert restored_selection.model_snapshot["lowerer_target"] == "litellm"
-    with pytest.raises(RuntimeError, match="irreversible"):
-        command.downgrade(migration_database.config, _OLD_REVISION)
-    assert _capture_state(migration_database.engine) == expected
-
-
-@pytest.mark.parametrize("scope", ["system", "integration"])
-def test_semantic_identity_collisions_abort_before_any_transition(
-    migration_database: _MigrationDatabase,
-    scope: str,
-) -> None:
-    """Bounded preflight fails without deleting or merging unexpected catalogs."""
-    command.upgrade(migration_database.config, _MAIN_REVISION)
-    integration_id = _seed_upgrade(migration_database.engine)
-    with migration_database.engine.begin() as connection:
-        if scope == "integration":
-            old_index = "uq_llm_catalogs_integration_target_purpose"
-        else:
-            old_index = "uq_llm_catalogs_system_scope_provider_target_purpose"
-        connection.execute(sa.text(f"DROP INDEX {old_index}"))
-        for _ in range(7):
-            connection.execute(
-                sa.text(
-                    "INSERT INTO llm_catalogs "
-                    "(id, scope, provider, purpose, lowerer_target, "
-                    "provider_integration_id) VALUES "
-                    "(:id, :scope, 'openai', 'conversation', 'litellm', :integration)"
-                ),
-                {
-                    "id": uuid4().hex,
-                    "scope": scope,
-                    "integration": integration_id if scope == "integration" else None,
-                },
-            )
-    before = _capture_state(migration_database.engine)
-    with pytest.raises(RuntimeError, match="semantic identity collisions") as failure:
-        command.upgrade(migration_database.config, _CUTOVER_REVISION)
-    assert len(str(failure.value)) < 1024
-    assert "no catalogs were merged or deleted" in str(failure.value)
-    assert _capture_state(migration_database.engine) == before
+    """A Phase 2-ready database keeps generic current state during cleanup."""
+    command.upgrade(migration_database.config, _SHADOW_REVISION)
+    _seed_ready_cutover(migration_database.engine)
+    command.upgrade(migration_database.config, _CLEANUP_REVISION)
+    _assert_cleanup_schema(migration_database.engine)
     with migration_database.engine.connect() as connection:
-        assert (
-            connection.execute(
-                sa.text("SELECT version_num FROM alembic_version")
-            ).scalar_one()
-            == _MAIN_REVISION
+        catalog = connection.execute(
+            sa.text(
+                "SELECT current_snapshot_id, latest_attempt_id "
+                "FROM llm_catalogs WHERE id = :catalog"
+            ),
+            {"catalog": "c" * 32},
+        ).one()
+        source = connection.execute(
+            sa.text(
+                "SELECT source_snapshot_id FROM llm_catalog_snapshots WHERE id = :id"
+            ),
+            {"id": "n" * 32},
+        ).scalar_one()
+        legacy_attempts = connection.execute(
+            sa.text(
+                "SELECT count(*) FROM llm_catalog_sync_attempts "
+                "WHERE source_key = 'litellm_model_cost'"
+            )
+        ).scalar_one()
+        retired_task_states = connection.execute(
+            sa.text(
+                "SELECT count(*) FROM scheduled_task_states WHERE task_key IN "
+                "('model_catalog_integration_reprojection', "
+                "'model_metadata_shadow_projection')"
+            )
+        ).scalar_one()
+    assert catalog.current_snapshot_id == "n" * 32
+    assert catalog.latest_attempt_id == "b" * 32
+    assert source == "g" * 32
+    assert legacy_attempts == 0
+    assert retired_task_states == 0
+
+
+def test_cleanup_rejects_running_catalog_attempt(
+    migration_database: _MigrationDatabase,
+) -> None:
+    """Cleanup leaves the Phase 2 schema intact while an attempt is running."""
+    command.upgrade(migration_database.config, _SHADOW_REVISION)
+    with migration_database.engine.begin() as connection:
+        connection.execute(
+            sa.text(
+                "INSERT INTO llm_catalog_sync_attempts "
+                "(id, catalog_id, source_key, status, started_at, fetched_count, "
+                "matched_count, skipped_count, hidden_count) VALUES "
+                "(:id, NULL, 'genai_prices', 'running', now(), 0, 0, 0, 0)"
+            ),
+            {"id": "r" * 32},
         )
-    assert "lowerer_target" in {
-        column["name"]
-        for column in sa.inspect(migration_database.engine).get_columns("llm_catalogs")
-    }
+
+    _assert_upgrade_rejected(
+        migration_database,
+        message="catalog attempts are still running",
+    )
+
+    _assert_revision(migration_database.engine, _SHADOW_REVISION)
+    assert (
+        "litellm_source_snapshots"
+        in sa.inspect(migration_database.engine).get_table_names()
+    )
+
+
+def test_cleanup_allows_conversation_catalog_without_current_snapshot(
+    migration_database: _MigrationDatabase,
+) -> None:
+    """An unsynchronized catalog has no legacy current authority to migrate."""
+    command.upgrade(migration_database.config, _SHADOW_REVISION)
+    with migration_database.engine.begin() as connection:
+        connection.execute(
+            sa.text(
+                "INSERT INTO workspaces (id, name, handle) "
+                "VALUES (:id, 'Migration Workspace', 'migration-workspace')"
+            ),
+            {"id": "w" * 32},
+        )
+        connection.execute(
+            sa.text(
+                "INSERT INTO llm_provider_integrations "
+                "(id, workspace_id, provider, name, encrypted_credentials, "
+                "config, enabled) VALUES "
+                "(:id, :workspace, 'chatgpt_oauth', 'ChatGPT', "
+                "'encrypted-placeholder', NULL, true)"
+            ),
+            {"id": "i" * 32, "workspace": "w" * 32},
+        )
+        connection.execute(
+            sa.text(
+                "INSERT INTO llm_catalogs "
+                "(id, scope, provider, purpose, provider_integration_id) VALUES "
+                "(:id, 'integration', 'chatgpt_oauth', 'conversation', :integration)"
+            ),
+            {"id": "c" * 32, "integration": "i" * 32},
+        )
+
+    command.upgrade(migration_database.config, _CLEANUP_REVISION)
+
+    _assert_cleanup_schema(migration_database.engine)
+
+
+def test_cleanup_rejects_system_catalog_without_current_snapshot(
+    migration_database: _MigrationDatabase,
+) -> None:
+    """Every supported system catalog must publish replacement authority first."""
+    command.upgrade(migration_database.config, _SHADOW_REVISION)
+    with migration_database.engine.begin() as connection:
+        connection.execute(
+            sa.text(
+                "INSERT INTO llm_catalogs "
+                "(id, scope, provider, purpose) VALUES "
+                "(:id, 'system', 'openai', 'conversation')"
+            ),
+            {"id": "c" * 32},
+        )
+
+    _assert_upgrade_rejected(
+        migration_database,
+        message="conversation catalog lacks generic provenance",
+    )
+    _assert_revision(migration_database.engine, _SHADOW_REVISION)
+
+
+def test_cleanup_rejects_current_conversation_catalog_without_generic_provenance(
+    migration_database: _MigrationDatabase,
+) -> None:
+    """Cleanup rejects a current conversation snapshot that missed cutover."""
+    command.upgrade(migration_database.config, _SHADOW_REVISION)
+    _seed_ready_cutover(migration_database.engine)
+    with migration_database.engine.begin() as connection:
+        connection.execute(
+            sa.text(
+                "UPDATE llm_catalogs SET current_snapshot_id = rollback_snapshot_id "
+                "WHERE id = :id"
+            ),
+            {"id": "c" * 32},
+        )
+
+    _assert_upgrade_rejected(
+        migration_database,
+        message="conversation catalog lacks generic provenance",
+    )
+
+    _assert_revision(migration_database.engine, _SHADOW_REVISION)
+
+
+def test_cleanup_rejects_missing_generic_source_authority(
+    migration_database: _MigrationDatabase,
+) -> None:
+    """Current generic catalogs require the matching runtime source pointer."""
+    command.upgrade(migration_database.config, _SHADOW_REVISION)
+    _seed_ready_cutover(migration_database.engine)
+    with migration_database.engine.begin() as connection:
+        connection.execute(
+            sa.text(
+                "UPDATE model_metadata_sources SET current_snapshot_id = NULL "
+                "WHERE source_key = 'genai_prices'"
+            )
+        )
+
+    _assert_upgrade_rejected(
+        migration_database,
+        message="generic model metadata source is unavailable",
+    )
+
+    _assert_revision(migration_database.engine, _SHADOW_REVISION)
+
+
+def test_cleanup_rejects_legacy_metadata_in_current_generic_entry(
+    migration_database: _MigrationDatabase,
+) -> None:
+    """Nested provider metadata cannot preserve the retired source identity."""
+    command.upgrade(migration_database.config, _SHADOW_REVISION)
+    _seed_ready_cutover(migration_database.engine)
+    with migration_database.engine.begin() as connection:
+        connection.execute(
+            sa.text(
+                "INSERT INTO llm_catalog_entries "
+                "(id, catalog_id, snapshot_id, provider, "
+                "provider_model_identifier, display_name, normalized_capabilities, "
+                "lifecycle_status, visibility_status, source_metadata, "
+                "projection_metadata) VALUES "
+                "(:id, :catalog, :snapshot, 'xai', 'grok-test', 'Grok Test', "
+                "'{}'::jsonb, 'active', 'selectable', "
+                '\'{"provider_metadata": {"litellm_provider": "xai"}}\'::jsonb, '
+                "'{\"matched\": true}'::jsonb)"
+            ),
+            {
+                "id": "e" * 32,
+                "catalog": "c" * 32,
+                "snapshot": "n" * 32,
+            },
+        )
+
+    _assert_upgrade_rejected(
+        migration_database,
+        message="current conversation entry retains legacy metadata",
+    )
+
+    _assert_revision(migration_database.engine, _SHADOW_REVISION)
+
+
+def test_cleanup_rejects_invalid_rollback_pin(
+    migration_database: _MigrationDatabase,
+) -> None:
+    """Cleanup does not delete a pin that cannot represent pre-cutover state."""
+    command.upgrade(migration_database.config, _SHADOW_REVISION)
+    _seed_ready_cutover(migration_database.engine)
+    with migration_database.engine.begin() as connection:
+        connection.execute(
+            sa.text(
+                "UPDATE llm_catalogs SET rollback_snapshot_id = current_snapshot_id "
+                "WHERE id = :id"
+            ),
+            {"id": "c" * 32},
+        )
+
+    _assert_upgrade_rejected(
+        migration_database,
+        message="rollback pins are not valid pre-cutover snapshots",
+    )
+
+    _assert_revision(migration_database.engine, _SHADOW_REVISION)
+
+
+def test_cleanup_downgrade_is_explicitly_irreversible(
+    migration_database: _MigrationDatabase,
+) -> None:
+    """Deleted legacy authority cannot be reconstructed by application downgrade."""
+    command.upgrade(migration_database.config, _CLEANUP_REVISION)
+
+    with pytest.raises(RuntimeError, match="irreversible"):
+        command.downgrade(migration_database.config, _SHADOW_REVISION)
+
+    _assert_revision(migration_database.engine, _CLEANUP_REVISION)
+    _assert_cleanup_schema(migration_database.engine)

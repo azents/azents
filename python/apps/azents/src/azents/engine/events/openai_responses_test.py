@@ -57,7 +57,7 @@ from azents.core.enums import (
 )
 from azents.core.llm_catalog import ModelCapabilities
 from azents.core.model_execution_options import ModelExecutionOptionId
-from azents.core.model_pricing import ModelPricing, normalize_model_pricing
+from azents.core.model_pricing import GenAIModelPricing
 from azents.core.openai_client_config import openai_responses_client_config
 from azents.engine.events.file_parts import ModelFileLoweringContent
 from azents.engine.events.openai_responses import (
@@ -109,6 +109,7 @@ from azents.engine.run.provider_failure import (
     UnclassifiedModelProviderError,
 )
 from azents.engine.run.types import BuiltinToolSpec
+from azents.testing.model_metadata import make_test_model_pricing
 from azents.testing.model_stream import make_test_model_stream_watchdog
 
 _PNG_BASE64 = (
@@ -332,27 +333,11 @@ def _response(*, text: str = "done") -> Response:
     )
 
 
-def _openai_pricing(metadata: dict[str, object] | None) -> ModelPricing:
-    """Capture an explicit source fixture without any installed price map."""
-    return normalize_model_pricing(
+def _standard_openai_pricing() -> GenAIModelPricing:
+    """Return deterministic standard token/cache rates from the fixture."""
+    return make_test_model_pricing(
         provider=LLMProvider.OPENAI,
         model_identifier="gpt-5.1-codex",
-        source_snapshot_id="source-snapshot-1",
-        source_hash="source-hash-1",
-        source_model_key="openai/gpt-5.1-codex",
-        metadata=metadata,
-    )
-
-
-def _standard_openai_pricing() -> ModelPricing:
-    """Return deterministic standard token/cache rates from the fixture."""
-    return _openai_pricing(
-        {
-            "input_cost_per_token": 0.1,
-            "output_cost_per_token": 0.2,
-            "cache_read_input_token_cost": 0.01,
-            "cache_creation_input_token_cost": 0.15,
-        }
     )
 
 
@@ -2790,36 +2775,6 @@ def test_typed_normalizer_builds_openai_artifact_usage_and_cost() -> None:
     assert completed.usage.cost_provenance.source_snapshot_id == "source-snapshot-1"
 
 
-def test_typed_normalizer_normalizes_fast_tier_for_priority_pricing() -> None:
-    """Use captured priority rates for an older Fast response label."""
-    pricing = _openai_pricing(
-        {
-            "input_cost_per_token_priority": 0.1,
-            "cache_read_input_token_cost_priority": 0.01,
-            "cache_creation_input_token_cost_priority": 0.15,
-            "output_cost_per_token_priority": 0.2,
-        }
-    )
-    output = OpenAIResponsesOutputNormalizer(
-        pricing=pricing,
-        provider="openai",
-        model="gpt-5.1-codex",
-        operation="sampling",
-        integration=None,
-        requested_service_tier=None,
-    ).start("session-1")
-    output.process_event(
-        _completed_event(_response().model_copy(update={"service_tier": "fast"}))
-    )
-
-    completed = output.complete()
-
-    assert completed.usage is not None
-    assert completed.usage.cost_usd == pytest.approx(1.97)
-    assert completed.usage.cost_provenance is not None
-    assert completed.usage.cost_provenance.service_tier == "priority"
-
-
 def test_typed_normalizer_omits_cost_without_priority_pricing() -> None:
     """Do not present standard-rate pricing for a premium response."""
     output = OpenAIResponsesOutputNormalizer(
@@ -2889,33 +2844,6 @@ def test_missing_native_tier_uses_frozen_priority_request_or_unknown() -> None:
     assert second_usage is not None
     assert first_usage.cost_usd is None
     assert second_usage.cost_usd == pytest.approx(1.97)
-
-
-def test_missing_native_tier_uses_explicit_captured_priority_rates() -> None:
-    """A known priority request can use its own captured tier rules."""
-    normalizer = OpenAIResponsesOutputNormalizer(
-        pricing=_openai_pricing(
-            {
-                "input_cost_per_token_priority": 0.1,
-                "cache_read_input_token_cost_priority": 0.01,
-                "cache_creation_input_token_cost_priority": 0.15,
-                "output_cost_per_token_priority": 0.2,
-            }
-        ),
-        provider="openai",
-        model="gpt-5.1-codex",
-        operation="sampling",
-        integration=None,
-        requested_service_tier=None,
-    )
-    normalizer.service_tier = "priority"
-    output = normalizer.start("session-1")
-    output.process_event(_completed_event())
-    usage = output.complete().usage
-    assert usage is not None
-    assert usage.cost_usd == pytest.approx(1.97)
-    assert usage.cost_provenance is not None
-    assert usage.cost_provenance.service_tier == "priority"
 
 
 def test_typed_normalizer_projects_provider_tool_lifecycle() -> None:
@@ -3421,73 +3349,6 @@ def test_unknown_premium_pricing_never_uses_standard_rates(
     )
     completed = output.complete()
     assert completed.events
-    assert completed.usage is not None
-    assert completed.usage.total_tokens == 15
-    assert completed.usage.cost_usd is None
-
-
-@pytest.mark.parametrize(
-    ("actual_tier", "pricing_tier"),
-    [
-        ("default", "standard"),
-        ("priority", "priority"),
-        ("fast", "priority"),
-        ("flex", "flex"),
-    ],
-)
-def test_ultrafast_request_cost_uses_supported_actual_response_tier(
-    actual_tier: str,
-    pricing_tier: str,
-) -> None:
-    """An explicit served tier, not the requested tier, owns valid estimation."""
-    pricing = _openai_pricing(
-        {
-            "input_cost_per_token": 0.1,
-            "cache_read_input_token_cost": 0.01,
-            "cache_creation_input_token_cost": 0.15,
-            "output_cost_per_token": 0.2,
-            "input_cost_per_token_priority": 0.1,
-            "cache_read_input_token_cost_priority": 0.01,
-            "cache_creation_input_token_cost_priority": 0.15,
-            "output_cost_per_token_priority": 0.2,
-            "input_cost_per_token_flex": 0.1,
-            "cache_read_input_token_cost_flex": 0.01,
-            "cache_creation_input_token_cost_flex": 0.15,
-            "output_cost_per_token_flex": 0.2,
-        }
-    )
-    output = OpenAIResponsesOutputNormalizer(
-        pricing=pricing,
-        provider="openai",
-        model="gpt-5.1-codex",
-        operation="sampling",
-        integration=None,
-        requested_service_tier="ultrafast",
-    ).start("session-1")
-    output.process_event(
-        _completed_event(_response().model_copy(update={"service_tier": actual_tier}))
-    )
-    completed = output.complete()
-    assert completed.usage is not None
-    assert completed.usage.cost_usd == pytest.approx(1.97)
-    assert completed.usage.cost_provenance is not None
-    assert completed.usage.cost_provenance.service_tier == pricing_tier
-
-
-def test_invalid_source_pricing_preserves_successful_usage() -> None:
-    """Unsupported source rates keep costs unknown without failing output."""
-    output = OpenAIResponsesOutputNormalizer(
-        pricing=_openai_pricing({"input_cost_per_token": -1}),
-        provider="openai",
-        model="gpt-5.1-codex",
-        operation="sampling",
-        integration=None,
-        requested_service_tier=None,
-    ).start("session-1")
-    output.process_event(_completed_event())
-
-    completed = output.complete()
-
     assert completed.usage is not None
     assert completed.usage.total_tokens == 15
     assert completed.usage.cost_usd is None

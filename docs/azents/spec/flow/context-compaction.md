@@ -9,7 +9,6 @@ code_paths:
   - python/apps/azents/src/azents/engine/context/compaction.py
   - python/apps/azents/src/azents/engine/context/window.py
   - python/apps/azents/src/azents/services/model_metadata.py
-  - python/apps/azents/src/azents/core/model_source_metadata.py
   - python/apps/azents/src/azents/engine/responses.py
   - python/apps/azents/src/azents/engine/providers/**
   - python/apps/azents/src/azents/engine/events/**

@@ -27,7 +27,7 @@ from pydantic_ai.messages import (
 from pydantic_ai.usage import RequestUsage
 
 from azents.core.enums import LLMProvider
-from azents.core.model_pricing import ModelPricing, normalize_model_pricing
+from azents.core.model_pricing import GenAIModelPricing
 from azents.engine.events.protocols import (
     ContentDeltaProjection,
     FunctionCallDeltaProjection,
@@ -54,6 +54,7 @@ from azents.engine.run.provider_failure import (
     ModelProviderFailure,
     ModelProviderFailureCategory,
 )
+from azents.testing.model_metadata import make_test_model_pricing
 
 
 def _observation(
@@ -98,7 +99,7 @@ def _normalizer(
     *,
     provider: str = "anthropic",
     model: str = "selected-model",
-    pricing: ModelPricing | None = None,
+    pricing: GenAIModelPricing | None = None,
 ) -> PydanticAIOutputNormalizer:
     return PydanticAIOutputNormalizer(
         provider=provider,
@@ -109,19 +110,10 @@ def _normalizer(
     )
 
 
-def _pricing() -> ModelPricing:
-    return normalize_model_pricing(
+def _pricing() -> GenAIModelPricing:
+    return make_test_model_pricing(
         provider=LLMProvider.ANTHROPIC,
         model_identifier="selected-model",
-        source_snapshot_id="snapshot-1",
-        source_hash="hash-1",
-        source_model_key="anthropic/selected-model",
-        metadata={
-            "input_cost_per_token": 0.1,
-            "output_cost_per_token": 0.2,
-            "cache_read_input_token_cost": 0.01,
-            "cache_creation_input_token_cost": 0.15,
-        },
     )
 
 
@@ -467,7 +459,7 @@ def test_native_final_usage_cache_partition_and_snapshot_are_fixed() -> None:
     assert result.usage.cache_creation_tokens == 3
     assert result.usage.cost_usd == pytest.approx(1.97)
     assert result.usage.cost_provenance is not None
-    assert result.usage.cost_provenance.source_snapshot_id == "snapshot-1"
+    assert result.usage.cost_provenance.source_snapshot_id == "source-snapshot-1"
 
 
 def test_google_thought_tokens_are_not_double_counted() -> None:

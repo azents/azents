@@ -2,21 +2,16 @@
 
 import dataclasses
 import datetime
-import hashlib
 import importlib.metadata
-import json
-import os
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import Awaitable, Callable
 from typing import Annotated, Any, assert_never
 
-import httpx
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
-from pydantic import BaseModel, Field, TypeAdapter, ValidationError
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent import AgentModelSelection, AgentModelSelectionInput
-from azents.core.builtin_tools import supported_builtin_capabilities
 from azents.core.crypto import CredentialCipher
 from azents.core.deps import get_credential_cipher
 from azents.core.enums import (
@@ -29,15 +24,7 @@ from azents.core.enums import (
 )
 from azents.core.llm_catalog import (
     INTEGRATION_SCOPED_CATALOG_PROVIDERS,
-    ModelBuiltInToolCapabilities,
     ModelCapabilities,
-    ModelCompatibilityCapabilities,
-    ModelContextWindow,
-    ModelModalities,
-    ModelModality,
-    ModelReasoningCapabilities,
-    ModelReasoningEffort,
-    ModelToolCallingCapabilities,
     model_freshness_rank,
 )
 from azents.core.llm_catalog_sync import (
@@ -55,14 +42,10 @@ from azents.engine.providers.model_profiles import (
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.chatgpt_oauth_runtime import ChatGPTOAuthRuntimeRepository
-from azents.repos.llm_catalog import (
-    LiteLLMSourceSnapshotRepository,
-    LLMCatalogRepository,
-)
+from azents.repos.llm_catalog import LLMCatalogRepository
 from azents.repos.llm_catalog.data import (
     CatalogNotFound,
     CatalogProjectionProvenance,
-    LiteLLMSourceSnapshot,
     LLMCatalogEntry,
     LLMCatalogEntryCreate,
     LLMCatalogSyncAttempt,
@@ -80,15 +63,10 @@ from azents.services.kimi_oauth.data import (
 from azents.services.kimi_oauth.runtime import (
     ensure_runtime_tokens as ensure_kimi_runtime_tokens,
 )
-from azents.services.llm_catalog.source_metadata import SourceReasoningMetadata
-from azents.services.model_listing.data import (
-    ModelListingOutput,
-    NormalizedModelCandidate,
-)
+from azents.services.model_listing.data import ModelListingOutput
 from azents.services.model_listing.providers import (
     ListingProviderError,
     XaiListingProviderError,
-    _openai_supported_execution_options,
     list_bedrock_models_for_integration,
     list_chatgpt_models_for_integration,
     list_kimi_models_for_integration,
@@ -98,7 +76,7 @@ from azents.services.model_listing.providers import (
 )
 from azents.services.model_metadata_projection import (
     MODEL_METADATA_PROJECTION_SCHEMA_VERSION,
-    SystemCatalogShadowProjectionService,
+    SystemCatalogReplacementProjectionService,
     integration_projection_fingerprint,
     project_integration_replacement_entries,
 )
@@ -121,47 +99,6 @@ from azents.testing.deterministic_model_listing import (
     parse_deterministic_fixture_variant,
 )
 
-_LITELLM_SOURCE_KEY = "litellm_model_cost"
-_LITELLM_SOURCE_TIMEOUT_SECONDS = 20.0
-_LITELLM_SOURCE_MIN_REMOVAL_COUNT = 50
-_LITELLM_SOURCE_MIN_REMOVAL_RATIO = 0.02
-_LITELLM_PAYLOAD_ADAPTER = TypeAdapter(dict[str, dict[str, Any]])
-_LITELLM_ALIAS_LIST_ADAPTER = TypeAdapter(list[str])
-
-
-async def _get_litellm_source_http_client() -> AsyncIterator[httpx.AsyncClient]:
-    """Create the LiteLLM source HTTP client."""
-    async with httpx.AsyncClient(timeout=_LITELLM_SOURCE_TIMEOUT_SECONDS) as client:
-        yield client
-
-
-def _get_litellm_source_url() -> str:
-    """Return the configured LiteLLM model metadata URL."""
-    return os.environ.get(
-        "LITELLM_MODEL_COST_MAP_URL",
-        "https://raw.githubusercontent.com/BerriAI/litellm/main/"
-        "model_prices_and_context_window.json",
-    )
-
-
-@dataclasses.dataclass(frozen=True)
-class LiteLLMSourceLoader:
-    """Load the retained public metadata without an executable package."""
-
-    http_client: Annotated[httpx.AsyncClient, Depends(_get_litellm_source_http_client)]
-    source_url: Annotated[str, Depends(_get_litellm_source_url)]
-
-    async def fetch_remote(self) -> dict[str, dict[str, Any]]:
-        """Fetch and decode the configured remote model metadata."""
-        response = await self.http_client.get(self.source_url)
-        response.raise_for_status()
-        payload = _LITELLM_PAYLOAD_ADAPTER.validate_python(response.json())
-        return _expand_litellm_source_aliases(payload)
-
-
-class LiteLLMSourceSyncError(RuntimeError):
-    """LiteLLM source ingestion failed without changing source authority."""
-
 
 def _get_integration_repository(
     cipher: Annotated[CredentialCipher, Depends(get_credential_cipher)],
@@ -175,12 +112,6 @@ _SYSTEM_CATALOG_PROVIDERS = (
     LLMProvider.ANTHROPIC,
     LLMProvider.GOOGLE_GEMINI,
 )
-_SYSTEM_PROVIDER_TO_LITELLM_PROVIDER: dict[LLMProvider, tuple[str, ...]] = {
-    LLMProvider.OPENAI: ("openai",),
-    LLMProvider.ANTHROPIC: ("anthropic",),
-    LLMProvider.GOOGLE_GEMINI: ("gemini",),
-}
-
 _PROVIDER_TO_DEVELOPER: dict[LLMProvider, LLMModelDeveloper] = {
     LLMProvider.OPENAI: LLMModelDeveloper.OPENAI,
     LLMProvider.CHATGPT_OAUTH: LLMModelDeveloper.OPENAI,
@@ -577,177 +508,6 @@ class ModelCatalogReadService:
 
 
 @dataclasses.dataclass(frozen=True)
-class LiteLLMSourceSyncService:
-    """Synchronize LiteLLM model metadata into source snapshots."""
-
-    session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
-    ]
-    snapshot_repository: Annotated[
-        LiteLLMSourceSnapshotRepository, Depends(LiteLLMSourceSnapshotRepository)
-    ]
-    source_loader: Annotated[LiteLLMSourceLoader, Depends(LiteLLMSourceLoader)]
-
-    async def sync_current_source(self) -> LiteLLMSourceSnapshot:
-        """Ingest and publish the configured remote LiteLLM source."""
-        started_at = _utcnow()
-        async with self.session_manager() as session:
-            attempt_id = await self.snapshot_repository.begin_attempt(
-                session,
-                source_key=_LITELLM_SOURCE_KEY,
-                started_at=started_at,
-            )
-
-        try:
-            payload = await self.source_loader.fetch_remote()
-        except (
-            httpx.HTTPError,
-            json.JSONDecodeError,
-            UnicodeDecodeError,
-            ValidationError,
-        ) as exc:
-            await self._record_remote_failure(
-                attempt_id=attempt_id,
-                error=exc,
-            )
-            raise LiteLLMSourceSyncError(
-                "The remote LiteLLM model catalog could not be ingested."
-            ) from None
-
-        source_hash = _source_payload_hash(payload)
-        rejection_message: str | None = None
-        superseded = False
-        snapshot: LiteLLMSourceSnapshot | None = None
-        async with self.session_manager() as session:
-            await self.snapshot_repository.lock_authority(
-                session,
-                source_key=_LITELLM_SOURCE_KEY,
-            )
-            previous = await self.snapshot_repository.get_latest_authoritative(
-                session,
-                source_key=_LITELLM_SOURCE_KEY,
-            )
-            diagnostics = _source_change_diagnostics(
-                previous=previous,
-                payload=payload,
-                source_kind="remote",
-                source_url=self.source_loader.source_url,
-                source_hash=source_hash,
-            )
-            latest_attempt = await self.snapshot_repository.get_latest_attempt(
-                session,
-                source_key=_LITELLM_SOURCE_KEY,
-            )
-            if latest_attempt is None or latest_attempt.id != attempt_id:
-                superseded = True
-                await self.snapshot_repository.mark_attempt_failed(
-                    session,
-                    attempt_id=attempt_id,
-                    finished_at=_utcnow(),
-                    failure_code="LiteLLMSourceSyncSuperseded",
-                    failure_message=(
-                        "A newer LiteLLM source synchronization attempt superseded "
-                        "this result."
-                    ),
-                    action_hint="Use the newer source synchronization result.",
-                    fetched_count=len(payload),
-                    diagnostics=diagnostics,
-                )
-            elif _material_source_reduction(previous=previous, payload=payload):
-                rejection_message = (
-                    "The remote LiteLLM model catalog is materially smaller than "
-                    "the current authoritative snapshot."
-                )
-                await self.snapshot_repository.mark_attempt_failed(
-                    session,
-                    attempt_id=attempt_id,
-                    finished_at=_utcnow(),
-                    failure_code="LiteLLMSourceModelCountReduction",
-                    failure_message=rejection_message,
-                    action_hint=(
-                        "Verify the upstream removals before replacing the "
-                        "authoritative source."
-                    ),
-                    fetched_count=len(payload),
-                    diagnostics=diagnostics,
-                )
-            else:
-                snapshot = await self.snapshot_repository.upsert_validated_remote(
-                    session,
-                    source_key=_LITELLM_SOURCE_KEY,
-                    source_url=self.source_loader.source_url,
-                    source_hash=source_hash,
-                    model_count=len(payload),
-                    litellm_version=None,
-                    payload=payload,
-                )
-                await self.snapshot_repository.mark_attempt_succeeded(
-                    session,
-                    attempt_id=attempt_id,
-                    finished_at=_utcnow(),
-                    produced_snapshot_id=snapshot.id,
-                    fetched_count=len(payload),
-                    diagnostics=diagnostics,
-                )
-        if superseded:
-            raise LiteLLMSourceSyncError(
-                "The LiteLLM source synchronization was superseded."
-            )
-        if rejection_message is not None:
-            raise LiteLLMSourceSyncError(rejection_message)
-        if snapshot is None:
-            raise RuntimeError("Validated LiteLLM source snapshot was not stored.")
-        return snapshot
-
-    async def get_authoritative_source(self) -> LiteLLMSourceSnapshot:
-        """Return the latest explicitly validated remote DB snapshot."""
-        async with self.session_manager() as session:
-            snapshot = await self.snapshot_repository.get_latest_authoritative(
-                session,
-                source_key=_LITELLM_SOURCE_KEY,
-            )
-        if snapshot is None:
-            raise LiteLLMSourceSyncError(
-                "No validated remote LiteLLM source snapshot is available."
-            )
-        return snapshot
-
-    async def _record_remote_failure(
-        self,
-        *,
-        attempt_id: str,
-        error: (
-            httpx.HTTPError
-            | json.JSONDecodeError
-            | UnicodeDecodeError
-            | ValidationError
-        ),
-    ) -> None:
-        """Record a safe remote failure without consulting package resources."""
-        failure_message = "The remote LiteLLM model catalog could not be ingested."
-        diagnostics: dict[str, Any] = {
-            "source_kind": "remote",
-            "source_url": self.source_loader.source_url,
-            "fetch_failure_reason": failure_message,
-            "litellm_version": None,
-        }
-
-        async with self.session_manager() as session:
-            await self.snapshot_repository.mark_attempt_failed(
-                session,
-                attempt_id=attempt_id,
-                finished_at=_utcnow(),
-                failure_code=type(error).__name__,
-                failure_message=failure_message,
-                action_hint=(
-                    "Retry after the configured LiteLLM source becomes available."
-                ),
-                fetched_count=0,
-                diagnostics=diagnostics,
-            )
-
-
-@dataclasses.dataclass(frozen=True)
 class SystemCatalogProjectionService:
     """Publish replacement system catalogs from generic metadata authority."""
 
@@ -756,8 +516,8 @@ class SystemCatalogProjectionService:
     ]
     catalog_repository: Annotated[LLMCatalogRepository, Depends(LLMCatalogRepository)]
     replacement_projection_service: Annotated[
-        SystemCatalogShadowProjectionService,
-        Depends(SystemCatalogShadowProjectionService),
+        SystemCatalogReplacementProjectionService,
+        Depends(SystemCatalogReplacementProjectionService),
     ]
 
     async def list_system_catalogs(self) -> list[SystemCatalogListItem]:
@@ -848,26 +608,6 @@ class SystemCatalogProjectionService:
             status=summary.status,
         )
 
-    async def rollback_system_catalogs(
-        self,
-    ) -> list[SystemCatalogProjectionSummary]:
-        """Atomically restore all pinned pre-cutover system catalogs."""
-        restored = await self.replacement_projection_service.rollback_cutover(
-            provider=None
-        )
-        current = {item.provider: item for item in await self.list_system_catalogs()}
-        return [
-            SystemCatalogProjectionSummary(
-                provider=summary.provider,
-                catalog_id=summary.catalog_id,
-                snapshot_id=summary.snapshot_id,
-                visible_count=current[summary.provider].visible_count,
-                hidden_count=current[summary.provider].hidden_count,
-                status="rolled_back",
-            )
-            for summary in restored
-        ]
-
 
 type IntegrationModelListing = Callable[
     [LLMProviderIntegrationWithSecrets], Awaitable[ModelListingOutput]
@@ -888,7 +628,7 @@ def get_integration_model_listing() -> IntegrationModelListing:
 
 @dataclasses.dataclass(frozen=True)
 class IntegrationCatalogProjectionService:
-    """Project integration catalogs from provider visibility and LiteLLM metadata."""
+    """Project integration catalogs from provider visibility and generic metadata."""
 
     session_manager: Annotated[
         SessionManager[AsyncSession], Depends(get_session_manager)
@@ -1095,7 +835,7 @@ class IntegrationCatalogProjectionService:
                 catalog_configuration_version=claim.catalog_configuration_version,
             )
             provenance = CatalogProjectionProvenance(
-                metadata_source_snapshot_id=(
+                source_snapshot_id=(
                     source_snapshot.id if source_snapshot is not None else None
                 ),
                 projection_schema_version=(MODEL_METADATA_PROJECTION_SCHEMA_VERSION),
@@ -1281,103 +1021,6 @@ class IntegrationCatalogProjectionService:
         )
 
 
-def _source_payload_hash(payload: dict[str, dict[str, Any]]) -> str:
-    """Compute the canonical source payload hash."""
-    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
-
-
-def _expand_litellm_source_aliases(
-    payload: dict[str, dict[str, Any]],
-) -> dict[str, dict[str, Any]]:
-    """Expand LiteLLM aliases without replacing canonical model entries."""
-    expanded = {model_key: dict(metadata) for model_key, metadata in payload.items()}
-    aliases_to_add: dict[str, dict[str, Any]] = {}
-    for metadata in expanded.values():
-        aliases_value = metadata.pop("aliases", None)
-        if aliases_value is None:
-            continue
-        aliases = _LITELLM_ALIAS_LIST_ADAPTER.validate_python(aliases_value)
-        for alias in aliases:
-            if alias in expanded or alias in aliases_to_add:
-                continue
-            aliases_to_add[alias] = metadata
-    expanded.update(aliases_to_add)
-    return expanded
-
-
-def _source_provider_counts(
-    payload: dict[str, dict[str, Any]],
-) -> dict[str, int]:
-    """Count source entries by LiteLLM provider."""
-    counts: dict[str, int] = {}
-    for metadata in payload.values():
-        provider = metadata.get("litellm_provider")
-        provider_key = provider if isinstance(provider, str) else "unknown"
-        counts[provider_key] = counts.get(provider_key, 0) + 1
-    return counts
-
-
-def _source_change_diagnostics(
-    *,
-    previous: LiteLLMSourceSnapshot | None,
-    payload: dict[str, dict[str, Any]],
-    source_kind: str,
-    source_url: str,
-    source_hash: str,
-) -> dict[str, Any]:
-    """Build source provenance and model/provider change diagnostics."""
-    previous_payload = previous.payload if previous is not None else {}
-    previous_models = set(previous_payload)
-    current_models = set(payload)
-    previous_provider_counts = _source_provider_counts(
-        _LITELLM_PAYLOAD_ADAPTER.validate_python(previous_payload)
-    )
-    current_provider_counts = _source_provider_counts(payload)
-    provider_count_changes = {
-        provider: {
-            "previous": previous_provider_counts.get(provider, 0),
-            "current": current_provider_counts.get(provider, 0),
-            "delta": (
-                current_provider_counts.get(provider, 0)
-                - previous_provider_counts.get(provider, 0)
-            ),
-        }
-        for provider in sorted(
-            previous_provider_counts.keys() | current_provider_counts
-        )
-        if previous_provider_counts.get(provider, 0)
-        != current_provider_counts.get(provider, 0)
-    }
-    return {
-        "source_kind": source_kind,
-        "source_url": source_url,
-        "content_hash": source_hash,
-        "model_count": len(payload),
-        "previous_snapshot_id": previous.id if previous is not None else None,
-        "previous_model_count": (
-            previous.model_count if previous is not None else None
-        ),
-        "added_models": sorted(current_models - previous_models),
-        "removed_models": sorted(previous_models - current_models),
-        "provider_count_changes": provider_count_changes,
-    }
-
-
-def _material_source_reduction(
-    *,
-    previous: LiteLLMSourceSnapshot | None,
-    payload: dict[str, dict[str, Any]],
-) -> bool:
-    """Return whether candidate model-count shrinkage requires quarantine."""
-    if previous is None or previous.model_count == 0:
-        return False
-    removed_count = previous.model_count - len(payload)
-    if removed_count < _LITELLM_SOURCE_MIN_REMOVAL_COUNT:
-        return False
-    return removed_count / previous.model_count >= _LITELLM_SOURCE_MIN_REMOVAL_RATIO
-
-
 def _deterministic_listing_failure(
     integration: LLMProviderIntegrationWithSecrets,
 ) -> bool:
@@ -1457,411 +1100,6 @@ def project_deterministic_integration_entries(
     return entries
 
 
-def project_chatgpt_integration_entries(
-    *,
-    integration_id: str,
-    listing: ModelListingOutput,
-) -> list[LLMCatalogEntryCreate]:
-    """Project ChatGPT backend models without requiring LiteLLM metadata."""
-    entries: list[LLMCatalogEntryCreate] = []
-    for candidate in listing.models:
-        capabilities = candidate.normalized_capabilities
-        entries.append(
-            LLMCatalogEntryCreate(
-                provider=LLMProvider.CHATGPT_OAUTH,
-                provider_model_identifier=candidate.model_identifier,
-                display_name=candidate.model_display_name,
-                normalized_capabilities=capabilities.model_dump(mode="json"),
-                supported_execution_options=[
-                    option.value for option in candidate.supported_execution_options
-                ],
-                lifecycle_status=LLMModelLifecycleStatus.ACTIVE,
-                visibility_status=LLMCatalogEntryVisibility.SELECTABLE,
-                provider_integration_id=integration_id,
-                publisher=candidate.model_developer.value,
-                family=candidate.model_family,
-                source_metadata={
-                    "provider_listing_source": listing.summary.source,
-                    "provider_metadata": candidate.source_metadata,
-                },
-                projection_metadata={
-                    "freshness_rank": model_freshness_rank(candidate.model_identifier),
-                },
-                hidden_reason=None,
-            )
-        )
-    return entries
-
-
-def project_kimi_integration_entries(
-    *,
-    integration_id: str,
-    listing: ModelListingOutput,
-) -> list[LLMCatalogEntryCreate]:
-    """Project Kimi account models without a LiteLLM metadata gate."""
-    entries: list[LLMCatalogEntryCreate] = []
-    for candidate in listing.models:
-        entries.append(
-            LLMCatalogEntryCreate(
-                provider=LLMProvider.KIMI_OAUTH,
-                provider_model_identifier=candidate.model_identifier,
-                display_name=candidate.model_display_name,
-                normalized_capabilities=candidate.normalized_capabilities.model_dump(
-                    mode="json"
-                ),
-                supported_execution_options=[
-                    option.value for option in candidate.supported_execution_options
-                ],
-                lifecycle_status=LLMModelLifecycleStatus.ACTIVE,
-                visibility_status=LLMCatalogEntryVisibility.SELECTABLE,
-                provider_integration_id=integration_id,
-                publisher=candidate.model_developer.value,
-                family=candidate.model_family,
-                source_metadata={
-                    "provider_listing_source": listing.summary.source,
-                    "provider_metadata": candidate.source_metadata,
-                },
-                projection_metadata={
-                    "target_metadata_match_required": False,
-                    "freshness_rank": model_freshness_rank(candidate.model_identifier),
-                },
-                hidden_reason=None,
-            )
-        )
-    return entries
-
-
-def project_openrouter_integration_entries(
-    *,
-    integration_id: str,
-    listing: ModelListingOutput,
-) -> list[LLMCatalogEntryCreate]:
-    """Project OpenRouter account models without LiteLLM visibility matching."""
-    entries: list[LLMCatalogEntryCreate] = []
-    for candidate in listing.models:
-        entries.append(
-            LLMCatalogEntryCreate(
-                provider=LLMProvider.OPENROUTER,
-                provider_model_identifier=candidate.model_identifier,
-                display_name=candidate.model_display_name,
-                normalized_capabilities=candidate.normalized_capabilities.model_dump(
-                    mode="json"
-                ),
-                supported_execution_options=[
-                    option.value for option in candidate.supported_execution_options
-                ],
-                lifecycle_status=LLMModelLifecycleStatus.ACTIVE,
-                visibility_status=LLMCatalogEntryVisibility.SELECTABLE,
-                provider_integration_id=integration_id,
-                publisher=candidate.model_developer.value,
-                family=candidate.model_family,
-                source_metadata={
-                    "provider_listing_source": listing.summary.source,
-                    "provider_metadata": candidate.source_metadata,
-                },
-                projection_metadata={
-                    "target_metadata_match_required": False,
-                    "freshness_rank": model_freshness_rank(candidate.model_identifier),
-                },
-                hidden_reason=None,
-            )
-        )
-    return entries
-
-
-def project_xai_integration_entries(
-    *,
-    integration_id: str,
-    provider: LLMProvider,
-    listing: ModelListingOutput,
-    source_snapshot: LiteLLMSourceSnapshot | None,
-) -> list[LLMCatalogEntryCreate]:
-    """Project provider-visible xAI models with optional LiteLLM enrichment."""
-    entries: list[LLMCatalogEntryCreate] = []
-    for candidate in listing.models:
-        source_key = f"xai/{candidate.model_identifier}"
-        metadata: dict[str, Any] | None = None
-        if source_snapshot is not None:
-            source_value = source_snapshot.payload.get(source_key)
-            if isinstance(source_value, dict):
-                metadata = source_value
-        try:
-            capabilities = _merge_xai_capabilities(
-                candidate=candidate,
-                provider=provider,
-                metadata=metadata,
-            )
-        except ValidationError:
-            metadata = None
-            capabilities = candidate.normalized_capabilities.model_copy(deep=True)
-        entries.append(
-            LLMCatalogEntryCreate(
-                provider=provider,
-                provider_model_identifier=candidate.model_identifier,
-                display_name=candidate.model_display_name,
-                normalized_capabilities=capabilities.model_dump(mode="json"),
-                supported_execution_options=[
-                    option.value for option in candidate.supported_execution_options
-                ],
-                lifecycle_status=LLMModelLifecycleStatus.ACTIVE,
-                visibility_status=LLMCatalogEntryVisibility.SELECTABLE,
-                provider_integration_id=integration_id,
-                publisher=LLMModelDeveloper.XAI.value,
-                family=candidate.model_family,
-                source_metadata={
-                    "provider_listing_source": listing.summary.source,
-                    "provider_metadata": candidate.source_metadata,
-                    "target_projection_key": source_key,
-                    "target_metadata": _xai_enrichment_source_metadata(metadata),
-                    "source_hash": (
-                        source_snapshot.source_hash
-                        if source_snapshot is not None
-                        else None
-                    ),
-                },
-                projection_metadata={
-                    "target_metadata_match_required": False,
-                    "matched": metadata is not None,
-                    "freshness_rank": model_freshness_rank(candidate.model_identifier),
-                    "exact_projection_key": source_key,
-                },
-                hidden_reason=None,
-            )
-        )
-    return entries
-
-
-def _merge_xai_capabilities(
-    *,
-    candidate: NormalizedModelCandidate,
-    provider: LLMProvider,
-    metadata: dict[str, Any] | None,
-) -> ModelCapabilities:
-    """Fill xAI-omitted capability fields without overriding provider values."""
-    provider_capabilities = candidate.normalized_capabilities.model_copy(deep=True)
-    if metadata is None:
-        return provider_capabilities
-    enrichment = _capabilities_from_litellm_metadata(
-        metadata,
-        provider=provider,
-        model_identifier=candidate.model_identifier,
-    )
-    provider_metadata = candidate.source_metadata or {}
-
-    if "context_window" not in provider_metadata:
-        provider_capabilities.context_window.max_input_tokens = (
-            enrichment.context_window.max_input_tokens
-        )
-    provider_capabilities.context_window.max_output_tokens = (
-        enrichment.context_window.max_output_tokens
-    )
-    if "input_modalities" not in provider_metadata:
-        provider_capabilities.modalities.input = enrichment.modalities.input
-    provider_capabilities.modalities.output = enrichment.modalities.output
-    provider_capabilities.tool_calling = enrichment.tool_calling
-    if "supports_reasoning_effort" not in provider_metadata:
-        provider_capabilities.reasoning = enrichment.reasoning
-
-    provider_tools = set(provider_capabilities.built_in_tools.supported)
-    enrichment_tools = set(enrichment.built_in_tools.supported)
-    if "supports_backend_search" not in provider_metadata:
-        if "web_search" in enrichment_tools:
-            provider_tools.add("web_search")
-    elif provider_metadata["supports_backend_search"] is not True:
-        provider_tools.discard("web_search")
-    if "image_generation" in enrichment_tools:
-        provider_tools.add("image_generation")
-    provider_capabilities.built_in_tools.supported = [
-        tool for tool in ("web_search", "image_generation") if tool in provider_tools
-    ]
-    provider_capabilities.parameters = enrichment.parameters
-    if "api_backend" not in provider_metadata:
-        provider_capabilities.compatibility.responses_api = (
-            enrichment.compatibility.responses_api
-        )
-    return provider_capabilities
-
-
-def _xai_enrichment_source_metadata(
-    metadata: dict[str, Any] | None,
-) -> dict[str, Any] | None:
-    """Keep bounded LiteLLM pricing enrichment without raw source retention."""
-    if metadata is None:
-        return None
-    keys = (
-        "input_cost_per_token",
-        "output_cost_per_token",
-        "cache_read_input_token_cost",
-        "cache_creation_input_token_cost",
-        "input_cost_per_image",
-        "output_cost_per_image",
-        "input_cost_per_audio_token",
-        "output_cost_per_audio_token",
-    )
-    values = {key: metadata[key] for key in keys if key in metadata}
-    return values or None
-
-
-def project_integration_entries(
-    *,
-    integration_id: str,
-    provider: LLMProvider,
-    listing: ModelListingOutput,
-    source_snapshot: LiteLLMSourceSnapshot,
-) -> list[LLMCatalogEntryCreate]:
-    """Project provider-visible integration models against LiteLLM metadata."""
-    entries: list[LLMCatalogEntryCreate] = []
-    for candidate in listing.models:
-        source_key = _integration_projection_key(provider, candidate.model_identifier)
-        metadata = source_snapshot.payload.get(source_key)
-        hidden_reason = (
-            None if isinstance(metadata, dict) else "missing_target_projection"
-        )
-        if not isinstance(metadata, dict):
-            metadata = {}
-        visibility = (
-            LLMCatalogEntryVisibility.HIDDEN
-            if hidden_reason is not None
-            else LLMCatalogEntryVisibility.SELECTABLE
-        )
-        capabilities = (
-            _capabilities_from_litellm_metadata(
-                metadata,
-                provider=provider,
-                model_identifier=candidate.model_identifier,
-            )
-            if hidden_reason is None
-            else candidate.normalized_capabilities
-        )
-        entries.append(
-            LLMCatalogEntryCreate(
-                provider=provider,
-                provider_model_identifier=candidate.model_identifier,
-                display_name=candidate.model_display_name,
-                normalized_capabilities=capabilities.model_dump(mode="json"),
-                supported_execution_options=[
-                    option.value for option in candidate.supported_execution_options
-                ],
-                lifecycle_status=LLMModelLifecycleStatus.ACTIVE,
-                visibility_status=visibility,
-                provider_integration_id=integration_id,
-                publisher=candidate.model_developer.value,
-                family=candidate.model_family,
-                source_metadata={
-                    "provider_listing_source": listing.summary.source,
-                    "target_projection_key": source_key,
-                    "source_hash": source_snapshot.source_hash,
-                },
-                projection_metadata={
-                    "matched": hidden_reason is None,
-                    "freshness_rank": model_freshness_rank(candidate.model_identifier),
-                    "exact_projection_key": source_key,
-                },
-                hidden_reason=hidden_reason,
-            )
-        )
-    return entries
-
-
-def _integration_projection_key(provider: LLMProvider, model_identifier: str) -> str:
-    if provider == LLMProvider.AWS_BEDROCK:
-        return f"bedrock/{model_identifier}"
-    if provider == LLMProvider.GOOGLE_VERTEX_AI:
-        return f"vertex_ai/{model_identifier}"
-    raise RuntimeError("Unsupported integration catalog provider")
-
-
-def project_system_entries(
-    *,
-    provider: LLMProvider,
-    source_snapshot: LiteLLMSourceSnapshot,
-) -> list[LLMCatalogEntryCreate]:
-    litellm_providers = _SYSTEM_PROVIDER_TO_LITELLM_PROVIDER[provider]
-    entries: list[LLMCatalogEntryCreate] = []
-    for model_key, metadata in source_snapshot.payload.items():
-        if not isinstance(metadata, dict):
-            continue
-        if metadata.get("litellm_provider") not in litellm_providers:
-            continue
-        hidden_reason = _hidden_reason(model_key, metadata)
-        visibility = (
-            LLMCatalogEntryVisibility.HIDDEN
-            if hidden_reason is not None
-            else LLMCatalogEntryVisibility.SELECTABLE
-        )
-        entries.append(
-            LLMCatalogEntryCreate(
-                provider=provider,
-                provider_model_identifier=_provider_model_identifier(
-                    provider, model_key
-                ),
-                display_name=_display_name(model_key),
-                normalized_capabilities=_capabilities_from_litellm_metadata(
-                    metadata,
-                    provider=provider,
-                    model_identifier=_provider_model_identifier(provider, model_key),
-                ).model_dump(mode="json"),
-                supported_execution_options=[
-                    option.value
-                    for option in _openai_supported_execution_options(
-                        _provider_model_identifier(provider, model_key)
-                    )
-                ]
-                if provider == LLMProvider.OPENAI
-                else [],
-                lifecycle_status=LLMModelLifecycleStatus.ACTIVE,
-                visibility_status=visibility,
-                provider_integration_id=None,
-                publisher=metadata.get("litellm_provider"),
-                family=_family(model_key),
-                source_metadata={
-                    "model_key": model_key,
-                    "source_hash": source_snapshot.source_hash,
-                },
-                projection_metadata={
-                    "litellm_provider": metadata.get("litellm_provider"),
-                    "freshness_rank": model_freshness_rank(
-                        _provider_model_identifier(provider, model_key)
-                    ),
-                },
-                hidden_reason=hidden_reason,
-            )
-        )
-    return entries
-
-
-def _hidden_reason(model_key: str, metadata: dict[str, Any]) -> str | None:
-    mode = metadata.get("mode")
-    if mode not in (None, "chat", "completion"):
-        return f"unsupported_mode:{mode}"
-    if model_key == "sample_spec":
-        return "sample_spec"
-    if model_key.startswith("ft:"):
-        return "fine_tuned_model"
-    return None
-
-
-def _provider_model_identifier(provider: LLMProvider, model_key: str) -> str:
-    if provider == LLMProvider.GOOGLE_GEMINI and model_key.startswith("gemini/"):
-        return model_key.removeprefix("gemini/")
-    if provider in {LLMProvider.XAI, LLMProvider.XAI_OAUTH} and model_key.startswith(
-        "xai/"
-    ):
-        return model_key.removeprefix("xai/")
-    return model_key.removeprefix("openai/").removeprefix("anthropic/")
-
-
-def _display_name(model_key: str) -> str:
-    return model_key.rsplit("/", maxsplit=1)[-1]
-
-
-def _family(model_key: str) -> str | None:
-    name = _display_name(model_key)
-    if not name:
-        return None
-    return name.split("-", maxsplit=1)[0]
-
-
 def _projection_diagnostics(
     *,
     entries: list[LLMCatalogEntryCreate],
@@ -1901,94 +1139,6 @@ def _projection_diagnostics(
         "hidden_reasons": hidden_reasons,
         "exact_match_misses": exact_match_misses[:50],
     }
-
-
-def _capabilities_from_litellm_metadata(
-    metadata: dict[str, Any],
-    *,
-    provider: LLMProvider,
-    model_identifier: str,
-) -> ModelCapabilities:
-    provider_info = SourceReasoningMetadata.model_validate(metadata)
-    return ModelCapabilities(
-        context_window=ModelContextWindow(
-            max_input_tokens=_positive_int(metadata.get("max_input_tokens")),
-            max_output_tokens=_positive_int(metadata.get("max_output_tokens")),
-        ),
-        modalities=ModelModalities(
-            input=_modalities_from_metadata(metadata),
-            output=[ModelModality.TEXT],
-        ),
-        tool_calling=ModelToolCallingCapabilities(
-            supported=metadata.get("supports_function_calling") is True,
-            parallel_tool_calls=metadata.get("supports_parallel_function_calling"),
-            strict_json_schema=metadata.get("supports_response_schema"),
-        ),
-        reasoning=ModelReasoningCapabilities(
-            supported=provider_info.supports_reasoning is True,
-            effort_levels=_reasoning_effort_levels(provider_info),
-        ),
-        built_in_tools=ModelBuiltInToolCapabilities(
-            supported=supported_builtin_capabilities(
-                provider=provider,
-                model_identifier=model_identifier,
-                metadata=metadata,
-            )
-        ),
-        compatibility=ModelCompatibilityCapabilities(
-            provider_family=_str_or_none(metadata.get("litellm_provider")),
-            responses_api=True,
-        ),
-    )
-
-
-def _reasoning_effort_levels(
-    model_info: SourceReasoningMetadata,
-) -> list[ModelReasoningEffort]:
-    """Reconstruct ordered explicit efforts from LiteLLM capability flags."""
-    if model_info.supports_reasoning is not True:
-        return []
-
-    efforts: list[ModelReasoningEffort] = []
-    if model_info.supports_none_reasoning_effort is True:
-        efforts.append(ModelReasoningEffort.NONE)
-    if model_info.supports_minimal_reasoning_effort is True:
-        efforts.append(ModelReasoningEffort.MINIMAL)
-
-    if model_info.supports_low_reasoning_effort is not False:
-        efforts.append(ModelReasoningEffort.LOW)
-    efforts.extend((ModelReasoningEffort.MEDIUM, ModelReasoningEffort.HIGH))
-
-    if model_info.supports_xhigh_reasoning_effort is True:
-        efforts.append(ModelReasoningEffort.XHIGH)
-    if model_info.supports_max_reasoning_effort is True:
-        efforts.append(ModelReasoningEffort.MAX)
-    return efforts
-
-
-def _modalities_from_metadata(metadata: dict[str, Any]) -> list[ModelModality]:
-    result = [ModelModality.TEXT]
-    if metadata.get("supports_vision") is True:
-        result.append(ModelModality.IMAGE)
-    if metadata.get("supports_pdf_input") is True:
-        result.append(ModelModality.PDF)
-    if metadata.get("supports_audio_input") is True:
-        result.append(ModelModality.AUDIO)
-    if metadata.get("supports_video_input") is True:
-        result.append(ModelModality.VIDEO)
-    return result
-
-
-def _positive_int(value: object) -> int | None:
-    if isinstance(value, int) and not isinstance(value, bool) and value > 0:
-        return value
-    return None
-
-
-def _str_or_none(value: object) -> str | None:
-    if isinstance(value, str):
-        return value
-    return None
 
 
 def _utcnow() -> datetime.datetime:

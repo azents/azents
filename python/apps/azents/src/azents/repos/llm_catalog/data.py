@@ -24,7 +24,6 @@ class LLMCatalog:
     purpose: LLMCatalogPurpose
     provider_integration_id: str | None
     current_snapshot_id: str | None
-    rollback_snapshot_id: str | None
     latest_attempt_id: str | None
 
 
@@ -74,22 +73,12 @@ class LLMCatalogEntryCreate:
 class CatalogProjectionProvenance:
     """Versioned evidence used to create one replacement projection."""
 
-    metadata_source_snapshot_id: str | None
+    source_snapshot_id: str | None
     projection_schema_version: str
     runtime_profile_resolver_revision: str
     pydantic_ai_version: str
     genai_prices_version: str
     projection_fingerprint: str
-
-
-@dataclass(frozen=True)
-class IntegrationCatalogReprojectionTarget:
-    """One current integration catalog requiring replacement provenance."""
-
-    catalog: LLMCatalog
-    current_snapshot_id: str
-    catalog_configuration_version: int
-    entries: list[LLMCatalogEntry]
 
 
 @dataclass(frozen=True)
@@ -215,18 +204,3 @@ class ImageGenerationCatalogPublication:
     snapshot_id: str | None
     superseding_attempt_id: str | None
     current_catalog_configuration_version: int
-
-
-@dataclass(frozen=True)
-class LiteLLMSourceSnapshot:
-    """Stored LiteLLM source snapshot."""
-
-    id: str
-    source_key: str
-    source_url: str | None
-    source_hash: str
-    model_count: int
-    litellm_version: str | None
-    loaded_source: str
-    payload: dict[str, Any]
-    created_at: datetime.datetime

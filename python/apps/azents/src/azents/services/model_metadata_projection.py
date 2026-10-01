@@ -22,7 +22,6 @@ from azents.core.llm_catalog import (
     ModelParameterCapabilities,
     model_freshness_rank,
 )
-from azents.core.model_execution_options import ModelExecutionOptionId
 from azents.core.model_metadata_source import (
     ModelMetadataSourcePayload,
     SourceModelMatch,
@@ -41,7 +40,6 @@ from azents.repos.llm_catalog import LLMCatalogRepository
 from azents.repos.llm_catalog.data import (
     CatalogProjectionProvenance,
     CatalogSyncAlreadyRunning,
-    LLMCatalogEntry,
     LLMCatalogEntryCreate,
 )
 from azents.repos.model_metadata_source_data import ModelMetadataSourceSnapshot
@@ -61,12 +59,13 @@ _SYSTEM_SOURCE_PROVIDERS: dict[LLMProvider, str] = {
 
 
 @dataclasses.dataclass(frozen=True)
-class SystemCatalogShadowSummary:
+class SystemCatalogCandidateSummary:
     """One prepared non-current replacement candidate."""
 
     provider: LLMProvider
     catalog_id: str
     candidate_snapshot_id: str
+    expected_current_snapshot_id: str | None
     visible_count: int
     hidden_count: int
     projection_fingerprint: str
@@ -85,15 +84,6 @@ class SystemCatalogCutoverSummary:
     status: str = "succeeded"
 
 
-@dataclasses.dataclass(frozen=True)
-class SystemCatalogRollbackSummary:
-    """One system catalog restored to its pinned pre-cutover snapshot."""
-
-    provider: LLMProvider
-    catalog_id: str
-    snapshot_id: str
-
-
 class ModelMetadataProjectionError(RuntimeError):
     """Replacement metadata cannot produce a complete system projection."""
 
@@ -103,16 +93,7 @@ class _SystemCatalogPublicationBusy(RuntimeError):
 
 
 @dataclasses.dataclass(frozen=True)
-class IntegrationCatalogReprojectionSummary:
-    """One bounded network-free integration reprojection pass."""
-
-    scanned: int
-    published: int
-    superseded: int
-
-
-@dataclasses.dataclass(frozen=True)
-class SystemCatalogShadowProjectionService:
+class SystemCatalogReplacementProjectionService:
     """Prepare replacement system projections without changing current pointers."""
 
     session_manager: Annotated[
@@ -123,7 +104,7 @@ class SystemCatalogShadowProjectionService:
         ModelMetadataSourceSyncService, Depends(ModelMetadataSourceSyncService)
     ]
 
-    async def prepare_candidates(self) -> list[SystemCatalogShadowSummary]:
+    async def prepare_candidates(self) -> list[SystemCatalogCandidateSummary]:
         """Refresh the replacement source and create non-current candidates."""
         source = await self.source_sync_service.sync_current_source()
         return await self._prepare_candidates(
@@ -188,15 +169,21 @@ class SystemCatalogShadowProjectionService:
                         raise RuntimeError("The system catalog refresh was superseded.")
                     snapshot_ids[
                         candidate.catalog_id
-                    ] = await self.catalog_repository.publish_cutover_candidate(
+                    ] = await self.catalog_repository.publish_candidate_snapshot(
                         session,
                         catalog_id=candidate.catalog_id,
                         candidate_snapshot_id=candidate.candidate_snapshot_id,
-                        expected_metadata_source_key=source.source_key,
-                        expected_metadata_source_snapshot_id=source.id,
+                        expected_current_snapshot_id=(
+                            candidate.expected_current_snapshot_id
+                        ),
+                        expected_catalog_configuration_version=None,
                         expected_projection_fingerprint=(
                             candidate.projection_fingerprint
                         ),
+                        expected_source_key=source.source_key,
+                        expected_source_snapshot_id=source.id,
+                        fence_latest_attempt=True,
+                        expected_latest_attempt_id=attempt_ids[candidate.catalog_id],
                     )
                 for candidate in candidates:
                     await self.catalog_repository.mark_attempt_succeeded(
@@ -252,56 +239,17 @@ class SystemCatalogShadowProjectionService:
             for candidate in candidates
         ]
 
-    async def rollback_cutover(
-        self,
-        *,
-        provider: LLMProvider | None,
-    ) -> list[SystemCatalogRollbackSummary]:
-        """Atomically restore one or all pinned pre-cutover system catalogs."""
-        if provider is not None and provider not in _SYSTEM_SOURCE_PROVIDERS:
-            raise ValueError("Unsupported system catalog provider.")
-        providers = (
-            (provider,) if provider is not None else tuple(_SYSTEM_SOURCE_PROVIDERS)
-        )
-        summaries: list[SystemCatalogRollbackSummary] = []
-        async with self.session_manager() as session:
-            catalogs = []
-            for target_provider in providers:
-                catalog = await self.catalog_repository.get_system_catalog(
-                    session,
-                    provider=target_provider,
-                    purpose=LLMCatalogPurpose.CONVERSATION,
-                )
-                if catalog is None:
-                    raise ModelMetadataProjectionError(
-                        f"System catalog {target_provider.value} was not found."
-                    )
-                catalogs.append((target_provider, catalog))
-            for target_provider, catalog in catalogs:
-                snapshot_id = await self.catalog_repository.rollback_cutover(
-                    session,
-                    catalog_id=catalog.id,
-                )
-                summaries.append(
-                    SystemCatalogRollbackSummary(
-                        provider=target_provider,
-                        catalog_id=catalog.id,
-                        snapshot_id=snapshot_id,
-                    )
-                )
-        return summaries
-
     async def _prepare_candidates(
         self,
         *,
         source: ModelMetadataSourceSnapshot,
         providers: tuple[LLMProvider, ...],
-    ) -> list[SystemCatalogShadowSummary]:
+    ) -> list[SystemCatalogCandidateSummary]:
         """Create complete candidates for one captured source."""
         projections = [
             (
                 provider,
-                project_system_shadow_entries(
+                project_system_entries(
                     provider=provider,
                     source=source,
                 ),
@@ -312,10 +260,10 @@ class SystemCatalogShadowProjectionService:
             )
             for provider in providers
         ]
-        summaries: list[SystemCatalogShadowSummary] = []
+        summaries: list[SystemCatalogCandidateSummary] = []
         for provider, entries, fingerprint in projections:
             provenance = CatalogProjectionProvenance(
-                metadata_source_snapshot_id=source.id,
+                source_snapshot_id=source.id,
                 projection_schema_version=MODEL_METADATA_PROJECTION_SCHEMA_VERSION,
                 runtime_profile_resolver_revision=(
                     RUNTIME_MODEL_PROFILE_RESOLVER_REVISION
@@ -335,7 +283,6 @@ class SystemCatalogShadowProjectionService:
                     catalog=catalog,
                     entries=entries,
                     diagnostics={
-                        "shadow": True,
                         "source_kind": source.source_kind,
                         "source_snapshot_id": source.id,
                         "projection_fingerprint": fingerprint,
@@ -349,10 +296,11 @@ class SystemCatalogShadowProjectionService:
                 for entry in entries
             )
             summaries.append(
-                SystemCatalogShadowSummary(
+                SystemCatalogCandidateSummary(
                     provider=provider,
                     catalog_id=catalog.id,
                     candidate_snapshot_id=candidate_id,
+                    expected_current_snapshot_id=catalog.current_snapshot_id,
                     visible_count=visible_count,
                     hidden_count=len(entries) - visible_count,
                     projection_fingerprint=fingerprint,
@@ -361,156 +309,7 @@ class SystemCatalogShadowProjectionService:
         return summaries
 
 
-@dataclasses.dataclass(frozen=True)
-class IntegrationCatalogReprojectionService:
-    """Reproject current integration visibility without provider network calls."""
-
-    session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
-    ]
-    catalog_repository: Annotated[LLMCatalogRepository, Depends(LLMCatalogRepository)]
-    source_sync_service: Annotated[
-        ModelMetadataSourceSyncService, Depends(ModelMetadataSourceSyncService)
-    ]
-
-    async def reproject_batch(
-        self,
-        *,
-        limit: int,
-    ) -> IntegrationCatalogReprojectionSummary:
-        """Reproject one bounded batch and let concurrent normal sync win."""
-        source = await self.source_sync_service.get_current_source()
-        if source is None:
-            raise ModelMetadataProjectionError(
-                "Integration reprojection requires a current metadata source."
-            )
-        async with self.session_manager() as session:
-            targets = await (
-                self.catalog_repository.list_integration_reprojection_targets
-            )(
-                session,
-                limit=limit,
-            )
-        published = 0
-        superseded = 0
-        for target in targets:
-            integration_id = target.catalog.provider_integration_id
-            if integration_id is None:
-                raise RuntimeError(
-                    "Integration reprojection target has no integration."
-                )
-            candidates = [
-                _candidate_from_stored_entry(entry) for entry in target.entries
-            ]
-            entries = project_integration_replacement_entries(
-                integration_id=integration_id,
-                provider=target.catalog.provider,
-                candidates=candidates,
-                source=source,
-                provider_listing_source="stored_current_catalog",
-            )
-            fingerprint = integration_projection_fingerprint(
-                provider=target.catalog.provider,
-                source=source,
-                entries=entries,
-                catalog_configuration_version=(target.catalog_configuration_version),
-            )
-            provenance = CatalogProjectionProvenance(
-                metadata_source_snapshot_id=source.id,
-                projection_schema_version=MODEL_METADATA_PROJECTION_SCHEMA_VERSION,
-                runtime_profile_resolver_revision=(
-                    RUNTIME_MODEL_PROFILE_RESOLVER_REVISION
-                ),
-                pydantic_ai_version=importlib.metadata.version("pydantic-ai-slim"),
-                genai_prices_version=importlib.metadata.version("genai-prices"),
-                projection_fingerprint=fingerprint,
-            )
-            try:
-                async with self.session_manager() as session:
-                    candidate_snapshot_id = (
-                        await self.catalog_repository.create_candidate_snapshot(
-                            session,
-                            catalog=target.catalog,
-                            entries=entries,
-                            diagnostics={
-                                "network_free_reprojection": True,
-                                "source_snapshot_id": source.id,
-                                "prior_snapshot_id": target.current_snapshot_id,
-                                "projection_fingerprint": fingerprint,
-                            },
-                            provenance=provenance,
-                            catalog_configuration_version=(
-                                target.catalog_configuration_version
-                            ),
-                        )
-                    )
-                    await self.catalog_repository.publish_candidate_snapshot(
-                        session,
-                        catalog_id=target.catalog.id,
-                        candidate_snapshot_id=candidate_snapshot_id,
-                        expected_current_snapshot_id=target.current_snapshot_id,
-                        expected_catalog_configuration_version=(
-                            target.catalog_configuration_version
-                        ),
-                        expected_projection_fingerprint=fingerprint,
-                        fence_latest_attempt=True,
-                        expected_latest_attempt_id=target.catalog.latest_attempt_id,
-                        reject_running_attempt=True,
-                    )
-            except RuntimeError as error:
-                if str(error) not in {
-                    "The current catalog snapshot changed.",
-                    "The integration catalog configuration generation changed.",
-                    "The latest catalog sync attempt changed.",
-                    "A provider catalog sync is running.",
-                }:
-                    raise
-                superseded += 1
-                continue
-            published += 1
-        return IntegrationCatalogReprojectionSummary(
-            scanned=len(targets),
-            published=published,
-            superseded=superseded,
-        )
-
-
-def _candidate_from_stored_entry(
-    entry: LLMCatalogEntry,
-) -> NormalizedModelCandidate:
-    """Reconstruct provider-visible evidence from one stored current entry."""
-    try:
-        developer = (
-            LLMModelDeveloper(entry.publisher)
-            if entry.publisher is not None
-            else LLMModelDeveloper.OTHER
-        )
-    except ValueError:
-        developer = LLMModelDeveloper.OTHER
-    return NormalizedModelCandidate(
-        provider=entry.provider,
-        model_identifier=entry.provider_model_identifier,
-        model_display_name=entry.display_name,
-        model_developer=developer,
-        model_family=entry.family,
-        normalized_capabilities=ModelCapabilities.model_validate(
-            entry.normalized_capabilities
-        ),
-        supported_execution_options=[
-            ModelExecutionOptionId(option)
-            for option in entry.supported_execution_options
-        ],
-        model_snapshot={
-            "source": "stored_current_catalog",
-            "provider": entry.provider.value,
-            "model_identifier": entry.provider_model_identifier,
-        },
-        source_metadata=entry.source_metadata,
-        last_refreshed_at=entry.created_at,
-    )
-
-
-def project_system_shadow_entries(
+def project_system_entries(
     *,
     provider: LLMProvider,
     source: ModelMetadataSourceSnapshot,

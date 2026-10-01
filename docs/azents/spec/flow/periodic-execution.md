@@ -45,7 +45,7 @@ code_paths:
   - infra/charts/azents/templates/server/scheduler-deployment.yaml.tpl
   - infra/charts/azents/templates/server/scheduler-pdb.yaml.tpl
 last_verified_at: 2026-10-01
-spec_version: 21
+spec_version: 22
 ---
 
 # Periodic Execution Flow Spec
@@ -88,7 +88,6 @@ in `scheduled_tasks`; the maintenance registry stores only the dispatcher
 definition that scans that domain.
 
 Registered tasks include `scheduler_heartbeat`, `model_catalog_system_projection`,
-`model_catalog_integration_reprojection`,
 `archived_session_retention_recalculation`, `archived_session_purge`,
 `session_auto_archive`, `agent_decommission`, `agent_runtime_removal`, `owner_lifecycle`,
 `file_lifecycle_cleanup`, `external_account_oauth_cleanup`, plus the user Scheduled
@@ -379,6 +378,9 @@ Model catalog source sync is a later consumer of this scheduler.
 
 ## Changelog
 
+- **2026-10-01** (spec_version 22) — Removed the temporary integration
+  reprojection task after cleanup validated generic provenance on every current
+  conversation catalog.
 - **2026-10-01** (spec_version 21) — Made the existing system catalog task
   publish generic metadata authority and added bounded, network-free integration
   catalog reprojection from stored current entries.
