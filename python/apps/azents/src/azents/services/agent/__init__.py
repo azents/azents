@@ -4,12 +4,10 @@ import dataclasses
 import datetime
 from typing import Annotated, Literal, assert_never
 
-from azcommon.datetime import tznow
 from azcommon.infra.s3.service import S3Service
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
 from pydantic import ValidationError
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent import (
     AgentModelSelection,
@@ -29,25 +27,26 @@ from azents.core.enums import (
 )
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.core.llm_mapping import to_runtime_model
-from azents.core.runtime_profile import RuntimeReconcileSourceKind
 from azents.core.s3.deps import get_s3_service
 from azents.engine.context.window import (
     EffectiveContextWindow,
     compute_effective_context_window_tokens,
     resolve_model_input_tokens,
 )
-from azents.rdb.deps import get_session_manager
-from azents.rdb.session import SessionManager
-from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent, AgentCreate, AgentUpdate, NotFound
-from azents.repos.agent_admin import AgentAdminRepository
-from azents.repos.agent_admin.data import AgentAdminCreate
-from azents.repos.agent_decommission import AgentDecommissionRepository
-from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.archived_session_retention import ArchivedSessionRetentionRepository
-from azents.repos.runtime_profile.repository import RuntimeProfileRepository
-from azents.repos.workspace_model_settings import WorkspaceModelSettingsRepository
-from azents.repos.workspace_user import WorkspaceUserRepository
+from azents.repos.agent_operations import (
+    AgentOperationAdminNotFound,
+    AgentOperationLastAdmin,
+    AgentOperationNotAdmin,
+    AgentOperationNotFound,
+    AgentOperationRuntimeProfileInvalid,
+    AgentOperationRuntimeProfileVersionConflict,
+    AgentOperationRuntimeProfileVersionRequired,
+    AgentOperationsRepository,
+    AgentOperationUnlimitedRetention,
+    AgentOperationWorkspaceMismatch,
+    AgentRuntimeProfileSelectionChange,
+)
 from azents.services.image_generation_catalog import ImageGenerationCatalogService
 from azents.services.llm_catalog import ModelCatalogReadService
 from azents.services.model_options import (
@@ -175,32 +174,13 @@ def _default_session_reasoning_effort(
 class AgentService:
     """Agent CRUD service."""
 
-    repository: Annotated[AgentRepository, Depends(AgentRepository)]
-    admin_repository: Annotated[AgentAdminRepository, Depends(AgentAdminRepository)]
-    workspace_model_settings_repository: Annotated[
-        WorkspaceModelSettingsRepository, Depends(WorkspaceModelSettingsRepository)
+    repository: Annotated[
+        AgentOperationsRepository,
+        Depends(AgentOperationsRepository),
     ]
     model_catalog_read_service: Annotated[ModelCatalogReadService, Depends()]
     image_generation_catalog_service: Annotated[
         ImageGenerationCatalogService, Depends()
-    ]
-    workspace_user_repository: Annotated[
-        WorkspaceUserRepository, Depends(WorkspaceUserRepository)
-    ]
-    agent_decommission_repository: Annotated[
-        AgentDecommissionRepository, Depends(AgentDecommissionRepository)
-    ]
-    archived_session_retention_repository: Annotated[
-        ArchivedSessionRetentionRepository,
-        Depends(ArchivedSessionRetentionRepository),
-    ]
-    agent_session_repository: Annotated[
-        AgentSessionRepository,
-        Depends(AgentSessionRepository),
-    ]
-    runtime_profile_repository: Annotated[
-        RuntimeProfileRepository,
-        Depends(RuntimeProfileRepository),
     ]
     runtime_profile_service: Annotated[
         RuntimeProfileWorkspaceService,
@@ -213,9 +193,6 @@ class AgentService:
     terminal_policy_invalidation_publisher: (
         TerminalPolicyInvalidationPublisherDependency
     )
-    session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
-    ]
 
     def _parse_model_parameters(
         self,
@@ -314,11 +291,9 @@ class AgentService:
         ModelRequired | ModelSelectionNotFound | InvalidSelectableModelOptions,
     ]:
         """Decide selectable model options for Agent creation."""
-        async with self.session_manager() as session:
-            settings = await self.workspace_model_settings_repository.get_or_create(
-                session,
-                create.workspace_id,
-            )
+        settings = await self.repository.get_workspace_model_settings(
+            create.workspace_id
+        )
 
         if create.selectable_model_options is not None:
             options_result = await self._normalize_option_inputs(
@@ -380,62 +355,48 @@ class AgentService:
             case _:
                 assert_never(params_result)
 
-        async with self.session_manager() as session:
-            runtime_profile_id: str | None = None
-            runtime_capability = AgentRuntimeCapability.NONE
-            if create.runtime_profile_id is not None:
-                try:
-                    await self.runtime_profile_service.require_available_agent_profile(
-                        session,
-                        workspace_id=create.workspace_id,
-                        profile_id=create.runtime_profile_id,
-                    )
-                except RuntimeProfileWorkspaceUnavailable as error:
-                    return Failure(RuntimeProfileSelectionInvalid(code=error.code))
-                runtime_profile_id = create.runtime_profile_id
-                runtime_capability = AgentRuntimeCapability.MANAGED
-
-            repo_create = AgentCreate(
-                workspace_id=create.workspace_id,
-                name=create.name,
-                model_selection=main_selection,
-                lightweight_model_selection=lightweight_selection,
-                selectable_model_options=model_options.selectable_model_options,
-                main_model_label=model_options.main_model_label,
-                lightweight_model_label=model_options.lightweight_model_label,
-                description=create.description,
-                model_parameters=create.model_parameters,
-                system_prompt=create.system_prompt,
-                enabled=create.enabled,
-                external_channel_default_response_mode=(
-                    ExternalChannelResponseMode.ALL_MESSAGES
-                ),
-                type=create.type,
-                runtime_profile_id=runtime_profile_id,
-                runtime_capability=runtime_capability,
-                terminal_enabled=create.terminal_enabled,
-                memory_enabled=create.memory_enabled,
-                tool_search_enabled=create.tool_search_enabled,
-                max_turns=create.max_turns,
-                auto_archive_ttl_days=create.auto_archive_ttl_days,
-                subagent_settings=create.subagent_settings,
-            )
-            agent = await self.repository.create(session, repo_create)
-            await self.admin_repository.create(
-                session,
-                AgentAdminCreate(
-                    agent_id=agent.id,
-                    workspace_user_id=creator_workspace_user_id,
-                ),
-            )
-            if runtime_capability is AgentRuntimeCapability.MANAGED:
-                await self.runtime_profile_repository.enqueue_reconcile_task(
-                    session,
-                    source_type=RuntimeReconcileSourceKind.AGENT_SELECTION,
-                    source_id=agent.id,
-                    source_version=str(agent.runtime_profile_selection_version),
-                    available_at=tznow(),
-                )
+        runtime_profile_id = create.runtime_profile_id
+        runtime_capability = (
+            AgentRuntimeCapability.MANAGED
+            if runtime_profile_id is not None
+            else AgentRuntimeCapability.NONE
+        )
+        repo_create = AgentCreate(
+            workspace_id=create.workspace_id,
+            name=create.name,
+            model_selection=main_selection,
+            lightweight_model_selection=lightweight_selection,
+            selectable_model_options=model_options.selectable_model_options,
+            main_model_label=model_options.main_model_label,
+            lightweight_model_label=model_options.lightweight_model_label,
+            description=create.description,
+            model_parameters=create.model_parameters,
+            system_prompt=create.system_prompt,
+            enabled=create.enabled,
+            external_channel_default_response_mode=(
+                ExternalChannelResponseMode.ALL_MESSAGES
+            ),
+            type=create.type,
+            runtime_profile_id=runtime_profile_id,
+            runtime_capability=runtime_capability,
+            terminal_enabled=create.terminal_enabled,
+            memory_enabled=create.memory_enabled,
+            tool_search_enabled=create.tool_search_enabled,
+            max_turns=create.max_turns,
+            auto_archive_ttl_days=create.auto_archive_ttl_days,
+            subagent_settings=create.subagent_settings,
+        )
+        create_result = await self.repository.create(
+            repo_create,
+            creator_workspace_user_id=creator_workspace_user_id,
+        )
+        match create_result:
+            case Success(agent):
+                pass
+            case Failure(AgentOperationRuntimeProfileInvalid(code)):
+                return Failure(RuntimeProfileSelectionInvalid(code=code))
+            case _:
+                assert_never(create_result)
         return Success(await self._build_output(agent, can_manage=True))
 
     async def list_by_workspace(
@@ -446,22 +407,18 @@ class AgentService:
         role: WorkspaceUserRole,
     ) -> AgentListOutput:
         """Fetch Agent list in workspace."""
-        async with self.session_manager() as session:
-            if role == WorkspaceUserRole.OWNER:
-                result = await self.repository.list_by_workspace(session, workspace_id)
-            else:
-                result = await self.repository.list_visible_by_workspace(
-                    session, workspace_id, workspace_user_id
-                )
+        result = await self.repository.list_by_workspace(
+            workspace_id,
+            workspace_user_id=workspace_user_id,
+            owner=role is WorkspaceUserRole.OWNER,
+        )
         if role is WorkspaceUserRole.OWNER:
             managed_agent_ids = {agent.id for agent in result.items}
         else:
-            async with self.session_manager() as session:
-                managed_agent_ids = await self.admin_repository.list_admin_agent_ids(
-                    session,
-                    workspace_user_id=workspace_user_id,
-                    agent_ids=[agent.id for agent in result.items],
-                )
+            managed_agent_ids = await self.repository.list_admin_agent_ids(
+                workspace_user_id=workspace_user_id,
+                agent_ids=[agent.id for agent in result.items],
+            )
         items = [
             await self._build_output(
                 agent,
@@ -483,18 +440,17 @@ class AgentService:
         NotFound | NotBelongToWorkspace | PrivateAgentAccessDenied,
     ]:
         """Fetch Agent by ID."""
-        async with self.session_manager() as session:
-            agent = await self.repository.get_by_id(session, agent_id)
+        agent = await self.repository.get_by_id(agent_id)
         if agent is None:
             return Failure(NotFound(agent_id=agent_id))
         if agent.workspace_id != workspace_id:
             return Failure(NotBelongToWorkspace(agent_id=agent_id))
         can_manage = role is WorkspaceUserRole.OWNER
         if not can_manage:
-            async with self.session_manager() as session:
-                can_manage = await self.admin_repository.is_admin(
-                    session, agent_id, workspace_user_id
-                )
+            can_manage = await self.repository.is_admin(
+                agent_id,
+                workspace_user_id,
+            )
         if agent.type == AgentType.PRIVATE and not can_manage:
             return Failure(PrivateAgentAccessDenied(agent_id=agent_id))
         return Success(await self._build_output(agent, can_manage=can_manage))
@@ -521,8 +477,7 @@ class AgentService:
         | RuntimeProfileSelectionVersionConflict,
     ]:
         """Update Agent by ID."""
-        async with self.session_manager() as session:
-            existing = await self.repository.get_by_id(session, agent_id)
+        existing = await self.repository.get_by_id(agent_id)
         if existing is None:
             return Failure(NotFound(agent_id=agent_id))
         if existing.workspace_id != workspace_id:
@@ -639,106 +594,32 @@ class AgentService:
         if "subagent_settings" in update:
             repo_update["subagent_settings"] = update["subagent_settings"]
 
-        async with self.session_manager() as session:
-            if "runtime_profile_id" in update:
-                locked = await self.repository.lock_by_id(session, agent_id)
-                if locked is None:
-                    return Failure(NotFound(agent_id=agent_id))
-                if locked.workspace_id != workspace_id:
-                    return Failure(NotBelongToWorkspace(agent_id=agent_id))
-                if (
-                    "runtime_profile_id" in update
-                    and (
-                        error_code := self._runtime_capability_update_error(
-                            locked.runtime_capability
-                        )
-                    )
-                    is not None
-                ):
-                    return Failure(RuntimeProfileSelectionInvalid(code=error_code))
-            if "runtime_profile_id" in update:
-                if "expected_runtime_profile_selection_version" not in update:
-                    return Failure(RuntimeProfileSelectionVersionRequired())
-                runtime_profile_id = update["runtime_profile_id"]
-                if runtime_profile_id is None:
-                    profile_repository = self.runtime_profile_repository
-                    clear_selection = (
-                        profile_repository.clear_agent_runtime_profile_selection
-                    )
-                    cleared = await clear_selection(
-                        session,
-                        agent_id=agent_id,
-                        expected_selection_version=update[
-                            "expected_runtime_profile_selection_version"
-                        ],
-                    )
-                    if not cleared:
-                        current = await self.repository.get_by_id(session, agent_id)
-                        if current is None:
-                            return Failure(NotFound(agent_id=agent_id))
-                        return Failure(
-                            RuntimeProfileSelectionVersionConflict(
-                                current_version=(
-                                    current.runtime_profile_selection_version
-                                )
-                            )
-                        )
-                else:
-                    try:
-                        require_available = (
-                            self.runtime_profile_service.require_available_agent_profile
-                        )
-                        await require_available(
-                            session,
-                            workspace_id=workspace_id,
-                            profile_id=runtime_profile_id,
-                        )
-                    except RuntimeProfileWorkspaceUnavailable as error:
-                        return Failure(RuntimeProfileSelectionInvalid(code=error.code))
-                    selected = await self.repository.replace_runtime_profile_selection(
-                        session,
-                        agent_id=agent_id,
-                        expected_version=update[
-                            "expected_runtime_profile_selection_version"
-                        ],
-                        runtime_profile_id=runtime_profile_id,
-                    )
-                    if selected is None:
-                        current = await self.repository.get_by_id(session, agent_id)
-                        if current is None:
-                            return Failure(NotFound(agent_id=agent_id))
-                        return Failure(
-                            RuntimeProfileSelectionVersionConflict(
-                                current_version=(
-                                    current.runtime_profile_selection_version
-                                )
-                            )
-                        )
-                    await self.runtime_profile_repository.enqueue_reconcile_task(
-                        session,
-                        source_type=RuntimeReconcileSourceKind.AGENT_SELECTION,
-                        source_id=selected.id,
-                        source_version=str(selected.runtime_profile_selection_version),
-                        available_at=tznow(),
-                    )
-            result = await self.repository.update_by_id(session, agent_id, repo_update)
-            if result.success and model_configuration_changed:
-                await (
-                    self.agent_session_repository.replace_stale_applied_inference_profiles
-                )(
-                    session,
-                    agent_id=agent_id,
-                    valid_model_target_labels=[
-                        option.label
-                        for option in model_options.selectable_model_options
-                    ],
-                    model_target_label=model_options.main_model_label,
-                    reasoning_effort=_default_session_reasoning_effort(
-                        model_parameters=model_parameters,
-                        model_selection=model_options.model_selection,
-                    ),
-                    enabled_execution_options=[],
-                )
+        runtime_profile_change = (
+            AgentRuntimeProfileSelectionChange(
+                profile_id=update["runtime_profile_id"],
+                expected_version=update.get(
+                    "expected_runtime_profile_selection_version"
+                ),
+            )
+            if "runtime_profile_id" in update
+            else None
+        )
+        result = await self.repository.update_by_id(
+            agent_id=agent_id,
+            workspace_id=workspace_id,
+            workspace_user_id=workspace_user_id,
+            update=repo_update,
+            runtime_profile_change=runtime_profile_change,
+            model_configuration_changed=model_configuration_changed,
+            valid_model_target_labels=[
+                option.label for option in model_options.selectable_model_options
+            ],
+            model_target_label=model_options.main_model_label,
+            reasoning_effort=_default_session_reasoning_effort(
+                model_parameters=model_parameters,
+                model_selection=model_options.model_selection,
+            ),
+        )
         match result:
             case Success(value):
                 if terminal_policy_changed:
@@ -752,7 +633,25 @@ class AgentService:
                     )
                 return Success(await self._build_output(value, can_manage=True))
             case Failure(error):
-                return Failure(error)
+                match error:
+                    case AgentOperationNotFound():
+                        return Failure(NotFound(agent_id=agent_id))
+                    case AgentOperationWorkspaceMismatch():
+                        return Failure(NotBelongToWorkspace(agent_id=agent_id))
+                    case AgentOperationNotAdmin():
+                        return Failure(NotAdmin(agent_id=agent_id))
+                    case AgentOperationRuntimeProfileInvalid(code):
+                        return Failure(RuntimeProfileSelectionInvalid(code=code))
+                    case AgentOperationRuntimeProfileVersionRequired():
+                        return Failure(RuntimeProfileSelectionVersionRequired())
+                    case AgentOperationRuntimeProfileVersionConflict(current_version):
+                        return Failure(
+                            RuntimeProfileSelectionVersionConflict(
+                                current_version=current_version
+                            )
+                        )
+                    case _:
+                        assert_never(error)
             case _:
                 assert_never(result)
 
@@ -768,8 +667,7 @@ class AgentService:
         NotFound | NotBelongToWorkspace | NotAdmin | UnlimitedRetention,
     ]:
         """Request durable Agent decommission."""
-        async with self.session_manager() as session:
-            existing = await self.repository.get_by_id(session, agent_id)
+        existing = await self.repository.get_by_id(agent_id)
         if existing is None:
             return Failure(NotFound(agent_id=agent_id))
         if existing.workspace_id != workspace_id:
@@ -779,33 +677,30 @@ class AgentService:
         )
         if admin_check is not None:
             return Failure(admin_check)
-        async with self.session_manager() as session:
-            settings = await self.archived_session_retention_repository.lock_settings(
-                session
-            )
-            if settings.archived_session_retention_days is None:
-                return Failure(UnlimitedRetention(agent_id=agent_id))
-            decommissioned = await self.repository.mark_decommissioning(
-                session,
-                agent_id,
-            )
-            if decommissioned is None:
-                return Failure(NotFound(agent_id=agent_id))
-            job = await self.agent_decommission_repository.create_or_get(
-                session,
-                agent_id=decommissioned.id,
-                workspace_id=decommissioned.workspace_id,
-                requested_by_workspace_user_id=workspace_user_id,
-            )
+        result = await self.repository.request_decommission(
+            agent_id=agent_id,
+            workspace_user_id=workspace_user_id,
+        )
+        match result:
+            case Success(request):
+                pass
+            case Failure(error):
+                match error:
+                    case AgentOperationNotFound():
+                        return Failure(NotFound(agent_id=agent_id))
+                    case AgentOperationUnlimitedRetention():
+                        return Failure(UnlimitedRetention(agent_id=agent_id))
+                    case _:
+                        assert_never(error)
         publisher = self.terminal_policy_invalidation_publisher
         await publisher.publish_terminal_policy_invalidation(
             TerminalPolicySourceInvalidation(
                 scope=TerminalPolicySourceScope.AGENT,
-                source_id=decommissioned.id,
-                source_version=decommissioned.updated_at.isoformat(),
+                source_id=request.agent.id,
+                source_version=request.agent.updated_at.isoformat(),
             )
         )
-        return Success(AgentDecommissionOutput(job=job))
+        return Success(AgentDecommissionOutput(job=request.job))
 
     async def list_admins(
         self,
@@ -814,14 +709,12 @@ class AgentService:
         workspace_id: str,
     ) -> Result[AgentAdminListOutput, NotFound | NotBelongToWorkspace]:
         """Fetch Agent admin list."""
-        async with self.session_manager() as session:
-            agent = await self.repository.get_by_id(session, agent_id)
+        agent = await self.repository.get_by_id(agent_id)
         if agent is None:
             return Failure(NotFound(agent_id=agent_id))
         if agent.workspace_id != workspace_id:
             return Failure(NotBelongToWorkspace(agent_id=agent_id))
-        async with self.session_manager() as session:
-            admins = await self.admin_repository.list_by_agent(session, agent_id)
+        admins = await self.repository.list_admins(agent_id)
         return Success(
             AgentAdminListOutput(
                 items=[
@@ -853,8 +746,7 @@ class AgentService:
         | WorkspaceUserNotFound,
     ]:
         """Add admin to Agent."""
-        async with self.session_manager() as session:
-            agent = await self.repository.get_by_id(session, agent_id)
+        agent = await self.repository.get_by_id(agent_id)
         if agent is None:
             return Failure(NotFound(agent_id=agent_id))
         if agent.workspace_id != workspace_id:
@@ -864,22 +756,15 @@ class AgentService:
         )
         if admin_check is not None:
             return Failure(admin_check)
-        async with self.session_manager() as session:
-            target_user = await self.workspace_user_repository.get(
-                session, target_workspace_user_id
-            )
+        target_user = await self.repository.get_workspace_user(target_workspace_user_id)
         if target_user is None or target_user.workspace_id != workspace_id:
             return Failure(
                 WorkspaceUserNotFound(workspace_user_id=target_workspace_user_id)
             )
-        async with self.session_manager() as session:
-            result = await self.admin_repository.create(
-                session,
-                AgentAdminCreate(
-                    agent_id=agent_id,
-                    workspace_user_id=target_workspace_user_id,
-                ),
-            )
+        result = await self.repository.create_admin(
+            agent_id=agent_id,
+            workspace_user_id=target_workspace_user_id,
+        )
         match result:
             case Success(value):
                 return Success(
@@ -917,8 +802,7 @@ class AgentService:
         | AdminNotFound,
     ]:
         """Remove admin from Agent."""
-        async with self.session_manager() as session:
-            agent = await self.repository.get_by_id(session, agent_id)
+        agent = await self.repository.get_by_id(agent_id)
         if agent is None:
             return Failure(NotFound(agent_id=agent_id))
         if agent.workspace_id != workspace_id:
@@ -928,25 +812,31 @@ class AgentService:
         )
         if admin_check is not None:
             return Failure(admin_check)
-        async with self.session_manager() as session:
-            count = await self.admin_repository.count_by_agent(session, agent_id)
-            if count <= 1:
-                return Failure(
-                    LastAdminCannotBeRemoved(
-                        agent_id=agent_id,
-                        workspace_user_id=target_workspace_user_id,
-                    )
-                )
-            deleted = await self.admin_repository.delete(
-                session, agent_id, target_workspace_user_id
-            )
-        if not deleted:
-            return Failure(
-                AdminNotFound(
-                    agent_id=agent_id,
-                    workspace_user_id=target_workspace_user_id,
-                )
-            )
+        result = await self.repository.remove_admin(
+            agent_id=agent_id,
+            workspace_user_id=target_workspace_user_id,
+        )
+        match result:
+            case Success():
+                pass
+            case Failure(error):
+                match error:
+                    case AgentOperationLastAdmin():
+                        return Failure(
+                            LastAdminCannotBeRemoved(
+                                agent_id=agent_id,
+                                workspace_user_id=target_workspace_user_id,
+                            )
+                        )
+                    case AgentOperationAdminNotFound():
+                        return Failure(
+                            AdminNotFound(
+                                agent_id=agent_id,
+                                workspace_user_id=target_workspace_user_id,
+                            )
+                        )
+                    case _:
+                        assert_never(error)
         publisher = self.terminal_policy_invalidation_publisher
         await publisher.publish_terminal_policy_invalidation(
             TerminalPolicySourceInvalidation(
@@ -971,8 +861,7 @@ class AgentService:
         NotFound | NotBelongToWorkspace | NotAdmin | AvatarUploadRejected,
     ]:
         """Issue presigned PUT ticket for avatar upload."""
-        async with self.session_manager() as session:
-            existing = await self.repository.get_by_id(session, agent_id)
+        existing = await self.repository.get_by_id(agent_id)
         if existing is None:
             return Failure(NotFound(agent_id=agent_id))
         if existing.workspace_id != workspace_id:
@@ -1013,8 +902,7 @@ class AgentService:
         NotFound | NotBelongToWorkspace | NotAdmin | AvatarUploadRejected,
     ]:
         """Validate uploaded avatar file and reflect it in DB."""
-        async with self.session_manager() as session:
-            existing = await self.repository.get_by_id(session, agent_id)
+        existing = await self.repository.get_by_id(agent_id)
         if existing is None:
             return Failure(NotFound(agent_id=agent_id))
         if existing.workspace_id != workspace_id:
@@ -1033,15 +921,25 @@ class AgentService:
             )
         except UploadValidationError as err:
             return Failure(AvatarUploadRejected(message=str(err)))
-        async with self.session_manager() as session:
-            update_result = await self.repository.update_avatar(
-                session, agent_id, stored
-            )
+        update_result = await self.repository.update_avatar(
+            agent_id=agent_id,
+            workspace_id=workspace_id,
+            workspace_user_id=workspace_user_id,
+            avatar=stored,
+        )
         match update_result:
             case Success(updated_agent):
                 pass
-            case Failure(_):
-                return Failure(NotFound(agent_id=agent_id))
+            case Failure(error):
+                match error:
+                    case AgentOperationNotFound():
+                        return Failure(NotFound(agent_id=agent_id))
+                    case AgentOperationWorkspaceMismatch():
+                        return Failure(NotBelongToWorkspace(agent_id=agent_id))
+                    case AgentOperationNotAdmin():
+                        return Failure(NotAdmin(agent_id=agent_id))
+                    case _:
+                        assert_never(error)
         return Success(await self._build_output(updated_agent, can_manage=True))
 
     async def remove_avatar(
@@ -1053,8 +951,7 @@ class AgentService:
         role: WorkspaceUserRole,
     ) -> Result[AgentOutput, NotFound | NotBelongToWorkspace | NotAdmin]:
         """Remove the current Avatar."""
-        async with self.session_manager() as session:
-            existing = await self.repository.get_by_id(session, agent_id)
+        existing = await self.repository.get_by_id(agent_id)
         if existing is None:
             return Failure(NotFound(agent_id=agent_id))
         if existing.workspace_id != workspace_id:
@@ -1064,13 +961,25 @@ class AgentService:
         )
         if admin_check is not None:
             return Failure(admin_check)
-        async with self.session_manager() as session:
-            update_result = await self.repository.update_avatar(session, agent_id, None)
+        update_result = await self.repository.update_avatar(
+            agent_id=agent_id,
+            workspace_id=workspace_id,
+            workspace_user_id=workspace_user_id,
+            avatar=None,
+        )
         match update_result:
             case Success(updated_agent):
                 pass
-            case Failure(_):
-                return Failure(NotFound(agent_id=agent_id))
+            case Failure(error):
+                match error:
+                    case AgentOperationNotFound():
+                        return Failure(NotFound(agent_id=agent_id))
+                    case AgentOperationWorkspaceMismatch():
+                        return Failure(NotBelongToWorkspace(agent_id=agent_id))
+                    case AgentOperationNotAdmin():
+                        return Failure(NotAdmin(agent_id=agent_id))
+                    case _:
+                        assert_never(error)
         return Success(await self._build_output(updated_agent, can_manage=True))
 
     async def _build_output(
@@ -1233,10 +1142,10 @@ class AgentService:
         """Check whether admin or owner."""
         if role == WorkspaceUserRole.OWNER:
             return None
-        async with self.session_manager() as session:
-            is_admin = await self.admin_repository.is_admin(
-                session, agent_id, workspace_user_id
-            )
+        is_admin = await self.repository.is_admin(
+            agent_id,
+            workspace_user_id,
+        )
         if not is_admin:
             return NotAdmin(agent_id=agent_id)
         return None

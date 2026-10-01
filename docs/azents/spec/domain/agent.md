@@ -29,6 +29,7 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/model_candidate_chain_cutover.py
   - python/apps/azents/src/azents/rdb/models/runtime_profile.py
   - python/apps/azents/src/azents/repos/agent/**
+  - python/apps/azents/src/azents/repos/agent_operations.py
   - python/apps/azents/src/azents/repos/agent_admin/**
   - python/apps/azents/src/azents/repos/agent_automatic_project/**
   - python/apps/azents/src/azents/repos/agent_decommission/**
@@ -115,7 +116,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/default-response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack
-last_verified_at: 2026-09-29
+last_verified_at: 2026-10-01
 spec_version: 84
 ---
 
