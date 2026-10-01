@@ -30,10 +30,7 @@ from azents.engine.events.protocols import (
     SessionHeadRepository,
     TranscriptRepository,
 )
-from azents.engine.events.tool_calls import (
-    finalize_tool_result,
-    tool_call_external_id,
-)
+from azents.engine.events.tool_calls import tool_call_external_id
 from azents.engine.events.types import (
     ActiveToolCall,
     AssistantMessagePayload,
@@ -61,6 +58,9 @@ from azents.repos.agent_execution import (
 from azents.repos.agent_execution.data import EventCreate
 from azents.repos.engine_execution_operation import (
     EngineExecutionOperationRepository,
+)
+from azents.repos.engine_tool_result_operation import (
+    EngineToolResultOperationRepository,
 )
 from azents.repos.session_execution import (
     CanonicalExecutionOwnerGenerationStaleError,
@@ -342,12 +342,17 @@ class AgentRunExecution[
         self.pre_model_lower_hook = pre_model_lower_hook
         self.model_file_pin_repo = model_file_pin_repo
         self.run_repo = run_repo or AgentRunRepository()
+        self.transcript_repo = transcript_repo or EventTranscriptRepository()
         self.operation_repository = EngineExecutionOperationRepository(
             session_manager=session_manager,
             run_repository=self.run_repo,
             model_file_pin_repository=model_file_pin_repo,
         )
-        self.transcript_repo = transcript_repo or EventTranscriptRepository()
+        self.tool_result_operation_repository = EngineToolResultOperationRepository(
+            session_manager=session_manager,
+            run_repository=self.run_repo,
+            transcript_repository=self.transcript_repo,
+        )
         self.session_repo = session_repo
         self.terminal_finalization_coordinator = terminal_finalization_coordinator
         self.system_prompt_snapshot_repo = system_prompt_snapshot_repo
@@ -1108,23 +1113,19 @@ class AgentRunExecution[
                         )
                     ],
                 )
-                async with self.session_manager() as session:
-                    event = await self._finalize_tool_result_in_session(
-                        session,
-                        run_id=run_id,
-                        session_id=session_id,
-                        call=call,
-                        result=failed,
-                    )
-        else:
-            async with self.session_manager() as session:
-                event = await self._finalize_tool_result_in_session(
-                    session,
+                event = await self.tool_result_operation_repository.finalize(
                     run_id=run_id,
                     session_id=session_id,
                     call=call,
-                    result=result,
+                    result=failed,
                 )
+        else:
+            event = await self.tool_result_operation_repository.finalize(
+                run_id=run_id,
+                session_id=session_id,
+                call=call,
+                result=result,
+            )
         if self.output_sink is not None:
             await self.output_sink(
                 NormalizedAdapterOutput(needs_follow_up=False, events=[]),
@@ -1142,10 +1143,8 @@ class AgentRunExecution[
         result: ClientToolResultPayload,
     ) -> Event:
         """Finalize one tool result in the caller's DB transaction."""
-        return await finalize_tool_result(
+        return await self.tool_result_operation_repository.finalize_in_session(
             session,
-            run_repo=self.run_repo,
-            transcript_repo=self.transcript_repo,
             run_id=run_id,
             session_id=session_id,
             call=call,

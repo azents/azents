@@ -90,6 +90,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/engine_read.py
   - python/apps/azents/src/azents/repos/engine_event_operation.py
   - python/apps/azents/src/azents/repos/engine_execution_operation.py
+  - python/apps/azents/src/azents/repos/engine_tool_result_operation.py
   - python/apps/azents/src/azents/repos/session_execution/**
   - python/apps/azents/src/azents/repos/model_candidate_health/**
   - python/apps/azents/src/azents/services/model_listing/**
@@ -116,7 +117,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
   - typescript/apps/azents-web/messages/*/chat.json
 last_verified_at: 2026-10-01
-spec_version: 193
+spec_version: 194
 ---
 
 # Agent Execution Loop
@@ -1454,6 +1455,13 @@ publication remains after the phase transaction closes. Cancelled tool-result
 projection is pure and opens no database session before its ordinary fenced
 result-finalization operation.
 
+Ordinary client tool results and generated-file admission failures use one
+completed repository operation that appends the deterministic result Event,
+locks the Run, removes only the matching active call, and selects
+`executing_tools` or `appending_events` before returning. Successful
+generated-file metadata admission retains the same in-session primitive so file
+metadata and the result Event remain one atomic transaction.
+
 ExchangeFile, ModelFile, and Artifact creation preallocates the entity ID and object key, closes its
 authorization snapshot, uploads the blob without an open database session, and then revalidates
 ownership in the short metadata transaction. A failed revalidation or metadata commit deletes the
@@ -1622,6 +1630,10 @@ icon.
 
 ## Changelog
 
+- **2026-10-01** (spec_version 194) — Moved ordinary and
+  generated-file-failure tool-result admission into completed repository
+  operations while retaining the same database-only primitive for atomic
+  generated-file and user-stop compositions.
 - **2026-10-01** (spec_version 193) — Moved standalone execution phase updates,
   conditional STOPPING transitions, and ModelFile pin admission into completed
   repository operations, and removed the obsolete database scope around pure
