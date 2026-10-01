@@ -29,6 +29,7 @@ class ModelOperationKind(enum.StrEnum):
     FOREGROUND = "foreground"
     COMPACTION = "compaction"
     TITLE = "title"
+    HISTORICAL_MEMORY = "historical_memory"
 
 
 class ModelOperationCandidateRole(enum.StrEnum):

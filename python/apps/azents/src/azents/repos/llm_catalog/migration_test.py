@@ -20,7 +20,8 @@ _SHADOW_REVISION = "91dd4bb71ef6"
 _CLEANUP_REVISION = "d29225579621"
 _NAMESPACE_REVISION = "af654664e6b6"
 _RECONCILIATION_REVISION = "a0dac2fe3ca2"
-_HEAD_REVISION = "cda14157c46c"
+_TOOLKIT_REVISION = "cda14157c46c"
+_HISTORICAL_MEMORY_REVISION = "459a4285993c"
 
 
 @dataclass(frozen=True)
@@ -191,12 +192,15 @@ def _seed_ready_cutover(engine: Engine) -> None:
 def test_fresh_upgrade_has_only_generic_source_schema(
     migration_database: _MigrationDatabase,
 ) -> None:
-    """A fresh database reaches the Toolkit head without legacy objects."""
+    """A fresh database reaches the Historical head without legacy objects."""
     scripts = ScriptDirectory.from_config(migration_database.config)
-    assert scripts.get_heads() == [_HEAD_REVISION]
-    head = scripts.get_revision(_HEAD_REVISION)
+    assert scripts.get_heads() == [_HISTORICAL_MEMORY_REVISION]
+    head = scripts.get_revision(_HISTORICAL_MEMORY_REVISION)
     assert head is not None
-    assert head.down_revision == _RECONCILIATION_REVISION
+    assert head.down_revision == _TOOLKIT_REVISION
+    toolkit = scripts.get_revision(_TOOLKIT_REVISION)
+    assert toolkit is not None
+    assert toolkit.down_revision == _RECONCILIATION_REVISION
     reconciliation = scripts.get_revision(_RECONCILIATION_REVISION)
     assert reconciliation is not None
     assert reconciliation.down_revision == _NAMESPACE_REVISION
@@ -204,8 +208,19 @@ def test_fresh_upgrade_has_only_generic_source_schema(
     assert namespace is not None
     assert namespace.down_revision == _CLEANUP_REVISION
     command.upgrade(migration_database.config, "head")
-    _assert_revision(migration_database.engine, _HEAD_REVISION)
+    _assert_revision(migration_database.engine, _HISTORICAL_MEMORY_REVISION)
     _assert_cleanup_schema(migration_database.engine)
+
+
+def test_historical_memory_revision_extends_toolkit_head(
+    migration_database: _MigrationDatabase,
+) -> None:
+    """Historical Memory preserves the complete canonical Toolkit chain."""
+    scripts = ScriptDirectory.from_config(migration_database.config)
+    assert scripts.get_heads() == [_HISTORICAL_MEMORY_REVISION]
+    historical_memory = scripts.get_revision(_HISTORICAL_MEMORY_REVISION)
+    assert historical_memory is not None
+    assert historical_memory.down_revision == _TOOLKIT_REVISION
 
 
 def test_ready_cutover_upgrade_removes_legacy_state_and_preserves_current(
