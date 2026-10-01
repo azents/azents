@@ -16,6 +16,10 @@ from pathlib import Path
 
 METRIC = "pytest-call-total-v1"
 _LANE = re.compile(r"[a-z][a-z0-9-]*-[1-9][0-9]*")
+_SUMMARY_LANE = re.compile(
+    r"^### (?P<lane>[a-z][a-z0-9-]*-[1-9][0-9]*) — ",
+    re.MULTILINE,
+)
 _SHA = re.compile(r"[0-9a-f]{40}")
 Runner = Callable[[Sequence[str]], str]
 
@@ -67,13 +71,29 @@ def _seconds(text: str) -> Decimal:
     return value
 
 
+def _lane_name(path: Path, root: Path) -> str:
+    lane = path.parent.name.removeprefix("e2e-observability-")
+    if _LANE.fullmatch(lane):
+        return lane
+    if path.parent != root:
+        raise EvidenceError("invalid_lane_artifacts")
+    summary_path = path.with_name("summary.md")
+    try:
+        matches = _SUMMARY_LANE.findall(summary_path.read_text(encoding="utf-8"))
+    except OSError as error:
+        raise EvidenceError("invalid_lane_artifacts") from error
+    if len(matches) != 1:
+        raise EvidenceError("invalid_lane_artifacts")
+    return matches[0]
+
+
 def load_lanes(root: Path) -> LaneEvidence:
     """Read complete pytest call totals and retain setup/wall diagnostics."""
     lanes: dict[str, Decimal] = {}
     diagnostics: dict[str, Mapping[str, Decimal]] = {}
     for path in root.glob("**/pytest-timings.jsonl"):
-        lane = path.parent.name.removeprefix("e2e-observability-")
-        if not _LANE.fullmatch(lane) or lane in lanes:
+        lane = _lane_name(path, root)
+        if lane in lanes:
             raise EvidenceError("invalid_lane_artifacts")
         phases = {phase: Decimal(0) for phase in ("setup", "call", "teardown")}
         seen: set[tuple[str, str]] = set()

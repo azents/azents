@@ -21,29 +21,32 @@ _HEAD = "a" * 40
 _BASE = "b" * 40
 
 
+def _lane_files(directory: Path, lane: str, value: str) -> None:
+    directory.mkdir(parents=True, exist_ok=True)
+    records = [
+        {
+            "record_type": "test_phase",
+            "node_id": f"tests::{lane}",
+            "phase": phase,
+            "duration_seconds": duration,
+            "outcome": "passed",
+        }
+        for phase, duration in (("setup", 10), ("call", value), ("teardown", 2))
+    ]
+    (directory / "pytest-timings.jsonl").write_text(
+        "\n".join(json.dumps(record) for record in records) + "\n",
+        encoding="utf-8",
+    )
+    (directory / "junit.xml").write_text(
+        f'<testsuite><testcase classname="tests" name="{lane}"/></testsuite>',
+        encoding="utf-8",
+    )
+    (directory / "lane-duration-seconds.txt").write_text("999", encoding="utf-8")
+
+
 def _lanes(root: Path, values: dict[str, str]) -> None:
     for lane, value in values.items():
-        directory = root / f"e2e-observability-{lane}"
-        directory.mkdir(parents=True, exist_ok=True)
-        records = [
-            {
-                "record_type": "test_phase",
-                "node_id": f"tests::{lane}",
-                "phase": phase,
-                "duration_seconds": duration,
-                "outcome": "passed",
-            }
-            for phase, duration in (("setup", 10), ("call", value), ("teardown", 2))
-        ]
-        (directory / "pytest-timings.jsonl").write_text(
-            "\n".join(json.dumps(record) for record in records) + "\n",
-            encoding="utf-8",
-        )
-        (directory / "junit.xml").write_text(
-            f'<testsuite><testcase classname="tests" name="{lane}"/></testsuite>',
-            encoding="utf-8",
-        )
-        (directory / "lane-duration-seconds.txt").write_text("999", encoding="utf-8")
+        _lane_files(root / f"e2e-observability-{lane}", lane, value)
 
 
 def test_uses_maximum_and_fails_exact_twenty_percent() -> None:
@@ -71,6 +74,34 @@ def test_call_phase_is_the_measurement_source(tmp_path: Path) -> None:
         "teardown": Decimal("2"),
         "wall": Decimal("999"),
     }
+
+
+def test_single_downloaded_artifact_uses_summary_lane(tmp_path: Path) -> None:
+    _lane_files(tmp_path, "web-1", "367")
+    (tmp_path / "summary.md").write_text(
+        "### web-1 — ✅ Passed\n",
+        encoding="utf-8",
+    )
+    evidence = load_lanes(tmp_path)
+    assert evidence.lanes == {"web-1": Decimal("367")}
+    assert evidence.diagnostics["web-1"]["wall"] == Decimal("999")
+
+
+@pytest.mark.parametrize(
+    "summary",
+    [
+        "",
+        "### web-1 — ✅ Passed\n### web-2 — ✅ Passed\n",
+    ],
+)
+def test_single_downloaded_artifact_requires_one_summary_lane(
+    tmp_path: Path,
+    summary: str,
+) -> None:
+    _lane_files(tmp_path, "web-1", "367")
+    (tmp_path / "summary.md").write_text(summary, encoding="utf-8")
+    with pytest.raises(EvidenceError, match="invalid_lane_artifacts"):
+        load_lanes(tmp_path)
 
 
 @pytest.mark.parametrize("value", ["", "NaN", "Infinity", "-1"])
