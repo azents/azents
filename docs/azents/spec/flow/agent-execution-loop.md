@@ -35,6 +35,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/external_channel/repository.py
   - python/apps/azents/src/azents/repos/external_channel/work.py
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
+  - python/apps/azents/src/azents/repos/idle_continuation.py
   - python/apps/azents/src/azents/engine/context/compaction.py
   - python/apps/azents/src/azents/engine/context/window.py
   - python/apps/azents/src/azents/engine/model_stream.py

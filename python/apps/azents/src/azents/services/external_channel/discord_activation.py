@@ -26,6 +26,9 @@ from azents.core.external_channel_provider import (
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.repos.discord_connection_operations import (
+    DiscordConnectionOperationRepository,
+)
 from azents.repos.external_channel.data import ExternalChannelConnectionConfiguration
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.services.external_channel.connection import (
@@ -178,11 +181,7 @@ class DiscordConnectionActivationService:
         connection_id: str,
     ) -> ExternalChannelConnectionStatusSnapshot:
         """Activate or persist a safe reason for one Discord connection failure."""
-        async with self.session_manager() as session:
-            connection = await self.repository.get_connection_configuration(
-                session,
-                connection_id=connection_id,
-            )
+        connection = await self._operations().get_configuration(connection_id)
         if connection is None or connection.encrypted_credentials is None:
             raise ValueError("Discord connection is not configured.")
         try:
@@ -234,21 +233,16 @@ class DiscordConnectionActivationService:
                 callback_base_url=self.config.external_channel_discord_callback_url,
                 selector=selector,
             )
-            async with self.session_manager() as session:
-                prepared = await self.repository.prepare_discord_callback(
-                    session,
-                    connection_id=connection_id,
-                    expected_encrypted_credentials=encrypted_credentials,
-                    expected_configuration_generation=configuration_generation,
-                    provider_app_id=metadata.application_id,
-                    interaction_public_key=metadata.verify_key,
-                    callback_selector_hash=selector_hash,
-                )
-                if not prepared:
-                    raise DiscordActivationConfigurationError(
-                        "discord_authority_changed"
-                    )
-                await session.commit()
+            prepared = await self._operations().prepare_callback(
+                connection_id=connection_id,
+                expected_encrypted_credentials=encrypted_credentials,
+                expected_configuration_generation=configuration_generation,
+                provider_app_id=metadata.application_id,
+                interaction_public_key=metadata.verify_key,
+                callback_selector_hash=selector_hash,
+            )
+            if not prepared:
+                raise DiscordActivationConfigurationError("discord_authority_changed")
             command_set: DiscordGuildCommandSetCapability
             failure_stage: DiscordActivationFailureStage = "provider_callback"
             try:
@@ -283,24 +277,20 @@ class DiscordConnectionActivationService:
                     error=error,
                     failure_stage=failure_stage,
                 )
-        async with self.session_manager() as session:
-            capabilities = _discord_capabilities()
-            activated = await self.repository.activate_discord_connection(
-                session,
-                connection_id=connection_id,
-                expected_encrypted_credentials=encrypted_credentials,
-                expected_configuration_generation=configuration_generation,
-                provider_app_id=metadata.application_id,
-                provider_tenant_id=target_guild_id,
-                provider_bot_user_id=bot_user_id,
-                interaction_public_key=metadata.verify_key,
-                command_set=command_set.model_dump(mode="json"),
-                capabilities=capabilities.model_dump(mode="json"),
-                callback_selector_hash=selector_hash,
-                checked_at=datetime.datetime.now(datetime.UTC),
-            )
-            if activated is not None:
-                await session.commit()
+        capabilities = _discord_capabilities()
+        activated = await self._operations().activate(
+            connection_id=connection_id,
+            expected_encrypted_credentials=encrypted_credentials,
+            expected_configuration_generation=configuration_generation,
+            provider_app_id=metadata.application_id,
+            provider_tenant_id=target_guild_id,
+            provider_bot_user_id=bot_user_id,
+            interaction_public_key=metadata.verify_key,
+            command_set=command_set.model_dump(mode="json"),
+            capabilities=capabilities.model_dump(mode="json"),
+            callback_selector_hash=selector_hash,
+            checked_at=datetime.datetime.now(datetime.UTC),
+        )
         if activated is None:
             error = DiscordActivationConfigurationError("discord_authority_changed")
             cleared = await self._clear_prepared_callback(
@@ -346,17 +336,13 @@ class DiscordConnectionActivationService:
         """Fence and retain a safe failure code without retaining exception text."""
         failure_code = discord_activation_failure_code(error)
         checked_at = datetime.datetime.now(datetime.UTC)
-        async with self.session_manager() as session:
-            failed = await self.repository.record_discord_activation_failure(
-                session,
-                connection_id=connection_id,
-                expected_encrypted_credentials=expected_encrypted_credentials,
-                expected_configuration_generation=expected_configuration_generation,
-                failure_code=failure_code,
-                checked_at=checked_at,
-            )
-            if failed is not None:
-                await session.commit()
+        failed = await self._operations().record_activation_failure(
+            connection_id=connection_id,
+            expected_encrypted_credentials=expected_encrypted_credentials,
+            expected_configuration_generation=expected_configuration_generation,
+            failure_code=failure_code,
+            checked_at=checked_at,
+        )
         if failed is None:
             raise DiscordActivationConfigurationError(
                 "discord_authority_changed"
@@ -398,17 +384,20 @@ class DiscordConnectionActivationService:
         callback_selector_hash: str,
     ) -> bool:
         """Clear one fenced provisional callback without retaining its selector."""
-        async with self.session_manager() as session:
-            cleared = await self.repository.clear_prepared_discord_callback(
-                session,
-                connection_id=connection_id,
-                expected_encrypted_credentials=expected_encrypted_credentials,
-                expected_configuration_generation=expected_configuration_generation,
-                callback_selector_hash=callback_selector_hash,
-                checked_at=datetime.datetime.now(datetime.UTC),
-            )
-            await session.commit()
-        return cleared
+        return await self._operations().clear_prepared_callback(
+            connection_id=connection_id,
+            expected_encrypted_credentials=expected_encrypted_credentials,
+            expected_configuration_generation=expected_configuration_generation,
+            callback_selector_hash=callback_selector_hash,
+            checked_at=datetime.datetime.now(datetime.UTC),
+        )
+
+    def _operations(self) -> DiscordConnectionOperationRepository:
+        """Bind completed Discord operations to current dependencies."""
+        return DiscordConnectionOperationRepository(
+            session_manager=self.session_manager,
+            external_channel_repository=self.repository,
+        )
 
 
 def _target_guild_id(provider_config: dict[str, object] | None) -> str:

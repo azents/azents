@@ -33,6 +33,7 @@ from azents.core.external_model_settings import (
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.repos.discord_settings_read import DiscordSettingsReadRepository
 from azents.repos.external_channel.data import ExternalChannelInteraction
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.services.external_account_link import ExternalAccountLinkService
@@ -608,11 +609,10 @@ class DiscordSettingsResponseService:
         context: DiscordSettingsContext,
     ) -> None:
         """Bind any signed private control to its original admitted actor."""
-        async with self.session_manager() as session:
-            origin = await self.repository.lock_interaction(
-                session,
-                interaction_id=origin_interaction_id,
-            )
+        origin = await DiscordSettingsReadRepository(
+            session_manager=self.session_manager,
+            external_channel_repository=self.repository,
+        ).get_interaction(origin_interaction_id)
         if not _origin_matches(origin=origin, context=context):
             raise ExternalChannelParticipationError(
                 "Discord conversation settings control is unavailable."

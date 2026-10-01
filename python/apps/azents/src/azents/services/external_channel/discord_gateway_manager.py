@@ -18,6 +18,9 @@ from azents.core.enums import ExternalChannelIngressProfile
 from azents.core.external_channel_provider import DiscordConnectionCredentials
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.repos.discord_connection_operations import (
+    DiscordConnectionOperationRepository,
+)
 from azents.repos.external_channel.data import (
     DiscordGatewayTypingTarget,
     ExternalChannelConnectionConfiguration,
@@ -165,8 +168,7 @@ class DiscordGatewayManagerService:
                 await asyncio.gather(*tasks.values(), return_exceptions=True)
 
     async def _list_connection_ids(self) -> list[str]:
-        async with self.session_manager() as session:
-            return await self.repository.list_discord_gateway_connection_ids(session)
+        return await self._operations().list_gateway_connection_ids()
 
     async def _run_owned_connection(
         self,
@@ -360,16 +362,12 @@ class DiscordGatewayManagerService:
         connection_id: str,
     ) -> ExternalChannelIngressLeaseClaim | None:
         now = _utc_now()
-        async with self.session_manager() as session:
-            claim = await self.repository.claim_discord_gateway_lease(
-                session,
-                connection_id=connection_id,
-                lease_owner=self.manager_id,
-                now=now,
-                lease_until=now + self._lease_duration(),
-            )
-            await session.commit()
-            return claim
+        return await self._operations().claim_gateway_lease(
+            connection_id=connection_id,
+            lease_owner=self.manager_id,
+            now=now,
+            lease_until=now + self._lease_duration(),
+        )
 
     async def _owned_configuration(
         self,
@@ -377,14 +375,12 @@ class DiscordGatewayManagerService:
         connection_id: str,
         lease: ExternalChannelIngressLease,
     ) -> ExternalChannelConnectionConfiguration | None:
-        async with self.session_manager() as session:
-            return await self.repository.get_owned_discord_gateway_configuration(
-                session,
-                connection_id=connection_id,
-                lease_owner=self.manager_id,
-                lease_generation=lease.lease_generation,
-                now=_utc_now(),
-            )
+        return await self._operations().get_owned_gateway_configuration(
+            connection_id=connection_id,
+            lease_owner=self.manager_id,
+            lease_generation=lease.lease_generation,
+            now=_utc_now(),
+        )
 
     async def _renew(
         self,
@@ -393,17 +389,13 @@ class DiscordGatewayManagerService:
         lease: ExternalChannelIngressLease,
     ) -> bool:
         now = _utc_now()
-        async with self.session_manager() as session:
-            renewed = await self.repository.renew_discord_gateway_lease(
-                session,
-                connection_id=connection_id,
-                lease_owner=self.manager_id,
-                lease_generation=lease.lease_generation,
-                now=now,
-                lease_until=now + self._lease_duration(),
-            )
-            await session.commit()
-            return renewed
+        return await self._operations().renew_gateway_lease(
+            connection_id=connection_id,
+            lease_owner=self.manager_id,
+            lease_generation=lease.lease_generation,
+            now=now,
+            lease_until=now + self._lease_duration(),
+        )
 
     def _lease_override(self) -> ExternalChannelGatewayLeaseConfig | None:
         """Return the validated testenv lease override when configured."""
@@ -438,14 +430,12 @@ class DiscordGatewayManagerService:
         lease: ExternalChannelIngressLease,
     ) -> tuple[DiscordGatewayTypingTarget, ...]:
         """Load current typing targets only under the owning Gateway lease fence."""
-        async with self.session_manager() as session:
-            targets = await self.repository.list_owned_discord_typing_targets(
-                session,
-                connection_id=connection_id,
-                lease_owner=self.manager_id,
-                lease_generation=lease.lease_generation,
-                now=_utc_now(),
-            )
+        targets = await self._operations().list_owned_typing_targets(
+            connection_id=connection_id,
+            lease_owner=self.manager_id,
+            lease_generation=lease.lease_generation,
+            now=_utc_now(),
+        )
         if targets is None:
             raise DiscordGatewayLeaseLost("Discord Gateway typing authority is stale.")
         return targets
@@ -457,17 +447,13 @@ class DiscordGatewayManagerService:
         lease: ExternalChannelIngressLease,
         reason: str,
     ) -> bool:
-        async with self.session_manager() as session:
-            recorded = await self.repository.record_discord_gateway_gap(
-                session,
-                connection_id=connection_id,
-                lease_owner=self.manager_id,
-                lease_generation=lease.lease_generation,
-                now=_utc_now(),
-                reason=reason,
-            )
-            await session.commit()
-            return recorded
+        return await self._operations().record_gateway_gap(
+            connection_id=connection_id,
+            lease_owner=self.manager_id,
+            lease_generation=lease.lease_generation,
+            now=_utc_now(),
+            reason=reason,
+        )
 
     async def _mark_active(
         self,
@@ -475,16 +461,12 @@ class DiscordGatewayManagerService:
         connection_id: str,
         lease: ExternalChannelIngressLease,
     ) -> bool:
-        async with self.session_manager() as session:
-            active = await self.repository.mark_discord_gateway_active(
-                session,
-                connection_id=connection_id,
-                lease_owner=self.manager_id,
-                lease_generation=lease.lease_generation,
-                now=_utc_now(),
-            )
-            await session.commit()
-            return active
+        return await self._operations().mark_gateway_active(
+            connection_id=connection_id,
+            lease_owner=self.manager_id,
+            lease_generation=lease.lease_generation,
+            now=_utc_now(),
+        )
 
     async def _release(
         self,
@@ -492,16 +474,12 @@ class DiscordGatewayManagerService:
         connection_id: str,
         lease: ExternalChannelIngressLease,
     ) -> bool:
-        async with self.session_manager() as session:
-            released = await self.repository.release_discord_gateway_lease(
-                session,
-                connection_id=connection_id,
-                lease_owner=self.manager_id,
-                lease_generation=lease.lease_generation,
-                now=_utc_now(),
-            )
-            await session.commit()
-            return released
+        return await self._operations().release_gateway_lease(
+            connection_id=connection_id,
+            lease_owner=self.manager_id,
+            lease_generation=lease.lease_generation,
+            now=_utc_now(),
+        )
 
     async def _mark_reconnect_required(
         self,
@@ -510,19 +488,20 @@ class DiscordGatewayManagerService:
         lease: ExternalChannelIngressLease,
         reason: str,
     ) -> bool:
-        async with self.session_manager() as session:
-            terminalized = (
-                await self.repository.mark_discord_gateway_reconnect_required(
-                    session,
-                    connection_id=connection_id,
-                    lease_owner=self.manager_id,
-                    lease_generation=lease.lease_generation,
-                    now=_utc_now(),
-                    reason=reason,
-                )
-            )
-            await session.commit()
-            return terminalized
+        return await self._operations().mark_gateway_reconnect_required(
+            connection_id=connection_id,
+            lease_owner=self.manager_id,
+            lease_generation=lease.lease_generation,
+            now=_utc_now(),
+            reason=reason,
+        )
+
+    def _operations(self) -> DiscordConnectionOperationRepository:
+        """Bind completed Discord operations to current dependencies."""
+        return DiscordConnectionOperationRepository(
+            session_manager=self.session_manager,
+            external_channel_repository=self.repository,
+        )
 
     async def _admit_gateway_event(
         self,

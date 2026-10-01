@@ -24,6 +24,8 @@ code_paths:
   - python/apps/azents/src/azents/services/external_channel/discord_http.py
   - python/apps/azents/src/azents/services/external_channel/discord_interaction.py
   - python/apps/azents/src/azents/services/external_channel/discord_settings.py
+  - python/apps/azents/src/azents/repos/discord_settings_read.py
+  - python/apps/azents/src/azents/repos/discord_connection_operations.py
   - python/apps/azents/src/azents/services/external_channel/discord_settings_scope.py
   - python/apps/azents/src/azents/services/external_channel/discord_account_link.py
   - python/apps/azents/src/azents/services/external_channel/discord_model_settings.py
@@ -82,7 +84,7 @@ code_paths:
 api_routes:
   - /external-channel/v1/slack/events
   - /external-channel/v1/discord/interactions/{selector}
-last_verified_at: 2026-09-13
+last_verified_at: 2026-10-01
 spec_version: 63
 ---
 
