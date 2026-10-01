@@ -37,6 +37,9 @@ from azents.engine.tools.mcp_base import McpBasedToolkit
 from azents.rdb.session import SessionManager
 from azents.repos.mcp_oauth_connection import MCPOAuthConnectionRepository
 from azents.repos.mcp_oauth_connection.data import MCPOAuthConnection
+from azents.repos.mcp_oauth_connection.operations import (
+    MCPOAuthRuntimeOperationRepository,
+)
 from azents.services.artifact import ArtifactService
 
 logger = logging.getLogger(__name__)
@@ -303,8 +306,11 @@ async def _ensure_oauth_connection_token(
     :param proxy_url: egress proxy URL
     :return: OAuth connection or None
     """
-    async with session_manager() as session:
-        connection = await connection_repo.get_by_toolkit_id(session, toolkit_id)
+    operations = MCPOAuthRuntimeOperationRepository(
+        session_manager=session_manager,
+        connection_repository=connection_repo,
+    )
+    connection = await operations.load(toolkit_id=toolkit_id)
     if connection is None or connection.status != MCPOAuthConnectionStatus.CONNECTED:
         return connection
     if not _token_needs_refresh(connection):
@@ -337,9 +343,12 @@ async def _refresh_oauth_connection(
     :param force: Refresh even when token is not near expiry
     :return: Refreshed or existing OAuth connection
     """
+    operations = MCPOAuthRuntimeOperationRepository(
+        session_manager=session_manager,
+        connection_repository=connection_repo,
+    )
     if connection is None:
-        async with session_manager() as session:
-            connection = await connection_repo.get_by_toolkit_id(session, toolkit_id)
+        connection = await operations.load(toolkit_id=toolkit_id)
     if connection is None or connection.status != MCPOAuthConnectionStatus.CONNECTED:
         return connection
     if not force and not _token_needs_refresh(connection):
@@ -408,21 +417,13 @@ async def _refresh_oauth_connection(
             reconnect_required=False,
         )
 
-    async with session_manager() as session:
-        current = await connection_repo.get_by_toolkit_id_for_update(
-            session, toolkit_id
-        )
-        if current is None:
-            return None
-        if _connection_changed(connection, current):
-            return current
-        return await connection_repo.update_tokens(
-            session,
-            toolkit_id=toolkit_id,
-            access_token=refreshed.access_token,
-            refresh_token=refreshed.refresh_token,
-            expires_at=refreshed.expires_at,
-        )
+    return await operations.finalize_refresh(
+        before=connection,
+        toolkit_id=toolkit_id,
+        access_token=refreshed.access_token,
+        refresh_token=refreshed.refresh_token,
+        expires_at=refreshed.expires_at,
+    )
 
 
 async def _persist_refresh_failure(
@@ -434,31 +435,14 @@ async def _persist_refresh_failure(
     reconnect_required: bool,
 ) -> MCPOAuthConnection | None:
     """Keep a concurrent refresh or persist this refresh failure."""
-    async with session_manager() as session:
-        current = await connection_repo.get_by_toolkit_id_for_update(
-            session, toolkit_id
-        )
-        if current is None:
-            return None
-        if _connection_changed(connection, current):
-            return current
-        if reconnect_required:
-            await connection_repo.mark_reconnect_required(
-                session, toolkit_id=toolkit_id
-            )
-        return await connection_repo.get_by_toolkit_id(session, toolkit_id)
-
-
-def _connection_changed(
-    before: MCPOAuthConnection,
-    current: MCPOAuthConnection,
-) -> bool:
-    """Return whether another transaction changed the credential snapshot."""
-    return (
-        current.updated_at != before.updated_at
-        or current.refresh_token != before.refresh_token
-        or current.access_token != before.access_token
-        or current.status != before.status
+    operations = MCPOAuthRuntimeOperationRepository(
+        session_manager=session_manager,
+        connection_repository=connection_repo,
+    )
+    return await operations.finalize_failure(
+        before=connection,
+        toolkit_id=toolkit_id,
+        reconnect_required=reconnect_required,
     )
 
 

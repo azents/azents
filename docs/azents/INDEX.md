@@ -33,7 +33,7 @@ Design documents are accumulated records and are not listed individually in this
 | Title | Owner | Last Verified At | Spec Version |
 |---|---|---|---|
 | [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-10-01 | 192 |
-| [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-10-01 | 90 |
+| [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-10-01 | 91 |
 | [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-09-30 | 40 |
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-09-15 | 52 |
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-09-30 | 28 |
@@ -44,7 +44,7 @@ Design documents are accumulated records and are not listed individually in this
 | [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-10-01 | 63 |
 | [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-10-01 | 53 |
 | [Kimi OAuth Flow](spec/flow/kimi-oauth.md) | @Hardtack | 2026-09-30 | 4 |
-| [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-09-26 | 7 |
+| [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-10-01 | 8 |
 | [OpenRouter API Key Provider Flow](spec/flow/openrouter-api-key.md) | @Hardtack | 2026-09-30 | 5 |
 | [Periodic Execution Flow Spec](spec/flow/periodic-execution.md) | - | 2026-09-15 | 20 |
 | [Public Release Publication](spec/flow/public-release.md) | @Hardtack | 2026-09-18 | 3 |

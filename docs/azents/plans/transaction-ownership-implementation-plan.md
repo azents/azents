@@ -60,6 +60,13 @@ reads, and Session History authority/read compositions into completed repository
 operations. Runtime behavior/project reads, Scheduled/Subagent tools, MCP OAuth,
 model execution, provider output, and compactor ownership remain later phases.
 
+Phase 20 moves Runtime Toolkit behavior/configuration and Session Project reads,
+plus MCP OAuth connection load and refresh success/failure finalization, into
+completed repository operations. OAuth provider HTTP refresh remains outside
+database transactions, and stale credential snapshots still yield to concurrent
+refresh. Scheduled/Subagent tools, model execution, provider output, and
+compactor ownership remain later phases.
+
 ## Delivery Boundaries
 
 1. Correct the title-generation and ChatGPT OAuth persistence boundary as one
