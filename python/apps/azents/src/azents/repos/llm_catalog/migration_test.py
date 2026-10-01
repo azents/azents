@@ -8,6 +8,7 @@ import pytest
 import sqlalchemy as sa
 from alembic import command
 from alembic.config import Config as AlembicConfig
+from alembic.script import ScriptDirectory
 from sqlalchemy import event
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import ProgrammingError
@@ -17,6 +18,7 @@ from azents.consts import PROJECT_ROOT
 
 _SHADOW_REVISION = "91dd4bb71ef6"
 _CLEANUP_REVISION = "d29225579621"
+_HEAD_REVISION = "af654664e6b6"
 
 
 @dataclass(frozen=True)
@@ -187,8 +189,14 @@ def _seed_ready_cutover(engine: Engine) -> None:
 def test_fresh_upgrade_has_only_generic_source_schema(
     migration_database: _MigrationDatabase,
 ) -> None:
-    """A fresh database reaches the cleanup head without legacy objects."""
+    """A fresh database reaches the Toolkit head without legacy objects."""
+    scripts = ScriptDirectory.from_config(migration_database.config)
+    assert scripts.get_heads() == [_HEAD_REVISION]
+    head = scripts.get_revision(_HEAD_REVISION)
+    assert head is not None
+    assert head.down_revision == _CLEANUP_REVISION
     command.upgrade(migration_database.config, "head")
+    _assert_revision(migration_database.engine, _HEAD_REVISION)
     _assert_cleanup_schema(migration_database.engine)
 
 
