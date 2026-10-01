@@ -14,6 +14,22 @@ tags: [backend, architecture, database]
 - Independent reviewer: `/root/tx-review` (read-only).
 - Integration owner: `/root`.
 
+## Resumed Stack — 2026-10-01
+
+The requester authorized continuous stacked-PR delivery until #1718 is complete.
+The remaining current inventory is delivered in this branch chain before CI:
+
+1. Runtime Control read ownership.
+2. Engine read ownership.
+3. Agent service repository operations.
+4. Chat Workspace, Discord settings, idle continuation, and any evidence-backed
+   residual application entrypoints.
+5. Final inventory, validation, Spec promotion, implementation marking, and plan
+   cleanup.
+
+Each PR uses the previous phase branch as its base. Design delta remains `None`;
+M1–M5 and REQ-1 through REQ-5 remain the complete authority.
+
 ## Delivery Boundaries
 
 1. Correct the title-generation and ChatGPT OAuth persistence boundary as one
