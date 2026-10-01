@@ -45,6 +45,9 @@ azents-runtime-control = { path = "../../../python/libs/azents-runtime-control",
 [tool.ruff]
 target-version = "py314"
 
+[tool.ruff.per-file-target-version]
+"src/support/ci_duration_gate.py" = "py312"
+
 [tool.ruff.lint]
 select = ["E", "W", "F", "B", "I", "G", "PLC", "PLE", "PLW", "T", "PGH003"]
 

@@ -11,6 +11,7 @@ code_paths:
   - .claude/skills/ship-feature/SKILL.md
   - .github/actions/expose-github-runtime/**
   - .github/workflows/ci.yaml
+  - .github/workflows/e2e-duration-recheck.yaml
   - .github/workflows/snapshot.yaml
   - azents.Dockerfile
   - azents-e2e-server-overlay.Dockerfile
@@ -28,8 +29,8 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
-last_verified_at: 2026-09-30
-spec_version: 74
+last_verified_at: 2026-10-01
+spec_version: 75
 ---
 
 # E2E Primary Test Strategy
@@ -515,7 +516,9 @@ Always-on required CI does not depend on external credentials.
   is not a 1 GiB production throughput or latency benchmark.
 - The stable `ci-python-e2e` required gate aggregates support tests, the planner,
   all enabled suite lanes, and the timing aggregator for the scopes selected by path
-  filtering.
+  filtering. It compares the maximum raw lane time with a complete recorded run for
+  the PR base and fails at a ten-percent increase or unavailable base evidence.
+  Retargeting and a 15-minute sweep recompare recorded evidence without rerunning E2E.
 - Each executed required E2E lane uploads bounded observability artifacts even when
   pytest fails. The artifact contains JUnit XML, the complete pytest output, the
   slow-test report, and Docker process/storage diagnostics. Failed browser calls also
@@ -525,7 +528,8 @@ Always-on required CI does not depend on external credentials.
   node IDs, slow-test timing, wall-clock pytest execution time per lane, lane job
   results, and a link to the workflow artifacts. Test execution jobs retain read-only
   permissions; only the dedicated comment job receives `pull-requests: write`. Fork
-  pull requests remain read-only and skip comment publication.
+  pull requests remain read-only and skip comment publication. The default view is
+  compact; duration evidence and lane diagnostics remain in expandable sections.
 - Web Surface path filtering includes backend/E2E dependencies, both web Dockerfiles, and the TypeScript workspace.
 - testenv fixture/prerequisite unit, contract lint.
 
@@ -579,6 +583,9 @@ External substrate features such as Agent Runtime Provider are recorded in two l
 Local/PR environment without live substrate does not fake live PASS. Instead, separate prerequisite snapshot state and deterministic evidence in PR body and design QA record. If primary E2E substrate such as Browser runner or Docker/testcontainers is unavailable and product path cannot be executed, do not replace it with PASS. Track scenario, blocker category, observed error, expected verification target, and next action in GitHub Issue, and leave blocked evidence plus issue link in design QA record.
 
 ## Changelog
+
+- **2026-10-01** (spec_version 75) — Added base-relative ten-percent duration gating,
+  evidence-only base-change reevaluation, and compact collapsible comments.
 
 - **2026-09-30** (spec_version 74) — Moved stack-added heavy file-transfer matrices
   and native-browser journeys out of required E2E into fast unit/component ownership,

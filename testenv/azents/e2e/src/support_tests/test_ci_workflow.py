@@ -87,3 +87,38 @@ def test_web_lane_prefetches_all_snapshots_and_skips_unused_buildx() -> None:
     assert "AZENTS_E2E_IMAGE_BUILD_PROFILE: ${{ matrix.suite }}" in prefetch_step
     assert "matrix.suite == 'web'" not in buildx_step
     assert "matrix.suite == 'web'" not in runtime_step
+
+
+def test_duration_gate_compares_base_once_without_retry() -> None:
+    workflow = _WORKFLOW_PATH.read_text(encoding="utf-8")
+    aggregate = workflow.split("  ci_e2e_aggregate:\n", 1)[1].split(
+        "\n  ci-python-e2e:\n", 1
+    )[0]
+    gate = _step_block(aggregate, "Gate E2E duration against base")
+
+    assert "support.ci_duration_gate gate" in gate
+    assert "GH_TOKEN: ${{ github.token }}" in gate
+    assert "github.event.pull_request.base.sha" in gate
+    assert gate.count("ci_duration_gate gate") == 1
+    assert "gh run rerun" not in aggregate
+    assert "DURATION_RESULT: ${{ steps.duration.outcome }}" in aggregate
+
+
+def test_comment_is_compact_and_base_changes_are_rechecked() -> None:
+    workflow = _WORKFLOW_PATH.read_text(encoding="utf-8")
+    comment = workflow.split("  ci_e2e_observability_comment:\n", 1)[1].split(
+        "\n  ci_typescript_run:\n", 1
+    )[0]
+    recheck = (
+        REPOSITORY_ROOT / ".github/workflows/e2e-duration-recheck.yaml"
+    ).read_text(encoding="utf-8")
+
+    assert "## E2E CI observability" in comment
+    assert "Commit:" in comment
+    assert "Workflow run and full artifacts" in comment
+    assert "e2e-duration-gate/summary.md" in comment
+    assert "pull_request_target:" in recheck
+    assert "github.event.changes.base != null" in recheck
+    assert 'cron: "*/15 * * * *"' in recheck
+    assert "support.ci_duration_gate recheck" in recheck
+    assert "gh workflow run" not in recheck

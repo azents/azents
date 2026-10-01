@@ -74,6 +74,8 @@ def test_render_summary_lists_bounded_failures_and_slowest_tests(
     assert "3.00s" in rendered
     assert "do not publish this detail" not in rendered
     assert "traceback" not in rendered
+    assert "<summary>Tests: 1/2 passed · 1 failed</summary>" in rendered
+    assert "E2E execution time: **unavailable**" in rendered
 
 
 def test_render_summary_reports_lane_execution_time(tmp_path: Path) -> None:
@@ -96,6 +98,8 @@ def test_render_summary_reports_lane_execution_time(tmp_path: Path) -> None:
 
     assert "E2E execution time: **10m 5s**" in rendered
     assert "| 1 | 1 | 0 | 0 | 0 | 100.0s |" in rendered
+    assert "<summary>Tests: 1/1 passed</summary>" in rendered
+    assert rendered.count("<details>") == rendered.count("</details>")
 
 
 def test_render_summary_reports_missing_junit(tmp_path: Path) -> None:
@@ -123,6 +127,9 @@ def test_render_summary_reports_missing_junit(tmp_path: Path) -> None:
     assert "JUnit XML was not produced" in rendered
     assert "setup or infrastructure failures" in rendered
     assert "service_container (setup)" in rendered
+    assert "<summary>Tests: tests unavailable</summary>" in rendered
+    assert "E2E execution time: **1m 5s**" in rendered
+    assert rendered.count("<details>") == rendered.count("</details>")
 
 
 def test_parse_timings_and_render_detailed_summary(tmp_path: Path) -> None:

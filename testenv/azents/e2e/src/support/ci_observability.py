@@ -127,20 +127,45 @@ def render_summary(
         if timings_path is not None and timings_path.is_file()
         else None
     )
+    duration = (
+        _parse_duration(lane_duration_path)
+        if lane_duration_path is not None and lane_duration_path.is_file()
+        else None
+    )
+    summary = parse_junit(junit_path) if junit_path.is_file() else None
+    status = (
+        f"{summary.passed}/{summary.tests} passed"
+        if summary is not None
+        else "tests unavailable"
+    )
+    if summary is not None:
+        extras = [
+            f"{count} {label}"
+            for label, count in (
+                ("failed", summary.failures),
+                ("errors", summary.errors),
+                ("skipped", summary.skipped),
+            )
+            if count
+        ]
+        if extras:
+            status += f" · {', '.join(extras)}"
     lines = [
         f"### {_escape_text(lane)}",
         "",
         f"Job result: `{_escape_text(job_result)}`",
         "",
     ]
-    if lane_duration_path is not None and lane_duration_path.is_file():
+    if duration is not None:
         lines.extend(
             [
-                "E2E execution time: "
-                f"**{_format_duration(_parse_duration(lane_duration_path))}**",
+                f"E2E execution time: **{_format_duration(duration)}**",
                 "",
             ]
         )
+    else:
+        lines.extend(["E2E execution time: **unavailable**", ""])
+    lines.extend(["<details>", f"<summary>Tests: {status}</summary>", ""])
     if not junit_path.is_file():
         lines.extend(
             [
@@ -154,9 +179,10 @@ def render_summary(
             timing_records=timing_records,
             image_build_timings_path=image_build_timings_path,
         )
+        lines.extend(["", "</details>", ""])
         return "\n".join(lines)
 
-    summary = parse_junit(junit_path)
+    assert summary is not None
     lines.extend(
         [
             "| Tests | Passed | Failed | Errors | Skipped | Test time |",
@@ -216,6 +242,7 @@ def render_summary(
         timing_records=timing_records,
         image_build_timings_path=image_build_timings_path,
     )
+    lines.extend(["", "</details>", ""])
 
     return "\n".join(lines)
 
