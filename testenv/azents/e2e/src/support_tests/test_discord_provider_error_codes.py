@@ -1,17 +1,21 @@
 """Faithful Discord missing-target error codes without network fixtures."""
 
+from typing import NamedTuple
+
 import pytest
 
 from support import discord_provider_fake as fake
 
 
+class _HandlerFixture(NamedTuple):
+    handler: fake.DiscordHTTPHandler
+    state: fake.FakeState
+    responses: list[tuple[int, dict[str, object] | None]]
+
+
 def _handler(
     monkeypatch: pytest.MonkeyPatch,
-) -> tuple[
-    fake.DiscordHTTPHandler,
-    fake.FakeState,
-    list[tuple[int, dict[str, object] | None]],
-]:
+) -> _HandlerFixture:
     """Capture actual SDK handler responses without opening a listener."""
     state = fake.FakeState()
     handler = fake.DiscordHTTPHandler.__new__(fake.DiscordHTTPHandler)
@@ -23,7 +27,7 @@ def _handler(
         "_json_response",
         lambda status, payload, headers=None: responses.append((status, payload)),
     )
-    return handler, state, responses
+    return _HandlerFixture(handler=handler, state=state, responses=responses)
 
 
 @pytest.mark.parametrize("operation", ["update_message", "delete_message"])

@@ -65,6 +65,7 @@ from azents.services.browser_file_download import (
 )
 from azents.services.file_lifecycle_policy import exchange_file_expires_at
 from azents.services.session_resource_authority import SessionResourceAuthority
+from azents.utils.logging import sanitized_exception_info
 
 logger = logging.getLogger(__name__)
 
@@ -413,6 +414,9 @@ def make_exchange_preview_thumbnail(
     except (OSError, UnidentifiedImageError, ValueError) as err:
         logger.warning(
             "Exchange image upload did not produce preview thumbnail",
+            exc_info=sanitized_exception_info(
+                err, message="Exchange image preview decoding failed"
+            ),
             extra={"media_type": media_type, "reason": type(err).__name__},
         )
         return None
@@ -1523,6 +1527,9 @@ class ExchangeFileService:
             except (OSError, UnidentifiedImageError, ValueError) as err:
                 logger.warning(
                     "Exchange image upload did not produce preview thumbnail",
+                    exc_info=sanitized_exception_info(
+                        err, message="Exchange image preview decoding failed"
+                    ),
                     extra={"media_type": media_type, "reason": type(err).__name__},
                 )
                 return None
@@ -1593,6 +1600,9 @@ class ExchangeFileService:
                 (
                     "Unable to verify persisted Exchange publication; "
                     "retaining uploaded objects"
+                ),
+                exc_info=sanitized_exception_info(
+                    error, message="Exchange publication verification failed"
                 ),
                 extra={
                     "publication_id": publication_id,

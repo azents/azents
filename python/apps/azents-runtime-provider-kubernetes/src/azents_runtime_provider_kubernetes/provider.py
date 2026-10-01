@@ -597,6 +597,7 @@ class KubernetesRuntimeProvider:
                 _LOGGER.warning(
                     "Kubernetes Runtime Pod observation skipped without valid "
                     "Runtime metadata",
+                    exc_info=True,
                     extra={
                         "runtime_id": runtime_id,
                         "provider_id": self._config.provider_id,
@@ -622,6 +623,7 @@ class KubernetesRuntimeProvider:
                 _LOGGER.warning(
                     "Kubernetes Runtime PVC observation skipped without valid "
                     "Runtime metadata",
+                    exc_info=True,
                     extra={
                         "runtime_id": runtime_id,
                         "provider_id": self._config.provider_id,
@@ -653,6 +655,7 @@ class KubernetesRuntimeProvider:
                 _LOGGER.warning(
                     "Kubernetes Runtime watch event skipped without valid Runtime "
                     "metadata",
+                    exc_info=True,
                     extra={
                         "runtime_id": runtime_id,
                         "provider_id": self._config.provider_id,

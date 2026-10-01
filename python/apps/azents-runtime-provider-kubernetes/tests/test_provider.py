@@ -3,7 +3,6 @@
 import dataclasses
 from collections.abc import AsyncIterator, Mapping, Sequence
 from datetime import UTC, datetime
-from typing import cast
 
 import pytest
 from azents_runtime_control.provider import (
@@ -1894,7 +1893,9 @@ async def test_observe_known_runtimes_reports_pod_and_pvc() -> None:
 
 
 @pytest.mark.asyncio
-async def test_legacy_resources_are_skipped_until_command_replaces_them() -> None:
+async def test_legacy_resources_are_skipped_until_command_replaces_them(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     """Legacy Pod/PVC evidence stays untrusted while command processing continues."""
     api = FakeKubernetesApi()
     provider = _provider(api)
@@ -1903,7 +1904,8 @@ async def test_legacy_resources_are_skipped_until_command_replaces_them() -> Non
     pod = api.pods[("azents-runtime", "azents-runtime-runtime-1")]
     pvc = api.pvcs[("azents-runtime", "azents-runtime-runtime-1-workspace")]
     for resource in (pod, pvc):
-        annotations = cast(dict[str, str], resource.metadata.annotations)
+        annotations = resource.metadata.annotations
+        assert isinstance(annotations, dict)
         for key in (
             "azents/runtime-configuration-sequence",
             "azents/runtime-configuration-digest",
@@ -1913,6 +1915,14 @@ async def test_legacy_resources_are_skipped_until_command_replaces_them() -> Non
 
     assert await provider.observe_known_runtimes() == ()
     assert [report async for report in provider.watch_known_runtimes()] == []
+
+    warnings = [
+        record
+        for record in caplog.records
+        if "skipped without valid Runtime metadata" in record.getMessage()
+    ]
+    assert len(warnings) == 3
+    assert all(record.exc_info is not None for record in warnings)
 
     result = await provider.start(command)
 

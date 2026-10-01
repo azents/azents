@@ -219,3 +219,65 @@ async def test_fastapi_resolves_shared_container_without_overrides(
             "websocket.close",
         ]
         assert messages[1]["text"] == "resolved"
+
+
+@pytest.mark.asyncio
+async def test_container_runs_coroutine_task_with_resolved_dependency() -> None:
+    """Runtime awaitable narrowing preserves coroutine task injection."""
+    seen: list[object] = []
+    resource = object()
+
+    def dependency() -> object:
+        return resource
+
+    async def task(value: Annotated[object, Depends(dependency)]) -> None:
+        seen.append(value)
+
+    async with Container() as container:
+        await container.run(task)
+
+    assert seen == [resource]
+
+
+@pytest.mark.asyncio
+async def test_container_runs_class_task_through_declared_protocol() -> None:
+    """A runtime-checkable runnable retains the resolved class dependency."""
+    seen: list[object] = []
+    resource = object()
+
+    def dependency() -> object:
+        return resource
+
+    class Task:
+        def __init__(self, value: Annotated[object, Depends(dependency)]) -> None:
+            self.value = value
+
+        async def run(self) -> None:
+            seen.append(self.value)
+
+    async with Container() as container:
+        await container.run(Task)
+
+    assert seen == [resource]
+
+
+@pytest.mark.asyncio
+async def test_subcontainer_keeps_live_parent_cache_when_initially_empty() -> None:
+    """Explicitly empty shared caches retain their parent mapping identity."""
+    calls = 0
+
+    def parent_dependency() -> object:
+        nonlocal calls
+        calls += 1
+        return object()
+
+    def child_dependency() -> object:
+        return object()
+
+    async with Container() as parent:
+        async with parent.sub() as child:
+            await child.solve(child_dependency)
+            resource = await parent.solve(parent_dependency)
+
+            assert await child.solve(parent_dependency) is resource
+            assert calls == 1

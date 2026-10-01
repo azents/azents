@@ -4,6 +4,7 @@ import asyncio
 import dataclasses
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime, timedelta
+from typing import NamedTuple
 
 import pytest
 import pytest_asyncio
@@ -703,9 +704,15 @@ async def _admit(
     return result.value
 
 
+class _ConnectedTerminal(NamedTuple):
+    record: RuntimeTerminalRecord
+    attachment_generation: int
+    stream_generation: int
+
+
 async def _connected(
     store: RuntimeTerminalCoordinationStore,
-) -> tuple[RuntimeTerminalRecord, int, int]:
+) -> _ConnectedTerminal:
     record = await _admit(store)
     attachment = await store.attach_browser(
         record.admission.terminal_id,
@@ -720,10 +727,10 @@ async def _connected(
         lease_seconds=30,
     )
     assert attachment.value is not None and registered.value is not None
-    return (
-        record,
-        attachment.value.generation,
-        registered.value.accepted.stream_generation,
+    return _ConnectedTerminal(
+        record=record,
+        attachment_generation=attachment.value.generation,
+        stream_generation=registered.value.accepted.stream_generation,
     )
 
 

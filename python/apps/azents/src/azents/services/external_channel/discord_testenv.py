@@ -42,6 +42,7 @@ from azents.services.external_channel.discord_sdk import (
     DiscordSDKThread,
     DiscordSDKUnavailable,
 )
+from azents.utils.logging import sanitized_exception_info
 
 _MAX_GATEWAY_IDLE_SECONDS = 3600.0
 _TYPING_SNAPSHOT_INTERVAL_SECONDS = 0.1
@@ -602,6 +603,9 @@ async def _publish_typing_snapshot(
         except (httpx.HTTPError, OSError) as error:
             logger.warning(
                 "Discord testenv typing snapshot delivery failed.",
+                exc_info=sanitized_exception_info(
+                    error, message="Discord testenv typing snapshot delivery failed"
+                ),
                 extra={"error_type": type(error).__name__},
             )
         else:

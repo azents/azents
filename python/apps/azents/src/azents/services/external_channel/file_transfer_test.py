@@ -3,22 +3,32 @@
 import datetime
 from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Annotated, cast
-from unittest.mock import AsyncMock
+from typing import Annotated, List
+from unittest.mock import AsyncMock, create_autospec
 
 import grpc
 import pytest
-from azcommon.infra.s3.service import S3TransferCleanupRequired
+from azcommon.infra.s3.service import (
+    S3CompletedPart,
+    S3MultipartUpload,
+    S3ObjectIdentity,
+    S3ObjectMetadata,
+    S3TransferCleanupRequired,
+    S3TransferObjectMetadata,
+    S3VerifiedObject,
+)
 from azcommon.result import Failure, Success
 from azents_runtime_control.grpc_transfer_coordinator_client import (
     CoordinatorSourceTransport,
     CoordinatorTransferFailure,
 )
+from cryptography.fernet import Fernet
 from fastapi import Depends
 from fastapi.dependencies.utils import get_dependant
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.config import Config
+from azents.core.crypto import CredentialCipher
 from azents.core.enums import (
     ExchangeFileOrigin,
     ExchangeFileProvenanceKind,
@@ -40,7 +50,6 @@ from azents.core.external_channel_file_system_setting import (
 from azents.core.external_channel_provider import SlackConnectionCredentials
 from azents.core.system_setting import ResolvedSystemSetting, SystemSettingSection
 from azents.engine.io.attachments import RuntimeAttachment
-from azents.rdb.session import SessionManager
 from azents.repos.exchange_file.data import ExchangeFile
 from azents.repos.external_channel.work import ExternalChannelWorkRepository
 from azents.repos.external_channel.work_data import (
@@ -49,7 +58,6 @@ from azents.repos.external_channel.work_data import (
 from azents.runtime.transfer.provider_source import (
     DeferredProviderServerToRuntimeSource,
     ProviderByteStreamResponse,
-    ProviderStagingStore,
 )
 from azents.runtime.transfer.server_to_runtime import (
     ServerToRuntimeTarget,
@@ -89,14 +97,18 @@ from azents.services.external_channel.slack_events import (
     SlackProviderPermissionDenied,
     SlackProviderTemporaryError,
 )
-from azents.services.file_storage import FileStorage, RangedFileStorage
+from azents.services.file_storage import (
+    FileStorage,
+    GrepResult,
+    TextReadResult,
+)
 from azents.services.session_resource_authority import SessionResourceAuthority
 from azents.services.system_setting.service import SystemSettingsService
 
 _NOW = datetime.datetime.now(datetime.UTC)
 
 
-class _Repository:
+class _Repository(ExternalChannelWorkRepository):
     def __init__(
         self,
         target: ExternalChannelFileAccessTarget | None,
@@ -131,9 +143,12 @@ def test_file_transfer_dependency_graph_allows_unconfigured_inbound_staging() ->
     assert get_dependant(path="/", call=endpoint).dependencies
 
 
-class _CredentialsCodec:
-    def decrypt(self, encrypted: str) -> SlackConnectionCredentials:
-        assert encrypted == "ciphertext"
+class _CredentialsCodec(ExternalChannelCredentialsCodec):
+    def __init__(self) -> None:
+        super().__init__(cipher=CredentialCipher(Fernet.generate_key().decode()))
+
+    def decrypt(self, ciphertext: str) -> SlackConnectionCredentials:
+        assert ciphertext == "ciphertext"
         return SlackConnectionCredentials(
             bot_token="xoxb-secret",
             signing_secret="signing-secret",
@@ -141,7 +156,7 @@ class _CredentialsCodec:
         )
 
 
-class _SlackClient:
+class _SlackClient(SlackConversationClient):
     def __init__(
         self,
         *,
@@ -220,7 +235,7 @@ class _SlackClient:
             self.stream_closed += 1
 
 
-class _TransferService:
+class _TransferService(ServerToRuntimeTransferExecutor):
     """Capture terminal-success transfer requests without Runtime file writes."""
 
     def __init__(self, error: Exception | None = None) -> None:
@@ -233,7 +248,7 @@ class _TransferService:
             raise self.error
 
 
-class _DiscordClient:
+class _DiscordClient(DiscordChannelClient):
     def __init__(
         self,
         *,
@@ -314,7 +329,7 @@ class _DiscordClient:
             self.stream_closed += 1
 
 
-class _SystemSettings:
+class _SystemSettings(SystemSettingsService):
     def __init__(
         self,
         outbound_file_limit: int = 100,
@@ -342,7 +357,67 @@ class _SystemSettings:
         )
 
 
-class _FileStorage:
+class _UnusedFileOperations:
+    """Declare the full storage contract and fail on unexpected fixture effects."""
+
+    async def get(self, path: str, *, agent_id: str) -> bytes:
+        raise AssertionError("Unexpected storage get")
+
+    async def get_text(
+        self, path: str, *, agent_id: str, offset: int, limit: int, encoding: str
+    ) -> TextReadResult:
+        raise AssertionError("Unexpected storage text read")
+
+    async def stat(self, path: str, *, agent_id: str) -> dict[str, object]:
+        raise AssertionError("Unexpected storage stat")
+
+    async def put(
+        self, path: str, data: bytes, media_type: str | None = None, *, agent_id: str
+    ) -> RuntimeAttachment:
+        raise AssertionError("Unexpected storage put")
+
+    async def delete(self, path: str, *, agent_id: str) -> None:
+        raise AssertionError("Unexpected storage delete")
+
+    async def exists(self, path: str, *, agent_id: str) -> bool:
+        raise AssertionError("Unexpected storage exists")
+
+    async def list(
+        self,
+        path: str,
+        *,
+        agent_id: str,
+        recursive: bool = False,
+        exclude_patterns: List[str] | None = None,
+        include_directories: bool = False,
+    ) -> List[RuntimeAttachment]:
+        raise AssertionError("Unexpected storage list")
+
+    async def glob(
+        self, pattern: str, *, agent_id: str, exclude_patterns: List[str] | None
+    ) -> List[RuntimeAttachment]:
+        raise AssertionError("Unexpected storage glob")
+
+    async def list_dirs(self, path: str, *, agent_id: str) -> List[str]:
+        raise AssertionError("Unexpected storage directory list")
+
+    async def grep(
+        self,
+        path: str,
+        *,
+        agent_id: str,
+        pattern: str,
+        recursive: bool = True,
+        exclude_patterns: List[str] | None = None,
+        max_matching_files: int = 50,
+        max_lines_per_file: int = 10,
+        max_searched_files: int | None = None,
+        max_scanned_bytes: int | None = None,
+    ) -> GrepResult:
+        raise AssertionError("Unexpected storage grep")
+
+
+class _FileStorage(_UnusedFileOperations):
     def __init__(
         self,
         *,
@@ -353,7 +428,7 @@ class _FileStorage:
         self.existing = exists
         self.put_error = put_error
         self.exists_error = exists_error
-        self.put_calls: list[tuple[str, bytes, str, str]] = []
+        self.put_calls: list[tuple[str, bytes, str | None, str]] = []
 
     async def exists(self, path: str, *, agent_id: str) -> bool:
         assert path == "/workspace/agent/report.csv"
@@ -366,7 +441,7 @@ class _FileStorage:
         self,
         path: str,
         data: bytes,
-        media_type: str = "",
+        media_type: str | None = None,
         *,
         agent_id: str,
     ) -> RuntimeAttachment:
@@ -375,14 +450,14 @@ class _FileStorage:
         self.put_calls.append((path, data, media_type, agent_id))
         return RuntimeAttachment(
             uri=path,
-            media_type=media_type,
+            media_type=media_type or "application/octet-stream",
             size=len(data),
             name="report.csv",
             text_preview=None,
         )
 
 
-class _OutboundStorage:
+class _OutboundStorage(_UnusedFileOperations):
     def __init__(
         self,
         files: dict[str, bytes],
@@ -419,7 +494,57 @@ class _OutboundStorage:
 
 @asynccontextmanager
 async def _session_manager() -> AsyncGenerator[AsyncSession]:
-    yield cast(AsyncSession, object())
+    async with AsyncSession() as session:
+        yield session
+
+
+class _UnusedStagingStore:
+    """A complete typed staging collaborator that never contacts object storage."""
+
+    async def create_preparation_multipart_upload(
+        self, *, destination: S3ObjectIdentity, content_type: str | None
+    ) -> S3MultipartUpload:
+        raise AssertionError("Unexpected staging creation")
+
+    async def upload_part(
+        self, *, upload: S3MultipartUpload, part_number: int, body: bytes
+    ) -> S3CompletedPart:
+        raise AssertionError("Unexpected staging part")
+
+    async def complete_preparation_multipart_upload(
+        self,
+        *,
+        upload: S3MultipartUpload,
+        completed_parts: tuple[S3CompletedPart, ...],
+        expected_size: int,
+    ) -> S3ObjectMetadata:
+        raise AssertionError("Unexpected staging completion")
+
+    async def abort_multipart_upload(self, *, upload: S3MultipartUpload) -> None:
+        raise AssertionError("Unexpected staging abort")
+
+    async def create_empty_immutable(
+        self,
+        *,
+        destination: S3ObjectIdentity,
+        transfer_metadata: S3TransferObjectMetadata,
+    ) -> S3VerifiedObject:
+        raise AssertionError("Unexpected empty staging object")
+
+    async def copy_immutable(
+        self,
+        *,
+        source: S3ObjectIdentity,
+        destination: S3ObjectIdentity,
+        expected_size: int,
+        transfer_metadata: S3TransferObjectMetadata,
+        multipart_copy_threshold: int,
+        multipart_part_size: int,
+    ) -> S3VerifiedObject:
+        raise AssertionError("Unexpected staging copy")
+
+    async def delete(self, bucket: str, key: str) -> None:
+        raise AssertionError("Unexpected staging deletion")
 
 
 def _capabilities(
@@ -532,27 +657,19 @@ def _service(
     staging_configuration: ExternalChannelInboundStagingConfiguration | None = None,
 ) -> ExternalChannelFileTransferService:
     return ExternalChannelFileTransferService(
-        session_manager=cast(SessionManager[AsyncSession], _session_manager),
-        repository=cast(ExternalChannelWorkRepository, repository),
-        credentials_codec=cast(
-            ExternalChannelCredentialsCodec,
-            _CredentialsCodec(),
-        ),
-        slack_client=cast(SlackConversationClient, slack_client),
-        discord_client=cast(DiscordChannelClient, discord_client or _DiscordClient()),
-        exchange_file_service=cast(
-            ExchangeFileService,
-            exchange_file_service or AsyncMock(),
-        ),
-        system_settings=cast(
-            SystemSettingsService,
-            settings or _SystemSettings(),
-        ),
+        session_manager=_session_manager,
+        repository=repository,
+        credentials_codec=_CredentialsCodec(),
+        slack_client=slack_client,
+        discord_client=discord_client or _DiscordClient(),
+        exchange_file_service=exchange_file_service
+        or create_autospec(ExchangeFileService, instance=True, spec_set=True),
+        system_settings=settings or _SystemSettings(),
         config=Config.model_construct(),
         inbound_staging_configuration=(
             staging_configuration
             or ExternalChannelInboundStagingConfiguration(
-                s3_service=cast(ProviderStagingStore, object()),
+                s3_service=_UnusedStagingStore(),
                 workspace_bucket="workspace",
                 transfer_object_prefix="runtime-transfer",
                 stream_chunk_size=4,
@@ -605,7 +722,7 @@ async def _download(
         path=path,
         overwrite=overwrite,
         file_storage=file_storage,
-        transfer_service=cast(ServerToRuntimeTransferExecutor, executor),
+        transfer_service=executor,
         transfer_target=ServerToRuntimeTarget(
             runtime_id="runtime-1",
             desired_generation=1,
@@ -680,7 +797,7 @@ async def test_download_materializes_only_selected_current_provider_file() -> No
         file=_locator("F-MODIFIED"),
         path="/workspace/agent/report.csv",
         overwrite=False,
-        file_storage=cast(FileStorage, storage),
+        file_storage=storage,
     )
 
     assert result.path == "/workspace/agent/report.csv"
@@ -711,7 +828,7 @@ async def test_inactive_binding_fails_before_provider_access() -> None:
             file=_locator(),
             path="/workspace/agent/report.csv",
             overwrite=False,
-            file_storage=cast(FileStorage, _FileStorage()),
+            file_storage=_FileStorage(),
         )
 
     assert slack_client.info_file_ids == []
@@ -732,7 +849,7 @@ async def test_relative_runtime_destination_is_rejected() -> None:
             file=_locator(),
             path="report.csv",
             overwrite=False,
-            file_storage=cast(FileStorage, _FileStorage()),
+            file_storage=_FileStorage(),
         )
 
     assert repository.calls == []
@@ -758,7 +875,7 @@ async def test_missing_download_capability_fails_before_provider_access() -> Non
             file=_locator(),
             path="/workspace/agent/report.csv",
             overwrite=False,
-            file_storage=cast(FileStorage, _FileStorage()),
+            file_storage=_FileStorage(),
         )
 
     assert slack_client.info_file_ids == []
@@ -778,7 +895,7 @@ async def test_existing_destination_fails_before_provider_access() -> None:
             file=_locator(),
             path="/workspace/agent/report.csv",
             overwrite=False,
-            file_storage=cast(FileStorage, _FileStorage(exists=True)),
+            file_storage=_FileStorage(exists=True),
         )
 
     assert slack_client.info_file_ids == []
@@ -798,10 +915,7 @@ async def test_inaccessible_destination_fails_before_provider_access() -> None:
             file=_locator(),
             path="/workspace/agent/report.csv",
             overwrite=False,
-            file_storage=cast(
-                FileStorage,
-                _FileStorage(exists_error=PermissionError("read-only")),
-            ),
+            file_storage=_FileStorage(exists_error=PermissionError("read-only")),
         )
 
     assert slack_client.info_file_ids == []
@@ -826,7 +940,7 @@ async def test_explicit_overwrite_skips_existence_rejection() -> None:
         file=_locator(),
         path="/workspace/agent/report.csv",
         overwrite=True,
-        file_storage=cast(FileStorage, storage),
+        file_storage=storage,
     )
 
     assert result.bytes_written == 7
@@ -854,7 +968,7 @@ async def test_slack_metadata_size_does_not_gate_download_or_revalidation() -> N
         file=_locator(),
         path="/workspace/agent/report.csv",
         overwrite=False,
-        file_storage=cast(FileStorage, storage),
+        file_storage=storage,
     )
 
     assert result.bytes_written == 7
@@ -887,7 +1001,7 @@ async def test_slack_final_length_uses_small_limit_before_provider_staging(
                 file=_locator(),
                 path="/workspace/agent/report.csv",
                 overwrite=False,
-                file_storage=cast(FileStorage, storage),
+                file_storage=storage,
             )
         assert transfer.requests == []
         assert client.stream_opened == 0
@@ -900,7 +1014,7 @@ async def test_slack_final_length_uses_small_limit_before_provider_staging(
             file=_locator(),
             path="/workspace/agent/report.csv",
             overwrite=False,
-            file_storage=cast(FileStorage, storage),
+            file_storage=storage,
         )
         assert result.bytes_written == size
         assert transfer.requests[0].product_maximum_size == 16
@@ -925,7 +1039,7 @@ async def test_slack_final_length_limit_and_body_mismatch_never_write() -> None:
             file=_locator(),
             path="/workspace/agent/report.csv",
             overwrite=False,
-            file_storage=cast(FileStorage, oversize_storage),
+            file_storage=oversize_storage,
         )
 
     mismatch_storage = _FileStorage()
@@ -944,7 +1058,7 @@ async def test_slack_final_length_limit_and_body_mismatch_never_write() -> None:
             file=_locator(),
             path="/workspace/agent/report.csv",
             overwrite=False,
-            file_storage=cast(FileStorage, mismatch_storage),
+            file_storage=mismatch_storage,
         )
 
     assert oversize_storage.put_calls == []
@@ -967,7 +1081,7 @@ async def test_unsupported_or_missing_provider_file_never_writes_runtime() -> No
             file=_locator(),
             path="/workspace/agent/report.csv",
             overwrite=False,
-            file_storage=cast(FileStorage, unsupported_storage),
+            file_storage=unsupported_storage,
         )
 
     missing_storage = _FileStorage()
@@ -983,7 +1097,7 @@ async def test_unsupported_or_missing_provider_file_never_writes_runtime() -> No
             file=_locator(),
             path="/workspace/agent/report.csv",
             overwrite=False,
-            file_storage=cast(FileStorage, missing_storage),
+            file_storage=missing_storage,
         )
 
     assert unsupported_storage.put_calls == []
@@ -1027,7 +1141,7 @@ async def test_provider_failures_are_controlled_without_runtime_write(
             file=_locator(),
             path="/workspace/agent/report.csv",
             overwrite=False,
-            file_storage=cast(FileStorage, storage),
+            file_storage=storage,
         )
 
     assert storage.put_calls == []
@@ -1057,7 +1171,7 @@ async def test_terminal_runtime_failure_is_not_reported_as_success() -> None:
             file=_locator(),
             path="/workspace/agent/report.csv",
             overwrite=False,
-            file_storage=cast(FileStorage, _FileStorage()),
+            file_storage=_FileStorage(),
         )
 
     assert raised.value.failure.stage == "runtime_transfer"
@@ -1097,7 +1211,7 @@ async def test_runtime_grpc_transport_failure_is_controlled() -> None:
             file=_locator(),
             path="/workspace/agent/report.csv",
             overwrite=False,
-            file_storage=cast(FileStorage, _FileStorage()),
+            file_storage=_FileStorage(),
         )
 
     assert "AioRpcError" not in str(raised.value)
@@ -1170,7 +1284,7 @@ async def test_inbound_staging_and_terminal_failures_remain_controlled(
             file=_locator(),
             path="/workspace/agent/report.csv",
             overwrite=False,
-            file_storage=cast(FileStorage, _FileStorage()),
+            file_storage=_FileStorage(),
         )
 
     assert "bucket/internal-key" not in str(raised.value)
@@ -1210,7 +1324,7 @@ async def test_discord_download_materializes_only_current_binding_attachment() -
         file=_discord_locator(),
         path="/workspace/agent/report.csv",
         overwrite=False,
-        file_storage=cast(FileStorage, storage),
+        file_storage=storage,
     )
 
     assert result.path == "/workspace/agent/report.csv"
@@ -1254,7 +1368,7 @@ async def test_discord_capability_and_current_attachment_failures_never_write() 
             file=_discord_locator(),
             path="/workspace/agent/report.csv",
             overwrite=False,
-            file_storage=cast(FileStorage, _FileStorage()),
+            file_storage=_FileStorage(),
         )
 
     url_storage = _FileStorage()
@@ -1273,7 +1387,7 @@ async def test_discord_capability_and_current_attachment_failures_never_write() 
             file=_discord_locator(),
             path="/workspace/agent/report.csv",
             overwrite=False,
-            file_storage=cast(FileStorage, url_storage),
+            file_storage=url_storage,
         )
 
     deleted_storage = _FileStorage()
@@ -1292,7 +1406,7 @@ async def test_discord_capability_and_current_attachment_failures_never_write() 
             file=_discord_locator(),
             path="/workspace/agent/report.csv",
             overwrite=False,
-            file_storage=cast(FileStorage, deleted_storage),
+            file_storage=deleted_storage,
         )
 
     assert capability_client.fetch_calls == []
@@ -1322,7 +1436,7 @@ async def test_discord_metadata_size_does_not_gate_download_or_revalidation() ->
         file=_discord_locator(),
         path="/workspace/agent/report.csv",
         overwrite=False,
-        file_storage=cast(FileStorage, storage),
+        file_storage=storage,
     )
 
     assert result.bytes_written == 7
@@ -1355,7 +1469,7 @@ async def test_discord_final_length_limit_and_body_mismatch_never_write() -> Non
             file=_discord_locator(),
             path="/workspace/agent/report.csv",
             overwrite=False,
-            file_storage=cast(FileStorage, oversize_storage),
+            file_storage=oversize_storage,
         )
 
     mismatch_storage = _FileStorage()
@@ -1377,7 +1491,7 @@ async def test_discord_final_length_limit_and_body_mismatch_never_write() -> Non
             file=_discord_locator(),
             path="/workspace/agent/report.csv",
             overwrite=False,
-            file_storage=cast(FileStorage, mismatch_storage),
+            file_storage=mismatch_storage,
         )
 
     assert oversize_storage.put_calls == []
@@ -1415,7 +1529,7 @@ async def test_discord_provider_failures_are_controlled_without_runtime_write(
             file=_discord_locator(),
             path="/workspace/agent/report.csv",
             overwrite=False,
-            file_storage=cast(FileStorage, storage),
+            file_storage=storage,
         )
 
     assert storage.put_calls == []
@@ -1447,7 +1561,7 @@ async def test_outbound_preflight_builds_only_bounded_runtime_manifests() -> Non
             "/workspace/agent/report.csv",
             "/workspace/agent/chart.png",
         ],
-        file_storage=cast(FileStorage, storage),
+        file_storage=storage,
     )
 
     assert [item.model_dump(mode="json") for item in manifests] == [
@@ -1570,7 +1684,7 @@ async def test_outbound_preflight_rejects_unavailable_exchange_and_other_uris() 
             agent_id="agent-1",
             binding_id="binding-1",
             paths=["exchange://exchange/workspace-1/files/missing/original"],
-            file_storage=cast(FileStorage, storage),
+            file_storage=storage,
             authority=_authority(),
         )
     with pytest.raises(ExternalChannelFileTransferError, match="must be absolute"):
@@ -1579,7 +1693,7 @@ async def test_outbound_preflight_rejects_unavailable_exchange_and_other_uris() 
             agent_id="agent-1",
             binding_id="binding-1",
             paths=["artifact://artifacts/workspace-1/file-1"],
-            file_storage=cast(FileStorage, storage),
+            file_storage=storage,
             authority=_authority(),
         )
 
@@ -1605,7 +1719,7 @@ async def test_outbound_preflight_fails_before_reading_unavailable_sources() -> 
             agent_id="agent-1",
             binding_id="binding-1",
             paths=["/workspace/agent/first.bin"],
-            file_storage=cast(FileStorage, storage),
+            file_storage=storage,
         )
 
     service = _service(
@@ -1622,7 +1736,7 @@ async def test_outbound_preflight_fails_before_reading_unavailable_sources() -> 
             agent_id="agent-1",
             binding_id="binding-1",
             paths=["relative.bin"],
-            file_storage=cast(FileStorage, storage),
+            file_storage=storage,
         )
     with pytest.raises(ExternalChannelFileTransferError, match="action limit"):
         await service.prepare_outbound(
@@ -1633,7 +1747,7 @@ async def test_outbound_preflight_fails_before_reading_unavailable_sources() -> 
                 "/workspace/agent/first.bin",
                 "/workspace/agent/second.bin",
             ],
-            file_storage=cast(FileStorage, storage),
+            file_storage=storage,
         )
 
     assert storage.read_calls == []
@@ -1654,7 +1768,7 @@ async def test_outbound_iterator_reads_ordered_exact_bounded_ranges() -> None:
     chunks = [
         chunk
         async for chunk in iter_external_channel_outbound_file_chunks(
-            file_storage=cast(RangedFileStorage, storage),
+            file_storage=storage,
             manifest=manifest,
             agent_id="agent-1",
         )
@@ -1699,7 +1813,7 @@ async def test_outbound_iterator_rejects_short_and_grown_runtime_files() -> None
     )
     with pytest.raises(ExternalChannelFileTransferError, match="ended before"):
         async for _ in iter_external_channel_outbound_file_chunks(
-            file_storage=cast(RangedFileStorage, short),
+            file_storage=short,
             manifest=expected,
             agent_id="agent-1",
         ):
@@ -1709,7 +1823,7 @@ async def test_outbound_iterator_rejects_short_and_grown_runtime_files() -> None
     expected = expected.model_copy(update={"expected_size": 5})
     with pytest.raises(ExternalChannelFileTransferError, match="grew"):
         async for _ in iter_external_channel_outbound_file_chunks(
-            file_storage=cast(RangedFileStorage, grown),
+            file_storage=grown,
             manifest=expected,
             agent_id="agent-1",
         ):

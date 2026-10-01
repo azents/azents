@@ -7,6 +7,7 @@ import json
 from bisect import bisect_right
 from collections.abc import Callable
 from datetime import datetime
+from typing import NamedTuple
 
 from azents.runtime.transfer.data import (
     DIRECT_INGRESS_CLEANUP_GRACE,
@@ -2053,7 +2054,12 @@ def _encode_memory_stale_cursor(key: tuple[str, str]) -> str:
     return base64.urlsafe_b64encode(payload).decode("ascii")
 
 
-def _decode_memory_stale_cursor(cursor: str) -> tuple[str, str]:
+class _MemoryStaleCursor(NamedTuple):
+    transfer_id: str
+    attempt_id: str
+
+
+def _decode_memory_stale_cursor(cursor: str) -> _MemoryStaleCursor:
     """Decode one opaque immutable in-memory stale-record cursor."""
     try:
         value: object = json.loads(
@@ -2070,4 +2076,4 @@ def _decode_memory_stale_cursor(cursor: str) -> tuple[str, str]:
     first, second = value
     if not isinstance(first, str) or not isinstance(second, str):
         raise ValueError("invalid stale page cursor")
-    return first, second
+    return _MemoryStaleCursor(transfer_id=first, attempt_id=second)
