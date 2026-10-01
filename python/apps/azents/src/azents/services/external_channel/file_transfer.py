@@ -17,7 +17,6 @@ from azents_runtime_control.grpc_transfer_coordinator_client import (
 )
 from fastapi import Depends
 from pydantic import ValidationError
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.config import Config
 from azents.core.deps import get_config
@@ -33,9 +32,9 @@ from azents.core.external_channel_file import (
 from azents.core.external_channel_file_system_setting import ExternalChannelFilesConfig
 from azents.core.external_channel_provider import ExternalChannelCapabilitySnapshot
 from azents.core.system_setting import SystemSettingSection
-from azents.rdb.deps import get_session_manager
-from azents.rdb.session import SessionManager
-from azents.repos.external_channel.work import ExternalChannelWorkRepository
+from azents.repos.external_channel.file_access import (
+    ExternalChannelFileAccessRepository,
+)
 from azents.repos.external_channel.work_data import ExternalChannelFileAccessTarget
 from azents.runtime.transfer.provider_source import (
     DeferredProviderServerToRuntimeSource,
@@ -239,13 +238,9 @@ def get_unconfigured_external_channel_inbound_staging_configuration() -> (
 class ExternalChannelFileTransferService:
     """Authorize and materialize one selected provider file into the Runtime."""
 
-    session_manager: Annotated[
-        SessionManager[AsyncSession],
-        Depends(get_session_manager),
-    ]
-    repository: Annotated[
-        ExternalChannelWorkRepository,
-        Depends(ExternalChannelWorkRepository.create),
+    file_access_repository: Annotated[
+        ExternalChannelFileAccessRepository,
+        Depends(ExternalChannelFileAccessRepository),
     ]
     credentials_codec: Annotated[
         ExternalChannelCredentialsCodec,
@@ -292,13 +287,11 @@ class ExternalChannelFileTransferService:
             raise ExternalChannelFileTransferError(
                 "Runtime destination path must be absolute."
             )
-        async with self.session_manager() as session:
-            target = await self.repository.get_active_file_access_target(
-                session,
-                session_id=session_id,
-                agent_id=agent_id,
-                binding_id=locator.binding_id,
-            )
+        target = await self.file_access_repository.get_active_target(
+            session_id=session_id,
+            agent_id=agent_id,
+            binding_id=locator.binding_id,
+        )
         if target is None:
             raise ExternalChannelFileTransferError(
                 "External Channel binding is not active for this AgentSession."
@@ -739,13 +732,11 @@ class ExternalChannelFileTransferService:
         expected_metadata: ExternalChannelFileMetadata,
     ) -> bool:
         """Revalidate active Discord source authority before READY."""
-        async with self.session_manager() as session:
-            current = await self.repository.get_active_file_access_target(
-                session,
-                session_id=session_id,
-                agent_id=agent_id,
-                binding_id=locator.binding_id,
-            )
+        current = await self.file_access_repository.get_active_target(
+            session_id=session_id,
+            agent_id=agent_id,
+            binding_id=locator.binding_id,
+        )
         if current is None:
             raise ExternalChannelFileTransferError(
                 "External Channel binding is not active for this AgentSession."
@@ -801,13 +792,11 @@ class ExternalChannelFileTransferService:
         expected_metadata: ExternalChannelFileMetadata,
     ) -> bool:
         """Revalidate active binding and current provider metadata before READY."""
-        async with self.session_manager() as session:
-            current = await self.repository.get_active_file_access_target(
-                session,
-                session_id=session_id,
-                agent_id=agent_id,
-                binding_id=locator.binding_id,
-            )
+        current = await self.file_access_repository.get_active_target(
+            session_id=session_id,
+            agent_id=agent_id,
+            binding_id=locator.binding_id,
+        )
         if current is None:
             raise ExternalChannelFileTransferError(
                 "External Channel binding is not active for this AgentSession."
@@ -856,13 +845,11 @@ class ExternalChannelFileTransferService:
             raise ExternalChannelFileTransferError(
                 f"Outbound publication requires 1-{MAX_EXTERNAL_CHANNEL_FILES} files."
             )
-        async with self.session_manager() as session:
-            target = await self.repository.get_active_file_access_target(
-                session,
-                session_id=session_id,
-                agent_id=agent_id,
-                binding_id=binding_id,
-            )
+        target = await self.file_access_repository.get_active_target(
+            session_id=session_id,
+            agent_id=agent_id,
+            binding_id=binding_id,
+        )
         if target is None:
             raise ExternalChannelFileTransferError(
                 "External Channel binding is not active for this AgentSession."

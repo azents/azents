@@ -25,7 +25,6 @@ from azents_runtime_control.grpc_transfer_coordinator_client import (
 from cryptography.fernet import Fernet
 from fastapi import Depends
 from fastapi.dependencies.utils import get_dependant
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.config import Config
 from azents.core.crypto import CredentialCipher
@@ -51,7 +50,9 @@ from azents.core.external_channel_provider import SlackConnectionCredentials
 from azents.core.system_setting import ResolvedSystemSetting, SystemSettingSection
 from azents.engine.io.attachments import RuntimeAttachment
 from azents.repos.exchange_file.data import ExchangeFile
-from azents.repos.external_channel.work import ExternalChannelWorkRepository
+from azents.repos.external_channel.file_access import (
+    ExternalChannelFileAccessRepository,
+)
 from azents.repos.external_channel.work_data import (
     ExternalChannelFileAccessTarget,
 )
@@ -108,7 +109,7 @@ from azents.services.system_setting.service import SystemSettingsService
 _NOW = datetime.datetime.now(datetime.UTC)
 
 
-class _Repository(ExternalChannelWorkRepository):
+class _Repository(ExternalChannelFileAccessRepository):
     def __init__(
         self,
         target: ExternalChannelFileAccessTarget | None,
@@ -116,15 +117,13 @@ class _Repository(ExternalChannelWorkRepository):
         self.target = target
         self.calls: list[tuple[str, str, str]] = []
 
-    async def get_active_file_access_target(
+    async def get_active_target(
         self,
-        session: AsyncSession,
         *,
         session_id: str,
         agent_id: str,
         binding_id: str,
     ) -> ExternalChannelFileAccessTarget | None:
-        del session
         self.calls.append((session_id, agent_id, binding_id))
         return self.target
 
@@ -492,12 +491,6 @@ class _OutboundStorage(_UnusedFileOperations):
         return self.files[path][offset : offset + max_bytes]
 
 
-@asynccontextmanager
-async def _session_manager() -> AsyncGenerator[AsyncSession]:
-    async with AsyncSession() as session:
-        yield session
-
-
 class _UnusedStagingStore:
     """A complete typed staging collaborator that never contacts object storage."""
 
@@ -657,8 +650,7 @@ def _service(
     staging_configuration: ExternalChannelInboundStagingConfiguration | None = None,
 ) -> ExternalChannelFileTransferService:
     return ExternalChannelFileTransferService(
-        session_manager=_session_manager,
-        repository=repository,
+        file_access_repository=repository,
         credentials_codec=_CredentialsCodec(),
         slack_client=slack_client,
         discord_client=discord_client or _DiscordClient(),

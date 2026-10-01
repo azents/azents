@@ -53,7 +53,9 @@ from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.exchange_file import ExchangeFileRepository
 from azents.repos.exchange_file.operations import ExchangeFileOperationRepository
-from azents.repos.external_channel.work import ExternalChannelWorkRepository
+from azents.repos.external_channel.file_access import (
+    ExternalChannelFileAccessRepository,
+)
 from azents.repos.memory import MemoryRepository
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 from azents.repos.session_workspace_project_operations import (
@@ -286,12 +288,9 @@ def get_builtin_toolkit_provider(
 
 
 def get_worker_external_channel_file_transfer_service(
-    session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
-    ],
-    repository: Annotated[
-        ExternalChannelWorkRepository,
-        Depends(ExternalChannelWorkRepository.create),
+    file_access_repository: Annotated[
+        ExternalChannelFileAccessRepository,
+        Depends(ExternalChannelFileAccessRepository),
     ],
     credentials_codec: Annotated[
         ExternalChannelCredentialsCodec,
@@ -316,8 +315,7 @@ def get_worker_external_channel_file_transfer_service(
 ) -> ExternalChannelFileTransferService:
     """Compose the Worker-only inbound provider staging boundary."""
     return ExternalChannelFileTransferService(
-        session_manager=session_manager,
-        repository=repository,
+        file_access_repository=file_access_repository,
         credentials_codec=credentials_codec,
         slack_client=slack_client,
         discord_client=discord_client,

@@ -45,9 +45,10 @@ code_paths:
   - python/apps/azents/src/azents/repos/external_channel/work.py
   - python/apps/azents/src/azents/repos/external_channel/work_data.py
   - python/apps/azents/src/azents/repos/external_channel/work_state.py
+  - python/apps/azents/src/azents/repos/external_channel/file_access.py
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - typescript/apps/azents-web/src/features/session-channels/**
-last_verified_at: 2026-09-30
+last_verified_at: 2026-10-01
 spec_version: 63
 ---
 

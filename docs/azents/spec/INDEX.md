@@ -36,10 +36,10 @@ Details of all living specs. Synchronized from frontmatter.
 | [ChatGPT OAuth Flow](flow/chatgpt-oauth.md) | @Hardtack | 2026-09-29 | 27 |
 | [Context Compaction](flow/context-compaction.md) | @Hardtack | 2026-09-13 | 41 |
 | [External Channel Authorization](flow/external-channel-authorization.md) | @Hardtack | 2026-09-29 | 27 |
-| [External Channel Delivery and Channel Work](flow/external-channel-delivery.md) | @Hardtack | 2026-09-30 | 63 |
-| [External Channel Lifecycle](flow/external-channel-lifecycle.md) | @Hardtack | 2026-09-12 | 45 |
+| [External Channel Delivery and Channel Work](flow/external-channel-delivery.md) | @Hardtack | 2026-10-01 | 63 |
+| [External Channel Lifecycle](flow/external-channel-lifecycle.md) | @Hardtack | 2026-10-01 | 45 |
 | [External Channel Provider Ingress](flow/external-channel-provider-ingress.md) | @Hardtack | 2026-09-13 | 63 |
-| [File Exchange Storage](flow/file-exchange-storage.md) | @Hardtack | 2026-09-30 | 53 |
+| [File Exchange Storage](flow/file-exchange-storage.md) | @Hardtack | 2026-10-01 | 53 |
 | [Kimi OAuth Flow](flow/kimi-oauth.md) | @Hardtack | 2026-09-23 | 3 |
 | [MCP OAuth Flow](flow/mcp-oauth.md) | @Hardtack | 2026-09-26 | 7 |
 | [OpenRouter API Key Provider Flow](flow/openrouter-api-key.md) | @Hardtack | 2026-09-15 | 4 |
