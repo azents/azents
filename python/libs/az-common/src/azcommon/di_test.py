@@ -259,3 +259,25 @@ async def test_container_runs_class_task_through_declared_protocol() -> None:
         await container.run(Task)
 
     assert seen == [resource]
+
+
+@pytest.mark.asyncio
+async def test_subcontainer_keeps_live_parent_cache_when_initially_empty() -> None:
+    """Explicitly empty shared caches retain their parent mapping identity."""
+    calls = 0
+
+    def parent_dependency() -> object:
+        nonlocal calls
+        calls += 1
+        return object()
+
+    def child_dependency() -> object:
+        return object()
+
+    async with Container() as parent:
+        async with parent.sub() as child:
+            await child.solve(child_dependency)
+            resource = await parent.solve(parent_dependency)
+
+            assert await child.solve(parent_dependency) is resource
+            assert calls == 1

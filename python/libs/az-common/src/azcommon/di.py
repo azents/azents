@@ -96,7 +96,8 @@ async def solve_offline_dependencies(
     uses_scopes_cache: _UsesScopesCache | None = None,
 ) -> OfflineDependencySolution:
     values: dict[str, Any] = {}
-    dependency_cache = dependency_cache or {}
+    if dependency_cache is None:
+        dependency_cache = {}
     if uses_scopes_cache is None:
         uses_scopes_cache = {}
     sub_dependant: Dependant
