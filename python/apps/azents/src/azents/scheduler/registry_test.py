@@ -20,6 +20,10 @@ from azents.services.file_lifecycle_cleanup import (
     FileLifecycleCleanupService,
     FileLifecycleCleanupSummary,
 )
+from azents.services.historical_memory.discovery import (
+    HistoricalMemoryDiscoveryService,
+    HistoricalMemoryDiscoverySummary,
+)
 from azents.services.llm_catalog import (
     SystemCatalogProjectionService,
     SystemCatalogProjectionSummary,
@@ -99,6 +103,18 @@ class _CatalogProjectionContainer:
     async def solve(self, target: type[object]) -> object:
         """Return the requested catalog projection service."""
         assert target is SystemCatalogProjectionService
+        return self.service
+
+
+class _HistoricalMemoryDiscoveryContainer:
+    """Container test double for Historical Memory discovery."""
+
+    def __init__(self, service: HistoricalMemoryDiscoveryService) -> None:
+        self.service = service
+
+    async def solve(self, target: type[object]) -> object:
+        """Return the configured discovery service."""
+        assert target is HistoricalMemoryDiscoveryService
         return self.service
 
 
@@ -375,3 +391,54 @@ def test_external_account_oauth_cleanup_is_registered_with_a_distinct_key() -> N
     assert all(
         definition.key != "external_account_link_cleanup" for definition in definitions
     )
+
+
+@pytest.mark.asyncio
+async def test_historical_memory_discovery_handler_returns_dispatch_summary() -> None:
+    """Scheduler completion covers discovery and dispatch, not model work."""
+    service = Mock()
+    service.discover_once = AsyncMock(
+        return_value=HistoricalMemoryDiscoverySummary(
+            admitted=4,
+            due_agents=3,
+            dispatched=3,
+        )
+    )
+    now = datetime.datetime(2026, 10, 1, tzinfo=datetime.UTC)
+    context = TaskContext(
+        task_key="historical_memory_discovery",
+        attempt_started_at=now,
+        lease_owner="scheduler-1",
+        deadline=now + datetime.timedelta(minutes=2),
+        manual_triggered=False,
+        container=_HistoricalMemoryDiscoveryContainer(service),  # ty: ignore[invalid-argument-type] # Focused container implements only solve().
+    )
+
+    result = await registry.historical_memory_discovery_handler(context)
+
+    assert result.summary == {
+        "task_key": "historical_memory_discovery",
+        "attempt_started_at": now.isoformat(),
+        "manual_triggered": False,
+        "admitted": 4,
+        "due_agents": 3,
+        "dispatched": 3,
+    }
+    service.discover_once.assert_awaited_once_with()
+
+
+def test_historical_memory_discovery_is_registered_but_rollout_disabled() -> None:
+    """The five-minute definition exists without enabling final rollout early."""
+    definitions = registry.get_task_definitions()
+    matches = [
+        definition
+        for definition in definitions
+        if definition.key == "historical_memory_discovery"
+    ]
+
+    assert matches == [registry.HISTORICAL_MEMORY_DISCOVERY_TASK]
+    definition = matches[0]
+    assert definition.interval == datetime.timedelta(minutes=5)
+    assert definition.timeout == datetime.timedelta(minutes=2)
+    assert definition.retry_policy.kind == "bounded_backoff"
+    assert definition.enabled_by_default is False

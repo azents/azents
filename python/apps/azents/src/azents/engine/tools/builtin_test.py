@@ -11,6 +11,7 @@ from typing import Any, Protocol, runtime_checkable
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.engine_tool_state import AgentsAppendixDedupeState
 from azents.core.enums import (
@@ -116,6 +117,9 @@ from azents.services.agent_runtime.lifecycle_data import (
 )
 from azents.services.artifact import ArtifactService
 from azents.services.exchange_file import ExchangeFileService
+from azents.services.historical_memory.context_snapshot import (
+    MemoryContextSnapshotService,
+)
 from azents.services.runtime_storage_error import RuntimeStorageError
 from azents.services.session_resource_authority import SessionResourceAuthority
 from azents.services.session_working_folder_binding import (
@@ -253,6 +257,31 @@ def _make_mock_memory_repo(
 
     repo.list_summaries = _list_summaries
     return repo
+
+
+class _MemoryContextSnapshotServiceDouble(MemoryContextSnapshotService):
+    """Explicit async Memory snapshot service double."""
+
+    def __init__(self, prompt: str) -> None:
+        self.prompt = prompt
+        self.session_ids: list[str] = []
+
+    async def prompt_for_turn(
+        self,
+        *,
+        session_id: str,
+        session_manager: SessionManager[AsyncSession],
+    ) -> str:
+        """Record the canonical root identity and return the configured prompt."""
+        del session_manager
+        self.session_ids.append(session_id)
+        return self.prompt
+
+
+def _make_memory_snapshot_service(
+    prompt: str = "",
+) -> _MemoryContextSnapshotServiceDouble:
+    return _MemoryContextSnapshotServiceDouble(prompt)
 
 
 def _make_runtime_repo(
@@ -1136,6 +1165,7 @@ class TestBuiltinToolkitProviderResolve:
             agents_store=agents_store,
             session_manager=_make_mock_session_manager(),
             memory_repo=_make_mock_memory_repo(),
+            memory_context_snapshot_service=_make_memory_snapshot_service(),
             agent_runtime_repo=agent_runtime_repo,
             agent_runtime_service=runtime_service,
             agent_session_repository=AsyncMock(spec=AgentSessionRepository),
@@ -2329,11 +2359,20 @@ class TestBuiltinToolkitMemoryPrompt:
         config = ShellToolkitConfig(memory_enabled=True)
         session_manager = _make_mock_session_manager()
         memory_repo = _make_mock_memory_repo()
+        snapshot_service = _make_memory_snapshot_service(
+            "## Memories\n\n"
+            "### Memory Rules\n\n"
+            "Team Session execution exposes shared Agent Memory only. "
+            "User-scope Memory is unavailable.\n\n"
+            "#### Types of memory\n\n"
+            "Use search candidates with ranked partial matches."
+        )
         read_toolkit = MemoryReadToolkit(
             config=config,
             agent_id="agent-1",
             session_manager=session_manager,
             memory_repo=memory_repo,
+            memory_context_snapshot_service=snapshot_service,
         )
         write_toolkit = MemoryWriteToolkit(
             config=config,
@@ -2355,6 +2394,33 @@ class TestBuiltinToolkitMemoryPrompt:
         assert "What NOT to save" in write_prompt
         assert "Duplicate prevention" in write_prompt
         assert "empty search result alone" in write_prompt
+
+    @pytest.mark.asyncio
+    async def test_subagent_memory_prompt_uses_canonical_root_session(self) -> None:
+        """Subagents inherit the root snapshot without widening its authority."""
+        snapshot_service = _make_memory_snapshot_service("root snapshot")
+        toolkit = MemoryReadToolkit(
+            config=ShellToolkitConfig(memory_enabled=True),
+            agent_id="agent-1",
+            session_manager=_make_mock_session_manager(),
+            memory_repo=_make_mock_memory_repo(),
+            memory_context_snapshot_service=snapshot_service,
+        )
+        toolkit.set_session_id("subagent-session")
+        toolkit.bind_execution_authority(
+            SessionResourceAuthority(
+                workspace_id="workspace-1",
+                agent_id="agent-1",
+                session_id="subagent-session",
+                root_session_id="root-session",
+                run_id="run-1",
+                run_index=1,
+                owner_generation=1,
+            )
+        )
+
+        assert await toolkit.get_dynamic_prompt(_make_context()) == "root snapshot"
+        assert snapshot_service.session_ids == ["root-session"]
 
     @pytest.mark.asyncio
     async def test_memory_index_included(self) -> None:
@@ -2420,6 +2486,7 @@ class TestBuiltinToolkitMemoryPrompt:
             agent_id="agent-1",
             session_manager=_make_mock_session_manager(),
             memory_repo=_make_mock_memory_repo(),
+            memory_context_snapshot_service=_make_memory_snapshot_service(),
         )
         enabled.set_session_id("session-1")
         exposed = (await enabled.update_context(context)).tools
@@ -2440,6 +2507,7 @@ class TestBuiltinToolkitMemoryPrompt:
             agent_id="agent-1",
             session_manager=_make_mock_session_manager(),
             memory_repo=_make_mock_memory_repo(),
+            memory_context_snapshot_service=_make_memory_snapshot_service(),
         )
         disabled.set_session_id("session-1")
         assert (await disabled.update_context(context)).tools == []

@@ -510,11 +510,13 @@ async def test_close_cancellation_tracks_quarantine_created_during_close(
         container_stack: AsyncExitStack,
         *,
         request: JobRequest,
+        handler_semaphore: asyncio.Semaphore | None,
     ) -> None:
         await adopt_detached_cleanup(
             handler_task,
             container_stack,
             request=request,
+            handler_semaphore=handler_semaphore,
         )
         cleanup_adopted.set()
 

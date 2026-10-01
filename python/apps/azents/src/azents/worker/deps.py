@@ -114,6 +114,9 @@ from azents.services.external_channel.file_transfer import (
     get_slack_file_client,
 )
 from azents.services.external_channel.slack_events import SlackConversationClient
+from azents.services.historical_memory.context_snapshot import (
+    MemoryContextSnapshotService,
+)
 from azents.services.model_file import ModelFileService
 from azents.services.scheduled_task.channel import (
     ScheduledTaskChannelService,
@@ -250,6 +253,10 @@ def get_builtin_toolkit_provider(
         AgentSessionRepository,
         Depends(AgentSessionRepository),
     ],
+    memory_context_snapshot_service: Annotated[
+        MemoryContextSnapshotService,
+        Depends(MemoryContextSnapshotService),
+    ],
     session_working_folder_binding_service: Annotated[
         SessionWorkingFolderBindingService,
         Depends(),
@@ -279,6 +286,7 @@ def get_builtin_toolkit_provider(
         ),
         session_manager=session_manager,
         memory_repo=MemoryRepository(),
+        memory_context_snapshot_service=memory_context_snapshot_service,
         agent_runtime_repo=AgentRuntimeRepository(),
         agent_runtime_service=agent_runtime_service,
         runner_operations=runner_operations,

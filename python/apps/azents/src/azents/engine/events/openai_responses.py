@@ -1816,7 +1816,15 @@ def _optional_usage_detail(details: object, field: str) -> int | None:
     return value
 
 
-async def call_openai_responses_text(
+@dataclasses.dataclass(frozen=True)
+class OpenAIResponsesTextResult:
+    """Text and content-free usage returned by one bounded operation."""
+
+    text: str
+    usage: TokenUsagePayload | None
+
+
+async def call_openai_responses_text_with_usage(
     *,
     client_factory: OpenAIResponsesClientFactory,
     provider: LLMProvider,
@@ -1828,8 +1836,8 @@ async def call_openai_responses_text(
     watchdog: ModelStreamWatchdog,
     timeout_policy: ModelStreamTimeoutPolicy,
     call_context: ModelStreamCallContext,
-) -> str:
-    """Run one operation-scoped standard-dialect Responses text call."""
+) -> OpenAIResponsesTextResult:
+    """Run one operation-scoped Responses text call with normalized usage."""
     client = client_factory(
         config=openai_responses_client_config(
             provider=provider,
@@ -1874,9 +1882,41 @@ async def call_openai_responses_text(
         ):
             stream.process_event(event)
         completed = stream.complete()
-        return _assistant_text(completed.events)
+        return OpenAIResponsesTextResult(
+            text=_assistant_text(completed.events),
+            usage=completed.usage,
+        )
     finally:
         await adapter.close()
+
+
+async def call_openai_responses_text(
+    *,
+    client_factory: OpenAIResponsesClientFactory,
+    provider: LLMProvider,
+    model: str,
+    credential_kwargs: Mapping[str, object],
+    input_items: Sequence[dict[str, object]],
+    instructions: str,
+    text: ResponseTextConfigParam,
+    watchdog: ModelStreamWatchdog,
+    timeout_policy: ModelStreamTimeoutPolicy,
+    call_context: ModelStreamCallContext,
+) -> str:
+    """Run one operation-scoped standard-dialect Responses text call."""
+    result = await call_openai_responses_text_with_usage(
+        client_factory=client_factory,
+        provider=provider,
+        model=model,
+        credential_kwargs=credential_kwargs,
+        input_items=input_items,
+        instructions=instructions,
+        text=text,
+        watchdog=watchdog,
+        timeout_policy=timeout_policy,
+        call_context=call_context,
+    )
+    return result.text
 
 
 def _assistant_text(events: Sequence[Event]) -> str:

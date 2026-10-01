@@ -304,6 +304,83 @@ async def test_admitted_source_remains_due_beyond_first_admission_age_window(
     assert [item.source_session_id for item in due] == [source.session_id]
 
 
+async def test_snapshot_candidates_apply_team_and_associated_user_scope(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """Prepared summaries remain bounded by current root product scope."""
+    async with rdb_session_manager() as session:
+        team = await _create_source(
+            session,
+            slug="hm-snapshot-team",
+            activity_at=_NOW - datetime.timedelta(hours=9),
+        )
+        personal = await _create_source(
+            session,
+            slug="hm-snapshot-user",
+            activity_at=_NOW - datetime.timedelta(hours=8),
+            product_mode=AgentSessionProductMode.USER,
+        )
+        for source, summary in (
+            (team, "Team summary"),
+            (personal, "Personal summary"),
+        ):
+            row = RDBHistoricalMemorySource(
+                source_session_id=source.session_id,
+                admitted_at=_NOW - datetime.timedelta(hours=2),
+            )
+            row.completed_source_activity_at = _NOW - datetime.timedelta(hours=8)
+            row.completed_source_tail_event_id = source.event_id
+            row.prepared_at = _NOW - datetime.timedelta(hours=1)
+            row.summary = summary
+            session.add(row)
+
+    repository = HistoricalMemoryRepository(
+        session_manager=rdb_session_manager,
+    )
+    async with rdb_session_manager() as session:
+        team_candidates = (
+            await repository.list_available_snapshot_candidates_in_session(
+                session,
+                agent_id=team.agent_id,
+                workspace_id=team.workspace_id,
+                consumer_product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
+                source_session_ids=None,
+                limit=10,
+            )
+        )
+        personal_candidates = (
+            await repository.list_available_snapshot_candidates_in_session(
+                session,
+                agent_id=personal.agent_id,
+                workspace_id=personal.workspace_id,
+                consumer_product_mode=AgentSessionProductMode.USER,
+                associated_user_id=personal.associated_user_id,
+                source_session_ids=None,
+                limit=10,
+            )
+        )
+        denied_candidates = (
+            await repository.list_available_snapshot_candidates_in_session(
+                session,
+                agent_id=personal.agent_id,
+                workspace_id=personal.workspace_id,
+                consumer_product_mode=AgentSessionProductMode.USER,
+                associated_user_id="z" * 32,
+                source_session_ids=None,
+                limit=10,
+            )
+        )
+
+    assert [candidate.source_session_id for candidate in team_candidates] == [
+        team.session_id
+    ]
+    assert [candidate.source_session_id for candidate in personal_candidates] == [
+        personal.session_id
+    ]
+    assert denied_candidates == []
+
+
 async def test_failure_retains_prior_result_and_publish_resets_progress(
     rdb_session_manager: SessionManager[AsyncSession],
 ) -> None:
@@ -325,12 +402,25 @@ async def test_failure_retains_prior_result_and_publish_resets_progress(
         session_manager=rdb_session_manager,
     )
     operation = _operation()
-    started = await repository.begin_preparation(
-        source_session_id=source.session_id,
-        attempted_at=_NOW,
-        inactive_before=_NOW - datetime.timedelta(hours=6),
-        operation=operation,
-    )
+    async with rdb_session_manager() as session:
+        admission = await repository.lock_preparation_admission_in_session(
+            session,
+            source_session_id=source.session_id,
+            attempted_at=_NOW,
+            inactive_before=_NOW - datetime.timedelta(hours=6),
+        )
+        assert admission is not None
+        assert await repository.lock_preparation_membership_in_session(
+            session,
+            admission,
+        )
+        started = await repository.persist_preparation_operation_in_session(
+            session,
+            admission,
+            attempted_at=_NOW,
+            operation=operation,
+        )
+        await session.commit()
     assert started is not None
     assert started.model_operation_state == operation
     assert started.source_activity_at == _NOW - datetime.timedelta(hours=7)
@@ -396,10 +486,10 @@ async def test_failure_retains_prior_result_and_publish_resets_progress(
     assert empty.model_operation_state is None
 
 
-async def test_begin_preparation_rechecks_current_source_authority_and_inactivity(
+async def test_preparation_admission_rechecks_current_source_state_and_membership(
     rdb_session_manager: SessionManager[AsyncSession],
 ) -> None:
-    """Preparation cannot start from stale due-list authorization."""
+    """Preparation lock stages reject stale Session state and User membership."""
     async with rdb_session_manager() as session:
         running = await _create_source(
             session,
@@ -441,23 +531,44 @@ async def test_begin_preparation_rechecks_current_source_authority_and_inactivit
                 )
             )
 
-    repository = HistoricalMemoryRepository(
-        session_manager=rdb_session_manager,
-    )
-    for source in (running, recent, disabled, archived, private):
-        assert (
-            await repository.begin_preparation(
-                source_session_id=source.session_id,
-                attempted_at=_NOW,
-                inactive_before=_NOW - datetime.timedelta(hours=6),
-                operation=_operation(),
+    repository = HistoricalMemoryRepository(session_manager=rdb_session_manager)
+    for source in (running, recent, archived):
+        async with rdb_session_manager() as session:
+            assert (
+                await repository.lock_preparation_admission_in_session(
+                    session,
+                    source_session_id=source.session_id,
+                    attempted_at=_NOW,
+                    inactive_before=_NOW - datetime.timedelta(hours=6),
+                )
+                is None
             )
-            is None
-        )
         stored = await repository.get(source.session_id)
         assert stored is not None
         assert stored.last_attempt_at is None
         assert stored.model_operation_state is None
+
+    async with rdb_session_manager() as session:
+        disabled_admission = await repository.lock_preparation_admission_in_session(
+            session,
+            source_session_id=disabled.session_id,
+            attempted_at=_NOW,
+            inactive_before=_NOW - datetime.timedelta(hours=6),
+        )
+        assert disabled_admission is not None
+
+    async with rdb_session_manager() as session:
+        private_admission = await repository.lock_preparation_admission_in_session(
+            session,
+            source_session_id=private.session_id,
+            attempted_at=_NOW,
+            inactive_before=_NOW - datetime.timedelta(hours=6),
+        )
+        assert private_admission is not None
+        assert not await repository.lock_preparation_membership_in_session(
+            session,
+            private_admission,
+        )
 
 
 async def test_publication_reauthorizes_source_and_session_delete_cascades(
