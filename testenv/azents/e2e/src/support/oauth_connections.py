@@ -3,7 +3,6 @@
 import azentspublicclient
 import requests
 from azentspublicclient.api.chat_gpto_auth_v1_api import ChatGPTOAuthV1Api
-from azentspublicclient.api.kimi_o_auth_v1_api import KimiOAuthV1Api
 from azentspublicclient.api.llm_provider_integration_v1_api import (
     LLMProviderIntegrationV1Api,
 )
@@ -95,47 +94,6 @@ def connect_chatgpt_oauth(
     )
     if completed.integration is None:
         raise AssertionError("ChatGPT device flow did not create an integration")
-    integration_id = completed.integration.id
-    _update_integration_metadata(
-        api=LLMProviderIntegrationV1Api(public_api_client),
-        handle=handle,
-        token=token,
-        integration_id=integration_id,
-        name=name,
-        enabled=enabled,
-    )
-    return integration_id
-
-
-def connect_kimi_oauth(
-    *,
-    public_api_client: azentspublicclient.ApiClient,
-    proxy_url: str,
-    handle: str,
-    token: str,
-    scenario: str,
-    access_token: str,
-    refresh_token: str,
-    name: str,
-    enabled: bool,
-) -> str:
-    """Connect a deterministic Kimi account through its public device flow."""
-    _queue_oauth_connection(
-        proxy_url=proxy_url,
-        provider="kimi",
-        scenario=scenario,
-        access_token=access_token,
-        refresh_token=refresh_token,
-    )
-    oauth_api = KimiOAuthV1Api(public_api_client)
-    started = oauth_api.kimi_oauth_v1_start_device(
-        handle=handle, _headers=_headers(token)
-    )
-    completed = oauth_api.kimi_oauth_v1_poll_device(
-        session_id=started.session_id, handle=handle, _headers=_headers(token)
-    )
-    if completed.integration is None:
-        raise AssertionError("Kimi device flow did not create an integration")
     integration_id = completed.integration.id
     _update_integration_metadata(
         api=LLMProviderIntegrationV1Api(public_api_client),
