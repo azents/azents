@@ -2,7 +2,7 @@
 
 import dataclasses
 import datetime
-from collections.abc import AsyncGenerator, Callable
+from collections.abc import AsyncGenerator, Sequence
 from contextlib import asynccontextmanager
 from typing import ClassVar
 from unittest.mock import AsyncMock
@@ -14,6 +14,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent import BuiltinToolConfig, SelectableModelSettings
 from azents.core.credentials import ApiKeySecrets
+from azents.core.engine_tool_state import (
+    AgentsAppendixDedupeState,
+    ClaudeRulesAppendixDedupeState,
+)
 from azents.core.enums import (
     AgentLifecycleStatus,
     AgentRuntimeCapability,
@@ -39,11 +43,7 @@ from azents.core.tools import (
 from azents.engine.run.contracts import ToolkitBinding
 from azents.engine.run.input import InputMessage, InvalidModelParameters, InvokeInput
 from azents.engine.tools.builtin import BuiltinToolkitProvider
-from azents.engine.tools.builtin_agents import AgentsAppendixDedupeState
-from azents.engine.tools.claude_rules import (
-    ClaudeRulesAppendixDedupeState,
-    ClaudeRulesToolkitProvider,
-)
+from azents.engine.tools.claude_rules import ClaudeRulesToolkitProvider
 from azents.engine.tools.dynamic_worktree import (
     DynamicWorktreeToolkit,
     DynamicWorktreeToolkitProvider,
@@ -229,16 +229,22 @@ class _FakeClaudeRulesAppendixDedupeStateStore:
         del agent_id, session_id
         return ClaudeRulesAppendixDedupeState()
 
-    async def update_appendix_dedupe(
+    async def add_appendix_dedupe_paths(
         self,
         agent_id: str,
         session_id: str,
-        mutator: Callable[
-            [ClaudeRulesAppendixDedupeState], ClaudeRulesAppendixDedupeState
-        ],
+        appended_paths: Sequence[str],
     ) -> None:
         """Ignore dedupe updates."""
-        del agent_id, session_id, mutator
+        del agent_id, session_id, appended_paths
+
+    async def clear_appendix_dedupe(
+        self,
+        agent_id: str,
+        session_id: str,
+    ) -> None:
+        """Ignore dedupe clear."""
+        del agent_id, session_id
 
 
 class _FakeAgentsAppendixDedupeStateStore:
@@ -251,14 +257,14 @@ class _FakeAgentsAppendixDedupeStateStore:
         del agent_id, session_id
         return AgentsAppendixDedupeState()
 
-    async def update_appendix_dedupe(
+    async def replace_appendix_dedupe(
         self,
         agent_id: str,
         session_id: str,
-        mutator: Callable[[AgentsAppendixDedupeState], AgentsAppendixDedupeState],
+        appended_paths: Sequence[str],
     ) -> None:
         """Ignore dedupe updates."""
-        del agent_id, session_id, mutator
+        del agent_id, session_id, appended_paths
 
 
 class _TestToolkitConfig(BaseModel):

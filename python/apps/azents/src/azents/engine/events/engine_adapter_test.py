@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import azents.engine.events.engine_adapter as engine_adapter_module
 from azents.core.chatgpt_oauth import CHATGPT_OAUTH_BACKEND_BASE_URL
 from azents.core.credentials import XaiOAuthSecrets
+from azents.core.engine_tool_state import ToolWorkingSetState
 from azents.core.enums import (
     AgentRunPhase,
     AgentRunStatus,
@@ -127,10 +128,6 @@ from azents.engine.run.types import (
     FunctionToolSpec,
     FunctionToolWireVariant,
 )
-from azents.engine.tooling.tool_search import (
-    ToolWorkingSetState,
-    ToolWorkingSetStore,
-)
 from azents.engine.tools.run_tool_to_file import (
     RUN_TOOL_TO_FILE_NAME,
     LateBoundClientToolInvoker,
@@ -147,6 +144,7 @@ from azents.repos.model_file_pin import ModelFilePinRepository
 from azents.repos.session_execution import (
     CanonicalExecutionOwnerGenerationStaleError,
 )
+from azents.repos.toolkit_state.engine import ToolWorkingSetStore
 from azents.services.artifact import ArtifactService
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.model_file import ModelFileService

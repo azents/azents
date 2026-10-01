@@ -17,6 +17,7 @@ code_paths:
   - python/apps/azents/src/azents/engine/tooling/tool_search.py
   - python/apps/azents/src/azents/core/goal.py
   - python/apps/azents/src/azents/core/toolkit_state.py
+  - python/apps/azents/src/azents/core/engine_tool_state.py
   - python/apps/azents/src/azents/repos/goal/**
   - python/apps/azents/src/azents/repos/toolkit_state/**
   - python/apps/azents/src/azents/engine/tools/scheduled.py
@@ -29,8 +30,8 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/agent_session.py
   - python/apps/azents/src/azents/rdb/models/agent_run.py
   - python/apps/azents/src/azents/rdb/models/agent.py
-last_verified_at: 2026-09-30
-spec_version: 42
+last_verified_at: 2026-10-01
+spec_version: 43
 ---
 
 # Context Compaction
@@ -306,6 +307,9 @@ terminalizes.
 
 ## Changelog
 
+- **2026-10-01** (spec_version 43) — Moved Tool Search working-set persistence
+  into repository-owned operations while retaining the compaction-composed clear
+  in the same summary/head transaction.
 - **2026-09-30** (spec_version 42) — Documented local validated-source context fallback and
   provider-specific Pydantic AI summary execution while retaining native OpenAI and compaction ownership.
 - **2026-09-13** (spec_version 41) — Added an independent frozen Lightweight candidate chain for

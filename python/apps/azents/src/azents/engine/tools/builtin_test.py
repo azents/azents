@@ -3,7 +3,7 @@
 import asyncio
 import json
 import logging
-from collections.abc import AsyncGenerator, Callable
+from collections.abc import AsyncGenerator, Sequence
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from azents.core.engine_tool_state import AgentsAppendixDedupeState
 from azents.core.enums import (
     AgentRuntimeCapability,
     EventKind,
@@ -59,7 +60,6 @@ from azents.engine.tools.builtin import (
     RuntimeToolkit,
 )
 from azents.engine.tools.builtin_agents import (
-    AgentsAppendixDedupeState,
     _agents_appendix_candidates_for_path,  # Exercise root containment directly.
 )
 from azents.engine.tools.import_file import ImportFileStagingConfiguration
@@ -296,15 +296,16 @@ class _FakeAgentsAppendixDedupeStateStore:
             (agent_id, session_id), AgentsAppendixDedupeState()
         )
 
-    async def update_appendix_dedupe(
+    async def replace_appendix_dedupe(
         self,
         agent_id: str,
         session_id: str,
-        mutator: Callable[[AgentsAppendixDedupeState], AgentsAppendixDedupeState],
+        appended_paths: Sequence[str],
     ) -> None:
-        """Apply appendix dedupe state update."""
-        state = await self.load_appendix_dedupe(agent_id, session_id)
-        self.dedupe_states[(agent_id, session_id)] = mutator(state)
+        """Replace appendix dedupe state."""
+        self.dedupe_states[(agent_id, session_id)] = AgentsAppendixDedupeState(
+            appended_paths=list(appended_paths)
+        )
 
 
 def _runtime_configuration_document(

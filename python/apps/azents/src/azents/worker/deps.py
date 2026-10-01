@@ -28,11 +28,7 @@ from azents.engine.run.retry_policy import (
     get_failed_run_retry_policy,
 )
 from azents.engine.tools.builtin import BuiltinToolkitProvider
-from azents.engine.tools.builtin_agents import ToolkitAgentsAppendixDedupeStateStore
-from azents.engine.tools.claude_rules import (
-    ClaudeRulesToolkitProvider,
-    ToolkitClaudeRulesAppendixDedupeStateStore,
-)
+from azents.engine.tools.claude_rules import ClaudeRulesToolkitProvider
 from azents.engine.tools.deps import get_vfs_projection_service
 from azents.engine.tools.dynamic_worktree import DynamicWorktreeToolkitProvider
 from azents.engine.tools.external_channel import ExternalChannelToolkitProvider
@@ -62,6 +58,10 @@ from azents.repos.session_workspace_project_operations import (
     SessionWorkspaceProjectOperationsRepository,
 )
 from azents.repos.toolkit import ToolkitRepository
+from azents.repos.toolkit_state.engine import (
+    ToolkitAgentsAppendixDedupeStateStore,
+    ToolkitClaudeRulesAppendixDedupeStateStore,
+)
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.runtime.control_protocol.runner_operations import (
     RuntimeRunnerOperationClient as ControlRuntimeRunnerOperationClient,

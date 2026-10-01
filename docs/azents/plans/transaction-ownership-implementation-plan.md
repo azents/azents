@@ -43,6 +43,13 @@ slice. Later branches must cover Engine execution/tools, Chat and mailbox, Runti
 lifecycle workers, account/workspace/configuration services, API/CLI entrypoints, and
 other residual groups before final validation and plan cleanup.
 
+Phase 17 starts the Engine execution/tools group with Tool Search working-set,
+AGENTS.md and Claude Rules appendix-dedupe, and Todo Toolkit State. It moves the
+assigned persisted payloads to pure core models and their completed transaction
+lifetimes to repository operations while preserving compaction's existing atomic
+working-set reset. Later Engine phases retain model execution, provider output,
+MCP/cloud snapshots, and residual event-compaction ownership.
+
 ## Delivery Boundaries
 
 1. Correct the title-generation and ChatGPT OAuth persistence boundary as one

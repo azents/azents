@@ -38,7 +38,7 @@ from azents.engine.events.action_messages import (
     CreateSessionWorkingFolderAction,
 )
 from azents.engine.events.types import AgentRunState, ClientToolCallPayload, Event
-from azents.engine.tools.todo import TodoStateSnapshot, TodoStateStore
+from azents.engine.tools.todo import TodoStateSnapshot
 from azents.rdb.deps import get_session_manager
 from azents.rdb.models.event import JSONValue
 from azents.rdb.session import SessionManager
@@ -73,6 +73,7 @@ from azents.repos.message import MessageRepository
 from azents.repos.session_git_worktree import SessionGitWorktreeRepository
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 from azents.repos.session_workspace_project.data import SessionWorkspaceProjectCreate
+from azents.repos.toolkit_state.engine import TodoStateStore
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.runtime.control_protocol.runner_operations import (
     RuntimeRunnerOperationClient,
