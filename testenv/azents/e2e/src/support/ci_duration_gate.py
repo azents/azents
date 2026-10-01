@@ -15,6 +15,10 @@ from pathlib import Path
 
 METRIC = "pytest-lane-wall-v1"
 _LANE = re.compile(r"[a-z][a-z0-9-]*-[1-9][0-9]*")
+_SUMMARY_LANE = re.compile(
+    r"^### (?P<lane>[a-z][a-z0-9-]*-[1-9][0-9]*) — ",
+    re.MULTILINE,
+)
 _SHA = re.compile(r"[0-9a-f]{40}")
 Runner = Callable[[Sequence[str]], str]
 
@@ -57,12 +61,28 @@ def _seconds(text: str) -> Decimal:
     return value
 
 
+def _lane_name(path: Path, root: Path) -> str:
+    lane = path.parent.name.removeprefix("e2e-observability-")
+    if _LANE.fullmatch(lane):
+        return lane
+    if path.parent != root:
+        raise EvidenceError("invalid_lane_artifacts")
+    summary_path = path.with_name("summary.md")
+    try:
+        matches = _SUMMARY_LANE.findall(summary_path.read_text(encoding="utf-8"))
+    except OSError as error:
+        raise EvidenceError("invalid_lane_artifacts") from error
+    if len(matches) != 1:
+        raise EvidenceError("invalid_lane_artifacts")
+    return matches[0]
+
+
 def load_lanes(root: Path) -> dict[str, Decimal]:
     """Read the raw files already used by the sticky CI comment."""
     lanes: dict[str, Decimal] = {}
     for path in root.glob("**/lane-duration-seconds.txt"):
-        lane = path.parent.name.removeprefix("e2e-observability-")
-        if not _LANE.fullmatch(lane) or lane in lanes:
+        lane = _lane_name(path, root)
+        if lane in lanes:
             raise EvidenceError("invalid_lane_artifacts")
         lanes[lane] = _seconds(path.read_text(encoding="utf-8"))
     if not lanes:

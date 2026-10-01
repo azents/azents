@@ -48,6 +48,32 @@ def test_raw_lane_files_are_the_measurement_source(tmp_path: Path) -> None:
     }
 
 
+def test_single_downloaded_artifact_uses_summary_lane(tmp_path: Path) -> None:
+    (tmp_path / "lane-duration-seconds.txt").write_text("367\n", encoding="utf-8")
+    (tmp_path / "summary.md").write_text(
+        "### web-1 — ✅ Passed\n",
+        encoding="utf-8",
+    )
+    assert load_lanes(tmp_path) == {"web-1": Decimal("367")}
+
+
+@pytest.mark.parametrize(
+    "summary",
+    [
+        "",
+        "### web-1 — ✅ Passed\n### web-2 — ✅ Passed\n",
+    ],
+)
+def test_single_downloaded_artifact_requires_one_summary_lane(
+    tmp_path: Path,
+    summary: str,
+) -> None:
+    (tmp_path / "lane-duration-seconds.txt").write_text("367\n", encoding="utf-8")
+    (tmp_path / "summary.md").write_text(summary, encoding="utf-8")
+    with pytest.raises(EvidenceError, match="invalid_lane_artifacts"):
+        load_lanes(tmp_path)
+
+
 @pytest.mark.parametrize("value", ["", "NaN", "Infinity", "-1"])
 def test_invalid_duration_fails_closed(tmp_path: Path, value: str) -> None:
     _lanes(tmp_path, {"required-1": value})
