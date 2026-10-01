@@ -2,7 +2,7 @@
 
 import dataclasses
 import datetime
-from typing import Annotated
+from typing import Annotated, TypeAlias
 
 from pydantic import BaseModel, Field
 from typing_extensions import Self, TypedDict
@@ -20,6 +20,8 @@ from azents.core.enums import (
     ExternalChannelResponseMode,
 )
 from azents.services.uploads.schema import StoredImage
+
+AgentAvatar: TypeAlias = StoredImage
 
 
 class Agent(BaseModel):
