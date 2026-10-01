@@ -31,6 +31,7 @@ from azents.rdb.models.llm_catalog import (
     RDBLLMCatalog,
     RDBLLMCatalogEntry,
     RDBLLMCatalogSnapshot,
+    RDBLLMCatalogSyncAttempt,
 )
 from azents.rdb.models.model_metadata_source import (
     RDBModelMetadataSource,
@@ -39,7 +40,9 @@ from azents.rdb.models.model_metadata_source import (
 from azents.repos.llm_catalog import LLMCatalogRepository
 from azents.repos.llm_catalog.data import (
     CatalogProjectionProvenance,
+    CatalogSyncAlreadyRunning,
     ImageGenerationCatalogEntryCreate,
+    IntegrationCatalogSyncClaim,
     LLMCatalogEntryCreate,
 )
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
@@ -143,6 +146,47 @@ async def test_replace_current_snapshot_persists_snapshot_before_entries(
     assert snapshot_id is not None
     assert snapshot_count == 1
     assert entry_count == 1
+
+
+async def test_system_attempt_reclaims_an_abandoned_running_lease(
+    rdb_session: AsyncSession,
+) -> None:
+    """A process-lost system refresh cannot wedge later scheduler or Admin runs."""
+    repository = LLMCatalogRepository()
+    catalog = await repository.ensure_system_catalog(
+        rdb_session,
+        provider=LLMProvider.OPENAI,
+        purpose=LLMCatalogPurpose.CONVERSATION,
+    )
+    started_at = datetime.datetime(2026, 10, 1, tzinfo=datetime.UTC)
+    first = await repository.begin_attempt(
+        rdb_session,
+        catalog_id=catalog.id,
+        source_key="genai_prices",
+        started_at=started_at,
+    )
+    assert isinstance(first, str)
+
+    still_running = await repository.begin_attempt(
+        rdb_session,
+        catalog_id=catalog.id,
+        source_key="genai_prices",
+        started_at=started_at + datetime.timedelta(minutes=4, seconds=59),
+    )
+    assert isinstance(still_running, CatalogSyncAlreadyRunning)
+    assert still_running.attempt_id == first
+
+    reclaimed = await repository.begin_attempt(
+        rdb_session,
+        catalog_id=catalog.id,
+        source_key="genai_prices",
+        started_at=started_at + datetime.timedelta(minutes=5),
+    )
+    assert isinstance(reclaimed, str)
+    assert reclaimed != first
+    abandoned = await rdb_session.get(RDBLLMCatalogSyncAttempt, first)
+    assert abandoned is not None
+    assert abandoned.failure_code == "SystemCatalogSyncRunningTimeout"
 
 
 async def test_candidate_snapshot_is_complete_and_does_not_publish(
@@ -271,6 +315,375 @@ async def test_ordinary_publication_preserves_pinned_rollback_snapshot(
     assert second_id != first_id
     assert await rdb_session.get(RDBLLMCatalogSnapshot, first_id) is not None
     assert await rdb_session.get(RDBLLMCatalogSnapshot, second_id) is not None
+
+
+async def test_cutover_pins_exact_current_and_coordinated_rollback_restores_it(
+    rdb_session: AsyncSession,
+) -> None:
+    """Cutover is atomic, idempotent, and reversible before cleanup."""
+    repository = LLMCatalogRepository()
+    catalog = await repository.ensure_system_catalog(
+        rdb_session,
+        provider=LLMProvider.OPENAI,
+        purpose=LLMCatalogPurpose.CONVERSATION,
+    )
+    legacy_snapshot_id = await repository.replace_current_snapshot(
+        rdb_session,
+        catalog=catalog,
+        source_snapshot_id=None,
+        entries=[],
+        diagnostics={"authority": "legacy"},
+    )
+    source_id = "m" * 32
+    rdb_session.add(
+        RDBModelMetadataSource(
+            source_key="genai_prices",
+            current_snapshot_id=source_id,
+            latest_attempt_id=None,
+        )
+    )
+    rdb_session.add(
+        RDBModelMetadataSourceSnapshot(
+            id=source_id,
+            source_key="genai_prices",
+            source_kind="genai_prices",
+            source_schema_version="1",
+            source_url="https://metadata.example/data.json",
+            source_hash="c" * 64,
+            producer_name="genai-prices",
+            producer_version="0.1.9",
+            provider_count=1,
+            model_count=1,
+            payload={"schema_version": "1", "providers": []},
+        )
+    )
+    await rdb_session.flush()
+    refreshed = await repository.get_system_catalog(
+        rdb_session,
+        provider=LLMProvider.OPENAI,
+        purpose=LLMCatalogPurpose.CONVERSATION,
+    )
+    assert refreshed is not None
+    candidate_id = await repository.create_candidate_snapshot(
+        rdb_session,
+        catalog=refreshed,
+        entries=[],
+        diagnostics={"shadow": True},
+        provenance=CatalogProjectionProvenance(
+            metadata_source_snapshot_id=source_id,
+            projection_schema_version="1",
+            runtime_profile_resolver_revision="2",
+            pydantic_ai_version="2.52.0",
+            genai_prices_version="0.1.9",
+            projection_fingerprint="f" * 64,
+        ),
+        catalog_configuration_version=None,
+    )
+
+    published = await repository.publish_cutover_candidate(
+        rdb_session,
+        catalog_id=catalog.id,
+        candidate_snapshot_id=candidate_id,
+        expected_metadata_source_key="genai_prices",
+        expected_metadata_source_snapshot_id=source_id,
+        expected_projection_fingerprint="f" * 64,
+    )
+    repeated = await repository.publish_cutover_candidate(
+        rdb_session,
+        catalog_id=catalog.id,
+        candidate_snapshot_id=candidate_id,
+        expected_metadata_source_key="genai_prices",
+        expected_metadata_source_snapshot_id=source_id,
+        expected_projection_fingerprint="f" * 64,
+    )
+
+    catalog_row = await rdb_session.get(RDBLLMCatalog, catalog.id)
+    assert catalog_row is not None
+    assert published == candidate_id
+    assert repeated == candidate_id
+    assert catalog_row.current_snapshot_id == candidate_id
+    assert catalog_row.rollback_snapshot_id == legacy_snapshot_id
+    assert await rdb_session.get(RDBLLMCatalogSnapshot, legacy_snapshot_id) is not None
+
+    restored = await repository.rollback_cutover(
+        rdb_session,
+        catalog_id=catalog.id,
+    )
+
+    assert restored == legacy_snapshot_id
+    assert catalog_row.current_snapshot_id == legacy_snapshot_id
+    assert catalog_row.rollback_snapshot_id is None
+    assert await rdb_session.get(RDBLLMCatalogSnapshot, candidate_id) is None
+
+
+async def test_cutover_rejects_candidate_provenance_without_changing_pointers(
+    rdb_session: AsyncSession,
+) -> None:
+    """A stale readiness fingerprint cannot publish or create a rollback pin."""
+    repository = LLMCatalogRepository()
+    catalog = await repository.ensure_system_catalog(
+        rdb_session,
+        provider=LLMProvider.OPENAI,
+        purpose=LLMCatalogPurpose.CONVERSATION,
+    )
+    legacy_snapshot_id = await repository.replace_current_snapshot(
+        rdb_session,
+        catalog=catalog,
+        source_snapshot_id=None,
+        entries=[],
+        diagnostics={"authority": "legacy"},
+    )
+    source_id = "n" * 32
+    rdb_session.add(
+        RDBModelMetadataSource(
+            source_key="genai_prices",
+            current_snapshot_id=source_id,
+            latest_attempt_id=None,
+        )
+    )
+    rdb_session.add(
+        RDBModelMetadataSourceSnapshot(
+            id=source_id,
+            source_key="genai_prices",
+            source_kind="genai_prices",
+            source_schema_version="1",
+            source_url="https://metadata.example/data.json",
+            source_hash="d" * 64,
+            producer_name="genai-prices",
+            producer_version="0.1.9",
+            provider_count=1,
+            model_count=1,
+            payload={"schema_version": "1", "providers": []},
+        )
+    )
+    await rdb_session.flush()
+    refreshed = await repository.get_system_catalog(
+        rdb_session,
+        provider=LLMProvider.OPENAI,
+        purpose=LLMCatalogPurpose.CONVERSATION,
+    )
+    assert refreshed is not None
+    candidate_id = await repository.create_candidate_snapshot(
+        rdb_session,
+        catalog=refreshed,
+        entries=[],
+        diagnostics={"shadow": True},
+        provenance=CatalogProjectionProvenance(
+            metadata_source_snapshot_id=source_id,
+            projection_schema_version="1",
+            runtime_profile_resolver_revision="2",
+            pydantic_ai_version="2.52.0",
+            genai_prices_version="0.1.9",
+            projection_fingerprint="e" * 64,
+        ),
+        catalog_configuration_version=None,
+    )
+
+    with pytest.raises(RuntimeError, match="provenance changed"):
+        await repository.publish_cutover_candidate(
+            rdb_session,
+            catalog_id=catalog.id,
+            candidate_snapshot_id=candidate_id,
+            expected_metadata_source_key="genai_prices",
+            expected_metadata_source_snapshot_id=source_id,
+            expected_projection_fingerprint="x" * 64,
+        )
+
+    catalog_row = await rdb_session.get(RDBLLMCatalog, catalog.id)
+    assert catalog_row is not None
+    assert catalog_row.current_snapshot_id == legacy_snapshot_id
+    assert catalog_row.rollback_snapshot_id is None
+
+
+async def test_system_publication_refreshes_without_moving_rollback_pin(
+    rdb_session: AsyncSession,
+) -> None:
+    """Later generic refreshes retain the exact original legacy rollback pin."""
+    repository = LLMCatalogRepository()
+    catalog = await repository.ensure_system_catalog(
+        rdb_session,
+        provider=LLMProvider.OPENAI,
+        purpose=LLMCatalogPurpose.CONVERSATION,
+    )
+    legacy_snapshot_id = await repository.replace_current_snapshot(
+        rdb_session,
+        catalog=catalog,
+        source_snapshot_id=None,
+        entries=[],
+        diagnostics={"authority": "legacy"},
+    )
+    authority = RDBModelMetadataSource(
+        source_key="genai_prices",
+        current_snapshot_id=None,
+        latest_attempt_id=None,
+    )
+    rdb_session.add(authority)
+    source_ids = ["1" * 32, "2" * 32]
+    for index, source_id in enumerate(source_ids, start=1):
+        rdb_session.add(
+            RDBModelMetadataSourceSnapshot(
+                id=source_id,
+                source_key="genai_prices",
+                source_kind="genai_prices",
+                source_schema_version="1",
+                source_url="https://metadata.example/data.json",
+                source_hash=str(index) * 64,
+                producer_name="genai-prices",
+                producer_version="0.1.9",
+                provider_count=1,
+                model_count=1,
+                payload={"schema_version": "1", "providers": []},
+            )
+        )
+    authority.current_snapshot_id = source_ids[0]
+    await rdb_session.flush()
+
+    current_catalog = await repository.get_system_catalog(
+        rdb_session,
+        provider=LLMProvider.OPENAI,
+        purpose=LLMCatalogPurpose.CONVERSATION,
+    )
+    assert current_catalog is not None
+    first_candidate = await repository.create_candidate_snapshot(
+        rdb_session,
+        catalog=current_catalog,
+        entries=[],
+        diagnostics=None,
+        provenance=CatalogProjectionProvenance(
+            metadata_source_snapshot_id=source_ids[0],
+            projection_schema_version="1",
+            runtime_profile_resolver_revision="1",
+            pydantic_ai_version="2.52.0",
+            genai_prices_version="0.1.9",
+            projection_fingerprint="1" * 64,
+        ),
+        catalog_configuration_version=None,
+    )
+    await repository.publish_cutover_candidate(
+        rdb_session,
+        catalog_id=catalog.id,
+        candidate_snapshot_id=first_candidate,
+        expected_metadata_source_key="genai_prices",
+        expected_metadata_source_snapshot_id=source_ids[0],
+        expected_projection_fingerprint="1" * 64,
+    )
+
+    authority.current_snapshot_id = source_ids[1]
+    await rdb_session.flush()
+    refreshed_catalog = await repository.get_system_catalog(
+        rdb_session,
+        provider=LLMProvider.OPENAI,
+        purpose=LLMCatalogPurpose.CONVERSATION,
+    )
+    assert refreshed_catalog is not None
+    second_candidate = await repository.create_candidate_snapshot(
+        rdb_session,
+        catalog=refreshed_catalog,
+        entries=[],
+        diagnostics=None,
+        provenance=CatalogProjectionProvenance(
+            metadata_source_snapshot_id=source_ids[1],
+            projection_schema_version="1",
+            runtime_profile_resolver_revision="1",
+            pydantic_ai_version="2.52.0",
+            genai_prices_version="0.1.9",
+            projection_fingerprint="2" * 64,
+        ),
+        catalog_configuration_version=None,
+    )
+    await repository.publish_cutover_candidate(
+        rdb_session,
+        catalog_id=catalog.id,
+        candidate_snapshot_id=second_candidate,
+        expected_metadata_source_key="genai_prices",
+        expected_metadata_source_snapshot_id=source_ids[1],
+        expected_projection_fingerprint="2" * 64,
+    )
+
+    catalog_row = await rdb_session.get(RDBLLMCatalog, catalog.id)
+    assert catalog_row is not None
+    assert catalog_row.current_snapshot_id == second_candidate
+    assert catalog_row.rollback_snapshot_id == legacy_snapshot_id
+    assert await rdb_session.get(RDBLLMCatalogSnapshot, legacy_snapshot_id) is not None
+    assert await rdb_session.get(RDBLLMCatalogSnapshot, first_candidate) is None
+
+
+async def test_system_publication_fences_current_source_authority(
+    rdb_session: AsyncSession,
+) -> None:
+    """A candidate for an obsolete generic source cannot change pointers."""
+    repository = LLMCatalogRepository()
+    catalog = await repository.ensure_system_catalog(
+        rdb_session,
+        provider=LLMProvider.OPENAI,
+        purpose=LLMCatalogPurpose.CONVERSATION,
+    )
+    legacy_snapshot_id = await repository.replace_current_snapshot(
+        rdb_session,
+        catalog=catalog,
+        source_snapshot_id=None,
+        entries=[],
+        diagnostics={"authority": "legacy"},
+    )
+    source_id = "3" * 32
+    current_source_id = "4" * 32
+    rdb_session.add(
+        RDBModelMetadataSource(
+            source_key="genai_prices",
+            current_snapshot_id=current_source_id,
+            latest_attempt_id=None,
+        )
+    )
+    for snapshot_id, source_hash in (
+        (source_id, "3" * 64),
+        (current_source_id, "4" * 64),
+    ):
+        rdb_session.add(
+            RDBModelMetadataSourceSnapshot(
+                id=snapshot_id,
+                source_key="genai_prices",
+                source_kind="genai_prices",
+                source_schema_version="1",
+                source_url="https://metadata.example/data.json",
+                source_hash=source_hash,
+                producer_name="genai-prices",
+                producer_version="0.1.9",
+                provider_count=1,
+                model_count=1,
+                payload={"schema_version": "1", "providers": []},
+            )
+        )
+    await rdb_session.flush()
+    candidate = await repository.create_candidate_snapshot(
+        rdb_session,
+        catalog=catalog,
+        entries=[],
+        diagnostics=None,
+        provenance=CatalogProjectionProvenance(
+            metadata_source_snapshot_id=source_id,
+            projection_schema_version="1",
+            runtime_profile_resolver_revision="1",
+            pydantic_ai_version="2.52.0",
+            genai_prices_version="0.1.9",
+            projection_fingerprint="3" * 64,
+        ),
+        catalog_configuration_version=None,
+    )
+
+    with pytest.raises(RuntimeError, match="metadata source changed"):
+        await repository.publish_cutover_candidate(
+            rdb_session,
+            catalog_id=catalog.id,
+            candidate_snapshot_id=candidate,
+            expected_metadata_source_key="genai_prices",
+            expected_metadata_source_snapshot_id=source_id,
+            expected_projection_fingerprint="3" * 64,
+        )
+
+    catalog_row = await rdb_session.get(RDBLLMCatalog, catalog.id)
+    assert catalog_row is not None
+    assert catalog_row.current_snapshot_id == legacy_snapshot_id
+    assert catalog_row.rollback_snapshot_id is None
 
 
 async def test_partial_catalog_upserts_survive_prepared_statement_reuse(
@@ -475,7 +888,7 @@ async def test_integration_attempt_claim_enforces_running_and_cooldown(
         started_at=now,
         trigger=IntegrationCatalogSyncTrigger.CREATE,
     )
-    assert isinstance(first, str)
+    assert isinstance(first, IntegrationCatalogSyncClaim)
 
     duplicate = await repository.begin_integration_attempt(
         rdb_session,
@@ -487,11 +900,11 @@ async def test_integration_attempt_claim_enforces_running_and_cooldown(
     )
     assert isinstance(duplicate, IntegrationCatalogSyncPolicyDecision)
     assert duplicate.denial_reason == IntegrationCatalogSyncDenialReason.ALREADY_RUNNING
-    assert duplicate.blocking_attempt_id == first
+    assert duplicate.blocking_attempt_id == first.attempt_id
 
     await repository.mark_attempt_succeeded(
         rdb_session,
-        attempt_id=first,
+        attempt_id=first.attempt_id,
         finished_at=now + datetime.timedelta(seconds=2),
         produced_snapshot_id=None,
         fetched_count=0,
@@ -519,13 +932,13 @@ async def test_integration_attempt_claim_enforces_running_and_cooldown(
         started_at=now + datetime.timedelta(seconds=31),
         trigger=IntegrationCatalogSyncTrigger.EXPLICIT,
     )
-    assert isinstance(after_cooldown, str)
+    assert isinstance(after_cooldown, IntegrationCatalogSyncClaim)
     current_attempt_id = await repository.lock_catalog_for_attempt_completion(
         rdb_session,
         catalog_id=catalog.id,
     )
-    assert current_attempt_id == after_cooldown
-    assert current_attempt_id != first
+    assert current_attempt_id == after_cooldown.attempt_id
+    assert current_attempt_id != first.attempt_id
 
 
 async def test_catalog_identity_is_purpose_aware(
@@ -602,11 +1015,11 @@ async def test_image_catalog_fences_generation_and_preserves_last_good(
         started_at=started_at,
         trigger=IntegrationCatalogSyncTrigger.CREATE,
     )
-    assert isinstance(first_attempt, str)
+    assert isinstance(first_attempt, IntegrationCatalogSyncClaim)
     first_publication = await repository.replace_current_image_generation_snapshot(
         rdb_session,
         catalog=catalog,
-        attempt_id=first_attempt,
+        attempt_id=first_attempt.attempt_id,
         entries=[
             ImageGenerationCatalogEntryCreate(
                 provider=LLMProvider.OPENAI,
@@ -627,7 +1040,7 @@ async def test_image_catalog_fences_generation_and_preserves_last_good(
     assert first_publication.snapshot_id is not None
     await repository.mark_attempt_succeeded(
         rdb_session,
-        attempt_id=first_attempt,
+        attempt_id=first_attempt.attempt_id,
         finished_at=started_at + datetime.timedelta(seconds=1),
         produced_snapshot_id=first_publication.snapshot_id,
         fetched_count=1,
@@ -676,7 +1089,7 @@ async def test_image_catalog_fences_generation_and_preserves_last_good(
         started_at=started_at + datetime.timedelta(seconds=31),
         trigger=IntegrationCatalogSyncTrigger.CONFIG_UPDATE,
     )
-    assert isinstance(second_attempt, str)
+    assert isinstance(second_attempt, IntegrationCatalogSyncClaim)
     second_update = await integration_repository.update_by_id(
         rdb_session,
         integration_id,
@@ -689,7 +1102,7 @@ async def test_image_catalog_fences_generation_and_preserves_last_good(
     superseded = await repository.replace_current_image_generation_snapshot(
         rdb_session,
         catalog=catalog,
-        attempt_id=second_attempt,
+        attempt_id=second_attempt.attempt_id,
         entries=[],
         diagnostics=None,
     )

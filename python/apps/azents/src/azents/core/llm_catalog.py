@@ -1,6 +1,7 @@
 """LLM catalog capability contract models."""
 
 import enum
+import re
 from collections.abc import Mapping
 from typing import Any
 
@@ -20,6 +21,17 @@ INTEGRATION_SCOPED_CATALOG_PROVIDERS: frozenset[LLMProvider] = frozenset(
         LLMProvider.OPENROUTER,
     }
 )
+
+
+def model_freshness_rank(model_identifier: str) -> int:
+    """Rank model identifiers so newer generations sort first."""
+    match = re.search(r"(\d+)(?:\.(\d+))?", model_identifier)
+    if match is None:
+        return 0
+    major = int(match.group(1))
+    minor = int(match.group(2) or "0")
+    preview_bonus = 1 if "preview" in model_identifier.lower() else 0
+    return major * 1000 + minor * 10 + preview_bonus
 
 
 class ModelModality(enum.StrEnum):

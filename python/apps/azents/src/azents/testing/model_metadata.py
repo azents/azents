@@ -5,25 +5,25 @@ from contextlib import asynccontextmanager
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.repos.llm_catalog import LiteLLMSourceSnapshotRepository
-from azents.repos.llm_catalog.data import LiteLLMSourceSnapshot
+from azents.repos.model_metadata_source import ModelMetadataSourceRepository
+from azents.repos.model_metadata_source_data import ModelMetadataSourceSnapshot
 from azents.services.model_metadata import ModelMetadataService
 
 
-class _StaticSourceSnapshotRepository(LiteLLMSourceSnapshotRepository):
+class _StaticSourceRepository(ModelMetadataSourceRepository):
     """Return a supplied validated snapshot without database or network I/O."""
 
-    def __init__(self, snapshot: LiteLLMSourceSnapshot | None) -> None:
+    def __init__(self, snapshot: ModelMetadataSourceSnapshot | None) -> None:
         self.snapshot = snapshot
 
-    async def get_latest_authoritative(
+    async def get_current(
         self,
         session: AsyncSession,
         *,
         source_key: str,
-    ) -> LiteLLMSourceSnapshot | None:
+    ) -> ModelMetadataSourceSnapshot | None:
         del session
-        assert source_key == "litellm_model_cost"
+        assert source_key == "genai_prices"
         return self.snapshot
 
 
@@ -36,14 +36,10 @@ async def _disconnected_session() -> AsyncGenerator[AsyncSession, None]:
 
 def make_test_model_metadata_service(
     *,
-    snapshot: LiteLLMSourceSnapshot | None,
+    snapshot: ModelMetadataSourceSnapshot | None,
 ) -> ModelMetadataService:
-    """Construct explicit static metadata instead of a global/default fallback.
-
-    :param snapshot: supplied validated source fixture or an absent source
-    :returns: source metadata service with no database or remote fetch capability
-    """
+    """Construct explicit static metadata instead of a global/default fallback."""
     return ModelMetadataService(
         session_manager=_disconnected_session,
-        source_snapshot_repository=_StaticSourceSnapshotRepository(snapshot),
+        source_snapshot_repository=_StaticSourceRepository(snapshot),
     )

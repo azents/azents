@@ -210,6 +210,44 @@ class LLMProviderIntegrationRepository:
             return Failure(NotFound(integration_id=integration_id))
         return Success(self._build(rdb))
 
+    async def update_runtime_state_by_id(
+        self,
+        session: AsyncSession,
+        integration_id: str,
+        update: LLMProviderIntegrationUpdate,
+    ) -> Result[LLMProviderIntegration, NotFound]:
+        """Persist provider runtime credentials without changing catalog generation."""
+        unsupported = update.keys() - {"secrets", "config"}
+        if unsupported:
+            raise ValueError(
+                "Runtime state updates may only change secrets and config."
+            )
+        db_values: dict[str, object] = {}
+        if "secrets" in update:
+            db_values["encrypted_credentials"] = self._cipher.encrypt(
+                update["secrets"].model_dump_json()
+            )
+        if "config" in update:
+            config = update["config"]
+            db_values["config"] = (
+                config.model_dump(mode="json") if config is not None else None
+            )
+        if not db_values:
+            integration = await self.get_by_id(session, integration_id)
+            if integration is None:
+                return Failure(NotFound(integration_id=integration_id))
+            return Success(integration)
+        result = await session.execute(
+            sa.update(RDBLLMProviderIntegration)
+            .where(RDBLLMProviderIntegration.id == integration_id)
+            .values(**db_values)
+            .returning(RDBLLMProviderIntegration)
+        )
+        rdb = result.scalar_one_or_none()
+        if rdb is None:
+            return Failure(NotFound(integration_id=integration_id))
+        return Success(self._build(rdb))
+
     async def delete_by_id(
         self,
         session: AsyncSession,

@@ -20,7 +20,7 @@ Design documents are accumulated records and are not listed individually in this
 | [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-09-30 | 81 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-09-30 | 16 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-10-01 | 9 |
-| [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-10-01 | 31 |
+| [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-10-01 | 32 |
 | [Runtime Provider](spec/domain/runtime-provider.md) | runtime-provider | - | 2026-09-30 | 34 |
 | [Scheduled Task Domain Spec](spec/domain/scheduled-task.md) | scheduled-task | - | 2026-10-01 | 14 |
 | [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-09-30 | 7 |
@@ -46,7 +46,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Kimi OAuth Flow](spec/flow/kimi-oauth.md) | @Hardtack | 2026-09-30 | 4 |
 | [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-10-01 | 8 |
 | [OpenRouter API Key Provider Flow](spec/flow/openrouter-api-key.md) | @Hardtack | 2026-09-30 | 5 |
-| [Periodic Execution Flow Spec](spec/flow/periodic-execution.md) | - | 2026-09-15 | 20 |
+| [Periodic Execution Flow Spec](spec/flow/periodic-execution.md) | - | 2026-10-01 | 21 |
 | [Public Release Publication](spec/flow/public-release.md) | @Hardtack | 2026-09-18 | 3 |
 | [Run Resume](spec/flow/run-resume.md) | @Hardtack | 2026-09-13 | 37 |
 | [Session Context Inspector](spec/flow/session-context-inspector.md) | @Hardtack | 2026-09-30 | 24 |

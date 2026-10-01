@@ -7,7 +7,7 @@ from typing import ClassVar, Literal
 from azcommon.uuid import uuid7
 
 from azents.core.enums import EventKind
-from azents.core.model_pricing import ModelPricing
+from azents.core.model_pricing import CapturedModelPricing
 from azents.core.type_guards import is_string_object_dict
 from azents.engine.events.model_usage_pricing import apply_model_usage_pricing
 from azents.engine.events.protocols import (
@@ -63,14 +63,14 @@ class ResponsesOutputNormalizer:
         *,
         provider: str,
         model: str,
-        pricing: ModelPricing | None,
+        pricing: CapturedModelPricing | None,
         operation: ModelStreamCallKind,
         integration: str | None,
     ) -> None:
         """Set normalizer origin and provider-failure context."""
         self.provider: str = provider
         self.model: str = model
-        self.pricing: ModelPricing | None = pricing
+        self.pricing: CapturedModelPricing | None = pricing
         self.service_tier: str | None = None
         self.operation: ModelStreamCallKind = operation
         self.integration: str | None = integration
@@ -919,7 +919,7 @@ def _normalize_response_usage(
     *,
     provider: str,
     model: str,
-    pricing: ModelPricing | None,
+    pricing: CapturedModelPricing | None,
     requested_service_tier: str | None,
     completed_output_items: Sequence[dict[str, object]],
 ) -> TokenUsagePayload | None:
