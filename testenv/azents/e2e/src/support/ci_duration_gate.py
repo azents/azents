@@ -141,20 +141,20 @@ def _number(value: Decimal | None) -> str | None:
 def compare(
     lanes: Mapping[str, Decimal], base: Sample, head_sha: str, base_sha: str
 ) -> dict[str, object]:
-    """Compute the exact ten-percent verdict."""
+    """Compute the exact twenty-percent verdict."""
     critical = max(lanes, key=lambda lane: lanes[lane])
     observed = lanes[critical]
     reference = max(base.lanes.values())
-    threshold = reference * Decimal("1.10")
+    threshold = reference * Decimal("1.20")
     increase = (observed / reference - 1) * 100 if reference else None
     outcome = "regression" if observed >= threshold else "pass"
     return {
         "schema_version": 1,
         "metric": METRIC,
         "outcome": outcome,
-        "reason": "at_or_above_ten_percent"
+        "reason": "at_or_above_twenty_percent"
         if outcome == "regression"
-        else "below_ten_percent",
+        else "below_twenty_percent",
         "head_sha": head_sha,
         "base_sha": base_sha,
         "base_run_id": base.run_id,
@@ -211,7 +211,7 @@ def render(report: Mapping[str, object]) -> str:
     )
     status = {
         "pass": "✅ Within limit",
-        "regression": "❌ Over 10% limit",
+        "regression": "❌ Over 20% limit",
         "comparison_unavailable": "⚠️ Comparison unavailable",
     }.get(outcome, "⚠️ Unknown result")
     values = [

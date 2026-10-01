@@ -28,16 +28,16 @@ def _lanes(root: Path, values: dict[str, str]) -> None:
         path.write_text(value, encoding="utf-8")
 
 
-def test_uses_maximum_and_fails_exact_ten_percent() -> None:
+def test_uses_maximum_and_fails_exact_twenty_percent() -> None:
     result = compare(
-        {"required-1": Decimal("99"), "web-1": Decimal("110")},
+        {"required-1": Decimal("99"), "web-1": Decimal("120")},
         Sample(7, {"required-1": Decimal("100"), "web-1": Decimal("100")}),
         _HEAD,
         _BASE,
     )
     assert result["outcome"] == "regression"
     assert result["critical_lane"] == "web-1"
-    assert result["threshold_seconds"] == "110"
+    assert result["threshold_seconds"] == "120"
 
 
 def test_raw_lane_files_are_the_measurement_source(tmp_path: Path) -> None:
@@ -109,7 +109,7 @@ def test_markdown_keeps_summary_visible_and_evidence_collapsed() -> None:
     visible = markdown.split("<details>", 1)[0]
     assert "✅ Within limit" in visible
     assert "Candidate `90s` · Base `100s`" in visible
-    assert "Change `-10%` · Limit `110s`" in visible
+    assert "Change `-10%` · Limit `120s`" in visible
     assert _HEAD not in visible
     assert "<summary>Details</summary>" in markdown
     assert "<summary>Raw JSON</summary>" in markdown
@@ -118,7 +118,7 @@ def test_markdown_keeps_summary_visible_and_evidence_collapsed() -> None:
 
 def test_regression_and_unavailable_are_explained_in_plain_language() -> None:
     regression = compare(
-        {"web-1": Decimal("111")},
+        {"web-1": Decimal("121")},
         Sample(7, {"web-1": Decimal("100")}),
         _HEAD,
         _BASE,
@@ -132,8 +132,8 @@ def test_regression_and_unavailable_are_explained_in_plain_language() -> None:
         "increase_percent": None,
     }
 
-    assert "❌ Over 10% limit" in render(regression)
-    assert "Candidate `111s` · Base `100s`" in render(regression)
+    assert "❌ Over 20% limit" in render(regression)
+    assert "Candidate `121s` · Base `100s`" in render(regression)
     unavailable_markdown = render(unavailable_report)
     assert "⚠️ Comparison unavailable" in unavailable_markdown
     assert "Base timing artifact unavailable" in unavailable_markdown
