@@ -20,6 +20,13 @@ from azents.repos.llm_catalog.data import LiteLLMSourceSnapshot
 
 
 @dataclasses.dataclass(frozen=True)
+class CapturedContextSource:
+    """One captured context authority, including an explicitly absent source."""
+
+    snapshot: LiteLLMSourceSnapshot | None
+
+
+@dataclasses.dataclass(frozen=True)
 class ModelMetadataService:
     """Capture local validated metadata without source or provider fetches."""
 

@@ -768,6 +768,7 @@ class TestResolveInvokeInput:
                 session_id="session-1",
                 messages=[],
             ),
+            context_source=None,
             requested_profile=RequestedInferenceProfile(
                 enabled_execution_options=[],
                 model_target_label="default",
@@ -827,6 +828,7 @@ class TestResolveInvokeInput:
                 session_id="session-1",
                 messages=[],
             ),
+            context_source=None,
             resolved_model_selection=selection,
             resolved_model_settings=settings,
             resolved_reasoning_effort=None,
@@ -1030,6 +1032,7 @@ class TestResolveInvokeInput:
                 session_id="session-1",
                 messages=[],
             ),
+            context_source=None,
             requested_profile=RequestedInferenceProfile(
                 enabled_execution_options=[],
                 model_target_label="default",
@@ -1063,6 +1066,7 @@ class TestResolveInvokeInput:
                 session_id="session-1",
                 messages=[],
             ),
+            context_source=None,
             requested_profile=RequestedInferenceProfile(
                 model_target_label="default",
                 reasoning_effort=None,
@@ -1095,6 +1099,7 @@ class TestResolveInvokeInput:
                 session_id="session-1",
                 messages=[],
             ),
+            context_source=None,
             requested_profile=RequestedInferenceProfile(
                 model_target_label="default",
                 reasoning_effort=None,
@@ -1131,6 +1136,7 @@ class TestResolveInvokeInput:
                 session_id="session-1",
                 messages=[],
             ),
+            context_source=None,
             requested_profile=RequestedInferenceProfile(
                 enabled_execution_options=[],
                 model_target_label="deleted",
@@ -1168,6 +1174,7 @@ class TestResolveInvokeInput:
                 session_id="session-1",
                 messages=[],
             ),
+            context_source=None,
             requested_profile=RequestedInferenceProfile(
                 enabled_execution_options=[],
                 model_target_label="default",
@@ -1206,6 +1213,7 @@ class TestResolveInvokeInput:
                 session_id="session-1",
                 messages=[],
             ),
+            context_source=None,
             requested_profile=RequestedInferenceProfile(
                 enabled_execution_options=[],
                 model_target_label="default",
@@ -1245,6 +1253,7 @@ class TestResolveInvokeInput:
                 session_id="session-1",
                 messages=[],
             ),
+            context_source=None,
             requested_profile=RequestedInferenceProfile(
                 enabled_execution_options=[],
                 model_target_label="default",

@@ -343,6 +343,7 @@ class SessionTitleService:
             selection = candidate.model_selection
             resolved_runtime = await resolve_model_candidate_runtime(
                 agent_id=agent_id,
+                context_source=None,
                 workspace_id=current.workspace_id,
                 selection=selection,
                 settings=candidate.settings,

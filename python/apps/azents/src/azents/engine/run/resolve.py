@@ -132,7 +132,7 @@ from azents.services.model_file import (
     model_file_size_limit_message,
     model_file_source_size_error,
 )
-from azents.services.model_metadata import ModelMetadataService
+from azents.services.model_metadata import CapturedContextSource, ModelMetadataService
 from azents.services.session_resource_authority import SessionResourceAuthority
 from azents.services.xai_oauth.data import (
     ProviderEntitlementDenied as XaiOAuthProviderEntitlementDenied,
@@ -330,6 +330,7 @@ async def resolve_model_candidate_runtime(
     workspace_id: str,
     selection: AgentModelSelection,
     settings: SelectableModelSettings,
+    context_source: CapturedContextSource | None,
     integration_repository: LLMProviderIntegrationRepository,
     session_manager: SessionManager[AsyncSession],
     model_metadata_service: ModelMetadataService,
@@ -373,10 +374,14 @@ async def resolve_model_candidate_runtime(
             )
         )
     runtime_model = to_runtime_model(selection.provider, selection.model_identifier)
-    source_snapshot = await model_metadata_service.capture_for_context(
-        capability_maximums=[
-            selection.normalized_capabilities.context_window.max_input_tokens
-        ]
+    source_snapshot = (
+        context_source.snapshot
+        if context_source is not None
+        else await model_metadata_service.capture_for_context(
+            capability_maximums=[
+                selection.normalized_capabilities.context_window.max_input_tokens
+            ]
+        )
     )
     input_tokens = resolve_model_input_tokens(
         selection.normalized_capabilities.context_window.default_input_tokens,
@@ -529,6 +534,7 @@ async def resolve_invoke_input(
         model_source_agent_id=invoke_input.agent_id,
         requested_profile=None,
         resolved_model_selection=None,
+        context_source=None,
         resolved_model_settings=None,
         resolved_enabled_execution_options=None,
         agent_repository=agent_repository,
@@ -552,6 +558,7 @@ async def resolve_invoke_input_with_profile(
     invoke_input: InvokeInput,
     *,
     requested_profile: RequestedInferenceProfile,
+    context_source: CapturedContextSource | None,
     agent_repository: AgentRepository,
     integration_repository: LLMProviderIntegrationRepository,
     session_manager: SessionManager[AsyncSession],
@@ -565,6 +572,7 @@ async def resolve_invoke_input_with_profile(
         invoke_input,
         model_source_agent_id=invoke_input.agent_id,
         requested_profile=requested_profile,
+        context_source=context_source,
         resolved_model_selection=None,
         resolved_model_settings=None,
         resolved_enabled_execution_options=None,
@@ -597,6 +605,7 @@ async def resolve_invoke_input_with_resolved_profile(
     *,
     resolved_model_selection: AgentModelSelection,
     resolved_model_settings: SelectableModelSettings,
+    context_source: CapturedContextSource | None,
     resolved_reasoning_effort: ModelReasoningEffort | None,
     resolved_enabled_execution_options: list[ModelExecutionOptionId],
     agent_repository: AgentRepository,
@@ -613,6 +622,7 @@ async def resolve_invoke_input_with_resolved_profile(
         model_source_agent_id=invoke_input.agent_id,
         requested_profile=None,
         resolved_model_selection=resolved_model_selection,
+        context_source=context_source,
         resolved_model_settings=resolved_model_settings,
         resolved_enabled_execution_options=resolved_enabled_execution_options,
         agent_repository=agent_repository,
@@ -641,6 +651,7 @@ async def resolve_invoke_input_with_model_source(
     invoke_input: InvokeInput,
     *,
     model_source_agent_id: str,
+    context_source: CapturedContextSource | None,
     requested_profile: RequestedInferenceProfile | None,
     resolved_model_selection: AgentModelSelection | None,
     resolved_model_settings: SelectableModelSettings | None,
@@ -826,11 +837,15 @@ async def resolve_invoke_input_with_model_source(
             )
         )
 
-    source_snapshot = await model_metadata_service.capture_for_context(
-        capability_maximums=[
-            main_selection.normalized_capabilities.context_window.max_input_tokens,
-            lightweight_selection.normalized_capabilities.context_window.max_input_tokens,
-        ]
+    source_snapshot = (
+        context_source.snapshot
+        if context_source is not None
+        else await model_metadata_service.capture_for_context(
+            capability_maximums=[
+                main_selection.normalized_capabilities.context_window.max_input_tokens,
+                lightweight_selection.normalized_capabilities.context_window.max_input_tokens,
+            ]
+        )
     )
     reasoning_effort = (
         requested_profile.reasoning_effort
