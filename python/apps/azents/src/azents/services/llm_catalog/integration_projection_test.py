@@ -42,6 +42,7 @@ from azents.repos.llm_provider_integration.data import (
 )
 from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace.data import WorkspaceCreate
+from azents.repos.xai_oauth_runtime import XaiOAuthRuntimeRepository
 from azents.services.llm_catalog import (
     IntegrationCatalogProjectionService,
     LiteLLMSourceLoader,
@@ -569,6 +570,10 @@ async def test_deterministic_integration_sync_does_not_require_source_authority(
                 integration_repository=integration_repository,
                 session_manager=rdb_session_manager,
             ),
+            xai_oauth_runtime_repository=XaiOAuthRuntimeRepository(
+                integration_repository=integration_repository,
+                session_manager=rdb_session_manager,
+            ),
             source_sync_service=LiteLLMSourceSyncService(
                 session_manager=rdb_session_manager,
                 snapshot_repository=LiteLLMSourceSnapshotRepository(),
@@ -707,6 +712,10 @@ async def test_xai_oauth_sync_refreshes_before_listing(
                 integration_repository=integration_repository,
                 session_manager=rdb_session_manager,
             ),
+            xai_oauth_runtime_repository=XaiOAuthRuntimeRepository(
+                integration_repository=integration_repository,
+                session_manager=rdb_session_manager,
+            ),
             source_sync_service=LiteLLMSourceSyncService(
                 session_manager=rdb_session_manager,
                 snapshot_repository=LiteLLMSourceSnapshotRepository(),
@@ -815,6 +824,10 @@ async def test_xai_failure_preserves_last_successful_snapshot(
             catalog_repository=catalog_repository,
             integration_repository=integration_repository,
             chatgpt_oauth_runtime_repository=ChatGPTOAuthRuntimeRepository(
+                integration_repository=integration_repository,
+                session_manager=rdb_session_manager,
+            ),
+            xai_oauth_runtime_repository=XaiOAuthRuntimeRepository(
                 integration_repository=integration_repository,
                 session_manager=rdb_session_manager,
             ),

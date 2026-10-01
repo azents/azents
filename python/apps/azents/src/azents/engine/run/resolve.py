@@ -87,6 +87,7 @@ from azents.repos.exchange_file.data import ExchangeFile
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.llm_provider_integration.data import LLMProviderIntegrationWithSecrets
 from azents.repos.toolkit import ToolkitRepository
+from azents.repos.xai_oauth_runtime import XaiOAuthRuntimeRepository
 from azents.runtime.types import RuntimeDomainConfig
 from azents.services.chatgpt_oauth.data import (
     ProviderRejected as ChatGPTOAuthProviderRejected,
@@ -396,8 +397,10 @@ async def _ensure_provider_runtime_tokens(
     if integration.provider == LLMProvider.XAI_OAUTH:
         result = await ensure_xai_oauth_runtime_tokens(
             integration=integration,
-            integration_repository=integration_repository,
-            session_manager=session_manager,
+            persistence_repository=XaiOAuthRuntimeRepository(
+                integration_repository=integration_repository,
+                session_manager=session_manager,
+            ),
         )
     elif integration.provider == LLMProvider.KIMI_OAUTH:
         result = await ensure_kimi_oauth_runtime_tokens(

@@ -247,6 +247,7 @@ async def _service(
         service=SubscriptionUsageService(
             repository=repository,
             chatgpt_oauth_runtime_repository=AsyncMock(),
+            xai_oauth_runtime_repository=AsyncMock(),
             session_manager=_SessionManager(),
             http_client=http_client,
             chatgpt_usage_base_url="https://usage.example.test/backend-api",
