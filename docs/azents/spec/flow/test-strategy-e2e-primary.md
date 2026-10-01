@@ -29,8 +29,8 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
-last_verified_at: 2026-10-01
-spec_version: 77
+last_verified_at: 2026-10-02
+spec_version: 78
 ---
 
 # E2E Primary Test Strategy
@@ -530,9 +530,15 @@ Always-on required CI does not depend on external credentials.
   all enabled suite lanes, and the timing aggregator for the scopes selected by path
   filtering. It compares the maximum lane sum of pytest `call` phases with a complete
   recorded run for the PR base and fails at a twenty-percent increase or unavailable
-  evidence. Fixture setup/teardown, Docker preparation, and full lane wall time remain
-  diagnostic only. Retargeting and a 15-minute sweep recompare recorded evidence
-  without rerunning E2E.
+  evidence. An exact-base workflow may still be active when a later main-push aggregate
+  starts: the gate first accepts its already-complete lane artifacts, otherwise waits
+  for that exact workflow to finish before one required artifact read. It never
+  substitutes a different ancestor. Missing or incomplete evidence after that boundary
+  still fails closed. Fixture setup/teardown, Docker preparation, and full lane wall
+  time remain diagnostic only. Rolling timing aggregation requires one nonempty,
+  schema-valid timing file for every downloaded lane artifact. A failed current
+  aggregation is not published as a rolling planner cache entry. Retargeting and a
+  15-minute sweep recompare recorded evidence without rerunning E2E.
 - Each executed required E2E lane uploads bounded observability artifacts even when
   pytest fails. The artifact contains JUnit XML, the complete pytest output, the
   slow-test report, and Docker process/storage diagnostics. Failed browser calls also
@@ -599,6 +605,9 @@ Local/PR environment without live substrate does not fake live PASS. Instead, se
 
 ## Changelog
 
+- **2026-10-02** (spec_version 78) — Made exact-base duration comparison consume
+  ready artifacts from an active base workflow or wait for its authoritative
+  completion, and prevented failed timing aggregation from publishing a cache entry.
 - **2026-10-01** (spec_version 77) — Kept representative desktop quota-fallback and
   shared-cookie Runtime Web browser journeys, moved mobile presentation to a Storybook
   interaction, and assigned alternate authentication plus capacity edge cases to

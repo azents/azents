@@ -1,12 +1,14 @@
 """Focused tests for the compact E2E duration gate."""
 
 import json
+import subprocess
 from collections.abc import Sequence
 from decimal import Decimal
 from pathlib import Path
 
 import pytest
 
+from support import ci_duration_gate
 from support.ci_duration_gate import (
     EvidenceError,
     Sample,
@@ -130,6 +132,24 @@ def test_missing_or_duplicate_call_timing_fails_closed(tmp_path: Path) -> None:
         load_lanes(tmp_path)
 
 
+def test_authoritative_run_watch_uses_the_workflow_owned_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Do not expire exact-base waiting before the workflow can finish."""
+    observed_timeout: list[float | None] = []
+
+    def run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        del args
+        timeout = kwargs.get("timeout")
+        assert timeout is None or isinstance(timeout, int | float)
+        observed_timeout.append(None if timeout is None else float(timeout))
+        return subprocess.CompletedProcess(["gh", "run", "watch"], 0, "", "")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    assert ci_duration_gate._run(["gh", "run", "watch", "10"]) == ""
+    assert observed_timeout == [None]
+
+
 def test_evaluate_skips_incomplete_base_runs(tmp_path: Path) -> None:
     current = tmp_path / "current"
     _lanes(current, {"required-1": "100", "web-1": "100"})
@@ -159,6 +179,122 @@ def test_evaluate_skips_incomplete_base_runs(tmp_path: Path) -> None:
     required = diagnostics["required-1"]
     assert isinstance(required, dict)
     assert required["wall"] == "999"
+
+
+def test_evaluate_uses_ready_artifacts_from_active_exact_base_run(
+    tmp_path: Path,
+) -> None:
+    current = tmp_path / "current"
+    _lanes(current, {"required-1": "100", "web-1": "100"})
+
+    def command(args: Sequence[str]) -> str:
+        joined = " ".join(args)
+        if "actions/workflows/ci.yaml/runs" in joined:
+            return json.dumps({"workflow_runs": [{"id": 10, "status": "in_progress"}]})
+        if "gh run download 10" in joined:
+            _lanes(
+                tmp_path / "work/run-10",
+                {"required-1": "100", "web-1": "100"},
+            )
+            return ""
+        raise AssertionError(args)
+
+    report = evaluate(
+        current, "azents/azents", _BASE, _HEAD, 11, tmp_path / "work", command
+    )
+    assert report["outcome"] == "pass"
+    assert report["base_run_id"] == 10
+
+
+def test_evaluate_waits_when_active_exact_base_artifacts_are_not_ready(
+    tmp_path: Path,
+) -> None:
+    current = tmp_path / "current"
+    _lanes(current, {"required-1": "100", "web-1": "100"})
+    watched: list[int] = []
+    downloads = 0
+
+    def command(args: Sequence[str]) -> str:
+        nonlocal downloads
+        joined = " ".join(args)
+        if "actions/workflows/ci.yaml/runs" in joined:
+            return json.dumps({"workflow_runs": [{"id": 10, "status": "in_progress"}]})
+        if "gh run download 10" in joined:
+            downloads += 1
+            if downloads == 1:
+                _lanes(tmp_path / "work/run-10", {"required-1": "100"})
+            else:
+                _lanes(
+                    tmp_path / "work/run-10",
+                    {"required-1": "100", "web-1": "100"},
+                )
+            return ""
+        if "gh run watch 10" in joined:
+            watched.append(10)
+            return ""
+        raise AssertionError(args)
+
+    report = evaluate(
+        current, "azents/azents", _BASE, _HEAD, 11, tmp_path / "work", command
+    )
+    assert report["outcome"] == "pass"
+    assert report["base_run_id"] == 10
+    assert watched == [10]
+    assert downloads == 2
+
+
+def test_evaluate_fails_closed_when_active_base_never_produces_artifacts(
+    tmp_path: Path,
+) -> None:
+    current = tmp_path / "current"
+    _lanes(current, {"web-1": "123"})
+
+    def command(args: Sequence[str]) -> str:
+        joined = " ".join(args)
+        if "actions/workflows/ci.yaml/runs" in joined:
+            return json.dumps({"workflow_runs": [{"id": 10, "status": "in_progress"}]})
+        if "gh run download 10" in joined:
+            raise EvidenceError("github_evidence_unavailable")
+        if "gh run watch 10" in joined:
+            return ""
+        raise AssertionError(args)
+
+    report = evaluate(
+        current, "azents/azents", _BASE, _HEAD, 11, tmp_path / "work", command
+    )
+    assert report["outcome"] == "comparison_unavailable"
+    assert report["reason"] == "compatible_base_run_unavailable"
+
+
+def test_evaluate_waits_for_only_the_newest_active_base_run(tmp_path: Path) -> None:
+    """Bound the exact-base wait to one authoritative active workflow."""
+    current = tmp_path / "current"
+    _lanes(current, {"web-1": "123"})
+    watched: list[int] = []
+
+    def command(args: Sequence[str]) -> str:
+        joined = " ".join(args)
+        if "actions/workflows/ci.yaml/runs" in joined:
+            return json.dumps(
+                {
+                    "workflow_runs": [
+                        {"id": 10, "status": "in_progress"},
+                        {"id": 9, "status": "queued"},
+                    ]
+                }
+            )
+        if "gh run download" in joined:
+            raise EvidenceError("github_evidence_unavailable")
+        if "gh run watch" in joined:
+            watched.append(int(args[3]))
+            return ""
+        raise AssertionError(args)
+
+    report = evaluate(
+        current, "azents/azents", _BASE, _HEAD, 11, tmp_path / "work", command
+    )
+    assert report["outcome"] == "comparison_unavailable"
+    assert watched == [10]
 
 
 def test_missing_base_evidence_reports_failure_with_current_time(
@@ -228,7 +364,7 @@ def test_recheck_uses_latest_candidate_values_with_new_base(tmp_path: Path) -> N
         if joined.endswith("pulls/3"):
             return json.dumps({"head": {"sha": _HEAD}, "base": {"sha": _BASE}})
         if f"head_sha={_HEAD}" in joined:
-            return json.dumps({"workflow_runs": [{"id": 20}]})
+            return json.dumps({"workflow_runs": [{"id": 20, "status": "completed"}]})
         if "gh run download 20" in joined and "e2e-duration-gate" in joined:
             path = tmp_path / "candidate-20/report.json"
             path.parent.mkdir(parents=True)
@@ -238,7 +374,7 @@ def test_recheck_uses_latest_candidate_values_with_new_base(tmp_path: Path) -> N
             )
             return ""
         if f"head_sha={_BASE}" in joined:
-            return json.dumps({"workflow_runs": [{"id": 19}]})
+            return json.dumps({"workflow_runs": [{"id": 19, "status": "completed"}]})
         if "gh run download 19" in joined:
             _lanes(tmp_path / "base/run-19", {"web-1": "100"})
             return ""

@@ -5,11 +5,71 @@ from pathlib import Path
 import pytest
 
 from support.ci_observability import (
+    aggregate_timings,
     parse_image_build_timings,
     parse_junit,
     parse_timings,
     render_summary,
 )
+
+
+def _timing_line(node_id: str) -> str:
+    return (
+        '{"duration_seconds": 1.0, "node_id": "'
+        + node_id
+        + '", "outcome": "passed", "phase": "call", '
+        '"record_type": "test_phase"}\n'
+    )
+
+
+def test_aggregate_timings_validates_and_orders_lane_files(tmp_path: Path) -> None:
+    """Build one deterministic cache input from complete downloaded artifacts."""
+    root = tmp_path / "artifacts"
+    for lane, node_id in (("required-2", "test_b"), ("required-1", "test_a")):
+        lane_root = root / f"e2e-observability-{lane}"
+        path = lane_root / "pytest-timings.jsonl"
+        path.parent.mkdir(parents=True)
+        path.write_text(_timing_line(node_id), encoding="utf-8")
+        (lane_root / "lane-duration-seconds.txt").write_text("1\n", encoding="utf-8")
+    output = tmp_path / "current.jsonl"
+
+    assert aggregate_timings(root, output) == 2
+    assert [record["node_id"] for record in parse_timings(output)] == [
+        "test_a",
+        "test_b",
+    ]
+
+
+def test_aggregate_timings_rejects_missing_or_empty_lane_files(
+    tmp_path: Path,
+) -> None:
+    """Fail visibly instead of publishing absent or partial current timing."""
+    with pytest.raises(ValueError, match="no E2E lane artifact directories"):
+        aggregate_timings(tmp_path / "missing", tmp_path / "output.jsonl")
+    empty_root = tmp_path / "empty"
+    empty = empty_root / "pytest-timings.jsonl"
+    empty.parent.mkdir()
+    empty.write_text("", encoding="utf-8")
+    (empty_root / "lane-duration-seconds.txt").write_text("1\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="timing file is empty"):
+        aggregate_timings(tmp_path / "empty", tmp_path / "output.jsonl")
+
+
+def test_aggregate_timings_rejects_a_partial_lane_set(tmp_path: Path) -> None:
+    """Every downloaded lane artifact must contribute validated timing."""
+    root = tmp_path / "artifacts"
+    complete = root / "e2e-observability-required-1"
+    missing = root / "e2e-observability-required-2"
+    complete.mkdir(parents=True)
+    missing.mkdir(parents=True)
+    (complete / "lane-duration-seconds.txt").write_text("1\n", encoding="utf-8")
+    (complete / "pytest-timings.jsonl").write_text(
+        _timing_line("test_a"), encoding="utf-8"
+    )
+    (missing / "lane-duration-seconds.txt").write_text("1\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="timing file is missing"):
+        aggregate_timings(root, tmp_path / "output.jsonl")
 
 
 def test_parse_junit_counts_outcomes_and_durations(tmp_path: Path) -> None:
