@@ -4,6 +4,7 @@ import asyncio
 import time
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from typing import NamedTuple
 
 import pytest
 from azents_runtime_control.runner_terminal import RunnerTerminalTerminationReason
@@ -505,14 +506,16 @@ async def test_attachment_projects_coordinated_revocation_before_exit(
     await attachment.close()
 
 
+class _TerminalServiceFixture(NamedTuple):
+    service: RuntimeTerminalService
+    coordination: InMemoryRuntimeTerminalCoordinationStore
+    dispatcher: _Dispatcher
+    resolver: _Resolver
+
+
 def _service(
     authority: RuntimeTerminalAuthority,
-) -> tuple[
-    RuntimeTerminalService,
-    InMemoryRuntimeTerminalCoordinationStore,
-    _Dispatcher,
-    _Resolver,
-]:
+) -> _TerminalServiceFixture:
     coordination = InMemoryRuntimeTerminalCoordinationStore()
     dispatcher = _Dispatcher()
     resolver = _Resolver(authority)
@@ -526,7 +529,12 @@ def _service(
         terminal_id_factory=lambda: "terminal-1",
         stream_nonce_factory=lambda: "nonce-1",
     )
-    return service, coordination, dispatcher, resolver
+    return _TerminalServiceFixture(
+        service=service,
+        coordination=coordination,
+        dispatcher=dispatcher,
+        resolver=resolver,
+    )
 
 
 def _authority() -> RuntimeTerminalAuthority:

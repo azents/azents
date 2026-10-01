@@ -5,6 +5,7 @@ from __future__ import annotations
 # Protobuf generated modules expose dynamic message/RPC attributes.
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
+from typing import NamedTuple
 
 import grpc
 import pytest
@@ -387,14 +388,16 @@ class _TrackingCoordinationStore(InMemoryRuntimeCoordinationStore):
         return await super().get_connection(kind=kind, subject_id=subject_id)
 
 
+class _CoordinatorServer(NamedTuple):
+    server: grpc.aio.Server
+    channel: grpc.aio.Channel
+    stub: pb_grpc.RuntimeTransferCoordinatorAsyncStub
+    credentials: RuntimeTransferCoordinatorCredentialSupplier
+
+
 async def _server(
     coordinator: RuntimeTransferCoordinator,
-) -> tuple[
-    grpc.aio.Server,
-    grpc.aio.Channel,
-    pb_grpc.RuntimeTransferCoordinatorAsyncStub,
-    RuntimeTransferCoordinatorCredentialSupplier,
-]:
+) -> _CoordinatorServer:
     server = grpc.aio.server()
     credential_key = Fernet.generate_key().decode()
     verifier = RuntimeTransferCoordinatorCredentialVerifier(
@@ -416,11 +419,11 @@ async def _server(
         clock=lambda: _NOW,
         lifetime=timedelta(seconds=30),
     )
-    return (  # ty: ignore[invalid-return-type]  # Generated aio stub overload is runtime-correct.
-        server,
-        channel,
-        pb_grpc.RuntimeTransferCoordinatorStub(channel),
-        supplier,
+    return _CoordinatorServer(
+        server=server,
+        channel=channel,
+        stub=pb_grpc.RuntimeTransferCoordinatorStub(channel),  # ty: ignore[invalid-argument-type]  # Generated aio stub overload is runtime-correct.
+        credentials=supplier,
     )
 
 

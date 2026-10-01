@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import time
-from typing import TypedDict
+from typing import NamedTuple, TypedDict
 from urllib.parse import parse_qs, quote, urlparse, urlsplit, urlunsplit
 
 import azentsadminclient
@@ -340,6 +340,11 @@ def _wait_for_workspace_bytes(
     ) from last_error
 
 
+class _UploadFinalization(NamedTuple):
+    created: _WorkspaceUploadStatus
+    terminal: dict[str, object]
+
+
 def _upload_and_finalize(
     *,
     server_url: str,
@@ -348,7 +353,7 @@ def _upload_and_finalize(
     destination_directory: str,
     filename: str,
     content: bytes,
-) -> tuple[_WorkspaceUploadStatus, dict[str, object]]:
+) -> _UploadFinalization:
     """Perform one direct PUT and finalize it, returning create and terminal status."""
     created = _create_upload(
         server_url=server_url,
@@ -373,7 +378,7 @@ def _upload_and_finalize(
         upload_id=upload_id,
         expected={"succeeded", "failed", "expired", "conflicted"},
     )
-    return created_status, terminal
+    return _UploadFinalization(created=created_status, terminal=terminal)
 
 
 def test_workspace_upload_direct_put_finalize_and_exact_download(

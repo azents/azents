@@ -5,6 +5,7 @@ import hashlib
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
+from typing import NamedTuple
 
 import pytest
 from azcommon.infra.s3.service import (
@@ -251,17 +252,23 @@ class BlockingStream(Stream):
             self.closed += 1
 
 
+class _ProviderSourceFixture(NamedTuple):
+    source: DeferredProviderServerToRuntimeSource
+    store: Store
+    stream: Stream
+
+
 def _source(
     *,
     body: bytes,
     stream: Stream | None = None,
     declared_size: int | None = None,
     maximum_size: int | None = None,
-) -> tuple[DeferredProviderServerToRuntimeSource, Store, Stream]:
+) -> _ProviderSourceFixture:
     source_stream = stream or Stream((body,))
     store = Store()
-    return (
-        DeferredProviderServerToRuntimeSource(
+    return _ProviderSourceFixture(
+        source=DeferredProviderServerToRuntimeSource(
             metadata=ServerToRuntimeSourceMetadata(
                 canonical_uri="slack://opaque",
                 source_kind="provider",
@@ -283,8 +290,8 @@ def _source(
             multipart_copy_threshold=4,
             multipart_copy_part_size=4,
         ),
-        store,
-        source_stream,
+        store=store,
+        stream=source_stream,
     )
 
 

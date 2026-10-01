@@ -1,8 +1,5 @@
 """Tests for E2E container-log diagnostics."""
 
-from types import SimpleNamespace
-from typing import cast
-
 import pytest
 
 from support.container_logs import (
@@ -50,18 +47,23 @@ def test_emit_container_logs_writes_complete_terminal_output() -> None:
 
 def test_failed_report_emits_active_server_logs_to_terminal_reporter(
     monkeypatch: pytest.MonkeyPatch,
+    request: pytest.FixtureRequest,
 ) -> None:
     """A failed test report prints complete active server logs to CI stdout."""
     lines: list[str] = []
-    terminal_reporter = SimpleNamespace(write_line=lines.append)
-    config = SimpleNamespace(
-        pluginmanager=SimpleNamespace(
-            get_plugin=lambda name: (
-                terminal_reporter if name == "terminalreporter" else None
-            )
-        )
-    )
-    item = cast(pytest.Item, SimpleNamespace(config=config, stash={}))
+
+    class Reporter:
+        def write_line(self, line: str) -> None:
+            lines.append(line)
+
+    reporter = Reporter()
+    get_plugin = request.config.pluginmanager.get_plugin
+
+    def lookup_plugin(name: str) -> object:
+        return reporter if name == "terminalreporter" else get_plugin(name)
+
+    monkeypatch.setattr(request.config.pluginmanager, "get_plugin", lookup_plugin)
+    item = request.node
     monkeypatch.setattr(e2e_conftest, "_SERVER_LOG_CAPTURES", {})
     monkeypatch.setattr(
         e2e_conftest,
@@ -73,12 +75,11 @@ def test_failed_report_emits_active_server_logs_to_terminal_reporter(
         _Container(b"public stdout", b"public stderr"),
     )
 
-    hook = e2e_conftest.pytest_runtest_makereport(
-        item,
-        cast(pytest.CallInfo[None], None),
-    )
+    call = pytest.CallInfo.from_call(lambda: None, when="call")
+    hook = e2e_conftest.pytest_runtest_makereport(item, call)
     assert next(hook) is None
-    report = cast(pytest.TestReport, SimpleNamespace(when="call", failed=True))
+    report = pytest.TestReport.from_item_and_call(item, call)
+    report.outcome = "failed"
     with pytest.raises(StopIteration) as stopped:
         hook.send(report)
 

@@ -1,7 +1,6 @@
 """System Settings Admin API route tests."""
 
-from typing import Any, cast
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, create_autospec
 
 import pytest
 from fastapi import HTTPException
@@ -106,12 +105,10 @@ def _external_channel_files_resolved(
 
 async def test_get_external_channel_files_returns_effective_bytes() -> None:
     """The dedicated detail contains effective limits but no internal generation."""
-    service = cast(Any, Mock())
+    service = create_autospec(SystemSettingsService, instance=True, spec_set=True)
     service.resolve = AsyncMock(return_value=_external_channel_files_resolved())
 
-    response = await get_external_channel_files_setting(
-        service=cast(SystemSettingsService, service)
-    )
+    response = await get_external_channel_files_setting(service=service)
 
     assert response == ExternalChannelFilesDetailResponse(
         section="external_channel_files",
@@ -125,7 +122,7 @@ async def test_get_external_channel_files_returns_effective_bytes() -> None:
 
 async def test_patch_external_channel_files_activates_partial_update() -> None:
     """A present limit becomes one direct optimistic settings mutation."""
-    service = cast(Any, Mock())
+    service = create_autospec(SystemSettingsService, instance=True, spec_set=True)
     resolved = _external_channel_files_resolved(
         admin_version=4,
         outbound_max_file_bytes=10 * 1024 * 1024,
@@ -143,7 +140,7 @@ async def test_patch_external_channel_files_activates_partial_update() -> None:
             outbound_max_file_bytes=10 * 1024 * 1024,
         ),
         system_admin=_admin(),
-        service=cast(SystemSettingsService, service),
+        service=service,
     )
 
     await_call = service.mutate.await_args
@@ -171,14 +168,14 @@ async def test_patch_external_channel_files_rejects_empty_or_null_patch(
     patch_request: ExternalChannelFilesPatchRequest,
 ) -> None:
     """Direct policy mutation requires one concrete non-null limit."""
-    service = cast(Any, Mock())
+    service = create_autospec(SystemSettingsService, instance=True, spec_set=True)
     service.mutate = AsyncMock()
 
     with pytest.raises(HTTPException) as exc_info:
         await patch_external_channel_files_setting(
             patch_request,
             system_admin=_admin(),
-            service=cast(SystemSettingsService, service),
+            service=service,
         )
 
     assert exc_info.value.status_code == 422
@@ -187,7 +184,7 @@ async def test_patch_external_channel_files_rejects_empty_or_null_patch(
 
 async def test_patch_external_channel_files_maps_version_conflict() -> None:
     """Stale direct-save versions use the shared stable conflict response."""
-    service = cast(Any, Mock())
+    service = create_autospec(SystemSettingsService, instance=True, spec_set=True)
     service.mutate = AsyncMock(
         side_effect=SystemSettingVersionConflict(
             section=SystemSettingSection.EXTERNAL_CHANNEL_FILES,
@@ -203,7 +200,7 @@ async def test_patch_external_channel_files_maps_version_conflict() -> None:
                 outbound_max_file_bytes=10 * 1024 * 1024,
             ),
             system_admin=_admin(),
-            service=cast(SystemSettingsService, service),
+            service=service,
         )
 
     assert exc_info.value.status_code == 409
@@ -212,7 +209,7 @@ async def test_patch_external_channel_files_maps_version_conflict() -> None:
 
 async def test_patch_external_channel_files_maps_aggregate_validation() -> None:
     """An invalid aggregate produced by merged settings is a sanitized 422."""
-    service = cast(Any, Mock())
+    service = create_autospec(SystemSettingsService, instance=True, spec_set=True)
     service.mutate = AsyncMock(
         side_effect=ValidationError.from_exception_data(
             "ExternalChannelFilesConfig",
@@ -238,7 +235,7 @@ async def test_patch_external_channel_files_maps_aggregate_validation() -> None:
                 outbound_max_action_bytes=1,
             ),
             system_admin=_admin(),
-            service=cast(SystemSettingsService, service),
+            service=service,
         )
 
     assert exc_info.value.status_code == 422
@@ -270,14 +267,16 @@ def test_external_channel_files_patch_rejects_out_of_range_limits(
 
 async def test_patch_preserves_omitted_vs_explicit_null() -> None:
     """Non-secret null clears a field while omitted fields remain unchanged."""
-    service = cast(Any, Mock())
+    service = create_autospec(
+        PlatformGitHubAppSystemSettingService, instance=True, spec_set=True
+    )
     service.patch = AsyncMock()
     service.get_detail = AsyncMock(return_value=_detail())
 
     await patch_platform_github_app_setting(
         PlatformGitHubAppPatchRequest(expected_version=0, client_id=None),
         system_admin=_admin(),
-        service=cast(PlatformGitHubAppSystemSettingService, service),
+        service=service,
     )
 
     await_call = service.patch.await_args
@@ -290,14 +289,16 @@ async def test_patch_preserves_omitted_vs_explicit_null() -> None:
 
 async def test_patch_rejects_null_secret_field_without_action() -> None:
     """Secret fields never overload null as a mutation action."""
-    service = cast(Any, Mock())
+    service = create_autospec(
+        PlatformGitHubAppSystemSettingService, instance=True, spec_set=True
+    )
     service.patch = AsyncMock()
 
     with pytest.raises(HTTPException) as exc_info:
         await patch_platform_github_app_setting(
             PlatformGitHubAppPatchRequest(expected_version=0, private_key=None),
             system_admin=_admin(),
-            service=cast(PlatformGitHubAppSystemSettingService, service),
+            service=service,
         )
 
     assert exc_info.value.status_code == 422
@@ -335,14 +336,16 @@ async def test_patch_rejects_null_secret_field_without_action() -> None:
 )
 async def test_patch_maps_stable_conflict_codes(error: Exception, code: str) -> None:
     """Version and deployment ownership conflicts remain distinguishable."""
-    service = cast(Any, Mock())
+    service = create_autospec(
+        PlatformGitHubAppSystemSettingService, instance=True, spec_set=True
+    )
     service.patch = AsyncMock(side_effect=error)
 
     with pytest.raises(HTTPException) as exc_info:
         await patch_platform_github_app_setting(
             PlatformGitHubAppPatchRequest(expected_version=1, app_id="123"),
             system_admin=_admin(),
-            service=cast(PlatformGitHubAppSystemSettingService, service),
+            service=service,
         )
 
     assert exc_info.value.status_code == 409

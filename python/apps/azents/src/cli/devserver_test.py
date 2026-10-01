@@ -1,8 +1,8 @@
 """Local all-in-one devserver composition tests."""
 
 from contextlib import asynccontextmanager
-from typing import AsyncIterator, cast
-from unittest.mock import MagicMock
+from typing import AsyncIterator
+from unittest.mock import MagicMock, create_autospec
 
 import pytest
 from azcommon import di
@@ -19,10 +19,7 @@ from cli.devserver import _create_api_targets, _run_devserver_resources
 
 def test_non_reload_api_apps_share_root_appcontext_and_container() -> None:
     """Co-located API roles use the Worker/Scheduler process DI base."""
-    config = cast(
-        Config,
-        MagicMock(job_runtime_backend=JobRuntimeBackend.LOCAL),
-    )
+    config = Config.model_construct(job_runtime_backend=JobRuntimeBackend.LOCAL)
     appctx = AppContext(config)
     container = create_container(appctx)
 
@@ -45,7 +42,7 @@ def test_non_reload_api_apps_share_root_appcontext_and_container() -> None:
 
 def test_reload_api_targets_create_one_root_inside_each_child_process() -> None:
     """Reload mode retains process-local app factories instead of parent objects."""
-    config = cast(Config, MagicMock())
+    config = Config.model_construct()
     appctx = AppContext(config)
     container = create_container(appctx)
 
@@ -66,8 +63,8 @@ async def test_devserver_resources_start_runtime_control_before_app_container(
 ) -> None:
     """Local composition starts Runtime Control before Worker dependencies."""
     events: list[str] = []
-    config = cast(Config, MagicMock())
-    container = cast(di.Container, MagicMock())
+    config = Config.model_construct()
+    container = create_autospec(di.Container, instance=True, spec_set=True)
     runtime_control_settings = MagicMock()
 
     @asynccontextmanager
