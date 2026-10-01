@@ -25,7 +25,6 @@ from azents.core.image_generation_config import (
     ExplicitImageGenerationModel,
     decode_image_generation_model_config,
 )
-from azents.core.model_operation import ModelOperationKind
 from azents.core.model_pricing import ModelPricing, normalize_model_pricing
 from azents.core.openai_client_config import openai_responses_client_config
 from azents.core.tools import TurnContext
@@ -205,6 +204,7 @@ from azents.repos.agent_session_system_prompt_snapshot import (
     AgentSessionSystemPromptSnapshotRepository,
 )
 from azents.repos.chatgpt_oauth_runtime import ChatGPTOAuthRuntimeRepository
+from azents.repos.compaction_operation import CompactionCommitContext
 from azents.repos.engine_event_operation import EngineEventOperationRepository
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.llm_provider_integration.deps import (
@@ -627,21 +627,6 @@ class AgentEngineAdapter:
                 ),
             )
 
-        async def clear_tool_working_set(session: AsyncSession) -> None:
-            await self.tool_working_set_store.clear_in_session(
-                session,
-                request.agent_id,
-                request.session_id,
-            )
-
-        async def commit_compaction(session: AsyncSession) -> None:
-            if context.complete_model_operation_in_session is not None:
-                await context.complete_model_operation_in_session(
-                    session,
-                    ModelOperationKind.COMPACTION,
-                )
-            await clear_tool_working_set(session)
-
         await compactor.compact(
             session_id=request.session_id,
             transcript=transcript,
@@ -661,7 +646,15 @@ class AgentEngineAdapter:
                 providers=hook_providers,
                 run_id=context.run_id,
             ),
-            on_committing=commit_compaction,
+            commit_context=CompactionCommitContext(
+                workspace_id=request.workspace_id,
+                agent_id=request.agent_id,
+                run_id=context.run_id,
+                owner_generation=context.owner_generation,
+                settle_model_operation=(
+                    context.complete_model_operation_in_session is not None
+                ),
+            ),
         )
         yield ephemeral(CompactionComplete())
 
@@ -1141,21 +1134,6 @@ class AgentEngineAdapter:
                 ),
             )
 
-        async def clear_tool_working_set(session: AsyncSession) -> None:
-            await self.tool_working_set_store.clear_in_session(
-                session,
-                request.agent_id,
-                request.session_id,
-            )
-
-        async def commit_compaction(session: AsyncSession) -> None:
-            if context.complete_model_operation_in_session is not None:
-                await context.complete_model_operation_in_session(
-                    session,
-                    ModelOperationKind.COMPACTION,
-                )
-            await clear_tool_working_set(session)
-
         pre_lower_filter = EventPreLowerFilterPipeline(
             [
                 EventAttachmentAvailabilityFilter(),
@@ -1179,7 +1157,15 @@ class AgentEngineAdapter:
                 providers=run_hook_providers,
                 run_id=context.run_id,
             ),
-            on_committing=commit_compaction,
+            commit_context=CompactionCommitContext(
+                workspace_id=request.workspace_id,
+                agent_id=request.agent_id,
+                run_id=context.run_id,
+                owner_generation=context.owner_generation,
+                settle_model_operation=(
+                    context.complete_model_operation_in_session is not None
+                ),
+            ),
         )
         integration_id = (
             request.inference_state.model_selection.llm_provider_integration_id

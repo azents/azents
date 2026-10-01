@@ -140,6 +140,7 @@ from azents.repos.agent_session.data import AgentSession, SessionAgent
 from azents.repos.agent_session_system_prompt_snapshot import (
     AgentSessionSystemPromptSnapshotRepository,
 )
+from azents.repos.compaction_operation import CompactionCommitContext
 from azents.repos.model_file_pin import ModelFilePinRepository
 from azents.repos.provider_output_operation import ProviderOutputOperationRepository
 from azents.repos.session_execution import (
@@ -531,6 +532,7 @@ class _Compactor:
     def __init__(self) -> None:
         self.summary: str | None = None
         self.reason: str | None = None
+        self.commit_context: CompactionCommitContext | None = None
 
     def with_session_manager(
         self, session_manager: SessionManager[AsyncSession]
@@ -550,10 +552,11 @@ class _Compactor:
         summary_context_window_tokens: int | Callable[[], int] | None = None,
         reason: str | None = None,
         summary_enricher: SummaryEnricher | None = None,
-        on_committing: Callable[[AsyncSession], Awaitable[None]] | None = None,
+        commit_context: CompactionCommitContext | None = None,
     ) -> Event:
         """Call summary generator and return summary event."""
         self.reason = reason
+        self.commit_context = commit_context
         if on_started is not None:
             await on_started()
         if summary_context_window_tokens is None or isinstance(
@@ -575,8 +578,6 @@ class _Compactor:
                 reason=reason,
                 covered_until_event_id=transcript[-1].id,
             )
-        if on_committing is not None:
-            await on_committing(_Session())
         self.summary = summary
         return Event(
             id="2" * 32,
@@ -613,7 +614,7 @@ class _FailingCompactor:
         summary_context_window_tokens: int | Callable[[], int] | None = None,
         reason: str | None = None,
         summary_enricher: SummaryEnricher | None = None,
-        on_committing: Callable[[AsyncSession], Awaitable[None]] | None = None,
+        commit_context: CompactionCommitContext | None = None,
     ) -> Event | None:
         """Raise compaction failure."""
         del (
@@ -625,7 +626,7 @@ class _FailingCompactor:
             summary_context_window_tokens,
             reason,
             summary_enricher,
-            on_committing,
+            commit_context,
         )
         raise CompactionFailedError(
             "Compaction failed: summary model returned no text."
@@ -2601,9 +2602,13 @@ async def test_adapter_wires_event_filters_and_session_head_repo() -> None:
         model_adapter.continuation_planner,
         ResponsesContinuationPlanner,
     )
-    assert auto_compaction_filter.on_committing is not None
-    await auto_compaction_filter.on_committing(_Session())
-    assert (await store.load("agent-1", "session-1")).tool_names == []
+    assert auto_compaction_filter.commit_context == CompactionCommitContext(
+        workspace_id="workspace-1",
+        agent_id="agent-1",
+        run_id="0" * 32,
+        owner_generation=1,
+        settle_model_operation=False,
+    )
 
 
 async def test_manual_compact_runs_append_only_event_compactor() -> None:
@@ -2720,7 +2725,13 @@ async def test_manual_compact_runs_append_only_event_compactor() -> None:
     assert captured_prompts["model"] == "claude-prepared"
     assert captured_prompts["api_key"] == "prepared"
     assert captured_prompts["max_output_tokens"] == "4000"
-    assert (await store.load("agent-1", "session-1")).tool_names == []
+    assert compactor.commit_context == CompactionCommitContext(
+        workspace_id="workspace-1",
+        agent_id="agent-1",
+        run_id="0" * 32,
+        owner_generation=1,
+        settle_model_operation=False,
+    )
 
 
 async def test_manual_compact_runs_compaction_summary_hook() -> None:

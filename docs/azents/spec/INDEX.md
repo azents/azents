@@ -34,7 +34,7 @@ Details of all living specs. Synchronized from frontmatter.
 | [Agent Runtime Persistence](flow/agent-runtime-persistence.md) | @Hardtack | 2026-09-30 | 40 |
 | [Chat Session Resync](flow/chat-session-resync.md) | @Hardtack | 2026-09-15 | 52 |
 | [ChatGPT OAuth Flow](flow/chatgpt-oauth.md) | @Hardtack | 2026-09-30 | 28 |
-| [Context Compaction](flow/context-compaction.md) | @Hardtack | 2026-10-01 | 43 |
+| [Context Compaction](flow/context-compaction.md) | @Hardtack | 2026-10-01 | 44 |
 | [External Channel Authorization](flow/external-channel-authorization.md) | @Hardtack | 2026-09-29 | 27 |
 | [External Channel Delivery and Channel Work](flow/external-channel-delivery.md) | @Hardtack | 2026-10-01 | 63 |
 | [External Channel Lifecycle](flow/external-channel-lifecycle.md) | @Hardtack | 2026-10-01 | 45 |
