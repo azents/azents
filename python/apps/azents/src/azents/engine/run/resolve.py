@@ -21,7 +21,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.core.agent import (
     AgentModelSelection,
     ModelParameters,
-    SelectableModelOption,
     SelectableModelSettings,
 )
 from azents.core.builtin_tools import (
@@ -83,6 +82,17 @@ from azents.engine.tools.todo import TodoToolkit, TodoToolkitProvider
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
 from azents.repos.chatgpt_oauth_runtime import ChatGPTOAuthRuntimeRepository
+from azents.repos.engine_read import (
+    EngineAgentDisabled,
+    EngineAgentNotFound,
+    EngineIntegrationDisabled,
+    EngineIntegrationNotFound,
+    EngineInvokeReadRepository,
+    EngineModelReadRepository,
+    EngineModelTargetNotFound,
+    EngineReasoningEffortUnsupported,
+    EngineToolkitReadRepository,
+)
 from azents.repos.exchange_file.data import ExchangeFile
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.llm_provider_integration.data import LLMProviderIntegrationWithSecrets
@@ -326,11 +336,10 @@ async def resolve_model_candidate_runtime(
     IntegrationNotFound | IntegrationDisabled | InvalidModelParameters,
 ]:
     """Load credentials and materialize one frozen model candidate."""
-    async with session_manager() as session:
-        integration = await integration_repository.get_by_id_with_secrets(
-            session,
-            selection.llm_provider_integration_id,
-        )
+    integration = await EngineModelReadRepository(
+        session_manager=session_manager,
+        integration_repository=integration_repository,
+    ).get_integration(selection.llm_provider_integration_id)
     if integration is None or integration.workspace_id != workspace_id:
         return Failure(
             IntegrationNotFound(
@@ -377,14 +386,6 @@ async def resolve_model_candidate_runtime(
             effective_input_tokens=input_tokens.effective_input_tokens,
         )
     )
-
-
-def _find_model_option(
-    options: list[SelectableModelOption],
-    label: str,
-) -> SelectableModelOption | None:
-    """Return one Agent-owned selectable option by label."""
-    return next((option for option in options if option.label == label), None)
 
 
 async def _ensure_provider_runtime_tokens(
@@ -635,106 +636,53 @@ async def resolve_invoke_input_with_model_source(
     image_generation_catalog_service: ImageGenerationCatalogService,
 ) -> Result[_ResolvedInvokeInputModelSource, ResolveError]:
     """Resolve a run request and main selection from one Agent snapshot."""
-    async with session_manager() as session:
-        agent = await agent_repository.get_by_id(session, invoke_input.agent_id)
-        if agent is None:
-            return Failure(AgentNotFound(agent_id=invoke_input.agent_id))
-        if not agent.enabled:
-            return Failure(AgentDisabled(agent_id=invoke_input.agent_id))
-
-        if model_source_agent_id == invoke_input.agent_id:
-            model_agent = agent
-        else:
-            model_agent = await agent_repository.get_by_id(
-                session,
-                model_source_agent_id,
-            )
-            if model_agent is None:
-                return Failure(AgentNotFound(agent_id=model_source_agent_id))
-
-        main_option = _find_model_option(
-            model_agent.selectable_model_options,
-            model_agent.main_model_label,
-        )
-        if main_option is None:
-            return Failure(
-                ModelTargetNotFound(model_target_label=model_agent.main_model_label)
-            )
-        main_selection = main_option.candidates[0].model_selection
-        main_settings = main_option.candidates[0].settings
-        if resolved_model_selection is not None:
-            if resolved_model_settings is None:
-                raise ValueError("Resolved model settings are required")
-            main_selection = resolved_model_selection
-            main_settings = resolved_model_settings
-        elif requested_profile is not None:
-            selected_option = _find_model_option(
-                model_agent.selectable_model_options,
-                requested_profile.model_target_label,
-            )
-            if selected_option is None:
-                return Failure(
-                    ModelTargetNotFound(
-                        model_target_label=requested_profile.model_target_label
+    snapshot_result = await EngineInvokeReadRepository(
+        session_manager=session_manager,
+        agent_repository=agent_repository,
+        integration_repository=integration_repository,
+    ).load_model_source(
+        agent_id=invoke_input.agent_id,
+        model_source_agent_id=model_source_agent_id,
+        requested_profile=requested_profile,
+        resolved_model_selection=resolved_model_selection,
+        resolved_model_settings=resolved_model_settings,
+    )
+    match snapshot_result:
+        case Success(snapshot):
+            agent = snapshot.agent
+            main_selection = snapshot.main_selection
+            main_settings = snapshot.main_settings
+            lightweight_selection = snapshot.lightweight_selection
+            lightweight_settings = snapshot.lightweight_settings
+            integration = snapshot.main_integration
+            loaded_lightweight_integration = snapshot.lightweight_integration
+            main_model_target_label = snapshot.main_model_target_label
+        case Failure(error):
+            match error:
+                case EngineAgentNotFound(agent_id):
+                    return Failure(AgentNotFound(agent_id=agent_id))
+                case EngineAgentDisabled(agent_id):
+                    return Failure(AgentDisabled(agent_id=agent_id))
+                case EngineModelTargetNotFound(model_target_label):
+                    return Failure(
+                        ModelTargetNotFound(model_target_label=model_target_label)
                     )
-                )
-            main_selection = selected_option.candidates[0].model_selection
-            main_settings = selected_option.candidates[0].settings
-            requested_effort = requested_profile.reasoning_effort
-            if requested_effort is not None:
-                reasoning = main_selection.normalized_capabilities.reasoning
-                if (
-                    not reasoning.supported
-                    or requested_effort not in reasoning.effort_levels
+                case EngineReasoningEffortUnsupported(
+                    model_target_label,
+                    reasoning_effort,
                 ):
                     return Failure(
                         ReasoningEffortUnsupported(
-                            model_target_label=requested_profile.model_target_label,
-                            reasoning_effort=requested_effort,
+                            model_target_label=model_target_label,
+                            reasoning_effort=reasoning_effort,
                         )
                     )
-        lightweight_option = _find_model_option(
-            model_agent.selectable_model_options,
-            model_agent.lightweight_model_label,
-        )
-        if lightweight_option is None:
-            return Failure(
-                ModelTargetNotFound(
-                    model_target_label=model_agent.lightweight_model_label
-                )
-            )
-        lightweight_selection = lightweight_option.candidates[0].model_selection
-
-        integration = await integration_repository.get_by_id_with_secrets(
-            session,
-            main_selection.llm_provider_integration_id,
-        )
-        if integration is None:
-            return Failure(
-                IntegrationNotFound(
-                    integration_id=main_selection.llm_provider_integration_id,
-                )
-            )
-        loaded_lightweight_integration = integration
-        if lightweight_selection.llm_provider_integration_id != integration.id:
-            loaded_lightweight_integration = (
-                await integration_repository.get_by_id_with_secrets(
-                    session,
-                    lightweight_selection.llm_provider_integration_id,
-                )
-            )
-            if loaded_lightweight_integration is None:
-                return Failure(
-                    IntegrationNotFound(
-                        integration_id=lightweight_selection.llm_provider_integration_id,
-                    )
-                )
-            if not loaded_lightweight_integration.enabled:
-                return Failure(
-                    IntegrationDisabled(
-                        integration_id=lightweight_selection.llm_provider_integration_id,
-                    )
-                )
+                case EngineIntegrationNotFound(integration_id):
+                    return Failure(IntegrationNotFound(integration_id=integration_id))
+                case EngineIntegrationDisabled(integration_id):
+                    return Failure(IntegrationDisabled(integration_id=integration_id))
+                case _ as unreachable:
+                    assert_never(unreachable)
 
     image_configuration_error = await image_generation_catalog_service.validate_runtime(
         integration_id=integration.id,
@@ -837,7 +785,7 @@ async def resolve_invoke_input_with_model_source(
                 model_target_label=(
                     requested_profile.model_target_label
                     if requested_profile is not None
-                    else main_option.label
+                    else main_model_target_label
                 ),
                 enabled_execution_options=tuple(requested_enabled_execution_options),
             )
@@ -882,7 +830,7 @@ async def resolve_invoke_input_with_model_source(
         lightweight_selection.normalized_capabilities.context_window.default_input_tokens,
         lightweight_selection.normalized_capabilities.context_window.max_input_tokens,
         compaction_model,
-        lightweight_option.candidates[0].settings.context_window_tokens,
+        lightweight_settings.context_window_tokens,
     )
 
     model_developer = main_selection.model_developer
@@ -1477,12 +1425,13 @@ async def resolve_agent_tools(
     :param runtime_capability_resolver: Agent Runtime capability resolver.
     :return: List of (Toolkit, slug) tuples
     """
-    async with session_manager() as session:
-        registered_toolkits = await toolkit_repository.list_effective_for_agent(
-            session,
-            agent_id,
-            workspace_id=context.workspace_id,
-        )
+    registered_toolkits = await EngineToolkitReadRepository(
+        session_manager=session_manager,
+        toolkit_repository=toolkit_repository,
+    ).list_effective_for_agent(
+        agent_id,
+        workspace_id=context.workspace_id,
+    )
     # (provider, resolved, config, slug, prompt, use_prefix, toolkit_type, modes)
     # toolkit_type is populated only for DB-registered toolkits; auto-binding is None
     registered_toolkit_config_ids: dict[int, str] = {}
