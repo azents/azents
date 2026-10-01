@@ -57,18 +57,22 @@ def test_invalid_duration_fails_closed(tmp_path: Path, value: str) -> None:
         load_lanes(tmp_path)
 
 
-def test_command_timeout_becomes_unavailable_evidence(
+def test_authoritative_run_watch_uses_the_workflow_owned_timeout(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Operational wait expiry remains a rendered fail-closed evidence result."""
+    """Do not expire exact-base waiting before the workflow can finish."""
+    observed_timeout: list[float | None] = []
 
-    def timeout(*args: object, **kwargs: object) -> None:
-        del args, kwargs
-        raise subprocess.TimeoutExpired(["gh", "run", "watch"], 600)
+    def run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        del args
+        timeout = kwargs.get("timeout")
+        assert timeout is None or isinstance(timeout, int | float)
+        observed_timeout.append(None if timeout is None else float(timeout))
+        return subprocess.CompletedProcess(["gh", "run", "watch"], 0, "", "")
 
-    monkeypatch.setattr(subprocess, "run", timeout)
-    with pytest.raises(EvidenceError, match="github_evidence_unavailable"):
-        ci_duration_gate._run(["gh", "run", "watch", "10"])
+    monkeypatch.setattr(subprocess, "run", run)
+    assert ci_duration_gate._run(["gh", "run", "watch", "10"]) == ""
+    assert observed_timeout == [None]
 
 
 def test_evaluate_skips_incomplete_base_runs(tmp_path: Path) -> None:

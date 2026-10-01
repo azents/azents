@@ -41,7 +41,7 @@ class WorkflowRun:
 
 
 def _run(arguments: Sequence[str]) -> str:
-    timeout = 600 if list(arguments[:3]) == ["gh", "run", "watch"] else 90
+    timeout = None if list(arguments[:3]) == ["gh", "run", "watch"] else 90
     try:
         result = subprocess.run(
             list(arguments),
