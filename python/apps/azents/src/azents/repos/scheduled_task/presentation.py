@@ -4,6 +4,7 @@ import calendar
 import datetime
 import re
 from dataclasses import dataclass
+from textwrap import dedent
 from zoneinfo import ZoneInfo
 
 from azents.core.enums import ScheduledTaskScheduleType
@@ -21,6 +22,8 @@ _OBJECTIVE_LIMIT = 4_000
 _PROGRESS_TITLE_LIMIT = 500
 _TASK_LIMIT = 100
 _TASK_TEXT_LIMIT = 1_000
+_SCHEDULE_TIMING_GUIDANCE = """The schedule and scheduled-for timestamp are occurrence start triggers. They do not define a completion deadline or execution time budget. Work may start or continue after those timestamps without failing. Only a deadline explicitly stated in the objective limits completion time."""  # noqa: E501
+_EXECUTION_GUIDANCE = """Continue autonomously across Agent runs until the objective is complete. If required information, authority, user choice, or another prerequisite is unavailable after reasonable attempts, submit a failed result explaining what is missing. Submit a finished or failed Scheduled Task result explicitly."""  # noqa: E501
 
 
 @dataclass(frozen=True)
@@ -90,56 +93,35 @@ def render_scheduled_task_runtime_message(
         timezone=timezone,
         scheduled_for=scheduled_for,
     )
-    return (
-        "Scheduled Task work is due.\n"
-        f"Title: {title}\n"
-        f"Schedule: {schedule.summary}\n"
-        f"Schedule details: {schedule.canonical}\n"
-        f"Scheduled for: {schedule.occurrence}\n"
-        f"Scheduled for details: {schedule.occurrence_canonical}\n"
-        "Execution guidance: "
-        "Continue autonomously across Agent runs until the objective is complete. "
-        "If required information, authority, user choice, or another prerequisite "
-        "is unavailable after reasonable attempts, submit a failed result explaining "
-        "what is missing. Submit a finished or failed Scheduled Task result "
-        "explicitly.\n"
-        "Prompt:\n"
-        f"{objective}"
+    prefix = dedent(
+        f"""\
+        A Scheduled Task occurrence has started.
+        Title: {title}
+        Schedule: {schedule.summary}
+        Schedule details: {schedule.canonical}
+        Scheduled for: {schedule.occurrence}
+        Scheduled for details: {schedule.occurrence_canonical}
+        Timing semantics: {_SCHEDULE_TIMING_GUIDANCE}
+        Execution guidance: {_EXECUTION_GUIDANCE}
+        Prompt:
+        """
     )
+    return f"{prefix}{objective}"
 
 
 def render_scheduled_task_cycle_guidance(state: ScheduledTaskCycleState) -> str:
     """Render active-cycle-only dynamic execution guidance."""
     channel_guidance = (
-        "Use `channel_action` only for interim progress and publication. "
-        "`submit_scheduled_task_result` finishes this Scheduled Task cycle and "
-        "delivers its terminal message and files to the exact same bound "
-        "conversation used by `channel_action`; do not describe this as sending to "
-        "another Slack or Discord channel."
+        """Use `channel_action` only for interim progress and publication. `submit_scheduled_task_result` finishes this Scheduled Task cycle and delivers its terminal message and files to the exact same bound conversation used by `channel_action`; do not describe this as sending to another Slack or Discord channel."""  # noqa: E501
         if state.binding_id is not None
-        else (
-            "This cycle is Session-only; submit the terminal result with files set "
-            "to null because no external provider publication is available."
-        )
+        else """This cycle is Session-only; submit the terminal result with files set to null because no external provider publication is available."""  # noqa: E501
     )
-    runtime_message = render_scheduled_task_runtime_message(
-        title=state.title,
-        objective=state.objective,
-        schedule_type=state.schedule_type,
-        scheduled_at=state.scheduled_at,
-        cron_expression=state.cron_expression,
-        timezone=state.timezone,
-        scheduled_for=state.scheduled_for,
-    )
-    return (
-        "### Active Scheduled Task Work Cycle\n\n"
-        f"{runtime_message}\n"
-        "Ending this AgentRun does not finish the work cycle. Continue autonomously "
-        "through idle continuations until the objective is terminal. "
-        "Use `submit_scheduled_task_result` with `finished` only after achieving the "
-        "objective, or with `failed` after reasonable attempts when required "
-        "information, authority, a user choice, or another prerequisite remains "
-        f"unavailable. {channel_guidance}"
+    return dedent(
+        f"""\
+        ### Active Scheduled Task Work Cycle
+
+        Schedule timing semantics: {_SCHEDULE_TIMING_GUIDANCE}
+        Ending this AgentRun does not finish the work cycle. Continue autonomously through idle continuations until the objective is terminal. Use `submit_scheduled_task_result` with `finished` only after achieving the objective, or with `failed` after reasonable attempts when required information, authority, a user choice, or another prerequisite remains unavailable. {channel_guidance}"""  # noqa: E501
     )
 
 
@@ -171,7 +153,8 @@ def render_scheduled_task_compaction_snapshot(
                 f"- Title: {_bounded(state.title, _TITLE_LIMIT)}",
                 f"- Objective: {_bounded(state.objective, _OBJECTIVE_LIMIT)}",
                 f"- Schedule: {schedule}",
-                f"- Scheduled for: {_utc_text(state.scheduled_for)}",
+                f"- Occurrence start time: {_utc_text(state.scheduled_for)}",
+                f"- Timing semantics: {_SCHEDULE_TIMING_GUIDANCE}",
             ]
         )
         if state.progress_title:
