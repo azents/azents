@@ -55,6 +55,11 @@ snapshots plus GitHub selected-installation state. Provider discovery and token
 exchange remain outside completed repository operations; MCP OAuth/configuration,
 model execution, provider output, and compactor ownership remain later phases.
 
+Phase 19 moves model-visible Memory CRUD/search, Memory prompt scope and summary
+reads, and Session History authority/read compositions into completed repository
+operations. Runtime behavior/project reads, Scheduled/Subagent tools, MCP OAuth,
+model execution, provider output, and compactor ownership remain later phases.
+
 ## Delivery Boundaries
 
 1. Correct the title-generation and ChatGPT OAuth persistence boundary as one

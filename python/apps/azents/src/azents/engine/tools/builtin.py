@@ -22,8 +22,6 @@ from pydantic import BaseModel, Field, ValidationError, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
-    AgentSessionKind,
-    AgentSessionProductMode,
     RuntimeDesiredState,
     RuntimeProviderObservedState,
     RuntimeRunnerState,
@@ -114,6 +112,7 @@ from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.memory import MemoryRepository
 from azents.repos.memory.data import MemorySummary
+from azents.repos.memory.operations import MemoryOperationRepository
 from azents.repos.session_execution.ownership import OwnerBoundSessionManager
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 from azents.repos.session_workspace_project.data import SessionWorkspaceProject
@@ -223,8 +222,7 @@ _MAX_MEMORY_SUMMARIES = 100
 
 
 async def collect_memory_prompt(
-    repo: MemoryRepository,
-    session: AsyncSession,
+    operations: MemoryOperationRepository,
     agent_id: str,
     rules_prompt: str,
     *,
@@ -241,11 +239,11 @@ async def collect_memory_prompt(
         "You have a persistent memory system. Memories persist across conversations.",
         "",
     ]
-    agent_summaries = await repo.list_summaries(
-        session,
+    groups = await operations.load_prompt_summaries(
         agent_id=agent_id,
-        user_id=None,
+        user_id=user_id,
     )
+    agent_summaries = groups.agent
     if agent_summaries:
         parts.extend(["### Agent Memories (shared with all users)", ""])
         parts.extend(_format_summaries(agent_summaries))
@@ -257,11 +255,7 @@ async def collect_memory_prompt(
         parts.append("")
 
     if user_id is not None:
-        user_summaries = await repo.list_summaries(
-            session,
-            agent_id=agent_id,
-            user_id=user_id,
-        )
+        user_summaries = groups.user
         if user_summaries:
             parts.extend(["### User Memories (private to the current user)", ""])
             parts.extend(_format_summaries(user_summaries))
@@ -403,37 +397,24 @@ class WriteStdinInput(BaseModel):
 
 async def _resolve_associated_user_id(
     *,
-    session_manager: SessionManager[AsyncSession],
+    operations: MemoryOperationRepository,
     session_id: str,
 ) -> str | None:
     """Resolve root User Session associated user for Memory capability projection."""
-    if not session_id:
-        return None
-    agent_session_repository = AgentSessionRepository()
-    async with session_manager() as session:
-        agent_session = await agent_session_repository.get_by_id(session, session_id)
-        if agent_session is None:
-            return None
-        root_session = agent_session
-        if agent_session.session_kind is AgentSessionKind.SUBAGENT:
-            root_agent = (
-                await agent_session_repository.get_root_session_agent_by_session_id(
-                    session,
-                    session_id,
-                )
-            )
-            if root_agent is None:
-                return None
-            loaded_root = await agent_session_repository.get_by_id(
-                session,
-                root_agent.agent_session_id,
-            )
-            if loaded_root is None:
-                return None
-            root_session = loaded_root
-        if root_session.product_mode is AgentSessionProductMode.USER:
-            return root_session.associated_user_id
-    return None
+    return await operations.resolve_associated_user_id(session_id=session_id)
+
+
+def _memory_operations(
+    *,
+    session_manager: SessionManager[AsyncSession],
+    memory_repository: MemoryRepository,
+) -> MemoryOperationRepository:
+    """Create completed Memory operations for one Toolkit binding."""
+    return MemoryOperationRepository(
+        session_manager=session_manager,
+        memory_repository=memory_repository,
+        agent_session_repository=AgentSessionRepository(),
+    )
 
 
 class MemoryReadToolkit(Toolkit[ShellToolkitConfig]):
@@ -494,8 +475,12 @@ class MemoryReadToolkit(Toolkit[ShellToolkitConfig]):
         """Return memory read tools."""
         tools: list[FunctionTool] = []
         if self._config.memory_enabled:
-            associated_user_id = await _resolve_associated_user_id(
+            operations = _memory_operations(
                 session_manager=self.session_manager,
+                memory_repository=self.memory_repo,
+            )
+            associated_user_id = await _resolve_associated_user_id(
+                operations=operations,
                 session_id=self._session_id,
             )
             tools.extend(
@@ -531,18 +516,20 @@ class MemoryReadToolkit(Toolkit[ShellToolkitConfig]):
         """Return dynamic memory read prompt for the current turn."""
         if not self._config.memory_enabled:
             return ""
-        associated_user_id = await _resolve_associated_user_id(
+        operations = _memory_operations(
             session_manager=self.session_manager,
+            memory_repository=self.memory_repo,
+        )
+        associated_user_id = await _resolve_associated_user_id(
+            operations=operations,
             session_id=self._session_id,
         )
-        async with self.session_manager() as mem_session:
-            return await collect_memory_prompt(
-                self.memory_repo,
-                mem_session,
-                self._agent_id,
-                _MEMORY_READ_RULES_PROMPT,
-                user_id=associated_user_id,
-            )
+        return await collect_memory_prompt(
+            operations,
+            self._agent_id,
+            _MEMORY_READ_RULES_PROMPT,
+            user_id=associated_user_id,
+        )
 
 
 class MemoryWriteToolkit(Toolkit[ShellToolkitConfig]):
@@ -603,8 +590,12 @@ class MemoryWriteToolkit(Toolkit[ShellToolkitConfig]):
         """Return memory write tools."""
         tools: list[FunctionTool] = []
         if self._config.memory_enabled:
-            associated_user_id = await _resolve_associated_user_id(
+            operations = _memory_operations(
                 session_manager=self.session_manager,
+                memory_repository=self.memory_repo,
+            )
+            associated_user_id = await _resolve_associated_user_id(
+                operations=operations,
                 session_id=self._session_id,
             )
             tools.extend(
@@ -741,13 +732,14 @@ class BuiltinToolkit(Toolkit[ShellToolkitConfig]):
         config = self._config
         if not config.memory_enabled:
             return ""
-        async with self.session_manager() as mem_session:
-            return await collect_memory_prompt(
-                self.memory_repo,
-                mem_session,
-                self._agent_id,
-                f"{_MEMORY_READ_RULES_PROMPT}\n\n{_MEMORY_WRITE_RULES_PROMPT}",
-            )
+        return await collect_memory_prompt(
+            _memory_operations(
+                session_manager=self.session_manager,
+                memory_repository=self.memory_repo,
+            ),
+            self._agent_id,
+            f"{_MEMORY_READ_RULES_PROMPT}\n\n{_MEMORY_WRITE_RULES_PROMPT}",
+        )
 
 
 class RuntimeEnvProvider(Protocol):

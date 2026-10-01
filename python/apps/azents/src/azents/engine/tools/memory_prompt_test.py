@@ -1,11 +1,14 @@
 """Memory prompt injection tests (DB-based)."""
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock
 
 import pytest
 
 from azents.engine.tools import builtin as builtin_module
 from azents.repos.memory.data import MemorySummary
+from azents.repos.memory.operations import MemoryOperationRepository
 
 
 def _make_summary(
@@ -38,9 +41,17 @@ async def _collect_memory_prompt(
     agent_id: str,
 ) -> str:
     """Collect Agent-scope Memory prompt with root-session rules."""
+
+    @asynccontextmanager
+    async def session_manager() -> AsyncIterator[AsyncMock]:
+        yield session
+
     return await builtin_module.collect_memory_prompt(
-        repo,
-        session,
+        MemoryOperationRepository(
+            session_manager=session_manager,
+            memory_repository=repo,
+            agent_session_repository=AsyncMock(),
+        ),
         agent_id,
         _full_memory_rules_prompt(),
     )

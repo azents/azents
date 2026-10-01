@@ -16,7 +16,7 @@ Details of all living specs. Synchronized from frontmatter.
 | conversation | [Conversation & Events](domain/conversation.md) | @Hardtack | 2026-10-01 | 176 |
 | external-channel | [External Channel](domain/external-channel.md) | @Hardtack | 2026-09-30 | 81 |
 | goal | [Goal Domain Spec](domain/goal.md) | - | 2026-09-30 | 16 |
-| memory | [Memory](domain/memory.md) | @Hardtack | 2026-09-26 | 8 |
+| memory | [Memory](domain/memory.md) | @Hardtack | 2026-10-01 | 9 |
 | model-catalog | [Model Catalog Domain Spec](domain/model-catalog.md) | - | 2026-10-01 | 30 |
 | runtime-provider | [Runtime Provider](domain/runtime-provider.md) | - | 2026-09-30 | 34 |
 | scheduled-task | [Scheduled Task Domain Spec](domain/scheduled-task.md) | - | 2026-10-01 | 13 |
@@ -29,7 +29,7 @@ Details of all living specs. Synchronized from frontmatter.
 
 | Title | Owner | Last Verified | Version |
 |---|---|---|---|
-| [Agent Execution Loop](flow/agent-execution-loop.md) | @Hardtack | 2026-10-01 | 191 |
+| [Agent Execution Loop](flow/agent-execution-loop.md) | @Hardtack | 2026-10-01 | 192 |
 | [Agent Runtime Control](flow/agent-runtime-control.md) | @Hardtack | 2026-10-01 | 90 |
 | [Agent Runtime Persistence](flow/agent-runtime-persistence.md) | @Hardtack | 2026-09-30 | 40 |
 | [Chat Session Resync](flow/chat-session-resync.md) | @Hardtack | 2026-09-15 | 52 |
