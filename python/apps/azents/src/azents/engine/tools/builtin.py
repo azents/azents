@@ -110,6 +110,7 @@ from azents.engine.tools.write import make_write_tool
 from azents.rdb.session import SessionManager
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.engine_runtime_tool_read import EngineRuntimeToolReadRepository
 from azents.repos.memory import MemoryRepository
 from azents.repos.memory.data import MemorySummary
 from azents.repos.memory.operations import MemoryOperationRepository
@@ -1313,21 +1314,16 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         self,
     ) -> _RuntimeBehaviorPromptResult:
         """Render behavior for the configuration serving Runtime operations."""
-        async with self.session_manager() as session:
-            runtime = await self.agent_runtime_repo.get_by_agent_id(
-                session,
-                self._runtime_agent_id,
+        loaded = await self._runtime_read_repository().load_behavior(
+            agent_id=self._runtime_agent_id,
+        )
+        if loaded is None:
+            return _RuntimeBehaviorPromptResult(
+                prompt=_RUNTIME_OPERATIONS_UNAVAILABLE_PROMPT,
+                expected_authority=None,
             )
-            if runtime is None:
-                return _RuntimeBehaviorPromptResult(
-                    prompt=_RUNTIME_OPERATIONS_UNAVAILABLE_PROMPT,
-                    expected_authority=None,
-                )
-            profile_repository = self.agent_runtime_service.runtime_profile_repository
-            state = await profile_repository.get_configuration_state(
-                session,
-                runtime_id=runtime.id,
-            )
+        runtime = loaded.runtime
+        state = loaded.configuration
         if state is None:
             return _RuntimeBehaviorPromptResult(
                 prompt=_RUNTIME_OPERATIONS_UNAVAILABLE_PROMPT,
@@ -1407,13 +1403,20 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         session_id: str,
     ) -> list[SessionWorkspaceProject]:
         """Fetch Project list registered to AgentSession."""
-        if not session_id:
-            return []
-        async with self.session_manager() as session:
-            return await self.project_repo.list_projects(
-                session,
-                session_id=session_id,
-            )
+        return await self._runtime_read_repository().list_projects(
+            session_id=session_id,
+        )
+
+    def _runtime_read_repository(self) -> EngineRuntimeToolReadRepository:
+        """Create completed Runtime Toolkit reads for this bound execution."""
+        return EngineRuntimeToolReadRepository(
+            session_manager=self.session_manager,
+            agent_runtime_repository=self.agent_runtime_repo,
+            runtime_profile_repository=(
+                self.agent_runtime_service.runtime_profile_repository
+            ),
+            project_repository=self.project_repo,
+        )
 
     async def _resolve_projection_runtime_target(
         self,

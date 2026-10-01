@@ -54,6 +54,9 @@ code_paths:
   - python/apps/azents/src/azents/services/chat/workspace.py
   - python/apps/azents/src/azents/services/browser_file_download.py
   - python/apps/azents/src/azents/core/file_transfer.py
+  - python/apps/azents/src/azents/engine/tools/builtin.py
+  - python/apps/azents/src/azents/repos/engine_runtime_tool_read.py
+  - python/apps/azents/src/azents/repos/session_workspace_project/**
   - python/apps/azents/src/azents/runtime/control_server.py
   - python/apps/azents/src/azents/repos/runtime_control_read.py
   - python/apps/azents/src/cli/devserver.py
@@ -81,7 +84,7 @@ code_paths:
   - testenv/azents/e2e/src/tests/web/public/test_runtime_web_gateway.py
   - infra/charts/azents/**
 last_verified_at: 2026-10-01
-spec_version: 90
+spec_version: 91
 ---
 
 # Agent Runtime Control
@@ -1026,6 +1029,13 @@ applied or desired authority as appropriate. Runner loss, terminal deletion, cap
 change, supersession of the serving applied generation, timeout, cancellation, or authority drift
 fails closed rather than retargeting the operation to another Runtime incarnation.
 
+Runtime Toolkit prompt projection loads the Agent Runtime and its current
+configuration state in one completed repository-owned read transaction. Session
+Project projection uses a separate completed repository-owned read transaction
+and preserves repository ordering before the Engine applies its existing
+path-order presentation. These reads return detached results before Runtime
+coordination, Runner operations, or other external work begins.
+
 Desired/applied mismatch never authorizes implicit recreation. Kubernetes CIDR-only or proxy-owned
 policy/artifact changes may adopt in place through exact aggregate Provider and ordinary Runner
 evidence. Mode, Runtime trust, mandatory-host mapping, PodSpec, PVC, and Docker changes remain
@@ -1108,6 +1118,9 @@ Live/provider evidence belongs in the testenv prerequisite system and must redac
 
 ## Changelog
 
+- **2026-10-01** (spec_version 91) — Moved Runtime Toolkit behavior and Session
+  Project reads into completed repository-owned transactions while preserving
+  configuration authority, unavailable projection, and Project presentation.
 - **2026-09-30** (spec_version 90) — Promoted exact-attempt direct GET/PUT feature
   paths, manifest-bound upload claims and immutable completion, authorized browser
   ticket handoff, shared general-file policy, and capability-aware cleanup timing.

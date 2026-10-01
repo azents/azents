@@ -30,7 +30,7 @@ Details of all living specs. Synchronized from frontmatter.
 | Title | Owner | Last Verified | Version |
 |---|---|---|---|
 | [Agent Execution Loop](flow/agent-execution-loop.md) | @Hardtack | 2026-10-01 | 192 |
-| [Agent Runtime Control](flow/agent-runtime-control.md) | @Hardtack | 2026-10-01 | 90 |
+| [Agent Runtime Control](flow/agent-runtime-control.md) | @Hardtack | 2026-10-01 | 91 |
 | [Agent Runtime Persistence](flow/agent-runtime-persistence.md) | @Hardtack | 2026-09-30 | 40 |
 | [Chat Session Resync](flow/chat-session-resync.md) | @Hardtack | 2026-09-15 | 52 |
 | [ChatGPT OAuth Flow](flow/chatgpt-oauth.md) | @Hardtack | 2026-09-30 | 28 |
@@ -41,7 +41,7 @@ Details of all living specs. Synchronized from frontmatter.
 | [External Channel Provider Ingress](flow/external-channel-provider-ingress.md) | @Hardtack | 2026-10-01 | 63 |
 | [File Exchange Storage](flow/file-exchange-storage.md) | @Hardtack | 2026-10-01 | 53 |
 | [Kimi OAuth Flow](flow/kimi-oauth.md) | @Hardtack | 2026-09-30 | 4 |
-| [MCP OAuth Flow](flow/mcp-oauth.md) | @Hardtack | 2026-09-26 | 7 |
+| [MCP OAuth Flow](flow/mcp-oauth.md) | @Hardtack | 2026-10-01 | 8 |
 | [OpenRouter API Key Provider Flow](flow/openrouter-api-key.md) | @Hardtack | 2026-09-30 | 5 |
 | [Periodic Execution Flow Spec](flow/periodic-execution.md) | - | 2026-09-15 | 20 |
 | [Public Release Publication](flow/public-release.md) | @Hardtack | 2026-09-18 | 3 |

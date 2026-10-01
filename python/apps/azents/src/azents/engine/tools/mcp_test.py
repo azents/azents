@@ -47,6 +47,7 @@ class _ConnectionRepository:
         self.connection = connection
         self.active = active
         self.update_calls = 0
+        self.reconnect_calls = 0
 
     def _assert_session(self) -> None:
         assert self.active[0] == 1
@@ -91,9 +92,52 @@ class _ConnectionRepository:
     ) -> None:
         del session, toolkit_id
         self._assert_session()
+        self.reconnect_calls += 1
         self.connection = self.connection.model_copy(
             update={"status": MCPOAuthConnectionStatus.RECONNECT_REQUIRED}
         )
+
+
+@pytest.mark.asyncio
+async def test_oauth_fresh_token_returns_without_http_or_write(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A fresh connected token closes its read and skips refresh I/O."""
+    active = [0]
+
+    @asynccontextmanager
+    async def session_manager() -> AsyncIterator[AsyncSession]:
+        active[0] += 1
+        try:
+            yield cast(AsyncSession, object())
+        finally:
+            active[0] -= 1
+
+    async def unexpected_refresh(*args: object, **kwargs: object) -> OAuthTokenResponse:
+        del args, kwargs
+        raise AssertionError("Fresh OAuth tokens must not refresh")
+
+    monkeypatch.setattr(mcp_module, "refresh_access_token", unexpected_refresh)
+    fresh = _connection(access_token="access-1").model_copy(
+        update={
+            "expires_at": datetime.datetime.now(datetime.UTC)
+            + datetime.timedelta(hours=1)
+        }
+    )
+    repository = _ConnectionRepository(fresh, active)
+
+    connection = await mcp_module._ensure_oauth_connection_token(
+        connection_repo=cast(Any, repository),
+        session_manager=session_manager,
+        toolkit_id="toolkit-1",
+        proxy_url=None,
+    )
+
+    assert connection is not None
+    assert connection.access_token == "access-1"
+    assert repository.update_calls == 0
+    assert repository.reconnect_calls == 0
+    assert active[0] == 0
 
 
 @pytest.mark.asyncio
@@ -192,4 +236,36 @@ async def test_oauth_refresh_keeps_concurrent_newer_credentials(
     assert refreshed is not None
     assert refreshed.access_token == "access-from-peer"
     assert repository.update_calls == 0
+    assert active[0] == 0
+
+
+@pytest.mark.asyncio
+async def test_oauth_missing_refresh_token_marks_reconnect_required() -> None:
+    """An expired connection without refresh authority requires reconnect."""
+    active = [0]
+
+    @asynccontextmanager
+    async def session_manager() -> AsyncIterator[AsyncSession]:
+        active[0] += 1
+        try:
+            yield cast(AsyncSession, object())
+        finally:
+            active[0] -= 1
+
+    expired = _connection(access_token="access-1").model_copy(
+        update={"refresh_token": None}
+    )
+    repository = _ConnectionRepository(expired, active)
+
+    connection = await mcp_module._ensure_oauth_connection_token(
+        connection_repo=cast(Any, repository),
+        session_manager=session_manager,
+        toolkit_id="toolkit-1",
+        proxy_url=None,
+    )
+
+    assert connection is not None
+    assert connection.status is MCPOAuthConnectionStatus.RECONNECT_REQUIRED
+    assert repository.update_calls == 0
+    assert repository.reconnect_calls == 1
     assert active[0] == 0

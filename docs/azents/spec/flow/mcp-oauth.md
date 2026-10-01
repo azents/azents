@@ -19,8 +19,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/agents/components/AgentToolkitSection.tsx
   - typescript/apps/azents-web/src/features/toolkits/**
   - typescript/apps/azents-web/src/trpc/routers/toolkit.ts
-last_verified_at: 2026-09-26
-spec_version: 7
+last_verified_at: 2026-10-01
+spec_version: 8
 ---
 
 # MCP OAuth Flow
@@ -44,6 +44,9 @@ The flow supports OAuth authorization code + PKCE S256, RFC 8414 metadata discov
 - Existing per-user tokens are not promoted to toolkit-level grants.
 - Access tokens, refresh tokens, client IDs, and client secrets are encrypted with `CredentialCipher` before DB storage.
 - Runtime refresh is lazy and row-locked to protect refresh token rotation.
+- OAuth provider HTTP refresh runs without an active database transaction.
+- Final refresh success or failure locks the current row, compares the loaded
+  credential snapshot, and yields to a concurrently committed credential change.
 - A refresh failure with `invalid_grant` marks the connection `reconnect_required`.
 
 ## Preconditions
@@ -150,27 +153,32 @@ sequenceDiagram
     participant AS as OAuth AS
     participant MCP as MCP Server
 
-    Runtime->>DB: Load mcp_oauth_connections by toolkit_id
+    Runtime->>DB: Load connection by toolkit_id and close read transaction
     alt missing or reconnect_required
         Runtime-->>Runtime: Bind no token; toolkit shows connection failure/setup prompt
     else token near expiry
-        Runtime->>DB: SELECT connection FOR UPDATE
         Runtime->>AS: refresh_token grant
         AS-->>Runtime: new token set
-        Runtime->>DB: Update encrypted tokens
+        Runtime->>DB: Lock row, compare loaded snapshot, update encrypted tokens
     end
     Runtime-->>Runtime: update_context reads latest successful tool snapshot without waiting for list_tools
     Runtime->>MCP: background list_tools refresh with Bearer token
     Runtime->>DB: atomically replace successful deterministic tool snapshot
     Runtime->>MCP: call_tool with Bearer token
     alt call_tool returns 401
-        Runtime->>DB: SELECT connection FOR UPDATE
         Runtime->>AS: force refresh
         AS-->>Runtime: new token set
-        Runtime->>DB: Update encrypted tokens
+        Runtime->>DB: Lock row, compare loaded snapshot, update encrypted tokens
         Runtime->>MCP: retry call_tool once
     end
 ```
+
+Refresh-token HTTP I/O and error classification occur between completed
+repository transactions. A final success/failure transaction locks the current
+connection and compares `updated_at`, access token, refresh token, and status with
+the pre-refresh snapshot. A concurrent refresh wins without being overwritten.
+Current `invalid_grant` evidence or a missing refresh token marks
+`reconnect_required`; transient failures preserve the connected row.
 
 ## API
 
@@ -277,6 +285,10 @@ The UI does not display account identity. An Agent-owned callback posts only a f
 
 ## Changelog
 
+- **2026-10-01** (spec_version 8) — Moved runtime OAuth connection loads and
+  refresh success/failure finalization into completed repository-owned
+  transactions while keeping provider HTTP refresh outside transactions and
+  preserving stale-snapshot and reconnect-required behavior.
 - **2026-09-25** (spec_version 7) — Exposed ownership-gated OAuth connect and
   reconnect directly from saved-Agent Toolkit cards without changing the
   Workspace or Agent OAuth endpoint authority.
