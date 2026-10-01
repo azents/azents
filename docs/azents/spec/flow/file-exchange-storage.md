@@ -24,6 +24,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/model_file/**
   - python/apps/azents/src/azents/repos/exchange_file/**
   - python/apps/azents/src/azents/repos/file_metadata_authority.py
+  - python/apps/azents/src/azents/repos/external_channel/file_access.py
   - python/apps/azents/src/azents/repos/agent_session/**
   - python/apps/azents/src/azents/repos/archived_session_retention/**
   - python/apps/azents/src/azents/rdb/models/artifact.py
@@ -66,7 +67,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ToolActivityGroup.tsx
   - typescript/apps/azents-web/src/features/chat/components/ToolCallCard.tsx
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
-last_verified_at: 2026-09-30
+last_verified_at: 2026-10-01
 spec_version: 53
 ---
 

@@ -13,6 +13,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/external_channel/management_operations.py
   - python/apps/azents/src/azents/repos/external_channel/management_operation_data.py
   - python/apps/azents/src/azents/repos/external_channel/work_state.py
+  - python/apps/azents/src/azents/repos/external_channel/file_access.py
   - python/apps/azents/src/azents/rdb/models/external_model_settings.py
   - python/apps/azents/src/azents/services/external_channel/connection.py
   - python/apps/azents/src/azents/services/external_channel/lifecycle.py
@@ -40,7 +41,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/session_lifecycle_finalizer/**
   - typescript/apps/azents-web/src/features/external-channel-management/**
   - typescript/apps/azents-web/src/features/session-channels/**
-last_verified_at: 2026-09-12
+last_verified_at: 2026-10-01
 spec_version: 45
 ---
 
