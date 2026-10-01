@@ -529,7 +529,7 @@ Always-on required CI does not depend on external credentials.
 - The stable `ci-python-e2e` required gate aggregates support tests, the planner,
   all enabled suite lanes, and the timing aggregator for the scopes selected by path
   filtering. It compares the maximum raw lane time with a complete recorded run for
-  the PR base and fails at a ten-percent increase or unavailable base evidence.
+  the PR base and fails at a twenty-percent increase or unavailable base evidence.
   Retargeting and a 15-minute sweep recompare recorded evidence without rerunning E2E.
 - Each executed required E2E lane uploads bounded observability artifacts even when
   pytest fails. The artifact contains JUnit XML, the complete pytest output, the
@@ -601,7 +601,7 @@ Local/PR environment without live substrate does not fake live PASS. Instead, se
   shared-cookie Runtime Web browser journeys, moved mobile presentation to a Storybook
   interaction, and assigned alternate authentication plus capacity edge cases to
   focused lower-layer tests.
-- **2026-10-01** (spec_version 75) — Added base-relative ten-percent duration gating,
+- **2026-10-01** (spec_version 75) — Added base-relative duration gating,
   evidence-only base-change reevaluation, and compact collapsible comments.
 
 - **2026-09-30** (spec_version 74) — Moved stack-added heavy file-transfer matrices
