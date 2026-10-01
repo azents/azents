@@ -295,6 +295,34 @@ def parse_timings(path: Path) -> tuple[TimingRecord, ...]:
     return tuple(records)
 
 
+def aggregate_timings(artifacts_root: Path, output_path: Path) -> int:
+    """Validate and concatenate every downloaded lane timing file."""
+    lane_directories = sorted(
+        path.parent for path in artifacts_root.glob("**/lane-duration-seconds.txt")
+    )
+    if not lane_directories:
+        raise ValueError("no E2E lane artifact directories were found")
+    paths: list[Path] = []
+    for lane_directory in lane_directories:
+        timing_path = lane_directory / "pytest-timings.jsonl"
+        if not timing_path.is_file():
+            raise ValueError(f"E2E timing file is missing: {timing_path}")
+        paths.append(timing_path)
+    discovered_paths = set(artifacts_root.glob("**/pytest-timings.jsonl"))
+    if discovered_paths != set(paths):
+        raise ValueError("E2E timing files do not match the downloaded lane artifacts")
+    contents: list[str] = []
+    for path in paths:
+        content = path.read_text(encoding="utf-8")
+        if not content.strip():
+            raise ValueError(f"E2E timing file is empty: {path}")
+        parse_timings(path)
+        contents.append(content.rstrip("\n"))
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text("\n".join(contents) + "\n", encoding="utf-8")
+    return len(paths)
+
+
 def parse_image_build_timings(path: Path) -> tuple[ImageBuildTiming, ...]:
     """Parse safe image build timings produced by E2E fixtures."""
     return tuple(
@@ -591,29 +619,39 @@ def _build_parser() -> argparse.ArgumentParser:
     summarize.add_argument("--image-build-timings", type=Path)
     summarize.add_argument("--lane-duration", type=Path)
     summarize.add_argument("--output", type=Path, required=True)
+    aggregate = subparsers.add_parser(
+        "aggregate-timings",
+        help="Validate and concatenate downloaded lane timing files.",
+    )
+    aggregate.add_argument("--artifacts-root", type=Path, required=True)
+    aggregate.add_argument("--output", type=Path, required=True)
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the CI observability command."""
     args = _build_parser().parse_args(argv)
-    if args.command != "summarize":
-        raise AssertionError(f"unsupported command: {args.command}")
-
-    output: Path = args.output
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(
-        render_summary(
-            lane=args.lane,
-            job_result=args.job_result,
-            junit_path=args.junit,
-            timings_path=args.timings,
-            image_build_timings_path=args.image_build_timings,
-            lane_duration_path=args.lane_duration,
-        ),
-        encoding="utf-8",
-    )
-    return 0
+    match args.command:
+        case "summarize":
+            output: Path = args.output
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_text(
+                render_summary(
+                    lane=args.lane,
+                    job_result=args.job_result,
+                    junit_path=args.junit,
+                    timings_path=args.timings,
+                    image_build_timings_path=args.image_build_timings,
+                    lane_duration_path=args.lane_duration,
+                ),
+                encoding="utf-8",
+            )
+            return 0
+        case "aggregate-timings":
+            aggregate_timings(args.artifacts_root, args.output)
+            return 0
+        case _:
+            raise AssertionError(f"unsupported command: {args.command}")
 
 
 if __name__ == "__main__":

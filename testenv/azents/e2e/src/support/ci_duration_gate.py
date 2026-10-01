@@ -6,6 +6,7 @@ import argparse
 import html
 import json
 import re
+import shutil
 import subprocess
 import sys
 from collections.abc import Callable, Mapping, Sequence
@@ -31,10 +32,26 @@ class Sample:
     lanes: Mapping[str, Decimal]
 
 
+@dataclass(frozen=True)
+class WorkflowRun:
+    """One workflow run that may provide exact-SHA base evidence."""
+
+    run_id: int
+    status: str
+
+
 def _run(arguments: Sequence[str]) -> str:
-    result = subprocess.run(
-        list(arguments), capture_output=True, text=True, check=False, timeout=90
-    )
+    timeout = 600 if list(arguments[:3]) == ["gh", "run", "watch"] else 90
+    try:
+        result = subprocess.run(
+            list(arguments),
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as error:
+        raise EvidenceError("github_evidence_unavailable") from error
     if result.returncode != 0:
         raise EvidenceError("github_evidence_unavailable")
     return result.stdout
@@ -70,7 +87,7 @@ def load_lanes(root: Path) -> dict[str, Decimal]:
     return lanes
 
 
-def _runs(repository: str, sha: str, command: Runner) -> list[int]:
+def _runs(repository: str, sha: str, command: Runner) -> list[WorkflowRun]:
     payload = _object(
         command(
             [
@@ -79,7 +96,7 @@ def _runs(repository: str, sha: str, command: Runner) -> list[int]:
                 "--method",
                 "GET",
                 f"repos/{repository}/actions/workflows/ci.yaml/runs"
-                f"?head_sha={sha}&status=completed&per_page=10",
+                f"?head_sha={sha}&per_page=10",
             ]
         )
     )
@@ -87,10 +104,46 @@ def _runs(repository: str, sha: str, command: Runner) -> list[int]:
     if not isinstance(rows, list):
         raise EvidenceError("invalid_run_list")
     return [
-        row["id"]
+        WorkflowRun(
+            row["id"],
+            row.get("status") if isinstance(row.get("status"), str) else "completed",
+        )
         for row in rows
         if isinstance(row, dict) and isinstance(row.get("id"), int)
     ]
+
+
+def _download_sample(
+    repository: str,
+    run_id: int,
+    expected_lanes: set[str],
+    work_dir: Path,
+    command: Runner,
+) -> Sample | None:
+    destination = work_dir / f"run-{run_id}"
+    try:
+        if destination.exists():
+            shutil.rmtree(destination)
+        command(
+            [
+                "gh",
+                "run",
+                "download",
+                str(run_id),
+                "--repo",
+                repository,
+                "--pattern",
+                "e2e-observability-*",
+                "--dir",
+                str(destination),
+            ]
+        )
+        lanes = load_lanes(destination)
+    except (EvidenceError, OSError):
+        return None
+    if expected_lanes <= set(lanes):
+        return Sample(run_id, {lane: lanes[lane] for lane in expected_lanes})
+    return None
 
 
 def find_sample(
@@ -101,33 +154,73 @@ def find_sample(
     work_dir: Path,
     command: Runner,
 ) -> Sample:
-    """Use the newest existing run with the same complete lane set."""
+    """Use complete exact-SHA evidence, waiting for an active base run if needed."""
     if not _SHA.fullmatch(sha):
         raise EvidenceError("base_sha_unavailable")
-    for run_id in _runs(repository, sha, command):
-        if run_id == exclude_run_id:
+    runs = [
+        run for run in _runs(repository, sha, command) if run.run_id != exclude_run_id
+    ]
+    for run in runs:
+        if run.status != "completed":
             continue
-        destination = work_dir / f"run-{run_id}"
+        sample = _download_sample(
+            repository,
+            run.run_id,
+            expected_lanes,
+            work_dir,
+            command,
+        )
+        if sample is not None:
+            return sample
+    active_run = next(
+        (
+            run
+            for run in runs
+            if run.status
+            in {
+                "queued",
+                "in_progress",
+                "waiting",
+                "requested",
+                "pending",
+            }
+        ),
+        None,
+    )
+    if active_run is not None:
+        sample = _download_sample(
+            repository,
+            active_run.run_id,
+            expected_lanes,
+            work_dir,
+            command,
+        )
+        if sample is not None:
+            return sample
         try:
             command(
                 [
                     "gh",
                     "run",
-                    "download",
-                    str(run_id),
+                    "watch",
+                    str(active_run.run_id),
                     "--repo",
                     repository,
-                    "--pattern",
-                    "e2e-observability-*",
-                    "--dir",
-                    str(destination),
+                    "--interval",
+                    "10",
                 ]
             )
-            lanes = load_lanes(destination)
-        except (EvidenceError, OSError):
-            continue
-        if expected_lanes <= set(lanes):
-            return Sample(run_id, {lane: lanes[lane] for lane in expected_lanes})
+        except EvidenceError:
+            pass
+        sample = _download_sample(
+            repository,
+            active_run.run_id,
+            expected_lanes,
+            work_dir,
+            command,
+        )
+        if sample is not None:
+            return sample
     raise EvidenceError("compatible_base_run_unavailable")
 
 
@@ -282,7 +375,10 @@ def evaluate(
 def _candidate_report(
     repository: str, head_sha: str, work_dir: Path, command: Runner
 ) -> tuple[int, dict[str, object]]:
-    for run_id in _runs(repository, head_sha, command):
+    for run in _runs(repository, head_sha, command):
+        if run.status != "completed":
+            continue
+        run_id = run.run_id
         destination = work_dir / f"candidate-{run_id}"
         try:
             command(

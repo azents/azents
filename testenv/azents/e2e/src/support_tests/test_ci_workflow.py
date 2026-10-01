@@ -42,6 +42,19 @@ def test_timing_cache_save_keys_are_unique_per_attempt() -> None:
     assert (
         "key: e2e-timing-baseline-${{ github.run_id }}-${{ github.run_attempt }}"
     ) in main_save
+    assert "steps.aggregate_timing.outcome == 'success'" in pr_save
+    assert "steps.aggregate_timing.outcome == 'success'" in main_save
+
+
+def test_timing_cache_save_requires_successful_current_aggregation() -> None:
+    """Never publish a cache after current timing aggregation fails."""
+    workflow = _WORKFLOW_PATH.read_text(encoding="utf-8")
+    aggregate = _step_block(workflow, "Aggregate rolling timing history")
+
+    assert "id: aggregate_timing" in aggregate
+    assert "support/ci_observability.py" in aggregate
+    assert "aggregate-timings" in aggregate
+    assert "xargs" not in aggregate
 
 
 def test_e2e_aggregate_artifact_download_fails_closed_without_retry() -> None:
@@ -102,6 +115,20 @@ def test_duration_gate_compares_base_once_without_retry() -> None:
     assert gate.count("ci_duration_gate gate") == 1
     assert "gh run rerun" not in aggregate
     assert "DURATION_RESULT: ${{ steps.duration.outcome }}" in aggregate
+
+
+def test_duration_wait_workflows_grant_read_only_checks_access() -> None:
+    """The authoritative run watcher has its documented read permission."""
+    workflow = _WORKFLOW_PATH.read_text(encoding="utf-8")
+    aggregate = workflow.split("  ci_e2e_aggregate:\n", 1)[1].split(
+        "\n  ci-python-e2e:\n", 1
+    )[0]
+    reevaluation = (
+        REPOSITORY_ROOT / ".github/workflows/e2e-duration-recheck.yaml"
+    ).read_text(encoding="utf-8")
+
+    assert "checks: read" in aggregate.split("    steps:\n", 1)[0]
+    assert "checks: read" in reevaluation.split("\njobs:\n", 1)[0]
 
 
 def test_comment_is_compact_and_base_changes_are_rechecked() -> None:

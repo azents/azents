@@ -653,6 +653,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       actions: read
+      checks: read
       contents: read
     steps:
       - name: Checkout duration gate
@@ -674,6 +675,7 @@ jobs:
             ${{ github.event_name == 'pull_request' && format('e2e-pr-timing-baseline-{0}-', github.event.pull_request.head.sha) || 'e2e-timing-baseline-' }}
             e2e-timing-baseline-
       - name: Aggregate rolling timing history
+        id: aggregate_timing
         run: |
           timing_root="${RUNNER_TEMP}/e2e-timing-baseline"
           timing_runs="${timing_root}/runs"
@@ -685,17 +687,10 @@ jobs:
             rm -f "$legacy_timing"
           fi
           current_timing="${timing_runs}/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.jsonl"
-          find e2e-observability-artifacts \
-            -name pytest-timings.jsonl \
-            -type f \
-            -print0 \
-            | sort -z \
-            | xargs -0 -r cat \
-            > "$current_timing"
-          if [ ! -s "$current_timing" ]; then
-            echo "::error::No E2E timing records were available to cache"
-            exit 1
-          fi
+          python testenv/azents/e2e/src/support/ci_observability.py \
+            aggregate-timings \
+            --artifacts-root e2e-observability-artifacts \
+            --output "$current_timing"
           mapfile -t timing_files < <(
             find "$timing_runs" \
               -maxdepth 1 \
@@ -738,6 +733,7 @@ jobs:
           github.event_name == 'pull_request'
           && github.event.pull_request.head.repo.full_name == github.repository
           && needs.ci_e2e_run.result == 'success'
+          && steps.aggregate_timing.outcome == 'success'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/e2e-timing-baseline
@@ -748,6 +744,7 @@ jobs:
           github.event_name == 'push'
           && github.ref == 'refs/heads/main'
           && needs.ci_e2e_run.result == 'success'
+          && steps.aggregate_timing.outcome == 'success'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/e2e-timing-baseline
