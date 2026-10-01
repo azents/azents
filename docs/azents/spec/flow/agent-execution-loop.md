@@ -9,6 +9,8 @@ code_paths:
   - python/apps/azents/src/azents/broker/types.py
   - python/apps/azents/src/azents/broker/redis.py
   - python/apps/azents/src/azents/core/vfs.py
+  - python/apps/azents/src/azents/core/model_pricing.py
+  - python/apps/azents/src/azents/services/model_metadata.py
   - python/apps/azents/src/azents/core/goal.py
   - python/apps/azents/src/azents/core/skill_projection.py
   - python/apps/azents/src/azents/core/toolkit_state.py
@@ -107,7 +109,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
   - typescript/apps/azents-web/messages/*/chat.json
 last_verified_at: 2026-10-01
-spec_version: 188
+spec_version: 189
 ---
 
 # Agent Execution Loop
@@ -675,20 +677,26 @@ is forwarded as a provider-hosted image tool or placed in model-visible argument
 
 OpenAI SDK completion usage maps directly into the existing turn-marker token fields. Its raw usage is
 the SDK usage object serialized to plain JSON and does not synthesize LiteLLM hidden parameters.
-`cost_usd` is a content-free estimate from LiteLLM's public pricing function using provider usage,
-model, actual response service tier, and required output-type metadata only. Actual Ultrafast
-and unmapped premium tiers bypass the calculator because the current dependency would
-otherwise use Standard price keys. A missing, empty, or `auto` actual tier on an
-Ultrafast request also leaves cost unavailable. The requested tier is carried from
-the same validated native lowering authority as immutable attempt-local context,
-not a persisted speed field or actual-tier authority. Explicit supported
-Standard/Priority/Flex response tiers retain delegated estimation with required
-premium price-key checks; the `fast` response alias maps to Priority.
-Unsupported or unmapped prices, a
-pricing-calculator `ValueError`, negative values, and non-finite values leave cost unset without
-failing completed output. Unexpected calculator defects propagate through the ordinary internal-error
-path instead of being reclassified as missing pricing. ChatGPT OAuth cost is an API price-map estimate,
-not subscription billing.
+Azents captures the validated retained-source DB snapshot before each physical model call and
+normalizes immutable pricing using the exact semantic provider/model and source key. The output
+stream freezes this view and the requested tier at start; a source refresh or later call cannot
+change an in-flight operation's price provenance. `cost_usd` is calculated from normalized usage,
+cache/reasoning/TTL/media quantities, service tier and necessary billable categories without model
+output content. Concrete provider-returned tier wins; a missing or `auto` tier on an explicitly
+priority request uses captured priority rules or remains unknown, never standard pricing.
+Actual Ultrafast and unmapped premium tiers remain unpriced; a missing, empty, or
+`auto` actual tier on an Ultrafast request also leaves cost unavailable. Explicit
+supported response tiers take precedence, and the `fast` response alias maps to Priority.
+Missing, unmapped, invalid or unsupported required prices/quantities leave cost unset without
+failing completed output. Unexpected estimator defects retain the ordinary internal-error path.
+Installed price maps, SDK estimates and private hidden-response costs are not estimation authority.
+ChatGPT OAuth cost remains an API-price estimate, not subscription billing.
+
+Known costs carry optional `cost_provenance` with `provider_reported` or `estimated` method,
+semantic provider/model, applicable tier, and snapshot/hash/key/estimator version for estimates.
+Explicit native OpenRouter `usage.cost` remains a separately reported charge even without source
+prices. It is not added to an estimate for the same usage. Historical amounts without provenance
+stay unlabeled; this metadata does not introduce a new cost UI or retroactive history rewrite.
 
 Both `xai` and `xai_oauth` use the xAI transport target in this lowerer. For either identity, system instructions become the first `system` input item instead of top-level `instructions`, hosted `web_search` uses the xAI Responses tool target, and Anthropic cache-control hints are omitted. Credential refresh is resolved before the adapter pipeline and remains exclusive to `xai_oauth`; the lowerer does not own OAuth lifecycle state.
 

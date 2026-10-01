@@ -60,6 +60,7 @@ from azents.services.subagent_coordination import (
     SubagentCoordinationService,
     SubagentListProjection,
 )
+from azents.testing.model_metadata import make_test_model_metadata_service
 from azents.testing.model_selection import (
     make_test_model_selection,
     make_test_model_settings,
@@ -775,6 +776,7 @@ async def _make_toolkit() -> _SubagentToolkitFixture:
         published_events.append(event)
 
     toolkit = SubagentToolkit(
+        model_metadata_service=make_test_model_metadata_service(snapshot=None),
         session_manager=_session_manager,
         agent_session_repository=_typed_fake(
             agent_session_repository,

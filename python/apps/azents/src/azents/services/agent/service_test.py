@@ -9,6 +9,7 @@ import pytest
 from azcommon.result import Failure, Success
 from fastapi import Depends
 from fastapi.dependencies.utils import get_dependant
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent import (
     DEFAULT_MAIN_MODEL_OPTION_LABEL,
@@ -31,6 +32,9 @@ from azents.repos.agent_operations import (
     AgentOperationRuntimeProfileInvalid,
     AgentOperationsRepository,
 )
+from azents.repos.llm_catalog import LiteLLMSourceSnapshotRepository
+from azents.repos.llm_catalog.data import LiteLLMSourceSnapshot
+from azents.services.model_metadata import ModelMetadataService
 from azents.services.terminal_policy.invalidation import (
     NoopTerminalPolicyInvalidationPublisher,
     TerminalPolicySourceInvalidation,
@@ -41,6 +45,7 @@ from azents.services.uploads.schema import (
     StoredImageFile,
     StoredImageThumbnails,
 )
+from azents.testing.model_metadata import make_test_model_metadata_service
 from azents.testing.model_selection import (
     make_test_model_selection,
     make_test_model_settings,
@@ -65,6 +70,22 @@ def test_agent_service_dependency_graph_is_valid() -> None:
         del service
 
     assert get_dependant(path="/", call=endpoint).dependencies
+
+
+class _CountingMetadataRepository(LiteLLMSourceSnapshotRepository):
+    """Supply one local source fixture and count reads."""
+
+    def __init__(self, snapshot: LiteLLMSourceSnapshot) -> None:
+        self.snapshot = snapshot
+        self.capture_count = 0
+
+    async def get_latest_authoritative(
+        self, session: AsyncSession, *, source_key: str
+    ) -> LiteLLMSourceSnapshot:
+        del session
+        assert source_key == "litellm_model_cost"
+        self.capture_count += 1
+        return self.snapshot
 
 
 def test_terminal_denied_scope_reports_each_policy_owner() -> None:
@@ -210,6 +231,7 @@ def _make_service() -> AgentService:
     s3_service = AsyncMock()
 
     return AgentService(
+        model_metadata_service=make_test_model_metadata_service(snapshot=None),
         repository=repository,
         model_catalog_read_service=model_catalog_read_service,
         image_generation_catalog_service=image_generation_catalog_service,
@@ -298,6 +320,132 @@ async def test_terminal_policy_invalidation_is_not_published_on_rollback() -> No
         )
 
     assert invalidations == []
+
+
+class TestAgentServiceSourceContext:
+    """API context uses the same captured maximum and math as runtime."""
+
+    async def test_agent_list_shares_one_source_capture_and_runtime_math(self) -> None:
+        """Multiple Agents and paired budgets do not repeat a large source read."""
+        service = _make_service()
+        agents: list[Agent] = []
+        for agent_id in ("agent-1", "agent-2"):
+            agent = _make_agent(agent_id)
+            option = agent.selectable_model_options[0]
+            candidate = option.candidates[0]
+            selection = candidate.model_selection
+            capabilities = selection.normalized_capabilities
+            context = capabilities.context_window.model_copy(
+                update={"default_input_tokens": None, "max_input_tokens": None}
+            )
+            selection = selection.model_copy(
+                update={
+                    "normalized_capabilities": capabilities.model_copy(
+                        update={"context_window": context}
+                    )
+                }
+            )
+            updated_option = option.model_copy(
+                update={
+                    "candidates": [
+                        candidate.model_copy(update={"model_selection": selection})
+                    ]
+                }
+            )
+            agents.append(
+                agent.model_copy(
+                    update={
+                        "model_selection": selection,
+                        "lightweight_model_selection": selection,
+                        "selectable_model_options": [updated_option],
+                    }
+                )
+            )
+        source_key = agents[0].model_selection.model_identifier
+        snapshot = LiteLLMSourceSnapshot(
+            id="source-id",
+            source_key="litellm_model_cost",
+            source_url=None,
+            source_hash="source-hash",
+            model_count=1,
+            litellm_version=None,
+            loaded_source="remote",
+            payload={source_key: {"max_input_tokens": 256_000}},
+            created_at=_NOW,
+        )
+        repository = _CountingMetadataRepository(snapshot)
+        static_service = make_test_model_metadata_service(snapshot=snapshot)
+        service.model_metadata_service = ModelMetadataService(
+            session_manager=static_service.session_manager,
+            source_snapshot_repository=repository,
+        )
+        agent_repository = require_instance(service.repository, AsyncMock)
+        agent_repository.list_by_workspace.return_value = SimpleNamespace(items=agents)
+        result = await service.list_by_workspace(
+            "ws-1",
+            workspace_user_id="owner",
+            role=WorkspaceUserRole.OWNER,
+        )
+        assert repository.capture_count == 1
+        assert len(result.items) == 2
+        for item in result.items:
+            assert item.effective_context_window_tokens == 256_000
+            assert item.effective_auto_compaction_threshold_tokens == 230_400
+
+    async def test_saved_maximum_avoids_source_capture(self) -> None:
+        """A complete capability snapshot does not need fallback source metadata."""
+        service = _make_service()
+        agent = _make_agent()
+        option = agent.selectable_model_options[0]
+        candidate = option.candidates[0]
+        selection = candidate.model_selection
+        capabilities = selection.normalized_capabilities
+        selection = selection.model_copy(
+            update={
+                "normalized_capabilities": capabilities.model_copy(
+                    update={
+                        "context_window": capabilities.context_window.model_copy(
+                            update={"max_input_tokens": 128_000}
+                        )
+                    }
+                )
+            }
+        )
+        agent = agent.model_copy(
+            update={
+                "selectable_model_options": [
+                    option.model_copy(
+                        update={
+                            "candidates": [
+                                candidate.model_copy(
+                                    update={"model_selection": selection}
+                                )
+                            ]
+                        }
+                    )
+                ]
+            }
+        )
+        snapshot = LiteLLMSourceSnapshot(
+            id="source-id",
+            source_key="litellm_model_cost",
+            source_url=None,
+            source_hash="source-hash",
+            model_count=0,
+            litellm_version=None,
+            loaded_source="remote",
+            payload={},
+            created_at=_NOW,
+        )
+        repository = _CountingMetadataRepository(snapshot)
+        static_service = make_test_model_metadata_service(snapshot=snapshot)
+        service.model_metadata_service = ModelMetadataService(
+            session_manager=static_service.session_manager,
+            source_snapshot_repository=repository,
+        )
+        source = await service._capture_context_source([agent])
+        assert source is None
+        assert repository.capture_count == 0
 
 
 class TestAgentServiceModelSelection:

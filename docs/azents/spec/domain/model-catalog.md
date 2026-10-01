@@ -7,6 +7,9 @@ domain: model-catalog
 code_paths:
   - python/apps/azents/src/azents/core/model_execution_options.py
   - python/apps/azents/src/azents/core/openai_client_config.py
+  - python/apps/azents/src/azents/core/model_source_metadata.py
+  - python/apps/azents/src/azents/core/model_pricing.py
+  - python/apps/azents/src/azents/services/model_metadata.py
   - python/apps/azents/src/azents/core/agent.py
   - python/apps/azents/src/azents/core/llm_catalog.py
   - python/apps/azents/src/azents/core/llm_catalog_sync.py
@@ -43,7 +46,7 @@ code_paths:
   - typescript/apps/azents-web/src/trpc/routers/workspace-model-settings.ts
   - typescript/apps/azents-admin-web/src/features/model-catalog/containers/useModelCatalogPageContainer.ts
 last_verified_at: 2026-09-30
-spec_version: 27
+spec_version: 28
 ---
 
 # Model Catalog Domain Spec
@@ -202,6 +205,22 @@ version. An image sync publishes only when its claimed attempt is still latest a
 its version still matches the integration. The last successful snapshot remains
 diagnostic after a generation change or failed sync, but `generation_current =
 false` prevents it from authorizing new saves or runtime dispatch.
+
+## Local operation metadata and pricing
+
+Context fallback and cost estimation read a locally captured validated source snapshot
+through `ModelMetadataService`, never an installed model map, library profile or
+request-time remote source fetch. Exact provider/source namespaces and expanded aliases
+are distinct from execution encoding; publisher paths and cloud resource identifiers are
+not stripped. Saved normalized capabilities retain their existing precedence and default
+floor. Paired context calculations share one snapshot, and known maxima skip source reads.
+
+Pricing normalization is separate from capability projection. It captures snapshot identity,
+exact model/source key and explicit token/cache/tier/context/tool/media rules for the
+operation. Unavailable or unsupported required pricing remains `null` rather than a zero,
+partial total or execution failure. Provider-returned charges and estimates retain
+distinct provenance. Optional metadata/pricing misses do not change model visibility or
+saved selections.
 
 ## Public read API
 

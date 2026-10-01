@@ -993,6 +993,29 @@ _PROVIDER_TOOL_LIVE_BARRIER = _ProviderToolLiveBarrier()
 _INFERENCE_PROFILE_BARRIER = _ProviderToolLiveBarrier()
 
 
+def _inference_profile_source_payload() -> dict[str, dict[str, object]]:
+    """Supply synthetic prices through the ordinary validated-source API."""
+    return {
+        model: {
+            "litellm_provider": "openai",
+            "mode": "chat",
+            "max_input_tokens": 128_000,
+            "max_output_tokens": 16_384,
+            "supports_function_calling": True,
+            "supports_reasoning": True,
+            "input_cost_per_token": 0.000001,
+            "cache_read_input_token_cost": 0.0000001,
+            "cache_creation_input_token_cost": 0.000001,
+            "output_cost_per_token": 0.000002,
+            "input_cost_per_token_priority": 0.000002,
+            "cache_read_input_token_cost_priority": 0.0000002,
+            "cache_creation_input_token_cost_priority": 0.000002,
+            "output_cost_per_token_priority": 0.000004,
+        }
+        for model in ("gpt-5.5", "gpt-5.5-mini", "gpt-6-astra", "gpt-5.6-sol")
+    }
+
+
 def inference_profile_scenario(user_text: str | None) -> str | None:
     """Recognize only explicitly named synthetic inference-profile requests."""
     if user_text is None or not user_text.startswith(_INFERENCE_PROFILE_PREFIX):
@@ -1490,6 +1513,9 @@ class _Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         """Return a local journal, deterministic usage, or proxied response."""
+        if self.path == "/inference-profile/catalog-source":
+            self._write_json(200, _inference_profile_source_payload())
+            return
         if self.path == _INFERENCE_PROFILE_BARRIER_PATH:
             self._write_json(200, _INFERENCE_PROFILE_BARRIER.evidence())
             return

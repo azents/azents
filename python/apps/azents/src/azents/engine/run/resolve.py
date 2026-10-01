@@ -132,6 +132,7 @@ from azents.services.model_file import (
     model_file_size_limit_message,
     model_file_source_size_error,
 )
+from azents.services.model_metadata import CapturedContextSource, ModelMetadataService
 from azents.services.session_resource_authority import SessionResourceAuthority
 from azents.services.xai_oauth.data import (
     ProviderEntitlementDenied as XaiOAuthProviderEntitlementDenied,
@@ -329,8 +330,10 @@ async def resolve_model_candidate_runtime(
     workspace_id: str,
     selection: AgentModelSelection,
     settings: SelectableModelSettings,
+    context_source: CapturedContextSource | None,
     integration_repository: LLMProviderIntegrationRepository,
     session_manager: SessionManager[AsyncSession],
+    model_metadata_service: ModelMetadataService,
 ) -> Result[
     ResolvedModelCandidateRuntime,
     IntegrationNotFound | IntegrationDisabled | InvalidModelParameters,
@@ -371,10 +374,23 @@ async def resolve_model_candidate_runtime(
             )
         )
     runtime_model = to_runtime_model(selection.provider, selection.model_identifier)
+    source_snapshot = (
+        context_source.snapshot
+        if context_source is not None
+        else await model_metadata_service.capture_for_context(
+            capability_maximums=[
+                selection.normalized_capabilities.context_window.max_input_tokens
+            ]
+        )
+    )
     input_tokens = resolve_model_input_tokens(
         selection.normalized_capabilities.context_window.default_input_tokens,
         selection.normalized_capabilities.context_window.max_input_tokens,
-        runtime_model,
+        model_metadata_service.maximum_input_tokens(
+            source_snapshot,
+            provider=selection.provider,
+            model_identifier=selection.model_identifier,
+        ),
         settings.context_window_tokens,
     )
     return Success(
@@ -510,6 +526,7 @@ async def resolve_invoke_input(
     exchange_file_service: ExchangeFileService,
     model_file_service: ModelFileService,
     image_generation_catalog_service: ImageGenerationCatalogService,
+    model_metadata_service: ModelMetadataService,
 ) -> Result[RunRequest, ResolveError]:
     """Load Agent/Integration and build RunRequest."""
     resolved = await resolve_invoke_input_with_model_source(
@@ -517,6 +534,7 @@ async def resolve_invoke_input(
         model_source_agent_id=invoke_input.agent_id,
         requested_profile=None,
         resolved_model_selection=None,
+        context_source=None,
         resolved_model_settings=None,
         resolved_enabled_execution_options=None,
         agent_repository=agent_repository,
@@ -525,6 +543,7 @@ async def resolve_invoke_input(
         exchange_file_service=exchange_file_service,
         model_file_service=model_file_service,
         image_generation_catalog_service=image_generation_catalog_service,
+        model_metadata_service=model_metadata_service,
     )
     match resolved:
         case Success(value):
@@ -539,18 +558,21 @@ async def resolve_invoke_input_with_profile(
     invoke_input: InvokeInput,
     *,
     requested_profile: RequestedInferenceProfile,
+    context_source: CapturedContextSource | None,
     agent_repository: AgentRepository,
     integration_repository: LLMProviderIntegrationRepository,
     session_manager: SessionManager[AsyncSession],
     exchange_file_service: ExchangeFileService,
     model_file_service: ModelFileService,
     image_generation_catalog_service: ImageGenerationCatalogService,
+    model_metadata_service: ModelMetadataService,
 ) -> Result[ResolvedInvokeInputProfile, ResolveError]:
     """Build a run request from one explicit Agent-owned inference profile."""
     resolved = await resolve_invoke_input_with_model_source(
         invoke_input,
         model_source_agent_id=invoke_input.agent_id,
         requested_profile=requested_profile,
+        context_source=context_source,
         resolved_model_selection=None,
         resolved_model_settings=None,
         resolved_enabled_execution_options=None,
@@ -560,6 +582,7 @@ async def resolve_invoke_input_with_profile(
         exchange_file_service=exchange_file_service,
         model_file_service=model_file_service,
         image_generation_catalog_service=image_generation_catalog_service,
+        model_metadata_service=model_metadata_service,
     )
     match resolved:
         case Success(value):
@@ -582,6 +605,7 @@ async def resolve_invoke_input_with_resolved_profile(
     *,
     resolved_model_selection: AgentModelSelection,
     resolved_model_settings: SelectableModelSettings,
+    context_source: CapturedContextSource | None,
     resolved_reasoning_effort: ModelReasoningEffort | None,
     resolved_enabled_execution_options: list[ModelExecutionOptionId],
     agent_repository: AgentRepository,
@@ -590,6 +614,7 @@ async def resolve_invoke_input_with_resolved_profile(
     exchange_file_service: ExchangeFileService,
     model_file_service: ModelFileService,
     image_generation_catalog_service: ImageGenerationCatalogService,
+    model_metadata_service: ModelMetadataService,
 ) -> Result[RunRequest, ResolveError]:
     """Rebuild a run request from an already activated model snapshot."""
     resolved = await resolve_invoke_input_with_model_source(
@@ -597,6 +622,7 @@ async def resolve_invoke_input_with_resolved_profile(
         model_source_agent_id=invoke_input.agent_id,
         requested_profile=None,
         resolved_model_selection=resolved_model_selection,
+        context_source=context_source,
         resolved_model_settings=resolved_model_settings,
         resolved_enabled_execution_options=resolved_enabled_execution_options,
         agent_repository=agent_repository,
@@ -605,6 +631,7 @@ async def resolve_invoke_input_with_resolved_profile(
         exchange_file_service=exchange_file_service,
         model_file_service=model_file_service,
         image_generation_catalog_service=image_generation_catalog_service,
+        model_metadata_service=model_metadata_service,
     )
     match resolved:
         case Success(value):
@@ -624,6 +651,7 @@ async def resolve_invoke_input_with_model_source(
     invoke_input: InvokeInput,
     *,
     model_source_agent_id: str,
+    context_source: CapturedContextSource | None,
     requested_profile: RequestedInferenceProfile | None,
     resolved_model_selection: AgentModelSelection | None,
     resolved_model_settings: SelectableModelSettings | None,
@@ -634,6 +662,7 @@ async def resolve_invoke_input_with_model_source(
     exchange_file_service: ExchangeFileService,
     model_file_service: ModelFileService,
     image_generation_catalog_service: ImageGenerationCatalogService,
+    model_metadata_service: ModelMetadataService,
 ) -> Result[_ResolvedInvokeInputModelSource, ResolveError]:
     """Resolve a run request and main selection from one Agent snapshot."""
     snapshot_result = await EngineInvokeReadRepository(
@@ -808,6 +837,16 @@ async def resolve_invoke_input_with_model_source(
             )
         )
 
+    source_snapshot = (
+        context_source.snapshot
+        if context_source is not None
+        else await model_metadata_service.capture_for_context(
+            capability_maximums=[
+                main_selection.normalized_capabilities.context_window.max_input_tokens,
+                lightweight_selection.normalized_capabilities.context_window.max_input_tokens,
+            ]
+        )
+    )
     reasoning_effort = (
         requested_profile.reasoning_effort
         if requested_profile is not None
@@ -816,7 +855,11 @@ async def resolve_invoke_input_with_model_source(
     main_input_tokens = resolve_model_input_tokens(
         main_selection.normalized_capabilities.context_window.default_input_tokens,
         main_selection.normalized_capabilities.context_window.max_input_tokens,
-        model,
+        model_metadata_service.maximum_input_tokens(
+            source_snapshot,
+            provider=main_selection.provider,
+            model_identifier=main_selection.model_identifier,
+        ),
         main_settings.context_window_tokens,
     )
 
@@ -829,7 +872,11 @@ async def resolve_invoke_input_with_model_source(
     compaction_input_tokens = resolve_model_input_tokens(
         lightweight_selection.normalized_capabilities.context_window.default_input_tokens,
         lightweight_selection.normalized_capabilities.context_window.max_input_tokens,
-        compaction_model,
+        model_metadata_service.maximum_input_tokens(
+            source_snapshot,
+            provider=lightweight_selection.provider,
+            model_identifier=lightweight_selection.model_identifier,
+        ),
         lightweight_settings.context_window_tokens,
     )
 

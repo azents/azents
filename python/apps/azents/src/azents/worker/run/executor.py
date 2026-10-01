@@ -21,6 +21,7 @@ from azents.broker.types import (
     SessionBroker,
     SessionWakeUp,
 )
+from azents.core.agent import AgentModelSelection
 from azents.core.enums import (
     ActionExecutionStatus,
     AgentRunPhase,
@@ -205,6 +206,7 @@ from azents.services.model_candidate_selection import (
     select_model_operation_candidate,
 )
 from azents.services.model_file import ModelFileService
+from azents.services.model_metadata import CapturedContextSource, ModelMetadataService
 from azents.services.session_git_worktree import (
     GitWorktreeActionExecutionResult,
     SessionGitWorktreeService,
@@ -494,6 +496,9 @@ class RunExecutor:
     ]
     model_candidate_health_repository: Annotated[
         ModelCandidateHealthRepository, Depends(ModelCandidateHealthRepository)
+    ]
+    model_metadata_service: Annotated[
+        ModelMetadataService, Depends(ModelMetadataService)
     ]
     toolkit_registry: Annotated[
         dict[str, ToolkitProvider[Any]], Depends(get_toolkit_registry)
@@ -1286,6 +1291,7 @@ class RunExecutor:
         else:
             recovered = await resolve_invoke_input_with_resolved_profile(
                 invoke_input,
+                context_source=None,
                 resolved_model_selection=turn_inference_state.model_selection,
                 resolved_model_settings=turn_inference_state.model_settings,
                 resolved_reasoning_effort=turn_inference_state.reasoning_effort,
@@ -1294,6 +1300,7 @@ class RunExecutor:
                 ),
                 agent_repository=self.agent_repository,
                 integration_repository=self.integration_repository,
+                model_metadata_service=self.model_metadata_service,
                 session_manager=self.session_manager,
                 exchange_file_service=self.exchange_file_service,
                 model_file_service=self.model_file_service,
@@ -1824,12 +1831,18 @@ class RunExecutor:
             if current_request is None:
                 raise RuntimeError("Active model request is not prepared")
             candidate = operation.current_candidate
+            context_source = await self._capture_compaction_context(
+                current_request=current_request,
+                selection=candidate.model_selection,
+            )
             runtime = await resolve_model_candidate_runtime(
                 agent_id=snapshot.agent_id,
+                context_source=context_source,
                 workspace_id=current_request.workspace_id,
                 selection=candidate.model_selection,
                 settings=candidate.settings,
                 integration_repository=self.integration_repository,
+                model_metadata_service=self.model_metadata_service,
                 session_manager=self.session_manager,
             )
             if runtime.failure:
@@ -1837,13 +1850,16 @@ class RunExecutor:
                     _profile_resolution_failure(runtime.error)
                 )
             value = runtime.value
-            run_request = dataclasses.replace(
-                current_request,
-                compaction_provider_integration_id=value.provider_integration_id,
-                compaction_model=value.model,
-                compaction_provider=value.provider,
-                compaction_credential_kwargs=value.credential_kwargs,
-                compaction_max_input_tokens=value.effective_input_tokens,
+            run_request = self._with_shared_compaction_context(
+                dataclasses.replace(
+                    current_request,
+                    compaction_provider_integration_id=value.provider_integration_id,
+                    compaction_model=value.model,
+                    compaction_provider=value.provider,
+                    compaction_credential_kwargs=value.credential_kwargs,
+                    compaction_max_input_tokens=value.effective_input_tokens,
+                ),
+                context_source=context_source,
             )
 
         async def refresh_session_activity() -> None:
@@ -2995,6 +3011,90 @@ class RunExecutor:
             AgentRunPatch(model_operation_state=next_state),
         )
 
+    async def _capture_compaction_context(
+        self,
+        *,
+        current_request: RunRequest,
+        selection: AgentModelSelection,
+    ) -> CapturedContextSource:
+        """Capture one source after selecting the actual compaction candidate."""
+        return CapturedContextSource(
+            snapshot=await self.model_metadata_service.capture_for_context(
+                capability_maximums=[
+                    current_request.model_capabilities.context_window.max_input_tokens,
+                    selection.normalized_capabilities.context_window.max_input_tokens,
+                ]
+            ),
+        )
+
+    def _with_shared_compaction_context(
+        self,
+        request: RunRequest,
+        *,
+        context_source: CapturedContextSource,
+    ) -> RunRequest:
+        """Recompute the foreground budget and paired threshold from one source."""
+        inference_state = request.inference_state
+        user_context_cap = (
+            inference_state.model_settings.context_window_tokens
+            if inference_state is not None
+            else request.context_window_tokens
+        )
+        foreground_window = request.model_capabilities.context_window
+        foreground_selection = (
+            inference_state.model_selection if inference_state is not None else None
+        )
+        foreground_input_tokens = resolve_model_input_tokens(
+            foreground_window.default_input_tokens,
+            foreground_window.max_input_tokens,
+            self.model_metadata_service.maximum_input_tokens(
+                context_source.snapshot,
+                provider=(
+                    foreground_selection.provider
+                    if foreground_selection is not None
+                    else request.provider
+                ),
+                model_identifier=(
+                    foreground_selection.model_identifier
+                    if foreground_selection is not None
+                    else request.model
+                ),
+            ),
+            user_context_cap,
+        )
+        paired_request = dataclasses.replace(
+            request,
+            max_input_tokens=foreground_input_tokens.effective_input_tokens,
+            context_window_tokens=user_context_cap,
+        )
+        threshold = request.auto_compaction_threshold_tokens
+        if inference_state is not None and (
+            threshold is None
+            or threshold == inference_state.effective_auto_compaction_threshold_tokens
+        ):
+            effective_window = paired_request.effective_max_input_tokens
+            threshold = compute_auto_compaction_threshold_tokens(effective_window)
+            applied_route = inference_state.applied_model_route
+            if applied_route is not None:
+                applied_route = applied_route.model_copy(
+                    update={
+                        "effective_context_window_tokens": effective_window,
+                        "effective_auto_compaction_threshold_tokens": threshold,
+                    }
+                )
+            inference_state = inference_state.model_copy(
+                update={
+                    "effective_context_window_tokens": effective_window,
+                    "effective_auto_compaction_threshold_tokens": threshold,
+                    "applied_model_route": applied_route,
+                }
+            )
+        return dataclasses.replace(
+            paired_request,
+            auto_compaction_threshold_tokens=threshold,
+            inference_state=inference_state,
+        )
+
     async def _prepare_fresh_main_model_turn(
         self,
         *,
@@ -3256,12 +3356,23 @@ class RunExecutor:
                         )
 
             candidate = selection.candidate
+            compaction_candidate = compaction_selection.candidate
+            context_source = CapturedContextSource(
+                snapshot=await self.model_metadata_service.capture_for_context(
+                    capability_maximums=[
+                        candidate.model_selection.normalized_capabilities.context_window.max_input_tokens,
+                        compaction_candidate.model_selection.normalized_capabilities.context_window.max_input_tokens,
+                    ]
+                ),
+            )
             if candidate.ordinal == 1:
                 primary = await resolve_invoke_input_with_profile(
                     invoke_input,
+                    context_source=context_source,
                     requested_profile=selected.profile,
                     agent_repository=self.agent_repository,
                     integration_repository=self.integration_repository,
+                    model_metadata_service=self.model_metadata_service,
                     session_manager=self.session_manager,
                     exchange_file_service=self.exchange_file_service,
                     model_file_service=self.model_file_service,
@@ -3279,6 +3390,7 @@ class RunExecutor:
                 else:
                     frozen = await resolve_invoke_input_with_resolved_profile(
                         invoke_input,
+                        context_source=context_source,
                         resolved_model_selection=candidate.model_selection,
                         resolved_model_settings=candidate.settings,
                         resolved_reasoning_effort=selected.profile.reasoning_effort,
@@ -3287,6 +3399,7 @@ class RunExecutor:
                         ),
                         agent_repository=self.agent_repository,
                         integration_repository=self.integration_repository,
+                        model_metadata_service=self.model_metadata_service,
                         session_manager=self.session_manager,
                         exchange_file_service=self.exchange_file_service,
                         model_file_service=self.model_file_service,
@@ -3300,6 +3413,7 @@ class RunExecutor:
             else:
                 resolved = await resolve_invoke_input_with_resolved_profile(
                     invoke_input,
+                    context_source=context_source,
                     resolved_model_selection=candidate.model_selection,
                     resolved_model_settings=candidate.settings,
                     resolved_reasoning_effort=selected.profile.reasoning_effort,
@@ -3308,6 +3422,7 @@ class RunExecutor:
                     ),
                     agent_repository=self.agent_repository,
                     integration_repository=self.integration_repository,
+                    model_metadata_service=self.model_metadata_service,
                     session_manager=self.session_manager,
                     exchange_file_service=self.exchange_file_service,
                     model_file_service=self.model_file_service,
@@ -3318,7 +3433,6 @@ class RunExecutor:
                 if resolved.failure:
                     return Failure(resolved.error)
                 resolved_request = resolved.value
-            compaction_candidate = compaction_selection.candidate
             compaction_model = to_runtime_model(
                 compaction_candidate.model_selection.provider,
                 compaction_candidate.model_selection.model_identifier,
@@ -3330,7 +3444,13 @@ class RunExecutor:
             compaction_input_tokens = resolve_model_input_tokens(
                 compaction_context_window.default_input_tokens,
                 compaction_context_window.max_input_tokens,
-                compaction_model,
+                self.model_metadata_service.maximum_input_tokens(
+                    context_source.snapshot,
+                    provider=compaction_candidate.model_selection.provider,
+                    model_identifier=(
+                        compaction_candidate.model_selection.model_identifier
+                    ),
+                ),
                 compaction_candidate.settings.context_window_tokens,
             ).effective_input_tokens
             if (
@@ -3344,10 +3464,12 @@ class RunExecutor:
             ):
                 compaction_runtime = await resolve_model_candidate_runtime(
                     agent_id=agent_id,
+                    context_source=context_source,
                     workspace_id=resolved_request.workspace_id,
                     selection=compaction_candidate.model_selection,
                     settings=compaction_candidate.settings,
                     integration_repository=self.integration_repository,
+                    model_metadata_service=self.model_metadata_service,
                     session_manager=self.session_manager,
                 )
                 if compaction_runtime.failure:
@@ -3547,12 +3669,18 @@ class RunExecutor:
             )
             candidate = selection.candidate
 
+        context_source = await self._capture_compaction_context(
+            current_request=current_request,
+            selection=candidate.model_selection,
+        )
         runtime = await resolve_model_candidate_runtime(
             agent_id=agent_id,
+            context_source=context_source,
             workspace_id=current_request.workspace_id,
             selection=candidate.model_selection,
             settings=candidate.settings,
             integration_repository=self.integration_repository,
+            model_metadata_service=self.model_metadata_service,
             session_manager=self.session_manager,
         )
         if runtime.failure:
@@ -3560,13 +3688,16 @@ class RunExecutor:
                 _profile_resolution_failure(runtime.error)
             )
         value = runtime.value
-        return dataclasses.replace(
-            current_request,
-            compaction_provider_integration_id=value.provider_integration_id,
-            compaction_model=value.model,
-            compaction_provider=value.provider,
-            compaction_credential_kwargs=value.credential_kwargs,
-            compaction_max_input_tokens=value.effective_input_tokens,
+        return self._with_shared_compaction_context(
+            dataclasses.replace(
+                current_request,
+                compaction_provider_integration_id=value.provider_integration_id,
+                compaction_model=value.model,
+                compaction_provider=value.provider,
+                compaction_credential_kwargs=value.credential_kwargs,
+                compaction_max_input_tokens=value.effective_input_tokens,
+            ),
+            context_source=context_source,
         )
 
     async def _publish_session_agent_tree_changes(

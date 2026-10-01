@@ -159,6 +159,7 @@ from azents.services.xai_oauth.data import (
     ProviderRejected,
     ProviderUnavailable,
 )
+from azents.testing.model_metadata import make_test_model_metadata_service
 from azents.testing.model_selection import (
     make_test_model_selection,
     make_test_model_settings,
@@ -3126,6 +3127,7 @@ def _agent_engine_adapter(
         exchange_file_service=exchange_file_service or _ExchangeFileService(),
         model_file_service=model_file_service or _ModelFileService(),
         integration_repository=integration_repository or AsyncMock(),
+        metadata_service=make_test_model_metadata_service(snapshot=None),
         xai_imagine_client_factory=(
             xai_imagine_client_factory or _xai_imagine_client_factory()
         ),

@@ -1,11 +1,6 @@
 """Context window management utilities."""
 
 import dataclasses
-import logging
-
-import litellm
-
-logger = logging.getLogger(__name__)
 
 COMPACTION_THRESHOLD_RATIO = 0.9
 """Compaction trigger threshold ratio."""
@@ -72,45 +67,40 @@ def compute_effective_context_window_tokens(
 def resolve_model_input_tokens(
     capability_default_input_tokens: int | None,
     capability_max_input_tokens: int | None,
-    litellm_model: str,
+    source_max_input_tokens: int | None,
     context_window_tokens: int | None,
 ) -> ResolvedModelInputTokens:
     """Resolve default, maximum, and effective model input limits.
 
-    The normalized capability is authoritative. LiteLLM and the 128,000-token
-    fallback fill missing maximum metadata. A missing default uses the resolved
-    maximum, while explicit user intent is clamped to that maximum.
+    The normalized capability is authoritative. Validated source metadata and
+    the 128,000-token fallback fill missing maximum metadata. A missing default
+    uses the resolved maximum, while explicit user intent is clamped to it.
 
     :param capability_default_input_tokens: provider default input window
     :param capability_max_input_tokens: max_input_tokens from capability contract
-    :param litellm_model: LiteLLM model string
+    :param source_max_input_tokens: locally captured validated source maximum
     :param context_window_tokens: nullable user-configured input cap
     :return: resolved input-token limits
     """
-    litellm_max_input_tokens: int | None = None
-    if capability_max_input_tokens is None:
-        try:
-            info = litellm.get_model_info(litellm_model)
-            max_input = info.get("max_input_tokens")
-            if isinstance(max_input, int) and not isinstance(max_input, bool):
-                if max_input > 0:
-                    litellm_max_input_tokens = max_input
-        except Exception:  # noqa: BLE001 — LiteLLM catalog errors vary by provider.
-            logger.debug(
-                "Failed to get model info from litellm",
-                extra={"model": litellm_model},
-                exc_info=True,
-            )
+    source_maximum = (
+        source_max_input_tokens
+        if (
+            isinstance(source_max_input_tokens, int)
+            and not isinstance(source_max_input_tokens, bool)
+            and source_max_input_tokens > 0
+        )
+        else None
+    )
 
     if capability_max_input_tokens is not None:
         max_input_tokens = capability_max_input_tokens
     elif capability_default_input_tokens is not None:
         max_input_tokens = max(
             capability_default_input_tokens,
-            litellm_max_input_tokens or capability_default_input_tokens,
+            source_maximum or capability_default_input_tokens,
         )
     else:
-        max_input_tokens = litellm_max_input_tokens or 128_000
+        max_input_tokens = source_maximum or 128_000
 
     default_input_tokens = min(
         capability_default_input_tokens or max_input_tokens,

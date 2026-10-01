@@ -589,6 +589,21 @@ class ClientToolResultPayload(BaseModel):
     terminal_run: bool = Field(default=False, exclude=True, repr=False)
 
 
+class ModelCostProvenance(BaseModel):
+    """Distinguish native reported charges from snapshot-backed estimates."""
+
+    model_config = ConfigDict(frozen=True)
+
+    method: Literal["provider_reported", "estimated"]
+    provider: str
+    model_identifier: str
+    service_tier: str | None
+    source_snapshot_id: str | None
+    source_hash: str | None
+    source_model_key: str | None
+    estimator_version: str | None
+
+
 class TokenUsagePayload(BaseModel):
     """Model token usage with adapter raw payload preserved."""
 
@@ -602,6 +617,10 @@ class TokenUsagePayload(BaseModel):
     cache_creation_tokens: int | None = Field(default=None)
     reasoning_tokens: int | None = Field(default=None)
     cost_usd: float | None = Field(default=None)
+    cost_provenance: ModelCostProvenance | None = Field(
+        default=None,
+        description="Known charge or estimate authority; absent on historical usage",
+    )
     raw_hidden_params: RawDict | None = Field(default=None)
 
 

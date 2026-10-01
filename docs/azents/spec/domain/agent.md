@@ -12,6 +12,8 @@ code_paths:
   - python/apps/azents/src/azents/core/credentials.py
   - python/apps/azents/src/azents/core/llm_catalog.py
   - python/apps/azents/src/azents/core/llm_mapping.py
+  - python/apps/azents/src/azents/core/model_source_metadata.py
+  - python/apps/azents/src/azents/services/model_metadata.py
   - python/apps/azents/src/azents/core/inference_profile.py
   - python/apps/azents/src/azents/core/model_execution_options.py
   - python/apps/azents/src/azents/core/model_availability.py
@@ -117,7 +119,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack
 last_verified_at: 2026-10-01
-spec_version: 84
+spec_version: 85
 ---
 
 # Agent Domain Spec
@@ -664,8 +666,19 @@ Runtime passes the selected Session settings as `BuiltinToolSpec(name, config)` 
 Each selectable model snapshot can carry a default input window and a maximum
 input window. A missing default resolves to the maximum. For each option, an unset
 `context_window_tokens` cap uses the resolved default; an explicit cap uses the
-requested value up to the resolved maximum. LiteLLM metadata and the 128,000-token
-fallback fill only missing capability limits.
+requested value up to the resolved maximum. Metadata from the local validated
+retained-source DB snapshot fills only a missing maximum; it cannot lower a
+provider default. If maximum and source metadata are absent but a default exists,
+that default supplies the maximum. The 128,000-token fallback applies only when
+all three are absent. Library profiles and installed model maps are not fallback
+authorities, and this resolution does not fetch remote source or model listings.
+
+Main and lightweight calculations share one captured local source snapshot when
+either saved maximum is missing. Known saved maxima require no source read for
+context-limit computation; pricing capture remains a separate operation input.
+Agent list responses reuse one captured snapshot across the entire list.
+Foreground resolution, compaction, subagent scheduling, worker calculations and
+API displays use the same pure limit math and exact semantic model/source lookup.
 
 `effective_context_window_tokens` in Agent response is calculated from the smaller
 of the default main option's resolved effective input window and the default

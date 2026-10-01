@@ -7,7 +7,9 @@ from typing import ClassVar, Literal
 from azcommon.uuid import uuid7
 
 from azents.core.enums import EventKind
+from azents.core.model_pricing import ModelPricing
 from azents.core.type_guards import is_string_object_dict
+from azents.engine.events.model_usage_pricing import apply_model_usage_pricing
 from azents.engine.events.protocols import (
     CompletedAdapterOutput,
     ContentDeltaProjection,
@@ -61,12 +63,15 @@ class ResponsesOutputNormalizer:
         *,
         provider: str,
         model: str,
+        pricing: ModelPricing | None,
         operation: ModelStreamCallKind,
         integration: str | None,
     ) -> None:
         """Set normalizer origin and provider-failure context."""
         self.provider: str = provider
         self.model: str = model
+        self.pricing: ModelPricing | None = pricing
+        self.service_tier: str | None = None
         self.operation: ModelStreamCallKind = operation
         self.integration: str | None = integration
         self.compat_key = build_native_compat_key(
@@ -325,6 +330,8 @@ class _ResponsesOutputStream:
         session_id: str,
     ) -> None:
         self.normalizer = normalizer
+        self.pricing = normalizer.pricing
+        self.service_tier = normalizer.service_tier
         self._session_id = session_id
         self._tool_refs: dict[int, tuple[str, str]] = {}
         self._completed_output_items: list[dict[str, object]] = []
@@ -332,6 +339,8 @@ class _ResponsesOutputStream:
         self._completed_response_seen = False
         self._terminal_error: ModelProviderFailure | None = None
         self._usage: TokenUsagePayload | None = None
+        self._raw_usage: dict[str, object] | None = None
+        self._usage_billing_response: dict[str, object] | None = None
         self._partial_text: list[str] = []
         self._provider_tool_activity = ProviderToolActivityAccumulator()
 
@@ -438,9 +447,29 @@ class _ResponsesOutputStream:
         elif event_type == "ResponseCompletedEvent":
             self._completed_response_seen = True
             self._completed_response = response_item_dict(item.get("response"))
-            self._usage = (
-                _normalize_response_usage(self._completed_response) or self._usage
-            )
+            raw_usage = response_item_dict(self._completed_response.get("usage"))
+            if _response_usage_has_totals(raw_usage):
+                self._raw_usage = raw_usage
+                billing_response = dict(self._usage_billing_response or {})
+                output = self._completed_response.get("output")
+                if isinstance(output, list) and output:
+                    billing_response["output"] = [
+                        {"type": item_type}
+                        for raw_item in output
+                        if isinstance(
+                            item_type := response_item_dict(raw_item).get("type"),
+                            str,
+                        )
+                    ]
+                hidden_params = self._completed_response.get("_hidden_params")
+                if hidden_params is not None:
+                    billing_response["_hidden_params"] = hidden_params
+                self._usage_billing_response = billing_response
+            service_tier = self._completed_response.get("service_tier")
+            if isinstance(service_tier, str) and service_tier != "auto":
+                if self._usage_billing_response is None:
+                    self._usage_billing_response = {}
+                self._usage_billing_response["service_tier"] = service_tier
 
         return NormalizedAdapterOutput(
             needs_follow_up=False,
@@ -468,6 +497,18 @@ class _ResponsesOutputStream:
 
     def _build_output(self) -> NormalizedAdapterOutput:
         """Build output from received state without validating terminal status."""
+        if self._completed_response is not None:
+            self._usage = _normalize_response_usage(
+                {
+                    **(self._usage_billing_response or self._completed_response),
+                    "usage": self._raw_usage,
+                },
+                provider=self.normalizer.provider,
+                model=self.normalizer.model,
+                pricing=self.pricing,
+                requested_service_tier=self.service_tier,
+                completed_output_items=self._completed_output_items,
+            )
         completed = self.normalizer.normalize_completed_output(
             self._session_id,
             self._completed_response or {},
@@ -857,8 +898,30 @@ def _event(
     )
 
 
+def _response_usage_has_totals(raw_usage: dict[str, object]) -> bool:
+    """Recognize complete common totals without applying price calculations."""
+    return (
+        _first_int(
+            _int_or_none(raw_usage.get("prompt_tokens")),
+            _int_or_none(raw_usage.get("input_tokens")),
+        )
+        is not None
+        and _first_int(
+            _int_or_none(raw_usage.get("completion_tokens")),
+            _int_or_none(raw_usage.get("output_tokens")),
+        )
+        is not None
+    )
+
+
 def _normalize_response_usage(
     response: dict[str, object],
+    *,
+    provider: str,
+    model: str,
+    pricing: ModelPricing | None,
+    requested_service_tier: str | None,
+    completed_output_items: Sequence[dict[str, object]],
 ) -> TokenUsagePayload | None:
     """Normalize Responses usage payload to UI/legacy token usage shape."""
     raw_usage = response_item_dict(response.get("usage"))
@@ -906,6 +969,11 @@ def _normalize_response_usage(
             )
         ),
         _int_or_none(
+            response_item_dict(raw_usage.get("input_tokens_details")).get(
+                "cache_write_tokens"
+            )
+        ),
+        _int_or_none(
             response_item_dict(raw_usage.get("prompt_tokens_details")).get(
                 "cache_creation_tokens"
             )
@@ -925,17 +993,7 @@ def _normalize_response_usage(
         ),
     )
     raw_hidden_params = response_item_dict(response.get("_hidden_params")) or None
-    cost_usd = _first_float(
-        _float_or_none(raw_usage.get("cost_usd")),
-        _float_or_none(raw_usage.get("cost")),
-        _float_or_none(
-            raw_hidden_params.get("response_cost")
-            if raw_hidden_params is not None
-            else None
-        ),
-    )
-
-    return TokenUsagePayload(
+    normalized = TokenUsagePayload(
         prompt_tokens=prompt_tokens,
         completion_tokens=completion_tokens,
         total_tokens=total_tokens,
@@ -943,21 +1001,38 @@ def _normalize_response_usage(
         cached_tokens=cached_tokens,
         cache_creation_tokens=cache_creation_tokens,
         reasoning_tokens=reasoning_tokens,
-        cost_usd=cost_usd,
+        cost_usd=None,
         raw_hidden_params=raw_hidden_params,
+    )
+    output = response.get("output")
+    output_items = (
+        output if isinstance(output, list) and output else completed_output_items
+    )
+    output_item_types = [
+        item_type
+        for raw_item in output_items
+        if isinstance(item_type := response_item_dict(raw_item).get("type"), str)
+    ]
+    service_tier = response.get("service_tier")
+    return apply_model_usage_pricing(
+        normalized,
+        provider=provider,
+        model_identifier=model,
+        pricing=pricing,
+        service_tier=(
+            service_tier
+            if isinstance(service_tier, str) and service_tier != "auto"
+            else requested_service_tier
+        ),
+        output_item_types=output_item_types,
+        reported_charge=(
+            _float_or_none(raw_usage.get("cost")) if provider == "openrouter" else None
+        ),
     )
 
 
 def _first_int(*values: int | None) -> int | None:
     """Return first int value."""
-    for value in values:
-        if value is not None:
-            return value
-    return None
-
-
-def _first_float(*values: float | None) -> float | None:
-    """Return first float value."""
     for value in values:
         if value is not None:
             return value

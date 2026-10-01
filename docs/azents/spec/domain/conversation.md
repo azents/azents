@@ -779,6 +779,12 @@ Event kinds:
 - `system_error`
 - `unknown_adapter_output`
 
+Turn-marker token usage keeps nullable `cost_usd` and optional typed `cost_provenance`.
+Known estimates identify the selected provider/model, applicable tier and captured source
+snapshot/hash/key/estimator version. Native reported charges use a separate
+`provider_reported` method and do not acquire price-source provenance. Old amounts without
+that field remain unlabeled; history is not rewritten and existing cost presentation is unchanged.
+
 `agent_message` records agent-to-agent mailbox delivery in the target session. Instruction payloads use
 `message_kind` `spawn_agent`, `send_message`, or `followup_task` and store source/target
 `SessionAgent` ids, canonical paths, and content. Terminal payloads use `message_kind = agent_result`

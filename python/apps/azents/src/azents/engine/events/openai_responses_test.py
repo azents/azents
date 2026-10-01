@@ -5,12 +5,10 @@ import datetime
 import json
 import logging
 from collections.abc import AsyncIterator
-from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import httpx
 import pytest
-from litellm.types.llms.openai import ResponsesAPIResponse
 from openai import AsyncOpenAI, AuthenticationError, BadRequestError, OpenAIError, omit
 from openai.resources.responses.responses import AsyncResponsesConnection
 from openai.types.responses import (
@@ -58,6 +56,7 @@ from azents.core.enums import (
 )
 from azents.core.llm_catalog import ModelCapabilities
 from azents.core.model_execution_options import ModelExecutionOptionId
+from azents.core.model_pricing import ModelPricing, normalize_model_pricing
 from azents.core.openai_client_config import openai_responses_client_config
 from azents.engine.events.file_parts import ModelFileLoweringContent
 from azents.engine.events.litellm_responses import LiteLLMResponsesLowerer
@@ -336,16 +335,27 @@ def _response(*, text: str = "done") -> Response:
     )
 
 
-def _patch_standard_openai_pricing(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Provide stable public pricing for tests that exercise cost calculation."""
-    monkeypatch.setattr(
-        "azents.engine.events.openai_responses.model_cost",
+def _openai_pricing(metadata: dict[str, object] | None) -> ModelPricing:
+    """Capture an explicit source fixture without any installed price map."""
+    return normalize_model_pricing(
+        provider=LLMProvider.OPENAI,
+        model_identifier="gpt-5.1-codex",
+        source_snapshot_id="source-snapshot-1",
+        source_hash="source-hash-1",
+        source_model_key="openai/gpt-5.1-codex",
+        metadata=metadata,
+    )
+
+
+def _standard_openai_pricing() -> ModelPricing:
+    """Return deterministic standard token/cache rates from the fixture."""
+    return _openai_pricing(
         {
-            "gpt-5.1-codex": {
-                "input_cost_per_token": 0.1,
-                "output_cost_per_token": 0.2,
-            }
-        },
+            "input_cost_per_token": 0.1,
+            "output_cost_per_token": 0.2,
+            "cache_read_input_token_cost": 0.01,
+            "cache_creation_input_token_cost": 0.15,
+        }
     )
 
 
@@ -2437,6 +2447,7 @@ def test_typed_normalizer_admits_completed_custom_tool_call() -> None:
         type="custom_tool_call",
     )
     output = OpenAIResponsesOutputNormalizer(
+        pricing=None,
         provider="openai",
         model="gpt-5.1-codex",
         operation="sampling",
@@ -2539,6 +2550,7 @@ def test_typed_normalizer_maps_end_turn_false_to_follow_up() -> None:
     """Preserve the OpenAI dialect continuation hint in normalized output."""
     response = _response().model_copy(update={"end_turn": False, "output": []})
     output = OpenAIResponsesOutputNormalizer(
+        pricing=None,
         provider="openai",
         model="gpt-5.1-codex",
         operation="sampling",
@@ -2566,6 +2578,7 @@ def test_typed_normalizer_allows_end_turn_true_with_function_call() -> None:
         update={"end_turn": True, "output": [function_call]}
     )
     output = OpenAIResponsesOutputNormalizer(
+        pricing=None,
         provider="openai",
         model="gpt-5.1-codex",
         operation="sampling",
@@ -2590,6 +2603,7 @@ def test_typed_normalizer_rejects_inconsistent_custom_tool_input() -> None:
         type="custom_tool_call",
     )
     output = OpenAIResponsesOutputNormalizer(
+        pricing=None,
         provider="openai",
         model="gpt-5.1-codex",
         operation="sampling",
@@ -2623,6 +2637,7 @@ def test_typed_normalizer_rejects_inconsistent_custom_tool_input() -> None:
 def test_typed_normalizer_preserves_reasoning_stream_identity() -> None:
     """Carry reasoning item and summary-part identity into live projection."""
     output = OpenAIResponsesOutputNormalizer(
+        pricing=None,
         provider="openai",
         model="gpt-5.1-codex",
         operation="sampling",
@@ -2667,6 +2682,7 @@ def test_typed_completed_message_does_not_replay_output_index() -> None:
         type="message",
     )
     output = OpenAIResponsesOutputNormalizer(
+        pricing=None,
         provider="openai",
         model="gpt-5.1-codex",
         operation="sampling",
@@ -2702,15 +2718,10 @@ def test_typed_completed_message_does_not_replay_output_index() -> None:
     assert "output_index" not in request.input[0]
 
 
-def test_typed_normalizer_requires_exact_completed_wire_type(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_typed_normalizer_requires_exact_completed_wire_type() -> None:
     """An incidental completed class cannot promote an unknown discriminator."""
-    monkeypatch.setattr(
-        "azents.engine.events.openai_responses.completion_cost",
-        lambda **kwargs: 0.25,
-    )
     normalizer = OpenAIResponsesOutputNormalizer(
+        pricing=None,
         provider="openai",
         model="gpt-5.1-codex",
         operation="sampling",
@@ -2736,22 +2747,10 @@ def test_typed_normalizer_requires_exact_completed_wire_type(
     assert raised.value.provider_code == "stream_ended_before_completion"
 
 
-def test_typed_normalizer_builds_openai_artifact_usage_and_cost(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_typed_normalizer_builds_openai_artifact_usage_and_cost() -> None:
     """Typed completion produces canonical output with SDK usage provenance."""
-    captured: dict[str, object] = {}
-    _patch_standard_openai_pricing(monkeypatch)
-
-    def fake_completion_cost(**kwargs: object) -> float:
-        captured.update(kwargs)
-        return 0.25
-
-    monkeypatch.setattr(
-        "azents.engine.events.openai_responses.completion_cost",
-        fake_completion_cost,
-    )
     normalizer = OpenAIResponsesOutputNormalizer(
+        pricing=_standard_openai_pricing(),
         provider="openai",
         model="gpt-5.1-codex",
         operation="sampling",
@@ -2787,44 +2786,25 @@ def test_typed_normalizer_builds_openai_artifact_usage_and_cost(
     assert completed.usage.cached_tokens == 2
     assert completed.usage.cache_creation_tokens == 3
     assert completed.usage.reasoning_tokens == 1
-    assert completed.usage.cost_usd == 0.25
+    assert completed.usage.cost_usd == pytest.approx(1.97)
     assert completed.usage.raw_hidden_params is None
-    minimal_response = captured["completion_response"]
-    assert isinstance(minimal_response, ResponsesAPIResponse)
-    assert [
-        item.type
-        for item in minimal_response.output
-        if isinstance(item, SimpleNamespace)
-    ] == ["message"]
-    assert "done" not in str(minimal_response)
-    assert "resp_synthetic" not in str(minimal_response)
+    assert completed.usage.cost_provenance is not None
+    assert completed.usage.cost_provenance.method == "estimated"
+    assert completed.usage.cost_provenance.source_snapshot_id == "source-snapshot-1"
 
 
-def test_typed_normalizer_normalizes_fast_tier_for_priority_pricing(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Use LiteLLM's priority alias for an older Fast response label."""
-    captured: dict[str, object] = {}
-
-    def fake_completion_cost(**kwargs: object) -> float:
-        captured.update(kwargs)
-        return 0.5
-
-    monkeypatch.setattr(
-        "azents.engine.events.openai_responses.model_cost",
+def test_typed_normalizer_normalizes_fast_tier_for_priority_pricing() -> None:
+    """Use captured priority rates for an older Fast response label."""
+    pricing = _openai_pricing(
         {
-            "gpt-5.1-codex": {
-                "input_cost_per_token_priority": 0.1,
-                "cache_read_input_token_cost_priority": 0.01,
-                "output_cost_per_token_priority": 0.2,
-            }
-        },
-    )
-    monkeypatch.setattr(
-        "azents.engine.events.openai_responses.completion_cost",
-        fake_completion_cost,
+            "input_cost_per_token_priority": 0.1,
+            "cache_read_input_token_cost_priority": 0.01,
+            "cache_creation_input_token_cost_priority": 0.15,
+            "output_cost_per_token_priority": 0.2,
+        }
     )
     output = OpenAIResponsesOutputNormalizer(
+        pricing=pricing,
         provider="openai",
         model="gpt-5.1-codex",
         operation="sampling",
@@ -2838,24 +2818,15 @@ def test_typed_normalizer_normalizes_fast_tier_for_priority_pricing(
     completed = output.complete()
 
     assert completed.usage is not None
-    assert completed.usage.cost_usd == 0.5
-    assert captured["service_tier"] == "priority"
+    assert completed.usage.cost_usd == pytest.approx(1.97)
+    assert completed.usage.cost_provenance is not None
+    assert completed.usage.cost_provenance.service_tier == "priority"
 
 
-def test_typed_normalizer_omits_cost_without_priority_pricing(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_typed_normalizer_omits_cost_without_priority_pricing() -> None:
     """Do not present standard-rate pricing for a premium response."""
-    monkeypatch.setattr(
-        "azents.engine.events.openai_responses.model_cost",
-        {
-            "gpt-5.1-codex": {
-                "input_cost_per_token": 0.1,
-                "output_cost_per_token": 0.2,
-            }
-        },
-    )
     output = OpenAIResponsesOutputNormalizer(
+        pricing=_standard_openai_pricing(),
         provider="openai",
         model="gpt-5.1-codex",
         operation="sampling",
@@ -2872,9 +2843,88 @@ def test_typed_normalizer_omits_cost_without_priority_pricing(
     assert completed.usage.cost_usd is None
 
 
+def test_typed_normalizer_freezes_the_dispatch_price_view() -> None:
+    """A later operation cannot mutate an already-started stream's prices."""
+    normalizer = OpenAIResponsesOutputNormalizer(
+        pricing=_standard_openai_pricing(),
+        provider="openai",
+        model="gpt-5.1-codex",
+        operation="sampling",
+        integration=None,
+        requested_service_tier=None,
+    )
+    first = normalizer.start("session-1")
+    normalizer.pricing = None
+    second = normalizer.start("session-2")
+    first.process_event(_completed_event())
+    second.process_event(_completed_event())
+
+    first_usage = first.complete().usage
+    second_usage = second.complete().usage
+    assert first_usage is not None
+    assert second_usage is not None
+    assert first_usage.cost_usd == pytest.approx(1.97)
+    assert first_usage.cost_provenance is not None
+    assert first_usage.cost_provenance.source_snapshot_id == "source-snapshot-1"
+    assert second_usage.cost_usd is None
+
+
+def test_missing_native_tier_uses_frozen_priority_request_or_unknown() -> None:
+    """Missing priority rates cannot silently use standard after config changes."""
+    normalizer = OpenAIResponsesOutputNormalizer(
+        pricing=_standard_openai_pricing(),
+        provider="openai",
+        model="gpt-5.1-codex",
+        operation="sampling",
+        integration=None,
+        requested_service_tier=None,
+    )
+    normalizer.service_tier = "priority"
+    first = normalizer.start("session-1")
+    normalizer.service_tier = None
+    second = normalizer.start("session-2")
+    first.process_event(_completed_event())
+    second.process_event(_completed_event())
+
+    first_usage = first.complete().usage
+    second_usage = second.complete().usage
+    assert first_usage is not None
+    assert second_usage is not None
+    assert first_usage.cost_usd is None
+    assert second_usage.cost_usd == pytest.approx(1.97)
+
+
+def test_missing_native_tier_uses_explicit_captured_priority_rates() -> None:
+    """A known priority request can use its own captured tier rules."""
+    normalizer = OpenAIResponsesOutputNormalizer(
+        pricing=_openai_pricing(
+            {
+                "input_cost_per_token_priority": 0.1,
+                "cache_read_input_token_cost_priority": 0.01,
+                "cache_creation_input_token_cost_priority": 0.15,
+                "output_cost_per_token_priority": 0.2,
+            }
+        ),
+        provider="openai",
+        model="gpt-5.1-codex",
+        operation="sampling",
+        integration=None,
+        requested_service_tier=None,
+    )
+    normalizer.service_tier = "priority"
+    output = normalizer.start("session-1")
+    output.process_event(_completed_event())
+    usage = output.complete().usage
+    assert usage is not None
+    assert usage.cost_usd == pytest.approx(1.97)
+    assert usage.cost_provenance is not None
+    assert usage.cost_provenance.service_tier == "priority"
+
+
 def test_typed_normalizer_projects_provider_tool_lifecycle() -> None:
     """Translate SDK-specific hosted-tool stages to canonical snapshots."""
     output = OpenAIResponsesOutputNormalizer(
+        pricing=None,
         provider="openai",
         model="gpt-5.1-codex",
         operation="sampling",
@@ -2929,6 +2979,7 @@ def test_typed_normalizer_projects_provider_tool_lifecycle() -> None:
 def test_typed_normalizer_extracts_transient_generated_image() -> None:
     """Keep official SDK image bytes transient until Engine materialization."""
     completed = OpenAIResponsesOutputNormalizer(
+        pricing=None,
         provider="openai",
         model="gpt-5.1-codex",
         operation="sampling",
@@ -2966,6 +3017,7 @@ def test_typed_normalizer_extracts_transient_generated_image() -> None:
 def test_typed_normalizer_skips_failed_image_before_success() -> None:
     """Preserve a failed image call without rejecting a later successful image."""
     completed = OpenAIResponsesOutputNormalizer(
+        pricing=None,
         provider="openai",
         model="gpt-5.6-luna",
         operation="sampling",
@@ -3026,6 +3078,7 @@ def test_typed_stream_extracts_transient_generated_image() -> None:
     )
     response = _response().model_copy(update={"output": [image]})
     output = OpenAIResponsesOutputNormalizer(
+        pricing=None,
         provider="openai",
         model="gpt-5.1-codex",
         operation="sampling",
@@ -3061,6 +3114,7 @@ def test_typed_stream_extracts_transient_generated_image() -> None:
 def test_typed_normalizer_projects_generic_provider_tool_output_items() -> None:
     """Treat generic output-item completion as a hosted-tool terminal state."""
     output = OpenAIResponsesOutputNormalizer(
+        pricing=None,
         provider="openai",
         model="gpt-5.1-codex",
         operation="sampling",
@@ -3141,15 +3195,8 @@ def test_typed_normalizer_projects_generic_provider_tool_output_items() -> None:
     ]
 
 
-def test_typed_normalizer_accepts_omitted_usage_details(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_typed_normalizer_accepts_omitted_usage_details() -> None:
     """Usage totals survive compatible providers that omit detail objects."""
-    _patch_standard_openai_pricing(monkeypatch)
-    monkeypatch.setattr(
-        "azents.engine.events.openai_responses.completion_cost",
-        lambda **kwargs: 0.25,
-    )
     usage = ResponseUsage.model_construct(
         input_tokens=10,
         input_tokens_details=None,
@@ -3159,6 +3206,7 @@ def test_typed_normalizer_accepts_omitted_usage_details(
     )
     response = _response().model_copy(update={"usage": usage})
     output = OpenAIResponsesOutputNormalizer(
+        pricing=_standard_openai_pricing(),
         provider="openai",
         model="gpt-5.1-codex",
         operation="sampling",
@@ -3176,12 +3224,13 @@ def test_typed_normalizer_accepts_omitted_usage_details(
     assert completed.usage.cached_tokens is None
     assert completed.usage.cache_creation_tokens is None
     assert completed.usage.reasoning_tokens is None
-    assert completed.usage.cost_usd == 0.25
+    assert completed.usage.cost_usd == pytest.approx(2.0)
 
 
 def test_unclassified_typed_terminal_error_is_internal() -> None:
     """Unknown typed errors bypass provider-failure recovery immediately."""
     normalizer = OpenAIResponsesOutputNormalizer(
+        pricing=None,
         provider="openai",
         model="gpt-5.1-codex",
         operation="sampling",
@@ -3211,6 +3260,7 @@ def test_unclassified_typed_terminal_error_is_internal() -> None:
 def test_typed_failed_event_classifies_invalid_prompt() -> None:
     """Provider rejection preserves safe text and neutral classification."""
     normalizer = OpenAIResponsesOutputNormalizer(
+        pricing=None,
         provider="chatgpt_oauth",
         model="gpt-5.6-terra",
         operation="sampling",
@@ -3240,6 +3290,7 @@ def test_typed_failed_event_classifies_invalid_prompt() -> None:
 def test_typed_failed_event_classifies_rate_limit() -> None:
     """Rate limits preserve safe text and neutral classification."""
     normalizer = OpenAIResponsesOutputNormalizer(
+        pricing=None,
         provider="chatgpt_oauth",
         model="gpt-5.6-terra",
         operation="sampling",
@@ -3270,6 +3321,7 @@ def test_typed_failed_event_classifies_rate_limit() -> None:
 def test_typed_failed_event_preserves_http_status_code() -> None:
     """Terminal failed events keep a concrete HTTP status when the payload has one."""
     normalizer = OpenAIResponsesOutputNormalizer(
+        pricing=None,
         provider="chatgpt_oauth",
         model="gpt-5.6-terra",
         operation="sampling",
@@ -3347,21 +3399,12 @@ def test_cross_adapter_artifacts_use_canonical_fallback() -> None:
     ],
 )
 def test_unknown_premium_pricing_never_uses_standard_rates(
-    monkeypatch: pytest.MonkeyPatch,
     requested_tier: str | None,
     actual_tier: str | None,
 ) -> None:
     """Keep output and usage while bypassing unsupported or uncertain pricing."""
-    _patch_standard_openai_pricing(monkeypatch)
-
-    def unexpected_pricing(**kwargs: object) -> float:
-        del kwargs
-        raise AssertionError("Unknown premium pricing must not invoke the calculator.")
-
-    monkeypatch.setattr(
-        "azents.engine.events.openai_responses.completion_cost", unexpected_pricing
-    )
     output = OpenAIResponsesOutputNormalizer(
+        pricing=_standard_openai_pricing(),
         provider="openai",
         model="gpt-5.1-codex",
         operation="sampling",
@@ -3381,44 +3424,35 @@ def test_unknown_premium_pricing_never_uses_standard_rates(
 @pytest.mark.parametrize(
     ("actual_tier", "pricing_tier"),
     [
-        ("default", "default"),
+        ("default", "standard"),
         ("priority", "priority"),
         ("fast", "priority"),
         ("flex", "flex"),
     ],
 )
 def test_ultrafast_request_cost_uses_supported_actual_response_tier(
-    monkeypatch: pytest.MonkeyPatch,
     actual_tier: str,
     pricing_tier: str,
 ) -> None:
     """An explicit served tier, not the requested tier, owns valid estimation."""
-    captured: dict[str, object] = {}
-    monkeypatch.setattr(
-        "azents.engine.events.openai_responses.model_cost",
+    pricing = _openai_pricing(
         {
-            "gpt-5.1-codex": {
-                "input_cost_per_token": 0.1,
-                "cache_read_input_token_cost": 0.01,
-                "output_cost_per_token": 0.2,
-                "input_cost_per_token_priority": 0.1,
-                "cache_read_input_token_cost_priority": 0.01,
-                "output_cost_per_token_priority": 0.2,
-                "input_cost_per_token_flex": 0.1,
-                "cache_read_input_token_cost_flex": 0.01,
-                "output_cost_per_token_flex": 0.2,
-            }
-        },
-    )
-
-    def completion_cost(**kwargs: object) -> float:
-        captured.update(kwargs)
-        return 0.25
-
-    monkeypatch.setattr(
-        "azents.engine.events.openai_responses.completion_cost", completion_cost
+            "input_cost_per_token": 0.1,
+            "cache_read_input_token_cost": 0.01,
+            "cache_creation_input_token_cost": 0.15,
+            "output_cost_per_token": 0.2,
+            "input_cost_per_token_priority": 0.1,
+            "cache_read_input_token_cost_priority": 0.01,
+            "cache_creation_input_token_cost_priority": 0.15,
+            "output_cost_per_token_priority": 0.2,
+            "input_cost_per_token_flex": 0.1,
+            "cache_read_input_token_cost_flex": 0.01,
+            "cache_creation_input_token_cost_flex": 0.15,
+            "output_cost_per_token_flex": 0.2,
+        }
     )
     output = OpenAIResponsesOutputNormalizer(
+        pricing=pricing,
         provider="openai",
         model="gpt-5.1-codex",
         operation="sampling",
@@ -3429,26 +3463,16 @@ def test_ultrafast_request_cost_uses_supported_actual_response_tier(
         _completed_event(_response().model_copy(update={"service_tier": actual_tier}))
     )
     completed = output.complete()
-    assert captured["service_tier"] == pricing_tier
     assert completed.usage is not None
-    assert completed.usage.cost_usd == 0.25
+    assert completed.usage.cost_usd == pytest.approx(1.97)
+    assert completed.usage.cost_provenance is not None
+    assert completed.usage.cost_provenance.service_tier == pricing_tier
 
 
-def test_pricing_failure_preserves_successful_usage(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A pricing-map failure does not fail completed provider output."""
-    _patch_standard_openai_pricing(monkeypatch)
-
-    def fail_pricing(**kwargs: object) -> float:
-        del kwargs
-        raise ValueError("synthetic pricing failure")
-
-    monkeypatch.setattr(
-        "azents.engine.events.openai_responses.completion_cost",
-        fail_pricing,
-    )
+def test_invalid_source_pricing_preserves_successful_usage() -> None:
+    """Unsupported source rates keep costs unknown without failing output."""
     output = OpenAIResponsesOutputNormalizer(
+        pricing=_openai_pricing({"input_cost_per_token": -1}),
         provider="openai",
         model="gpt-5.1-codex",
         operation="sampling",
@@ -3464,20 +3488,10 @@ def test_pricing_failure_preserves_successful_usage(
     assert completed.usage.cost_usd is None
 
 
-def test_unmapped_pricing_skips_litellm_cost_calculation(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Missing public pricing remains absent without invoking the calculator."""
-
-    def unexpected_pricing(**kwargs: object) -> float:
-        del kwargs
-        raise AssertionError("unmapped pricing must not call completion_cost")
-
-    monkeypatch.setattr(
-        "azents.engine.events.openai_responses.completion_cost",
-        unexpected_pricing,
-    )
+def test_unmapped_pricing_preserves_unknown_cost() -> None:
+    """Absent captured pricing cannot consult an installed calculator or map."""
     output = OpenAIResponsesOutputNormalizer(
+        pricing=None,
         provider="openai",
         model="unmapped-openai-model",
         operation="sampling",
@@ -3496,17 +3510,17 @@ def test_unexpected_pricing_failure_propagates(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Unexpected calculator failures remain visible to monitoring."""
-    _patch_standard_openai_pricing(monkeypatch)
 
     def fail_pricing(**kwargs: object) -> float:
         del kwargs
         raise RuntimeError("synthetic calculator defect")
 
     monkeypatch.setattr(
-        "azents.engine.events.openai_responses.completion_cost",
+        "azents.engine.events.model_usage_pricing.estimate_model_cost",
         fail_pricing,
     )
     output = OpenAIResponsesOutputNormalizer(
+        pricing=_standard_openai_pricing(),
         provider="openai",
         model="gpt-5.1-codex",
         operation="sampling",

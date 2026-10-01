@@ -67,6 +67,7 @@ from azents.services.image_generation_catalog import (
     ImageGenerationRuntimeConfigurationError,
 )
 from azents.services.runtime_web.service import RuntimeWebService
+from azents.testing.model_metadata import make_test_model_metadata_service
 from azents.testing.model_selection import (
     make_test_model_selection,
     make_test_selectable_model_options,
@@ -505,6 +506,7 @@ def _make_subagent_provider() -> SubagentToolkitProvider:
     agent_repository = AsyncMock()
     agent_repository.get_by_id.return_value = _make_agent()
     return SubagentToolkitProvider(
+        model_metadata_service=make_test_model_metadata_service(snapshot=None),
         session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
         broker=AsyncMock(),
         mailbox_item_service=AsyncMock(),
@@ -553,6 +555,7 @@ class TestResolveInvokeInput:
             exchange_file_service=AsyncMock(),
             model_file_service=AsyncMock(),
             image_generation_catalog_service=(_make_image_generation_catalog_service()),
+            model_metadata_service=make_test_model_metadata_service(snapshot=None),
         )
 
         assert isinstance(result, Success)
@@ -600,6 +603,7 @@ class TestResolveInvokeInput:
             exchange_file_service=AsyncMock(),
             model_file_service=AsyncMock(),
             image_generation_catalog_service=image_service,
+            model_metadata_service=make_test_model_metadata_service(snapshot=None),
         )
 
         assert isinstance(result, Success)
@@ -657,6 +661,7 @@ class TestResolveInvokeInput:
             exchange_file_service=AsyncMock(),
             model_file_service=AsyncMock(),
             image_generation_catalog_service=image_service,
+            model_metadata_service=make_test_model_metadata_service(snapshot=None),
         )
 
         assert result == Failure(error)
@@ -721,6 +726,7 @@ class TestResolveInvokeInput:
             exchange_file_service=AsyncMock(),
             model_file_service=AsyncMock(),
             image_generation_catalog_service=image_service,
+            model_metadata_service=make_test_model_metadata_service(snapshot=None),
         )
 
         assert result == Failure(error)
@@ -762,6 +768,7 @@ class TestResolveInvokeInput:
                 session_id="session-1",
                 messages=[],
             ),
+            context_source=None,
             requested_profile=RequestedInferenceProfile(
                 enabled_execution_options=[],
                 model_target_label="default",
@@ -773,6 +780,7 @@ class TestResolveInvokeInput:
             exchange_file_service=AsyncMock(),
             model_file_service=AsyncMock(),
             image_generation_catalog_service=image_service,
+            model_metadata_service=make_test_model_metadata_service(snapshot=None),
         )
 
         assert result == Failure(error)
@@ -820,6 +828,7 @@ class TestResolveInvokeInput:
                 session_id="session-1",
                 messages=[],
             ),
+            context_source=None,
             resolved_model_selection=selection,
             resolved_model_settings=settings,
             resolved_reasoning_effort=None,
@@ -830,6 +839,7 @@ class TestResolveInvokeInput:
             exchange_file_service=AsyncMock(),
             model_file_service=AsyncMock(),
             image_generation_catalog_service=image_service,
+            model_metadata_service=make_test_model_metadata_service(snapshot=None),
         )
 
         assert result == Failure(error)
@@ -889,6 +899,7 @@ class TestResolveInvokeInput:
             exchange_file_service=AsyncMock(),
             model_file_service=AsyncMock(),
             image_generation_catalog_service=(_make_image_generation_catalog_service()),
+            model_metadata_service=make_test_model_metadata_service(snapshot=None),
         )
 
         assert isinstance(result, Success)
@@ -925,6 +936,7 @@ class TestResolveInvokeInput:
             exchange_file_service=AsyncMock(),
             model_file_service=AsyncMock(),
             image_generation_catalog_service=(_make_image_generation_catalog_service()),
+            model_metadata_service=make_test_model_metadata_service(snapshot=None),
         )
 
         assert result == Failure(
@@ -995,6 +1007,7 @@ class TestResolveInvokeInput:
             exchange_file_service=AsyncMock(),
             model_file_service=AsyncMock(),
             image_generation_catalog_service=(_make_image_generation_catalog_service()),
+            model_metadata_service=make_test_model_metadata_service(snapshot=None),
         )
 
         assert isinstance(result, Success)
@@ -1019,6 +1032,7 @@ class TestResolveInvokeInput:
                 session_id="session-1",
                 messages=[],
             ),
+            context_source=None,
             requested_profile=RequestedInferenceProfile(
                 enabled_execution_options=[],
                 model_target_label="default",
@@ -1030,6 +1044,7 @@ class TestResolveInvokeInput:
             exchange_file_service=AsyncMock(),
             model_file_service=AsyncMock(),
             image_generation_catalog_service=(_make_image_generation_catalog_service()),
+            model_metadata_service=make_test_model_metadata_service(snapshot=None),
         )
 
         assert isinstance(result, Success)
@@ -1051,6 +1066,7 @@ class TestResolveInvokeInput:
                 session_id="session-1",
                 messages=[],
             ),
+            context_source=None,
             requested_profile=RequestedInferenceProfile(
                 model_target_label="default",
                 reasoning_effort=None,
@@ -1062,6 +1078,7 @@ class TestResolveInvokeInput:
             exchange_file_service=AsyncMock(),
             model_file_service=AsyncMock(),
             image_generation_catalog_service=(_make_image_generation_catalog_service()),
+            model_metadata_service=make_test_model_metadata_service(snapshot=None),
         )
 
         assert isinstance(result, Success)
@@ -1082,6 +1099,7 @@ class TestResolveInvokeInput:
                 session_id="session-1",
                 messages=[],
             ),
+            context_source=None,
             requested_profile=RequestedInferenceProfile(
                 model_target_label="default",
                 reasoning_effort=None,
@@ -1093,6 +1111,7 @@ class TestResolveInvokeInput:
             exchange_file_service=AsyncMock(),
             model_file_service=AsyncMock(),
             image_generation_catalog_service=(_make_image_generation_catalog_service()),
+            model_metadata_service=make_test_model_metadata_service(snapshot=None),
         )
 
         assert result == Failure(
@@ -1117,6 +1136,7 @@ class TestResolveInvokeInput:
                 session_id="session-1",
                 messages=[],
             ),
+            context_source=None,
             requested_profile=RequestedInferenceProfile(
                 enabled_execution_options=[],
                 model_target_label="deleted",
@@ -1128,6 +1148,7 @@ class TestResolveInvokeInput:
             exchange_file_service=AsyncMock(),
             model_file_service=AsyncMock(),
             image_generation_catalog_service=(_make_image_generation_catalog_service()),
+            model_metadata_service=make_test_model_metadata_service(snapshot=None),
         )
 
         assert result == Failure(ModelTargetNotFound(model_target_label="deleted"))
@@ -1153,6 +1174,7 @@ class TestResolveInvokeInput:
                 session_id="session-1",
                 messages=[],
             ),
+            context_source=None,
             requested_profile=RequestedInferenceProfile(
                 enabled_execution_options=[],
                 model_target_label="default",
@@ -1164,6 +1186,7 @@ class TestResolveInvokeInput:
             exchange_file_service=AsyncMock(),
             model_file_service=AsyncMock(),
             image_generation_catalog_service=(_make_image_generation_catalog_service()),
+            model_metadata_service=make_test_model_metadata_service(snapshot=None),
         )
 
         assert result == Failure(
@@ -1190,6 +1213,7 @@ class TestResolveInvokeInput:
                 session_id="session-1",
                 messages=[],
             ),
+            context_source=None,
             requested_profile=RequestedInferenceProfile(
                 enabled_execution_options=[],
                 model_target_label="default",
@@ -1201,6 +1225,7 @@ class TestResolveInvokeInput:
             exchange_file_service=AsyncMock(),
             model_file_service=AsyncMock(),
             image_generation_catalog_service=(_make_image_generation_catalog_service()),
+            model_metadata_service=make_test_model_metadata_service(snapshot=None),
         )
 
         assert result == Failure(
@@ -1228,6 +1253,7 @@ class TestResolveInvokeInput:
                 session_id="session-1",
                 messages=[],
             ),
+            context_source=None,
             requested_profile=RequestedInferenceProfile(
                 enabled_execution_options=[],
                 model_target_label="default",
@@ -1239,6 +1265,7 @@ class TestResolveInvokeInput:
             exchange_file_service=AsyncMock(),
             model_file_service=AsyncMock(),
             image_generation_catalog_service=(_make_image_generation_catalog_service()),
+            model_metadata_service=make_test_model_metadata_service(snapshot=None),
         )
 
         assert result == Failure(

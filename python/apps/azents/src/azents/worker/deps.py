@@ -109,6 +109,7 @@ from azents.services.external_channel.file_transfer import (
 from azents.services.external_channel.slack_events import SlackConversationClient
 from azents.services.mailbox import MailboxService
 from azents.services.model_file import ModelFileService
+from azents.services.model_metadata import ModelMetadataService
 from azents.services.scheduled_task.channel import (
     ScheduledTaskChannelService,
     get_scheduled_task_channel_service,
@@ -515,6 +516,9 @@ def get_subagent_toolkit_provider(
     broker: Annotated[SessionBroker, Depends(get_worker_broker)],
     mailbox_item_service: Annotated[MailboxService, Depends(MailboxService)],
     agent_repository: Annotated[AgentRepository, Depends(AgentRepository)],
+    model_metadata_service: Annotated[
+        ModelMetadataService, Depends(ModelMetadataService)
+    ],
 ) -> SubagentToolkitProvider:
     """SubagentToolkitProvider dependency for Worker."""
     return SubagentToolkitProvider(
@@ -522,6 +526,7 @@ def get_subagent_toolkit_provider(
         broker=broker,
         mailbox_item_service=mailbox_item_service,
         agent_repository=agent_repository,
+        model_metadata_service=model_metadata_service,
     )
 
 
