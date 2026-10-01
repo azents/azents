@@ -40,6 +40,8 @@ from azents.repos.toolkit.data import (
     ToolkitScopeCreate,
     ToolkitUpdate,
 )
+from azents.repos.toolkit_namespace import ToolkitNamespaceRepository
+from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace_user import WorkspaceUserRepository
 
 from .data import (
@@ -107,6 +109,11 @@ class ToolkitOperationsRepository:
         Depends(AgentToolkitRepository),
     ]
     agent_repository: Annotated[AgentRepository, Depends(AgentRepository)]
+    namespace_repository: Annotated[
+        ToolkitNamespaceRepository,
+        Depends(ToolkitNamespaceRepository),
+    ]
+    workspace_repository: Annotated[WorkspaceRepository, Depends(WorkspaceRepository)]
     workspace_user_repository: Annotated[
         WorkspaceUserRepository,
         Depends(WorkspaceUserRepository),
@@ -136,6 +143,12 @@ class ToolkitOperationsRepository:
     ) -> Result[ToolkitWithOAuth, DuplicateSlug | PlatformAuthorityRejected]:
         """Atomically create a Toolkit, Workspace scope, and response snapshot."""
         async with self.session_manager() as session:
+            workspace = await self.workspace_repository.get_by_id_for_update(
+                session,
+                create.workspace_id,
+            )
+            if workspace is None:
+                raise RuntimeError("Authorized Toolkit Workspace no longer exists.")
             if platform_authority is not None:
                 authority_error = await self.validate_platform_authority(
                     session,
@@ -143,6 +156,20 @@ class ToolkitOperationsRepository:
                 )
                 if authority_error is not None:
                     return Failure(authority_error)
+            if await self.toolkit_repository.has_ownership_slug_conflict(
+                session,
+                workspace_id=create.workspace_id,
+                owner_agent_id=None,
+                toolkit_id="",
+                slug=create.slug,
+            ):
+                return Failure(
+                    DuplicateSlug(
+                        workspace_id=create.workspace_id,
+                        owner_agent_id=None,
+                        slug=create.slug,
+                    )
+                )
             create_result = await self.toolkit_repository.create(session, create)
             if isinstance(create_result, Failure):
                 return Failure(create_result.error)
@@ -257,12 +284,35 @@ class ToolkitOperationsRepository:
                 return Failure(NotFound(toolkit_id=toolkit_id))
             candidate_slug = update.get("slug", toolkit.slug)
             candidate_enabled = update.get("enabled", toolkit.enabled)
+            if candidate_slug != toolkit.slug:
+                workspace = await self.workspace_repository.get_by_id_for_update(
+                    session,
+                    workspace_id,
+                )
+                if workspace is None:
+                    raise RuntimeError("Authorized Toolkit Workspace no longer exists.")
+                if await self.toolkit_repository.has_ownership_slug_conflict(
+                    session,
+                    workspace_id=workspace_id,
+                    owner_agent_id=None,
+                    toolkit_id=toolkit_id,
+                    slug=candidate_slug,
+                ):
+                    return Failure(
+                        DuplicateSlug(
+                            workspace_id=workspace_id,
+                            owner_agent_id=None,
+                            slug=candidate_slug,
+                        )
+                    )
+            agent_ids: list[str] = []
             if candidate_slug != toolkit.slug or candidate_enabled != toolkit.enabled:
                 agent_ids = (
                     await self.agent_toolkit_repository.list_agent_ids_by_toolkit(
                         session, toolkit_id
                     )
                 )
+                agent_ids.sort()
                 for agent_id in agent_ids:
                     await self.agent_repository.lock_by_id(session, agent_id)
                 for agent_id in agent_ids:
@@ -282,6 +332,14 @@ class ToolkitOperationsRepository:
             )
             if isinstance(update_result, Failure):
                 return Failure(update_result.error)
+            if candidate_slug != toolkit.slug:
+                for agent_id in agent_ids:
+                    await self.namespace_repository.ensure_active(
+                        session,
+                        agent_id=agent_id,
+                        toolkit_id=toolkit_id,
+                        base_slug=candidate_slug,
+                    )
             return Success(update_result.value)
 
     async def delete(
@@ -459,6 +517,12 @@ class ToolkitOperationsRepository:
             )
             if isinstance(create_result, Failure):
                 return Failure(create_result.error)
+            await self.namespace_repository.ensure_active(
+                session,
+                agent_id=agent_id,
+                toolkit_id=toolkit_id,
+                base_slug=toolkit.slug,
+            )
             return Success(create_result.value)
 
     async def detach_from_agent(

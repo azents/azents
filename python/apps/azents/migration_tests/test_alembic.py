@@ -12,6 +12,7 @@ from azents.rdb.models.base import RDBModel
 _RUNTIME_WEB_SERVICE_CUTOVER = "a32efa82fd63"
 _CATALOG_EXECUTION_CUTOVER = "4550a9c9083a"
 _PRE_CATALOG_EXECUTION_CUTOVER = "43a0fbdc96fe"
+_TOOLKIT_NAMESPACE_FOUNDATION = "af654664e6b6"
 
 
 def test_single_head_revision(alembic_runner: MigrationContext) -> None:
@@ -114,6 +115,185 @@ def test_catalog_execution_cutover_is_forward_only(
         for column in sa.inspect(alembic_engine).get_columns("llm_catalogs")
     }
     assert "lowerer_target" not in columns
+
+
+def test_toolkit_namespace_foundation_backfills_all_persisted_relations(
+    alembic_runner: MigrationContext,
+    alembic_engine: Engine,
+) -> None:
+    """Backfill shared attachments and Agent-owned Toolkits without rewriting Slugs."""
+    alembic_runner.migrate_up_to(_CATALOG_EXECUTION_CUTOVER)
+    with alembic_engine.begin() as connection:
+        connection.execute(
+            sa.text(
+                """
+                INSERT INTO workspaces (id, name, handle)
+                VALUES (
+                    'ws-ns-migration',
+                    'Namespace',
+                    'namespace-migration'
+                )
+                """
+            )
+        )
+        connection.execute(
+            sa.text(
+                """
+                INSERT INTO agents (
+                    id, workspace_id, name, model_selection,
+                    lightweight_model_selection, selectable_model_options,
+                    main_model_label, lightweight_model_label, enabled, type,
+                    memory_enabled
+                )
+                VALUES (
+                    'agent-ns-migration',
+                    'ws-ns-migration',
+                    'Namespace migration Agent',
+                    '{}'::jsonb,
+                    '{}'::jsonb,
+                    '[{
+                        "label": "default",
+                        "candidates": [{
+                            "model_selection": {},
+                            "settings": {
+                                "context_window_tokens": null,
+                                "max_output_tokens": null,
+                                "builtin_tools": []
+                            }
+                        }],
+                        "subagent_enabled": true,
+                        "subagent_guidance": null
+                    }]'::jsonb,
+                    'default',
+                    'default',
+                    TRUE,
+                    'public',
+                    TRUE
+                )
+                """
+            )
+        )
+        connection.execute(
+            sa.text(
+                """
+                INSERT INTO toolkit_configs (
+                    id, workspace_id, owner_agent_id, toolkit_type, slug, name,
+                    config, enabled
+                )
+                VALUES
+                    (
+                        'toolkit-ns-shared-base',
+                        'ws-ns-migration',
+                        NULL,
+                        'mcp',
+                        'mcp',
+                        'Shared base',
+                        '{}'::jsonb,
+                        FALSE
+                    ),
+                    (
+                        'toolkit-ns-shared-suffix',
+                        'ws-ns-migration',
+                        NULL,
+                        'mcp',
+                        'mcp_2',
+                        'Shared suffix',
+                        '{}'::jsonb,
+                        FALSE
+                    ),
+                    (
+                        'toolkit-ns-owned',
+                        'ws-ns-migration',
+                        'agent-ns-migration',
+                        'mcp',
+                        'mcp',
+                        'Owned',
+                        '{}'::jsonb,
+                        FALSE
+                    )
+                """
+            )
+        )
+        connection.execute(
+            sa.text(
+                """
+                INSERT INTO agent_toolkits (id, agent_id, toolkit_id, toolkit_type)
+                VALUES
+                    (
+                        'attachment-ns-base',
+                        'agent-ns-migration',
+                        'toolkit-ns-shared-base',
+                        'mcp'
+                    ),
+                    (
+                        'attachment-ns-suffix',
+                        'agent-ns-migration',
+                        'toolkit-ns-shared-suffix',
+                        'mcp'
+                    )
+                """
+            )
+        )
+
+    alembic_runner.migrate_up_to(_TOOLKIT_NAMESPACE_FOUNDATION)
+    with alembic_engine.connect() as connection:
+        reservations = connection.execute(
+            sa.text(
+                """
+                SELECT toolkit_id, base_slug, ordinal, namespace
+                FROM agent_toolkit_namespace_reservations
+                WHERE agent_id = 'agent-ns-migration'
+                ORDER BY toolkit_id
+                """
+            )
+        ).all()
+        sequences = connection.execute(
+            sa.text(
+                """
+                SELECT base_slug, last_ordinal
+                FROM agent_toolkit_namespace_sequences
+                WHERE agent_id = 'agent-ns-migration'
+                ORDER BY base_slug
+                """
+            )
+        ).all()
+        stored_slugs = connection.execute(
+            sa.text(
+                """
+                SELECT id, slug
+                FROM toolkit_configs
+                WHERE id LIKE 'toolkit-ns-%'
+                ORDER BY id
+                """
+            )
+        ).all()
+
+    assert reservations == [
+        (
+            "toolkit-ns-owned",
+            "mcp",
+            3,
+            "mcp_3",
+        ),
+        (
+            "toolkit-ns-shared-base",
+            "mcp",
+            1,
+            "mcp",
+        ),
+        (
+            "toolkit-ns-shared-suffix",
+            "mcp_2",
+            1,
+            "mcp_2",
+        ),
+    ]
+    assert sequences == [("mcp", 3), ("mcp_2", 1)]
+    assert stored_slugs == [
+        ("toolkit-ns-owned", "mcp"),
+        ("toolkit-ns-shared-base", "mcp"),
+        ("toolkit-ns-shared-suffix", "mcp_2"),
+    ]
 
 
 def test_all_check_constraints_are_named(

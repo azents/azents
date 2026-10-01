@@ -60,8 +60,12 @@ tags: [toolkit, backend, database, migration, testing]
 - Scope-drift check: M3, M4, and phase-1 portions of M7 must be complete; M1, M2, M5, M6,
   M8 behavior must not be activated; no lazy runtime allocation, compatibility fallback,
   administrator namespace field, live action, or new source of truth may appear
-- Context checkpoint: approved authority is committed on this branch; implementation is
-  unstarted; current shared and owned operation repositories already own complete
-  transactions and Agent locking; current runtime continues asserting unique effective
-  Slugs; largest risks are backfill SQL correctness, retirement semantics under Toolkit
-  deletion, cross-base namespace collisions, and deadlocks during shared Slug updates
+- Context checkpoint: schema, migration/backfill, repository allocator, shared attach and
+  Slug-update population, Agent-owned create/update population, FK retirement, and
+  race-safe Foundation ownership guards are implemented. Current Public API, Web,
+  duplicate rejection, Slug indexes, and runtime prefix behavior remain unchanged.
+  Evidence: migration graph/model/backfill tests, allocator collision/no-reuse/reuse/FK
+  tests, operation/service tests, Ruff, format check, and `ty` pass. Independent review
+  found one legacy disabled-collision backfill defect; the deterministic migration fix
+  passed the same reviewer with no remaining findings. Remaining work is commit, PR
+  creation, and dependent phase setup.
