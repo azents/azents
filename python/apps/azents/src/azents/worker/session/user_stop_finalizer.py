@@ -10,7 +10,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import AgentRunStatus, EventKind
 from azents.engine.events.engine_events import RunStopped
-from azents.engine.events.tool_calls import finalize_tool_result
 from azents.engine.events.types import (
     ActiveToolCall,
     AssistantMessagePayload,
@@ -26,6 +25,9 @@ from azents.rdb.deps import get_session_manager
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import EventCreate
 from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.engine_tool_result_operation import (
+    EngineToolResultOperationRepository,
+)
 from azents.services.chat.live_events import RedisLiveEventStore
 from azents.worker.deps import get_live_event_store
 from azents.worker.events.publisher import WorkerEventPublisher
@@ -341,6 +343,11 @@ class UserStopFinalizer:
             return
         if run_id is None:
             raise RuntimeError("Active tool calls require a running AgentRun")
+        tool_results = EngineToolResultOperationRepository(
+            session_manager=self.session_manager,
+            run_repository=self.agent_run_repository,
+            transcript_repository=self.event_transcript_repository,
+        )
 
         async def append(db_session: AsyncSession) -> None:
             await self.session_lifecycle.assert_owner_generation(
@@ -363,10 +370,8 @@ class UserStopFinalizer:
                         )
                     ],
                 )
-                await finalize_tool_result(
+                await tool_results.finalize_in_session(
                     db_session,
-                    run_repo=self.agent_run_repository,
-                    transcript_repo=self.event_transcript_repository,
                     run_id=run_id,
                     session_id=session_id,
                     call=call,

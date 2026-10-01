@@ -95,6 +95,12 @@ Phase publication remains post-commit, and the obsolete session scope around
 pure cancelled-result projection is removed. Model-input preparation, output and
 tool-result admission, and terminal finalization remain later execution phases.
 
+Phase 25 moves ordinary and generated-file-failure tool-result admission into a
+completed repository operation while retaining the same in-session primitive for
+atomic user-stop recovery. Successful generated-file metadata admission,
+model-output admission, model-input preparation, and terminal finalization remain
+later execution phases.
+
 ## Delivery Boundaries
 
 1. Correct the title-generation and ChatGPT OAuth persistence boundary as one
