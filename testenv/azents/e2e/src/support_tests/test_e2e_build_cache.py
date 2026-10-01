@@ -2,6 +2,7 @@
 
 import importlib.util
 import inspect
+import json
 import re
 import sys
 import threading
@@ -24,10 +25,10 @@ _CONFTEST_SPEC.loader.exec_module(_CONFTEST_MODULE)
 _SNAPSHOT_WORKFLOW_PATH = REPOSITORY_ROOT / ".github/workflows/snapshot.yaml"
 
 
-def test_gha_cache_imports_every_image_without_exporting_from_e2e(
+def test_gha_cache_options_are_per_image_and_import_only(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """GHA cache scopes are per image and E2E lanes remain import-only."""
+    """Images retaining the remote path use per-image import-only scopes."""
     monkeypatch.setenv(_CONFTEST_MODULE._DOCKER_BUILDER_ENV, "e2e-builder")
     monkeypatch.setenv(
         _CONFTEST_MODULE._GHA_DOCKER_CACHE_SCOPE_PREFIX_ENV,
@@ -35,13 +36,15 @@ def test_gha_cache_imports_every_image_without_exporting_from_e2e(
     )
 
     cache_from, cache_to, backend, scope = (
-        _CONFTEST_MODULE._get_e2e_image_cache_options("azents-server")
+        _CONFTEST_MODULE._get_e2e_image_cache_options("azents-runtime-runner")
     )
 
-    assert cache_from == [{"type": "gha", "scope": "azents-e2e-v1-azents-server"}]
+    assert cache_from == [
+        {"type": "gha", "scope": "azents-e2e-v1-azents-runtime-runner"}
+    ]
     assert cache_to is None
     assert backend == "gha"
-    assert scope == "azents-e2e-v1-azents-server"
+    assert scope == "azents-e2e-v1-azents-runtime-runner"
 
     _, cache_to, _, _ = _CONFTEST_MODULE._get_e2e_image_cache_options(
         "azents-runtime-runner"
@@ -65,7 +68,7 @@ def test_gha_cache_requires_the_named_buildx_builder(
         match="AZENTS_E2E_DOCKER_GHA_CACHE_SCOPE_PREFIX requires "
         "AZENTS_E2E_DOCKER_BUILDER",
     ):
-        _CONFTEST_MODULE._get_e2e_image_cache_options("azents-server")
+        _CONFTEST_MODULE._get_e2e_image_cache_options("azents-runtime-runner")
 
 
 def test_build_passes_import_only_gha_cache_to_buildx_and_records_duration(
@@ -87,14 +90,14 @@ def test_build_passes_import_only_gha_cache_to_buildx_and_records_duration(
     monkeypatch.setattr(_CONFTEST_MODULE.pow_docker, "build", fake_build)
 
     _CONFTEST_MODULE._build_e2e_image(
-        image_tag="azents-e2e:test",
-        dockerfile=REPOSITORY_ROOT / "azents.Dockerfile",
-        cache_repository="azents-server",
+        image_tag="azents-runtime-runner-e2e:test",
+        dockerfile=(REPOSITORY_ROOT / "python/apps/azents-runtime-runner/Dockerfile"),
+        cache_repository="azents-runtime-runner",
     )
 
     assert build_arguments["builder"] == "e2e-builder"
     assert build_arguments["cache_from"] == [
-        {"type": "gha", "scope": "azents-e2e-v1-azents-server"}
+        {"type": "gha", "scope": "azents-e2e-v1-azents-runtime-runner"}
     ]
     assert build_arguments["cache_to"] is None
     timings = (tmp_path / "image-build-timings.jsonl").read_text(encoding="utf-8")
@@ -103,17 +106,20 @@ def test_build_passes_import_only_gha_cache_to_buildx_and_records_duration(
 
 
 def test_snapshot_workflow_owns_every_e2e_gha_cache_scope() -> None:
-    """Snapshot cache writers exactly cover the repositories imported by E2E."""
+    """Snapshot writers cover every configured scope and actual remote reader."""
     workflow = _SNAPSHOT_WORKFLOW_PATH.read_text(encoding="utf-8")
     writer_repositories = set(
         re.findall(r"            e2e_cache_repository: (azents-[a-z-]+)", workflow)
     )
-    reader_repositories = {
+    configured_repositories = {
         image_build.cache_repository
         for image_build in _CONFTEST_MODULE._E2E_IMAGE_BUILD_PROFILES["web"]
     }
+    remote_reader_repositories = configured_repositories - {"azents-server"}
 
-    assert writer_repositories == reader_repositories
+    assert writer_repositories == configured_repositories
+    assert remote_reader_repositories <= writer_repositories
+    assert "azents-server" not in remote_reader_repositories
     assert 'cache_repository="${{ matrix.e2e_cache_repository }}"' in workflow
     assert 'cache_scope="azents-e2e-v1-$cache_repository"' in workflow
     assert '"type=gha,scope=$cache_scope,mode=max,ignore-error=true"' in workflow
@@ -150,6 +156,48 @@ def test_server_source_overlay_uses_snapshot_base_without_remote_cache(
     assert build_arguments["cache_to"] is None
 
 
+def test_server_full_build_uses_local_buildkit_without_remote_cache(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A changed dependency image keeps the full build but skips slower GHA import."""
+    build_arguments: dict[str, object] = {}
+
+    def fake_build(**kwargs: object) -> None:
+        build_arguments.update(kwargs)
+
+    monkeypatch.delenv(
+        _CONFTEST_MODULE._SERVER_SOURCE_OVERLAY_BASE_ENV,
+        raising=False,
+    )
+    monkeypatch.setenv(_CONFTEST_MODULE._DOCKER_BUILDER_ENV, "e2e-builder")
+    monkeypatch.setenv(
+        _CONFTEST_MODULE._GHA_DOCKER_CACHE_SCOPE_PREFIX_ENV,
+        "azents-e2e-v1",
+    )
+    monkeypatch.setenv(_CONFTEST_MODULE._E2E_ARTIFACT_DIR_ENV, str(tmp_path))
+    monkeypatch.setattr(_CONFTEST_MODULE.pow_docker, "build", fake_build)
+
+    _CONFTEST_MODULE._build_configured_e2e_image(
+        _CONFTEST_MODULE._SERVER_IMAGE_BUILD,
+        "azents-e2e:test",
+    )
+
+    assert build_arguments["file"] == str(REPOSITORY_ROOT / "azents.Dockerfile")
+    assert build_arguments["builder"] == "default"
+    assert build_arguments["cache_from"] is None
+    assert build_arguments["cache_to"] is None
+    timing = json.loads(
+        (tmp_path / "image-build-timings.jsonl").read_text(encoding="utf-8")
+    )
+    assert timing["image"] == "azents-server"
+    assert timing["build_mode"] == "full"
+    assert timing["cache_backend"] == "docker-local:default"
+    assert timing["cache_scope"] is None
+    assert timing["cache_export_enabled"] is False
+    assert timing["completed"] is True
+
+
 def test_server_source_overlay_replaces_the_complete_application_directory() -> None:
     """Deleted application files cannot survive from the predecessor snapshot."""
     dockerfile = (REPOSITORY_ROOT / "azents-e2e-server-overlay.Dockerfile").read_text(
@@ -177,11 +225,24 @@ def test_required_profile_builds_independent_images_concurrently(
         *,
         image_tag: str,
         dockerfile: Path,
-        cache_repository: str,
+        cache_repository: str | None,
         build_contexts: dict[str, str] | None = None,
+        observability_image: str | None = None,
+        build_mode: str = "full",
+        builder_override: str | None = None,
+        cache_backend_override: str | None = None,
     ) -> None:
-        del image_tag, dockerfile, build_contexts
-        calls.append((cache_repository, threading.get_ident()))
+        del (
+            image_tag,
+            dockerfile,
+            build_contexts,
+            build_mode,
+            builder_override,
+            cache_backend_override,
+        )
+        repository = observability_image or cache_repository
+        assert repository is not None
+        calls.append((repository, threading.get_ident()))
         barrier.wait()
 
     monkeypatch.setattr(_CONFTEST_MODULE, "_build_e2e_image", fake_build)
@@ -230,11 +291,24 @@ def test_parallel_profile_reuses_preconfigured_images(
         *,
         image_tag: str,
         dockerfile: Path,
-        cache_repository: str,
+        cache_repository: str | None,
         build_contexts: dict[str, str] | None = None,
+        observability_image: str | None = None,
+        build_mode: str = "full",
+        builder_override: str | None = None,
+        cache_backend_override: str | None = None,
     ) -> None:
-        del image_tag, dockerfile, build_contexts
-        calls.append(cache_repository)
+        del (
+            image_tag,
+            dockerfile,
+            build_contexts,
+            build_mode,
+            builder_override,
+            cache_backend_override,
+        )
+        repository = observability_image or cache_repository
+        assert repository is not None
+        calls.append(repository)
 
     monkeypatch.setattr(_CONFTEST_MODULE, "_build_e2e_image", fake_build)
 

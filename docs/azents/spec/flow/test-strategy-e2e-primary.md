@@ -30,7 +30,7 @@ code_paths:
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
 last_verified_at: 2026-10-01
-spec_version: 75
+spec_version: 76
 ---
 
 # E2E Primary Test Strategy
@@ -277,6 +277,13 @@ Always-on required CI does not depend on external credentials.
   current-worktree Server build, as does any unavailable or incompatible overlay
   base. Snapshot and image-build artifacts distinguish final-image pulls,
   source-overlay-base pulls, full builds, and source-overlay builds.
+  A changed Server dependency set still performs a complete current-worktree image
+  build inside the lane. That full build uses Docker's local BuildKit cache rather
+  than importing the slower remote E2E cache; source-overlay builds continue to use
+  the pulled dependency-compatible snapshot without remote cache. Image timing
+  evidence identifies the full-build path as `docker-local:default`, and lane
+  diagnostics capture disk usage for both the named remote-cache builder and the
+  default builder.
 - Snapshot workflow dispatch keeps downstream publication enabled by default for
   compatibility. An explicit `dispatch_downstream: false` manual input builds and
   publishes immutable images without invoking the downstream deployment, allowing
