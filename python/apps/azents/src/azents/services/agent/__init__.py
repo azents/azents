@@ -46,7 +46,7 @@ from azents.repos.agent_operations import (
     AgentOperationWorkspaceMismatch,
     AgentRuntimeProfileSelectionChange,
 )
-from azents.repos.llm_catalog.data import LiteLLMSourceSnapshot
+from azents.repos.model_metadata_source_data import ModelMetadataSourceSnapshot
 from azents.services.image_generation_catalog import ImageGenerationCatalogService
 from azents.services.llm_catalog import ModelCatalogReadService
 from azents.services.model_metadata import ModelMetadataService
@@ -1020,7 +1020,7 @@ class AgentService:
 
     async def _capture_context_source(
         self, agents: list[Agent]
-    ) -> LiteLLMSourceSnapshot | None:
+    ) -> ModelMetadataSourceSnapshot | None:
         """Share one local source read across models and Agents needing fallback."""
         capability_maximums: list[int | None] = []
         for agent in agents:
@@ -1042,7 +1042,7 @@ class AgentService:
         agent: Agent,
         *,
         can_manage: bool,
-        source_snapshot: LiteLLMSourceSnapshot | None,
+        source_snapshot: ModelMetadataSourceSnapshot | None,
     ) -> AgentOutput:
         """Convert `Agent` domain model to output."""
         avatar = await self._resolve_avatar(agent.avatar)
@@ -1113,7 +1113,7 @@ class AgentService:
         self,
         agent: Agent,
         *,
-        source_snapshot: LiteLLMSourceSnapshot | None,
+        source_snapshot: ModelMetadataSourceSnapshot | None,
     ) -> EffectiveContextWindow | None:
         """Calculate effective context window using same criteria as Runtime."""
         option_by_label = {

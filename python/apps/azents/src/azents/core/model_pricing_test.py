@@ -1,13 +1,28 @@
 """Golden billing rules use explicit source fixtures, never a package price map."""
 
 import dataclasses
+import datetime
 from collections.abc import Mapping
 from decimal import Decimal, localcontext
 
 import pytest
+from genai_prices.data_snapshot import get_snapshot
 
 from azents.core.enums import LLMProvider
+from azents.core.model_metadata_source import (
+    SourceEqualsClause,
+    SourceModelRecord,
+    SourcePriceSet,
+    SourcePriceTier,
+    SourceProviderRecord,
+    SourceScalarPrice,
+    SourceStartDatePriceConstraint,
+    SourceTieredPrice,
+    encode_data_snapshot,
+    lookup_source_model,
+)
 from azents.core.model_pricing import (
+    GenAIModelPricing,
     ModelCostEstimate,
     ModelPricing,
     ModelPricingBilling,
@@ -15,6 +30,7 @@ from azents.core.model_pricing import (
     ModelPricingUnavailableReason,
     ModelPricingUsage,
     estimate_model_cost,
+    normalize_genai_model_pricing,
     normalize_model_pricing,
 )
 
@@ -71,6 +87,147 @@ def _standard_prices() -> dict[str, object]:
 
 def _estimate(pricing: ModelPricing) -> ModelCostEstimate:
     return estimate_model_cost(pricing=pricing, usage=_usage(), billing=_billing())
+
+
+def _genai_pricing(
+    prices: list[SourcePriceSet],
+    *,
+    request_timestamp: datetime.datetime | None = None,
+) -> GenAIModelPricing:
+    model = SourceModelRecord(
+        id="exact-model",
+        name="Exact model",
+        match=SourceEqualsClause(value="exact-model"),
+        context_window=128_000,
+        deprecated=False,
+        prices=prices,
+    )
+    provider = SourceProviderRecord(
+        id="openai",
+        name="OpenAI",
+        api_pattern=r"https://api\.openai\.com/.*",
+        model_match=None,
+        provider_match=None,
+        fallback_model_providers=None,
+        models=[model],
+    )
+    return normalize_genai_model_pricing(
+        provider=LLMProvider.OPENAI,
+        model_identifier="exact-model",
+        source_snapshot_id="snapshot-before-stream",
+        source_hash="captured-hash",
+        source_provider=provider,
+        source_model=model,
+        request_timestamp=request_timestamp
+        or datetime.datetime(2026, 10, 1, tzinfo=datetime.UTC),
+    )
+
+
+def test_genai_prices_inclusive_cache_and_reasoning_parity() -> None:
+    """Canonical source evaluation partitions inclusive token totals once."""
+    pricing = _genai_pricing(
+        [
+            SourcePriceSet(
+                constraint=None,
+                prices={
+                    "input_mtok": SourceScalarPrice(value=Decimal("1")),
+                    "output_mtok": SourceScalarPrice(value=Decimal("2")),
+                    "cache_read_mtok": SourceScalarPrice(value=Decimal("0.5")),
+                    "cache_write_mtok": SourceScalarPrice(value=Decimal("1.5")),
+                },
+            )
+        ]
+    )
+
+    result = estimate_model_cost(
+        pricing=pricing,
+        usage=_usage(),
+        billing=_billing(),
+    )
+
+    assert result.cost_usd == pytest.approx(0.0000205)
+    assert result.unavailable_reason is None
+
+
+def test_genai_prices_conditional_and_tiered_rules_use_capture_time() -> None:
+    """Captured request time selects the conditional set before tier evaluation."""
+    pricing = _genai_pricing(
+        [
+            SourcePriceSet(
+                constraint=None,
+                prices={
+                    "input_mtok": SourceScalarPrice(value=Decimal("1")),
+                    "output_mtok": SourceScalarPrice(value=Decimal("0")),
+                },
+            ),
+            SourcePriceSet(
+                constraint=SourceStartDatePriceConstraint(
+                    start_date=datetime.date(2026, 9, 1)
+                ),
+                prices={
+                    "input_mtok": SourceTieredPrice(
+                        base=Decimal("2"),
+                        tiers=[
+                            SourcePriceTier(start=10, price=Decimal("3")),
+                        ],
+                    ),
+                    "output_mtok": SourceScalarPrice(value=Decimal("0")),
+                },
+            ),
+        ]
+    )
+    usage = dataclasses.replace(
+        _usage(),
+        prompt_tokens=11,
+        completion_tokens=0,
+        cached_input_tokens=None,
+        cache_write_input_tokens=None,
+        reasoning_tokens=None,
+    )
+
+    result = estimate_model_cost(
+        pricing=pricing,
+        usage=usage,
+        billing=_billing(),
+    )
+
+    assert result.cost_usd == pytest.approx(0.000033)
+    assert result.unavailable_reason is None
+
+
+def test_genai_prices_replays_captured_model_without_rematching_canonical_id() -> None:
+    """Canonical IDs that miss their own clause still retain captured pricing."""
+    model_identifier = "us.anthropic.claude-sonnet-4-20250514-v1:0"
+    match = lookup_source_model(
+        encode_data_snapshot(get_snapshot()),
+        provider=LLMProvider.AWS_BEDROCK,
+        model_identifier=model_identifier,
+    )
+    assert match is not None
+    assert match.model.id == "regional.anthropic.claude-sonnet-4-20250514-v1:0"
+    pricing = normalize_genai_model_pricing(
+        provider=LLMProvider.AWS_BEDROCK,
+        model_identifier=model_identifier,
+        source_snapshot_id="snapshot-before-stream",
+        source_hash="captured-hash",
+        source_provider=match.provider,
+        source_model=match.model,
+        request_timestamp=datetime.datetime(2026, 10, 1, tzinfo=datetime.UTC),
+    )
+
+    result = estimate_model_cost(
+        pricing=pricing,
+        usage=dataclasses.replace(
+            _usage(),
+            cached_input_tokens=None,
+            cache_write_input_tokens=None,
+            reasoning_tokens=None,
+        ),
+        billing=_billing(),
+    )
+
+    assert result.cost_usd is not None
+    assert result.unavailable_reason is None
 
 
 def test_openai_inclusive_cache_and_reasoning_golden() -> None:

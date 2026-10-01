@@ -32,6 +32,7 @@ from azents.rdb.models.llm_catalog import (
     RDBLLMCatalogSyncAttempt,
 )
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
+from azents.rdb.models.model_metadata_source import RDBModelMetadataSource
 from azents.rdb.models.workspace import RDBWorkspace
 
 from .data import (
@@ -41,6 +42,8 @@ from .data import (
     ImageGenerationCatalogEntryCreate,
     ImageGenerationCatalogEntryList,
     ImageGenerationCatalogPublication,
+    IntegrationCatalogReprojectionTarget,
+    IntegrationCatalogSyncClaim,
     LiteLLMSourceSnapshot,
     LLMCatalog,
     LLMCatalogEntry,
@@ -49,6 +52,8 @@ from .data import (
     LLMCatalogSnapshotCounts,
     LLMCatalogSyncAttempt,
 )
+
+_SYSTEM_CATALOG_ATTEMPT_LEASE = datetime.timedelta(minutes=5)
 
 
 class CatalogEntryWithCatalog(NamedTuple):
@@ -109,9 +114,24 @@ class LLMCatalogRepository:
                 existing is not None
                 and existing.status == LLMCatalogAttemptStatus.RUNNING
             ):
-                return CatalogSyncAlreadyRunning(
-                    catalog_id=catalog_id,
+                if started_at < existing.started_at + _SYSTEM_CATALOG_ATTEMPT_LEASE:
+                    return CatalogSyncAlreadyRunning(
+                        catalog_id=catalog_id,
+                        attempt_id=existing.id,
+                    )
+                await self.mark_attempt_failed(
+                    session,
                     attempt_id=existing.id,
+                    finished_at=started_at,
+                    failure_code="SystemCatalogSyncRunningTimeout",
+                    failure_message=(
+                        "The previous system catalog refresh exceeded its running "
+                        "lease."
+                    ),
+                    action_hint=("The abandoned refresh was reclaimed automatically."),
+                    diagnostics={
+                        "failure_category": "system_sync_lease_timeout",
+                    },
                 )
         attempt_id = uuid7().hex
         session.add(
@@ -146,7 +166,7 @@ class LLMCatalogRepository:
         source_key: str,
         started_at: datetime.datetime,
         trigger: IntegrationCatalogSyncTrigger,
-    ) -> str | IntegrationCatalogSyncPolicyDecision:
+    ) -> IntegrationCatalogSyncClaim | IntegrationCatalogSyncPolicyDecision:
         """Atomically apply sync policy and create an integration attempt."""
         workspace_lock = await session.execute(
             sa.select(RDBWorkspace.id)
@@ -234,7 +254,11 @@ class LLMCatalogRepository:
         )
         catalog_rdb.latest_attempt_id = attempt_id
         await session.flush()
-        return attempt_id
+        return IntegrationCatalogSyncClaim(
+            attempt_id=attempt_id,
+            expected_current_snapshot_id=catalog.current_snapshot_id,
+            catalog_configuration_version=(integration.catalog_configuration_version),
+        )
 
     async def lock_catalog_for_attempt_completion(
         self,
@@ -544,6 +568,240 @@ class LLMCatalogRepository:
             )
         await session.flush()
         return snapshot_id
+
+    async def publish_cutover_candidate(
+        self,
+        session: AsyncSession,
+        *,
+        catalog_id: str,
+        candidate_snapshot_id: str,
+        expected_metadata_source_key: str,
+        expected_metadata_source_snapshot_id: str,
+        expected_projection_fingerprint: str,
+    ) -> str:
+        """Publish a system candidate while retaining the original rollback pin."""
+        source_result = await session.execute(
+            sa.select(RDBModelMetadataSource.current_snapshot_id)
+            .where(RDBModelMetadataSource.source_key == expected_metadata_source_key)
+            .with_for_update()
+        )
+        if source_result.scalar_one_or_none() != expected_metadata_source_snapshot_id:
+            raise RuntimeError("The current model metadata source changed.")
+        catalog_result = await session.execute(
+            sa.select(RDBLLMCatalog)
+            .where(RDBLLMCatalog.id == catalog_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        catalog = catalog_result.scalar_one()
+        candidate_result = await session.execute(
+            sa.select(RDBLLMCatalogSnapshot).where(
+                RDBLLMCatalogSnapshot.id == candidate_snapshot_id,
+                RDBLLMCatalogSnapshot.catalog_id == catalog_id,
+            )
+        )
+        candidate = candidate_result.scalar_one_or_none()
+        if candidate is None:
+            raise RuntimeError("The replacement catalog candidate was not found.")
+        if (
+            candidate.metadata_source_snapshot_id
+            != expected_metadata_source_snapshot_id
+            or candidate.projection_fingerprint != expected_projection_fingerprint
+        ):
+            raise RuntimeError("The replacement catalog candidate provenance changed.")
+        if catalog.current_snapshot_id == candidate_snapshot_id:
+            return candidate_snapshot_id
+        previous_snapshot_id = catalog.current_snapshot_id
+        if previous_snapshot_id is not None and catalog.rollback_snapshot_id is None:
+            previous_result = await session.execute(
+                sa.select(RDBLLMCatalogSnapshot.metadata_source_snapshot_id).where(
+                    RDBLLMCatalogSnapshot.id == previous_snapshot_id,
+                    RDBLLMCatalogSnapshot.catalog_id == catalog_id,
+                )
+            )
+            previous_metadata_source_snapshot_id = previous_result.scalar_one_or_none()
+            if previous_metadata_source_snapshot_id is None:
+                catalog.rollback_snapshot_id = previous_snapshot_id
+        catalog.current_snapshot_id = candidate_snapshot_id
+        if (
+            previous_snapshot_id is not None
+            and previous_snapshot_id != catalog.rollback_snapshot_id
+        ):
+            await session.execute(
+                sa.delete(RDBLLMCatalogSnapshot).where(
+                    RDBLLMCatalogSnapshot.id == previous_snapshot_id
+                )
+            )
+        await session.flush()
+        return candidate_snapshot_id
+
+    async def publish_candidate_snapshot(
+        self,
+        session: AsyncSession,
+        *,
+        catalog_id: str,
+        candidate_snapshot_id: str,
+        expected_current_snapshot_id: str | None,
+        expected_catalog_configuration_version: int | None,
+        expected_projection_fingerprint: str,
+        fence_latest_attempt: bool = False,
+        expected_latest_attempt_id: str | None = None,
+        reject_running_attempt: bool = False,
+    ) -> str:
+        """Publish one replacement candidate without changing a rollback pin."""
+        catalog_result = await session.execute(
+            sa.select(RDBLLMCatalog)
+            .where(RDBLLMCatalog.id == catalog_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        catalog = catalog_result.scalar_one()
+        if catalog.current_snapshot_id != expected_current_snapshot_id:
+            raise RuntimeError("The current catalog snapshot changed.")
+        if (
+            fence_latest_attempt
+            and catalog.latest_attempt_id != expected_latest_attempt_id
+        ):
+            raise RuntimeError("The latest catalog sync attempt changed.")
+        if reject_running_attempt and catalog.latest_attempt_id is not None:
+            attempt_status_result = await session.execute(
+                sa.select(RDBLLMCatalogSyncAttempt.status).where(
+                    RDBLLMCatalogSyncAttempt.id == catalog.latest_attempt_id
+                )
+            )
+            if (
+                attempt_status_result.scalar_one_or_none()
+                == LLMCatalogAttemptStatus.RUNNING
+            ):
+                raise RuntimeError("A provider catalog sync is running.")
+        if (
+            expected_catalog_configuration_version is not None
+            and catalog.provider_integration_id is not None
+        ):
+            generation_result = await session.execute(
+                sa.select(RDBLLMProviderIntegration.catalog_configuration_version)
+                .where(RDBLLMProviderIntegration.id == catalog.provider_integration_id)
+                .with_for_update()
+            )
+            if generation_result.scalar_one() != expected_catalog_configuration_version:
+                raise RuntimeError(
+                    "The integration catalog configuration generation changed."
+                )
+        candidate_result = await session.execute(
+            sa.select(RDBLLMCatalogSnapshot).where(
+                RDBLLMCatalogSnapshot.id == candidate_snapshot_id,
+                RDBLLMCatalogSnapshot.catalog_id == catalog_id,
+            )
+        )
+        candidate = candidate_result.scalar_one_or_none()
+        if candidate is None:
+            raise RuntimeError("The replacement catalog candidate was not found.")
+        if (
+            candidate.catalog_configuration_version
+            != expected_catalog_configuration_version
+            or candidate.projection_fingerprint != expected_projection_fingerprint
+        ):
+            raise RuntimeError("The replacement catalog candidate provenance changed.")
+        previous_snapshot_id = catalog.current_snapshot_id
+        catalog.current_snapshot_id = candidate_snapshot_id
+        if (
+            previous_snapshot_id is not None
+            and previous_snapshot_id != candidate_snapshot_id
+            and previous_snapshot_id != catalog.rollback_snapshot_id
+        ):
+            await session.execute(
+                sa.delete(RDBLLMCatalogSnapshot).where(
+                    RDBLLMCatalogSnapshot.id == previous_snapshot_id
+                )
+            )
+        await session.flush()
+        return candidate_snapshot_id
+
+    async def list_integration_reprojection_targets(
+        self,
+        session: AsyncSession,
+        *,
+        limit: int,
+    ) -> list[IntegrationCatalogReprojectionTarget]:
+        """Return a bounded batch lacking replacement provenance."""
+        result = await session.execute(
+            sa.select(
+                RDBLLMCatalog,
+                RDBLLMProviderIntegration.catalog_configuration_version,
+            )
+            .join(
+                RDBLLMCatalogSnapshot,
+                RDBLLMCatalogSnapshot.id == RDBLLMCatalog.current_snapshot_id,
+            )
+            .join(
+                RDBLLMProviderIntegration,
+                RDBLLMProviderIntegration.id == RDBLLMCatalog.provider_integration_id,
+            )
+            .where(
+                RDBLLMCatalog.scope == LLMCatalogScope.INTEGRATION,
+                RDBLLMCatalog.purpose == LLMCatalogPurpose.CONVERSATION,
+                RDBLLMCatalog.current_snapshot_id.is_not(None),
+                RDBLLMCatalogSnapshot.metadata_source_snapshot_id.is_(None),
+            )
+            .order_by(RDBLLMCatalog.id)
+            .limit(limit)
+        )
+        targets: list[IntegrationCatalogReprojectionTarget] = []
+        for catalog_rdb, configuration_version in result.tuples():
+            current_snapshot_id = catalog_rdb.current_snapshot_id
+            if current_snapshot_id is None:
+                continue
+            entries_result = await session.execute(
+                sa.select(RDBLLMCatalogEntry)
+                .where(
+                    RDBLLMCatalogEntry.catalog_id == catalog_rdb.id,
+                    RDBLLMCatalogEntry.snapshot_id == current_snapshot_id,
+                )
+                .order_by(RDBLLMCatalogEntry.provider_model_identifier)
+            )
+            targets.append(
+                IntegrationCatalogReprojectionTarget(
+                    catalog=self._build_catalog(catalog_rdb),
+                    current_snapshot_id=current_snapshot_id,
+                    catalog_configuration_version=configuration_version,
+                    entries=[
+                        self._build_entry(entry) for entry in entries_result.scalars()
+                    ],
+                )
+            )
+        return targets
+
+    async def rollback_cutover(
+        self,
+        session: AsyncSession,
+        *,
+        catalog_id: str,
+    ) -> str:
+        """Restore the pinned pre-cutover snapshot and clear replacement rows."""
+        catalog_result = await session.execute(
+            sa.select(RDBLLMCatalog)
+            .where(RDBLLMCatalog.id == catalog_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        catalog = catalog_result.scalar_one()
+        rollback_snapshot_id = catalog.rollback_snapshot_id
+        if rollback_snapshot_id is None:
+            raise RuntimeError("The catalog does not have a rollback snapshot.")
+        retained = await session.get(RDBLLMCatalogSnapshot, rollback_snapshot_id)
+        if retained is None or retained.catalog_id != catalog_id:
+            raise RuntimeError("The pinned rollback snapshot was not found.")
+        await session.execute(
+            sa.delete(RDBLLMCatalogSnapshot).where(
+                RDBLLMCatalogSnapshot.catalog_id == catalog_id,
+                RDBLLMCatalogSnapshot.metadata_source_snapshot_id.is_not(None),
+                RDBLLMCatalogSnapshot.id != rollback_snapshot_id,
+            )
+        )
+        catalog.current_snapshot_id = rollback_snapshot_id
+        catalog.rollback_snapshot_id = None
+        await session.flush()
+        return rollback_snapshot_id
 
     async def replace_current_image_generation_snapshot(
         self,

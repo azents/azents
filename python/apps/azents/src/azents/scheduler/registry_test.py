@@ -20,9 +20,13 @@ from azents.services.file_lifecycle_cleanup import (
     FileLifecycleCleanupService,
     FileLifecycleCleanupSummary,
 )
+from azents.services.llm_catalog import (
+    SystemCatalogProjectionService,
+    SystemCatalogProjectionSummary,
+)
 from azents.services.model_metadata_projection import (
-    SystemCatalogShadowProjectionService,
-    SystemCatalogShadowSummary,
+    IntegrationCatalogReprojectionService,
+    IntegrationCatalogReprojectionSummary,
 )
 from azents.services.scheduled_task.service import (
     ScheduledTaskDispatcher,
@@ -91,98 +95,160 @@ class _OAuthCleanupContainer:
 
 
 class _CatalogProjectionContainer:
-    """Resolve the replacement model catalog service."""
+    """Resolve the active system model catalog service."""
 
-    def __init__(self, shadow: SystemCatalogShadowProjectionService) -> None:
-        self.shadow = shadow
+    def __init__(self, service: SystemCatalogProjectionService) -> None:
+        self.service = service
 
     async def solve(self, target: type[object]) -> object:
         """Return the requested catalog projection service."""
-        assert target is SystemCatalogShadowProjectionService
-        return self.shadow
+        assert target is SystemCatalogProjectionService
+        return self.service
+
+
+class _IntegrationReprojectionContainer:
+    """Resolve the bounded integration reprojection service."""
+
+    def __init__(self, service: IntegrationCatalogReprojectionService) -> None:
+        self.service = service
+
+    async def solve(self, target: type[object]) -> object:
+        """Return the requested integration reprojection service."""
+        assert target is IntegrationCatalogReprojectionService
+        return self.service
 
 
 @pytest.mark.asyncio
-async def test_model_metadata_shadow_handler_prepares_candidates() -> None:
-    """A separate scheduled task prepares inert replacement evidence."""
-    shadow = Mock(spec=SystemCatalogShadowProjectionService)
-    shadow.prepare_candidates = AsyncMock(
+async def test_system_catalog_handler_publishes_replacement_authority() -> None:
+    """The existing scheduled task owns replacement catalog publication."""
+    service = Mock(spec=SystemCatalogProjectionService)
+    service.sync_system_catalogs = AsyncMock(
         return_value=[
-            SystemCatalogShadowSummary(
+            SystemCatalogProjectionSummary(
                 provider=LLMProvider.OPENAI,
                 catalog_id="catalog-id",
-                candidate_snapshot_id="candidate-id",
+                snapshot_id="snapshot-id",
                 visible_count=3,
                 hidden_count=2,
-                projection_fingerprint="a" * 64,
             )
         ]
     )
     now = datetime.datetime(2026, 10, 1, tzinfo=datetime.UTC)
     context = TaskContext(
-        task_key="model_metadata_shadow_projection",
+        task_key="model_catalog_system_projection",
         attempt_started_at=now,
         lease_owner="scheduler-1",
         deadline=now + datetime.timedelta(minutes=5),
         manual_triggered=False,
-        container=_CatalogProjectionContainer(shadow),  # ty: ignore[invalid-argument-type] # Focused container implements only solve().
+        container=_CatalogProjectionContainer(service),  # ty: ignore[invalid-argument-type] # Focused container implements only solve().
     )
 
-    result = await registry.model_metadata_shadow_projection_handler(context)
+    result = await registry.system_catalog_projection_handler(context)
 
     assert result.summary is not None
-    assert result.summary["replacement_candidates"] == [
+    assert result.summary["catalogs"] == [
         {
             "provider": "openai",
             "catalog_id": "catalog-id",
-            "candidate_snapshot_id": "candidate-id",
+            "snapshot_id": "snapshot-id",
             "visible_count": 3,
             "hidden_count": 2,
-            "projection_fingerprint": "a" * 64,
         }
     ]
-    shadow.prepare_candidates.assert_awaited_once_with()
+    service.sync_system_catalogs.assert_awaited_once_with()
 
 
 @pytest.mark.asyncio
-async def test_model_metadata_shadow_failure_isolated_from_legacy_handler() -> None:
-    """A shadow failure propagates without invoking the legacy catalog task."""
-    shadow = Mock(spec=SystemCatalogShadowProjectionService)
-    shadow.prepare_candidates = AsyncMock(side_effect=RuntimeError("source failed"))
+async def test_system_catalog_replacement_failure_propagates() -> None:
+    """Replacement failure remains visible to the scheduler retry lifecycle."""
+    service = Mock(spec=SystemCatalogProjectionService)
+    service.sync_system_catalogs = AsyncMock(side_effect=RuntimeError("source failed"))
     now = datetime.datetime(2026, 10, 1, tzinfo=datetime.UTC)
     context = TaskContext(
-        task_key="model_metadata_shadow_projection",
+        task_key="model_catalog_system_projection",
         attempt_started_at=now,
         lease_owner="scheduler-1",
         deadline=now + datetime.timedelta(minutes=5),
         manual_triggered=False,
-        container=_CatalogProjectionContainer(shadow),  # ty: ignore[invalid-argument-type] # Focused container implements only solve().
+        container=_CatalogProjectionContainer(service),  # ty: ignore[invalid-argument-type] # Focused container implements only solve().
     )
 
     with pytest.raises(RuntimeError, match="source failed"):
-        await registry.model_metadata_shadow_projection_handler(context)
+        await registry.system_catalog_projection_handler(context)
 
-    shadow.prepare_candidates.assert_awaited_once_with()
-    assert registry.MODEL_METADATA_SHADOW_PROJECTION_TASK.handler is (
-        registry.model_metadata_shadow_projection_handler
-    )
+    service.sync_system_catalogs.assert_awaited_once_with()
     assert registry.SYSTEM_CATALOG_PROJECTION_TASK.handler is (
         registry.system_catalog_projection_handler
     )
 
 
-def test_model_metadata_shadow_projection_is_registered_separately() -> None:
-    """Replacement preparation cannot make current catalog refresh fail."""
+def test_system_catalog_projection_is_the_only_metadata_refresh_task() -> None:
+    """The legacy task key now owns replacement publication without shadow work."""
     definitions = registry.get_task_definitions()
     matches = [
         definition
         for definition in definitions
-        if definition.key == "model_metadata_shadow_projection"
+        if definition.key == "model_catalog_system_projection"
     ]
 
-    assert matches == [registry.MODEL_METADATA_SHADOW_PROJECTION_TASK]
+    assert matches == [registry.SYSTEM_CATALOG_PROJECTION_TASK]
     definition = matches[0]
     assert definition.interval == datetime.timedelta(hours=6)
+    assert definition.timeout == datetime.timedelta(minutes=5)
+    assert definition.retry_policy.kind == "bounded_backoff"
+    assert definition.enabled_by_default is True
+    assert all(
+        definition.key != "model_metadata_shadow_projection"
+        for definition in definitions
+    )
+
+
+@pytest.mark.asyncio
+async def test_integration_reprojection_handler_returns_bounded_summary() -> None:
+    """The coordinator task reports one network-free bounded pass."""
+    service = Mock(spec=IntegrationCatalogReprojectionService)
+    service.reproject_batch = AsyncMock(
+        return_value=IntegrationCatalogReprojectionSummary(
+            scanned=5,
+            published=4,
+            superseded=1,
+        )
+    )
+    now = datetime.datetime(2026, 10, 1, tzinfo=datetime.UTC)
+    context = TaskContext(
+        task_key="model_catalog_integration_reprojection",
+        attempt_started_at=now,
+        lease_owner="scheduler-1",
+        deadline=now + datetime.timedelta(minutes=5),
+        manual_triggered=False,
+        container=_IntegrationReprojectionContainer(service),  # ty: ignore[invalid-argument-type] # Focused container implements only solve().
+    )
+
+    result = await registry.integration_catalog_reprojection_handler(context)
+
+    assert result.summary == {
+        "task_key": "model_catalog_integration_reprojection",
+        "attempt_started_at": now.isoformat(),
+        "manual_triggered": False,
+        "scanned": 5,
+        "published": 4,
+        "superseded": 1,
+    }
+    service.reproject_batch.assert_awaited_once_with(limit=25)
+
+
+def test_integration_reprojection_is_registered_as_bounded_task() -> None:
+    """Stored integration catalogs are processed by one bounded scheduler task."""
+    definitions = registry.get_task_definitions()
+    matches = [
+        definition
+        for definition in definitions
+        if definition.key == "model_catalog_integration_reprojection"
+    ]
+
+    assert matches == [registry.INTEGRATION_CATALOG_REPROJECTION_TASK]
+    definition = matches[0]
+    assert definition.interval == datetime.timedelta(minutes=1)
     assert definition.timeout == datetime.timedelta(minutes=5)
     assert definition.retry_policy.kind == "bounded_backoff"
     assert definition.enabled_by_default is True

@@ -26,7 +26,10 @@ from azents.core.llm_catalog_sync import (
 )
 from azents.rdb.session import SessionManager
 from azents.repos.llm_catalog import LLMCatalogRepository
-from azents.repos.llm_catalog.data import ImageGenerationCatalogEntryCreate
+from azents.repos.llm_catalog.data import (
+    ImageGenerationCatalogEntryCreate,
+    IntegrationCatalogSyncClaim,
+)
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.llm_provider_integration.data import (
     LLMProviderIntegrationCreate,
@@ -153,7 +156,7 @@ async def _publish_flare(
         purpose=LLMCatalogPurpose.IMAGE_GENERATION,
     )
     started_at = datetime.datetime.now(datetime.UTC)
-    attempt_id = await service.catalog_repository.begin_integration_attempt(
+    claim = await service.catalog_repository.begin_integration_attempt(
         rdb_session,
         catalog_id=catalog.id,
         workspace_id=workspace_id,
@@ -161,12 +164,12 @@ async def _publish_flare(
         started_at=started_at,
         trigger=IntegrationCatalogSyncTrigger.CREATE,
     )
-    assert isinstance(attempt_id, str)
+    assert isinstance(claim, IntegrationCatalogSyncClaim)
     publication = (
         await service.catalog_repository.replace_current_image_generation_snapshot(
             rdb_session,
             catalog=catalog,
-            attempt_id=attempt_id,
+            attempt_id=claim.attempt_id,
             entries=[
                 ImageGenerationCatalogEntryCreate(
                     provider=LLMProvider.OPENAI,
@@ -188,7 +191,7 @@ async def _publish_flare(
     assert publication.snapshot_id is not None
     await service.catalog_repository.mark_attempt_succeeded(
         rdb_session,
-        attempt_id=attempt_id,
+        attempt_id=claim.attempt_id,
         finished_at=started_at + datetime.timedelta(seconds=1),
         produced_snapshot_id=publication.snapshot_id,
         fetched_count=1,
@@ -224,7 +227,7 @@ async def test_sync_uses_credential_snapshot_loaded_after_attempt_claim(
         source_key: str,
         started_at: datetime.datetime,
         trigger: IntegrationCatalogSyncTrigger,
-    ) -> str | IntegrationCatalogSyncPolicyDecision:
+    ) -> IntegrationCatalogSyncClaim | IntegrationCatalogSyncPolicyDecision:
         update_result = await integration_repository.update_by_id(
             rdb_session,
             integration_id,

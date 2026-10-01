@@ -409,7 +409,7 @@ class ImageGenerationCatalogService:
             )
         if isinstance(claim, IntegrationCatalogSyncPolicyDecision):
             return Failure(_sync_policy_failure(catalog.id, claim))
-        attempt_id = claim
+        attempt_id = claim.attempt_id
         async with self.session_manager() as session:
             integration = await self.integration_repository.get_by_id_with_secrets(
                 session,

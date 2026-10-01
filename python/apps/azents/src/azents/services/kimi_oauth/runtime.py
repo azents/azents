@@ -124,7 +124,7 @@ async def _persist_refresh_success(
             )
         if _credentials_changed(original=integration, latest=latest):
             return Success(latest)
-        update = await integration_repository.update_by_id(
+        update = await integration_repository.update_runtime_state_by_id(
             session,
             integration.id,
             {
@@ -181,7 +181,7 @@ async def _persist_refresh_failure(
             return None
         if _credentials_changed(original=integration, latest=latest):
             return latest
-        await integration_repository.update_by_id(
+        await integration_repository.update_runtime_state_by_id(
             session,
             integration.id,
             {

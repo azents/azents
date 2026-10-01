@@ -10,6 +10,12 @@ from azcommon.result import Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.inference_profile import RequestedInferenceProfile
+from azents.core.model_metadata_source import (
+    ModelMetadataSourcePayload,
+    SourceEqualsClause,
+    SourceModelRecord,
+    SourceProviderRecord,
+)
 from azents.engine.run import resolve as resolve_module
 from azents.engine.run import resolve_test as fixtures
 from azents.engine.run.input import InvokeInput
@@ -18,7 +24,7 @@ from azents.engine.run.resolve import (
     resolve_invoke_input_with_resolved_profile,
     resolve_model_candidate_runtime,
 )
-from azents.repos.llm_catalog.data import LiteLLMSourceSnapshot
+from azents.repos.model_metadata_source_data import ModelMetadataSourceSnapshot
 from azents.services.model_metadata import CapturedContextSource, ModelMetadataService
 from azents.testing.model_metadata import make_test_model_metadata_service
 
@@ -26,21 +32,46 @@ from azents.testing.model_metadata import make_test_model_metadata_service
 class _ForbidContextRecapture(ModelMetadataService):
     async def capture_for_context(
         self, *, capability_maximums: Sequence[int | None]
-    ) -> LiteLLMSourceSnapshot | None:
+    ) -> ModelMetadataSourceSnapshot | None:
         del capability_maximums
         raise AssertionError("The caller already captured this context authority.")
 
 
-def _snapshot(identifier: str, maximum: int) -> LiteLLMSourceSnapshot:
-    return LiteLLMSourceSnapshot(
+def _snapshot(identifier: str, maximum: int) -> ModelMetadataSourceSnapshot:
+    payload = ModelMetadataSourcePayload(
+        providers=[
+            SourceProviderRecord(
+                id="openai",
+                name="OpenAI",
+                api_pattern=r"https://api\.openai\.com/.*",
+                model_match=None,
+                provider_match=None,
+                fallback_model_providers=None,
+                models=[
+                    SourceModelRecord(
+                        id="gpt-4o",
+                        name="GPT-4o",
+                        match=SourceEqualsClause(value="gpt-4o"),
+                        context_window=maximum,
+                        deprecated=False,
+                        prices=[],
+                    )
+                ],
+            )
+        ]
+    )
+    return ModelMetadataSourceSnapshot(
         id=identifier,
-        source_key="litellm_model_cost",
-        source_url=None,
-        source_hash=f"hash-{identifier}",
-        model_count=1,
-        litellm_version=None,
-        loaded_source="remote",
-        payload={"openai/gpt-4o": {"max_input_tokens": maximum}},
+        source_key="genai_prices",
+        source_kind="genai_prices",
+        source_schema_version="1",
+        source_url="https://source.example.test/models.json",
+        source_hash=payload.content_hash(),
+        producer_name="genai-prices",
+        producer_version="0.1.9",
+        provider_count=payload.provider_count,
+        model_count=payload.model_count,
+        payload=payload,
         created_at=datetime.datetime.now(datetime.UTC),
     )
 

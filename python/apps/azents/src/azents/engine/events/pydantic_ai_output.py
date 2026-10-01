@@ -28,7 +28,7 @@ from pydantic_ai.messages import (
 )
 
 from azents.core.enums import EventKind
-from azents.core.model_pricing import ModelPricing
+from azents.core.model_pricing import CapturedModelPricing
 from azents.core.type_guards import is_string_object_dict
 from azents.engine.events.generated_files import PendingGeneratedFileOutput
 from azents.engine.events.model_usage_pricing import apply_model_usage_pricing
@@ -92,7 +92,7 @@ class PydanticAIOutputNormalizer:
         *,
         provider: str,
         model: str,
-        pricing: ModelPricing | None,
+        pricing: CapturedModelPricing | None,
         operation: ModelStreamCallKind,
         integration: str | None,
     ) -> None:

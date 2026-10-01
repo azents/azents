@@ -316,6 +316,9 @@ class TestEnsureRuntimeTokens:
         assert isinstance(result, Success)
         assert isinstance(result.value.secrets, KimiOAuthSecrets)
         assert result.value.secrets.access_token == "forced-access-token"
+        assert result.value.catalog_configuration_version == (
+            integration.catalog_configuration_version
+        )
 
     async def test_refresh_success_preserves_concurrent_reconnect(
         self, rdb_session: AsyncSession, monkeypatch: pytest.MonkeyPatch

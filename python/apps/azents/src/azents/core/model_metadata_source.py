@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import datetime
 import hashlib
 import json
@@ -28,6 +29,8 @@ from genai_prices.types import (
     TimeOfDateConstraint,
 )
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from azents.core.enums import LLMProvider
 
 MODEL_METADATA_SOURCE_SCHEMA_VERSION = "1"
 
@@ -264,6 +267,69 @@ class ModelMetadataSourcePayload(BaseModel):
             providers=[_decode_provider(provider) for provider in self.providers],
             from_auto_update=False,
         )
+
+
+@dataclasses.dataclass(frozen=True)
+class SourceModelMatch:
+    """One semantic provider/model match in a captured canonical source."""
+
+    provider: SourceProviderRecord
+    model: SourceModelRecord
+
+
+_SEMANTIC_SOURCE_PROVIDER_IDS: dict[LLMProvider, str] = {
+    LLMProvider.OPENAI: "openai",
+    LLMProvider.CHATGPT_OAUTH: "openai",
+    LLMProvider.ANTHROPIC: "anthropic",
+    LLMProvider.GOOGLE_GEMINI: "google",
+    LLMProvider.GOOGLE_VERTEX_AI: "google",
+    LLMProvider.AWS_BEDROCK: "aws",
+    LLMProvider.XAI: "x-ai",
+    LLMProvider.XAI_OAUTH: "x-ai",
+    LLMProvider.KIMI_OAUTH: "moonshotai",
+    LLMProvider.OPENROUTER: "openrouter",
+}
+
+
+def lookup_source_model(
+    payload: ModelMetadataSourcePayload,
+    *,
+    provider: LLMProvider,
+    model_identifier: str,
+) -> SourceModelMatch | None:
+    """Match one exact semantic selection through persisted source rules."""
+    source_provider_id = _SEMANTIC_SOURCE_PROVIDER_IDS[provider]
+    if not any(candidate.id == source_provider_id for candidate in payload.providers):
+        return None
+    decoded_providers = [
+        (source_provider, _decode_provider(source_provider))
+        for source_provider in payload.providers
+    ]
+    snapshot = DataSnapshot(
+        providers=[provider for _, provider in decoded_providers],
+        from_auto_update=False,
+    )
+    try:
+        _, matched = snapshot.find_provider_model(
+            model_identifier,
+            provider=None,
+            provider_id=source_provider_id,
+            provider_api_url=None,
+        )
+    except LookupError:
+        return None
+    for source_provider, decoded_provider in decoded_providers:
+        for source_model, decoded_model in zip(
+            source_provider.models,
+            decoded_provider.models,
+            strict=True,
+        ):
+            if decoded_model is matched:
+                return SourceModelMatch(
+                    provider=source_provider,
+                    model=source_model,
+                )
+    raise RuntimeError("Matched source model is missing from canonical payload.")
 
 
 def encode_data_snapshot(snapshot: DataSnapshot) -> ModelMetadataSourcePayload:

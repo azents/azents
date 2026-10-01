@@ -1,4 +1,4 @@
-"""Operation-local reads of the validated retained-source DB authority."""
+"""Operation-local reads of the validated generic model metadata authority."""
 
 import dataclasses
 from collections.abc import Sequence
@@ -8,22 +8,19 @@ from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import LLMProvider
-from azents.core.model_source_metadata import (
-    SourceModelMetadata,
-    lookup_model_source_metadata,
-    source_max_input_tokens,
-)
+from azents.core.model_metadata_source import SourceModelMatch, lookup_source_model
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
-from azents.repos.llm_catalog import LiteLLMSourceSnapshotRepository
-from azents.repos.llm_catalog.data import LiteLLMSourceSnapshot
+from azents.repos.model_metadata_source import ModelMetadataSourceRepository
+from azents.repos.model_metadata_source_data import ModelMetadataSourceSnapshot
+from azents.services.model_metadata_source import GENAI_PRICES_SOURCE_KEY
 
 
 @dataclasses.dataclass(frozen=True)
 class CapturedContextSource:
     """One captured context authority, including an explicitly absent source."""
 
-    snapshot: LiteLLMSourceSnapshot | None
+    snapshot: ModelMetadataSourceSnapshot | None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -34,72 +31,52 @@ class ModelMetadataService:
         SessionManager[AsyncSession], Depends(get_session_manager)
     ]
     source_snapshot_repository: Annotated[
-        LiteLLMSourceSnapshotRepository, Depends(LiteLLMSourceSnapshotRepository)
+        ModelMetadataSourceRepository, Depends(ModelMetadataSourceRepository)
     ]
 
-    async def capture(self) -> LiteLLMSourceSnapshot | None:
-        """Capture one validated source snapshot for a read or operation.
-
-        :returns: current validated source including ID/hash/payload, or no source
-        """
+    async def capture(self) -> ModelMetadataSourceSnapshot | None:
+        """Capture the explicitly selected generic source snapshot."""
         async with self.session_manager() as session:
-            return await self.source_snapshot_repository.get_latest_authoritative(
+            return await self.source_snapshot_repository.get_current(
                 session,
-                source_key="litellm_model_cost",
+                source_key=GENAI_PRICES_SOURCE_KEY,
             )
 
     async def capture_for_context(
         self, *, capability_maximums: Sequence[int | None]
-    ) -> LiteLLMSourceSnapshot | None:
-        """Read fallback metadata only when a saved maximum needs supplementation.
-
-        :param capability_maximums: maxima for the models sharing one budget/read
-        :returns: one validated source snapshot or no fallback is needed/available
-        """
+    ) -> ModelMetadataSourceSnapshot | None:
+        """Read fallback metadata only when a saved maximum needs supplementation."""
         if all(maximum is not None for maximum in capability_maximums):
             return None
         return await self.capture()
 
     @staticmethod
     def lookup(
-        snapshot: LiteLLMSourceSnapshot | None,
+        snapshot: ModelMetadataSourceSnapshot | None,
         *,
         provider: LLMProvider,
         model_identifier: str,
-    ) -> SourceModelMetadata | None:
-        """Resolve one semantic model from a previously captured snapshot.
-
-        :param snapshot: operation/read-local validated source snapshot
-        :param provider: saved provider identity
-        :param model_identifier: exact saved raw provider model ID
-        :returns: exact source match or unknown metadata
-        """
+    ) -> SourceModelMatch | None:
+        """Resolve one semantic model from a captured generic source snapshot."""
         if snapshot is None:
             return None
-        return lookup_model_source_metadata(
+        return lookup_source_model(
+            snapshot.payload,
             provider=provider,
             model_identifier=model_identifier,
-            payload=snapshot.payload,
         )
 
     @staticmethod
     def maximum_input_tokens(
-        snapshot: LiteLLMSourceSnapshot | None,
+        snapshot: ModelMetadataSourceSnapshot | None,
         *,
         provider: LLMProvider,
         model_identifier: str,
     ) -> int | None:
-        """Read one positive source maximum from a captured local snapshot.
-
-        :param snapshot: operation/read-local validated source snapshot
-        :param provider: saved provider identity
-        :param model_identifier: exact saved raw provider model ID
-        :returns: positive source input maximum or unknown metadata
-        """
-        return source_max_input_tokens(
-            ModelMetadataService.lookup(
-                snapshot,
-                provider=provider,
-                model_identifier=model_identifier,
-            )
+        """Read one positive source maximum from a captured local snapshot."""
+        match = ModelMetadataService.lookup(
+            snapshot,
+            provider=provider,
+            model_identifier=model_identifier,
         )
+        return match.model.context_window if match is not None else None

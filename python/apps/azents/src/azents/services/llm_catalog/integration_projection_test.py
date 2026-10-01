@@ -1,6 +1,7 @@
 """Integration model catalog projection tests."""
 
 import datetime
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -31,7 +32,6 @@ from azents.core.llm_catalog_sync import IntegrationCatalogSyncTrigger
 from azents.rdb.session import SessionManager
 from azents.repos.chatgpt_oauth_runtime import ChatGPTOAuthRuntimeRepository
 from azents.repos.llm_catalog import (
-    LiteLLMSourceSnapshotRepository,
     LLMCatalogRepository,
 )
 from azents.repos.llm_catalog.data import LiteLLMSourceSnapshot
@@ -40,13 +40,12 @@ from azents.repos.llm_provider_integration.data import (
     LLMProviderIntegrationCreate,
     LLMProviderIntegrationWithSecrets,
 )
+from azents.repos.model_metadata_source import ModelMetadataSourceRepository
 from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace.data import WorkspaceCreate
 from azents.repos.xai_oauth_runtime import XaiOAuthRuntimeRepository
 from azents.services.llm_catalog import (
     IntegrationCatalogProjectionService,
-    LiteLLMSourceLoader,
-    LiteLLMSourceSyncService,
     project_chatgpt_integration_entries,
     project_integration_entries,
     project_kimi_integration_entries,
@@ -57,6 +56,10 @@ from azents.services.model_listing.data import (
     ModelListingOutput,
     ModelListingSummary,
     NormalizedModelCandidate,
+)
+from azents.services.model_metadata_source import (
+    GenAIPricesSourceAdapter,
+    ModelMetadataSourceSyncService,
 )
 
 
@@ -556,7 +559,7 @@ async def test_deterministic_integration_sync_does_not_require_source_authority(
 
     async with httpx.AsyncClient(
         transport=httpx.MockTransport(unexpected_source_request)
-    ) as client:
+    ) as _client:
         result = await IntegrationCatalogProjectionService(
             provider_listing=llm_catalog_service.get_integration_model_listing(),
             session_manager=rdb_session_manager,
@@ -570,13 +573,10 @@ async def test_deterministic_integration_sync_does_not_require_source_authority(
                 integration_repository=integration_repository,
                 session_manager=rdb_session_manager,
             ),
-            source_sync_service=LiteLLMSourceSyncService(
+            source_sync_service=ModelMetadataSourceSyncService(
                 session_manager=rdb_session_manager,
-                snapshot_repository=LiteLLMSourceSnapshotRepository(),
-                source_loader=LiteLLMSourceLoader(
-                    http_client=client,
-                    source_url="https://catalog.example.test/models.json",
-                ),
+                repository=ModelMetadataSourceRepository(),
+                source_adapter=AsyncMock(spec=GenAIPricesSourceAdapter),
             ),
         ).sync_integration_catalog(
             integration_id=integration.id,
@@ -698,7 +698,7 @@ async def test_xai_oauth_sync_refreshes_before_listing(
         list_models,
     )
 
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient() as _client:
         result = await IntegrationCatalogProjectionService(
             provider_listing=llm_catalog_service.get_integration_model_listing(),
             session_manager=rdb_session_manager,
@@ -712,13 +712,10 @@ async def test_xai_oauth_sync_refreshes_before_listing(
                 integration_repository=integration_repository,
                 session_manager=rdb_session_manager,
             ),
-            source_sync_service=LiteLLMSourceSyncService(
+            source_sync_service=ModelMetadataSourceSyncService(
                 session_manager=rdb_session_manager,
-                snapshot_repository=LiteLLMSourceSnapshotRepository(),
-                source_loader=LiteLLMSourceLoader(
-                    http_client=client,
-                    source_url="https://catalog.example.test/models.json",
-                ),
+                repository=ModelMetadataSourceRepository(),
+                source_adapter=AsyncMock(spec=GenAIPricesSourceAdapter),
             ),
         ).sync_integration_catalog(
             integration_id=integration.id,
@@ -813,7 +810,7 @@ async def test_xai_failure_preserves_last_successful_snapshot(
         list_models,
     )
     catalog_repository = LLMCatalogRepository()
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient() as _client:
         service = IntegrationCatalogProjectionService(
             provider_listing=llm_catalog_service.get_integration_model_listing(),
             session_manager=rdb_session_manager,
@@ -827,13 +824,10 @@ async def test_xai_failure_preserves_last_successful_snapshot(
                 integration_repository=integration_repository,
                 session_manager=rdb_session_manager,
             ),
-            source_sync_service=LiteLLMSourceSyncService(
+            source_sync_service=ModelMetadataSourceSyncService(
                 session_manager=rdb_session_manager,
-                snapshot_repository=LiteLLMSourceSnapshotRepository(),
-                source_loader=LiteLLMSourceLoader(
-                    http_client=client,
-                    source_url="https://catalog.example.test/models.json",
-                ),
+                repository=ModelMetadataSourceRepository(),
+                source_adapter=AsyncMock(spec=GenAIPricesSourceAdapter),
             ),
         )
         first = await service.sync_integration_catalog(

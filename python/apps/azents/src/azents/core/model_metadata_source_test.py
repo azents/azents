@@ -20,11 +20,13 @@ from genai_prices.types import (
 )
 from pydantic import ValidationError
 
+from azents.core.enums import LLMProvider
 from azents.core.model_metadata_source import (
     ModelMetadataSourcePayload,
     SourcePriceTier,
     SourceTieredPrice,
     encode_data_snapshot,
+    lookup_source_model,
 )
 
 
@@ -163,6 +165,21 @@ def test_installed_snapshot_provider_round_trips() -> None:
     assert provider.id == "openai"
     assert model.id == "chatgpt-4o-latest"
     assert model.context_window == 128_000
+
+
+def test_persisted_lookup_preserves_fallback_provider_matching() -> None:
+    """A hosting provider can resolve a model owned by its fallback provider."""
+    payload = encode_data_snapshot(get_snapshot())
+
+    match = lookup_source_model(
+        payload,
+        provider=LLMProvider.GOOGLE_VERTEX_AI,
+        model_identifier="claude-2",
+    )
+
+    assert match is not None
+    assert match.provider.id == "anthropic"
+    assert match.model.id == "claude-2"
 
 
 def test_tier_thresholds_must_be_unique_and_ordered() -> None:
