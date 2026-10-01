@@ -18,7 +18,8 @@ from azents.consts import PROJECT_ROOT
 
 _SHADOW_REVISION = "91dd4bb71ef6"
 _CLEANUP_REVISION = "d29225579621"
-_HEAD_REVISION = "af654664e6b6"
+_NAMESPACE_REVISION = "af654664e6b6"
+_HEAD_REVISION = "a0dac2fe3ca2"
 
 
 @dataclass(frozen=True)
@@ -194,7 +195,10 @@ def test_fresh_upgrade_has_only_generic_source_schema(
     assert scripts.get_heads() == [_HEAD_REVISION]
     head = scripts.get_revision(_HEAD_REVISION)
     assert head is not None
-    assert head.down_revision == _CLEANUP_REVISION
+    assert head.down_revision == _NAMESPACE_REVISION
+    namespace = scripts.get_revision(_NAMESPACE_REVISION)
+    assert namespace is not None
+    assert namespace.down_revision == _CLEANUP_REVISION
     command.upgrade(migration_database.config, "head")
     _assert_revision(migration_database.engine, _HEAD_REVISION)
     _assert_cleanup_schema(migration_database.engine)
