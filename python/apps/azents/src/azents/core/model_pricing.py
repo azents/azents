@@ -576,6 +576,12 @@ def _has_required_genai_prices(
         required.add("input_mtok")
     if usage.completion_tokens > 0:
         required.add("output_mtok")
+    elif (
+        not usage.completion_tokens_include_reasoning
+        and (usage.reasoning_tokens or 0) > 0
+        and not {"output_mtok", "output_reasoning_mtok"} & price_fields
+    ):
+        return False
     if (usage.cached_input_tokens or 0) > 0:
         required.add("cache_read_mtok")
     if (

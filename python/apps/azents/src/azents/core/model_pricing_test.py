@@ -18,6 +18,7 @@ from azents.core.model_metadata_source import (
     SourceScalarPrice,
     SourceStartDatePriceConstraint,
     SourceTieredPrice,
+    SourceTimeOfDayPriceConstraint,
     encode_data_snapshot,
     lookup_source_model,
 )
@@ -306,6 +307,93 @@ def test_genai_prices_rejects_inconsistent_cache_ttl_partition() -> None:
 
     assert result.cost_usd is None
     assert result.unavailable_reason is ModelPricingUnavailableReason.INVALID_USAGE
+
+
+def test_genai_prices_reasoning_exclusive_usage_requires_output_coverage() -> None:
+    """Reasoning outside the completion total cannot disappear from the estimate."""
+    result = estimate_model_cost(
+        pricing=_genai_pricing(
+            [
+                SourcePriceSet(
+                    constraint=None,
+                    prices={
+                        "input_mtok": SourceScalarPrice(value=Decimal("1")),
+                    },
+                )
+            ]
+        ),
+        usage=dataclasses.replace(
+            _usage(),
+            completion_tokens=0,
+            cached_input_tokens=None,
+            cache_write_input_tokens=None,
+            reasoning_tokens=5,
+            completion_tokens_include_reasoning=False,
+        ),
+        billing=_billing(),
+    )
+
+    assert result.cost_usd is None
+    assert result.unavailable_reason is ModelPricingUnavailableReason.MISSING_PRICE
+
+
+@pytest.mark.parametrize(
+    ("start_time", "end_time", "hour", "expected"),
+    [
+        (datetime.time(1), datetime.time(5), 3, 0.00002),
+        (datetime.time(1), datetime.time(5), 12, 0.00001),
+        (datetime.time(22), datetime.time(2), 23, 0.00002),
+        (datetime.time(22), datetime.time(2), 12, 0.00001),
+    ],
+)
+def test_genai_prices_time_of_day_rules_match_normal_and_overnight_windows(
+    start_time: datetime.time,
+    end_time: datetime.time,
+    hour: int,
+    expected: float,
+) -> None:
+    """UTC time conditions retain genai-prices normal and wraparound semantics."""
+    result = estimate_model_cost(
+        pricing=_genai_pricing(
+            [
+                SourcePriceSet(
+                    constraint=None,
+                    prices={
+                        "input_mtok": SourceScalarPrice(value=Decimal("1")),
+                        "output_mtok": SourceScalarPrice(value=Decimal("0")),
+                    },
+                ),
+                SourcePriceSet(
+                    constraint=SourceTimeOfDayPriceConstraint(
+                        start_time=start_time,
+                        end_time=end_time,
+                    ),
+                    prices={
+                        "input_mtok": SourceScalarPrice(value=Decimal("2")),
+                        "output_mtok": SourceScalarPrice(value=Decimal("0")),
+                    },
+                ),
+            ],
+            request_timestamp=datetime.datetime(
+                2026,
+                10,
+                1,
+                hour,
+                tzinfo=datetime.UTC,
+            ),
+        ),
+        usage=dataclasses.replace(
+            _usage(),
+            completion_tokens=0,
+            cached_input_tokens=None,
+            cache_write_input_tokens=None,
+            reasoning_tokens=None,
+        ),
+        billing=_billing(),
+    )
+
+    assert result.cost_usd == pytest.approx(expected)
+    assert result.unavailable_reason is None
 
 
 def test_genai_prices_conditional_and_tiered_rules_use_capture_time() -> None:
