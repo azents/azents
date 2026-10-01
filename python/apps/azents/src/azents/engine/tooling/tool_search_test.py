@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.engine_tool_state import ToolWorkingSetState
 from azents.core.enums import LLMProvider
 from azents.engine.run.tool_budget import (
     ResolvedToolDeclarationBudget,
@@ -22,8 +23,6 @@ from azents.engine.tooling.tool_search import (
     DeferredToolSearchIndex,
     ToolCatalogSource,
     ToolExposure,
-    ToolWorkingSetState,
-    ToolWorkingSetStore,
     make_tool_search_tool,
     project_tool_catalog,
 )
@@ -33,6 +32,7 @@ from azents.repos.toolkit_state import (
     ToolkitStateRepository,
 )
 from azents.repos.toolkit_state.data import ToolkitStateRecord, ToolkitStateUpsert
+from azents.repos.toolkit_state.engine import ToolWorkingSetStore
 from azents.testing.types import is_string_object_dict
 
 

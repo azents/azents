@@ -3,14 +3,13 @@
 import json
 from unittest.mock import AsyncMock
 
+from azents.core.engine_tool_state import TodoItem, TodoState
 from azents.core.tools import TurnContext
 from azents.engine.hooks.types import (
     CompactionSummaryHookContext,
     CompactionSummaryReplace,
 )
 from azents.engine.tools.todo import (
-    TodoItem,
-    TodoState,
     TodoToolkit,
     TodoUpdateItem,
     UpdateTodoInput,
@@ -176,7 +175,7 @@ async def test_todo_toolkit_exposes_unprefixed_update_tool() -> None:
 async def test_update_todo_returns_compact_acknowledgement() -> None:
     """update_todo stores and publishes state without echoing JSON."""
     store = AsyncMock()
-    store.update.return_value = TodoState(
+    store.replace.return_value = TodoState(
         items=[TodoItem(content="Current work", status="in_progress")]
     )
     publish_changed = AsyncMock()

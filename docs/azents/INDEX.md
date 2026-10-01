@@ -16,7 +16,7 @@ Design documents are accumulated records and are not listed individually in this
 | Title | Domain | Owner | Last Verified At | Spec Version |
 |---|---|---|---|---|
 | [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-10-01 | 85 |
-| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-09-30 | 175 |
+| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-10-01 | 176 |
 | [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-09-30 | 81 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-09-30 | 16 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-09-26 | 8 |
@@ -24,7 +24,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Runtime Provider](spec/domain/runtime-provider.md) | runtime-provider | - | 2026-09-30 | 34 |
 | [Scheduled Task Domain Spec](spec/domain/scheduled-task.md) | scheduled-task | - | 2026-10-01 | 13 |
 | [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-09-30 | 7 |
-| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-09-30 | 122 |
+| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-10-01 | 123 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-09-16 | 22 |
 | [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-10-01 | 90 |
 
@@ -32,12 +32,12 @@ Design documents are accumulated records and are not listed individually in this
 
 | Title | Owner | Last Verified At | Spec Version |
 |---|---|---|---|
-| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-10-01 | 190 |
+| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-10-01 | 191 |
 | [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-10-01 | 90 |
 | [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-09-30 | 40 |
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-09-15 | 52 |
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-09-30 | 28 |
-| [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-09-30 | 42 |
+| [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-10-01 | 43 |
 | [External Channel Authorization](spec/flow/external-channel-authorization.md) | @Hardtack | 2026-09-29 | 27 |
 | [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-10-01 | 63 |
 | [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-10-01 | 45 |

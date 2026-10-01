@@ -13,6 +13,7 @@ code_paths:
   - python/apps/azents/src/azents/core/goal.py
   - python/apps/azents/src/azents/core/skill_projection.py
   - python/apps/azents/src/azents/core/toolkit_state.py
+  - python/apps/azents/src/azents/core/engine_tool_state.py
   - python/apps/azents/src/azents/repos/toolkit/**
   - python/apps/azents/src/azents/repos/toolkit_operations/**
   - python/apps/azents/src/azents/repos/github_user_installation/**
@@ -72,8 +73,8 @@ code_paths:
   - typescript/apps/azents-web/src/trpc/routers/toolkit.ts
 api_routes:
   - /toolkit/v1
-last_verified_at: 2026-09-30
-spec_version: 122
+last_verified_at: 2026-10-01
+spec_version: 123
 ---
 
 # Toolkit
@@ -121,6 +122,11 @@ through owner-bound database scopes. External discovery, Runtime/file reads,
 provider calls, and broker publication occur after those scopes close. A stale
 owner rejection terminates hook/tool processing instead of becoming an allowed
 hook result, failed Tool payload, or background refresh retry.
+
+Tool Search working-set, AGENTS.md/Claude Rules appendix dedupe, and Todo payload
+models are pure core state. Their ordinary reads and mutations are completed
+repository operations; the successful compaction reset uses the same repository
+mutation inside the compactor's atomic database composition.
 
 All currently implemented AgentSessions execute as Team Sessions. Generic Toolkit, resolve, run, and
 turn contexts contain canonical Workspace, Agent, Session, Run, and resource authority, but no User
@@ -1042,6 +1048,9 @@ without requiring a separate Toolkit setup row.
 
 ## Changelog
 
+- **2026-10-01** (spec_version 123) — Moved Engine Toolkit persisted payloads to
+  pure core models and their Tool Search, appendix-dedupe, and Todo transaction
+  lifetimes to repository-owned operations without changing identities or behavior.
 - **2026-09-30** (spec_version 122) — Mapped provider-specific tool dialect selection to the
   current Pydantic AI model-message boundary while retaining native OpenAI custom tools.
 - **2026-09-30** (spec_version 121) — Promoted builtin file consumers to exact-attempt

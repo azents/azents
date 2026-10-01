@@ -180,7 +180,6 @@ from azents.engine.run.types import (
 )
 from azents.engine.tooling.tool_search import (
     DeferredToolSearchIndex,
-    ToolWorkingSetStore,
     make_tool_search_tool,
     project_tool_catalog,
 )
@@ -213,6 +212,7 @@ from azents.repos.llm_provider_integration.deps import (
 )
 from azents.repos.model_file_pin import ModelFilePinRepository
 from azents.repos.session_execution.ownership import OwnerBoundSessionManager
+from azents.repos.toolkit_state.engine import ToolWorkingSetStore
 from azents.repos.xai_oauth_runtime import XaiOAuthRuntimeRepository
 from azents.services.artifact import ArtifactService
 from azents.services.chatgpt_oauth.data import (

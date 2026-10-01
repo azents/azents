@@ -9,6 +9,7 @@ code_paths:
   - python/apps/azents/src/azents/services/chat/**
   - python/apps/azents/src/azents/core/config.py
   - python/apps/azents/src/azents/core/model_availability.py
+  - python/apps/azents/src/azents/core/engine_tool_state.py
   - python/apps/azents/src/azents/services/agent_runtime/**
   - python/apps/azents/src/azents/engine/run/contracts.py
   - python/apps/azents/src/azents/engine/events/**
@@ -139,8 +140,8 @@ api_routes:
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ticket
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ws
-last_verified_at: 2026-09-30
-spec_version: 175
+last_verified_at: 2026-10-01
+spec_version: 176
 ---
 
 # Conversation & Events
@@ -1429,6 +1430,9 @@ presentations.
 
 ## 13. Changelog
 
+- **2026-10-01** — v176. Moved Todo persisted payloads and completed state
+  transactions to core/repository ownership while preserving Chat snapshots and
+  `todo_state_changed` publication behavior.
 - **2026-09-30** — v175. Documented truthful Pydantic AI model-message native identity and
   canonical fallback for historical adapters while retaining native OpenAI and exact replay authority.
 - **2026-09-29** — v174. Added registry-derived exclusive Normal/Fast/Ultrafast

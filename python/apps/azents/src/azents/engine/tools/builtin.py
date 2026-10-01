@@ -65,7 +65,6 @@ from azents.engine.tools.apply_patch import RuntimePatchTarget, make_apply_patch
 from azents.engine.tools.builtin_agents import (
     AgentsAppendixDedupeStateStore,
     AgentsAppendixMixin,
-    ToolkitAgentsAppendixDedupeStateStore,
 )
 from azents.engine.tools.delete_file import make_delete_file_tool
 from azents.engine.tools.edit import RuntimeEditTarget, make_edit_tool
@@ -118,6 +117,9 @@ from azents.repos.memory.data import MemorySummary
 from azents.repos.session_execution.ownership import OwnerBoundSessionManager
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 from azents.repos.session_workspace_project.data import SessionWorkspaceProject
+from azents.repos.toolkit_state.engine import (
+    ToolkitAgentsAppendixDedupeStateStore,
+)
 from azents.runtime.transfer.runtime_image_read import RuntimeImageReadService
 from azents.runtime.transfer.runtime_to_provider import (
     RuntimeToProviderDeliveryExecutor,

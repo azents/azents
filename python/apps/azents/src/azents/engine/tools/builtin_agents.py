@@ -5,17 +5,11 @@ import json
 import logging
 import posixpath
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from pathlib import PurePosixPath
 from typing import NamedTuple, Protocol
 
-from pydantic import Field
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from azents.core.toolkit_state import (
-    ToolkitStateIdentity,
-    ToolkitStateModel,
-)
+from azents.core.engine_tool_state import AgentsAppendixDedupeState
 from azents.core.tools import ToolCallHookContext, ToolCallHookOutcome
 from azents.engine.hooks.types import (
     AfterToolCallHookContext,
@@ -25,30 +19,14 @@ from azents.engine.hooks.types import (
     ToolOutputReplace,
 )
 from azents.engine.tools.runtime_instruction_context import RuntimeInstructionContext
-from azents.rdb.session import SessionManager
-from azents.repos.session_execution.ownership import OwnerBoundSessionManager
 from azents.repos.session_workspace_project.data import SessionWorkspaceProject
-from azents.repos.toolkit_state.store import (
-    ToolkitStateHandle,
-    ToolkitStateStore,
-)
 from azents.services.file_storage import FileStorage
-from azents.services.session_resource_authority import SessionExecutionOwner
 
 logger = logging.getLogger(__name__)
 
 AGENTS_FILENAME = "AGENTS.md"
 MAX_AGENTS_CHARACTERS = 64 * 1024
-AGENTS_TOOLKIT_NAMESPACE = "builtin"
-AGENTS_APPENDIX_DEDUPE_TOOLKIT_STATE_NAME = "agents_md_appendix_dedupe"
 AGENTS_MISSING_CACHE_TTL_SECONDS = 5.0
-
-
-class AgentsAppendixDedupeState(ToolkitStateModel):
-    """AGENTS.md read-result appendix dedupe Toolkit State payload."""
-
-    schema_version: int = 1
-    appended_paths: list[str] = Field(default_factory=list)
 
 
 class AgentsAppendixDedupeStateStore(Protocol):
@@ -60,85 +38,14 @@ class AgentsAppendixDedupeStateStore(Protocol):
         """Fetch AGENTS.md appendix dedupe state."""
         ...
 
-    async def update_appendix_dedupe(
+    async def replace_appendix_dedupe(
         self,
         agent_id: str,
         session_id: str,
-        mutator: Callable[[AgentsAppendixDedupeState], AgentsAppendixDedupeState],
+        appended_paths: Sequence[str],
     ) -> None:
-        """Retry-apply mutator to latest appendix dedupe state."""
+        """Replace persistent appendix dedupe paths."""
         ...
-
-
-class ToolkitAgentsAppendixDedupeStateStore:
-    """AGENTS.md appendix dedupe store based on Toolkit State."""
-
-    def __init__(
-        self,
-        *,
-        session_manager: SessionManager[AsyncSession],
-    ) -> None:
-        """Create AGENTS.md appendix dedupe store."""
-        self.session_manager = session_manager
-
-    def for_execution(
-        self,
-        owner: SessionExecutionOwner,
-    ) -> "ToolkitAgentsAppendixDedupeStateStore":
-        """Bind dedupe state to one durable Session owner."""
-        return ToolkitAgentsAppendixDedupeStateStore(
-            session_manager=OwnerBoundSessionManager(
-                session_manager=self.session_manager,
-                session_id=owner.session_id,
-                owner_generation=owner.owner_generation,
-            )
-        )
-
-    async def load_appendix_dedupe(
-        self, agent_id: str, session_id: str
-    ) -> AgentsAppendixDedupeState:
-        """Fetch AGENTS.md appendix dedupe state."""
-        async with self.session_manager() as session:
-            handle = self._make_appendix_dedupe_handle(session, agent_id, session_id)
-            if handle is None:
-                return AgentsAppendixDedupeState()
-            return await handle.load(default_factory=AgentsAppendixDedupeState)
-
-    async def update_appendix_dedupe(
-        self,
-        agent_id: str,
-        session_id: str,
-        mutator: Callable[[AgentsAppendixDedupeState], AgentsAppendixDedupeState],
-    ) -> None:
-        """Retry-apply mutator to latest appendix dedupe state."""
-        async with self.session_manager() as session:
-            handle = self._make_appendix_dedupe_handle(session, agent_id, session_id)
-            if handle is None:
-                return
-            await handle.update(
-                default_factory=AgentsAppendixDedupeState,
-                mutator=mutator,
-            )
-
-    def _make_appendix_dedupe_handle(
-        self,
-        session: AsyncSession,
-        agent_id: str,
-        session_id: str,
-    ) -> ToolkitStateHandle[AgentsAppendixDedupeState] | None:
-        """Create AGENTS.md appendix dedupe handle for agent/session identity."""
-        if not agent_id or not session_id:
-            return None
-        identity = ToolkitStateIdentity(
-            agent_id=agent_id,
-            session_id=session_id,
-            toolkit_namespace=AGENTS_TOOLKIT_NAMESPACE,
-            state_name=AGENTS_APPENDIX_DEDUPE_TOOLKIT_STATE_NAME,
-        )
-        return ToolkitStateStore(session=session).handle(
-            identity,
-            AgentsAppendixDedupeState,
-        )
 
 
 class _ToolPathRef(NamedTuple):
@@ -288,9 +195,7 @@ class AgentsAppendixMixin:
         del context
         async with self._agents_appendix_lock:
             self._agents_missing_cache.clear()
-            await self._update_appendix_dedupe_state(
-                lambda state: state.model_copy(update={"appended_paths": []})
-            )
+            await self._replace_appendix_dedupe_state([])
 
     async def append_agents_after_read(
         self,
@@ -353,11 +258,7 @@ class AgentsAppendixMixin:
         files = read_result.files
         if files:
             appended_paths = sorted(already_appended | {path for path, _ in files})
-            await self._update_appendix_dedupe_state(
-                lambda state: state.model_copy(
-                    update={"appended_paths": appended_paths}
-                )
-            )
+            await self._replace_appendix_dedupe_state(appended_paths)
         logger.info(
             "Processed AGENTS.md read appendix",
             extra={
@@ -485,15 +386,15 @@ class AgentsAppendixMixin:
             self._runtime_session_id,
         )
 
-    async def _update_appendix_dedupe_state(
+    async def _replace_appendix_dedupe_state(
         self,
-        mutator: Callable[[AgentsAppendixDedupeState], AgentsAppendixDedupeState],
+        appended_paths: Sequence[str],
     ) -> None:
-        """Retry-update persistent appendix dedupe state."""
-        await self.agents_store.update_appendix_dedupe(
+        """Replace persistent appendix dedupe paths."""
+        await self.agents_store.replace_appendix_dedupe(
             self._runtime_agent_id,
             self._runtime_session_id,
-            mutator,
+            appended_paths,
         )
 
 

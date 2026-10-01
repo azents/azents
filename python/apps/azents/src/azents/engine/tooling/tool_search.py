@@ -7,31 +7,19 @@ import json
 import math
 import re
 from collections import Counter
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 
-from pydantic import BaseModel, Field, field_validator
-from sqlalchemy.ext.asyncio import AsyncSession
+from pydantic import BaseModel, Field
 
-from azents.core.toolkit_state import (
-    ToolkitStateIdentity,
-    ToolkitStateModel,
-)
+from azents.core.engine_tool_state import ToolWorkingSetState
 from azents.engine.run.tool_budget import (
     ResolvedToolDeclarationBudget,
     ensure_pinned_direct_tools_fit,
 )
 from azents.engine.run.types import FunctionTool
 from azents.engine.tooling.make_tool import make_tool
-from azents.rdb.session import SessionManager
-from azents.repos.toolkit_state import ToolkitStateRepository
-from azents.repos.toolkit_state.store import (
-    ToolkitStateHandle,
-    ToolkitStateStore,
-)
+from azents.repos.toolkit_state.engine import ToolWorkingSetStore
 
-TOOL_SEARCH_TOOLKIT_NAMESPACE = "tool_search"
-TOOL_SEARCH_WORKING_SET_STATE_NAME = "working_set"
-TOOL_SEARCH_STATE_SCHEMA_VERSION = 1
 TOOL_SEARCH_DEFAULT_RESULT_LIMIT = 5
 TOOL_SEARCH_MAX_RESULT_LIMIT = 10
 
@@ -180,155 +168,6 @@ class DeferredToolSearchIndex:
         return score
 
 
-class ToolWorkingSetState(ToolkitStateModel):
-    """Session-scoped deferred-tool recency state, most recent first."""
-
-    schema_version: int = TOOL_SEARCH_STATE_SCHEMA_VERSION
-    tool_names: list[str] = Field(default_factory=list)
-
-    @field_validator("tool_names")
-    @classmethod
-    def validate_tool_names(cls, value: list[str]) -> list[str]:
-        """Reject blanks and normalize duplicate names to first occurrence."""
-        normalized: list[str] = []
-        seen: set[str] = set()
-        for name in value:
-            if not name.strip():
-                raise ValueError("Tool working-set names cannot be blank")
-            if name not in seen:
-                normalized.append(name)
-                seen.add(name)
-        return normalized
-
-
-class ToolWorkingSetStore:
-    """Persist session Tool Search recency through Toolkit State."""
-
-    def __init__(
-        self,
-        *,
-        session_manager: SessionManager[AsyncSession],
-        repository: ToolkitStateRepository | None = None,
-    ) -> None:
-        """Create one session-bound working-set store."""
-        self.session_manager = session_manager
-        self.repository = repository
-
-    def with_session_manager(
-        self, session_manager: SessionManager[AsyncSession]
-    ) -> "ToolWorkingSetStore":
-        """Bind working-set mutations to one execution's database authority."""
-        return ToolWorkingSetStore(
-            session_manager=session_manager,
-            repository=self.repository,
-        )
-
-    async def load(self, agent_id: str, session_id: str) -> ToolWorkingSetState:
-        """Load the current session working set."""
-        async with self.session_manager() as session:
-            handle = self._handle(session, agent_id, session_id)
-            return await handle.load(default_factory=ToolWorkingSetState)
-
-    async def activate(
-        self,
-        agent_id: str,
-        session_id: str,
-        tool_names: Sequence[str],
-    ) -> ToolWorkingSetState:
-        """Move ranked search results to the recency front in supplied order."""
-        activated = _unique_tool_names(tool_names)
-        return await self._update(
-            agent_id,
-            session_id,
-            lambda current: ToolWorkingSetState(
-                tool_names=[
-                    *activated,
-                    *(name for name in current.tool_names if name not in activated),
-                ]
-            ),
-        )
-
-    async def touch(
-        self,
-        agent_id: str,
-        session_id: str,
-        tool_name: str,
-    ) -> ToolWorkingSetState:
-        """Move an invoked deferred tool to the most-recent position."""
-        return await self.activate(agent_id, session_id, [tool_name])
-
-    async def clear_in_session(
-        self,
-        session: AsyncSession,
-        agent_id: str,
-        session_id: str,
-    ) -> ToolWorkingSetState:
-        """Clear working-set recency within a caller-owned transaction."""
-        return await self._update_in_session(
-            session,
-            agent_id,
-            session_id,
-            lambda _: ToolWorkingSetState(),
-        )
-
-    async def _update(
-        self,
-        agent_id: str,
-        session_id: str,
-        mutator: Callable[[ToolWorkingSetState], ToolWorkingSetState],
-    ) -> ToolWorkingSetState:
-        """Update recency state using the shared optimistic-lock retry."""
-        async with self.session_manager() as session:
-            return await self._update_in_session(
-                session,
-                agent_id,
-                session_id,
-                mutator,
-            )
-
-    async def _update_in_session(
-        self,
-        session: AsyncSession,
-        agent_id: str,
-        session_id: str,
-        mutator: Callable[[ToolWorkingSetState], ToolWorkingSetState],
-    ) -> ToolWorkingSetState:
-        """Update recency state inside a caller-owned transaction."""
-        handle = self._handle(session, agent_id, session_id)
-        updated: ToolWorkingSetState | None = None
-
-        def capture(current: ToolWorkingSetState) -> ToolWorkingSetState:
-            nonlocal updated
-            updated = mutator(current)
-            return updated
-
-        await handle.update(
-            default_factory=ToolWorkingSetState,
-            mutator=capture,
-        )
-        if updated is None:
-            raise RuntimeError("Tool working-set update did not run")
-        return updated
-
-    def _handle(
-        self,
-        session: AsyncSession,
-        agent_id: str,
-        session_id: str,
-    ) -> ToolkitStateHandle[ToolWorkingSetState]:
-        """Create the typed Toolkit State handle for one AgentSession."""
-        identity = ToolkitStateIdentity(
-            agent_id=agent_id,
-            session_id=session_id,
-            toolkit_namespace=TOOL_SEARCH_TOOLKIT_NAMESPACE,
-            state_name=TOOL_SEARCH_WORKING_SET_STATE_NAME,
-        )
-        return ToolkitStateStore(
-            session=session,
-            repository=self.repository,
-        ).handle(identity, ToolWorkingSetState)
-
-
 class ToolSearchInput(BaseModel):
     """Tool Search input schema."""
 
@@ -392,7 +231,7 @@ def project_tool_catalog(
 def make_tool_search_tool(
     *,
     index: DeferredToolSearchIndex,
-    store: ToolWorkingSetStore,
+    store: "ToolWorkingSetStore",
     agent_id: str,
     session_id: str,
     activation_capacity: int | None,
@@ -534,15 +373,3 @@ def _deferred_catalog_hash(entries: Sequence[CatalogTool]) -> str:
 
 def _tokenize(value: str) -> list[str]:
     return _TOKEN_PATTERN.findall(value.lower())
-
-
-def _unique_tool_names(tool_names: Sequence[str]) -> list[str]:
-    unique: list[str] = []
-    seen: set[str] = set()
-    for name in tool_names:
-        if not name.strip():
-            raise ValueError("Tool working-set names cannot be blank")
-        if name not in seen:
-            unique.append(name)
-            seen.add(name)
-    return unique

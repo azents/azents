@@ -3,8 +3,8 @@
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.engine_tool_state import TodoItem, TodoState
 from azents.core.enums import AgentSessionProductMode
-from azents.engine.tools.todo import TodoItem, TodoState, TodoStateStore
 from azents.rdb.session import SessionManager
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSessionCreate
@@ -12,6 +12,7 @@ from azents.repos.agent_session.repository_test import _create_agent, _create_wo
 from azents.repos.session_execution import (
     CanonicalExecutionOwnerGenerationStaleError,
 )
+from azents.repos.toolkit_state.engine import TodoStateStore
 from azents.services.session_resource_authority import SessionExecutionOwner
 
 
@@ -41,12 +42,10 @@ async def test_toolkit_state_store_rejects_superseded_execution_owner(
             owner_generation=generation,
         )
     )
-    await store.update(
+    await store.replace(
         agent_id,
         created.id,
-        lambda _current: TodoState(
-            items=[TodoItem(content="current", status="in_progress")]
-        ),
+        TodoState(items=[TodoItem(content="current", status="in_progress")]),
     )
 
     async with rdb_session_manager() as session:
@@ -54,12 +53,10 @@ async def test_toolkit_state_store_rejects_superseded_execution_owner(
     assert next_generation == generation + 1
 
     with pytest.raises(CanonicalExecutionOwnerGenerationStaleError):
-        await store.update(
+        await store.replace(
             agent_id,
             created.id,
-            lambda _current: TodoState(
-                items=[TodoItem(content="stale", status="completed")]
-            ),
+            TodoState(items=[TodoItem(content="stale", status="completed")]),
         )
 
     current = await TodoStateStore(session_manager=rdb_session_manager).load(

@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Callable
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import List
 from unittest.mock import AsyncMock, Mock
 
 import pytest
 
+from azents.core.engine_tool_state import ClaudeRulesAppendixDedupeState
 from azents.core.enums import AgentRuntimeCapability
 from azents.core.runtime_capabilities import RuntimeCapabilityResolver
 from azents.core.tools import TurnContext
@@ -23,7 +24,6 @@ from azents.engine.io.attachments import RuntimeAttachment
 from azents.engine.tools.claude_rules import (
     ClaudeRuleFile,
     ClaudeRuleRoot,
-    ClaudeRulesAppendixDedupeState,
     ClaudeRulesToolkit,
     claude_rule_roots_for_path,
     discover_claude_rule_files,
@@ -56,17 +56,29 @@ class _FakeClaudeRulesAppendixDedupeStateStore:
             (agent_id, session_id), ClaudeRulesAppendixDedupeState()
         )
 
-    async def update_appendix_dedupe(
+    async def add_appendix_dedupe_paths(
         self,
         agent_id: str,
         session_id: str,
-        mutator: Callable[
-            [ClaudeRulesAppendixDedupeState], ClaudeRulesAppendixDedupeState
-        ],
+        appended_paths: Sequence[str],
     ) -> None:
-        """Apply appendix dedupe state update."""
+        """Merge appendix dedupe paths."""
         state = await self.load_appendix_dedupe(agent_id, session_id)
-        self.dedupe_states[(agent_id, session_id)] = mutator(state)
+        self.dedupe_states[(agent_id, session_id)] = state.model_copy(
+            update={
+                "appended_paths": sorted(
+                    set(state.appended_paths) | set(appended_paths)
+                )
+            }
+        )
+
+    async def clear_appendix_dedupe(
+        self,
+        agent_id: str,
+        session_id: str,
+    ) -> None:
+        """Clear appendix dedupe paths."""
+        self.dedupe_states[(agent_id, session_id)] = ClaudeRulesAppendixDedupeState()
 
 
 class _FailingListStorage(FakeSharedStorage):

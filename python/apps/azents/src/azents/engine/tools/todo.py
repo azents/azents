@@ -4,12 +4,14 @@ from collections.abc import Awaitable, Callable
 from typing import Literal, Self
 
 from pydantic import BaseModel, Field
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.toolkit_state import (
-    ToolkitStateIdentity,
-    ToolkitStateModel,
+from azents.core.engine_tool_state import (
+    TODO_STATE_SCHEMA_VERSION,
+    TodoItem,
+    TodoState,
+    TodoStatus,
 )
+from azents.core.toolkit_state import ToolkitStateModel
 from azents.core.tools import (
     ResolveContext,
     Toolkit,
@@ -26,23 +28,14 @@ from azents.engine.hooks.types import (
 )
 from azents.engine.run.types import FunctionTool, FunctionToolError
 from azents.engine.tooling.make_tool import make_tool
-from azents.rdb.session import SessionManager
-from azents.repos.session_execution.ownership import OwnerBoundSessionManager
-from azents.repos.toolkit_state.store import (
-    ToolkitStateHandle,
-    ToolkitStateStore,
-)
+from azents.repos.toolkit_state.engine import TodoStateStore
 from azents.services.session_resource_authority import (
     SessionExecutionOwner,
     SessionResourceAuthority,
     accepts_execution_owner,
 )
 
-TODO_TOOLKIT_NAMESPACE = "todo"
-TODO_TOOLKIT_STATE_NAME = "todo"
-TODO_STATE_SCHEMA_VERSION = 1
 TODO_STATUS_VALUES = {"pending", "in_progress", "completed"}
-TodoStatus = Literal["pending", "in_progress", "completed"]
 TodoOperation = Literal["replace", "clear"]
 
 _TODO_PROMPT = """### Todo List
@@ -61,20 +54,6 @@ the user in the chat UI.
 """
 
 
-class TodoItem(BaseModel):
-    """Todo item payload."""
-
-    content: str = Field(min_length=1, max_length=500, description="Todo text")
-    status: TodoStatus = Field(description="Todo status")
-
-
-class TodoState(ToolkitStateModel):
-    """Session-scoped todo list Toolkit State payload."""
-
-    schema_version: int = TODO_STATE_SCHEMA_VERSION
-    items: list[TodoItem] = Field(default_factory=list)
-
-
 class TodoUpdateItem(BaseModel):
     """update_todo tool input item."""
 
@@ -91,86 +70,6 @@ class UpdateTodoInput(ToolkitStateModel):
         default_factory=list,
         description="Full todo list for replace operations",
     )
-
-
-class TodoStateStore:
-    """todo state store based on Toolkit State."""
-
-    def __init__(
-        self,
-        *,
-        session_manager: SessionManager[AsyncSession],
-    ) -> None:
-        """Create todo state store."""
-        self.session_manager = session_manager
-
-    def for_execution(
-        self,
-        owner: SessionExecutionOwner,
-    ) -> "TodoStateStore":
-        """Bind state operations to one durable Session owner."""
-        return TodoStateStore(
-            session_manager=OwnerBoundSessionManager(
-                session_manager=self.session_manager,
-                session_id=owner.session_id,
-                owner_generation=owner.owner_generation,
-            )
-        )
-
-    async def load(self, agent_id: str, session_id: str) -> TodoState:
-        """Fetch session todo state."""
-        async with self.session_manager() as session:
-            return await self.load_in_session(session, agent_id, session_id)
-
-    async def load_in_session(
-        self,
-        session: AsyncSession,
-        agent_id: str,
-        session_id: str,
-    ) -> TodoState:
-        """Fetch session todo state inside the caller's transaction."""
-        handle = await self._make_handle(session, agent_id, session_id)
-        if handle is None:
-            return TodoState()
-        return await handle.load(default_factory=TodoState)
-
-    async def update(
-        self,
-        agent_id: str,
-        session_id: str,
-        mutator: Callable[[TodoState], TodoState],
-    ) -> TodoState:
-        """Update session todo state with optimistic retry."""
-        async with self.session_manager() as session:
-            handle = await self._make_handle(session, agent_id, session_id)
-            if handle is None:
-                return TodoState()
-            saved_state: TodoState | None = None
-
-            def capture(current: TodoState) -> TodoState:
-                nonlocal saved_state
-                saved_state = mutator(current)
-                return saved_state
-
-            await handle.update(default_factory=TodoState, mutator=capture)
-            return saved_state or TodoState()
-
-    async def _make_handle(
-        self,
-        session: AsyncSession,
-        agent_id: str,
-        session_id: str,
-    ) -> ToolkitStateHandle[TodoState] | None:
-        """Create todo Toolkit State handle corresponding to agent/session identity."""
-        if not agent_id or not session_id:
-            return None
-        identity = ToolkitStateIdentity(
-            agent_id=agent_id,
-            session_id=session_id,
-            toolkit_namespace=TODO_TOOLKIT_NAMESPACE,
-            state_name=TODO_TOOLKIT_STATE_NAME,
-        )
-        return ToolkitStateStore(session=session).handle(identity, TodoState)
 
 
 class TodoToolkitConfig(BaseModel):
@@ -320,10 +219,10 @@ def make_update_todo_tool(
         """Update the session todo list shown in the chat UI."""
         if not session_id:
             raise FunctionToolError("Session ID is not available.")
-        updated = await store.update(
+        updated = await store.replace(
             agent_id,
             session_id,
-            lambda current: apply_todo_update(current, args),
+            apply_todo_update(TodoState(), args),
         )
         snapshot = TodoStateSnapshot.from_state(updated)
         if publish_changed is not None:

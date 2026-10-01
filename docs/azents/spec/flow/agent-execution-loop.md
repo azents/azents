@@ -15,6 +15,7 @@ code_paths:
   - python/apps/azents/src/azents/core/goal.py
   - python/apps/azents/src/azents/core/skill_projection.py
   - python/apps/azents/src/azents/core/toolkit_state.py
+  - python/apps/azents/src/azents/core/engine_tool_state.py
   - python/apps/azents/src/azents/core/external_channel_reference.py
   - python/apps/azents/src/azents/engine/client_tools.py
   - python/apps/azents/src/azents/engine/run/contracts.py
@@ -114,7 +115,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
   - typescript/apps/azents-web/messages/*/chat.json
 last_verified_at: 2026-10-01
-spec_version: 190
+spec_version: 191
 ---
 
 # Agent Execution Loop
@@ -1167,6 +1168,10 @@ An unmatched request path is unlimited. Preparation does not invent a global sof
 
 Remaining explicit capacity is filled from the AgentSession's shared deferred working set in most-recent-first order. A smaller model path hides the non-fitting tail without deleting it; a later larger or unlimited path can expose that same state. Tool Search activates only the highest-ranked results that can become visible on the next call under the current explicit deferred capacity and reports when the requested result count was reduced. With no explicit limit, all active currently available deferred names are visible.
 
+Working-set load, activation, invocation touch, and independent clear operations
+complete inside repository-owned transactions. Owner-bound execution uses the
+same persisted identity and optimistic conflict retry behavior.
+
 Successful manual or automatic context compaction atomically replaces the Session's shared Tool Search working set with an empty list while committing the summary and new model-input head. The reset applies even when Tool Search is disabled at that boundary, so later opt-in cannot recover pre-compaction activation. Skipped, failed, cancelled, or stale compaction preserves the existing working set. The next enabled prepared call after a successful reset contains direct tools and `tool_search`, with deferred tools requiring new activation.
 
 Provider-facing client schemas are sorted canonically by final model-visible name after membership is selected. Recency changes membership only and does not reorder an identical visible set. Provider adapters receive the already-projected functions and must not independently truncate or perform LRU selection.
@@ -1607,6 +1612,9 @@ icon.
 
 ## Changelog
 
+- **2026-10-01** (spec_version 191) — Moved Engine Tool Search, appendix-dedupe,
+  and Todo state transactions behind repository-owned completed operations while
+  preserving owner fencing, optimistic retry, and compaction atomicity.
 - **2026-09-30** (spec_version 190) — Documented public Pydantic AI/SDK routes, native
   terminal/progress observation, truthful model-message artifacts and semantic raw-ID dispatch,
   retaining native OpenAI, engine-owned tools/retries/Stop and captured metadata/pricing authority.
