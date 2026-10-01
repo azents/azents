@@ -125,13 +125,6 @@
         "next"
       ],
       "allowedVersions": "<=16.2.11"
-    },
-    {
-      "description": "Pin litellm until the prompt caching regression is resolved upstream",
-      "matchPackageNames": [
-        "litellm"
-      ],
-      "enabled": false
     }
   ],
   "customManagers": [

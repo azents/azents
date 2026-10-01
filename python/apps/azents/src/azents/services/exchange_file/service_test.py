@@ -55,6 +55,7 @@ from azents.repos.exchange_file.operations import (
     ExchangeFileOperationRepository,
 )
 from azents.repos.workspace_user.data import WorkspaceUser
+from azents.services.exchange_file import make_exchange_preview_thumbnail
 from azents.services.session_resource_authority import SessionResourceAuthority
 from azents.testing.model_selection import (
     make_test_model_selection,
@@ -2115,3 +2116,23 @@ async def test_delete_keeps_metadata_when_object_delete_fails() -> None:
 
     assert created.value.object_key in s3_service.objects
     assert created.value.id in repository.files
+
+
+def test_preview_warning_keeps_origin_without_untrusted_error_text(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A handled decoder failure retains its traceback but sanitizes its text."""
+    private_marker = "private-decoder-message"
+
+    def fail_decode(body: object) -> Image.Image:
+        raise ValueError(private_marker)
+
+    monkeypatch.setattr(Image, "open", fail_decode)
+
+    assert make_exchange_preview_thumbnail(b"invalid", "image/png") is None
+    [record] = caplog.records
+    assert record.exc_info is not None
+    assert record.exc_info[2] is not None
+    assert isinstance(record.exc_info[1], RuntimeError)
+    assert private_marker not in str(record.exc_info[1])
+    assert private_marker not in caplog.text

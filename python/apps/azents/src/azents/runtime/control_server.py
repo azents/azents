@@ -378,6 +378,7 @@ class _OwnerRuntimeStreamSessionOfferProvider:
             except RuntimeWebSessionRouteConflict:
                 _LOGGER.warning(
                     "Runtime Web session offer unavailable",
+                    exc_info=True,
                     extra={
                         "runner_generation": runner_generation,
                         "reason": "owner_route_conflict",
