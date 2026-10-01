@@ -760,6 +760,10 @@ async def test_dispatch_commits_trigger_before_counting_wake_failure() -> None:
     assert "Schedule: August 16, 2026 at 12:00 AM UTC" in event.payload.content
     assert "Schedule details: 2026-08-16T00:00:00Z" in event.payload.content
     assert "Scheduled for details: 2026-08-16T00:00:00Z" in event.payload.content
+    assert "occurrence start triggers" in event.payload.content
+    assert "Do not infer a completion deadline or execution time budget" in (
+        event.payload.content
+    )
     assert event.payload.content.endswith(f"Prompt:\n{task.objective}")
     assert "submit a failed result explaining what is missing" in event.payload.content
     assert broker.messages == [SessionWakeUp(session_id=task.session_id)]

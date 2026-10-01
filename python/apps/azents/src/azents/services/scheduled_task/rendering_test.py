@@ -53,12 +53,20 @@ def test_cycle_guidance_distinguishes_session_and_channel_execution() -> None:
     session_guidance = render_scheduled_task_cycle_guidance(_state())
     channel_guidance = render_scheduled_task_cycle_guidance(_state(binding_id="b" * 32))
 
+    assert "occurrence start triggers" in session_guidance
+    assert "Do not infer a completion deadline or execution time budget" in (
+        session_guidance
+    )
+    assert "Work may start or continue after those timestamps" in session_guidance
+    assert "authoritatively discovered during execution" in session_guidance
     assert "no external provider publication is available" in session_guidance
     assert "`channel_action` only for interim progress" in channel_guidance
     assert "files set to null" in session_guidance
     assert "`submit_scheduled_task_result`" in session_guidance
     assert "exact same bound conversation" in channel_guidance
     assert "another Slack or Discord channel" in channel_guidance
+    assert "Title: Daily report" not in session_guidance
+    assert "Schedule: Every day" not in session_guidance
 
 
 def test_schedule_presentation_uses_human_first_and_canonical_secondary_text() -> None:
@@ -91,9 +99,18 @@ def test_runtime_message_keeps_exact_prompt_after_structured_schedule() -> None:
         scheduled_for=_NOW,
     )
 
+    assert message.startswith("A Scheduled Task occurrence has started.")
+    assert "Scheduled Task work is due." not in message
     assert "Schedule: August 16, 2026 at 12:00 PM UTC" in message
     assert "Schedule details: 2026-08-16T12:00:00Z" in message
     assert "Scheduled for details: 2026-08-16T12:00:00Z" in message
+    assert "occurrence start triggers" in message
+    assert (
+        "Do not infer a completion deadline or execution time budget from them."
+        in message
+    )
+    assert "without failing solely because they are past." in message
+    assert "authoritatively discovered during execution" in message
     assert message.endswith(f"Prompt:\n{objective}")
 
 
@@ -111,6 +128,8 @@ def test_compaction_snapshot_is_bounded_sanitized_and_identifier_free() -> None:
     assert snapshot is not None
     assert "Title: Daily ## injected report" in snapshot
     assert "Objective: Prepare all sections." in snapshot
+    assert "Occurrence start time: 2026-08-16T12:00:00Z" in snapshot
+    assert "occurrence start triggers" in snapshot
     assert "Progress title: Draft ready" in snapshot
     assert "1. Collect metrics" in snapshot
     assert "2. Write briefing" in snapshot

@@ -121,6 +121,9 @@ Write a concise, self-contained objective that:
 - contains enough information to determine success or failure;
 - does not copy the entire conversation;
 - does not invent unavailable facts or authorization; and
+- keeps schedule timing separate from completion timing: do not turn `at` or
+  `cron` into a completion deadline or time budget, while preserving any
+  completion constraint the user explicitly requested; and
 - does not include system-owned trigger, continuation, or terminal-action
   instructions.
 

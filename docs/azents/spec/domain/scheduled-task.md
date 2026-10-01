@@ -32,8 +32,8 @@ api_routes:
   - /scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks
   - /scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks/{task_id}
   - /scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks/{task_id}/cycle
-last_verified_at: 2026-09-15
-spec_version: 12
+last_verified_at: 2026-10-01
+spec_version: 13
 ---
 
 # Scheduled Task Domain Spec
@@ -145,7 +145,10 @@ field shapes explicitly: one-time work supplies aware `at` with `cron` and
 `timezone` to null before enforcing those canonical shapes. When requester
 timezone context is reliably known, the Skill preserves the target instant's
 local UTC offset in one-time `at` values, including duration-relative requests,
-instead of normalizing equivalent input to `Z`.
+instead of normalizing equivalent input to `Z`. Objective construction keeps
+schedule timing separate from completion timing: `at` and cron occurrences are
+not restated as deadlines or execution budgets, while user-explicit completion
+deadlines remain part of the objective.
 
 Chat activity groups all four Scheduled tools under the Schedule category. Their
 tool-call rows use dedicated summaries and bounded details for title, schedule,
@@ -193,6 +196,15 @@ Before continuity history is appended, the compaction summary hook replaces the
 bounded Scheduled Task section with sanitized snapshots of every current started
 cycle. Admitted and terminalized cycles are omitted. The hook reads existing
 Toolkit State only and introduces no additional persistence authority.
+
+Every trigger and continuation runtime message identifies the occurrence as
+started and defines the schedule and `scheduled_for` instant as start triggers,
+without inferring completion deadlines or execution budgets from them. Delayed
+dispatch and later continuations remain valid after those instants solely despite
+their being in the past. Explicit objective constraints and authoritative
+deadlines or validity windows discovered during execution remain applicable. The
+dynamic Toolkit prompt repeats these timing and lifecycle semantics without
+duplicating the complete runtime message.
 
 ## Terminal Result
 
@@ -319,6 +331,10 @@ and result text.
 
 ## Changelog
 
+- **2026-10-01** (spec_version 13) — Defined schedule and `scheduled_for` values
+  as occurrence start triggers that do not imply completion deadlines, removed
+  duplicate full-message rendering from the dynamic Toolkit prompt, and preserved
+  explicit or authoritatively discovered completion constraints.
 - **2026-09-12** (spec_version 12) — Bound Scheduled progress, initial
   channel tracking, terminal state, and provider settlement to the current Session
   execution owner.
