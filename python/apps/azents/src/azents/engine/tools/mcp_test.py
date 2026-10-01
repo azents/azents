@@ -3,13 +3,13 @@
 import datetime
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Any, cast
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import MCPOAuthConnectionStatus
 from azents.core.oauth2 import OAuthTokenResponse
+from azents.repos.mcp_oauth_connection import MCPOAuthConnectionRepository
 from azents.repos.mcp_oauth_connection.data import MCPOAuthConnection
 
 from . import mcp as mcp_module
@@ -40,7 +40,7 @@ def _connection(*, access_token: str, updated_second: int = 0) -> MCPOAuthConnec
     )
 
 
-class _ConnectionRepository:
+class _ConnectionRepository(MCPOAuthConnectionRepository):
     """In-memory repository that verifies every DB call has an open session."""
 
     def __init__(self, connection: MCPOAuthConnection, active: list[int]) -> None:
@@ -109,7 +109,7 @@ async def test_oauth_fresh_token_returns_without_http_or_write(
     async def session_manager() -> AsyncIterator[AsyncSession]:
         active[0] += 1
         try:
-            yield cast(AsyncSession, object())
+            yield AsyncSession()
         finally:
             active[0] -= 1
 
@@ -127,7 +127,7 @@ async def test_oauth_fresh_token_returns_without_http_or_write(
     repository = _ConnectionRepository(fresh, active)
 
     connection = await mcp_module._ensure_oauth_connection_token(
-        connection_repo=cast(Any, repository),
+        connection_repo=repository,
         session_manager=session_manager,
         toolkit_id="toolkit-1",
         proxy_url=None,
@@ -151,7 +151,7 @@ async def test_oauth_refresh_closes_db_session_during_http(
     async def session_manager() -> AsyncIterator[AsyncSession]:
         active[0] += 1
         try:
-            yield cast(AsyncSession, object())
+            yield AsyncSession()
         finally:
             active[0] -= 1
 
@@ -175,7 +175,7 @@ async def test_oauth_refresh_closes_db_session_during_http(
     repository = _ConnectionRepository(_connection(access_token="access-1"), active)
 
     refreshed = await mcp_module._ensure_oauth_connection_token(
-        connection_repo=cast(Any, repository),
+        connection_repo=repository,
         session_manager=session_manager,
         toolkit_id="toolkit-1",
         proxy_url=None,
@@ -198,7 +198,7 @@ async def test_oauth_refresh_keeps_concurrent_newer_credentials(
     async def session_manager() -> AsyncIterator[AsyncSession]:
         active[0] += 1
         try:
-            yield cast(AsyncSession, object())
+            yield AsyncSession()
         finally:
             active[0] -= 1
 
@@ -227,7 +227,7 @@ async def test_oauth_refresh_keeps_concurrent_newer_credentials(
     monkeypatch.setattr(mcp_module, "refresh_access_token", refresh_access_token)
 
     refreshed = await mcp_module._ensure_oauth_connection_token(
-        connection_repo=cast(Any, repository),
+        connection_repo=repository,
         session_manager=session_manager,
         toolkit_id="toolkit-1",
         proxy_url=None,
@@ -248,7 +248,7 @@ async def test_oauth_missing_refresh_token_marks_reconnect_required() -> None:
     async def session_manager() -> AsyncIterator[AsyncSession]:
         active[0] += 1
         try:
-            yield cast(AsyncSession, object())
+            yield AsyncSession()
         finally:
             active[0] -= 1
 
@@ -258,7 +258,7 @@ async def test_oauth_missing_refresh_token_marks_reconnect_required() -> None:
     repository = _ConnectionRepository(expired, active)
 
     connection = await mcp_module._ensure_oauth_connection_token(
-        connection_repo=cast(Any, repository),
+        connection_repo=repository,
         session_manager=session_manager,
         toolkit_id="toolkit-1",
         proxy_url=None,

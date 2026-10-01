@@ -2381,6 +2381,7 @@ class RunExecutor:
                                 "model_stream_failure_code": exc.failure_code,
                                 "model_stream_timeout_kind": exc.timeout_kind,
                             },
+                            exc_info=True,
                         )
                     else:
                         error_log_fields: dict[str, object] = {

@@ -1,5 +1,7 @@
 """Tests for E2E container-log diagnostics."""
 
+from typing import NamedTuple
+
 import pytest
 
 from support.container_logs import (
@@ -9,6 +11,13 @@ from support.container_logs import (
 from tests import conftest as e2e_conftest
 
 
+class _ContainerLogs(NamedTuple):
+    """Container stdout and stderr returned by the test fake."""
+
+    stdout: bytes
+    stderr: bytes
+
+
 class _Container:
     """Small fake container with deterministic stdout and stderr."""
 
@@ -16,9 +25,9 @@ class _Container:
         self.stdout = stdout
         self.stderr = stderr
 
-    def get_logs(self) -> tuple[bytes, bytes]:
+    def get_logs(self) -> _ContainerLogs:
         """Return configured output."""
-        return self.stdout, self.stderr
+        return _ContainerLogs(stdout=self.stdout, stderr=self.stderr)
 
 
 def test_read_container_logs_returns_both_container_output_streams() -> None:

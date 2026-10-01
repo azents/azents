@@ -427,11 +427,12 @@ async def test_early_service_failures_log_one_safe_completion_event(
     ]
     assert len(records) == 1
     record = records[0]
-    assert getattr(record, "integration_id", None) == "integration-1"
-    assert getattr(record, "operation", None) == "subscription_usage_read"
-    assert getattr(record, "outcome", None) == expected_outcome
-    assert getattr(record, "adapter_contract_version", "missing") is None
-    assert getattr(record, "provider", None) == expected_provider
+    fields = vars(record)
+    assert fields.get("integration_id") == "integration-1"
+    assert fields.get("operation") == "subscription_usage_read"
+    assert fields.get("outcome") == expected_outcome
+    assert fields.get("adapter_contract_version", "missing") is None
+    assert fields.get("provider") == expected_provider
 
 
 async def test_disabled_chatgpt_returns_without_refresh_or_usage_call(

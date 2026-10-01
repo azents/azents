@@ -276,6 +276,7 @@ async def _create_artifact_output_part(
         logger.warning(
             "MCP tool returned invalid base64 content",
             extra={"tool_name": tool_name, "part_index": part_index},
+            exc_info=True,
         )
         return None
     return await _create_artifact_output_part_from_body(
@@ -683,6 +684,7 @@ class McpBasedToolkit(Toolkit[McpConfigT], ABC, Generic[McpConfigT]):
                 logger.warning(
                     "MCP server auth failed",
                     extra={"server_url": config.server_url},
+                    exc_info=True,
                 )
                 self._bg_error = f"MCP server auth failed: {config.server_url}"
             else:

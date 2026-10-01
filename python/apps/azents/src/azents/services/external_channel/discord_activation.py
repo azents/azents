@@ -5,7 +5,7 @@ import hashlib
 import logging
 import secrets
 from dataclasses import dataclass
-from typing import Annotated, Literal
+from typing import Annotated, Literal, NamedTuple
 
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -95,6 +95,13 @@ class DiscordActivationConfigurationError(ValueError):
         super().__init__(code)
 
 
+class DiscordActivationFailureDetail(NamedTuple):
+    """Safe operator-facing Discord activation failure text."""
+
+    summary: str
+    action: str
+
+
 def discord_activation_failure_code(
     error: DiscordAPIError | DiscordActivationConfigurationError,
 ) -> DiscordActivationFailureCode:
@@ -111,44 +118,44 @@ def discord_activation_failure_code(
 
 def discord_activation_failure_detail(
     code: DiscordActivationFailureCode,
-) -> tuple[str, str]:
+) -> DiscordActivationFailureDetail:
     """Return bounded operator-safe fallback text for a safe failure code."""
-    details: dict[DiscordActivationFailureCode, tuple[str, str]] = {
-        "discord_credentials_invalid": (
+    details: dict[DiscordActivationFailureCode, DiscordActivationFailureDetail] = {
+        "discord_credentials_invalid": DiscordActivationFailureDetail(
             "Discord rejected the Bot Token.",
             "Replace the Bot Token and try again.",
         ),
-        "discord_callback_configuration_invalid": (
+        "discord_callback_configuration_invalid": DiscordActivationFailureDetail(
             "Discord rejected the automatically configured interaction endpoint.",
             "Validate again. If it still fails, ask an administrator to check the "
             "public callback URL; no manual Discord endpoint setup is required.",
         ),
-        "discord_api_unavailable": (
+        "discord_api_unavailable": DiscordActivationFailureDetail(
             "Discord is temporarily unavailable.",
             "Try again later.",
         ),
-        "discord_callback_url_missing": (
+        "discord_callback_url_missing": DiscordActivationFailureDetail(
             "The Discord callback URL is not configured.",
             "Ask an administrator to configure the public callback URL, "
             "then validate again.",
         ),
-        "discord_credentials_unavailable": (
+        "discord_credentials_unavailable": DiscordActivationFailureDetail(
             "The stored Discord credentials cannot be used.",
             "Replace the Bot Token and try again.",
         ),
-        "discord_target_guild_missing": (
+        "discord_target_guild_missing": DiscordActivationFailureDetail(
             "The Discord Guild ID is missing.",
             "Edit the connection and provide the target Guild ID.",
         ),
-        "discord_target_guild_invalid": (
+        "discord_target_guild_invalid": DiscordActivationFailureDetail(
             "The Discord Guild ID is invalid.",
             "Edit the connection and provide the correct target Guild ID.",
         ),
-        "discord_application_id_mismatch": (
+        "discord_application_id_mismatch": DiscordActivationFailureDetail(
             "The Application ID does not match the Bot Token.",
             "Edit the connection and use the Application ID that owns this Bot Token.",
         ),
-        "discord_authority_changed": (
+        "discord_authority_changed": DiscordActivationFailureDetail(
             "The Discord connection changed while it was being validated.",
             "Validate again. If it continues, replace the credentials.",
         ),

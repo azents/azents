@@ -2,6 +2,7 @@
 
 import dataclasses
 from textwrap import dedent
+from typing import NamedTuple
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -66,6 +67,13 @@ class SubagentTargetResult:
     target_session: AgentSession | None = None
     previous_status: str | None = None
     signal_stop: bool = False
+
+
+class SubagentResolvedTarget(NamedTuple):
+    """Current SessionAgent and an optionally resolved collaboration target."""
+
+    current: SessionAgent
+    target: SessionAgent | None
 
 
 @dataclasses.dataclass
@@ -448,7 +456,7 @@ class SubagentToolOperationRepository:
         *,
         session_id: str,
         agent_name: str,
-    ) -> tuple[SessionAgent, SessionAgent | None]:
+    ) -> SubagentResolvedTarget:
         current = await self.agent_session_repository.get_session_agent_by_session_id(
             session,
             session_id,
@@ -463,7 +471,7 @@ class SubagentToolOperationRepository:
             )
         except ValueError:
             target = None
-        return current, target
+        return SubagentResolvedTarget(current=current, target=target)
 
     async def _lock_and_list_active_subagent_ids(
         self,

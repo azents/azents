@@ -2,8 +2,7 @@
 
 import datetime
 import json
-from types import SimpleNamespace
-from typing import NamedTuple, cast
+from typing import NamedTuple
 from unittest.mock import AsyncMock
 
 import pytest
@@ -23,6 +22,7 @@ from azents.engine.hooks.types import (
 )
 from azents.engine.run.types import FunctionToolError, FunctionToolResult
 from azents.engine.tools.runtime_instruction_context import (
+    RuntimeInstructionContext,
     RuntimeInstructionContextStore,
 )
 from azents.repos.scheduled_task.data import ScheduledTask
@@ -34,14 +34,13 @@ from azents.repos.scheduled_task_cycle.data import (
     ScheduledTaskCycleRecord,
     ScheduledTaskCycleState,
 )
-from azents.services.external_channel.file_transfer import (
-    ExternalChannelFileTransferService,
+from azents.runtime.transfer.runtime_to_provider import (
+    RuntimeToProviderDeliveryExecutor,
 )
-from azents.services.scheduled_task.channel import ScheduledTaskChannelService
+from azents.services.file_storage import FileStorage
 from azents.services.scheduled_task.terminal import (
     ScheduledTaskTerminalEffectSnapshot,
     ScheduledTaskTerminalOutcome,
-    ScheduledTaskTerminalService,
 )
 from azents.services.session_resource_authority import SessionResourceAuthority
 
@@ -136,13 +135,10 @@ def _toolkit(
     operations.active_cycle.return_value = active_cycle
     operations.list_started_cycle_states.return_value = []
     toolkit = ScheduledToolkit(
-        operations=cast(ScheduledTaskToolOperationRepository, operations),
-        terminal_service=cast(ScheduledTaskTerminalService, terminal_service),
-        channel_service=cast(ScheduledTaskChannelService, channel_service),
-        file_transfer_service=cast(
-            ExternalChannelFileTransferService,
-            transfer_service,
-        ),
+        operations=operations,
+        terminal_service=terminal_service,
+        channel_service=channel_service,
+        file_transfer_service=transfer_service,
         workspace_id="w" * 32,
         agent_id="a" * 32,
         session_id="s" * 32,
@@ -159,7 +155,7 @@ def _toolkit(
 def _turn_context(
     publish_event: AsyncMock | None = None,
     *,
-    resource_authority: object | None = None,
+    resource_authority: SessionResourceAuthority | None = None,
 ) -> TurnContext:
     """Build one run-bound Toolkit context."""
     return TurnContext(
@@ -168,7 +164,7 @@ def _turn_context(
         run_id=_RUN_ID,
         session_id="s" * 32,
         publish_event=publish_event or AsyncMock(),
-        resource_authority=cast(SessionResourceAuthority | None, resource_authority),
+        resource_authority=resource_authority,
     )
 
 
@@ -352,7 +348,8 @@ async def test_terminal_tool_publishes_new_event_and_requests_run_completion() -
 
     assert isinstance(result, FunctionToolResult)
     assert result.terminal_run is True
-    assert json.loads(cast(str, result.output)) == {
+    assert isinstance(result.output, str)
+    assert json.loads(result.output) == {
         "outcomes": [],
         "recovered": False,
         "result": "Completed.",
@@ -384,19 +381,24 @@ async def test_terminal_tool_preflights_files_for_exact_bound_conversation() -> 
         expected_size=128,
     )
     transfer_service.prepare_outbound.return_value = (manifest,)
-    file_storage = object()
-    provider_delivery_service = object()
-    resolve_runtime_target = object()
-    toolkit.runtime_context_store = cast(
-        RuntimeInstructionContextStore,
-        SimpleNamespace(
-            get=lambda: SimpleNamespace(
-                file_storage=file_storage,
-                provider_delivery_service=provider_delivery_service,
-                resolve_runtime_target=resolve_runtime_target,
-            )
-        ),
+    file_storage: FileStorage = AsyncMock(spec=FileStorage)
+    provider_delivery_service: RuntimeToProviderDeliveryExecutor = AsyncMock(
+        spec=RuntimeToProviderDeliveryExecutor
     )
+    resolve_runtime_target = AsyncMock()
+    runtime_context_store = RuntimeInstructionContextStore()
+    runtime_context_store.set(
+        RuntimeInstructionContext(
+            file_storage=file_storage,
+            workspace_root=None,
+            projects=(),
+            transfer_service=AsyncMock(),
+            publication_service=AsyncMock(),
+            provider_delivery_service=provider_delivery_service,
+            resolve_runtime_target=resolve_runtime_target,
+        )
+    )
+    toolkit.runtime_context_store = runtime_context_store
     snapshot = ScheduledTaskTerminalEffectSnapshot(
         cycle_id=_CYCLE_ID,
         task_id="t" * 32,
@@ -427,7 +429,7 @@ async def test_terminal_tool_preflights_files_for_exact_bound_conversation() -> 
         created=True,
         effect_snapshot=snapshot,
     )
-    authority = object()
+    authority = AsyncMock(spec=SessionResourceAuthority)
     state = await toolkit.update_context(_turn_context(resource_authority=authority))
 
     await state.tools[-1].handler(

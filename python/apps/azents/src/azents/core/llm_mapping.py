@@ -1,7 +1,5 @@
 """Convert saved integration credentials into operation-scoped SDK settings."""
 
-from typing import cast
-
 from azents.core.chatgpt_oauth import (
     CHATGPT_OAUTH_BACKEND_BASE_URL,
     build_chatgpt_oauth_headers,
@@ -80,7 +78,9 @@ def build_credential_kwargs(
                 "extra_headers": build_kimi_compatibility_headers(device_id=device_id),
             }
         case AwsSecrets(secret_access_key=secret):
-            config = cast(AwsConfig, integration.config)
+            config = integration.config
+            if not isinstance(config, AwsConfig):
+                raise ValueError("AWS integration config is required")
             kwargs: dict[str, object] = {
                 "aws_access_key_id": config.access_key_id,
                 "aws_secret_access_key": secret,
@@ -91,7 +91,9 @@ def build_credential_kwargs(
                 kwargs["aws_session_name"] = f"azents-{integration.workspace_id[:8]}"
             return kwargs
         case GcpSecrets(service_account_json=json_str):
-            config = cast(GcpConfig, integration.config)
+            config = integration.config
+            if not isinstance(config, GcpConfig):
+                raise ValueError("GCP integration config is required")
             return {
                 "vertex_project": config.project_id,
                 "vertex_location": config.region,
