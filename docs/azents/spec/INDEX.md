@@ -21,7 +21,7 @@ Details of all living specs. Synchronized from frontmatter.
 | runtime-provider | [Runtime Provider](domain/runtime-provider.md) | - | 2026-09-30 | 34 |
 | scheduled-task | [Scheduled Task Domain Spec](domain/scheduled-task.md) | - | 2026-10-01 | 13 |
 | system-settings | [System Settings](domain/system-settings.md) | @Hardtack | 2026-09-30 | 7 |
-| toolkit | [Toolkit](domain/toolkit.md) | @Hardtack | 2026-10-01 | 123 |
+| toolkit | [Toolkit](domain/toolkit.md) | @Hardtack | 2026-10-01 | 124 |
 | user-auth | [User & Authentication](domain/user-auth.md) | @Hardtack | 2026-09-16 | 22 |
 | workspace | [Workspace & Membership](domain/workspace.md) | @Hardtack | 2026-10-01 | 90 |
 

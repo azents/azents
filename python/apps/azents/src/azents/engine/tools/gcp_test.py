@@ -103,7 +103,7 @@ def _toolkit_state_store(  # pytest autouse fixture
     """Patch Toolkit State to an in-memory store."""
     _FakeToolkitStateHandle.clear()
     monkeypatch.setattr(
-        "azents.engine.tools.gcp.ToolkitStateStore",
+        "azents.repos.toolkit_state.engine.ToolkitStateStore",
         _FakeToolkitStateStore,
     )
 

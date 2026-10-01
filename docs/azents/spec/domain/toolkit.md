@@ -74,7 +74,7 @@ code_paths:
 api_routes:
   - /toolkit/v1
 last_verified_at: 2026-10-01
-spec_version: 123
+spec_version: 124
 ---
 
 # Toolkit
@@ -127,6 +127,13 @@ Tool Search working-set, AGENTS.md/Claude Rules appendix dedupe, and Todo payloa
 models are pure core state. Their ordinary reads and mutations are completed
 repository operations; the successful compaction reset uses the same repository
 mutation inside the compactor's atomic database composition.
+
+Raw MCP, AWS, GCP, and GitHub MCP tool snapshots plus the GitHub selected
+installation are also pure core state loaded and replaced through completed
+repository operations. External tool discovery, credential exchange, and tool
+execution remain outside those operations. Successful snapshot replacement keeps
+the existing optimistic retry and owner-generation fence; runtime still validates
+the stored server/project identity before rebuilding tools.
 
 All currently implemented AgentSessions execute as Team Sessions. Generic Toolkit, resolve, run, and
 turn contexts contain canonical Workspace, Agent, Session, Run, and resource authority, but no User
@@ -1048,6 +1055,9 @@ without requiring a separate Toolkit setup row.
 
 ## Changelog
 
+- **2026-10-01** (spec_version 124) — Moved MCP/AWS/GCP/GitHub tool snapshots
+  and GitHub selected-installation persistence behind repository-owned completed
+  operations while preserving hashes, filtering, and owner fencing.
 - **2026-10-01** (spec_version 123) — Moved Engine Toolkit persisted payloads to
   pure core models and their Tool Search, appendix-dedupe, and Todo transaction
   lifetimes to repository-owned operations without changing identities or behavior.

@@ -50,6 +50,11 @@ lifetimes to repository operations while preserving compaction's existing atomic
 working-set reset. Later Engine phases retain model execution, provider output,
 MCP/cloud snapshots, and residual event-compaction ownership.
 
+Phase 18 continues that group with Raw MCP, AWS, GCP, and GitHub MCP tool
+snapshots plus GitHub selected-installation state. Provider discovery and token
+exchange remain outside completed repository operations; MCP OAuth/configuration,
+model execution, provider output, and compactor ownership remain later phases.
+
 ## Delivery Boundaries
 
 1. Correct the title-generation and ChatGPT OAuth persistence boundary as one
