@@ -528,9 +528,11 @@ Always-on required CI does not depend on external credentials.
   is not a 1 GiB production throughput or latency benchmark.
 - The stable `ci-python-e2e` required gate aggregates support tests, the planner,
   all enabled suite lanes, and the timing aggregator for the scopes selected by path
-  filtering. It compares the maximum raw lane time with a complete recorded run for
-  the PR base and fails at a twenty-percent increase or unavailable base evidence.
-  Retargeting and a 15-minute sweep recompare recorded evidence without rerunning E2E.
+  filtering. It compares the maximum lane sum of pytest `call` phases with a complete
+  recorded run for the PR base and fails at a twenty-percent increase or unavailable
+  evidence. Fixture setup/teardown, Docker preparation, and full lane wall time remain
+  diagnostic only. Retargeting and a 15-minute sweep recompare recorded evidence
+  without rerunning E2E.
 - Each executed required E2E lane uploads bounded observability artifacts even when
   pytest fails. The artifact contains JUnit XML, the complete pytest output, the
   slow-test report, and Docker process/storage diagnostics. Failed browser calls also
