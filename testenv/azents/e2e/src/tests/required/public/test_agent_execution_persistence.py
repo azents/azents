@@ -4,6 +4,7 @@ import json
 import os
 import socket
 import subprocess
+import sys
 import time
 from collections.abc import Generator
 from contextlib import contextmanager
@@ -105,7 +106,6 @@ _TOOL_CALL_ID = "call_chat_input_buffer_delay"
 _DUPLICATE_MCP_BASE_SLUG = "dupmcp"
 _TESTENV_ROOT = Path(__file__).parents[5]
 _MOCK_MCP_SCRIPT = _TESTENV_ROOT / "fixtures" / "mock_mcp_server.py"
-_TESTENV_PYTHON = _TESTENV_ROOT / ".venv" / "bin" / "python"
 _RETRY_ONCE = "Failed run retry once then succeed"
 _RETRY_ONCE_RESPONSE = "Failed run retry recovered after one attempt."
 _RETRY_ACROSS_TURNS = "Failed run retry resets across model turns"
@@ -171,7 +171,7 @@ def _mock_mcp_instance(
         "MOCK_MCP_INSTANCE_DELAY_ONCE_SECONDS": str(delay_once_seconds),
     }
     process = subprocess.Popen(
-        [str(_TESTENV_PYTHON), str(_MOCK_MCP_SCRIPT)],
+        [sys.executable, str(_MOCK_MCP_SCRIPT)],
         cwd=_TESTENV_ROOT,
         env=environment,
         stdout=subprocess.DEVNULL,
