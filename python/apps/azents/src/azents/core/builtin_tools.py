@@ -165,6 +165,12 @@ def _supports_image_generation(
             for key in ("supported_builtin_tools", "experimental_supported_tools")
         )
 
+    if provider in {LLMProvider.XAI, LLMProvider.XAI_OAUTH}:
+        return (
+            metadata.get("mode") == "chat"
+            and metadata.get("supports_function_calling") is True
+        )
+
     explicit = metadata.get("supports_image_generation")
     if isinstance(explicit, bool):
         return explicit
@@ -174,11 +180,6 @@ def _supports_image_generation(
         if _string_sequence_contains(value, "image_generation"):
             return True
 
-    if provider in {LLMProvider.XAI, LLMProvider.XAI_OAUTH}:
-        return (
-            metadata.get("mode") == "chat"
-            and metadata.get("supports_function_calling") is True
-        )
     return False
 
 

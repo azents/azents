@@ -2,6 +2,7 @@
 
 from decimal import Decimal
 
+import pytest
 from pydantic_ai.native_tools import ImageGenerationTool, WebSearchTool
 
 from azents.core.enums import LLMProvider
@@ -59,6 +60,29 @@ def test_compatible_responses_profile_preserves_runtime_overrides() -> None:
     assert resolution.profile["supported_native_tools"] == frozenset({WebSearchTool})
     assert resolution.normalized_capabilities.tool_calling.supported is True
     assert resolution.normalized_capabilities.reasoning.supported is True
+
+
+@pytest.mark.parametrize("provider", [LLMProvider.XAI, LLMProvider.XAI_OAUTH])
+@pytest.mark.parametrize("has_source", [True, False])
+def test_xai_tools_do_not_require_price_metadata(
+    provider: LLMProvider, has_source: bool
+) -> None:
+    """Executable search and client images survive missing tool prices."""
+    capabilities = resolve_runtime_model_profile(
+        provider=provider,
+        model="grok-4",
+        profile_model="grok-4",
+        assembly_metadata=None,
+        context_window=None,
+        context_window_explicit=False,
+        source_model=_source_model("grok-4") if has_source else None,
+    ).normalized_capabilities
+
+    assert capabilities.tool_calling.supported is True
+    assert capabilities.built_in_tools.supported == [
+        "web_search",
+        "image_generation",
+    ]
 
 
 def test_explicit_context_disables_implicit_global_authority() -> None:

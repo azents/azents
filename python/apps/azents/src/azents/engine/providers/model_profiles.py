@@ -40,7 +40,7 @@ from azents.core.model_metadata_source import SourceModelRecord
 from azents.engine.events.pydantic_ai_types import NativeModelProtocol
 from azents.engine.model_assembly import ModelAssemblyMetadata
 
-RUNTIME_MODEL_PROFILE_RESOLVER_REVISION = "2"
+RUNTIME_MODEL_PROFILE_RESOLVER_REVISION = "3"
 
 RuntimeModelKind = Literal[
     "native_openai_responses",
@@ -476,7 +476,11 @@ def _built_in_tools(
         "supports_function_calling": tool_calling_supported,
         "supports_web_search": (
             WebSearchTool in native_tools
-            and (source_web_search or protocol == "google")
+            and (
+                source_web_search
+                or protocol == "google"
+                or provider in {LLMProvider.XAI, LLMProvider.XAI_OAUTH}
+            )
         ),
         "supports_image_generation": (
             protocol == "google" and ImageGenerationTool in native_tools

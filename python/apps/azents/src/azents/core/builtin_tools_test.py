@@ -2,15 +2,37 @@
 
 import dataclasses
 
+import pytest
+
 from azents.core.agent import BuiltinToolConfig
 from azents.core.builtin_tools import (
     BuiltinToolValidationContext,
     ImageGenerationRule,
     WebSearchRule,
+    supported_builtin_capabilities,
     validate_builtin_tools,
 )
 from azents.core.enums import LLMProvider
 from azents.core.llm_catalog import ModelCapabilities
+
+
+@pytest.mark.parametrize("provider", [LLMProvider.XAI, LLMProvider.XAI_OAUTH])
+@pytest.mark.parametrize("function_calling", [True, False])
+def test_xai_client_image_support_is_independent_of_hosted_image_metadata(
+    provider: LLMProvider, function_calling: bool
+) -> None:
+    """The Imagine client tool requires function calling, not hosted images."""
+    supported = supported_builtin_capabilities(
+        provider=provider,
+        model_identifier="grok-4",
+        metadata={
+            "mode": "chat",
+            "supports_function_calling": function_calling,
+            "supports_image_generation": False,
+        },
+    )
+
+    assert ("image_generation" in supported) is function_calling
 
 
 @dataclasses.dataclass(frozen=True)
