@@ -20,6 +20,10 @@ STATUS_CONTEXT = "ci-python-e2e"
 _DURATION_START = "<!-- e2e-duration:start -->"
 _DURATION_END = "<!-- e2e-duration:end -->"
 _STICKY_MARKER = "<!-- Sticky Pull Request Commente2e-observability -->"
+_STICKY_MARKERS = (
+    _STICKY_MARKER,
+    "<!-- Sticky Pull Request Comment:e2e-observability -->",
+)
 _LANE = re.compile(r"[a-z][a-z0-9-]*-[1-9][0-9]*")
 _SUMMARY_LANE = re.compile(
     r"^### (?P<lane>[a-z][a-z0-9-]*-[1-9][0-9]*) — ",
@@ -92,8 +96,14 @@ def _objects(text: str) -> list[dict[str, object]]:
     value: object = json.loads(text)
     if not isinstance(value, list):
         raise EvidenceError("invalid_json")
-    objects: list[dict[str, object]] = []
+    items: list[object] = []
     for item in value:
+        if isinstance(item, list):
+            items.extend(item)
+        else:
+            items.append(item)
+    objects: list[dict[str, object]] = []
+    for item in items:
         if not isinstance(item, dict) or any(not isinstance(key, str) for key in item):
             raise EvidenceError("invalid_json")
         objects.append(item)
@@ -391,10 +401,15 @@ def render(report: Mapping[str, object]) -> str:
         if increase is not None
         else None
     )
+    reason_code = str(report.get("reason"))
     status = {
         "pass": "✅ Within limit",
         "regression": "❌ Over 20% limit",
-        "comparison_unavailable": "⏳ Waiting for base timing",
+        "comparison_unavailable": (
+            "⏳ Base CI running"
+            if reason_code == "base_workflow_running"
+            else "⚠️ Comparison unavailable"
+        ),
         "evidence_invalid": "❌ Candidate timing invalid",
     }.get(outcome, "⚠️ Unknown result")
     observed_display = _display_seconds(observed)
@@ -603,9 +618,12 @@ def _publish_status(
     command: Runner,
 ) -> None:
     outcome = str(result["outcome"])
+    reason = str(result.get("reason"))
     state = {
         "pass": "success",
-        "comparison_unavailable": "pending",
+        "comparison_unavailable": (
+            "pending" if reason == "base_workflow_running" else "success"
+        ),
         "regression": "failure",
         "evidence_invalid": "failure",
     }.get(outcome, "failure")
@@ -631,8 +649,14 @@ def _publish_status(
     )
 
 
+def _sticky_marker(body: str) -> str | None:
+    return next((marker for marker in _STICKY_MARKERS if marker in body), None)
+
+
 def _replace_duration(body: str, duration: str) -> str:
     replacement = duration.strip()
+    marker = _sticky_marker(body)
+    marker_position = body.find(marker) if marker is not None else -1
     start = body.find(_DURATION_START)
     end = body.find(_DURATION_END)
     if start >= 0 and end >= start:
@@ -640,8 +664,7 @@ def _replace_duration(body: str, duration: str) -> str:
         return body[:start] + replacement + body[end:]
     start = body.find("## E2E duration")
     if start < 0:
-        marker = body.find(_STICKY_MARKER)
-        insertion = marker if marker >= 0 else len(body)
+        insertion = marker_position if marker_position >= 0 else len(body)
         return (
             body[:insertion].rstrip() + "\n\n" + replacement + "\n\n" + body[insertion:]
         )
@@ -650,7 +673,7 @@ def _replace_duration(body: str, duration: str) -> str:
         for position in (
             body.find("\n### ", start),
             body.find("\nThis comment is updated in place", start),
-            body.find(_STICKY_MARKER, start),
+            marker_position,
         )
         if position >= 0
     ]
@@ -671,6 +694,8 @@ def _update_sticky_comment(
             [
                 "gh",
                 "api",
+                "--paginate",
+                "--slurp",
                 f"repos/{repository}/issues/{pull_number}/comments?per_page=100",
             ]
         )
@@ -681,7 +706,7 @@ def _update_sticky_comment(
         body = comment.get("body")
         if not isinstance(comment_id, int) or not isinstance(body, str):
             continue
-        if _STICKY_MARKER not in body:
+        if _sticky_marker(body) is None:
             continue
         updated = _replace_duration(body, duration)
         command(
@@ -731,6 +756,12 @@ def recheck(repository: str, pull_number: int, work_dir: Path, command: Runner) 
     base = pull.get("base")
     if not isinstance(head, dict) or not isinstance(base, dict):
         raise EvidenceError("invalid_pull_request")
+    head_repository = head.get("repo")
+    if (
+        not isinstance(head_repository, dict)
+        or head_repository.get("full_name") != repository
+    ):
+        return f"PR #{pull_number}: fork pull request skipped"
     head_sha, base_sha = head.get("sha"), base.get("sha")
     if not isinstance(head_sha, str) or not isinstance(base_sha, str):
         raise EvidenceError("invalid_pull_request")

@@ -56,12 +56,12 @@ jobs:
               base_sha="$WORKFLOW_HEAD_SHA"
               numbers="$(
                 gh api "repos/${GITHUB_REPOSITORY}/pulls?state=open&base=main&per_page=100" \
-                  --jq ".[] | select(.base.sha == \"${base_sha}\") | .number"
+                  --jq ".[] | select(.base.sha == \"${base_sha}\" and .head.repo.full_name == \"${GITHUB_REPOSITORY}\") | .number"
               )"
             else
               numbers="$(
                 gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${WORKFLOW_RUN_ID}/pull_requests" \
-                  --jq '.[].number'
+                  --jq ".[] | select(.head.repo.full_name == \"${GITHUB_REPOSITORY}\") | .number"
               )"
             fi
           else

@@ -530,14 +530,16 @@ Always-on required CI does not depend on external credentials.
   all enabled suite lanes, and the timing aggregator for the scopes selected by path
   filtering. It compares the maximum lane sum of pytest `call` phases with a complete
   recorded run for the PR base and fails at a twenty-percent increase or invalid
-  candidate timing evidence. Missing base evidence is a pending comparison rather
-  than a failed regression check. When the exact-base CI workflow is active, the
-  duration result identifies and links that run without waiting inside candidate CI.
+  candidate timing evidence. Missing base evidence is non-failing: an active
+  exact-base CI workflow publishes a pending status and linked run, while an absent or
+  completed base without compatible artifacts publishes a neutral successful status
+  with an unavailable comparison. Candidate CI never waits for base completion.
   Exact-base CI completion triggers evidence-only reevaluation of affected open pull
   requests. Candidate CI completion performs the same reevaluation so ordering between
   base completion and initial sticky-comment publication cannot leave stale state.
   Reevaluation updates both the `ci-python-e2e` commit status and the duration block in
-  the sticky observability comment. Retargeting and a 15-minute sweep retain equivalent
+  the sticky observability comment for same-repository pull requests; fork pull
+  requests remain read-only. Retargeting and a 15-minute sweep retain equivalent
   fallback reevaluation without rerunning E2E. Fixture
   setup/teardown, Docker preparation, and full lane wall time remain diagnostic only.
 - Each executed required E2E lane uploads bounded observability artifacts even when
@@ -606,9 +608,9 @@ Local/PR environment without live substrate does not fake live PASS. Instead, se
 
 ## Changelog
 
-- **2026-10-02** (spec_version 78) — Made missing base duration evidence pending,
-  linked active exact-base CI, and synchronized status plus sticky-comment
-  reevaluation when either base or candidate CI completes.
+- **2026-10-02** (spec_version 78) — Made missing base duration evidence
+  non-failing, reserved pending for active exact-base CI, and synchronized guarded
+  status plus sticky-comment reevaluation when either base or candidate CI completes.
 - **2026-10-01** (spec_version 77) — Kept representative desktop quota-fallback and
   shared-cookie Runtime Web browser journeys, moved mobile presentation to a Storybook
   interaction, and assigned alternate authentication plus capacity edge cases to

@@ -22,6 +22,15 @@ _HEAD = "a" * 40
 _BASE = "b" * 40
 
 
+def _pull(head_repository: str = "azents/azents") -> str:
+    return json.dumps(
+        {
+            "head": {"sha": _HEAD, "repo": {"full_name": head_repository}},
+            "base": {"sha": _BASE},
+        }
+    )
+
+
 def _lane_files(directory: Path, lane: str, value: str) -> None:
     directory.mkdir(parents=True, exist_ok=True)
     records = [
@@ -162,7 +171,7 @@ def test_evaluate_skips_incomplete_base_runs(tmp_path: Path) -> None:
     assert required["wall"] == "999"
 
 
-def test_missing_base_evidence_reports_pending_with_current_time(
+def test_missing_base_evidence_reports_neutral_with_current_time(
     tmp_path: Path,
 ) -> None:
     current = tmp_path / "current"
@@ -177,6 +186,51 @@ def test_missing_base_evidence_reports_pending_with_current_time(
     assert report["outcome"] == "comparison_unavailable"
     assert report["observed_seconds"] == "123"
     assert "compatible_base_run_unavailable" in str(report["reason"])
+    assert "⚠️ Comparison unavailable" in render(report)
+
+
+def test_terminal_missing_base_publishes_success(tmp_path: Path) -> None:
+    current = tmp_path / "current"
+    _lanes(current, {"web-1": "123"})
+    posts: list[list[str]] = []
+
+    def command(args: Sequence[str]) -> str:
+        values = list(args)
+        joined = " ".join(values)
+        if "actions/workflows/ci.yaml/runs" in joined:
+            return json.dumps({"workflow_runs": []})
+        if "/statuses/" in joined and "--method POST" in joined:
+            posts.append(values)
+            return ""
+        raise AssertionError(values)
+
+    exit_code = main(
+        [
+            "gate",
+            "--artifacts-root",
+            str(current),
+            "--repository",
+            "azents/azents",
+            "--base-sha",
+            _BASE,
+            "--head-sha",
+            _HEAD,
+            "--run-id",
+            "11",
+            "--work-dir",
+            str(tmp_path / "work"),
+            "--report-json",
+            str(tmp_path / "report.json"),
+            "--report-markdown",
+            str(tmp_path / "summary.md"),
+            "--publish-status",
+        ],
+        command_runner=command,
+    )
+
+    assert exit_code == 0
+    assert any("state=success" in item for item in posts[0])
+    assert "⚠️ Comparison unavailable" in (tmp_path / "summary.md").read_text()
 
 
 def test_active_base_workflow_is_reported_with_its_link(tmp_path: Path) -> None:
@@ -324,13 +378,14 @@ def test_regression_and_unavailable_are_explained_in_plain_language() -> None:
     assert "❌ Over 20% limit" in render(regression)
     assert "Candidate test `121s` · Base test `100s`" in render(regression)
     unavailable_markdown = render(unavailable_report)
-    assert "⏳ Waiting for base timing" in unavailable_markdown
+    assert "⚠️ Comparison unavailable" in unavailable_markdown
     assert "Base timing artifact unavailable" in unavailable_markdown
 
 
 def test_recheck_uses_latest_candidate_values_with_new_base(tmp_path: Path) -> None:
     statuses: list[list[str]] = []
     patches: list[list[str]] = []
+    comment_reads: list[list[str]] = []
     existing_body = "\n".join(
         [
             "## E2E CI observability",
@@ -349,7 +404,7 @@ def test_recheck_uses_latest_candidate_values_with_new_base(tmp_path: Path) -> N
         values = list(args)
         joined = " ".join(values)
         if joined.endswith("pulls/3"):
-            return json.dumps({"head": {"sha": _HEAD}, "base": {"sha": _BASE}})
+            return _pull()
         if f"head_sha={_HEAD}" in joined:
             return json.dumps({"workflow_runs": [{"id": 20}]})
         if "gh run download 20" in joined and "e2e-duration-gate" in joined:
@@ -382,7 +437,8 @@ def test_recheck_uses_latest_candidate_values_with_new_base(tmp_path: Path) -> N
             statuses.append(values)
             return ""
         if joined.endswith("issues/3/comments?per_page=100"):
-            return json.dumps([{"id": 42, "body": existing_body}])
+            comment_reads.append(values)
+            return json.dumps([[{"id": 42, "body": existing_body}]])
         if "/issues/comments/42" in joined and "--method PATCH" in joined:
             patches.append(values)
             return ""
@@ -391,6 +447,8 @@ def test_recheck_uses_latest_candidate_values_with_new_base(tmp_path: Path) -> N
     summary = recheck("azents/azents", 3, tmp_path, command)
 
     assert "pass" in summary
+    assert "--paginate" in comment_reads[0]
+    assert "--slurp" in comment_reads[0]
     assert any("state=success" in item for item in statuses[0])
     assert any(f"description=base={_BASE[:7]} pass" in item for item in statuses[0])
     updated_body = next(
@@ -411,7 +469,7 @@ def test_recheck_marks_active_base_pending_and_links_it(tmp_path: Path) -> None:
         values = list(args)
         joined = " ".join(values)
         if joined.endswith("pulls/3"):
-            return json.dumps({"head": {"sha": _HEAD}, "base": {"sha": _BASE}})
+            return _pull()
         if f"head_sha={_HEAD}" in joined:
             return json.dumps({"workflow_runs": [{"id": 20}]})
         if "gh run download 20" in joined and "e2e-duration-gate" in joined:
@@ -438,13 +496,16 @@ def test_recheck_marks_active_base_pending_and_links_it(tmp_path: Path) -> None:
         if joined.endswith("issues/3/comments?per_page=100"):
             return json.dumps(
                 [
-                    {
-                        "id": 42,
-                        "body": (
-                            "## E2E duration\n\nold result\n\n"
-                            "<!-- Sticky Pull Request Commente2e-observability -->"
-                        ),
-                    }
+                    [],
+                    [
+                        {
+                            "id": 42,
+                            "body": (
+                                "## E2E duration\n\nold result\n\n"
+                                "<!-- Sticky Pull Request Comment:e2e-observability -->"
+                            ),
+                        }
+                    ],
                 ]
             )
         if "/issues/comments/42" in joined and "--method PATCH" in joined:
@@ -460,7 +521,7 @@ def test_recheck_marks_active_base_pending_and_links_it(tmp_path: Path) -> None:
     updated_body = next(
         item.removeprefix("body=") for item in patches[0] if item.startswith("body=")
     )
-    assert "⏳ Waiting for base timing" in updated_body
+    assert "⏳ Base CI running" in updated_body
     assert f"[workflow run 19]({run_url})" in updated_body
 
 
@@ -471,7 +532,7 @@ def test_recheck_skips_prs_without_duration_evidence(tmp_path: Path) -> None:
         values = list(args)
         joined = " ".join(values)
         if joined.endswith("pulls/3"):
-            return json.dumps({"head": {"sha": _HEAD}, "base": {"sha": _BASE}})
+            return _pull()
         if "actions/workflows/ci.yaml/runs" in joined:
             return json.dumps({"workflow_runs": []})
         if "--method POST" in joined:
@@ -482,3 +543,19 @@ def test_recheck_skips_prs_without_duration_evidence(tmp_path: Path) -> None:
     summary = recheck("azents/azents", 3, tmp_path, command)
     assert "no duration evidence" in summary
     assert posts == []
+
+
+def test_recheck_skips_fork_pull_requests(tmp_path: Path) -> None:
+    commands: list[list[str]] = []
+
+    def command(args: Sequence[str]) -> str:
+        values = list(args)
+        commands.append(values)
+        if " ".join(values).endswith("pulls/3"):
+            return _pull("someone/fork")
+        raise AssertionError(values)
+
+    summary = recheck("azents/azents", 3, tmp_path, command)
+
+    assert summary == "PR #3: fork pull request skipped"
+    assert len(commands) == 1
