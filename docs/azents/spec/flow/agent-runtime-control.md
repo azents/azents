@@ -10,6 +10,9 @@ code_paths:
   - python/libs/azents-runtime-control/**
   - python/apps/azents/src/azents/repos/agent_runtime/**
   - python/apps/azents/src/azents/repos/runtime_lifecycle_dispatch/**
+  - python/apps/azents/src/azents/repos/runtime_reconciliation*
+  - python/apps/azents/src/azents/repos/runtime_report*
+  - python/apps/azents/src/azents/repos/runtime_stream_route*
   - python/apps/azents/src/azents/rdb/models/agent_runtime.py
   - python/apps/azents/src/azents/rdb/models/agent_runtime_removal.py
   - python/apps/azents/src/azents/repos/agent_runtime_removal_scope/**
@@ -83,8 +86,8 @@ code_paths:
   - testenv/azents/e2e/src/tests/web/public/test_runtime_capability_web.py
   - testenv/azents/e2e/src/tests/web/public/test_runtime_web_gateway.py
   - infra/charts/azents/**
-last_verified_at: 2026-10-01
-spec_version: 91
+last_verified_at: 2026-10-02
+spec_version: 92
 ---
 
 # Agent Runtime Control
@@ -242,6 +245,15 @@ the accepting replica routes locally or uses at most one persistent
 Control-to-Control relay. A relay cannot relay again. The Owner performs one exact
 PostgreSQL authority validation for every new logical stream before Runtime capacity
 admission and Runner forwarding.
+
+Owner acquisition, renewal, resolution, join-nonce consumption, draining, and exact-epoch
+release each finish in a completed database-only route operation before local projection,
+capacity, registry, or transport work. Acquisition retains Runtime-then-route locking;
+renewal, resolution, and join consumption retain route-then-Runtime locking. PostgreSQL
+time remains lease authority. Renewal does not extend the original one-time offer deadline.
+Registry admission checks the local deadline again after committed nonce consumption:
+expiry at that boundary rejects the join without restoring its consumed nonce. Cleanup
+releases only the original exact epoch and cannot delete replacement ownership.
 
 Runtime capacity is Owner-scoped ephemeral operational state, not durable product
 authority. It bounds active HTTP, SSE, and WebSocket streams, pending opens, buffered
@@ -632,6 +644,25 @@ and dispatch: only a successful correlated `OBSERVE` completion may hand it curr
 `network_enforcement:drifted` evidence, which it re-fences before a non-destructive
 `UPDATE_CONFIGURATION` dispatch. The Reconciler does not reinterpret Provider lifecycle facts and
 does not persist a drift candidate, claim, retry time, or completion history.
+
+The report adapters translate decoded protocol facts into completed repository operations.
+Provider configuration evidence, observed state/failure, and connection evidence retain
+one atomic report transaction; terminal-delete acknowledgement retains its existing atomic
+group. Restart rearm remains a distinct later transaction. Runner configuration evidence,
+workspace path/state/failure, and eligible failure clearing likewise remain atomic.
+Normal stale query outcomes commit already-reached evidence as before; exceptions and
+cancellation roll back the operation. Registration validation and heartbeat evidence reads
+also close before gRPC output. The Runtime Web generation gate runs only after the
+completed Runner delegate, including its normal no-op returns.
+
+Reconciliation loads the three ordered candidate lists together. Lifecycle candidate IDs
+suppress adoption and observation; only successfully dispatched adoption IDs suppress
+observation, so a false adoption dispatch leaves observation eligible.
+Periodic profile gating and the observe-requested marker complete before coordination
+or dispatch; a later false dispatch result does not undo that committed marker.
+Adoption and one-shot repair snapshots are separate completed reads, and the final
+post-coordination dispatch admission still revalidates current authority. Start-timeout
+mutation completes separately after connection refresh and dispatch attempts.
 
 The Kubernetes Provider owns each Runtime-specific enforcement bundle. Direct mode owns the
 Runtime Pod, PVC, and complete Runtime NetworkPolicy. Proxy-required mode additionally owns one
@@ -1118,6 +1149,9 @@ Live/provider evidence belongs in the testenv prerequisite system and must redac
 
 ## Changelog
 
+- **2026-10-02** (spec_version 92) — Moved Runtime stream route, report, and
+  reconciliation scopes into completed database-only repository operations,
+  preserving lock order, nonce consumption, report atomicity, and dispatch ordering.
 - **2026-10-01** (spec_version 91) — Moved Runtime Toolkit behavior and Session
   Project reads into completed repository-owned transactions while preserving
   configuration authority, unavailable projection, and Project presentation.

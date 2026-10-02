@@ -18,6 +18,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/agent_execution/**
   - python/apps/azents/src/azents/repos/agent_runtime/**
   - python/apps/azents/src/azents/repos/runtime_lifecycle_dispatch/**
+  - python/apps/azents/src/azents/repos/runtime_reconciliation*
   - python/apps/azents/src/azents/repos/session_execution/**
   - python/apps/azents/src/azents/repos/model_candidate_health/**
   - python/apps/azents/src/azents/runtime/control_protocol/reconciler.py
@@ -29,8 +30,8 @@ code_paths:
   - python/apps/azents/src/azents/worker/run/**
   - python/apps/azents/src/azents/services/team_session_cutover_replay.py
   - python/apps/azents/src/azents/cli/team_session_cutover.py
-last_verified_at: 2026-09-13
-spec_version: 37
+last_verified_at: 2026-10-02
+spec_version: 38
 ---
 
 # Run Resume
@@ -152,6 +153,13 @@ outcome write or result-driven replay. Later convergence uses the existing durab
 desired/Provider/configuration generation fences, current Provider evidence, and ordinary
 reconciliation retry rules. A stale post-dispatch outcome cannot overwrite a newer Runtime
 generation or capability.
+
+Reconciliation candidate collection, periodic profile/observe-marker preparation,
+adoption and one-shot repair reads, and timeout mutation are completed database-only
+operations. Candidate lists remain ordered hints with lifecycle/adoption/observation
+precedence, not dispatch authority. A committed observe marker survives a later
+false dispatch result; timeout mutation remains after connection refresh and dispatch.
+No durable repair candidate or replay state is introduced.
 
 Before recovery promotes any pending input, `RunExecutor` ensures the selected run's VFS projection. A projection already stored on the run is returned unchanged, so package deployment changes and Toolkit attachment changes cannot alter managed Skill or import bytes during takeover. A pre-migration run with a null projection receives one at this boundary before its first post-deployment promotion.
 
@@ -376,6 +384,8 @@ run to observe `check_stop()` as true.
 
 ## Changelog
 
+- **2026-10-02** (spec_version 38) — Completed reconciliation snapshot, marker,
+  repair-read, and timeout ownership while preserving convergence and dispatch authority.
 - **2026-09-13** (spec_version 37) — Added recovery of frozen foreground/compaction candidate
   operations, attempted-identity cursors, and generation-fenced probe/reservation claims from
   PostgreSQL when Redis is unavailable or empty.

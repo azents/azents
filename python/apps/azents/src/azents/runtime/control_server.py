@@ -77,6 +77,9 @@ from azents.repos.runtime_provider_control.repository import (
 from azents.repos.runtime_provider_policy.repository import (
     RuntimeProviderPolicyRepository,
 )
+from azents.repos.runtime_reconciliation import RuntimeReconciliationOperationRepository
+from azents.repos.runtime_report_operations import RuntimeReportOperationRepository
+from azents.repos.runtime_stream_route import RuntimeStreamRouteOperationRepository
 from azents.repos.runtime_web.session_route_repository import (
     RuntimeWebSessionRouteConflict,
     RuntimeWebSessionRouteRepository,
@@ -907,17 +910,16 @@ async def runtime_control_server_lifespan(
         policy_repository=policy_repository,
         profile_repository=profile_repository,
     )
-    provider_sink = RuntimeProviderReportRepositorySink(
+    report_operations = RuntimeReportOperationRepository(
         runtime_repository=runtime_repository,
         profile_repository=profile_repository,
         session_manager=session_manager,
     )
+    provider_sink = RuntimeProviderReportRepositorySink(repository=report_operations)
     web_runner_generation_gate = _RuntimeWebRunnerGenerationGate()
     runner_sink = _RuntimeWebRunnerStateSink(
         delegate=RuntimeRunnerStateRepositorySink(
-            runtime_repository=runtime_repository,
-            profile_repository=profile_repository,
-            session_manager=session_manager,
+            repository=report_operations,
         ),
         generation_gate=web_runner_generation_gate,
     )
@@ -959,9 +961,11 @@ async def runtime_control_server_lifespan(
     if settings.runtime_control_web_transport_enabled:
         trusted_transport = runtime_web_trusted_transport(settings)
         control_boot_id = uuid.uuid4().hex
-        route_repository = RuntimeWebSessionRouteRepository()
-        owner_manager = RuntimeStreamSessionOwnerManager(
+        route_repository = RuntimeStreamRouteOperationRepository(
             session_manager=session_manager,
+            route_repository=RuntimeWebSessionRouteRepository(),
+        )
+        owner_manager = RuntimeStreamSessionOwnerManager(
             repository=route_repository,
             owner_replica_id=settings.runtime_control_instance_id,
             owner_boot_id=control_boot_id,
@@ -976,7 +980,6 @@ async def runtime_control_server_lifespan(
         )
         stream_session_offer_provider = owner_offer_provider
         owner_registry = RuntimeStreamOwnerSessionRegistry(
-            session_manager=session_manager,
             repository=route_repository,
             clock=clock,
         )
@@ -1033,7 +1036,6 @@ async def runtime_control_server_lifespan(
             platform=sys.platform,
         )
         web_data_plane = RuntimeStreamControlDataPlane(
-            session_manager=session_manager,
             route_repository=route_repository,
             owner_replica_id=settings.runtime_control_instance_id,
             control_boot_id=control_boot_id,
@@ -1049,10 +1051,11 @@ async def runtime_control_server_lifespan(
             resident_memory_bytes=resident_memory_sampler.current_bytes,
         )
     reconciler = RuntimeLifecycleReconciler(
-        agent_repository=agent_repository,
-        runtime_repository=runtime_repository,
-        profile_repository=profile_repository,
-        session_manager=session_manager,
+        repository=RuntimeReconciliationOperationRepository(
+            runtime_repository=runtime_repository,
+            profile_repository=profile_repository,
+            session_manager=session_manager,
+        ),
         dispatch_repository=RuntimeLifecycleDispatchRepository(
             agent_repository=agent_repository,
             runtime_repository=runtime_repository,
