@@ -200,20 +200,6 @@ class ClientToolExecutor(Protocol):
         ...
 
 
-class PreLowerFilter(Protocol):
-    """Event transcript pre-lower filter."""
-
-    was_compacted: bool
-
-    async def apply(
-        self,
-        session: AsyncSession,
-        transcript: Sequence[Event],
-    ) -> list[Event]:
-        """Normalize Event transcript before lowerer input."""
-        ...
-
-
 class AdapterLowerer[TNativeRequest](Protocol):
     """Lower Event transcript to an adapter-specific native request."""
 
