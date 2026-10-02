@@ -20,6 +20,7 @@ import json
 from pydantic import BaseModel, ConfigDict
 from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.model_built_in_tool_capabilities import ModelBuiltInToolCapabilities
+from azentspublicclient.models.model_capability_contract import ModelCapabilityContract
 from azentspublicclient.models.model_compatibility_capabilities import ModelCompatibilityCapabilities
 from azentspublicclient.models.model_context_window import ModelContextWindow
 from azentspublicclient.models.model_modalities import ModelModalities
@@ -40,8 +41,9 @@ class ModelCapabilities(BaseModel):
     built_in_tools: Optional[ModelBuiltInToolCapabilities] = None
     parameters: Optional[ModelParameterCapabilities] = None
     compatibility: Optional[ModelCompatibilityCapabilities] = None
+    semantic_contract: Optional[ModelCapabilityContract] = None
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["context_window", "modalities", "tool_calling", "reasoning", "built_in_tools", "parameters", "compatibility"]
+    __properties: ClassVar[List[str]] = ["context_window", "modalities", "tool_calling", "reasoning", "built_in_tools", "parameters", "compatibility", "semantic_contract"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -105,10 +107,18 @@ class ModelCapabilities(BaseModel):
         # override the default output from pydantic by calling `to_dict()` of compatibility
         if self.compatibility:
             _dict['compatibility'] = self.compatibility.to_dict()
+        # override the default output from pydantic by calling `to_dict()` of semantic_contract
+        if self.semantic_contract:
+            _dict['semantic_contract'] = self.semantic_contract.to_dict()
         # puts key-value pairs in additional_properties in the top level
         if self.additional_properties is not None:
             for _key, _value in self.additional_properties.items():
                 _dict[_key] = _value
+
+        # set to None if semantic_contract (nullable) is None
+        # and model_fields_set contains the field
+        if self.semantic_contract is None and "semantic_contract" in self.model_fields_set:
+            _dict['semantic_contract'] = None
 
         return _dict
 
@@ -128,7 +138,8 @@ class ModelCapabilities(BaseModel):
             "reasoning": ModelReasoningCapabilities.from_dict(obj["reasoning"]) if obj.get("reasoning") is not None else None,
             "built_in_tools": ModelBuiltInToolCapabilities.from_dict(obj["built_in_tools"]) if obj.get("built_in_tools") is not None else None,
             "parameters": ModelParameterCapabilities.from_dict(obj["parameters"]) if obj.get("parameters") is not None else None,
-            "compatibility": ModelCompatibilityCapabilities.from_dict(obj["compatibility"]) if obj.get("compatibility") is not None else None
+            "compatibility": ModelCompatibilityCapabilities.from_dict(obj["compatibility"]) if obj.get("compatibility") is not None else None,
+            "semantic_contract": ModelCapabilityContract.from_dict(obj["semantic_contract"]) if obj.get("semantic_contract") is not None else None
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

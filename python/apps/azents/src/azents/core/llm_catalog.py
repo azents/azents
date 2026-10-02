@@ -3,12 +3,13 @@
 import enum
 import re
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, Self
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from azents.core.builtin_tools import BUILTIN_TOOL_RULES
 from azents.core.enums import LLMProvider
+from azents.core.model_capability_contract import ModelCapabilityContract
 
 INTEGRATION_SCOPED_CATALOG_PROVIDERS: frozenset[LLMProvider] = frozenset(
     {
@@ -160,6 +161,110 @@ class ModelCapabilities(BaseModel):
     compatibility: ModelCompatibilityCapabilities = Field(
         default_factory=ModelCompatibilityCapabilities
     )
+    # Descriptor absence is the approved historical snapshot boundary.
+    semantic_contract: ModelCapabilityContract | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+
+    @model_validator(mode="after")
+    def validate_semantic_views(self) -> Self:
+        """Reject competing boolean/list facts for a versioned semantic contract."""
+        contract = self.semantic_contract
+        if contract is None:
+            return self
+        flag_views = (
+            (
+                "tool_calling.supported",
+                self.tool_calling.supported,
+                contract.function_calling.enabled,
+            ),
+            (
+                "tool_calling.parallel_tool_calls",
+                self.tool_calling.parallel_tool_calls,
+                contract.parallel_function_calls.nullable_enabled,
+            ),
+            (
+                "tool_calling.strict_json_schema",
+                self.tool_calling.strict_json_schema,
+                contract.strict_function_schema.nullable_enabled,
+            ),
+            (
+                "reasoning.supported",
+                self.reasoning.supported,
+                contract.reasoning.support.enabled,
+            ),
+            (
+                "reasoning.summaries",
+                self.reasoning.summaries,
+                contract.reasoning_summaries.nullable_enabled,
+            ),
+            (
+                "parameters.temperature",
+                self.parameters.temperature,
+                contract.parameters.temperature.enabled,
+            ),
+            (
+                "parameters.max_output_tokens",
+                self.parameters.max_output_tokens,
+                contract.parameters.max_output_tokens.enabled,
+            ),
+            (
+                "parameters.top_p",
+                self.parameters.top_p,
+                contract.parameters.top_p.enabled,
+            ),
+            (
+                "parameters.top_k",
+                self.parameters.top_k,
+                contract.parameters.top_k.enabled,
+            ),
+            (
+                "parameters.stop_sequences",
+                self.parameters.stop_sequences,
+                contract.parameters.stop_sequences.enabled,
+            ),
+        )
+        for name, actual, expected in flag_views:
+            if actual != expected:
+                raise ValueError(f"{name} must match the saved semantic contract.")
+        list_views = (
+            (
+                "reasoning.effort_levels",
+                [level.value for level in self.reasoning.effort_levels],
+                list(contract.reasoning.enabled_efforts),
+            ),
+            (
+                "modalities.input",
+                [modality.value for modality in self.modalities.input],
+                [
+                    declaration.modality
+                    for declaration in contract.input_modalities
+                    if declaration.support.enabled
+                ],
+            ),
+            (
+                "modalities.output",
+                [modality.value for modality in self.modalities.output],
+                [
+                    declaration.modality
+                    for declaration in contract.output_modalities
+                    if declaration.support.enabled
+                ],
+            ),
+            (
+                "built_in_tools.supported",
+                self.built_in_tools.supported,
+                [
+                    declaration.tool
+                    for declaration in contract.built_in_tools
+                    if declaration.support.enabled
+                ],
+            ),
+        )
+        for name, actual, expected in list_views:
+            if actual != expected:
+                raise ValueError(f"{name} must match the saved semantic contract.")
+        return self
 
 
 def build_initial_model_capabilities(

@@ -74,7 +74,61 @@ class TestModelCatalogEntryResponse(unittest.TestCase):
                     compatibility = azentspublicclient.models.model_compatibility_capabilities.ModelCompatibilityCapabilities(
                         provider_family = '', 
                         responses_api = True, 
-                        unsupported_media_policy = 'text_substitution', ), ),
+                        unsupported_media_policy = 'text_substitution', ), 
+                    semantic_contract = azentspublicclient.models.model_capability_contract.ModelCapabilityContract(
+                        version = 2, 
+                        reasoning = azentspublicclient.models.reasoning_support.ReasoningSupport(
+                            support = azentspublicclient.models.capability_support.CapabilitySupport(
+                                state = 'supported', 
+                                origin = 'explicit', 
+                                predicate = azentspublicclient.models.support_predicate.SupportPredicate(
+                                    reasoning_efforts = [
+                                        'none'
+                                        ], 
+                                    function_tools = True, ), ), 
+                            completeness = 'complete', 
+                            efforts = [
+                                azentspublicclient.models.effort_declaration.EffortDeclaration(
+                                    level = 'none', 
+                                    state = 'supported', 
+                                    origin = 'explicit', )
+                                ], 
+                            default_effort = azentspublicclient.models.default_effort_evidence.DefaultEffortEvidence(
+                                level = 'none', 
+                                origin = 'explicit', ), ), 
+                        reasoning_summaries = azentspublicclient.models.capability_support.CapabilitySupport(
+                            state = 'supported', 
+                            origin = , 
+                            predicate = azentspublicclient.models.support_predicate.SupportPredicate(
+                                reasoning_efforts = [
+                                    'none'
+                                    ], 
+                                function_tools = True, ), ), 
+                        function_calling = , 
+                        parallel_function_calls = , 
+                        strict_function_schema = , 
+                        structured_response = , 
+                        parameters = azentspublicclient.models.parameter_support.ParameterSupport(
+                            temperature = , 
+                            max_output_tokens = , 
+                            top_p = , 
+                            top_k = , 
+                            stop_sequences = , ), 
+                        input_modalities = [
+                            azentspublicclient.models.modality_support.ModalitySupport(
+                                modality = 'text', 
+                                support = , )
+                            ], 
+                        output_modalities = [
+                            azentspublicclient.models.modality_support.ModalitySupport(
+                                modality = 'text', 
+                                support = , )
+                            ], 
+                        built_in_tools = [
+                            azentspublicclient.models.builtin_tool_support.BuiltinToolSupport(
+                                tool = 'web_search', 
+                                support = , )
+                            ], ), ),
                 supported_execution_options = [
                     'fast'
                     ],
@@ -82,8 +136,8 @@ class TestModelCatalogEntryResponse(unittest.TestCase):
                 visibility_status = '',
                 publisher = '',
                 family = '',
-                source_metadata = { },
-                projection_metadata = { }
+                source_metadata = azentspublicclient.models.source_metadata.source_metadata(),
+                projection_metadata = azentspublicclient.models.projection_metadata.projection_metadata()
             )
         else:
             return ModelCatalogEntryResponse(
@@ -126,7 +180,61 @@ class TestModelCatalogEntryResponse(unittest.TestCase):
                     compatibility = azentspublicclient.models.model_compatibility_capabilities.ModelCompatibilityCapabilities(
                         provider_family = '', 
                         responses_api = True, 
-                        unsupported_media_policy = 'text_substitution', ), ),
+                        unsupported_media_policy = 'text_substitution', ), 
+                    semantic_contract = azentspublicclient.models.model_capability_contract.ModelCapabilityContract(
+                        version = 2, 
+                        reasoning = azentspublicclient.models.reasoning_support.ReasoningSupport(
+                            support = azentspublicclient.models.capability_support.CapabilitySupport(
+                                state = 'supported', 
+                                origin = 'explicit', 
+                                predicate = azentspublicclient.models.support_predicate.SupportPredicate(
+                                    reasoning_efforts = [
+                                        'none'
+                                        ], 
+                                    function_tools = True, ), ), 
+                            completeness = 'complete', 
+                            efforts = [
+                                azentspublicclient.models.effort_declaration.EffortDeclaration(
+                                    level = 'none', 
+                                    state = 'supported', 
+                                    origin = 'explicit', )
+                                ], 
+                            default_effort = azentspublicclient.models.default_effort_evidence.DefaultEffortEvidence(
+                                level = 'none', 
+                                origin = 'explicit', ), ), 
+                        reasoning_summaries = azentspublicclient.models.capability_support.CapabilitySupport(
+                            state = 'supported', 
+                            origin = , 
+                            predicate = azentspublicclient.models.support_predicate.SupportPredicate(
+                                reasoning_efforts = [
+                                    'none'
+                                    ], 
+                                function_tools = True, ), ), 
+                        function_calling = , 
+                        parallel_function_calls = , 
+                        strict_function_schema = , 
+                        structured_response = , 
+                        parameters = azentspublicclient.models.parameter_support.ParameterSupport(
+                            temperature = , 
+                            max_output_tokens = , 
+                            top_p = , 
+                            top_k = , 
+                            stop_sequences = , ), 
+                        input_modalities = [
+                            azentspublicclient.models.modality_support.ModalitySupport(
+                                modality = 'text', 
+                                support = , )
+                            ], 
+                        output_modalities = [
+                            azentspublicclient.models.modality_support.ModalitySupport(
+                                modality = 'text', 
+                                support = , )
+                            ], 
+                        built_in_tools = [
+                            azentspublicclient.models.builtin_tool_support.BuiltinToolSupport(
+                                tool = 'web_search', 
+                                support = , )
+                            ], ), ),
                 supported_execution_options = [
                     'fast'
                     ],
@@ -134,8 +242,8 @@ class TestModelCatalogEntryResponse(unittest.TestCase):
                 visibility_status = '',
                 publisher = '',
                 family = '',
-                source_metadata = { },
-                projection_metadata = { },
+                source_metadata = azentspublicclient.models.source_metadata.source_metadata(),
+                projection_metadata = azentspublicclient.models.projection_metadata.projection_metadata(),
         )
         """
 

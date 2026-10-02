@@ -21907,6 +21907,67 @@
         "title": "BuiltinToolConfig",
         "description": "Built-in tool setting enabled for one selectable model option."
       },
+      "BuiltinToolSupport": {
+        "properties": {
+          "tool": {
+            "$ref": "#/components/schemas/BuiltinToolValue"
+          },
+          "support": {
+            "$ref": "#/components/schemas/CapabilitySupport"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "tool",
+          "support"
+        ],
+        "title": "BuiltinToolSupport",
+        "description": "One implemented configurable tool's saved support fact."
+      },
+      "BuiltinToolValue": {
+        "type": "string",
+        "enum": [
+          "web_search",
+          "image_generation"
+        ]
+      },
+      "CapabilitySupport": {
+        "properties": {
+          "state": {
+            "$ref": "#/components/schemas/SupportState"
+          },
+          "origin": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EvidenceOrigin"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "predicate": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SupportPredicate"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "state",
+          "origin",
+          "predicate"
+        ],
+        "title": "CapabilitySupport",
+        "description": "One justified support state, independent of source or runtime libraries."
+      },
       "ChatEditMessageWriteRequest": {
         "properties": {
           "agent_id": {
@@ -23386,6 +23447,24 @@
         "title": "CurrentMemberResponse",
         "description": "Current user workspace member info response schema."
       },
+      "DefaultEffortEvidence": {
+        "properties": {
+          "level": {
+            "$ref": "#/components/schemas/ReasoningEffortValue"
+          },
+          "origin": {
+            "$ref": "#/components/schemas/EvidenceOrigin"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "level",
+          "origin"
+        ],
+        "title": "DefaultEffortEvidence",
+        "description": "A saved known default; absence of this object means the default is unknown."
+      },
       "DiscordConnectionConfiguration": {
         "properties": {
           "provider": {
@@ -23651,6 +23730,49 @@
         "title": "DockerContainerResources",
         "description": "Docker-native enforceable Runner resource choices."
       },
+      "EffortCompleteness": {
+        "type": "string",
+        "enum": [
+          "complete",
+          "partial",
+          "unknown"
+        ]
+      },
+      "EffortDeclaration": {
+        "properties": {
+          "level": {
+            "$ref": "#/components/schemas/ReasoningEffortValue"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "supported",
+              "unsupported",
+              "unknown"
+            ],
+            "title": "State"
+          },
+          "origin": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EvidenceOrigin"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "level",
+          "state",
+          "origin"
+        ],
+        "title": "EffortDeclaration",
+        "description": "An individual effort fact and whether it was explicit or derived."
+      },
       "ElevateResponse": {
         "properties": {
           "access_token": {
@@ -23740,6 +23862,13 @@
         ],
         "title": "EventKind",
         "description": "Event transcript event kind."
+      },
+      "EvidenceOrigin": {
+        "type": "string",
+        "enum": [
+          "explicit",
+          "contract_derived"
+        ]
       },
       "ExistingProjectWorkspaceItemResponse": {
         "properties": {
@@ -28620,6 +28749,34 @@
         "title": "MemoryUpdateRequest",
         "description": "Memory update request, for partial updates."
       },
+      "ModalitySupport": {
+        "properties": {
+          "modality": {
+            "$ref": "#/components/schemas/ModalityValue"
+          },
+          "support": {
+            "$ref": "#/components/schemas/CapabilitySupport"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "modality",
+          "support"
+        ],
+        "title": "ModalitySupport",
+        "description": "One supported, denied, unknown, or conditional content form."
+      },
+      "ModalityValue": {
+        "type": "string",
+        "enum": [
+          "text",
+          "image",
+          "pdf",
+          "audio",
+          "video"
+        ]
+      },
       "ModelBuiltInToolCapabilities": {
         "properties": {
           "supported": {
@@ -28678,11 +28835,89 @@
           },
           "compatibility": {
             "$ref": "#/components/schemas/ModelCompatibilityCapabilities"
+          },
+          "semantic_contract": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelCapabilityContract"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
         "title": "ModelCapabilities",
         "description": "Normalized LLM model capability contract."
+      },
+      "ModelCapabilityContract": {
+        "properties": {
+          "version": {
+            "type": "integer",
+            "const": 2,
+            "title": "Version"
+          },
+          "reasoning": {
+            "$ref": "#/components/schemas/ReasoningSupport"
+          },
+          "reasoning_summaries": {
+            "$ref": "#/components/schemas/CapabilitySupport"
+          },
+          "function_calling": {
+            "$ref": "#/components/schemas/CapabilitySupport"
+          },
+          "parallel_function_calls": {
+            "$ref": "#/components/schemas/CapabilitySupport"
+          },
+          "strict_function_schema": {
+            "$ref": "#/components/schemas/CapabilitySupport"
+          },
+          "structured_response": {
+            "$ref": "#/components/schemas/CapabilitySupport"
+          },
+          "parameters": {
+            "$ref": "#/components/schemas/ParameterSupport"
+          },
+          "input_modalities": {
+            "items": {
+              "$ref": "#/components/schemas/ModalitySupport"
+            },
+            "type": "array",
+            "title": "Input Modalities"
+          },
+          "output_modalities": {
+            "items": {
+              "$ref": "#/components/schemas/ModalitySupport"
+            },
+            "type": "array",
+            "title": "Output Modalities"
+          },
+          "built_in_tools": {
+            "items": {
+              "$ref": "#/components/schemas/BuiltinToolSupport"
+            },
+            "type": "array",
+            "title": "Built In Tools"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "version",
+          "reasoning",
+          "reasoning_summaries",
+          "function_calling",
+          "parallel_function_calls",
+          "strict_function_schema",
+          "structured_response",
+          "parameters",
+          "input_modalities",
+          "output_modalities",
+          "built_in_tools"
+        ],
+        "title": "ModelCapabilityContract",
+        "description": "Version-two semantic authority carried by a newly projected selection.\n\nExisting boolean/list capability fields are conservative derived views of\nthis object. Raw source records and collection provenance are stored outside\nthis bounded dispatch contract. No field triggers source or profile lookup."
       },
       "ModelCatalogEntryListResponse": {
         "properties": {
@@ -29651,6 +29886,36 @@
         ],
         "title": "OpenRouterSubscriptionFinancialDetailsResponse",
         "description": "Management-only OpenRouter API-key credit details."
+      },
+      "ParameterSupport": {
+        "properties": {
+          "temperature": {
+            "$ref": "#/components/schemas/CapabilitySupport"
+          },
+          "max_output_tokens": {
+            "$ref": "#/components/schemas/CapabilitySupport"
+          },
+          "top_p": {
+            "$ref": "#/components/schemas/CapabilitySupport"
+          },
+          "top_k": {
+            "$ref": "#/components/schemas/CapabilitySupport"
+          },
+          "stop_sequences": {
+            "$ref": "#/components/schemas/CapabilitySupport"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "temperature",
+          "max_output_tokens",
+          "top_p",
+          "top_k",
+          "stop_sequences"
+        ],
+        "title": "ParameterSupport",
+        "description": "Independent support facts for the existing configurable parameters."
       },
       "PartialHistoryResponse": {
         "properties": {
@@ -30704,6 +30969,55 @@
         ],
         "title": "ProjectBrowserModeResponse",
         "description": "Workspace browser mode descriptor response."
+      },
+      "ReasoningEffortValue": {
+        "type": "string",
+        "enum": [
+          "none",
+          "minimal",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      },
+      "ReasoningSupport": {
+        "properties": {
+          "support": {
+            "$ref": "#/components/schemas/CapabilitySupport"
+          },
+          "completeness": {
+            "$ref": "#/components/schemas/EffortCompleteness"
+          },
+          "efforts": {
+            "items": {
+              "$ref": "#/components/schemas/EffortDeclaration"
+            },
+            "type": "array",
+            "title": "Efforts"
+          },
+          "default_effort": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DefaultEffortEvidence"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "support",
+          "completeness",
+          "efforts",
+          "default_effort"
+        ],
+        "title": "ReasoningSupport",
+        "description": "Reasoning support and an explicitly complete, partial, or unknown effort set."
       },
       "ReceivedInvitationListResponse": {
         "properties": {
@@ -34912,6 +35226,52 @@
         ],
         "title": "SubscriptionUsageUnavailableResponse",
         "description": "Public controlled unavailable subscription usage response."
+      },
+      "SupportPredicate": {
+        "properties": {
+          "reasoning_efforts": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ReasoningEffortValue"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reasoning Efforts"
+          },
+          "function_tools": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Function Tools"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "reasoning_efforts",
+          "function_tools"
+        ],
+        "title": "SupportPredicate",
+        "description": "A conjunction of saved effort and function-tool request conditions.\n\nNull means that dimension does not constrain the request. An omitted request\neffort cannot satisfy an effort predicate without a known saved default.\nEvaluation belongs to the consumers of this contract, not to source lookup."
+      },
+      "SupportState": {
+        "type": "string",
+        "enum": [
+          "supported",
+          "unsupported",
+          "unknown",
+          "conditional"
+        ]
       },
       "SystemUserRole": {
         "type": "string",
