@@ -15,6 +15,11 @@ permissions:
   pull-requests: write
   statuses: write
 
+concurrency:
+  group: e2e-duration-reevaluation
+  cancel-in-progress: false
+  queue: max
+
 jobs:
   recheck:
     if: >-
@@ -48,6 +53,7 @@ jobs:
           WORKFLOW_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
           WORKFLOW_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
           WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
+          REPOSITORY_ID: ${{ github.repository_id }}
         run: |
           if [ "$GITHUB_EVENT_NAME" = 'pull_request_target' ]; then
             numbers='${{ github.event.pull_request.number }}'
@@ -60,8 +66,8 @@ jobs:
               )"
             else
               numbers="$(
-                gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs/${WORKFLOW_RUN_ID}/pull_requests" \
-                  --jq ".[] | select(.head.repo.full_name == \"${GITHUB_REPOSITORY}\") | .number"
+                gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${WORKFLOW_RUN_ID}" \
+                  --jq ".pull_requests[] | select(.head.repo.id == ${REPOSITORY_ID}) | .number"
               )"
             fi
           else

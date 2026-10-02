@@ -559,3 +559,46 @@ def test_recheck_skips_fork_pull_requests(tmp_path: Path) -> None:
 
     assert summary == "PR #3: fork pull request skipped"
     assert len(commands) == 1
+
+
+@pytest.mark.parametrize("change_after_status", [False, True])
+def test_recheck_drops_stale_head_before_publication(
+    tmp_path: Path, change_after_status: bool
+) -> None:
+    pull_reads = 0
+    posts: list[list[str]] = []
+
+    def command(args: Sequence[str]) -> str:
+        nonlocal pull_reads
+        values = list(args)
+        joined = " ".join(values)
+        if joined.endswith("pulls/3"):
+            pull_reads += 1
+            pull = json.loads(_pull())
+            if pull_reads >= (3 if change_after_status else 2):
+                pull["head"]["sha"] = "c" * 40
+            return json.dumps(pull)
+        if f"head_sha={_HEAD}" in joined:
+            return json.dumps({"workflow_runs": [{"id": 20}]})
+        if "gh run download 20" in joined:
+            path = tmp_path / "candidate-20/report.json"
+            path.parent.mkdir(parents=True)
+            path.write_text(
+                json.dumps({"head_sha": _HEAD, "lanes": {"web-1": "109"}}),
+                encoding="utf-8",
+            )
+            return ""
+        if f"head_sha={_BASE}" in joined:
+            return json.dumps({"workflow_runs": []})
+        if "/statuses/" in joined:
+            posts.append(values)
+            return ""
+        raise AssertionError(values)
+
+    summary = recheck("azents/azents", 3, tmp_path, command)
+
+    expected = (
+        "stale comment skipped" if change_after_status else "stale publication skipped"
+    )
+    assert expected in summary
+    assert len(posts) == int(change_after_status)

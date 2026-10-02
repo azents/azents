@@ -537,9 +537,11 @@ Always-on required CI does not depend on external credentials.
   Exact-base CI completion triggers evidence-only reevaluation of affected open pull
   requests. Candidate CI completion performs the same reevaluation so ordering between
   base completion and initial sticky-comment publication cannot leave stale state.
-  Reevaluation updates both the `ci-python-e2e` commit status and the duration block in
-  the sticky observability comment for same-repository pull requests; fork pull
-  requests remain read-only. Retargeting and a 15-minute sweep retain equivalent
+  Reevaluation workflows are serialized before evidence is read and publication
+  begins. The helper checks current PR head/base identity before publishing status
+  and again before replacing the duration block in the sticky observability comment.
+  Same-repository pull requests receive updates; fork pull requests remain read-only.
+  Retargeting and a 15-minute sweep retain equivalent
   fallback reevaluation without rerunning E2E. Fixture
   setup/teardown, Docker preparation, and full lane wall time remain diagnostic only.
 - Each executed required E2E lane uploads bounded observability artifacts even when

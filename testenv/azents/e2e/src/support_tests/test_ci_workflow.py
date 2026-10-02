@@ -127,14 +127,22 @@ def test_comment_and_status_are_rechecked_when_base_ci_completes() -> None:
     assert "github.event.workflow_run.head_branch" in recheck
     assert "github.event.workflow_run.head_sha" in recheck
     assert "select(.base.sha" in recheck
-    assert recheck.count(".head.repo.full_name") == 2
-    assert recheck.count("gh api --paginate") == 3
+    assert recheck.count(".head.repo.full_name") == 1
+    assert ".pull_requests[] | select(.head.repo.id" in recheck
+    assert recheck.count("gh api --paginate") == 2
     assert "WORKFLOW_HEAD_BRANCH:" in recheck
     assert "WORKFLOW_HEAD_SHA:" in recheck
     assert "WORKFLOW_RUN_ID:" in recheck
-    assert "actions/runs/${WORKFLOW_RUN_ID}/pull_requests" in recheck
+    assert "REPOSITORY_ID: ${{ github.repository_id }}" in recheck
+    assert (
+        'gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${WORKFLOW_RUN_ID}"' in recheck
+    )
+    assert "actions/runs/${WORKFLOW_RUN_ID}/pull_requests" not in recheck
     assert "github.event.changes.base != null" in recheck
     assert 'cron: "*/15 * * * *"' in recheck
     assert "pull-requests: write" in recheck
+    assert "group: e2e-duration-reevaluation" in recheck
+    assert "cancel-in-progress: false" in recheck
+    assert "queue: max" in recheck
     assert "support.ci_duration_gate recheck" in recheck
     assert "gh workflow run" not in recheck

@@ -749,6 +749,21 @@ def _update_sticky_comment(
     )
 
 
+def _pull_matches(
+    repository: str,
+    pull_number: int,
+    head_sha: str,
+    base_sha: str,
+    command: Runner,
+) -> bool:
+    """Reject evidence publication after the PR identity changes."""
+    pull = _object(command(["gh", "api", f"repos/{repository}/pulls/{pull_number}"]))
+    head, base = pull.get("head"), pull.get("base")
+    if not isinstance(head, dict) or not isinstance(base, dict):
+        raise EvidenceError("invalid_pull_request")
+    return head.get("sha") == head_sha and base.get("sha") == base_sha
+
+
 def recheck(repository: str, pull_number: int, work_dir: Path, command: Runner) -> str:
     """Recompare recorded candidate evidence and synchronize status plus comment."""
     pull = _object(command(["gh", "api", f"repos/{repository}/pulls/{pull_number}"]))
@@ -808,7 +823,11 @@ def recheck(repository: str, pull_number: int, work_dir: Path, command: Runner) 
                 base_sha,
                 diagnostics=diagnostics,
             )
+    if not _pull_matches(repository, pull_number, head_sha, base_sha, command):
+        return f"PR #{pull_number}: changed head/base; stale publication skipped"
     _publish_status(repository, head_sha, base_sha, result, candidate_target, command)
+    if not _pull_matches(repository, pull_number, head_sha, base_sha, command):
+        return f"PR #{pull_number}: changed head/base; stale comment skipped"
     _update_sticky_comment(
         repository, pull_number, head_sha, candidate_target, result, command
     )
