@@ -29,7 +29,7 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
-last_verified_at: 2026-10-01
+last_verified_at: 2026-10-02
 spec_version: 78
 ---
 
@@ -606,7 +606,7 @@ Local/PR environment without live substrate does not fake live PASS. Instead, se
 
 ## Changelog
 
-- **2026-10-01** (spec_version 78) — Made missing base duration evidence pending,
+- **2026-10-02** (spec_version 78) — Made missing base duration evidence pending,
   linked active exact-base CI, and synchronized status plus sticky-comment
   reevaluation when either base or candidate CI completes.
 - **2026-10-01** (spec_version 77) — Kept representative desktop quota-fallback and
