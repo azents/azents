@@ -1,14 +1,14 @@
 {
   "change_checkpoint": {
-    "checked_at": "2026-10-01T00:35:20Z",
+    "checked_at": "2026-10-01T22:30:04Z",
     "checked_ruleset_revisions": [
-      "077a5584a71947f841c4f9bb4408a38671bc06c03ad3f8b7a07c5bbde94d7ad5",
       "193cd524af5bf589eeab7744b06e813623015ce64d6d503b684ddbbbf9bbced2",
       "54a25573d8ff81ac5a2cd2a5b3f3d59e4a86f7305779185adc9154bb8d474d52",
       "62f8502dfaead68e71a6667c5d096e57071fa99d0d528840ea2505268d711835",
-      "dd33ea3996e4ff2f1c4603341225ede42ed3dda8ac3440e62507dec6abd7d8ff"
+      "753224fe20ed069ad162c506972f515615951fedb74fa83a1f6ae81a77bd43f2",
+      "766c579c22206f1c77dfac6c9675c6619b9762929affa695b77bebf505e3f15b"
     ],
-    "checked_through_commit": "4f338c476e60308fb10b6286cb6b155a86c65438"
+    "checked_through_commit": "1622d02e1eff14ecc18514e2416ba740956a67fd"
   },
   "ranges": {
     ".::bucket-1-of-8": {
@@ -367,34 +367,34 @@
       "checked_through_commit": "4f338c476e60308fb10b6286cb6b155a86c65438"
     },
     "python/apps/azents-runtime-proxy/**::bucket-4-of-8": {
-      "checked_at": "2026-08-30T22:26:30Z",
-      "checked_ruleset_revision": "1e4953945f6a9596a55bdba94be8ebe2866574df610eeb8c3a2c34a5076db388",
-      "checked_through_commit": "6ffe29a8a9d3c6c2de2b5feb15354c215d3de471"
+      "checked_at": "2026-10-01T22:30:04Z",
+      "checked_ruleset_revision": "54a25573d8ff81ac5a2cd2a5b3f3d59e4a86f7305779185adc9154bb8d474d52",
+      "checked_through_commit": "1622d02e1eff14ecc18514e2416ba740956a67fd"
     },
     "python/apps/azents-runtime-proxy/**::bucket-5-of-8": {
-      "checked_at": "2026-08-30T22:26:30Z",
-      "checked_ruleset_revision": "1e4953945f6a9596a55bdba94be8ebe2866574df610eeb8c3a2c34a5076db388",
-      "checked_through_commit": "6ffe29a8a9d3c6c2de2b5feb15354c215d3de471"
+      "checked_at": "2026-10-01T22:30:04Z",
+      "checked_ruleset_revision": "54a25573d8ff81ac5a2cd2a5b3f3d59e4a86f7305779185adc9154bb8d474d52",
+      "checked_through_commit": "1622d02e1eff14ecc18514e2416ba740956a67fd"
     },
     "python/apps/azents-runtime-proxy/**::bucket-7-of-8": {
-      "checked_at": "2026-08-30T22:26:30Z",
-      "checked_ruleset_revision": "1e4953945f6a9596a55bdba94be8ebe2866574df610eeb8c3a2c34a5076db388",
-      "checked_through_commit": "6ffe29a8a9d3c6c2de2b5feb15354c215d3de471"
+      "checked_at": "2026-10-01T22:30:04Z",
+      "checked_ruleset_revision": "54a25573d8ff81ac5a2cd2a5b3f3d59e4a86f7305779185adc9154bb8d474d52",
+      "checked_through_commit": "1622d02e1eff14ecc18514e2416ba740956a67fd"
     },
     "python/apps/azents-runtime-proxy/**::bucket-8-of-8": {
-      "checked_at": "2026-09-02T04:08:33Z",
-      "checked_ruleset_revision": "1e4953945f6a9596a55bdba94be8ebe2866574df610eeb8c3a2c34a5076db388",
-      "checked_through_commit": "ed5227f98c8b3a39c1a6a7fa325ce9708a22b1bd"
+      "checked_at": "2026-10-01T22:30:04Z",
+      "checked_ruleset_revision": "54a25573d8ff81ac5a2cd2a5b3f3d59e4a86f7305779185adc9154bb8d474d52",
+      "checked_through_commit": "1622d02e1eff14ecc18514e2416ba740956a67fd"
     },
     "python/apps/azents-runtime-runner/**::bucket-1-of-8": {
-      "checked_at": "2026-09-02T04:08:33Z",
-      "checked_ruleset_revision": "1e4953945f6a9596a55bdba94be8ebe2866574df610eeb8c3a2c34a5076db388",
-      "checked_through_commit": "ed5227f98c8b3a39c1a6a7fa325ce9708a22b1bd"
+      "checked_at": "2026-10-01T22:30:04Z",
+      "checked_ruleset_revision": "54a25573d8ff81ac5a2cd2a5b3f3d59e4a86f7305779185adc9154bb8d474d52",
+      "checked_through_commit": "1622d02e1eff14ecc18514e2416ba740956a67fd"
     },
     "python/apps/azents-runtime-runner/**::bucket-2-of-8": {
-      "checked_at": "2026-09-02T04:08:33Z",
-      "checked_ruleset_revision": "1e4953945f6a9596a55bdba94be8ebe2866574df610eeb8c3a2c34a5076db388",
-      "checked_through_commit": "ed5227f98c8b3a39c1a6a7fa325ce9708a22b1bd"
+      "checked_at": "2026-10-01T22:30:04Z",
+      "checked_ruleset_revision": "54a25573d8ff81ac5a2cd2a5b3f3d59e4a86f7305779185adc9154bb8d474d52",
+      "checked_through_commit": "1622d02e1eff14ecc18514e2416ba740956a67fd"
     },
     "python/apps/azents-runtime-runner/**::bucket-3-of-8": {
       "checked_at": "2026-09-02T04:08:33Z",
@@ -873,26 +873,6 @@
     }
   },
   "rulesets": {
-    "077a5584a71947f841c4f9bb4408a38671bc06c03ad3f8b7a07c5bbde94d7ad5": [
-      ".claude/conventions/global/avoid-oppositional-negative-rewrites.md",
-      ".claude/conventions/global/comments-and-docstrings-in-english.md",
-      ".claude/conventions/global/decode-json-into-typed-payloads.md",
-      ".claude/conventions/global/dependency-updates-without-overrides.md",
-      ".claude/conventions/global/deterministic-test-synchronization.md",
-      ".claude/conventions/global/diagrams-in-mermaid.md",
-      ".claude/conventions/global/load-tests-as-reports.md",
-      ".claude/conventions/global/patch-null-means-set-null.md",
-      ".claude/conventions/global/prefer-supported-external-service-sdks.md",
-      ".claude/conventions/global/redis-optional-no-ha.md",
-      ".claude/conventions/global/runner-reported-agent-workspace.md",
-      ".claude/conventions/global/stacked-pr-rebase-script.md",
-      ".claude/conventions/global/user-facing-text-in-english.md",
-      ".claude/conventions/global/worktree-rebase-origin-main.md",
-      ".claude/conventions/testenv/azents-web-cookie-names.md",
-      ".claude/conventions/testenv/no-direct-db-write-in-tests.md",
-      ".claude/conventions/testenv/qa-report-includes-slack-link.md",
-      ".claude/conventions/testenv/slack-password-login-uses-hidden-url.md"
-    ],
     "193cd524af5bf589eeab7744b06e813623015ce64d6d503b684ddbbbf9bbced2": [
       ".claude/conventions/global/avoid-oppositional-negative-rewrites.md",
       ".claude/conventions/global/comments-and-docstrings-in-english.md",
@@ -1129,6 +1109,27 @@
       ".claude/conventions/global/stacked-pr-rebase-script.md",
       ".claude/conventions/global/user-facing-text-in-english.md",
       ".claude/conventions/global/worktree-rebase-origin-main.md"
+    ],
+    "766c579c22206f1c77dfac6c9675c6619b9762929affa695b77bebf505e3f15b": [
+      ".claude/conventions/global/avoid-oppositional-negative-rewrites.md",
+      ".claude/conventions/global/comments-and-docstrings-in-english.md",
+      ".claude/conventions/global/decode-json-into-typed-payloads.md",
+      ".claude/conventions/global/dependency-updates-without-overrides.md",
+      ".claude/conventions/global/deterministic-test-synchronization.md",
+      ".claude/conventions/global/diagrams-in-mermaid.md",
+      ".claude/conventions/global/load-tests-as-reports.md",
+      ".claude/conventions/global/patch-null-means-set-null.md",
+      ".claude/conventions/global/prefer-supported-external-service-sdks.md",
+      ".claude/conventions/global/redis-optional-no-ha.md",
+      ".claude/conventions/global/runner-reported-agent-workspace.md",
+      ".claude/conventions/global/stacked-pr-rebase-script.md",
+      ".claude/conventions/global/user-facing-text-in-english.md",
+      ".claude/conventions/global/worktree-rebase-origin-main.md",
+      ".claude/conventions/testenv/azents-web-cookie-names.md",
+      ".claude/conventions/testenv/e2e-core-flows-only.md",
+      ".claude/conventions/testenv/no-direct-db-write-in-tests.md",
+      ".claude/conventions/testenv/qa-report-includes-slack-link.md",
+      ".claude/conventions/testenv/slack-password-login-uses-hidden-url.md"
     ],
     "a85886eaaa1c36360d324bb41257013fa109c1ee287de0ba3be2d26c09927678": [
       ".claude/conventions/global/avoid-oppositional-negative-rewrites.md",
