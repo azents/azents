@@ -10,6 +10,7 @@ import pytest
 from support.ci_duration_gate import (
     EvidenceError,
     Sample,
+    affected_pull_numbers,
     compare,
     evaluate,
     load_lanes,
@@ -20,6 +21,85 @@ from support.ci_duration_gate import (
 
 _HEAD = "a" * 40
 _BASE = "b" * 40
+
+
+@pytest.mark.parametrize(
+    ("completed_sha", "expected"),
+    [
+        (_BASE, (2020, 2026)),
+        (_HEAD, (2026, 2028)),
+        ("d" * 40, (2020, 2031)),
+        ("f" * 40, ()),
+    ],
+)
+def test_completed_sha_selects_candidate_and_stacked_dependents(
+    completed_sha: str, expected: tuple[int, ...]
+) -> None:
+    def row(
+        number: int, head_sha: str, base_sha: str, repository: str
+    ) -> dict[str, object]:
+        return {
+            "number": number,
+            "state": "open",
+            "head": {"sha": head_sha, "repo": {"full_name": repository}},
+            "base": {"sha": base_sha},
+        }
+
+    pages = [
+        [
+            row(2020, _BASE, "d" * 40, "azents/azents"),
+            row(2031, "e" * 40, "d" * 40, "azents/azents"),
+        ],
+        [
+            row(2026, _HEAD, _BASE, "azents/azents"),
+            row(2028, "c" * 40, _HEAD, "azents/azents"),
+            row(77, _BASE, _BASE, "someone/fork"),
+            {**row(78, _BASE, _BASE, "azents/azents"), "state": "closed"},
+        ],
+    ]
+
+    def command(args: Sequence[str]) -> str:
+        assert list(args) == [
+            "gh",
+            "api",
+            "--paginate",
+            "--slurp",
+            "repos/azents/azents/pulls?state=open&per_page=100",
+        ]
+        return json.dumps(pages)
+
+    assert affected_pull_numbers("azents/azents", completed_sha, command) == expected
+
+
+def test_targets_cli_emits_dependent_pull_numbers(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    payload = [
+        [
+            {
+                "number": 2026,
+                "state": "open",
+                "head": {"sha": _HEAD, "repo": {"full_name": "azents/azents"}},
+                "base": {"sha": _BASE},
+            }
+        ]
+    ]
+    assert (
+        main(
+            ["targets", "--repository", "azents/azents", "--completed-sha", _BASE],
+            command_runner=lambda args: json.dumps(payload),
+        )
+        == 0
+    )
+    assert capsys.readouterr().out == "2026\n"
+
+
+def test_target_selection_rejects_invalid_sha_before_listing() -> None:
+    def command(args: Sequence[str]) -> str:
+        raise AssertionError("Invalid completion events must not query GitHub.")
+
+    with pytest.raises(EvidenceError, match="completed_sha_unavailable"):
+        affected_pull_numbers("azents/azents", "invalid", command)
 
 
 def _pull(head_repository: str = "azents/azents") -> str:

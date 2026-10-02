@@ -844,6 +844,44 @@ def recheck(repository: str, pull_number: int, work_dir: Path, command: Runner) 
     return f"PR #{pull_number}: {result['outcome']} ({result['reason']})"
 
 
+def affected_pull_numbers(
+    repository: str, completed_sha: str, command: Runner
+) -> tuple[int, ...]:
+    """Select the completed candidate and every exact-base dependent PR."""
+    if not _SHA.fullmatch(completed_sha):
+        raise EvidenceError("completed_sha_unavailable")
+    pulls = _objects(
+        command(
+            [
+                "gh",
+                "api",
+                "--paginate",
+                "--slurp",
+                f"repos/{repository}/pulls?state=open&per_page=100",
+            ]
+        )
+    )
+    numbers: set[int] = set()
+    for pull in pulls:
+        number, head, base = pull.get("number"), pull.get("head"), pull.get("base")
+        if (
+            pull.get("state") != "open"
+            or not isinstance(number, int)
+            or not isinstance(head, dict)
+            or not isinstance(base, dict)
+        ):
+            continue
+        head_repository = head.get("repo")
+        if (
+            not isinstance(head_repository, dict)
+            or head_repository.get("full_name") != repository
+        ):
+            continue
+        if head.get("sha") == completed_sha or base.get("sha") == completed_sha:
+            numbers.add(number)
+    return tuple(sorted(numbers))
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     commands = parser.add_subparsers(dest="command", required=True)
@@ -858,6 +896,9 @@ def _parser() -> argparse.ArgumentParser:
     check.add_argument("--repository", required=True)
     check.add_argument("--pull-number", type=int, required=True)
     check.add_argument("--work-dir", type=Path, required=True)
+    targets = commands.add_parser("targets")
+    targets.add_argument("--repository", required=True)
+    targets.add_argument("--completed-sha", required=True)
     return parser
 
 
@@ -867,6 +908,10 @@ def main(
     """Run the workflow helper."""
     args = _parser().parse_args(argv)
     command = command_runner or _run
+    if args.command == "targets":
+        numbers = affected_pull_numbers(args.repository, args.completed_sha, command)
+        sys.stdout.write("\n".join(str(number) for number in numbers) + "\n")
+        return 0
     if args.command == "recheck":
         sys.stdout.write(
             recheck(args.repository, args.pull_number, args.work_dir, command) + "\n"

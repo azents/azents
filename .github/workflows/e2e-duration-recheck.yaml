@@ -50,26 +50,16 @@ jobs:
         if: steps.helper.outputs.ready == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-          WORKFLOW_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
           WORKFLOW_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
-          WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
-          REPOSITORY_ID: ${{ github.repository_id }}
         run: |
           if [ "$GITHUB_EVENT_NAME" = 'pull_request_target' ]; then
             numbers='${{ github.event.pull_request.number }}'
           elif [ "$GITHUB_EVENT_NAME" = 'workflow_run' ]; then
-            if [ "$WORKFLOW_HEAD_BRANCH" = 'main' ]; then
-              base_sha="$WORKFLOW_HEAD_SHA"
-              numbers="$(
-                gh api --paginate "repos/${GITHUB_REPOSITORY}/pulls?state=open&base=main&per_page=100" \
-                  --jq ".[] | select(.base.sha == \"${base_sha}\" and .head.repo.full_name == \"${GITHUB_REPOSITORY}\") | .number"
-              )"
-            else
-              numbers="$(
-                gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${WORKFLOW_RUN_ID}" \
-                  --jq ".pull_requests[] | select(.head.repo.id == ${REPOSITORY_ID}) | .number"
-              )"
-            fi
+            numbers="$(
+              PYTHONPATH=trusted python -m support.ci_duration_gate targets \
+                --repository "$GITHUB_REPOSITORY" \
+                --completed-sha "$WORKFLOW_HEAD_SHA"
+            )"
           else
             numbers="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/pulls?state=open&per_page=100" --jq '.[].number')"
           fi
