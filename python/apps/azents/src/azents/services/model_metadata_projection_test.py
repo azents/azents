@@ -19,6 +19,11 @@ from azents.core.model_metadata_source import (
 )
 from azents.repos.model_metadata_source_data import ModelMetadataSourceSnapshot
 from azents.services.model_listing.data import NormalizedModelCandidate
+from azents.services.model_listing.providers import (
+    _candidate_from_xai_api_key_model,
+    _candidate_from_xai_oauth_model,
+    _XaiOAuthModelPayload,
+)
 from azents.services.model_metadata_projection import (
     ModelMetadataProjectionError,
     integration_projection_fingerprint,
@@ -125,6 +130,101 @@ def test_projection_uses_runtime_profile_and_source_neutral_metadata() -> None:
     embedding = by_id["text-embedding-4"]
     assert embedding.visibility_status is LLMCatalogEntryVisibility.HIDDEN
     assert embedding.hidden_reason == "unsupported_model_kind"
+
+
+@pytest.mark.parametrize("provider", [LLMProvider.XAI, LLMProvider.XAI_OAUTH])
+@pytest.mark.parametrize("source_kind", ["missing", "unmatched", "unpriced"])
+@pytest.mark.parametrize("backend_search", [None, True, False])
+def test_xai_projection_preserves_effective_client_and_native_tools(
+    provider: LLMProvider, source_kind: str, backend_search: bool | None
+) -> None:
+    """Sparse listings and price misses cannot deny executable Grok tools."""
+    fetched_at = datetime.datetime(2026, 10, 2, tzinfo=datetime.UTC)
+    candidate = (
+        _candidate_from_xai_api_key_model(
+            model_id="grok-4", created=0, fetched_at=fetched_at
+        )
+        if provider is LLMProvider.XAI
+        else _candidate_from_xai_oauth_model(
+            _XaiOAuthModelPayload(id="grok-4", supports_backend_search=backend_search),
+            fetched_at=fetched_at,
+        )
+    )
+    source = (
+        None
+        if source_kind == "missing"
+        else _source(
+            ModelMetadataSourcePayload(
+                providers=[
+                    _provider(
+                        "x-ai",
+                        [_model("grok-4" if source_kind == "unpriced" else "other")],
+                    )
+                ]
+            )
+        )
+    )
+    [entry] = project_integration_replacement_entries(
+        integration_id="integration",
+        provider=provider,
+        candidates=[candidate],
+        source=source,
+        provider_listing_source="xai:models",
+    )
+    capabilities = ModelCapabilities.model_validate(entry.normalized_capabilities)
+
+    assert entry.visibility_status is LLMCatalogEntryVisibility.SELECTABLE
+    assert capabilities.tool_calling.supported is True
+    assert "image_generation" in capabilities.built_in_tools.supported
+    assert ("web_search" in capabilities.built_in_tools.supported) is (
+        provider is LLMProvider.XAI or backend_search is not False
+    )
+
+    [restored_entry] = project_integration_replacement_entries(
+        integration_id="integration",
+        provider=provider,
+        candidates=[
+            NormalizedModelCandidate.model_validate_json(candidate.model_dump_json())
+        ],
+        source=source,
+        provider_listing_source="xai:models",
+    )
+    assert restored_entry.normalized_capabilities == entry.normalized_capabilities
+
+
+@pytest.mark.parametrize("reasoning", [None, True, False])
+@pytest.mark.parametrize("efforts", [None, [], [{"value": "low"}]])
+def test_xai_projection_respects_explicit_reasoning_evidence(
+    reasoning: bool | None, efforts: list[dict[str, str]] | None
+) -> None:
+    """Omitted reasoning metadata is not a denial; explicit empty levels are."""
+    candidate = _candidate_from_xai_oauth_model(
+        _XaiOAuthModelPayload.model_validate(
+            {
+                "id": "grok-4",
+                "supports_reasoning_effort": reasoning,
+                "reasoning_efforts": efforts,
+            }
+        ),
+        fetched_at=datetime.datetime(2026, 10, 2, tzinfo=datetime.UTC),
+    )
+    [entry] = project_integration_replacement_entries(
+        integration_id="integration",
+        provider=LLMProvider.XAI_OAUTH,
+        candidates=[candidate],
+        source=None,
+        provider_listing_source="xai:models",
+    )
+    capabilities = ModelCapabilities.model_validate(entry.normalized_capabilities)
+
+    assert capabilities.reasoning.supported is (reasoning is not False)
+    assert [effort.value for effort in capabilities.reasoning.effort_levels] == (
+        []
+        if reasoning is False or efforts == []
+        else ["low"]
+        if efforts
+        else ["low", "medium", "high"]
+    )
 
 
 def test_google_system_projection_excludes_vertex_anthropic_family() -> None:
@@ -288,6 +388,26 @@ def test_projection_fingerprint_uses_installed_dependency_version(
 
     assert source.producer_version == "0.1.9"
     assert first != second
+
+
+def test_projection_fingerprint_covers_runtime_and_policy_revision(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A capability repair invalidates unchanged-source candidate reuse."""
+    source = _source(_payload())
+    original = projection_fingerprint(provider=LLMProvider.OPENAI, source=source)
+    monkeypatch.setattr(
+        "azents.services.model_metadata_projection.RUNTIME_MODEL_PROFILE_RESOLVER_REVISION",
+        "next-runtime",
+    )
+    runtime_changed = projection_fingerprint(provider=LLMProvider.OPENAI, source=source)
+    monkeypatch.setattr(
+        "azents.services.model_metadata_projection.MODEL_METADATA_PROJECTION_POLICY_REVISION",
+        "next-policy",
+    )
+    policy_changed = projection_fingerprint(provider=LLMProvider.OPENAI, source=source)
+
+    assert len({original, runtime_changed, policy_changed}) == 3
 
 
 @pytest.mark.parametrize("provider_id", [None, "empty"])

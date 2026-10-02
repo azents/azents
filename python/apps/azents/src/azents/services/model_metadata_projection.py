@@ -50,7 +50,7 @@ from azents.services.model_listing.providers import (
 from azents.services.model_metadata_source import ModelMetadataSourceSyncService
 
 MODEL_METADATA_PROJECTION_SCHEMA_VERSION = "1"
-MODEL_METADATA_PROJECTION_POLICY_REVISION = "1"
+MODEL_METADATA_PROJECTION_POLICY_REVISION = "2"
 _SYSTEM_SOURCE_PROVIDERS: dict[LLMProvider, str] = {
     LLMProvider.OPENAI: "openai",
     LLMProvider.ANTHROPIC: "anthropic",
@@ -423,6 +423,11 @@ def _merge_provider_listing_capabilities(
     source_match: SourceModelMatch | None,
 ) -> ModelCapabilities:
     """Intersect provider-visible evidence with shared runtime compatibility."""
+    if candidate.provider in {LLMProvider.XAI, LLMProvider.XAI_OAUTH}:
+        return _merge_xai_listing_capabilities(
+            candidate=candidate,
+            resolved=resolved,
+        )
     runtime = resolved
     listing = candidate.normalized_capabilities
     merged = runtime.model_copy(deep=True)
@@ -497,6 +502,39 @@ def _merge_provider_listing_capabilities(
         merged.compatibility.unsupported_media_policy = (
             listing.compatibility.unsupported_media_policy
         )
+    return merged
+
+
+def _merge_xai_listing_capabilities(
+    *,
+    candidate: NormalizedModelCandidate,
+    resolved: ModelCapabilities,
+) -> ModelCapabilities:
+    """Narrow Grok only with facts actually supplied by its listing API."""
+    merged = resolved.model_copy(deep=True)
+    listing = candidate.normalized_capabilities
+    metadata = candidate.source_metadata or {}
+    if listing.context_window.max_input_tokens is not None:
+        merged.context_window.max_input_tokens = listing.context_window.max_input_tokens
+    if "supports_reasoning_effort" in metadata:
+        merged.reasoning.supported = (
+            merged.reasoning.supported and listing.reasoning.supported
+        )
+    if not merged.reasoning.supported:
+        merged.reasoning.effort_levels = []
+    elif "reasoning_efforts" in metadata:
+        merged.reasoning.effort_levels = [
+            effort
+            for effort in merged.reasoning.effort_levels
+            if effort in listing.reasoning.effort_levels
+        ]
+    if metadata.get("supports_backend_search") is False:
+        merged.built_in_tools.supported = [
+            tool for tool in merged.built_in_tools.supported if tool != "web_search"
+        ]
+    if listing.compatibility.responses_api is not None:
+        merged.compatibility.responses_api = listing.compatibility.responses_api
+    merged.compatibility.provider_family = listing.compatibility.provider_family
     return merged
 
 

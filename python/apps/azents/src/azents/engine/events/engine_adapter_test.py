@@ -154,6 +154,10 @@ from azents.repos.toolkit_state.engine import ToolWorkingSetStore
 from azents.services.artifact import ArtifactService
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.model_file import ModelFileService
+from azents.services.model_listing.providers import _candidate_from_xai_api_key_model
+from azents.services.model_metadata_projection import (
+    project_integration_replacement_entries,
+)
 from azents.services.xai_imagine import (
     XaiImagineAuthenticationError,
     XaiImagineClient,
@@ -1841,12 +1845,25 @@ async def test_openai_image_generation_is_bound_as_client_function_tool(
 async def test_xai_image_generation_is_bound_as_client_function_tool(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Expose Imagine to Grok without lowering it as a provider-hosted tool."""
+    """Lower repaired catalog capabilities to client Imagine and native search."""
     caplog.set_level("INFO", logger=engine_adapter_module.__name__)
     execution = _Execution()
     adapter = _agent_engine_adapter(
         session_manager=_session_context,
         execution_factory=_capture_execution_factory(execution),
+    )
+    [entry] = project_integration_replacement_entries(
+        integration_id="integration",
+        provider=LLMProvider.XAI,
+        candidates=[
+            _candidate_from_xai_api_key_model(
+                model_id="grok-4",
+                created=0,
+                fetched_at=datetime.datetime(2026, 10, 2, tzinfo=datetime.UTC),
+            )
+        ],
+        source=None,
+        provider_listing_source="xai:developer_models",
     )
 
     _ = [
@@ -1861,11 +1878,9 @@ async def test_xai_image_generation_is_bound_as_client_function_tool(
                 agent_prompt=None,
                 toolkits=[],
                 provider=LLMProvider.XAI,
-                model="xai/grok-4",
-                model_capabilities=ModelCapabilities(
-                    built_in_tools=ModelBuiltInToolCapabilities(
-                        supported=["image_generation"]
-                    )
+                model="grok-4",
+                model_capabilities=ModelCapabilities.model_validate(
+                    entry.normalized_capabilities
                 ),
                 credential_kwargs={"api_key": "xai-api-key"},
                 workspace_id="workspace-1",
@@ -1874,7 +1889,10 @@ async def test_xai_image_generation_is_bound_as_client_function_tool(
                 auto_compaction_threshold_tokens=None,
                 inference_state=None,
                 compaction_provider_integration_id=None,
-                builtin_tools=[BuiltinToolSpec(name="image_generation", config={})],
+                builtin_tools=[
+                    BuiltinToolSpec(name="image_generation", config={}),
+                    BuiltinToolSpec(name="web_search", config={}),
+                ],
             ),
             RunContext(
                 owner_generation=1,
@@ -1895,6 +1913,9 @@ async def test_xai_image_generation_is_bound_as_client_function_tool(
     assert [tool.name for tool in prepared_request.parameters.function_tools] == [
         "image_generation"
     ]
+    assert [
+        type(tool).__name__ for tool in prepared_request.parameters.native_tools
+    ] == ["WebSearchTool"]
     projection_record = next(
         record
         for record in caplog.records
