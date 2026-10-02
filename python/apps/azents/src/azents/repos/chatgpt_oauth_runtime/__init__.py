@@ -44,53 +44,74 @@ class ChatGPTOAuthRuntimeRepository:
     async def update_and_reload(
         self,
         *,
-        integration_id: str,
+        original_integration: LLMProviderIntegrationWithSecrets,
         secrets: ChatGPTOAuthSecrets,
         config: ChatGPTOAuthConfig,
     ) -> LLMProviderIntegrationWithSecrets | None:
-        """Atomically store successful refresh credentials and reload their row."""
+        """Store success only while the original refresh identity remains current."""
         async with self.session_manager() as session:
+            latest = (
+                await self.integration_repository.get_by_id_with_secrets_for_update(
+                    session, original_integration.id
+                )
+            )
+            if latest is None or not _refresh_identity_matches(
+                latest=latest, original=original_integration
+            ):
+                return latest
             update = await self.integration_repository.update_runtime_state_by_id(
                 session,
-                integration_id,
+                original_integration.id,
                 {"secrets": secrets, "config": config},
             )
             if isinstance(update, Failure):
                 return None
             return await self.integration_repository.get_by_id_with_secrets(
                 session,
-                integration_id,
+                original_integration.id,
             )
 
     async def persist_refresh_failure(
         self,
         *,
-        integration_id: str,
-        original_secrets: ChatGPTOAuthSecrets,
-        original_config: ChatGPTOAuthConfig,
+        original_integration: LLMProviderIntegrationWithSecrets,
         config: ChatGPTOAuthConfig,
     ) -> LLMProviderIntegrationWithSecrets | None:
-        """Fence failure persistence against a concurrently refreshed identity."""
+        """Persist failure only while its original refresh identity remains current."""
         async with self.session_manager() as session:
             latest = (
                 await self.integration_repository.get_by_id_with_secrets_for_update(
-                    session, integration_id
+                    session, original_integration.id
                 )
             )
-            if (
-                latest is None
-                or not isinstance(latest.secrets, ChatGPTOAuthSecrets)
-                or not isinstance(latest.config, ChatGPTOAuthConfig)
-            ):
-                return None
-            if (
-                latest.secrets.refresh_token != original_secrets.refresh_token
-                or latest.config.last_refreshed_at != original_config.last_refreshed_at
+            if latest is None or not _refresh_identity_matches(
+                latest=latest, original=original_integration
             ):
                 return latest
             await self.integration_repository.update_runtime_state_by_id(
                 session,
-                integration_id,
+                original_integration.id,
                 {"config": config},
             )
             return None
+
+
+def _refresh_identity_matches(
+    *,
+    latest: LLMProviderIntegrationWithSecrets,
+    original: LLMProviderIntegrationWithSecrets,
+) -> bool:
+    """Compare user generation and refresh identity, allowing state-only failures."""
+    if not isinstance(latest.secrets, ChatGPTOAuthSecrets) or not isinstance(
+        original.secrets, ChatGPTOAuthSecrets
+    ):
+        return False
+    if not isinstance(latest.config, ChatGPTOAuthConfig) or not isinstance(
+        original.config, ChatGPTOAuthConfig
+    ):
+        return False
+    return (
+        latest.catalog_configuration_version == original.catalog_configuration_version
+        and latest.secrets == original.secrets
+        and latest.config.last_refreshed_at == original.config.last_refreshed_at
+    )

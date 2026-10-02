@@ -209,7 +209,7 @@ async def test_oauth_sync_refresh_preserves_generation_and_user_update_fence(
             assert isinstance(fresh_secrets, XaiOAuthSecrets)
             assert isinstance(fresh_config, XaiOAuthConfig)
             refreshed = await persistence.update_and_reload(
-                integration_id=integration.id,
+                original_integration=integration,
                 secrets=fresh_secrets,
                 config=fresh_config,
             )
@@ -218,7 +218,7 @@ async def test_oauth_sync_refresh_preserves_generation_and_user_update_fence(
             assert isinstance(fresh_secrets, ChatGPTOAuthSecrets)
             assert isinstance(fresh_config, ChatGPTOAuthConfig)
             refreshed = await persistence.update_and_reload(
-                integration_id=integration.id,
+                original_integration=integration,
                 secrets=fresh_secrets,
                 config=fresh_config,
             )
