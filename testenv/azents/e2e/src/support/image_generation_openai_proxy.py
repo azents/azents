@@ -12,10 +12,18 @@ import urllib.request
 from base64 import b64encode, urlsafe_b64encode
 from collections import OrderedDict
 from collections.abc import Callable
+from dataclasses import dataclass
 from hashlib import sha256
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import ClassVar, NamedTuple, Protocol, runtime_checkable
+from typing import (
+    ClassVar,
+    Literal,
+    NamedTuple,
+    Protocol,
+    assert_never,
+    runtime_checkable,
+)
 from urllib.parse import parse_qs, urlsplit
 
 _PROMPT = "Provider image generation handoff"
@@ -1074,35 +1082,93 @@ _PROVIDER_TOOL_LIVE_BARRIER = _ProviderToolLiveBarrier()
 _INFERENCE_PROFILE_BARRIER = _ProviderToolLiveBarrier()
 
 
-def _inference_profile_source_payload() -> list[dict[str, object]]:
-    """Supply synthetic prices through the ordinary validated-source API."""
-    return [
-        {
-            "id": "openai",
-            "name": "OpenAI",
-            "api_pattern": r"https://api\.openai\.com",
-            "models": [
-                {
-                    "id": model,
-                    "name": model,
-                    "match": {"equals": model},
-                    "context_window": 128_000,
-                    "prices": {
-                        "input_mtok": 1,
-                        "cache_read_mtok": 0.1,
-                        "cache_write_mtok": 1,
-                        "output_mtok": 2,
-                    },
-                }
-                for model in (
-                    "gpt-5.5",
-                    "gpt-5.5-mini",
-                    "gpt-6-astra",
-                    "gpt-5.6-sol",
-                )
-            ],
+type _InferenceProfileSourceVariant = Literal["baseline", "refreshed", "missing-model"]
+
+
+@dataclass(frozen=True)
+class _InferenceProfileSourceControl:
+    """Accept only the bounded source-only fixture control."""
+
+    variant: _InferenceProfileSourceVariant
+
+
+def _decode_inference_profile_source_control(
+    body: bytes,
+) -> _InferenceProfileSourceControl:
+    """Validate the exact control object before entering fixture state logic."""
+    payload: object = json.loads(body)
+    if not isinstance(payload, dict) or set(payload) != {"variant"}:
+        raise ValueError("A valid catalog source variant is required.")
+    match payload["variant"]:
+        case "baseline":
+            return _InferenceProfileSourceControl(variant="baseline")
+        case "refreshed":
+            return _InferenceProfileSourceControl(variant="refreshed")
+        case "missing-model":
+            return _InferenceProfileSourceControl(variant="missing-model")
+        case _:
+            raise ValueError("A valid catalog source variant is required.")
+
+
+def _inference_profile_source_payload(
+    variant: _InferenceProfileSourceVariant,
+) -> dict[str, dict[str, object]]:
+    """Supply inert exact-scoped facts and per-token synthetic catalog prices."""
+    full_efforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+    model_efforts = {
+        "gpt-5.5": full_efforts,
+        "gpt-5.5-mini": [],
+        "gpt-6-astra": full_efforts,
+        "gpt-5.6-sol": full_efforts,
+    }
+    model_web_search = {
+        "gpt-5.5": True,
+        "gpt-5.5-mini": False,
+        "gpt-6-astra": True,
+        "gpt-5.6-sol": True,
+    }
+    payload: dict[str, dict[str, object]] = {
+        model: {
+            "litellm_provider": "openai",
+            "display_name": model,
+            "mode": "responses",
+            "supported_endpoints": ["/v1/responses"],
+            "max_input_tokens": 128_000,
+            "supported_modalities": ["text", "image", "pdf"],
+            "supported_output_modalities": ["text"],
+            "supports_vision": True,
+            "supports_pdf_input": True,
+            "supports_function_calling": True,
+            "supports_parallel_function_calling": True,
+            "supports_response_schema": True,
+            "supports_reasoning": bool(efforts),
+            "reasoning_effort_levels": list(efforts),
+            "supports_web_search": model_web_search[model],
+            "input_cost_per_token": 0.000001,
+            "output_cost_per_token": 0.000002,
+            "cache_read_input_token_cost": 0.0000001,
+            "cache_creation_input_token_cost": 0.000001,
         }
-    ]
+        for model, efforts in model_efforts.items()
+    }
+    match variant:
+        case "baseline":
+            pass
+        case "refreshed":
+            payload["gpt-5.5"].update(
+                {
+                    "reasoning_effort_levels": [
+                        effort for effort in full_efforts if effort != "max"
+                    ],
+                    "input_cost_per_token": 0.000003,
+                    "output_cost_per_token": 0.000004,
+                }
+            )
+        case "missing-model":
+            del payload["gpt-5.5"]
+        case _:
+            assert_never(variant)
+    return payload
 
 
 def inference_profile_scenario(user_text: str | None) -> str | None:
@@ -1579,6 +1645,7 @@ def _external_channel_quiet_work_barrier_binding(body: bytes) -> str | None:
 
 
 class _State:
+    catalog_source_variant: ClassVar[_InferenceProfileSourceVariant] = "baseline"
     requests: ClassVar[list[dict[str, object]]] = []
     openai_image_requests: ClassVar[list[dict[str, object]]] = []
     dynamic_worktree_requests: ClassVar[list[dict[str, object]]] = []
@@ -1603,7 +1670,9 @@ class _Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         """Return a local journal, deterministic usage, or proxied response."""
         if self.path == "/inference-profile/catalog-source":
-            self._write_json(200, _inference_profile_source_payload())
+            with _State.lock:
+                variant = _State.catalog_source_variant
+            self._write_json(200, _inference_profile_source_payload(variant))
             return
         if self.path == _INFERENCE_PROFILE_BARRIER_PATH:
             self._write_json(200, _INFERENCE_PROFILE_BARRIER.evidence())
@@ -1645,6 +1714,23 @@ class _Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         """Handle deterministic image, hosted-tool, and OAuth boundaries."""
+        if self.path == "/inference-profile/catalog-source":
+            try:
+                control = _decode_inference_profile_source_control(self._read_body())
+            except ValueError:
+                self._write_json(
+                    400,
+                    {
+                        "error": {
+                            "message": "A valid catalog source variant is required."
+                        }
+                    },
+                )
+                return
+            with _State.lock:
+                _State.catalog_source_variant = control.variant
+            self._write_json(200, {"variant": control.variant})
+            return
         if self.path == _INFERENCE_PROFILE_BARRIER_PATH:
             _INFERENCE_PROFILE_BARRIER.arm()
             self._write_json(201, _INFERENCE_PROFILE_BARRIER.evidence())

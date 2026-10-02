@@ -1683,7 +1683,7 @@ def azents_core_service_containers(
             _GITHUB_VALIDATION_INTERNAL_URL,
         )
         .with_env(
-            "GENAI_PRICES_SOURCE_URL",
+            "MODEL_CATALOG_SOURCE_URL",
             "http://openai-proxy:8081/inference-profile/catalog-source",
         )
         .with_env("AZ_TESTENV_API_ENABLED", "true")

@@ -48,6 +48,8 @@ The exact single reviewer remains `/root/catalog-metadata-reviewer`; only root r
 
 ## Integration and Validation
 
+CI boundary correction: the deterministic source proxy, new source URL environment wiring and Docker-free support fixture are included in this connection phase. Leaving the retired URL variable until phase 3 caused phase-2 CI to fetch live public rates and invalidated the fixed-premium-unavailable test premise. The already reviewed final fixture is moved earlier without changing the complete-stack product tree, price logic or approved authority. Phase 3 retains representative saved-contract E2E and DB fencing.
+
 1. Freeze source read and pricing capture interfaces and share them with projection/estimator owners.
 2. Listing evidence and pure projection/parser/evaluator can be implemented independently; do not activate a second authority or source toggle.
 3. Root rewires source/repository/services and caller capture; integrate owners' patches in place, regenerate APIs/clients and resolve all type/test failures.
