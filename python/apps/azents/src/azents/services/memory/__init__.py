@@ -58,7 +58,7 @@ class MemoryService:
         NotFound | NotBelongToWorkspace | PrivateAgentAccessDenied,
     ]:
         """List memories for one visible Agent and one exact scope."""
-        access = await self._get_visible_agent(
+        access = await self.get_visible_agent(
             agent_id,
             workspace_id=workspace_id,
             workspace_user_id=workspace_user_id,
@@ -141,7 +141,7 @@ class MemoryService:
         | DuplicateMemory,
     ]:
         """Create Memory with strict conflict semantics."""
-        access = await self._get_visible_agent(
+        access = await self.get_visible_agent(
             agent_id,
             workspace_id=workspace_id,
             workspace_user_id=workspace_user_id,
@@ -328,7 +328,7 @@ class MemoryService:
             return Failure(MemoryNotFound(memory_id=memory_id))
         return Success(None)
 
-    async def _get_visible_agent(
+    async def get_visible_agent(
         self,
         agent_id: str,
         *,
@@ -374,7 +374,7 @@ class MemoryService:
             return Failure(MemoryNotFound(memory_id=memory_id))
         if memory.agent_id != agent_id:
             return Failure(MemoryNotFound(memory_id=memory_id))
-        agent_access = await self._get_visible_agent(
+        agent_access = await self.get_visible_agent(
             memory.agent_id,
             workspace_id=workspace_id,
             workspace_user_id=workspace_user_id,

@@ -91,9 +91,11 @@ Class | Method | HTTP request | Description
 *AgentV1Api* | [**agent_v1_delete_agent_memory**](azentspublicclient/docs/AgentV1Api.md#agent_v1_delete_agent_memory) | **DELETE** /agent/v1/workspaces/{handle}/agents/{agent_id}/memories/{memory_id} | Delete Agent Memory
 *AgentV1Api* | [**agent_v1_finalize_avatar**](azentspublicclient/docs/AgentV1Api.md#agent_v1_finalize_avatar) | **POST** /agent/v1/workspaces/{handle}/agents/{agent_id}/avatar/finalize | Finalize Avatar
 *AgentV1Api* | [**agent_v1_get_agent**](azentspublicclient/docs/AgentV1Api.md#agent_v1_get_agent) | **GET** /agent/v1/workspaces/{handle}/agents/{agent_id} | Get Agent
+*AgentV1Api* | [**agent_v1_get_agent_historical_memory**](azentspublicclient/docs/AgentV1Api.md#agent_v1_get_agent_historical_memory) | **GET** /agent/v1/workspaces/{handle}/agents/{agent_id}/historical-memories/{source_session_id} | Get Agent Historical Memory
 *AgentV1Api* | [**agent_v1_get_agent_memory**](azentspublicclient/docs/AgentV1Api.md#agent_v1_get_agent_memory) | **GET** /agent/v1/workspaces/{handle}/agents/{agent_id}/memories/{memory_id} | Get Agent Memory
 *AgentV1Api* | [**agent_v1_get_automatic_session_projects**](azentspublicclient/docs/AgentV1Api.md#agent_v1_get_automatic_session_projects) | **GET** /agent/v1/workspaces/{handle}/agents/{agent_id}/automatic-session-projects | Get Automatic Session Projects
 *AgentV1Api* | [**agent_v1_list_agent_admins**](azentspublicclient/docs/AgentV1Api.md#agent_v1_list_agent_admins) | **GET** /agent/v1/workspaces/{handle}/agents/{agent_id}/admins | List Agent Admins
+*AgentV1Api* | [**agent_v1_list_agent_historical_memories**](azentspublicclient/docs/AgentV1Api.md#agent_v1_list_agent_historical_memories) | **GET** /agent/v1/workspaces/{handle}/agents/{agent_id}/historical-memories | List Agent Historical Memories
 *AgentV1Api* | [**agent_v1_list_agent_memories**](azentspublicclient/docs/AgentV1Api.md#agent_v1_list_agent_memories) | **GET** /agent/v1/workspaces/{handle}/agents/{agent_id}/memories | List Agent Memories
 *AgentV1Api* | [**agent_v1_list_agents**](azentspublicclient/docs/AgentV1Api.md#agent_v1_list_agents) | **GET** /agent/v1/workspaces/{handle}/agents | List Agents
 *AgentV1Api* | [**agent_v1_remove_agent_admin**](azentspublicclient/docs/AgentV1Api.md#agent_v1_remove_agent_admin) | **DELETE** /agent/v1/workspaces/{handle}/agents/{agent_id}/admins/{admin_workspace_user_id} | Remove Agent Admin
@@ -578,6 +580,9 @@ Class | Method | HTTP request | Description
  - [GoalUpdateRequest](azentspublicclient/docs/GoalUpdateRequest.md)
  - [HTTPValidationError](azentspublicclient/docs/HTTPValidationError.md)
  - [HealthStatus](azentspublicclient/docs/HealthStatus.md)
+ - [HistoricalMemoryListResponse](azentspublicclient/docs/HistoricalMemoryListResponse.md)
+ - [HistoricalMemoryResponse](azentspublicclient/docs/HistoricalMemoryResponse.md)
+ - [HistoricalMemorySettingsScope](azentspublicclient/docs/HistoricalMemorySettingsScope.md)
  - [ImageFile](azentspublicclient/docs/ImageFile.md)
  - [ImageGenerationCatalogAttemptResponse](azentspublicclient/docs/ImageGenerationCatalogAttemptResponse.md)
  - [ImageGenerationCatalogEntryResponse](azentspublicclient/docs/ImageGenerationCatalogEntryResponse.md)

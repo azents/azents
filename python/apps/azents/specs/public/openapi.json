@@ -469,6 +469,189 @@
         }
       }
     },
+    "/agent/v1/workspaces/{handle}/agents/{agent_id}/historical-memories": {
+      "get": {
+        "tags": [
+          "Agent v1"
+        ],
+        "summary": "List Agent Historical Memories",
+        "description": "List currently visible Historical Memory for settings inspection.",
+        "operationId": "agent_v1_list_agent_historical_memories",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          },
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "scope",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/HistoricalMemorySettingsScope",
+              "description": "Exact Historical Memory source scope"
+            },
+            "description": "Exact Historical Memory source scope"
+          },
+          {
+            "name": "query",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional source title or summary search",
+              "title": "Query"
+            },
+            "description": "Optional source title or summary search"
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque continuation cursor",
+              "title": "Cursor"
+            },
+            "description": "Opaque continuation cursor"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "Maximum records to return",
+              "default": 20,
+              "title": "Limit"
+            },
+            "description": "Maximum records to return"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HistoricalMemoryListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agent/v1/workspaces/{handle}/agents/{agent_id}/historical-memories/{source_session_id}": {
+      "get": {
+        "tags": [
+          "Agent v1"
+        ],
+        "summary": "Get Agent Historical Memory",
+        "description": "Return one currently visible Historical Memory source.",
+        "operationId": "agent_v1_get_agent_historical_memory",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          },
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "source_session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Source Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HistoricalMemoryResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/agent/v1/workspaces/{handle}/agents/{agent_id}/memories": {
       "get": {
         "tags": [
@@ -24918,6 +25101,96 @@
         ],
         "title": "HealthStatus",
         "description": "Server status response model."
+      },
+      "HistoricalMemoryListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/HistoricalMemoryResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "HistoricalMemoryListResponse",
+        "description": "Cursor-paginated Historical Memory settings response."
+      },
+      "HistoricalMemoryResponse": {
+        "properties": {
+          "source_session_id": {
+            "type": "string",
+            "title": "Source Session Id"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/HistoricalMemorySettingsScope"
+          },
+          "source_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Title"
+          },
+          "source_activity_through": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Source Activity Through"
+          },
+          "prepared_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Prepared At"
+          },
+          "summary": {
+            "type": "string",
+            "title": "Summary"
+          },
+          "source_path": {
+            "type": "string",
+            "title": "Source Path"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source_session_id",
+          "scope",
+          "source_title",
+          "source_activity_through",
+          "prepared_at",
+          "summary",
+          "source_path"
+        ],
+        "title": "HistoricalMemoryResponse",
+        "description": "Read-only Historical Memory settings response."
+      },
+      "HistoricalMemorySettingsScope": {
+        "type": "string",
+        "enum": [
+          "team",
+          "user"
+        ],
+        "title": "HistoricalMemorySettingsScope",
+        "description": "One exact Historical Memory settings source scope."
       },
       "ImageFile": {
         "properties": {

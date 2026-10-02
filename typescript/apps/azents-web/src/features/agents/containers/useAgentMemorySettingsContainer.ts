@@ -4,9 +4,15 @@
 
 import { useState } from "react";
 import { trpc } from "@/trpc/client";
-import type { AgentResponse, MemoryResponse } from "@azents/public-client";
+import type {
+  AgentResponse,
+  HistoricalMemoryResponse,
+  MemoryResponse,
+} from "@azents/public-client";
 
-export type MemoryScopeValue = "agent" | "user";
+export type MemoryKindValue = "saved" | "historical";
+export type SavedMemoryScopeValue = "agent" | "user";
+export type HistoricalMemoryScopeValue = "team" | "user";
 
 export interface MemoryDraft {
   type: string;
@@ -20,10 +26,19 @@ type DraftState =
   | { type: "edit"; memoryId: string; draft: MemoryDraft }
   | null;
 
-export type MemoryListState =
+export type SavedMemoryListState =
   | { type: "LOADING" }
   | { type: "ERROR"; message: string }
   | { type: "LOADED"; memories: MemoryResponse[] };
+
+export type HistoricalMemoryListState =
+  | { type: "LOADING" }
+  | { type: "ERROR"; message: string }
+  | {
+      type: "LOADED";
+      memories: HistoricalMemoryResponse[];
+      hasMore: boolean;
+    };
 
 export interface AgentMemorySettingsContainerProps {
   handle: string;
@@ -34,16 +49,25 @@ export interface AgentMemorySettingsContainerOutput {
   handle: string;
   agent: AgentResponse;
   memoryEnabled: boolean;
-  scope: MemoryScopeValue;
-  query: string;
-  listState: MemoryListState;
+  kind: MemoryKindValue;
+  savedScope: SavedMemoryScopeValue;
+  historicalScope: HistoricalMemoryScopeValue;
+  savedQuery: string;
+  historicalQuery: string;
+  savedListState: SavedMemoryListState;
+  historicalListState: HistoricalMemoryListState;
   draftState: DraftState;
   actionError: string | null;
   saving: boolean;
   deletingId: string | null;
   togglingMemory: boolean;
-  onScopeChange: (scope: MemoryScopeValue) => void;
-  onQueryChange: (query: string) => void;
+  loadingMoreHistorical: boolean;
+  onKindChange: (kind: MemoryKindValue) => void;
+  onSavedScopeChange: (scope: SavedMemoryScopeValue) => void;
+  onHistoricalScopeChange: (scope: HistoricalMemoryScopeValue) => void;
+  onSavedQueryChange: (query: string) => void;
+  onHistoricalQueryChange: (query: string) => void;
+  onLoadMoreHistorical: () => void;
   onMemoryEnabledChange: (enabled: boolean) => void;
   onStartCreate: () => void;
   onStartEdit: (memory: MemoryResponse) => void;
@@ -81,20 +105,42 @@ export function useAgentMemorySettingsContainer({
   agent,
 }: AgentMemorySettingsContainerProps): AgentMemorySettingsContainerOutput {
   const utils = trpc.useUtils();
-  const [scope, setScope] = useState<MemoryScopeValue>("agent");
-  const [query, setQuery] = useState("");
+  const [kind, setKind] = useState<MemoryKindValue>("saved");
+  const [savedScope, setSavedScope] = useState<SavedMemoryScopeValue>("agent");
+  const [historicalScope, setHistoricalScope] =
+    useState<HistoricalMemoryScopeValue>("team");
+  const [savedQuery, setSavedQuery] = useState("");
+  const [historicalQuery, setHistoricalQuery] = useState("");
   const [draftState, setDraftState] = useState<DraftState>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [memoryEnabled, setMemoryEnabled] = useState(agent.memory_enabled);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  const listQuery = trpc.agent.listMemories.useQuery({
-    handle,
-    agentId: agent.id,
-    scope,
-    type: null,
-    query: query.trim() === "" ? null : query.trim(),
-  });
+  const savedListQuery = trpc.agent.listMemories.useQuery(
+    {
+      handle,
+      agentId: agent.id,
+      scope: savedScope,
+      type: null,
+      query: savedQuery.trim() === "" ? null : savedQuery.trim(),
+    },
+    { enabled: kind === "saved" },
+  );
+
+  const historicalListQuery =
+    trpc.agent.listHistoricalMemories.useInfiniteQuery(
+      {
+        handle,
+        agentId: agent.id,
+        scope: historicalScope,
+        query: historicalQuery.trim() === "" ? null : historicalQuery.trim(),
+        limit: 20,
+      },
+      {
+        enabled: kind === "historical",
+        getNextPageParam: (lastPage) => lastPage.next_cursor,
+      },
+    );
 
   const createMutation = trpc.agent.createMemory.useMutation({
     onSuccess: () => {
@@ -137,30 +183,61 @@ export function useAgentMemorySettingsContainer({
     },
   });
 
-  const listState: MemoryListState = listQuery.isLoading
+  const savedListState: SavedMemoryListState = savedListQuery.isLoading
     ? { type: "LOADING" }
-    : listQuery.isError
-      ? { type: "ERROR", message: normalizeError(listQuery.error) }
-      : { type: "LOADED", memories: listQuery.data?.items ?? [] };
+    : savedListQuery.isError
+      ? { type: "ERROR", message: normalizeError(savedListQuery.error) }
+      : { type: "LOADED", memories: savedListQuery.data?.items ?? [] };
+
+  const historicalListState: HistoricalMemoryListState =
+    historicalListQuery.isLoading
+      ? { type: "LOADING" }
+      : historicalListQuery.isError
+        ? {
+            type: "ERROR",
+            message: normalizeError(historicalListQuery.error),
+          }
+        : {
+            type: "LOADED",
+            memories:
+              historicalListQuery.data?.pages.flatMap((page) => page.items) ??
+              [],
+            hasMore: historicalListQuery.hasNextPage,
+          };
 
   return {
     handle,
     agent,
     memoryEnabled,
-    scope,
-    query,
-    listState,
+    kind,
+    savedScope,
+    historicalScope,
+    savedQuery,
+    historicalQuery,
+    savedListState,
+    historicalListState,
     draftState,
     actionError,
     saving: createMutation.isPending || updateMutation.isPending,
     deletingId,
     togglingMemory: toggleMutation.isPending,
-    onScopeChange: (nextScope) => {
-      setScope(nextScope);
+    loadingMoreHistorical: historicalListQuery.isFetchingNextPage,
+    onKindChange: (nextKind) => {
+      setKind(nextKind);
       setDraftState(null);
       setActionError(null);
     },
-    onQueryChange: setQuery,
+    onSavedScopeChange: (nextScope) => {
+      setSavedScope(nextScope);
+      setDraftState(null);
+      setActionError(null);
+    },
+    onHistoricalScopeChange: setHistoricalScope,
+    onSavedQueryChange: setSavedQuery,
+    onHistoricalQueryChange: setHistoricalQuery,
+    onLoadMoreHistorical: () => {
+      void historicalListQuery.fetchNextPage();
+    },
     onMemoryEnabledChange: (enabled) => {
       setMemoryEnabled(enabled);
       toggleMutation.mutate({
@@ -197,7 +274,7 @@ export function useAgentMemorySettingsContainer({
         createMutation.mutate({
           handle,
           agentId: agent.id,
-          scope,
+          scope: savedScope,
           ...draftState.draft,
         });
         return;

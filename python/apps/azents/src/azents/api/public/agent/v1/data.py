@@ -21,12 +21,18 @@ from azents.core.model_execution_options import (
     list_model_execution_option_definitions,
 )
 from azents.repos.agent_automatic_project.data import AgentAutomaticProjectPolicy
+from azents.repos.historical_memory.settings_data import (
+    HistoricalMemorySettingsScope,
+)
 from azents.repos.memory.data import MemoryScope
 from azents.services.agent.data import (
     AgentAdminOutput,
     AgentDecommissionOutput,
     AgentOutput,
     AvatarUploadTicketOutput,
+)
+from azents.services.historical_memory.settings_data import (
+    HistoricalMemorySettingsOutput,
 )
 from azents.services.memory.data import MemoryOutput
 from azents.services.uploads.schema import UploadedImage
@@ -447,6 +453,46 @@ class MemoryListResponse(BaseModel):
     """Memory list response."""
 
     items: list[MemoryResponse]
+
+
+class HistoricalMemoryResponse(BaseModel):
+    """Read-only Historical Memory settings response."""
+
+    source_session_id: str
+    scope: HistoricalMemorySettingsScope
+    source_title: str | None
+    source_activity_through: datetime.datetime
+    prepared_at: datetime.datetime
+    summary: str
+    source_path: str
+
+    @classmethod
+    def convert_from(
+        cls,
+        data: HistoricalMemorySettingsOutput,
+        *,
+        handle: str,
+        agent_id: str,
+    ) -> Self:
+        """Convert a visible Historical Memory source to its public response."""
+        return cls(
+            source_session_id=data.source_session_id,
+            scope=data.scope,
+            source_title=data.source_title,
+            source_activity_through=data.source_activity_through,
+            prepared_at=data.prepared_at,
+            summary=data.summary,
+            source_path=(
+                f"/w/{handle}/agents/{agent_id}/sessions/{data.source_session_id}"
+            ),
+        )
+
+
+class HistoricalMemoryListResponse(BaseModel):
+    """Cursor-paginated Historical Memory settings response."""
+
+    items: list[HistoricalMemoryResponse]
+    next_cursor: str | None
 
 
 class MemoryCreateRequest(BaseModel):

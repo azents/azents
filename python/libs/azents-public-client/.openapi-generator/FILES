@@ -250,6 +250,9 @@ azentspublicclient/docs/GoalUpdateRequest.md
 azentspublicclient/docs/HTTPValidationError.md
 azentspublicclient/docs/HealthStatus.md
 azentspublicclient/docs/HealthV1Api.md
+azentspublicclient/docs/HistoricalMemoryListResponse.md
+azentspublicclient/docs/HistoricalMemoryResponse.md
+azentspublicclient/docs/HistoricalMemorySettingsScope.md
 azentspublicclient/docs/ImageFile.md
 azentspublicclient/docs/ImageGenerationCatalogAttemptResponse.md
 azentspublicclient/docs/ImageGenerationCatalogEntryResponse.md
@@ -802,6 +805,9 @@ azentspublicclient/models/goal_state_response.py
 azentspublicclient/models/goal_status_update_request.py
 azentspublicclient/models/goal_update_request.py
 azentspublicclient/models/health_status.py
+azentspublicclient/models/historical_memory_list_response.py
+azentspublicclient/models/historical_memory_response.py
+azentspublicclient/models/historical_memory_settings_scope.py
 azentspublicclient/models/http_validation_error.py
 azentspublicclient/models/image_file.py
 azentspublicclient/models/image_generation_catalog_attempt_response.py
@@ -1344,6 +1350,9 @@ azentspublicclient/test/test_goal_status_update_request.py
 azentspublicclient/test/test_goal_update_request.py
 azentspublicclient/test/test_health_status.py
 azentspublicclient/test/test_health_v1_api.py
+azentspublicclient/test/test_historical_memory_list_response.py
+azentspublicclient/test/test_historical_memory_response.py
+azentspublicclient/test/test_historical_memory_settings_scope.py
 azentspublicclient/test/test_http_validation_error.py
 azentspublicclient/test/test_image_file.py
 azentspublicclient/test/test_image_generation_catalog_attempt_response.py
