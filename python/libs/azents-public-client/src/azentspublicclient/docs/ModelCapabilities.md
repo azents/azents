@@ -13,6 +13,7 @@ Name | Type | Description | Notes
 **built_in_tools** | [**ModelBuiltInToolCapabilities**](ModelBuiltInToolCapabilities.md) |  | [optional] 
 **parameters** | [**ModelParameterCapabilities**](ModelParameterCapabilities.md) |  | [optional] 
 **compatibility** | [**ModelCompatibilityCapabilities**](ModelCompatibilityCapabilities.md) |  | [optional] 
+**semantic_contract** | [**ModelCapabilityContract**](ModelCapabilityContract.md) |  | [optional] 
 
 ## Example
 
