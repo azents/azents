@@ -128,6 +128,7 @@ def test_comment_and_status_are_rechecked_when_base_ci_completes() -> None:
     assert "github.event.workflow_run.head_sha" in recheck
     assert "select(.base.sha" in recheck
     assert recheck.count(".head.repo.full_name") == 2
+    assert recheck.count("gh api --paginate") == 3
     assert "WORKFLOW_HEAD_BRANCH:" in recheck
     assert "WORKFLOW_HEAD_SHA:" in recheck
     assert "WORKFLOW_RUN_ID:" in recheck
