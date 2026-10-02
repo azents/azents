@@ -164,7 +164,7 @@ from azents.repos.action_execution.data import (
 )
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
-from azents.repos.agent_execution import EventTranscriptRepository
+from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import AgentRunPatch
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
@@ -178,7 +178,13 @@ from azents.repos.model_candidate_health.data import ModelCandidateIdentity
 from azents.repos.model_operation_completion import (
     ModelOperationCompletion,
 )
+from azents.repos.session_execution import (
+    CanonicalExecutionOwnerGenerationStaleError,
+)
+from azents.repos.session_execution.data import CanonicalExecutionSnapshot
 from azents.repos.toolkit import ToolkitRepository
+from azents.repos.worker_session import WorkerSessionOperationRepository
+from azents.repos.worker_session_data import CanonicalExecutionWorkDriftError
 from azents.runtime.types import RuntimeDomainConfig
 from azents.services.agent_wait import AgentWaitService
 from azents.services.chat.data import (
@@ -256,11 +262,6 @@ from azents.worker.run.turn_action_executor import (
     OperationActionExecutorRegistry,
 )
 from azents.worker.session.contracts import PrepareToolkits
-from azents.worker.session.execution_snapshot import (
-    CanonicalExecutionOwnerGenerationStaleError,
-    CanonicalExecutionSnapshot,
-    CanonicalExecutionWorkDriftError,
-)
 from azents.worker.session.lifecycle import SessionLifecycleService
 from azents.worker.session.mailbox_activity import MailboxActivityObserver
 from azents.worker.session.user_stop_finalizer import UserStopFinalizer
@@ -513,6 +514,10 @@ class RunExecutor:
     ]
     agent_session_repository: Annotated[
         AgentSessionRepository, Depends(AgentSessionRepository)
+    ]
+    agent_run_repository: Annotated[AgentRunRepository, Depends(AgentRunRepository)]
+    worker_session_repository: Annotated[
+        WorkerSessionOperationRepository, Depends(WorkerSessionOperationRepository)
     ]
     event_transcript_repository: Annotated[
         EventTranscriptRepository, Depends(EventTranscriptRepository)
@@ -1553,9 +1558,7 @@ class RunExecutor:
                     wait_service=AgentWaitService(
                         session_manager=self.session_manager,
                         agent_session_repository=self.agent_session_repository,
-                        agent_run_repository=(
-                            self.session_lifecycle.agent_run_repository
-                        ),
+                        agent_run_repository=(self.agent_run_repository),
                         mailbox_item_service=self.mailbox_item_service,
                     )
                 ),
@@ -2776,7 +2779,7 @@ class RunExecutor:
             raise ValueError("Run quota transition received an unsupported operation")
 
         async with self.session_manager() as session:
-            await self.session_lifecycle.assert_owner_generation(
+            await self.worker_session_repository.assert_owner_generation_in_session(
                 session,
                 session_id=session_id,
                 owner_generation=owner_generation,
@@ -2785,7 +2788,7 @@ class RunExecutor:
                 session,
                 session_id,
             )
-            locked_run = await self.session_lifecycle.agent_run_repository.lock_by_id(
+            locked_run = await self.agent_run_repository.lock_by_id(
                 session,
                 run_id,
             )
@@ -2903,7 +2906,7 @@ class RunExecutor:
                     else state.compaction
                 ),
             )
-            await self.session_lifecycle.agent_run_repository.update(
+            await self.agent_run_repository.update(
                 session,
                 run_id,
                 AgentRunPatch(
@@ -3060,11 +3063,9 @@ class RunExecutor:
                     session,
                     session_id,
                 )
-                locked_run = (
-                    await self.session_lifecycle.agent_run_repository.lock_by_id(
-                        session,
-                        run_id,
-                    )
+                locked_run = await self.agent_run_repository.lock_by_id(
+                    session,
+                    run_id,
                 )
                 if locked_agent is None or locked_session is None or locked_run is None:
                     raise ValueError("AgentSession, Agent, or AgentRun not found")
@@ -3175,7 +3176,7 @@ class RunExecutor:
                         foreground=exc.operation,
                         compaction=operation_state.compaction,
                     )
-                    await self.session_lifecycle.agent_run_repository.update(
+                    await self.agent_run_repository.update(
                         session,
                         run_id,
                         AgentRunPatch(model_operation_state=exhausted_state),
@@ -3227,7 +3228,7 @@ class RunExecutor:
                         foreground=selection.operation,
                         compaction=exc.operation,
                     )
-                    await self.session_lifecycle.agent_run_repository.update(
+                    await self.agent_run_repository.update(
                         session,
                         run_id,
                         AgentRunPatch(model_operation_state=exhausted_state),
@@ -3237,7 +3238,7 @@ class RunExecutor:
                     foreground=selection.operation,
                     compaction=compaction_selection.operation,
                 )
-                await self.session_lifecycle.agent_run_repository.update(
+                await self.agent_run_repository.update(
                     session,
                     run_id,
                     AgentRunPatch(model_operation_state=next_operation_state),
@@ -3435,11 +3436,9 @@ class RunExecutor:
                     session,
                     session_id,
                 )
-                locked_run = (
-                    await self.session_lifecycle.agent_run_repository.lock_by_id(
-                        session,
-                        run_id,
-                    )
+                locked_run = await self.agent_run_repository.lock_by_id(
+                    session,
+                    run_id,
                 )
                 if locked_session is None or locked_run is None:
                     raise ValueError("AgentSession or AgentRun not found")
@@ -3489,7 +3488,7 @@ class RunExecutor:
                 session,
                 session_id,
             )
-            locked_run = await self.session_lifecycle.agent_run_repository.lock_by_id(
+            locked_run = await self.agent_run_repository.lock_by_id(
                 session,
                 run_id,
             )
@@ -3551,7 +3550,7 @@ class RunExecutor:
                     reservation=None,
                 )
             except ModelOperationChainExhaustedError as exc:
-                await self.session_lifecycle.agent_run_repository.update(
+                await self.agent_run_repository.update(
                     session,
                     run_id,
                     AgentRunPatch(
@@ -3566,7 +3565,7 @@ class RunExecutor:
                         ModelCandidateChainExhausted(exc.operation)
                     )
                 ) from exc
-            await self.session_lifecycle.agent_run_repository.update(
+            await self.agent_run_repository.update(
                 session,
                 run_id,
                 AgentRunPatch(

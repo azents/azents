@@ -1,153 +1,82 @@
-"""Session lifecycle state and ownership management."""
+"""Session lifecycle orchestration over completed Worker database operations."""
 
 import dataclasses
 import datetime
 import logging
-from collections.abc import Awaitable, Callable, Sequence
-from typing import Annotated, TypeVar
+from collections.abc import Sequence
+from typing import Annotated, assert_never
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.broker.types import SessionBroker, SessionWakeUp
-from azents.core.enums import (
-    AgentRunParentResultDeliveryState,
-    AgentRunPhase,
-    AgentRunStatus,
-    MailboxSchedulingMode,
-)
-from azents.core.inference_profile import (
-    RequestedInferenceProfile,
-    SessionInferenceState,
-)
+from azents.core.enums import AgentRunPhase, AgentRunStatus
+from azents.core.inference_profile import RequestedInferenceProfile
 from azents.engine.events.types import AgentRunState
 from azents.engine.run.failure import FailedRunRetryState
-from azents.rdb.deps import get_session_manager
-from azents.rdb.session import SessionManager
-from azents.repos.agent_execution import AgentRunRepository
-from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSession
-from azents.repos.mailbox import MailboxRepository
 from azents.repos.session_execution.data import PendingCommandSnapshot
-from azents.repos.terminal_finalization import TerminalRunFinalizationRepository
+from azents.repos.worker_session import WorkerSessionOperationRepository
+from azents.repos.worker_session_data import WorkerIdleDisposition
 from azents.worker.deps import get_worker_broker
-from azents.worker.session.execution_snapshot import (
-    CanonicalExecutionOwnerGenerationStaleError,
-    CanonicalExecutionWorkDriftError,
-)
 
 logger = logging.getLogger(__name__)
-_T = TypeVar("_T")
 
 
 @dataclasses.dataclass(frozen=True)
 class SessionLifecycleService:
-    """Manage Session runtime state and broker ownership/activity."""
+    """Sequence completed Session operations and existing broker effects."""
 
     broker: Annotated[SessionBroker, Depends(get_worker_broker)]
-    session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
-    ]
-    agent_session_repository: Annotated[
-        AgentSessionRepository, Depends(AgentSessionRepository)
-    ]
-    agent_run_repository: Annotated[AgentRunRepository, Depends(AgentRunRepository)]
-    mailbox_item_repository: Annotated[MailboxRepository, Depends(MailboxRepository)]
-    terminal_finalization_repository: Annotated[
-        TerminalRunFinalizationRepository,
-        Depends(TerminalRunFinalizationRepository),
+    repository: Annotated[
+        WorkerSessionOperationRepository, Depends(WorkerSessionOperationRepository)
     ]
 
     async def claim_owner_generation(self, session_id: str) -> int:
-        """Claim the next durable generation after Redis ownership acquisition."""
-        async with self.session_manager() as db_session:
-            generation = await self.agent_session_repository.claim_owner_generation(
-                db_session,
-                session_id,
-            )
-            await db_session.commit()
-            return generation
+        """Claim the next durable generation after broker ownership acquisition."""
+        return await self.repository.claim_owner_generation(session_id)
 
     async def release_session_lock(self, session_id: str) -> None:
-        """Release session lock."""
+        """Release the existing broker lock."""
         await self.broker.release_session_lock(session_id)
 
     async def assert_current_owner_generation(
-        self,
-        session_id: str,
-        *,
-        owner_generation: int,
+        self, session_id: str, *, owner_generation: int
     ) -> None:
-        """Check durable ownership before an external execution side effect."""
-
-        async def assert_current(db_session: AsyncSession) -> None:
-            await self._lock_owned_session(
-                db_session,
-                session_id=session_id,
-                owner_generation=owner_generation,
-            )
-
-        await self.run_short_db(assert_current)
+        """Complete durable ownership validation before an external side effect."""
+        await self.repository.assert_current_owner_generation(
+            session_id, owner_generation=owner_generation
+        )
 
     async def release_owned_session_lock(
-        self,
-        session_id: str,
-        *,
-        owner_generation: int,
+        self, session_id: str, *, owner_generation: int
     ) -> None:
-        """Release the broker lock only while this Worker is still current."""
+        """Release broker ownership only after a completed current-owner check."""
         await self.assert_current_owner_generation(
-            session_id,
-            owner_generation=owner_generation,
+            session_id, owner_generation=owner_generation
         )
         await self.broker.release_session_lock(session_id)
 
     async def clear_owned_session_activity(
-        self,
-        session_id: str,
-        *,
-        owner_generation: int,
+        self, session_id: str, *, owner_generation: int
     ) -> None:
-        """Clear live activity only while this Worker is still current."""
+        """Clear live activity only after durable ownership validation completes."""
         await self.assert_current_owner_generation(
-            session_id,
-            owner_generation=owner_generation,
+            session_id, owner_generation=owner_generation
         )
         await self.broker.clear_session_activity(
-            session_id,
-            owner_generation=owner_generation,
+            session_id, owner_generation=owner_generation
         )
 
     async def send_session_wake_up(self, message: SessionWakeUp) -> None:
-        """Send wake-up through the existing session broker path."""
+        """Send through the existing Session broker path."""
         await self.broker.send_message(message)
 
     async def notify_parent_result_activity(self, run_id: str) -> None:
-        """Notify a live parent after committed terminal-result admission."""
-        async with self.session_manager() as session:
-            run = await self.agent_run_repository.get_by_id(session, run_id)
-            if (
-                run is None
-                or run.parent_result_delivery_state
-                is not AgentRunParentResultDeliveryState.ENQUEUED
-            ):
-                return
-            source = (
-                await self.agent_session_repository.get_session_agent_by_session_id(
-                    session,
-                    run.session_id,
-                )
-            )
-            if source is None or source.parent_session_agent_id is None:
-                return
-            parent = await self.agent_session_repository.get_session_agent_by_id(
-                session,
-                source.parent_session_agent_id,
-            )
-            if parent is None:
-                return
-            parent_session_id = parent.agent_session_id
-        await self.broker.notify_mailbox_activity(parent_session_id)
+        """Publish activity only after resolving committed parent-result routing."""
+        parent_session_id = await self.repository.parent_result_activity_session_id(
+            run_id
+        )
+        if parent_session_id is not None:
+            await self.broker.notify_mailbox_activity(parent_session_id)
 
     async def set_session_activity(
         self,
@@ -157,460 +86,153 @@ class SessionLifecycleService:
         run_id: str,
         phase: AgentRunPhase | None = None,
     ) -> None:
-        """Record session activity and refresh TTL."""
+        """Record existing live activity only after a completed owner check."""
         await self.assert_current_owner_generation(
-            session_id,
-            owner_generation=owner_generation,
+            session_id, owner_generation=owner_generation
         )
         await self.broker.set_session_activity(
-            session_id,
-            owner_generation=owner_generation,
-            run_id=run_id,
-            phase=phase,
+            session_id, owner_generation=owner_generation, run_id=run_id, phase=phase
         )
 
     async def renew_session_owner_heartbeat(self, session_id: str) -> None:
-        """Refresh Redis session owner heartbeat."""
+        """Refresh the existing broker owner heartbeat without database work."""
         await self.broker.renew_session_owner_heartbeat(session_id)
 
     async def mark_session_running(self, session_id: str) -> None:
-        """Transition ``run_state`` to RUNNING and initialize heartbeat."""
-        await self.run_short_db(
-            lambda db: self.agent_session_repository.mark_running(db, session_id)
-        )
-
-    async def mark_session_running_for_input_wakeup(self, session_id: str) -> None:
-        """Apply the durable input wake transition outside producer locks."""
-        await self.run_short_db(
-            lambda db: self.agent_session_repository.mark_running_for_input_wakeup(
-                db,
-                session_id,
-            )
-        )
+        """Complete the durable running/heartbeat transition."""
+        await self.repository.mark_session_running(session_id)
 
     async def mark_session_idle(
-        self,
-        session_id: str,
-        *,
-        owner_generation: int,
+        self, session_id: str, *, owner_generation: int
     ) -> bool:
-        """Revert ``run_state`` to IDLE only after all runs are terminal."""
-
-        async def mark_idle_if_no_run(db_session: AsyncSession) -> bool:
-            agent_session = await self._lock_owned_session(
-                db_session,
-                session_id=session_id,
-                owner_generation=owner_generation,
-            )
-            if agent_session.pending_command_id is not None:
+        """Apply true-idle predicates atomically and log their detached decision."""
+        transition = await self.repository.mark_session_idle(
+            session_id, owner_generation=owner_generation
+        )
+        match transition.disposition:
+            case WorkerIdleDisposition.IDLE:
+                return True
+            case WorkerIdleDisposition.COMMAND_PENDING:
                 logger.info(
                     "Skipped session idle transition because a command is pending",
                     extra={
                         "session_id": session_id,
-                        "command_id": agent_session.pending_command_id,
+                        "command_id": transition.command_id,
                     },
                 )
-                return False
-            mailbox_item_repository = self.mailbox_item_repository
-            pending_wake_input = (
-                await mailbox_item_repository.has_by_session_id_and_scheduling_mode(
-                    db_session,
-                    session_id=session_id,
-                    scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
-                )
-            )
-            if pending_wake_input:
+            case WorkerIdleDisposition.WAKE_INPUT_PENDING:
                 logger.info(
                     "Skipped session idle transition because "
                     "wake-producing input is pending",
                     extra={"session_id": session_id},
                 )
-                return False
-            active_run = await self.agent_run_repository.get_active_by_session_id(
-                db_session,
-                session_id=session_id,
-            )
-            if active_run is not None:
+            case WorkerIdleDisposition.RUN_ACTIVE:
                 logger.info(
                     "Skipped session idle transition because an AgentRun is active",
-                    extra={
-                        "session_id": session_id,
-                        "run_id": active_run.id,
-                    },
+                    extra={"session_id": session_id, "run_id": transition.run_id},
                 )
-                return False
-            await self.agent_session_repository.mark_idle(db_session, session_id)
-            return True
-
-        return await self.run_short_db(mark_idle_if_no_run)
-
-    async def _lock_owned_session(
-        self,
-        db_session: AsyncSession,
-        *,
-        session_id: str,
-        owner_generation: int,
-    ) -> AgentSession:
-        """Acquire tree-ordered admission and reject a superseded generation."""
-        agent_session = (
-            await self.agent_session_repository.wait_for_execution_lock_by_id(
-                db_session,
-                session_id,
-            )
-        )
-        if agent_session is None:
-            raise ValueError("AgentSession not found")
-        if agent_session.owner_generation != owner_generation:
-            raise CanonicalExecutionOwnerGenerationStaleError(
-                "Session owner generation is stale"
-            )
-        return agent_session
-
-    async def assert_owner_generation(
-        self,
-        db_session: AsyncSession,
-        *,
-        session_id: str,
-        owner_generation: int,
-    ) -> None:
-        """Hold the Session fence for a caller's durable mutation transaction."""
-        await self._lock_owned_session(
-            db_session,
-            session_id=session_id,
-            owner_generation=owner_generation,
-        )
+            case _ as unreachable:
+                assert_never(unreachable)
+        return False
 
     async def validate_pending_command(
-        self,
-        session_id: str,
-        *,
-        owner_generation: int,
-        command: PendingCommandSnapshot,
+        self, session_id: str, *, owner_generation: int, command: PendingCommandSnapshot
     ) -> None:
-        """Revalidate the exact canonical command under the Session lock."""
-        async with self.session_manager() as db_session:
-            agent_session = await self._lock_owned_session(
-                db_session,
-                session_id=session_id,
-                owner_generation=owner_generation,
-            )
-            current = (
-                agent_session.pending_command_id,
-                agent_session.pending_command_name,
-                agent_session.pending_command_payload,
-                agent_session.pending_command_requester_user_id,
-                agent_session.pending_command_created_at,
-            )
-            expected = (
-                command.id,
-                command.name,
-                command.payload,
-                command.requester_user_id,
-                command.created_at,
-            )
-            if current != expected:
-                raise CanonicalExecutionWorkDriftError(
-                    "Canonical pending command changed before execution"
-                )
+        """Revalidate the exact canonical command through a completed operation."""
+        await self.repository.validate_pending_command(
+            session_id, owner_generation=owner_generation, command=command
+        )
 
     async def clear_pending_command(
-        self,
-        session_id: str,
-        *,
-        owner_generation: int,
-        command_id: str,
+        self, session_id: str, *, owner_generation: int, command_id: str
     ) -> None:
-        """Clear the exact command only while this Worker owns the Session."""
-        async with self.session_manager() as db_session:
-            agent_session = await self._lock_owned_session(
-                db_session,
-                session_id=session_id,
-                owner_generation=owner_generation,
-            )
-            if agent_session.pending_command_id != command_id:
-                raise CanonicalExecutionWorkDriftError(
-                    "Canonical pending command changed before cleanup"
-                )
-            await self.agent_session_repository.clear_pending_command(
-                db_session,
-                session_id=session_id,
-                command_id=command_id,
-            )
-
-    async def set_inference_state(
-        self,
-        session_id: str,
-        *,
-        owner_generation: int,
-        inference_state: SessionInferenceState,
-    ) -> None:
-        """Persist resolved inference state under the owner-generation fence."""
-        async with self.session_manager() as db_session:
-            await self._lock_owned_session(
-                db_session,
-                session_id=session_id,
-                owner_generation=owner_generation,
-            )
-            await self.agent_session_repository.set_inference_state(
-                db_session,
-                session_id=session_id,
-                inference_state=inference_state,
-            )
+        """Complete exact command cleanup under the durable Worker fence."""
+        await self.repository.clear_pending_command(
+            session_id, owner_generation=owner_generation, command_id=command_id
+        )
 
     async def has_active_agent_run(self, session_id: str) -> bool:
-        """Return whether the session still has a pending or running AgentRun."""
+        """Read the existing active Run predicate without retaining a session."""
+        return await self.repository.has_active_agent_run(session_id)
 
-        async def get_active(db_session: AsyncSession) -> bool:
-            active_run = await self.agent_run_repository.get_active_by_session_id(
-                db_session,
-                session_id=session_id,
-            )
-            return active_run is not None
-
-        return await self.run_short_db(get_active)
-
-    async def get_pending_idle_continuation_run_id(
-        self,
-        session_id: str,
-    ) -> str | None:
-        """Return the completed Run awaiting true-idle continuation evaluation."""
-        async with self.session_manager() as db_session:
-            agent_session = await self.agent_session_repository.get_by_id(
-                db_session,
-                session_id,
-            )
-        if agent_session is None:
-            raise ValueError("AgentSession not found")
-        return agent_session.pending_idle_continuation_run_id
+    async def get_pending_idle_continuation_run_id(self, session_id: str) -> str | None:
+        """Return the detached completed Run awaiting true-idle evaluation."""
+        return await self.repository.get_pending_idle_continuation_run_id(session_id)
 
     async def has_pending_idle_continuation(self, session_id: str) -> bool:
-        """Return whether a completed Run still requires idle evaluation."""
+        """Return the existing pending idle-continuation predicate."""
         return (await self.get_pending_idle_continuation_run_id(session_id)) is not None
 
     async def heartbeat_session(
-        self,
-        session_id: str,
-        *,
-        owner_generation: int,
+        self, session_id: str, *, owner_generation: int
     ) -> None:
-        """Refresh DB heartbeat and Redis owner lease of RUNNING session."""
-
-        async def heartbeat(db_session: AsyncSession) -> None:
-            await self._lock_owned_session(
-                db_session,
-                session_id=session_id,
-                owner_generation=owner_generation,
-            )
-            await self.agent_session_repository.heartbeat_running(
-                db_session,
-                session_id,
-            )
-
-        await self.run_short_db(heartbeat)
+        """Commit the DB heartbeat before renewing the broker owner lease."""
+        await self.repository.heartbeat_session(
+            session_id, owner_generation=owner_generation
+        )
         await self.broker.renew_session_ttl(session_id)
 
     async def has_stop_request(self, session_id: str) -> bool:
-        """Return whether Durable stop intent exists."""
-        async with self.session_manager() as db_session:
-            return await self.agent_session_repository.has_stop_request(
-                db_session,
-                session_id,
-            )
+        """Return the completed durable Stop-intent read."""
+        return await self.repository.has_stop_request(session_id)
 
     async def get_running_agent_run(
-        self,
-        session_id: str,
-        *,
-        owner_generation: int,
+        self, session_id: str, *, owner_generation: int
     ) -> AgentRunState | None:
-        """Return the session's active running Run without claiming pending work."""
-        async with self.session_manager() as db_session:
-            await self._lock_owned_session(
-                db_session,
-                session_id=session_id,
-                owner_generation=owner_generation,
-            )
-            return await self.agent_run_repository.get_running_by_session_id(
-                db_session,
-                session_id=session_id,
-            )
+        """Read activated work without claiming pending work."""
+        return await self.repository.get_running_agent_run(
+            session_id, owner_generation=owner_generation
+        )
 
     async def get_active_agent_run(
-        self,
-        session_id: str,
-        *,
-        owner_generation: int,
+        self, session_id: str, *, owner_generation: int
     ) -> AgentRunState | None:
-        """Return the newest pending or running Run without claiming it."""
-        async with self.session_manager() as db_session:
-            await self._lock_owned_session(
-                db_session,
-                session_id=session_id,
-                owner_generation=owner_generation,
-            )
-            return await self.agent_run_repository.get_active_by_session_id(
-                db_session,
-                session_id=session_id,
-            )
+        """Read the newest pending/running Run under the current Worker fence."""
+        return await self.repository.get_active_agent_run(
+            session_id, owner_generation=owner_generation
+        )
 
     async def claim_recoverable_agent_run(
-        self,
-        session_id: str,
-        *,
-        owner_generation: int,
+        self, session_id: str, *, owner_generation: int
     ) -> AgentRunState | None:
-        """Return the session's activated or pending recoverable run."""
-        async with self.session_manager() as db_session:
-            await self._lock_owned_session(
-                db_session,
-                session_id=session_id,
-                owner_generation=owner_generation,
-            )
-            running = await self.agent_run_repository.get_running_by_session_id(
-                db_session,
-                session_id=session_id,
-            )
-            if running is not None:
-                return running
-            pending = await self.agent_run_repository.claim_pending_by_session_id(
-                db_session,
-                session_id=session_id,
-            )
-            await db_session.commit()
-            return pending
+        """Complete existing running selection or pending claim before dispatch."""
+        return await self.repository.claim_recoverable_agent_run(
+            session_id, owner_generation=owner_generation
+        )
 
     async def create_pending_agent_run(
-        self,
-        session_id: str,
-        *,
-        owner_generation: int,
-        input_event_ids: Sequence[str],
+        self, session_id: str, *, owner_generation: int, input_event_ids: Sequence[str]
     ) -> AgentRunState:
-        """Create a Run only when no post-snapshot recoverable Run appeared."""
-        async with self.session_manager() as db_session:
-            await self._lock_owned_session(
-                db_session,
-                session_id=session_id,
-                owner_generation=owner_generation,
-            )
-            running = await self.agent_run_repository.get_running_by_session_id(
-                db_session,
-                session_id=session_id,
-            )
-            pending = await self.agent_run_repository.claim_pending_by_session_id(
-                db_session,
-                session_id=session_id,
-            )
-            if running is not None or pending is not None:
-                raise CanonicalExecutionWorkDriftError(
-                    "Recoverable AgentRun appeared after canonical snapshot"
-                )
-            pending = await self.agent_run_repository.create_pending(
-                db_session,
-                session_id=session_id,
-                parent_agent_run_id=None,
-                scheduled_task_cycle_id=None,
-            )
-            await self.agent_run_repository.associate_input_events(
-                db_session,
-                run_id=pending.id,
-                event_ids=input_event_ids,
-            )
-            await db_session.commit()
-            return pending
+        """Complete pending Run creation/input association after drift validation."""
+        return await self.repository.create_pending_agent_run(
+            session_id,
+            owner_generation=owner_generation,
+            input_event_ids=input_event_ids,
+        )
 
     async def claim_lifecycle_start(
-        self,
-        session_id: str,
-        *,
-        owner_generation: int,
-        now: datetime.datetime,
+        self, session_id: str, *, owner_generation: int, now: datetime.datetime
     ) -> bool:
-        """Claim Session-start hooks only for the current owner generation."""
-        async with self.session_manager() as db_session:
-            await self._lock_owned_session(
-                db_session,
-                session_id=session_id,
-                owner_generation=owner_generation,
-            )
-            return await self.agent_session_repository.claim_lifecycle_start(
-                db_session,
-                session_id,
-                now=now,
-            )
+        """Claim Session-start hooks in a completed guarded operation."""
+        return await self.repository.claim_lifecycle_start(
+            session_id, owner_generation=owner_generation, now=now
+        )
 
     async def cancel_pending_agent_run(
-        self,
-        session_id: str,
-        *,
-        owner_generation: int,
-        run_id: str,
+        self, session_id: str, *, owner_generation: int, run_id: str
     ) -> AgentRunState:
-        """Cancel a newly created pending run that produced no model work."""
-        async with self.session_manager() as db_session:
-            await self._lock_owned_session(
-                db_session,
-                session_id=session_id,
-                owner_generation=owner_generation,
-            )
-            run = await self.agent_run_repository.get_by_id(db_session, run_id)
-            if (
-                run is None
-                or run.session_id != session_id
-                or run.status != AgentRunStatus.PENDING
-            ):
-                raise ValueError("Pending AgentRun not found in session")
-            cancelled = await self.agent_run_repository.mark_terminal(
-                db_session,
-                run_id,
-                AgentRunStatus.CANCELLED,
-                ended_at=datetime.datetime.now(datetime.UTC),
-            )
-            await self.terminal_finalization_repository.finalize_run_in_session(
-                db_session,
-                run_id=run_id,
-            )
-            await db_session.commit()
-            return cancelled
+        """Complete pending cancellation and direct-parent finalization."""
+        return await self.repository.cancel_pending_agent_run(
+            session_id, owner_generation=owner_generation, run_id=run_id
+        )
 
     async def complete_bridge_predecessor_run(
-        self,
-        session_id: str,
-        *,
-        owner_generation: int,
-        run_id: str,
+        self, session_id: str, *, owner_generation: int, run_id: str
     ) -> AgentRunStatus:
-        """Terminalize a bridge predecessor without delivering an interim result."""
-        async with self.session_manager() as db_session:
-            await self._lock_owned_session(
-                db_session,
-                session_id=session_id,
-                owner_generation=owner_generation,
-            )
-            run = await self.agent_run_repository.lock_by_id(db_session, run_id)
-            if run is None or run.session_id != session_id:
-                raise ValueError("AgentRun not found in session")
-            match run.status:
-                case AgentRunStatus.PENDING:
-                    terminal_status = AgentRunStatus.CANCELLED
-                case AgentRunStatus.RUNNING:
-                    terminal_status = AgentRunStatus.COMPLETED
-                case _:
-                    raise ValueError("Bridge predecessor AgentRun is not active")
-            terminal_at = datetime.datetime.now(datetime.UTC)
-            await self.agent_run_repository.mark_terminal(
-                db_session,
-                run_id,
-                terminal_status,
-                ended_at=terminal_at,
-            )
-            await self.agent_run_repository.mark_parent_result_suppressed(
-                db_session,
-                run_id=run_id,
-                finalized_at=terminal_at,
-            )
-            await db_session.commit()
-            return terminal_status
+        """Terminalize a bridge predecessor without ordinary foreground settlement."""
+        return await self.repository.complete_bridge_predecessor_run(
+            session_id, owner_generation=owner_generation, run_id=run_id
+        )
 
     async def activate_pending_agent_run(
         self,
@@ -621,89 +243,22 @@ class SessionLifecycleService:
         initial_phase: AgentRunPhase,
         requested_profile: RequestedInferenceProfile,
     ) -> AgentRunState:
-        """Persist selected profile and activate a reconnect-safe pending run."""
-        async with self.session_manager() as db_session:
-            await self._lock_owned_session(
-                db_session,
-                session_id=session_id,
-                owner_generation=owner_generation,
-            )
-            run = await self.agent_run_repository.activate_pending(
-                db_session,
-                run_id=run_id,
-                activated_at=datetime.datetime.now(datetime.UTC),
-                requested_model_target_label=requested_profile.model_target_label,
-                requested_reasoning_effort=requested_profile.reasoning_effort,
-                requested_enabled_execution_options=(
-                    requested_profile.enabled_execution_options
-                ),
-            )
-            if run.session_id != session_id:
-                raise ValueError("AgentRun session mismatch")
-            run = await self.agent_run_repository.update_phase(
-                db_session,
-                run_id,
-                initial_phase,
-            )
-            await db_session.commit()
-            return run
-
-    async def associate_agent_run_input_events(
-        self,
-        session_id: str,
-        *,
-        owner_generation: int,
-        run_id: str,
-        event_ids: Sequence[str],
-    ) -> None:
-        """Associate exact-profile continuation events with an active run."""
-        async with self.session_manager() as db_session:
-            await self._lock_owned_session(
-                db_session,
-                session_id=session_id,
-                owner_generation=owner_generation,
-            )
-            run = await self.agent_run_repository.get_by_id(db_session, run_id)
-            if run is None or run.session_id != session_id:
-                raise ValueError("AgentRun not found in session")
-            await self.agent_run_repository.associate_input_events(
-                db_session,
-                run_id=run_id,
-                event_ids=event_ids,
-            )
-            await db_session.commit()
+        """Complete profile/Session/phase activation before model preparation."""
+        return await self.repository.activate_pending_agent_run(
+            session_id,
+            owner_generation=owner_generation,
+            run_id=run_id,
+            initial_phase=initial_phase,
+            requested_profile=requested_profile,
+        )
 
     async def mark_session_agent_runs_terminal(
-        self,
-        session_id: str,
-        *,
-        owner_generation: int,
-        status: AgentRunStatus,
+        self, session_id: str, *, owner_generation: int, status: AgentRunStatus
     ) -> list[str]:
-        """Close remaining AgentRun projections and finalize parent delivery."""
-
-        transitioned_run_ids: list[str] = []
-
-        async def mark_terminal(db_session: AsyncSession) -> None:
-            await self._lock_owned_session(
-                db_session,
-                session_id=session_id,
-                owner_generation=owner_generation,
-            )
-            runs = await self.agent_run_repository.mark_session_running_terminal(
-                db_session,
-                session_id=session_id,
-                status=status,
-                ended_at=datetime.datetime.now(datetime.UTC),
-            )
-            transitioned_run_ids.extend(run.id for run in runs)
-            await self.terminal_finalization_repository.finalize_runs_in_session(
-                db_session,
-                run_ids=transitioned_run_ids,
-            )
-
-        await self.run_short_db(mark_terminal)
-        return transitioned_run_ids
+        """Complete bulk terminal mutation and parent-result admission together."""
+        return await self.repository.mark_session_agent_runs_terminal(
+            session_id, owner_generation=owner_generation, status=status
+        )
 
     async def mark_agent_run_terminal_if_running(
         self,
@@ -713,59 +268,18 @@ class SessionLifecycleService:
         run_id: str,
         status: AgentRunStatus,
     ) -> None:
-        """Close AgentRun row as terminal state if still running."""
-
-        async def mark_terminal(db_session: AsyncSession) -> None:
-            await self._lock_owned_session(
-                db_session,
-                session_id=session_id,
-                owner_generation=owner_generation,
-            )
-            run = await self.agent_run_repository.get_by_id(db_session, run_id)
-            if run is not None and run.session_id != session_id:
-                raise ValueError("AgentRun session mismatch")
-            await self.agent_run_repository.mark_terminal_if_running(
-                db_session,
-                run_id,
-                status,
-                ended_at=datetime.datetime.now(datetime.UTC),
-            )
-            await self.terminal_finalization_repository.finalize_run_in_session(
-                db_session,
-                run_id=run_id,
-            )
-
-        await self.run_short_db(mark_terminal)
+        """Complete conditional terminal mutation and parent admission together."""
+        await self.repository.mark_agent_run_terminal_if_running(
+            session_id, owner_generation=owner_generation, run_id=run_id, status=status
+        )
 
     async def mark_agent_run_stopped_for_user_stop(
-        self,
-        session_id: str,
-        *,
-        owner_generation: int,
-        run_id: str,
+        self, session_id: str, *, owner_generation: int, run_id: str
     ) -> None:
-        """Converge engine interruption to User Stop and finalize parent delivery."""
-
-        async def mark_stopped(db_session: AsyncSession) -> None:
-            await self._lock_owned_session(
-                db_session,
-                session_id=session_id,
-                owner_generation=owner_generation,
-            )
-            run = await self.agent_run_repository.get_by_id(db_session, run_id)
-            if run is not None and run.session_id != session_id:
-                raise ValueError("AgentRun session mismatch")
-            await self.agent_run_repository.mark_stopped_for_user_stop(
-                db_session,
-                run_id,
-                ended_at=datetime.datetime.now(datetime.UTC),
-            )
-            await self.terminal_finalization_repository.finalize_run_in_session(
-                db_session,
-                run_id=run_id,
-            )
-
-        await self.run_short_db(mark_stopped)
+        """Complete User Stop convergence and direct-parent finalization together."""
+        await self.repository.mark_agent_run_stopped_for_user_stop(
+            session_id, owner_generation=owner_generation, run_id=run_id
+        )
 
     async def update_agent_run_retry_state(
         self,
@@ -775,29 +289,10 @@ class SessionLifecycleService:
         run_id: str,
         retry_state: FailedRunRetryState | None,
     ) -> None:
-        """Set or clear the AgentRun retry state."""
-
-        async def update_retry(db_session: AsyncSession) -> None:
-            await self._lock_owned_session(
-                db_session,
-                session_id=session_id,
-                owner_generation=owner_generation,
-            )
-            run = await self.agent_run_repository.get_by_id(db_session, run_id)
-            if run is None or run.session_id != session_id:
-                raise ValueError("AgentRun not found in session")
-            await self.agent_run_repository.update_retry_state(
-                db_session,
-                run_id,
-                retry_state,
-            )
-
-        await self.run_short_db(update_retry)
-
-    async def run_short_db(
-        self,
-        action: Callable[[AsyncSession], Awaitable[_T]],
-    ) -> _T:
-        """Run ``action`` in short-lived DB transaction."""
-        async with self.session_manager() as db_session:
-            return await action(db_session)
+        """Complete the exact Session-bound Run retry-state mutation."""
+        await self.repository.update_agent_run_retry_state(
+            session_id,
+            owner_generation=owner_generation,
+            run_id=run_id,
+            retry_state=retry_state,
+        )

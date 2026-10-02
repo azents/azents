@@ -209,6 +209,37 @@ GitHub confirmation share one implementation owner; Workspace defaults is an
 independent workstream. Neighboring catalog reads remain explicit residuals.
 The same reviewer and full root validation/OpenAPI/CI gates apply.
 
+Phase 30 PR #2057 is validated at `cd4df4362` against main `dfd441aef` after
+requester merger of parent #2056. The only conflict was the Model Catalog change
+history; both records remain, with this phase's entry at v37. All Python patches
+remain identical. Latest backend validation passed 7,201 cases with three existing
+Redis-only memory skips; ty/pre-commit/OpenAPI gates passed. Independent review
+covered all 37 paths with no findings and 87 cases passed. Exact-head CI is 38
+passed, three skipped, no failures/pending. No Agent merge. Current inventory is
+556 candidates in 103 files, not a confirmed residual violation count.
+The requester merged #2057 as `602b1720e`; its tree is exactly the validated parent
+tree. Phase 31 fast-forwarded to that main commit without changing any dirty file.
+
+Phase 31 starts the verified Worker Session/Stop slice: lifecycle 17, Stop 2,
+canonical snapshot 1, live projector 2, recovery 1 and runner pending-command 1.
+It removes two dormant scopes and the generic application Session callbacks while
+preserving Worker-specific owner errors, lock order, command/Run/parent atomic
+sets, and the separate partial/cancel/terminal/marker/clear Stop commits. One
+remaining Executor in-session owner consumer and eleven borrowed Run repository
+references receive explicit narrow repository wiring; its 17 larger contexts
+remain later work. Three non-overlapping owners implement Session/core, Stop and
+projection; root owns shared Worker fixtures and the same review/validation gates.
+Design delta remains None and no broader issue closure is claimed.
+
+Phase 31 implementation and root integrated validation are complete: 385 focused
+cases and 7,311 full backend cases passed, with three existing Redis-specific
+contract variants skipped. Root type/Ruff/format/pre-commit/OpenAPI gates passed;
+public/admin contracts remain identical at 234/69 paths. All 24 scoped factories,
+generic callbacks, dormant helpers, old raw-service exports and no-op ownership
+test adapters are absent. Candidate inventory is 532/97, not a confirmed violation
+count. The same retained reviewer covered all 34 paths with no findings and
+independently passed 385 cases. Main-base PR/CI remain pending.
+
 ## Delivery Boundaries
 
 1. Correct the title-generation and ChatGPT OAuth persistence boundary as one

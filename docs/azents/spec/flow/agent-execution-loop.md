@@ -114,6 +114,9 @@ code_paths:
   - python/apps/azents/src/azents/engine/events/input_projection.py
   - python/apps/azents/src/azents/engine/events/tool_results.py
   - python/apps/azents/src/azents/repos/session_execution/**
+  - python/apps/azents/src/azents/repos/worker_session*.py
+  - python/apps/azents/src/azents/repos/user_stop*.py
+  - python/apps/azents/src/azents/repos/live_projection_authority.py
   - python/apps/azents/src/azents/repos/model_candidate_health/**
   - python/apps/azents/src/azents/services/model_listing/**
   - python/apps/azents/src/azents/rdb/models/event.py
@@ -139,7 +142,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
   - typescript/apps/azents-web/messages/*/chat.json
 last_verified_at: 2026-10-03
-spec_version: 202
+spec_version: 203
 ---
 
 # Agent Execution Loop
@@ -1491,6 +1494,26 @@ Primary checks:
 
 ## Database session boundaries
 
+Worker Session lifecycle, canonical snapshot loading, stuck-Session selection,
+Runner pending-command reads, and live projection authority reads complete in
+repository-owned scopes. Worker mutations retain the existing tree-ordered
+generation guard: a missing Session raises `ValueError("AgentSession not found")`,
+a changed generation raises `CanonicalExecutionOwnerGenerationStaleError`, and
+invalid canonical snapshots retain `CanonicalExecutionSnapshotError`. Snapshot
+loading remains an unlocked projection after ownership claim. Broker renewal,
+parent-result notification, recovery wake-up, and volatile projection effects
+follow database context closure.
+
+User Stop retains separate committed stages for eligible idempotent partials,
+cancelled durable active-call results, terminal Run/parent-result convergence,
+the interrupted/Run-marker pair, and later Stop-request clearing. Live cleanup
+and event dispatch run between completed stages. Cancelled results compose the
+ordinary tool-result finalization primitive in the same guarded transaction;
+interrupted and marker Events commit or roll back together. A later-stage failure
+does not roll back earlier committed stages, and Stop intent is cleared only
+after the existing dispatch sequence. Passed or Redis-only tool calls do not
+replace durable running-Run ownership.
+
 Execution-local database scopes lock and validate the exact Session owner generation
 before durable operations. Model output, tool results, compaction, tool-search
 working sets, phase changes, and terminal transitions share that authority. Shared
@@ -1731,6 +1754,10 @@ icon.
 
 ## Changelog
 
+- **2026-10-02** (spec_version 203) — Moved Worker Session lifecycle, snapshot,
+  recovery, Runner command, live projection authority, and separate User Stop
+  stages into completed repository operations while preserving Worker errors,
+  generation fencing, lock order, and post-commit effects.
 - **2026-10-03** (spec_version 202) — Promoted exact data-only source captures,
   complete typed estimates, saved v2 request predicates and lossless codec/tool
   admission while retaining descriptor-absent behavior and transitive counters.

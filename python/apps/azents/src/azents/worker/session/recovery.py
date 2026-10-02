@@ -7,13 +7,12 @@ import logging
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.broker.types import SessionBroker, SessionWakeUp
-from azents.rdb.deps import get_session_manager
-from azents.rdb.session import SessionManager
-from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSession
+from azents.repos.worker_session_data import StuckWorkerSession
+from azents.repos.worker_session_recovery import (
+    WorkerSessionRecoveryOperationRepository,
+)
 from azents.worker.deps import get_worker_broker
 from azents.worker.session.lifecycle import SessionLifecycleService
 
@@ -33,11 +32,9 @@ class StuckSessionRecovery:
     """Find Stuck RUNNING sessions and re-enqueue RESUME."""
 
     broker: Annotated[SessionBroker, Depends(get_worker_broker)]
-    session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
-    ]
-    agent_session_repository: Annotated[
-        AgentSessionRepository, Depends(AgentSessionRepository)
+    repository: Annotated[
+        WorkerSessionRecoveryOperationRepository,
+        Depends(WorkerSessionRecoveryOperationRepository),
     ]
     session_lifecycle: Annotated[
         SessionLifecycleService, Depends(SessionLifecycleService)
@@ -79,12 +76,9 @@ class StuckSessionRecovery:
         Partial index lets it scan only RUNNING sessions. Re-enqueue uses existing
         broker queue path, and receive_messages reacquires lock then dispatches.
         """
-        async with self.session_manager() as db_session:
-            stuck = await self.agent_session_repository.find_stuck_running(
-                db_session,
-                stale_threshold=self.stale_threshold,
-                limit=self.limit,
-            )
+        stuck = await self.repository.find_stuck_running(
+            stale_threshold=self.stale_threshold, limit=self.limit
+        )
         for rec in stuck:
             logger.info(
                 "Recovering stuck running session",
@@ -100,6 +94,6 @@ class StuckSessionRecovery:
                 )
 
 
-def _build_resume_message(rec: AgentSession) -> SessionWakeUp:
+def _build_resume_message(rec: StuckWorkerSession) -> SessionWakeUp:
     """Create SessionWakeUp for stuck recovery / shutdown recovery."""
     return SessionWakeUp(session_id=rec.id)
