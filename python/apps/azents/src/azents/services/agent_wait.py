@@ -1,15 +1,13 @@
 """Shared wait condition and mailbox activity service."""
 
 import dataclasses
-from typing import Protocol
+from typing import Annotated, Protocol
 
-from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import Depends
 
 from azents.engine.events.types import AgentRunState
-from azents.rdb.session import SessionManager
-from azents.repos.agent_execution import AgentRunRepository
-from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession
+from azents.repos.agent_wait_read import AgentWaitReadRepository
 from azents.services.mailbox import MailboxService
 
 
@@ -34,10 +32,8 @@ class WaitObservation:
 class AgentWaitService:
     """Evaluate descendant eligibility and durable mailbox activity."""
 
-    session_manager: SessionManager[AsyncSession]
-    agent_session_repository: AgentSessionRepository
-    agent_run_repository: AgentRunRepository
-    mailbox_item_service: MailboxService
+    repository: Annotated[AgentWaitReadRepository, Depends(AgentWaitReadRepository)]
+    mailbox_item_service: Annotated[MailboxService, Depends(MailboxService)]
 
     async def observe(self, session_id: str) -> WaitObservation:
         """Read all-kind mailbox state and descendant activity."""
@@ -46,41 +42,19 @@ class AgentWaitService:
                 session_id
             )
         )
-        async with self.session_manager() as session:
-            current = (
-                await self.agent_session_repository.get_session_agent_by_session_id(
-                    session,
-                    session_id,
-                )
-            )
-            if current is None:
-                return WaitObservation(mailbox_updated, 0, ())
-            descendants = (
-                await self.agent_session_repository.list_descendant_session_agents(
-                    session,
-                    session_agent_id=current.id,
-                    include_self=False,
-                )
-            )
-            session_ids = [agent.agent_session_id for agent in descendants]
-            sessions = await self.agent_session_repository.list_by_ids(
-                session,
-                agent_session_ids=session_ids,
-            )
-            latest_runs = await self.agent_run_repository.list_latest_by_session_ids(
-                session,
-                session_ids=session_ids,
-            )
+        snapshot = await self.repository.descendants(session_id)
         active_paths: list[str] = []
-        for descendant in descendants:
+        for descendant in snapshot.descendants:
             if _session_agent_active(
-                sessions.get(descendant.agent_session_id),
-                latest_runs.get(descendant.agent_session_id),
+                descendant.session,
+                descendant.run,
             ) or await self.mailbox_item_service.has_pending_wake_session_mailbox_items(
-                descendant.agent_session_id
+                descendant.session_id
             ):
                 active_paths.append(descendant.path)
-        return WaitObservation(mailbox_updated, len(descendants), tuple(active_paths))
+        return WaitObservation(
+            mailbox_updated, len(snapshot.descendants), tuple(active_paths)
+        )
 
 
 def _session_agent_active(

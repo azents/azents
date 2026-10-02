@@ -117,6 +117,14 @@ code_paths:
   - python/apps/azents/src/azents/repos/worker_session*.py
   - python/apps/azents/src/azents/repos/user_stop*.py
   - python/apps/azents/src/azents/repos/live_projection_authority.py
+  - python/apps/azents/src/azents/core/worker_model_profile.py
+  - python/apps/azents/src/azents/repos/worker_executor_*.py
+  - python/apps/azents/src/azents/repos/model_candidate_selection.py
+  - python/apps/azents/src/azents/repos/agent_wait_read*.py
+  - python/apps/azents/src/azents/repos/model_metadata_read.py
+  - python/apps/azents/src/azents/repos/kimi_oauth_runtime*.py
+  - python/apps/azents/src/azents/repos/engine_read_deps.py
+  - python/apps/azents/src/azents/services/engine_runtime_tokens.py
   - python/apps/azents/src/azents/repos/model_candidate_health/**
   - python/apps/azents/src/azents/services/model_listing/**
   - python/apps/azents/src/azents/rdb/models/event.py
@@ -142,7 +150,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
   - typescript/apps/azents-web/messages/*/chat.json
 last_verified_at: 2026-10-03
-spec_version: 203
+spec_version: 204
 ---
 
 # Agent Execution Loop
@@ -1494,6 +1502,29 @@ Primary checks:
 
 ## Database session boundaries
 
+Executor capability, Session, tree, drift, action and transcript reads return
+detached facts from completed repositories. Requested-profile selection, quota
+advancement, fresh model preparation/finalization and compaction preparation own
+their exact database groups without returning live Sessions. Engine request,
+candidate and Toolkit resolution receive concrete completed read collaborators;
+runtime token preparation follows those reads. Local metadata capture and Wait
+descendant snapshots also close before their external continuations.
+
+Fresh preparation retains its separate unlocked snapshot, locked chain/claim
+preparation, external materialization and final inference-write fence, with the
+existing three-attempt limit. Normal fresh failure results commit already reached
+profile, health, claim and operation changes. Quota exhaustion is caught inside
+its transaction and commits the reached renewal/slot/retry-clear group. Explicit
+compaction exhaustion instead raises inside preparation and rolls its writes
+back. A later external failure does not undo an earlier committed preparation.
+These distinct existing outcomes are retained rather than unified by extraction.
+
+Kimi runtime refresh finishes its existing bounded HTTP call before separate
+completed success/failure persistence. The existing integration row lock and
+secrets-only identity comparison protect concurrent refresh outcomes. Other
+provider token flows retain their completed persistence collaborators; resolution
+adds no new provider, retry, lock or token policy.
+
 Worker Session lifecycle, canonical snapshot loading, stuck-Session selection,
 Runner pending-command reads, and live projection authority reads complete in
 repository-owned scopes. Worker mutations retain the existing tree-ordered
@@ -1754,6 +1785,10 @@ icon.
 
 ## Changelog
 
+- **2026-10-02** (spec_version 204) — Completed Executor model/read boundaries,
+  local metadata and Wait snapshots, explicit Engine resolve dependencies and
+  Kimi refresh persistence while retaining separate failure commit/rollback
+  outcomes, existing fences and external-effect order.
 - **2026-10-02** (spec_version 203) — Moved Worker Session lifecycle, snapshot,
   recovery, Runner command, live projection authority, and separate User Stop
   stages into completed repository operations while preserving Worker errors,

@@ -5057,18 +5057,6 @@ class SessionGitWorktreeService:
             )
         return GitWorktreeCleanupRequest(cleanup_requested=True)
 
-    async def list_action_execution_projections(
-        self,
-        session: AsyncSession,
-        *,
-        session_id: str,
-    ) -> list[ActionExecutionProjection]:
-        """List live action execution projections for a session."""
-        return await self.action_execution_repository.list_projections_by_session_id(
-            session,
-            session_id=session_id,
-        )
-
     async def request_manual_cleanup(
         self,
         *,

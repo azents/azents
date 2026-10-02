@@ -26,6 +26,13 @@ class ModelMetadataSourceSnapshot:
 
 
 @dataclass(frozen=True)
+class CapturedContextSource:
+    """One captured context authority, including an explicitly absent source."""
+
+    snapshot: ModelMetadataSourceSnapshot | None
+
+
+@dataclass(frozen=True)
 class ModelMetadataSourceAttempt:
     """One source synchronization attempt."""
 

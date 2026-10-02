@@ -43,6 +43,7 @@ from azents.engine.providers.model_profiles import (
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.chatgpt_oauth_runtime import ChatGPTOAuthRuntimeRepository
+from azents.repos.kimi_oauth_runtime import KimiOAuthRuntimeRepository
 from azents.repos.llm_catalog import LLMCatalogRepository
 from azents.repos.llm_catalog.data import (
     CatalogNotFound,
@@ -637,6 +638,9 @@ class IntegrationCatalogProjectionService:
     integration_repository: Annotated[
         LLMProviderIntegrationRepository, Depends(_get_integration_repository)
     ]
+    kimi_oauth_runtime_repository: Annotated[
+        KimiOAuthRuntimeRepository, Depends(KimiOAuthRuntimeRepository)
+    ]
     chatgpt_oauth_runtime_repository: Annotated[
         ChatGPTOAuthRuntimeRepository, Depends(ChatGPTOAuthRuntimeRepository)
     ]
@@ -767,8 +771,7 @@ class IntegrationCatalogProjectionService:
             elif integration.provider == LLMProvider.KIMI_OAUTH:
                 kimi_token_result = await ensure_kimi_runtime_tokens(
                     integration=integration,
-                    integration_repository=self.integration_repository,
-                    session_manager=self.session_manager,
+                    persistence_repository=self.kimi_oauth_runtime_repository,
                 )
                 if kimi_token_result.success:
                     refreshed_integration = kimi_token_result.value

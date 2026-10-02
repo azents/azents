@@ -69,6 +69,8 @@ from azents.repos.agent.data import Agent
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession
 from azents.repos.chatgpt_oauth_runtime import ChatGPTOAuthRuntimeRepository
+from azents.repos.engine_read import EngineModelReadRepository
+from azents.repos.kimi_oauth_runtime import KimiOAuthRuntimeRepository
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.llm_provider_integration.data import LLMProviderIntegrationWithSecrets
 from azents.repos.model_candidate_health.data import (
@@ -77,6 +79,8 @@ from azents.repos.model_candidate_health.data import (
 )
 from azents.repos.session_title import SessionTitleRepository
 from azents.repos.session_title.data import SessionTitleGenerationSnapshot
+from azents.repos.xai_oauth_runtime import XaiOAuthRuntimeRepository
+from azents.services.engine_runtime_tokens import EngineRuntimeTokenResolver
 from azents.services.external_channel.thread_title import (
     ExternalChannelThreadTitleService,
 )
@@ -810,9 +814,6 @@ class TestSessionTitleHelpers:
                 strict_json_schema=None,
                 session_manager=_session_manager,
             ),
-            chatgpt_oauth_runtime_repository=_chatgpt_oauth_runtime_repository(
-                _session_manager
-            ),
             model_stream_watchdog=make_test_model_stream_watchdog(),
             retry_policy=FailedRunRetryPolicy(
                 max_retries=0,
@@ -821,6 +822,33 @@ class TestSessionTitleHelpers:
                 max_backoff_seconds=0,
             ),
             external_channel_thread_title_service=_ThreadTitleService(),
+            model_read_repository=EngineModelReadRepository(
+                session_manager=(
+                    _chatgpt_oauth_runtime_repository(_session_manager)
+                ).session_manager,
+                integration_repository=(
+                    _chatgpt_oauth_runtime_repository(_session_manager)
+                ).integration_repository,
+            ),
+            runtime_token_resolver=EngineRuntimeTokenResolver(
+                chatgpt_repository=_chatgpt_oauth_runtime_repository(_session_manager),
+                xai_repository=XaiOAuthRuntimeRepository(
+                    session_manager=(
+                        _chatgpt_oauth_runtime_repository(_session_manager)
+                    ).session_manager,
+                    integration_repository=(
+                        _chatgpt_oauth_runtime_repository(_session_manager)
+                    ).integration_repository,
+                ),
+                kimi_repository=KimiOAuthRuntimeRepository(
+                    session_manager=(
+                        _chatgpt_oauth_runtime_repository(_session_manager)
+                    ).session_manager,
+                    integration_repository=(
+                        _chatgpt_oauth_runtime_repository(_session_manager)
+                    ).integration_repository,
+                ),
+            ),
         )
 
         failure = model_provider_failure(
@@ -902,9 +930,6 @@ class TestSessionTitleHelpers:
                 strict_json_schema=None,
                 session_manager=_session_manager,
             ),
-            chatgpt_oauth_runtime_repository=_chatgpt_oauth_runtime_repository(
-                _session_manager
-            ),
             model_stream_watchdog=make_test_model_stream_watchdog(),
             retry_policy=FailedRunRetryPolicy(
                 max_retries=2,
@@ -913,6 +938,33 @@ class TestSessionTitleHelpers:
                 max_backoff_seconds=0,
             ),
             external_channel_thread_title_service=_ThreadTitleService(),
+            model_read_repository=EngineModelReadRepository(
+                session_manager=(
+                    _chatgpt_oauth_runtime_repository(_session_manager)
+                ).session_manager,
+                integration_repository=(
+                    _chatgpt_oauth_runtime_repository(_session_manager)
+                ).integration_repository,
+            ),
+            runtime_token_resolver=EngineRuntimeTokenResolver(
+                chatgpt_repository=_chatgpt_oauth_runtime_repository(_session_manager),
+                xai_repository=XaiOAuthRuntimeRepository(
+                    session_manager=(
+                        _chatgpt_oauth_runtime_repository(_session_manager)
+                    ).session_manager,
+                    integration_repository=(
+                        _chatgpt_oauth_runtime_repository(_session_manager)
+                    ).integration_repository,
+                ),
+                kimi_repository=KimiOAuthRuntimeRepository(
+                    session_manager=(
+                        _chatgpt_oauth_runtime_repository(_session_manager)
+                    ).session_manager,
+                    integration_repository=(
+                        _chatgpt_oauth_runtime_repository(_session_manager)
+                    ).integration_repository,
+                ),
+            ),
         )
         attempts: list[int] = []
 
@@ -982,9 +1034,6 @@ class TestSessionTitleHelpers:
                 health_repository=_healthy_health_repository(),
                 session_manager=_session_manager,
             ),
-            chatgpt_oauth_runtime_repository=_chatgpt_oauth_runtime_repository(
-                _session_manager
-            ),
             model_stream_watchdog=make_test_model_stream_watchdog(),
             retry_policy=FailedRunRetryPolicy(
                 max_retries=2,
@@ -993,6 +1042,33 @@ class TestSessionTitleHelpers:
                 max_backoff_seconds=0,
             ),
             external_channel_thread_title_service=_ThreadTitleService(),
+            model_read_repository=EngineModelReadRepository(
+                session_manager=(
+                    _chatgpt_oauth_runtime_repository(_session_manager)
+                ).session_manager,
+                integration_repository=(
+                    _chatgpt_oauth_runtime_repository(_session_manager)
+                ).integration_repository,
+            ),
+            runtime_token_resolver=EngineRuntimeTokenResolver(
+                chatgpt_repository=_chatgpt_oauth_runtime_repository(_session_manager),
+                xai_repository=XaiOAuthRuntimeRepository(
+                    session_manager=(
+                        _chatgpt_oauth_runtime_repository(_session_manager)
+                    ).session_manager,
+                    integration_repository=(
+                        _chatgpt_oauth_runtime_repository(_session_manager)
+                    ).integration_repository,
+                ),
+                kimi_repository=KimiOAuthRuntimeRepository(
+                    session_manager=(
+                        _chatgpt_oauth_runtime_repository(_session_manager)
+                    ).session_manager,
+                    integration_repository=(
+                        _chatgpt_oauth_runtime_repository(_session_manager)
+                    ).integration_repository,
+                ),
+            ),
         )
         failure = model_provider_failure(
             operation="session_title",
@@ -1095,9 +1171,6 @@ class TestSessionTitleHelpers:
                 health_repository=_healthy_health_repository(),
                 session_manager=session_manager,
             ),
-            chatgpt_oauth_runtime_repository=_chatgpt_oauth_runtime_repository(
-                session_manager
-            ),
             model_stream_watchdog=make_test_model_stream_watchdog(),
             retry_policy=FailedRunRetryPolicy(
                 max_retries=0,
@@ -1106,6 +1179,33 @@ class TestSessionTitleHelpers:
                 max_backoff_seconds=0,
             ),
             external_channel_thread_title_service=RecordingThreadTitleService(),
+            model_read_repository=EngineModelReadRepository(
+                session_manager=(
+                    _chatgpt_oauth_runtime_repository(session_manager)
+                ).session_manager,
+                integration_repository=(
+                    _chatgpt_oauth_runtime_repository(session_manager)
+                ).integration_repository,
+            ),
+            runtime_token_resolver=EngineRuntimeTokenResolver(
+                chatgpt_repository=_chatgpt_oauth_runtime_repository(session_manager),
+                xai_repository=XaiOAuthRuntimeRepository(
+                    session_manager=(
+                        _chatgpt_oauth_runtime_repository(session_manager)
+                    ).session_manager,
+                    integration_repository=(
+                        _chatgpt_oauth_runtime_repository(session_manager)
+                    ).integration_repository,
+                ),
+                kimi_repository=KimiOAuthRuntimeRepository(
+                    session_manager=(
+                        _chatgpt_oauth_runtime_repository(session_manager)
+                    ).session_manager,
+                    integration_repository=(
+                        _chatgpt_oauth_runtime_repository(session_manager)
+                    ).integration_repository,
+                ),
+            ),
         )
 
         async def generate_title(**kwargs: object) -> str:
@@ -1214,9 +1314,6 @@ class TestSessionTitleHelpers:
                 health_repository=_healthy_health_repository(),
                 session_manager=session_manager,
             ),
-            chatgpt_oauth_runtime_repository=_chatgpt_oauth_runtime_repository(
-                session_manager
-            ),
             model_stream_watchdog=make_test_model_stream_watchdog(),
             retry_policy=FailedRunRetryPolicy(
                 max_retries=0,
@@ -1225,6 +1322,33 @@ class TestSessionTitleHelpers:
                 max_backoff_seconds=0,
             ),
             external_channel_thread_title_service=RecordingThreadTitleService(),
+            model_read_repository=EngineModelReadRepository(
+                session_manager=(
+                    _chatgpt_oauth_runtime_repository(session_manager)
+                ).session_manager,
+                integration_repository=(
+                    _chatgpt_oauth_runtime_repository(session_manager)
+                ).integration_repository,
+            ),
+            runtime_token_resolver=EngineRuntimeTokenResolver(
+                chatgpt_repository=_chatgpt_oauth_runtime_repository(session_manager),
+                xai_repository=XaiOAuthRuntimeRepository(
+                    session_manager=(
+                        _chatgpt_oauth_runtime_repository(session_manager)
+                    ).session_manager,
+                    integration_repository=(
+                        _chatgpt_oauth_runtime_repository(session_manager)
+                    ).integration_repository,
+                ),
+                kimi_repository=KimiOAuthRuntimeRepository(
+                    session_manager=(
+                        _chatgpt_oauth_runtime_repository(session_manager)
+                    ).session_manager,
+                    integration_repository=(
+                        _chatgpt_oauth_runtime_repository(session_manager)
+                    ).integration_repository,
+                ),
+            ),
         )
 
         result = await service.generate_from_initial_prompt(
@@ -1464,9 +1588,6 @@ def _title_service(
             strict_json_schema=strict_json_schema,
             session_manager=_session_manager,
         ),
-        chatgpt_oauth_runtime_repository=_chatgpt_oauth_runtime_repository(
-            _session_manager
-        ),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         retry_policy=FailedRunRetryPolicy(
             max_retries=max_retries,
@@ -1475,6 +1596,33 @@ def _title_service(
             max_backoff_seconds=0,
         ),
         external_channel_thread_title_service=_ThreadTitleService(),
+        model_read_repository=EngineModelReadRepository(
+            session_manager=(
+                _chatgpt_oauth_runtime_repository(_session_manager)
+            ).session_manager,
+            integration_repository=(
+                _chatgpt_oauth_runtime_repository(_session_manager)
+            ).integration_repository,
+        ),
+        runtime_token_resolver=EngineRuntimeTokenResolver(
+            chatgpt_repository=_chatgpt_oauth_runtime_repository(_session_manager),
+            xai_repository=XaiOAuthRuntimeRepository(
+                session_manager=(
+                    _chatgpt_oauth_runtime_repository(_session_manager)
+                ).session_manager,
+                integration_repository=(
+                    _chatgpt_oauth_runtime_repository(_session_manager)
+                ).integration_repository,
+            ),
+            kimi_repository=KimiOAuthRuntimeRepository(
+                session_manager=(
+                    _chatgpt_oauth_runtime_repository(_session_manager)
+                ).session_manager,
+                integration_repository=(
+                    _chatgpt_oauth_runtime_repository(_session_manager)
+                ).integration_repository,
+            ),
+        ),
     )
 
 

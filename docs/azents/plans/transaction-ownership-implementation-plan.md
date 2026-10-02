@@ -238,7 +238,26 @@ public/admin contracts remain identical at 234/69 paths. All 24 scoped factories
 generic callbacks, dormant helpers, old raw-service exports and no-op ownership
 test adapters are absent. Candidate inventory is 532/97, not a confirmed violation
 count. The same retained reviewer covered all 34 paths with no findings and
-independently passed 385 cases. Main-base PR/CI remain pending.
+independently passed 385 cases. Main-base PR #2058 is open at `e14bf1de8`;
+exact-head required CI passed (38 passed, two path-condition skips, none
+failed/pending), MERGEABLE/CLEAN. No Agent merge.
+
+Phase 32 preparation owns the next 21 verified contexts: Executor 17 (11 reads
+and six coherent model/profile groups), Metadata capture one and Wait observation
+one, plus two Kimi runtime persistence scopes required by resolve factory closure.
+One owner integrates the entire Executor/fixture surface; the read owner
+supplies completed reads and closes Engine resolve factory callers; a dedicated
+PG test owner proves model groups. Canonical selector/data relocation updates all
+eight actual production callers without compatibility exports. Preserve fresh
+normal-Failure commits, quota-exhaustion commits, compaction-inside-error rollback,
+the existing three-attempt/final-operation fences and external resolution order.
+The recorded parent gate is confirmed. Implementation and root QA passed:
+624 focused cases and 7,419 full backend cases, with three existing Redis-specific
+contract skips; type/Ruff48/format/pre-commit/OpenAPI234/69/removal checks passed.
+Candidate inventory is 511/93, not a verified remaining-violation count. All
+21 assigned lifetimes and factory/canonical interfaces are removed. The same
+retained reviewer covered all 53 raw paths / 52 Git changes with no findings and
+independently passed 624 cases. Stacked PR/CI remain pending. Design delta is None.
 
 ## Delivery Boundaries
 

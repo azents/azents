@@ -25,7 +25,7 @@ from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession
 from azents.repos.model_candidate_health import ModelCandidateHealthRepository
 from azents.repos.model_candidate_health.data import ModelCandidateIdentity
-from azents.services.model_candidate_selection import select_model_operation_candidate
+from azents.repos.model_candidate_selection import select_model_operation_candidate
 
 from .data import SessionTitleGenerationSnapshot
 

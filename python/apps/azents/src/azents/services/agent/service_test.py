@@ -10,7 +10,6 @@ import pytest
 from azcommon.result import Failure, Success
 from fastapi import Depends
 from fastapi.dependencies.utils import get_dependant
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent import (
     DEFAULT_MAIN_MODEL_OPTION_LABEL,
@@ -27,14 +26,13 @@ from azents.core.enums import (
     ExternalChannelResponseMode,
     WorkspaceUserRole,
 )
-from azents.core.model_catalog_source import CATALOG_SOURCE_KEY
 from azents.repos.agent.data import Agent
 from azents.repos.agent_operations import (
     AgentOperationNotAdmin,
     AgentOperationRuntimeProfileInvalid,
     AgentOperationsRepository,
 )
-from azents.repos.model_metadata_source import ModelMetadataSourceRepository
+from azents.repos.model_metadata_read import ModelMetadataReadRepository
 from azents.repos.model_metadata_source_data import ModelMetadataSourceSnapshot
 from azents.services.model_metadata import ModelMetadataService
 from azents.services.terminal_policy.invalidation import (
@@ -78,18 +76,14 @@ def test_agent_service_dependency_graph_is_valid() -> None:
     assert get_dependant(path="/", call=endpoint).dependencies
 
 
-class _CountingMetadataRepository(ModelMetadataSourceRepository):
+class _CountingMetadataRepository(ModelMetadataReadRepository):
     """Supply one local source fixture and count reads."""
 
     def __init__(self, snapshot: ModelMetadataSourceSnapshot) -> None:
         self.snapshot = snapshot
         self.capture_count = 0
 
-    async def get_current(
-        self, session: AsyncSession, *, source_key: str
-    ) -> ModelMetadataSourceSnapshot:
-        del session
-        assert source_key == CATALOG_SOURCE_KEY
+    async def capture(self) -> ModelMetadataSourceSnapshot:
         self.capture_count += 1
         return self.snapshot
 
@@ -393,11 +387,7 @@ class TestAgentServiceSourceContext:
             context_window=256_000,
         )
         repository = _CountingMetadataRepository(snapshot)
-        static_service = make_test_model_metadata_service(snapshot=snapshot)
-        service.model_metadata_service = ModelMetadataService(
-            session_manager=static_service.session_manager,
-            source_snapshot_repository=repository,
-        )
+        service.model_metadata_service = ModelMetadataService(repository=repository)
         agent_repository = require_instance(service.repository, AsyncMock)
         agent_repository.list_by_workspace.return_value = SimpleNamespace(items=agents)
         result = await service.list_by_workspace(
@@ -450,11 +440,7 @@ class TestAgentServiceSourceContext:
             context_window=None,
         )
         repository = _CountingMetadataRepository(snapshot)
-        static_service = make_test_model_metadata_service(snapshot=snapshot)
-        service.model_metadata_service = ModelMetadataService(
-            session_manager=static_service.session_manager,
-            source_snapshot_repository=repository,
-        )
+        service.model_metadata_service = ModelMetadataService(repository=repository)
         source = await service._capture_context_source([agent])
         assert source is None
         assert repository.capture_count == 0
