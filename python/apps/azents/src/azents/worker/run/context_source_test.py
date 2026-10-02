@@ -5,10 +5,10 @@ import dataclasses
 import datetime
 from collections.abc import AsyncIterator, Callable
 from typing import Literal
+from unittest.mock import Mock
 
 import pytest
-from azcommon.result import Success
-from sqlalchemy.ext.asyncio import AsyncSession
+from azcommon.result import Result, Success
 
 import azents.worker.run.executor as executor_module
 from azents.core.agent import AgentModelSelection
@@ -18,11 +18,15 @@ from azents.core.inference_profile import (
     RequestedInferenceProfile,
     SessionInferenceState,
 )
-from azents.core.model_catalog_source import CATALOG_SOURCE_KEY
 from azents.core.model_operation import (
     ModelOperationKind,
     ModelOperationState,
     build_model_operation,
+)
+from azents.core.worker_model_profile import (
+    ModelCandidateChainExhausted,
+    ModelTargetNotFound,
+    RequestedProfileSelection,
 )
 from azents.engine.context.window import resolve_model_input_tokens
 from azents.engine.events.engine_events import RunComplete
@@ -37,11 +41,15 @@ from azents.engine.run.resolve import (
 )
 from azents.engine.run.types import PollMessages
 from azents.repos.agent.data import Agent
-from azents.repos.model_metadata_source import ModelMetadataSourceRepository
-from azents.repos.model_metadata_source_data import ModelMetadataSourceSnapshot
-from azents.services.model_metadata import CapturedContextSource, ModelMetadataService
+from azents.repos.model_metadata_read import ModelMetadataReadRepository
+from azents.repos.model_metadata_source_data import (
+    CapturedContextSource,
+    ModelMetadataSourceSnapshot,
+)
+from azents.repos.worker_executor_model import WorkerExecutorModelOperationRepository
+from azents.repos.worker_executor_model_data import FreshModelPreparation
+from azents.services.model_metadata import ModelMetadataService
 from azents.testing.model_metadata import (
-    make_test_model_metadata_service,
     make_test_source_payload,
     make_test_source_snapshot,
 )
@@ -118,28 +126,40 @@ def _pair_agent() -> Agent:
     )
 
 
-class _TrackedSelectionScope(fixtures._SessionScope):
-    def __init__(self, owner: "_TrackedSelectionSessions") -> None:
-        self.owner = owner
+class _TrackedSelectionOperations(fixtures._CompletedModels):
+    """Observe completed operation boundaries without a fake SQL scope."""
 
-    async def __aenter__(self) -> AsyncSession:
-        self.owner.open_scopes += 1
-        return await super().__aenter__()
+    open_operations = 0
 
-    async def __aexit__(self, *exc_info: object) -> None:
-        await super().__aexit__(*exc_info)
-        self.owner.open_scopes -= 1
+    async def prepare_fresh(
+        self,
+        *,
+        agent_id: str,
+        session_id: str,
+        run_id: str,
+        owner_generation: int,
+        selected: RequestedProfileSelection,
+        override: RequestedProfileSelection | None,
+        replace_operation: bool,
+    ) -> Result[
+        FreshModelPreparation | None, ModelTargetNotFound | ModelCandidateChainExhausted
+    ]:
+        self.open_operations += 1
+        try:
+            return await super().prepare_fresh(
+                agent_id=agent_id,
+                session_id=session_id,
+                run_id=run_id,
+                owner_generation=owner_generation,
+                selected=selected,
+                override=override,
+                replace_operation=replace_operation,
+            )
+        finally:
+            self.open_operations -= 1
 
 
-class _TrackedSelectionSessions(fixtures._SessionManager):
-    def __init__(self) -> None:
-        self.open_scopes = 0
-
-    def __call__(self) -> _TrackedSelectionScope:
-        return _TrackedSelectionScope(self)
-
-
-class _RefreshingSourceRepository(ModelMetadataSourceRepository):
+class _RefreshingSourceRepository(ModelMetadataReadRepository):
     """Publish the next source immediately after each authoritative read."""
 
     def __init__(
@@ -151,14 +171,7 @@ class _RefreshingSourceRepository(ModelMetadataSourceRepository):
         self.selection_transaction_open = selection_transaction_open
         self.captures = 0
 
-    async def get_current(
-        self,
-        session: AsyncSession,
-        *,
-        source_key: str,
-    ) -> ModelMetadataSourceSnapshot | None:
-        del session
-        assert source_key == CATALOG_SOURCE_KEY
+    async def capture(self) -> ModelMetadataSourceSnapshot | None:
         assert not self.selection_transaction_open()
         selected = self.snapshots[min(self.captures, len(self.snapshots) - 1)]
         self.captures += 1
@@ -169,15 +182,20 @@ def _install_sources(
     executor: RunExecutor,
     snapshots: tuple[ModelMetadataSourceSnapshot | None, ...],
 ) -> _RefreshingSourceRepository:
-    sessions = _TrackedSelectionSessions()
-    executor.session_manager = sessions
+    assert isinstance(executor, fixtures._TestRunExecutor)
+    operations = _TrackedSelectionOperations(
+        executor.test_agent_state,
+        executor.test_session_state,
+        executor.test_run_state,
+    )
+    executor.model_operation_repository = Mock(
+        spec=WorkerExecutorModelOperationRepository,
+        wraps=operations,
+    )
     repository = _RefreshingSourceRepository(
-        snapshots, lambda: sessions.open_scopes != 0
+        snapshots, lambda: operations.open_operations != 0
     )
-    executor.model_metadata_service = dataclasses.replace(
-        make_test_model_metadata_service(snapshot=None),
-        source_snapshot_repository=repository,
-    )
+    executor.model_metadata_service = ModelMetadataService(repository=repository)
     return repository
 
 
@@ -328,8 +346,8 @@ async def test_fresh_pair_does_not_recapture_after_source_publication(
             operation_id="f" * 32,
             recorded_at=datetime.datetime.now(datetime.UTC),
         ).model_copy(update={"cursor": 1})
-        lifecycle.agent_run_repository.run = dataclasses.replace(
-            lifecycle.agent_run_repository.run,
+        lifecycle.run_state.run = dataclasses.replace(
+            lifecycle.run_state.run,
             model_operation_state=ModelOperationState(
                 foreground=foreground, compaction=None
             ),

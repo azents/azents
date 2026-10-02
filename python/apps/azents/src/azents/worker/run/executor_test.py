@@ -6,13 +6,13 @@ import dataclasses
 import datetime
 import logging
 from collections.abc import AsyncIterator, Callable, Sequence
-from contextlib import AbstractAsyncContextManager
 from types import SimpleNamespace
 from typing import Any, TypedDict, Unpack
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
-from azcommon.result import Failure, Success
+from azcommon.result import Failure, Result, Success
+from azcommon.uuid import uuid7
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import azents.worker.run.executor as run_executor_module
@@ -49,16 +49,42 @@ from azents.core.inference_profile import (
     RequestedInferenceProfile,
     SessionAppliedInferenceProfile,
     SessionInferenceState,
+    validate_requested_profile_against_options,
 )
 from azents.core.llm_catalog import ModelReasoningEffort
-from azents.core.model_execution_options import ModelExecutionOptionId
-from azents.core.model_operation import ModelOperationKind, ModelOperationState
+from azents.core.model_execution_options import (
+    ModelExecutionOptionId,
+    validate_execution_options,
+)
+from azents.core.model_operation import (
+    ModelOperationCandidateOutcomeReason,
+    ModelOperationCandidateOutcomeStatus,
+    ModelOperationChainExhaustedError,
+    ModelOperationKind,
+    ModelOperationSnapshot,
+    ModelOperationState,
+    build_model_operation,
+    mark_current_candidate_active,
+    mark_current_candidate_quota_and_advance,
+    mark_current_candidate_skipped_and_advance,
+)
 from azents.core.runtime_capabilities import (
     RuntimeCapability,
     RuntimeCapabilityResolver,
 )
 from azents.core.tools import ToolkitContext, ToolkitExecutionMode
 from azents.core.vfs import VfsProjection, make_vfs_projection
+from azents.core.worker_model_profile import (
+    ModelCandidateChainExhausted,
+    ModelQuotaAdvanceResult,
+    ModelTargetNotFound,
+    ProfileResolutionRuntimeError,
+    ReasoningEffortUnsupported,
+    RequestedProfileSelection,
+    agent_default_inference_profile,
+    normalize_profile_selection_for_agent,
+    profile_resolution_failure,
+)
 from azents.engine.events.action_messages import (
     AgentCreateGitWorktreeAction,
     AgentRemoveGitWorktreeAction,
@@ -107,8 +133,6 @@ from azents.engine.run.provider_failure import (
     model_provider_failure,
 )
 from azents.engine.run.resolve import (
-    ModelTargetNotFound,
-    ReasoningEffortUnsupported,
     ResolvedInvokeInputProfile,
     ResolvedModelCandidateRuntime,
 )
@@ -123,24 +147,21 @@ from azents.engine.run.types import (
 from azents.engine.tools.dynamic_worktree import (
     DynamicWorktreeToolkit,
 )
-from azents.repos.action_execution.data import ActionExecution
+from azents.rdb.session import SessionManager
+from azents.repos.action_execution.data import (
+    ActionExecution,
+    ActionExecutionProjection,
+)
 from azents.repos.agent.data import Agent
-from azents.repos.agent_execution.data import AgentRunPatch
 from azents.repos.agent_session.data import AgentSession, PendingSessionCommand
+from azents.repos.engine_read import (
+    EngineInvokeReadRepository,
+    EngineModelReadRepository,
+    EngineToolkitReadRepository,
+)
 from azents.repos.external_channel.data import ExternalChannelMailboxProjectionItem
-from azents.repos.mailbox import MailboxRepository
 from azents.repos.mailbox.data import MailboxItem
-from azents.repos.model_candidate_health.data import (
-    CandidateHealthSettlement,
-    ForegroundProbeOutcome,
-    ForegroundProbeResult,
-    ModelCandidateHealthObservation,
-    ModelCandidateHealthStatus,
-)
-from azents.repos.model_operation_completion import (
-    ModelOperationCompletion,
-    ModelOperationCompletionRepository,
-)
+from azents.repos.model_candidate_selection import ModelCandidateSelection
 from azents.repos.session_execution import (
     CanonicalExecutionOwnerGenerationStaleError,
 )
@@ -148,10 +169,22 @@ from azents.repos.session_execution.data import (
     CanonicalExecutionSnapshot,
     PendingCommandSnapshot,
 )
-from azents.repos.terminal_finalization import TerminalRunFinalizationRepository
-from azents.repos.worker_session import WorkerSessionOperationRepository
+from azents.repos.worker_executor_model import WorkerExecutorModelOperationRepository
+from azents.repos.worker_executor_model_data import (
+    FreshModelPreparation,
+    FreshProfileSnapshot,
+)
+from azents.repos.worker_executor_model_test import model_fixture, model_rows
+from azents.repos.worker_executor_read import WorkerExecutorReadRepository
+from azents.repos.worker_executor_read_data import (
+    WorkerModelConfigurationSnapshot,
+    WorkerModelInputTranscript,
+    WorkerSessionTreeChangeRouting,
+)
 from azents.repos.worker_session_data import CanonicalExecutionWorkDriftError
+from azents.services.agent_wait import AgentWaitService
 from azents.services.chat.data import ChatLiveRunState
+from azents.services.engine_runtime_tokens import EngineRuntimeTokenResolver
 from azents.services.mailbox import (
     ExternalChannelMessageMailboxProcessor,
     MailboxPreparationContext,
@@ -164,6 +197,7 @@ from azents.services.mailbox import (
 )
 from azents.services.session_git_worktree import (
     GitWorktreeActionExecutionResult,
+    SessionGitWorktreeService,
 )
 from azents.services.session_resource_authority import SessionExecutionOwner
 from azents.services.turn_action import TurnActionCapabilityRegistry
@@ -238,35 +272,6 @@ class _OperationActionKwargs(TypedDict):
     operation_action: object | None
 
 
-class _DBSession(AsyncSession):
-    """Minimal DB session test double."""
-
-    def __init__(self) -> None:
-        """Avoid opening a real database session."""
-
-    async def commit(self) -> None:
-        """Accept transaction commits."""
-
-
-class _SessionScope(AbstractAsyncContextManager[AsyncSession]):
-    """DB session scope test double."""
-
-    async def __aenter__(self) -> AsyncSession:
-        """Return a dummy DB session."""
-        return _DBSession()
-
-    async def __aexit__(self, *exc_info: object) -> None:
-        """No resources to clean up."""
-
-
-class _SessionManager:
-    """SessionManager test double."""
-
-    def __call__(self) -> _SessionScope:
-        """Return a new session scope."""
-        return _SessionScope()
-
-
 async def _noop_dispatch_event(
     session_id: str,
     event: PublishedEvent,
@@ -336,103 +341,6 @@ class _PendingRun:
     model_operation_state: ModelOperationState | None = None
 
 
-class _AgentRunRepository:
-    """In-memory AgentRun state used by fenced executor transitions."""
-
-    def __init__(self, run: _PendingRun | None = None) -> None:
-        self.run = run or _PendingRun()
-
-    async def lock_by_id(
-        self,
-        session: AsyncSession,
-        run_id: str,
-    ) -> _PendingRun | None:
-        """Return the current run under the caller's synthetic lock."""
-        del session
-        if self.run.id != run_id:
-            self.run = dataclasses.replace(self.run, id=run_id)
-        return self.run
-
-    async def update(
-        self,
-        session: AsyncSession,
-        run_id: str,
-        patch: AgentRunPatch,
-    ) -> _PendingRun:
-        """Apply operation fields used by the production repository."""
-        del session
-        if self.run.id != run_id:
-            raise ValueError("AgentRun not found")
-        values: dict[str, object] = {}
-        if "model_operation_state" in patch.model_fields_set:
-            values["model_operation_state"] = patch.model_operation_state
-        if "retry_state" in patch.model_fields_set:
-            values["retry_state"] = patch.retry_state
-        if "model_call_started_at" in patch.model_fields_set:
-            values["model_call_started_at"] = patch.model_call_started_at
-        self.run = dataclasses.replace(self.run, **values)
-        return self.run
-
-
-class _ModelCandidateHealthRepository:
-    """Healthy candidate authority for existing executor behavior tests."""
-
-    def _available(self) -> ModelCandidateHealthObservation:
-        return ModelCandidateHealthObservation(
-            server_time=datetime.datetime.now(datetime.UTC),
-            status=ModelCandidateHealthStatus.AVAILABLE,
-            health=None,
-        )
-
-    async def claim_foreground_probe_in_session(
-        self,
-        *args: object,
-        **kwargs: object,
-    ) -> ForegroundProbeResult:
-        """Treat every candidate as healthy without allocating a probe."""
-        del args, kwargs
-        return ForegroundProbeResult(
-            outcome=ForegroundProbeOutcome.HEALTHY,
-            observation=self._available(),
-        )
-
-    async def snapshot_for_background_in_session(
-        self,
-        *args: object,
-        **kwargs: object,
-    ) -> ModelCandidateHealthObservation:
-        """Treat every background candidate as healthy."""
-        del args, kwargs
-        return self._available()
-
-    async def renew_quota_in_session(
-        self,
-        *args: object,
-        **kwargs: object,
-    ) -> ModelCandidateHealthObservation:
-        """Return deterministic database time for quota tests."""
-        del args, kwargs
-        return self._available()
-
-    async def complete_probe_success_in_session(
-        self,
-        *args: object,
-        **kwargs: object,
-    ) -> CandidateHealthSettlement:
-        """Accept a matching synthetic probe settlement."""
-        del args, kwargs
-        return CandidateHealthSettlement.APPLIED
-
-    async def transfer_reservation_in_session(
-        self,
-        *args: object,
-        **kwargs: object,
-    ) -> None:
-        """Report no Session reservation in existing behavior tests."""
-        del args, kwargs
-        return None
-
-
 @dataclasses.dataclass(frozen=True)
 class _SessionAgentStub:
     """Minimal typed SessionAgent projection used by executor tests."""
@@ -453,7 +361,7 @@ class _SessionLifecycle:
     ) -> None:
         self.order = order
         self.recoverable_run = recoverable_run
-        self.agent_run_repository = _AgentRunRepository(recoverable_run)
+        self.run_state = _RunState(recoverable_run)
         self.heartbeat_session_ids: list[str] = []
         self.second_heartbeat = asyncio.Event()
         self.heartbeat_error_after: int | None = None
@@ -622,7 +530,7 @@ class _SessionLifecycle:
         del session_id, kwargs
         self.pending_run_create_calls += 1
         created = _PendingRun()
-        self.agent_run_repository.run = created
+        self.run_state.run = created
         return created
 
     async def claim_lifecycle_start(
@@ -684,8 +592,8 @@ class _SessionLifecycle:
             status=AgentRunStatus.RUNNING,
             phase=initial_phase,
         )
-        self.agent_run_repository.run = dataclasses.replace(
-            self.agent_run_repository.run,
+        self.run_state.run = dataclasses.replace(
+            self.run_state.run,
             status=AgentRunStatus.RUNNING,
             phase=initial_phase,
         )
@@ -832,193 +740,6 @@ def _default_agent_session(
         created_at=now,
         updated_at=now,
     )
-
-
-class _AgentRepository:
-    """AgentRepository test double."""
-
-    def __init__(
-        self,
-        agent: object | None = None,
-        *,
-        default_if_none: bool = True,
-    ) -> None:
-        self.agent = _default_agent() if agent is None and default_if_none else agent
-
-    async def get_by_id(self, session: AsyncSession, agent_id: str) -> object | None:
-        """Return the configured persisted Agent settings."""
-        del session, agent_id
-        return self.agent
-
-    async def lock_by_id(
-        self,
-        session: AsyncSession,
-        agent_id: str,
-    ) -> object | None:
-        """Return the configured Agent under the final preparation fence."""
-        del session, agent_id
-        return self.agent
-
-
-class _AgentSessionRepository:
-    """AgentSessionRepository test double."""
-
-    def __init__(
-        self,
-        *,
-        inference_state: SessionInferenceState | None = None,
-        current_session_agent: _SessionAgentStub | None = None,
-        tree_session_agents: list[_SessionAgentStub] | None = None,
-        owner_generation: int = 1,
-    ) -> None:
-        self.inference_state = inference_state
-        self.owner_generation = owner_generation
-        self.applied_inference_profile: SessionAppliedInferenceProfile | None = None
-        self.applied_profile_updates: list[SessionAppliedInferenceProfile] = []
-        self.cleared_commands: list[tuple[str, str]] = []
-        self.current_session_agent = current_session_agent
-        self.tree_session_agents = tree_session_agents or []
-
-    async def get_by_id(
-        self,
-        session: AsyncSession,
-        agent_session_id: str,
-    ) -> object | None:
-        """Return the configured Session inference state."""
-        del session, agent_session_id
-        return _default_agent_session(
-            inference_state=self.inference_state,
-            applied_inference_profile=self.applied_inference_profile,
-            owner_generation=self.owner_generation,
-        )
-
-    async def lock_by_id(
-        self,
-        session: AsyncSession,
-        agent_session_id: str,
-    ) -> AgentSession:
-        """Return the configured Session under the final preparation fence."""
-        del session, agent_session_id
-        return _default_agent_session(
-            inference_state=self.inference_state,
-            applied_inference_profile=self.applied_inference_profile,
-            owner_generation=self.owner_generation,
-        )
-
-    async def wait_for_execution_lock_by_id(
-        self,
-        session: AsyncSession,
-        agent_session_id: str,
-    ) -> AgentSession:
-        """Return the configured Session under execution admission."""
-        return await self.lock_by_id(session, agent_session_id)
-
-    async def set_inference_state(
-        self,
-        session: AsyncSession,
-        *,
-        session_id: str,
-        inference_state: SessionInferenceState,
-    ) -> object:
-        """Record a newly prepared Session inference state."""
-        del session, session_id
-        self.inference_state = inference_state
-        return SimpleNamespace(inference_state=inference_state)
-
-    async def set_applied_inference_profile(
-        self,
-        session: AsyncSession,
-        *,
-        session_id: str,
-        model_target_label: str,
-        reasoning_effort: ModelReasoningEffort | None,
-        enabled_execution_options: list[ModelExecutionOptionId],
-    ) -> object:
-        """Record a fallback applied profile replacement."""
-        del session, session_id
-        profile = SessionAppliedInferenceProfile(
-            model_target_label=model_target_label,
-            reasoning_effort=reasoning_effort,
-            enabled_execution_options=enabled_execution_options,
-        )
-        self.applied_inference_profile = profile
-        self.applied_profile_updates.append(profile)
-        return SimpleNamespace(applied_inference_profile=profile)
-
-    async def set_primary_model_reservation(
-        self,
-        session: AsyncSession,
-        *,
-        session_id: str,
-        reservation: object | None,
-        expected_reservation_generation: int | None,
-    ) -> AgentSession:
-        """Accept reservation cleanup without an active reservation."""
-        del session, session_id, reservation, expected_reservation_generation
-        return _default_agent_session(
-            inference_state=self.inference_state,
-            applied_inference_profile=self.applied_inference_profile,
-            owner_generation=self.owner_generation,
-        )
-
-    async def list_session_agent_tree(
-        self,
-        session: AsyncSession,
-        *,
-        root_session_agent_id: str,
-    ) -> list[_SessionAgentStub]:
-        """Return the configured SessionAgent tree."""
-        del session, root_session_agent_id
-        return self.tree_session_agents
-
-    async def get_session_agent_by_session_id(
-        self,
-        session: AsyncSession,
-        session_id: str,
-    ) -> _SessionAgentStub | None:
-        """Return the configured current SessionAgent."""
-        del session, session_id
-        return self.current_session_agent
-
-    async def get_session_agent_by_id(
-        self,
-        session: AsyncSession,
-        session_agent_id: str,
-    ) -> _SessionAgentStub | None:
-        """Return a configured SessionAgent by ID."""
-        del session
-        candidates = [self.current_session_agent, *self.tree_session_agents]
-        return next(
-            (
-                candidate
-                for candidate in candidates
-                if isinstance(candidate, _SessionAgentStub)
-                and candidate.id == session_agent_id
-            ),
-            None,
-        )
-
-    async def clear_pending_command(
-        self,
-        session: AsyncSession,
-        *,
-        session_id: str,
-        command_id: str,
-    ) -> None:
-        """Record pending command cleanup."""
-        del session
-        self.cleared_commands.append((session_id, command_id))
-
-    async def claim_lifecycle_start(
-        self,
-        session: AsyncSession,
-        session_id: str,
-        *,
-        now: object,
-    ) -> bool:
-        """Pretend the session start hook was already claimed."""
-        del session, session_id, now
-        return False
 
 
 class _MailboxService:
@@ -1792,37 +1513,506 @@ class _UserStopFinalizer:
         self.interrupted_runs.append((session_id, run_id))
 
 
-def _run_executor(**kwargs: Any) -> RunExecutor:  # noqa: ANN401
-    """Construct a RunExecutor from test-owned dependency doubles."""
-    kwargs.setdefault(
-        "model_metadata_service", make_test_model_metadata_service(snapshot=None)
-    )
-    return RunExecutor(**kwargs)
+class _RunState:
+    """Detached stored Run facts, not a Session-taking repository adapter."""
+
+    def __init__(self, run: _PendingRun | None = None) -> None:
+        self.run = run or _PendingRun()
+
+    def write_operation(
+        self, state: ModelOperationState, *, clear_retry: bool = False
+    ) -> None:
+        self.run = dataclasses.replace(
+            self.run,
+            model_operation_state=state,
+            retry_state=None if clear_retry else self.run.retry_state,
+            model_call_started_at=None
+            if clear_retry
+            else self.run.model_call_started_at,
+        )
+
+    def complete_compaction(self) -> None:
+        state = self.run.model_operation_state
+        assert state is not None
+        self.write_operation(
+            ModelOperationState(foreground=state.foreground, compaction=None)
+        )
 
 
-def _worker_session_repository(**kwargs: Any) -> WorkerSessionOperationRepository:  # noqa: ANN401
-    """Construct the actual completed repository over existing query fixtures."""
-    return WorkerSessionOperationRepository(**kwargs)
+class _AgentState:
+    """Mutable detached Agent snapshot for orchestration scenarios."""
+
+    def __init__(
+        self, agent: Agent | None = None, *, default_if_none: bool = True
+    ) -> None:
+        self.agent = _default_agent() if agent is None and default_if_none else agent
+
+
+class _SessionState:
+    """Detached Session facts and recorded completed-operation outcomes."""
+
+    def __init__(
+        self,
+        *,
+        inference_state: SessionInferenceState | None = None,
+        current_session_agent: _SessionAgentStub | None = None,
+        tree_session_agents: list[_SessionAgentStub] | None = None,
+        owner_generation: int = 1,
+    ) -> None:
+        self.inference_state = inference_state
+        self.owner_generation = owner_generation
+        self.applied_inference_profile: SessionAppliedInferenceProfile | None = None
+        self.applied_profile_updates: list[SessionAppliedInferenceProfile] = []
+        self.cleared_commands: list[tuple[str, str]] = []
+        self.current_session_agent = current_session_agent
+        self.tree_session_agents = tree_session_agents or []
+
+    async def snapshot(self, session_id: str) -> AgentSession | None:
+        """Return detached facts, with no fake SQL session or lock."""
+        del session_id
+        return _default_agent_session(
+            inference_state=self.inference_state,
+            applied_inference_profile=self.applied_inference_profile,
+            owner_generation=self.owner_generation,
+        )
+
+    def apply_profile(self, profile: RequestedInferenceProfile) -> None:
+        applied = SessionAppliedInferenceProfile(
+            model_target_label=profile.model_target_label,
+            reasoning_effort=profile.reasoning_effort,
+            enabled_execution_options=profile.enabled_execution_options,
+        )
+        self.applied_inference_profile = applied
+        self.applied_profile_updates.append(applied)
+
+
+class _CompletedReads:
+    """Completed detached read outcomes; database predicates live in PG tests."""
+
+    def __init__(self, agent: _AgentState, session: _SessionState) -> None:
+        self.agent = agent
+        self.session = session
+
+    async def get_agent(self, agent_id: str) -> Agent | None:
+        del agent_id
+        return self.agent.agent
+
+    async def get_session(self, session_id: str) -> AgentSession | None:
+        return await self.session.snapshot(session_id)
+
+    async def list_tree_session_ids(
+        self, *, root_session_agent_id: str
+    ) -> tuple[str, ...]:
+        del root_session_agent_id
+        return tuple(
+            sorted({node.agent_session_id for node in self.session.tree_session_agents})
+        )
+
+    async def get_session_agent(self, session_id: str) -> _SessionAgentStub | None:
+        del session_id
+        return self.session.current_session_agent
+
+    async def tree_change_routes(
+        self, session_agent_ids: list[str]
+    ) -> tuple[WorkerSessionTreeChangeRouting, ...]:
+        nodes = [self.session.current_session_agent, *self.session.tree_session_agents]
+        targets = tuple(
+            sorted({node.agent_session_id for node in self.session.tree_session_agents})
+        )
+        result: list[WorkerSessionTreeChangeRouting] = []
+        for identity in dict.fromkeys(session_agent_ids):
+            node = next(
+                (node for node in nodes if node is not None and node.id == identity),
+                None,
+            )
+            if node is not None:
+                result.append(
+                    WorkerSessionTreeChangeRouting(
+                        root_session_agent_id=node.root_session_agent_id,
+                        changed_session_agent_id=node.id,
+                        target_session_ids=targets,
+                    )
+                )
+        return tuple(result)
+
+    async def model_configuration_snapshot(
+        self, *, agent_id: str, session_id: str
+    ) -> WorkerModelConfigurationSnapshot:
+        return WorkerModelConfigurationSnapshot(
+            agent=await self.get_agent(agent_id),
+            session=await self.get_session(session_id),
+        )
+
+    async def action_execution_projections(
+        self, session_id: str
+    ) -> list[ActionExecutionProjection]:
+        del session_id
+        return []
+
+    async def model_input_transcript(
+        self, session_id: str
+    ) -> WorkerModelInputTranscript:
+        del session_id
+        return WorkerModelInputTranscript(head_event_id=None, events=())
+
+
+def _healthy_selection(operation: ModelOperationSnapshot) -> ModelCandidateSelection:
+    """Pure healthy-candidate scenario, not a substitute for real health tests."""
+    while True:
+        candidate = operation.current_candidate
+        if (
+            operation.outcomes[operation.cursor].status
+            is ModelOperationCandidateOutcomeStatus.ACTIVE
+        ):
+            return ModelCandidateSelection(operation, candidate, False)
+        reason: ModelOperationCandidateOutcomeReason | None = None
+        requested = operation.requested_reasoning_effort
+        if requested is not None and requested not in (
+            candidate.model_selection.normalized_capabilities.reasoning.effort_levels
+        ):
+            reason = ModelOperationCandidateOutcomeReason.REASONING_EFFORT_UNSUPPORTED
+        try:
+            validate_execution_options(
+                provider=candidate.model_selection.provider,
+                supported=candidate.model_selection.supported_execution_options,
+                enabled=operation.requested_execution_options,
+            )
+        except ValueError:
+            reason = ModelOperationCandidateOutcomeReason.EXECUTION_OPTION_UNSUPPORTED
+        if reason is not None:
+            operation = mark_current_candidate_skipped_and_advance(
+                operation,
+                status=ModelOperationCandidateOutcomeStatus.INCOMPATIBLE,
+                reason=reason,
+                recorded_at=datetime.datetime.now(datetime.UTC),
+            )
+            continue
+        active = mark_current_candidate_active(
+            operation,
+            reason=ModelOperationCandidateOutcomeReason.SELECTED,
+            recorded_at=datetime.datetime.now(datetime.UTC),
+        )
+        return ModelCandidateSelection(active, candidate, False)
+
+
+class _CompletedModels:
+    """Typed completed-operation behavior scenarios, with no transaction adapter."""
+
+    def __init__(
+        self, agent: _AgentState, session: _SessionState, run: _RunState
+    ) -> None:
+        self.agent = agent
+        self.session = session
+        self.run = run
+
+    def require_agent(self) -> Agent:
+        agent = self.agent.agent
+        if agent is None:
+            raise ValueError("AgentSession or Agent not found")
+        return agent
+
+    def require_owner(self, owner_generation: int) -> None:
+        if self.session.owner_generation != owner_generation:
+            raise CanonicalExecutionOwnerGenerationStaleError(
+                "Session owner generation is stale"
+            )
+
+    def requested(
+        self, override: RequestedProfileSelection | None
+    ) -> RequestedProfileSelection:
+        agent = self.require_agent()
+        if override is not None and override.source in {
+            InferenceProfileSource.PARENT_RUN,
+            InferenceProfileSource.SPAWN_OVERRIDE,
+            InferenceProfileSource.RETRY_ORIGINAL,
+        }:
+            chosen = override
+        elif self.session.applied_inference_profile is not None:
+            applied = self.session.applied_inference_profile
+            chosen = RequestedProfileSelection(
+                RequestedInferenceProfile(
+                    model_target_label=applied.model_target_label,
+                    reasoning_effort=applied.reasoning_effort,
+                    enabled_execution_options=applied.enabled_execution_options,
+                ),
+                InferenceProfileSource.SESSION_LAST_USED,
+            )
+        else:
+            chosen = RequestedProfileSelection(
+                agent_default_inference_profile(agent),
+                InferenceProfileSource.AGENT_DEFAULT,
+            )
+        return normalize_profile_selection_for_agent(agent, chosen)
+
+    async def select_requested_profile(
+        self,
+        *,
+        agent_id: str,
+        session_id: str,
+        explicit_profile: RequestedInferenceProfile | None,
+    ) -> RequestedProfileSelection:
+        del agent_id, session_id
+        agent = self.require_agent()
+        if explicit_profile is not None:
+            return normalize_profile_selection_for_agent(
+                agent,
+                RequestedProfileSelection(
+                    explicit_profile, InferenceProfileSource.EXPLICIT_INPUT
+                ),
+            )
+        return self.requested(None)
+
+    async def load_fresh_profile_snapshot(
+        self, *, agent_id: str, session_id: str
+    ) -> FreshProfileSnapshot:
+        del agent_id
+        current = await self.session.snapshot(session_id)
+        if current is None:
+            raise ValueError("AgentSession or Agent not found")
+        return FreshProfileSnapshot(agent=self.require_agent(), session=current)
+
+    async def prepare_fresh(
+        self,
+        *,
+        agent_id: str,
+        session_id: str,
+        run_id: str,
+        owner_generation: int,
+        selected: RequestedProfileSelection,
+        override: RequestedProfileSelection | None,
+        replace_operation: bool,
+    ) -> Result[
+        FreshModelPreparation | None,
+        ModelTargetNotFound | ModelCandidateChainExhausted,
+    ]:
+        del agent_id, session_id
+        self.require_owner(owner_generation)
+        agent = self.require_agent()
+        expected = self.requested(override)
+        if expected.profile != selected.profile:
+            return Success(None)
+        applied = self.session.applied_inference_profile
+        if (
+            applied is not None
+            and applied.model_target_label != expected.profile.model_target_label
+        ):
+            self.session.apply_profile(expected.profile)
+        state = self.run.run.model_operation_state or ModelOperationState(
+            foreground=None, compaction=None
+        )
+        existing = state.foreground
+        option = validate_requested_profile_against_options(
+            agent.selectable_model_options, selected.profile
+        )
+        if option is None:
+            return Failure(ModelTargetNotFound(selected.profile.model_target_label))
+        operation = existing
+        if (
+            replace_operation
+            or existing is None
+            or existing.terminal_reason is not None
+            or existing.semantic_label != selected.profile.model_target_label
+            or existing.requested_reasoning_effort != selected.profile.reasoning_effort
+            or existing.requested_execution_options
+            != selected.profile.enabled_execution_options
+        ):
+            operation = build_model_operation(
+                option=option,
+                profile=selected.profile,
+                kind=ModelOperationKind.FOREGROUND,
+                operation_id=uuid7().hex,
+                recorded_at=datetime.datetime.now(datetime.UTC),
+            )
+        assert operation is not None
+        try:
+            foreground = _healthy_selection(operation)
+        except ModelOperationChainExhaustedError as exc:
+            self.run.write_operation(
+                ModelOperationState(
+                    foreground=exc.operation, compaction=state.compaction
+                )
+            )
+            return Failure(ModelCandidateChainExhausted(exc.operation))
+        light = next(
+            (
+                option
+                for option in agent.selectable_model_options
+                if option.label == agent.lightweight_model_label
+            ),
+            None,
+        )
+        if light is None:
+            return Failure(ModelTargetNotFound(agent.lightweight_model_label))
+        compaction = state.compaction
+        if compaction is None or compaction.terminal_reason is not None:
+            compaction = build_model_operation(
+                option=light,
+                profile=RequestedInferenceProfile(
+                    model_target_label=light.label,
+                    reasoning_effort=None,
+                    enabled_execution_options=[],
+                ),
+                kind=ModelOperationKind.COMPACTION,
+                operation_id=uuid7().hex,
+                recorded_at=datetime.datetime.now(datetime.UTC),
+            )
+        try:
+            background = _healthy_selection(compaction)
+        except ModelOperationChainExhaustedError as exc:
+            self.run.write_operation(
+                ModelOperationState(
+                    foreground=foreground.operation, compaction=exc.operation
+                )
+            )
+            return Failure(ModelCandidateChainExhausted(exc.operation))
+        self.run.run = dataclasses.replace(self.run.run, id=run_id)
+        self.run.write_operation(
+            ModelOperationState(
+                foreground=foreground.operation, compaction=background.operation
+            )
+        )
+        return Success(
+            FreshModelPreparation(selection=foreground, compaction_selection=background)
+        )
+
+    async def finalize_fresh(
+        self,
+        *,
+        session_id: str,
+        run_id: str,
+        owner_generation: int,
+        operation: ModelOperationSnapshot,
+        inference_state: SessionInferenceState,
+    ) -> bool:
+        del session_id, run_id
+        self.require_owner(owner_generation)
+        state = self.run.run.model_operation_state
+        if (
+            state is None
+            or state.foreground is None
+            or state.foreground.operation_id != operation.operation_id
+            or state.foreground.cursor != operation.cursor
+        ):
+            return False
+        self.session.inference_state = inference_state
+        return True
+
+    async def prepare_compaction(
+        self,
+        *,
+        agent_id: str,
+        session_id: str,
+        run_id: str,
+        owner_generation: int,
+        workspace_id: str,
+    ) -> ModelCandidateSelection:
+        del agent_id, session_id, run_id, workspace_id
+        self.require_owner(owner_generation)
+        agent = self.require_agent()
+        state = self.run.run.model_operation_state or ModelOperationState(
+            foreground=None, compaction=None
+        )
+        operation = state.compaction
+        if operation is None or operation.terminal_reason is not None:
+            option = next(
+                (
+                    option
+                    for option in agent.selectable_model_options
+                    if option.label == agent.lightweight_model_label
+                ),
+                None,
+            )
+            if option is None:
+                raise ProfileResolutionRuntimeError(
+                    profile_resolution_failure(
+                        ModelTargetNotFound(agent.lightweight_model_label)
+                    )
+                )
+            operation = build_model_operation(
+                option=option,
+                profile=RequestedInferenceProfile(
+                    model_target_label=option.label,
+                    reasoning_effort=None,
+                    enabled_execution_options=[],
+                ),
+                kind=ModelOperationKind.COMPACTION,
+                operation_id=uuid7().hex,
+                recorded_at=datetime.datetime.now(datetime.UTC),
+            )
+        try:
+            selected = _healthy_selection(operation)
+        except ModelOperationChainExhaustedError as exc:
+            raise ProfileResolutionRuntimeError(
+                profile_resolution_failure(ModelCandidateChainExhausted(exc.operation))
+            ) from exc
+        self.run.write_operation(
+            ModelOperationState(
+                foreground=state.foreground, compaction=selected.operation
+            )
+        )
+        return selected
+
+    async def advance_after_quota(
+        self,
+        *,
+        session_id: str,
+        run_id: str,
+        owner_generation: int,
+        workspace_id: str,
+        failure: ModelProviderFailure,
+    ) -> ModelQuotaAdvanceResult:
+        del session_id, run_id, workspace_id
+        self.require_owner(owner_generation)
+        state = self.run.run.model_operation_state
+        assert state is not None
+        foreground = failure.operation == "sampling"
+        current = state.foreground if foreground else state.compaction
+        assert current is not None
+        exhausted = False
+        try:
+            advanced = mark_current_candidate_quota_and_advance(
+                current, recorded_at=datetime.datetime.now(datetime.UTC)
+            )
+            operation = _healthy_selection(advanced).operation
+        except ModelOperationChainExhaustedError as exc:
+            operation = exc.operation
+            exhausted = True
+        self.run.write_operation(
+            ModelOperationState(
+                foreground=operation if foreground else state.foreground,
+                compaction=state.compaction if foreground else operation,
+            ),
+            clear_retry=True,
+        )
+        return ModelQuotaAdvanceResult(operation=operation, exhausted=exhausted)
+
+
+@dataclasses.dataclass
+class _TestRunExecutor(RunExecutor):
+    """Expose detached fixture state without exporting raw query dependencies."""
+
+    test_agent_state: _AgentState
+    test_session_state: _SessionState
+    test_run_state: _RunState
 
 
 def _executor(
-    session_lifecycle: Any | None = None,  # noqa: ANN401
+    session_lifecycle: _SessionLifecycle | None = None,
     *,
-    engine: Any | None = None,  # noqa: ANN401
-    agent: Any | None = None,  # noqa: ANN401
-    failed_run_finalizer: Any | None = None,  # noqa: ANN401
-    user_stop_finalizer: Any | None = None,  # noqa: ANN401
-    command_registry: Any | None = None,  # noqa: ANN401
-    agent_session_repository: Any | None = None,  # noqa: ANN401
-    live_event_projector: Any | None = None,  # noqa: ANN401
-    mailbox_item_service: Any | None = None,  # noqa: ANN401
-    session_git_worktree_service: Any | None = None,  # noqa: ANN401
-    vfs_projection_service: Any | None = None,  # noqa: ANN401
-    image_generation_catalog_service: Any | None = None,  # noqa: ANN401
-    model_candidate_health_repository: Any | None = None,  # noqa: ANN401
+    engine: _Engine | None = None,
+    agent: Agent | None = None,
+    failed_run_finalizer: _FailedRunFinalizer | None = None,
+    user_stop_finalizer: _UserStopFinalizer | None = None,
+    command_registry: dict[str, _CommandHandler | _FailingCommandHandler] | None = None,
+    session_state: _SessionState | None = None,
+    live_event_projector: _LiveEventProjector | None = None,
+    mailbox_item_service: _MailboxService | None = None,
+    session_git_worktree_service: _SessionGitWorktreeService | None = None,
+    vfs_projection_service: _VfsProjectionService | None = None,
+    image_generation_catalog_service: AsyncMock | None = None,
     failed_run_max_retries: int = 10,
-) -> RunExecutor:
-    """Create a RunExecutor for resolve-failure tests."""
+) -> _TestRunExecutor:
+    """Create a typed Executor with completed-operation scenario mocks."""
     if session_lifecycle is None:
         session_lifecycle = _SessionLifecycle()
     if engine is None:
@@ -1833,7 +2023,7 @@ def _executor(
         user_stop_finalizer = _UserStopFinalizer()
     if command_registry is None:
         command_registry = {}
-    if agent_session_repository is None:
+    if session_state is None:
         inference_state = None
         recoverable = session_lifecycle.recoverable_run
         if (
@@ -1858,9 +2048,7 @@ def _executor(
                 or datetime.datetime.now(datetime.UTC),
                 enabled_execution_options=[],
             )
-        agent_session_repository = _AgentSessionRepository(
-            inference_state=inference_state
-        )
+        session_state = _SessionState(inference_state=inference_state)
     if live_event_projector is None:
         live_event_projector = _LiveEventProjector()
     if mailbox_item_service is None:
@@ -1875,43 +2063,53 @@ def _executor(
     if image_generation_catalog_service is None:
         image_generation_catalog_service = AsyncMock()
         image_generation_catalog_service.validate_runtime.return_value = None
-    if model_candidate_health_repository is None:
-        model_candidate_health_repository = _ModelCandidateHealthRepository()
-    capability_registry_kwargs: dict[str, Any] = {  # noqa: ANN401
-        "skill_store": object(),
-        "vfs_projection_service": None,
-    }
-    operation_executor_kwargs: dict[str, Any] = {  # noqa: ANN401
-        "capabilities": TurnActionCapabilityRegistry(**capability_registry_kwargs),
-        "session_git_worktree_service": session_git_worktree_service,
-    }
-    session_manager = _SessionManager()
-    worker_session_repository = _worker_session_repository(
-        session_manager=session_manager,
-        agent_session_repository=agent_session_repository,
-        agent_run_repository=session_lifecycle.agent_run_repository,
-        mailbox_item_repository=MailboxRepository(),
-        terminal_finalization_repository=AsyncMock(
-            spec=TerminalRunFinalizationRepository
-        ),
+    agent_state = _AgentState(agent)
+    assert isinstance(session_state, _SessionState)
+    run_state = session_lifecycle.run_state
+    assert isinstance(run_state, _RunState)
+    reads = _CompletedReads(agent_state, session_state)
+    models = _CompletedModels(agent_state, session_state, run_state)
+    read_repository: WorkerExecutorReadRepository = Mock(
+        spec=WorkerExecutorReadRepository, wraps=reads
     )
-    return _run_executor(
-        broker=object(),
-        session_manager=session_manager,
-        engine=engine,
-        agent_repository=_AgentRepository(agent),
-        command_registry=command_registry,
-        integration_repository=object(),
-        model_candidate_health_repository=model_candidate_health_repository,
+    model_repository: WorkerExecutorModelOperationRepository = Mock(
+        spec=WorkerExecutorModelOperationRepository, wraps=models
+    )
+    worktree_service: SessionGitWorktreeService = Mock(
+        spec=SessionGitWorktreeService, wraps=session_git_worktree_service
+    )
+    registry = OperationActionExecutorRegistry(
+        capabilities=TurnActionCapabilityRegistry(
+            skill_store=Mock(), vfs_projection_service=None
+        ),
+        session_git_worktree_service=worktree_service,
+    )
+    return _TestRunExecutor(
+        broker=Mock(spec=run_executor_module.SessionBroker),
+        read_repository=read_repository,
+        model_operation_repository=model_repository,
+        invoke_read_repository=Mock(spec=EngineInvokeReadRepository),
+        model_read_repository=Mock(spec=EngineModelReadRepository),
+        toolkit_read_repository=Mock(spec=EngineToolkitReadRepository),
+        runtime_token_resolver=Mock(spec=EngineRuntimeTokenResolver),
+        agent_wait_service=Mock(spec=AgentWaitService),
+        test_agent_state=agent_state,
+        test_session_state=session_state,
+        test_run_state=run_state,
+        vfs_projection_service=Mock(
+            spec=run_executor_module.VfsProjectionService,
+            wraps=vfs_projection_service,
+        ),
+        model_metadata_service=make_test_model_metadata_service(snapshot=None),
+        engine=Mock(spec=run_executor_module.AgentEngineAdapter, wraps=engine),
+        command_registry={
+            name: Mock(spec=run_executor_module.CommandHandler, wraps=handler)
+            for name, handler in command_registry.items()
+        },
         toolkit_registry={},
-        vfs_projection_service=vfs_projection_service,
-        toolkit_repository=object(),
-        agent_runtime_repository=object(),
-        agent_session_repository=agent_session_repository,
-        agent_run_repository=session_lifecycle.agent_run_repository,
-        worker_session_repository=worker_session_repository,
-        event_transcript_repository=object(),
-        session_lifecycle=session_lifecycle,
+        session_lifecycle=Mock(
+            spec=run_executor_module.SessionLifecycleService, wraps=session_lifecycle
+        ),
         worker_config=AgentWorkerConfig(
             web_url="http://localhost:3000",
             oauth_secret_key="test-secret",
@@ -1924,31 +2122,53 @@ def _executor(
                 max_backoff_seconds=60,
             ),
         ),
-        exchange_file_service=object(),
-        model_file_service=object(),
-        image_generation_catalog_service=image_generation_catalog_service,
-        mailbox_item_service=mailbox_item_service,
-        session_git_worktree_service=session_git_worktree_service,
-        operation_action_executor=OperationActionExecutorRegistry(
-            **operation_executor_kwargs
+        exchange_file_service=Mock(spec=run_executor_module.ExchangeFileService),
+        model_file_service=Mock(spec=run_executor_module.ModelFileService),
+        image_generation_catalog_service=Mock(
+            spec=run_executor_module.ImageGenerationCatalogService,
+            wraps=image_generation_catalog_service,
         ),
-        session_title_service=_SessionTitleService(),
-        live_event_projector=live_event_projector,
-        user_stop_finalizer=user_stop_finalizer,
-        failed_run_finalizer=failed_run_finalizer,
-        builtin_toolkit_provider=object(),
-        claude_rules_toolkit_provider=object(),
-        todo_toolkit_provider=object(),
-        goal_toolkit_provider=object(),
-        runtime_web_toolkit_provider=object(),
-        scheduled_toolkit_provider=SimpleNamespace(
-            channel_service=_ScheduledChannelService()
+        mailbox_item_service=Mock(
+            spec=run_executor_module.MailboxService, wraps=mailbox_item_service
         ),
-        external_channel_toolkit_provider=object(),
-        skill_toolkit_provider=object(),
-        subagent_toolkit_provider=object(),
-        dynamic_worktree_toolkit_provider=object(),
-        broadcast=object(),
+        session_git_worktree_service=worktree_service,
+        operation_action_executor=registry,
+        session_title_service=Mock(
+            spec=run_executor_module.SessionTitleService, wraps=_SessionTitleService()
+        ),
+        live_event_projector=Mock(
+            spec=run_executor_module.LiveEventProjector, wraps=live_event_projector
+        ),
+        user_stop_finalizer=Mock(
+            spec=run_executor_module.UserStopFinalizer, wraps=user_stop_finalizer
+        ),
+        failed_run_finalizer=Mock(
+            spec=run_executor_module.FailedRunErrorFinalizer, wraps=failed_run_finalizer
+        ),
+        builtin_toolkit_provider=Mock(spec=run_executor_module.BuiltinToolkitProvider),
+        claude_rules_toolkit_provider=Mock(
+            spec=run_executor_module.ClaudeRulesToolkitProvider
+        ),
+        todo_toolkit_provider=Mock(spec=run_executor_module.TodoToolkitProvider),
+        goal_toolkit_provider=Mock(spec=run_executor_module.GoalToolkitProvider),
+        runtime_web_toolkit_provider=Mock(
+            spec=run_executor_module.RuntimeWebToolkitProvider
+        ),
+        scheduled_toolkit_provider=Mock(
+            spec=run_executor_module.ScheduledToolkitProvider,
+            channel_service=_ScheduledChannelService(),
+        ),
+        external_channel_toolkit_provider=Mock(
+            spec=run_executor_module.ExternalChannelToolkitProvider
+        ),
+        skill_toolkit_provider=Mock(spec=run_executor_module.SkillToolkitProvider),
+        subagent_toolkit_provider=Mock(
+            spec=run_executor_module.SubagentToolkitProvider
+        ),
+        dynamic_worktree_toolkit_provider=Mock(
+            spec=run_executor_module.DynamicWorktreeToolkitProvider
+        ),
+        broadcast=Mock(spec=run_executor_module.WebSocketBroadcast),
     )
 
 
@@ -1992,12 +2212,10 @@ def _runtime_agent(
     *,
     state: AgentRuntimeCapability = AgentRuntimeCapability.NONE,
     version: int = 1,
-) -> Any:  # noqa: ANN401
-    """Create Runtime capability fields used by Worker resolution tests."""
-    return SimpleNamespace(
-        memory_enabled=True,
-        runtime_capability=state,
-        runtime_capability_version=version,
+) -> Agent:
+    """Return an actual detached Agent for capability orchestration."""
+    return _default_agent().model_copy(
+        update={"runtime_capability": state, "runtime_capability_version": version}
     )
 
 
@@ -2072,7 +2290,7 @@ async def test_runtime_capability_resolver_fails_closed() -> None:
     assert decision.actual_version == 4
 
     missing_executor: Any = _executor()
-    missing_executor.agent_repository = _AgentRepository(default_if_none=False)
+    missing_executor.test_agent_state.agent = None
     missing_resolver = missing_executor._runtime_capability_resolver(
         agent_id="missing-agent",
         agent=None,
@@ -3192,7 +3410,7 @@ async def test_execute_recovers_unclassified_provider_retry_with_current_profile
         resolved_at=now,
         enabled_execution_options=[],
     )
-    session_repository = _AgentSessionRepository(inference_state=initial_state)
+    session_repository = _SessionState(inference_state=initial_state)
     session_repository.applied_inference_profile = SessionAppliedInferenceProfile(
         model_target_label="planning",
         reasoning_effort=None,
@@ -3202,7 +3420,7 @@ async def test_execute_recovers_unclassified_provider_retry_with_current_profile
     executor = _executor(
         session_lifecycle=lifecycle,
         engine=engine,
-        agent_session_repository=session_repository,
+        session_state=session_repository,
     )
     resolved_profiles: list[RequestedInferenceProfile] = []
 
@@ -3312,7 +3530,7 @@ async def test_execute_claims_manual_retry_profile_before_flushing_input(
     )
     executor = _executor(
         session_lifecycle=lifecycle,
-        agent_session_repository=_AgentSessionRepository(inference_state=retry_state),
+        session_state=_SessionState(inference_state=retry_state),
     )
     poll_calls: list[dict[str, object]] = []
 
@@ -3381,9 +3599,7 @@ async def test_execute_activates_pending_child_from_session_snapshot(
     executor = _executor(
         session_lifecycle=lifecycle,
         engine=engine,
-        agent_session_repository=_AgentSessionRepository(
-            inference_state=inference_state
-        ),
+        session_state=_SessionState(inference_state=inference_state),
     )
     resolved_snapshots: list[AgentModelSelection] = []
 
@@ -3456,13 +3672,13 @@ async def test_prepare_fresh_turn_remaps_same_label_to_current_agent_selection(
         resolved_at=datetime.datetime.now(datetime.UTC),
         enabled_execution_options=[],
     )
-    session_repository = _AgentSessionRepository(inference_state=old_state)
+    session_repository = _SessionState(inference_state=old_state)
     session_repository.applied_inference_profile = SessionAppliedInferenceProfile(
         model_target_label="default",
         reasoning_effort=None,
         enabled_execution_options=[],
     )
-    executor = _executor(agent_session_repository=session_repository)
+    executor = _executor(session_state=session_repository)
     monkeypatch.setattr(
         run_executor_module,
         "resolve_invoke_input_with_profile",
@@ -3498,13 +3714,13 @@ async def test_prepare_fresh_turn_falls_back_and_persists_stale_session_profile(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A removed Session label resolves through and replaces the Agent default."""
-    session_repository = _AgentSessionRepository()
+    session_repository = _SessionState()
     session_repository.applied_inference_profile = SessionAppliedInferenceProfile(
         model_target_label="removed",
         reasoning_effort=ModelReasoningEffort.HIGH,
         enabled_execution_options=[],
     )
-    executor = _executor(agent_session_repository=session_repository)
+    executor = _executor(session_state=session_repository)
     monkeypatch.setattr(
         run_executor_module,
         "resolve_invoke_input_with_profile",
@@ -3539,8 +3755,8 @@ async def test_prepare_fresh_turn_falls_back_and_persists_stale_session_profile(
 @pytest.mark.asyncio
 async def test_select_requested_profile_falls_back_for_stale_pending_profile() -> None:
     """A queued profile removed after admission uses the current Agent default."""
-    session_repository = _AgentSessionRepository()
-    executor = _executor(agent_session_repository=session_repository)
+    session_repository = _SessionState()
+    executor = _executor(session_state=session_repository)
 
     selected = await executor._select_requested_profile(
         agent_id="agent-001",
@@ -3710,8 +3926,8 @@ async def test_prepare_compaction_recreates_slot_after_prior_success(
     lifecycle = _SessionLifecycle()
     original_agent = _default_agent()
     executor = _executor(session_lifecycle=lifecycle, agent=original_agent)
-    agent_repository = executor.agent_repository
-    assert isinstance(agent_repository, _AgentRepository)
+    agent_repository = executor.test_agent_state
+    assert isinstance(agent_repository, _AgentState)
     resolved = await _resolve_success()
     assert isinstance(resolved, Success)
 
@@ -3744,7 +3960,7 @@ async def test_prepare_compaction_recreates_slot_after_prior_success(
         owner_generation=1,
         current_request=resolved.value.run_request,
     )
-    first_state = lifecycle.agent_run_repository.run.model_operation_state
+    first_state = lifecycle.run_state.run.model_operation_state
     assert first_state is not None
     assert first_state.compaction is not None
     first_operation_id = first_state.compaction.operation_id
@@ -3762,22 +3978,8 @@ async def test_prepare_compaction_recreates_slot_after_prior_success(
     assert resumed_request.compaction_model == first_request.compaction_model
     agent_repository.agent = original_agent
 
-    async with executor.session_manager() as session:
-        await ModelOperationCompletionRepository(
-            agent_session_repository=executor.agent_session_repository,
-            agent_run_repository=executor.agent_run_repository,
-            model_candidate_health_repository=executor.model_candidate_health_repository,
-        ).complete_success_in_session(
-            session,
-            ModelOperationCompletion(
-                session_id="session-001",
-                run_id="run-001",
-                owner_generation=1,
-                workspace_id="workspace-001",
-                operation_kind=ModelOperationKind.COMPACTION,
-            ),
-        )
-    completed_state = lifecycle.agent_run_repository.run.model_operation_state
+    lifecycle.run_state.complete_compaction()
+    completed_state = lifecycle.run_state.run.model_operation_state
     assert completed_state is not None
     assert completed_state.compaction is None
 
@@ -3788,7 +3990,7 @@ async def test_prepare_compaction_recreates_slot_after_prior_success(
         owner_generation=1,
         current_request=first_request,
     )
-    second_state = lifecycle.agent_run_repository.run.model_operation_state
+    second_state = lifecycle.run_state.run.model_operation_state
     assert second_state is not None
     assert second_state.compaction is not None
     assert second_state.compaction.operation_id != first_operation_id
@@ -3810,7 +4012,7 @@ async def test_execute_new_implicit_run_remaps_same_label_to_current_agent(
         resolved_at=datetime.datetime.now(datetime.UTC),
         enabled_execution_options=[],
     )
-    session_repository = _AgentSessionRepository(inference_state=old_state)
+    session_repository = _SessionState(inference_state=old_state)
     session_repository.applied_inference_profile = SessionAppliedInferenceProfile(
         model_target_label="default",
         reasoning_effort=None,
@@ -3819,7 +4021,7 @@ async def test_execute_new_implicit_run_remaps_same_label_to_current_agent(
     engine = _RecordingEngine([])
     executor = _executor(
         engine=engine,
-        agent_session_repository=session_repository,
+        session_state=session_repository,
     )
     _patch_successful_resolution(monkeypatch)
 
@@ -3870,9 +4072,9 @@ async def test_prepare_fresh_turn_fails_closed_when_session_is_missing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Missing canonical Session rows do not resolve, dispatch, or commit."""
-    session_repository = _AgentSessionRepository()
-    session_repository.get_by_id = AsyncMock(return_value=None)
-    executor = _executor(agent_session_repository=session_repository)
+    session_repository = _SessionState()
+    session_repository.snapshot = AsyncMock(return_value=None)
+    executor = _executor(session_state=session_repository)
     monkeypatch.setattr(
         run_executor_module,
         "resolve_invoke_input_with_profile",
@@ -3900,13 +4102,13 @@ async def test_prepare_fresh_turn_fails_closed_when_agent_is_missing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Missing canonical Agent rows do not resolve, dispatch, or commit."""
-    agent_repository = _AgentRepository(default_if_none=False)
-    session_repository = _AgentSessionRepository()
+    agent_repository = _AgentState(default_if_none=False)
+    session_repository = _SessionState()
     executor: Any = _executor(
         agent=None,
-        agent_session_repository=session_repository,
+        session_state=session_repository,
     )
-    executor.agent_repository = agent_repository
+    executor.test_agent_state.agent = agent_repository.agent
     monkeypatch.setattr(
         run_executor_module,
         "resolve_invoke_input_with_profile",
@@ -3934,8 +4136,8 @@ async def test_prepare_fresh_turn_rejects_owner_generation_drift(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A final owner fence prevents committing a candidate prepared by a stale owner."""
-    session_repository = _AgentSessionRepository(owner_generation=2)
-    executor = _executor(agent_session_repository=session_repository)
+    session_repository = _SessionState(owner_generation=2)
+    executor = _executor(session_state=session_repository)
     monkeypatch.setattr(
         run_executor_module,
         "resolve_invoke_input_with_profile",
@@ -3984,11 +4186,11 @@ async def test_execute_rebuilds_turn_with_exact_updated_inference_state(
         resolved_at=datetime.datetime.now(datetime.UTC),
         enabled_execution_options=[],
     )
-    session_repo = _AgentSessionRepository(inference_state=initial_state)
+    session_repo = _SessionState(inference_state=initial_state)
     engine = _BoundarySwitchEngine()
     executor = _executor(
         engine=engine,
-        agent_session_repository=session_repo,
+        session_state=session_repo,
     )
     poll_count = 0
 
@@ -4128,7 +4330,7 @@ async def test_execute_refreshes_same_label_settings_before_next_model_call(
             "selectable_model_options": [option(new_selection, 222)],
         }
     )
-    agent_repository: _AgentRepository | None = None
+    agent_repository: _AgentState | None = None
 
     update_index = 0
 
@@ -4144,8 +4346,8 @@ async def test_execute_refreshes_same_label_settings_before_next_model_call(
 
     engine = _TwoPollBoundaryEngine(replace_agent)
     executor = _executor(engine=engine, agent=old_agent)
-    assert isinstance(executor.agent_repository, _AgentRepository)
-    agent_repository = executor.agent_repository
+    assert isinstance(executor.test_agent_state, _AgentState)
+    agent_repository = executor.test_agent_state
 
     async def resolve_current_profile(
         *args: object,
@@ -4329,14 +4531,14 @@ async def test_execute_terminalizes_late_profile_failure_without_retry_or_overwr
     expected_failure_code: InferenceProfileFailureCode,
 ) -> None:
     """Late deterministic profile drift terminalizes without overwriting state."""
-    session_repository = _AgentSessionRepository()
+    session_repository = _SessionState()
     lifecycle = _SessionLifecycle()
     engine = _BoundarySwitchEngine()
     finalizer = _FailedRunFinalizer()
     executor = _executor(
         session_lifecycle=lifecycle,
         engine=engine,
-        agent_session_repository=session_repository,
+        session_state=session_repository,
         failed_run_finalizer=finalizer,
     )
     resolve_calls = 0
@@ -5522,11 +5724,11 @@ async def test_poll_run_inputs_publishes_acknowledgment_after_promotion_commit(
         root_session_agent_id="root-agent",
         agent_session_id="child-session",
     )
-    session_repository = _AgentSessionRepository(
+    session_repository = _SessionState(
         current_session_agent=root_agent,
         tree_session_agents=[root_agent, child_agent],
     )
-    executor = _executor(agent_session_repository=session_repository)
+    executor = _executor(session_state=session_repository)
     order: list[str] = []
     promoted_batches = [
         PromotedMailboxItems(
@@ -5982,7 +6184,7 @@ async def test_execute_runs_pending_command_inside_run_boundary(
     _patch_successful_resolution(monkeypatch)
     dispatched: list[tuple[str, PublishedEvent]] = []
     lifecycle = _SessionLifecycle()
-    session_repository = _AgentSessionRepository()
+    session_repository = _SessionState()
     live_event_projector = _LiveEventProjector()
     handler = _CommandHandler(
         [
@@ -5998,7 +6200,7 @@ async def test_execute_runs_pending_command_inside_run_boundary(
     executor = _executor(
         lifecycle,
         command_registry={"compact": handler},
-        agent_session_repository=session_repository,
+        session_state=session_repository,
         live_event_projector=live_event_projector,
     )
 
@@ -6050,11 +6252,11 @@ async def test_execute_ignores_unknown_command_without_run_boundary() -> None:
     """Unknown commands are cleared before a run id is created."""
     dispatched: list[PublishedEvent] = []
     lifecycle = _SessionLifecycle()
-    session_repository = _AgentSessionRepository()
+    session_repository = _SessionState()
     live_event_projector = _LiveEventProjector()
     executor = _executor(
         lifecycle,
-        agent_session_repository=session_repository,
+        session_state=session_repository,
         live_event_projector=live_event_projector,
     )
 
@@ -6094,12 +6296,12 @@ async def test_execute_finalizes_command_error_through_failed_run_finalizer(
     """Command run-stopping errors use shared failed-run finalization."""
     _patch_successful_resolution(monkeypatch)
     lifecycle = _SessionLifecycle()
-    session_repository = _AgentSessionRepository()
+    session_repository = _SessionState()
     finalizer = _FailedRunFinalizer()
     executor = _executor(
         lifecycle,
         command_registry={"compact": _FailingCommandHandler()},
-        agent_session_repository=session_repository,
+        session_state=session_repository,
         failed_run_finalizer=finalizer,
         failed_run_max_retries=1,
     )
@@ -6222,7 +6424,7 @@ async def test_execute_clears_live_projection_after_run_complete(
     order: list[str] = []
     dispatched: list[tuple[str, PublishedEvent]] = []
     live_event_projector = _LiveEventProjector()
-    session_repository = _AgentSessionRepository(
+    session_repository = _SessionState(
         current_session_agent=_SessionAgentStub(
             id="child-session-agent",
             root_session_agent_id="root-session-agent",
@@ -6235,7 +6437,7 @@ async def test_execute_clears_live_projection_after_run_complete(
     )
     executor = _executor(
         _SessionLifecycle(order),
-        agent_session_repository=session_repository,
+        session_state=session_repository,
         live_event_projector=live_event_projector,
     )
     message = _message()
@@ -6723,7 +6925,7 @@ async def test_quota_progresses_candidate_before_generic_retry(
     assert any(run.using_fallback for run in live_runs)
     assert live_runs[-1].using_fallback is True
     assert lifecycle.retry_states == []
-    operation_state = lifecycle.agent_run_repository.run.model_operation_state
+    operation_state = lifecycle.run_state.run.model_operation_state
     assert operation_state is not None
     assert operation_state.foreground is not None
     assert operation_state.foreground.cursor == 1
@@ -6829,7 +7031,7 @@ async def test_execute_refreshes_session_profile_before_model_retry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A retry attempt rebuilds its request from current Session model intent."""
-    session_repository = _AgentSessionRepository()
+    session_repository = _SessionState()
     session_repository.applied_inference_profile = SessionAppliedInferenceProfile(
         model_target_label="default",
         reasoning_effort=None,
@@ -6839,7 +7041,7 @@ async def test_execute_refreshes_session_profile_before_model_retry(
     executor = _executor(
         session_lifecycle=_SessionLifecycle(),
         engine=engine,
-        agent_session_repository=session_repository,
+        session_state=session_repository,
     )
     resolved_profiles: list[RequestedInferenceProfile] = []
 
@@ -7575,3 +7777,258 @@ async def test_execute_finalizes_non_retryable_failed_run_without_waiting(
     assert retry_state.backoff_seconds == 0
     assert len(finalizer.inputs) == 1
     assert finalizer.inputs[0].reason == "non_retryable"
+
+
+@pytest.mark.parametrize("source", list(InferenceProfileSource))
+def test_canonical_stale_profile_normalization_preserves_existing_source_policy(
+    source: InferenceProfileSource,
+) -> None:
+    """Relocated pure selection preserves inherited/retry intent and defaults."""
+    selected = RequestedProfileSelection(
+        profile=RequestedInferenceProfile(
+            model_target_label="removed",
+            reasoning_effort=None,
+            enabled_execution_options=[],
+        ),
+        source=source,
+    )
+    result = normalize_profile_selection_for_agent(_default_agent(), selected)
+    assert result.profile.model_target_label == "default"
+    assert result.source is (
+        source
+        if source
+        in {
+            InferenceProfileSource.PARENT_RUN,
+            InferenceProfileSource.SPAWN_OVERRIDE,
+            InferenceProfileSource.RETRY_ORIGINAL,
+        }
+        else InferenceProfileSource.AGENT_DEFAULT
+    )
+
+
+@pytest.mark.asyncio
+async def test_fresh_profile_drift_retains_exact_three_outer_attempts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A completed prewrite mismatch never invokes external materialization."""
+    executor = _executor()
+    prepare = AsyncMock(return_value=Success(None))
+    external = AsyncMock(
+        side_effect=AssertionError("Prewrite drift cannot start external resolution")
+    )
+    monkeypatch.setattr(executor.model_operation_repository, "prepare_fresh", prepare)
+    monkeypatch.setattr(
+        run_executor_module, "resolve_invoke_input_with_profile", external
+    )
+    with pytest.raises(
+        CanonicalExecutionWorkDriftError, match="fresh turn preparation"
+    ):
+        await executor._prepare_fresh_main_model_turn(
+            agent_id="agent-001",
+            session_id="session-001",
+            run_id="run-001",
+            owner_generation=1,
+            invoke_input=InvokeInput(
+                agent_id="agent-001", session_id="session-001", messages=[]
+            ),
+            override=None,
+        )
+    assert prepare.await_count == 3
+    external.assert_not_awaited()
+    assert executor.test_run_state.run.model_operation_state is None
+
+
+@pytest.mark.asyncio
+async def test_fresh_final_fence_drift_retains_committed_selection_and_three_attempts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Final drift retries only the existing loop, leaving preparation durable."""
+    executor = _executor()
+    final = AsyncMock(return_value=False)
+    external = AsyncMock(side_effect=_resolve_success)
+    monkeypatch.setattr(executor.model_operation_repository, "finalize_fresh", final)
+    monkeypatch.setattr(
+        run_executor_module, "resolve_invoke_input_with_profile", external
+    )
+    with pytest.raises(
+        CanonicalExecutionWorkDriftError, match="fresh turn preparation"
+    ):
+        await executor._prepare_fresh_main_model_turn(
+            agent_id="agent-001",
+            session_id="session-001",
+            run_id="run-001",
+            owner_generation=1,
+            invoke_input=InvokeInput(
+                agent_id="agent-001", session_id="session-001", messages=[]
+            ),
+            override=None,
+        )
+    assert final.await_count == external.await_count == 3
+    state = executor.test_run_state.run.model_operation_state
+    assert state is not None and state.foreground is not None
+    assert executor.test_session_state.inference_state is None
+
+
+@pytest.mark.asyncio
+async def test_external_fresh_resolution_failure_does_not_replay_or_discard_prepare(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """External failure follows a completed prepare and never runs final write."""
+    executor = _executor()
+    external = AsyncMock(return_value=Failure(AgentNotFound(agent_id="agent-001")))
+    final = AsyncMock(side_effect=AssertionError("External failure has no final write"))
+    monkeypatch.setattr(
+        run_executor_module, "resolve_invoke_input_with_profile", external
+    )
+    monkeypatch.setattr(executor.model_operation_repository, "finalize_fresh", final)
+    result = await executor._prepare_fresh_main_model_turn(
+        agent_id="agent-001",
+        session_id="session-001",
+        run_id="run-001",
+        owner_generation=1,
+        invoke_input=InvokeInput(
+            agent_id="agent-001", session_id="session-001", messages=[]
+        ),
+        override=None,
+    )
+    assert result.failure and isinstance(result.error, AgentNotFound)
+    external.assert_awaited_once()
+    final.assert_not_awaited()
+    state = executor.test_run_state.run.model_operation_state
+    assert state is not None
+    assert state.foreground is not None and state.compaction is not None
+    assert executor.test_session_state.inference_state is None
+
+
+@pytest.mark.parametrize("outcome", ["success", "failure", "cancel"])
+@pytest.mark.asyncio
+async def test_real_fresh_executor_materializers_observe_closed_postgres_phases(
+    rdb_session_manager: SessionManager[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+    outcome: str,
+) -> None:
+    """Actual Executor callbacks see closed PG scopes on success/error/cancel."""
+    fixture = await model_fixture(
+        rdb_session_manager, f"executor-materializer-{outcome}"
+    )
+    executor = _executor()
+    executor.model_operation_repository = fixture.repository
+    primary = fixture.options[0].candidates[0]
+    callbacks: list[str] = []
+    resolved = await _resolve_success()
+    assert isinstance(resolved, Success)
+    assert isinstance(resolved.value, ResolvedInvokeInputProfile)
+    request = dataclasses.replace(
+        resolved.value.run_request,
+        agent_id=fixture.agent_id,
+        session_id=fixture.session_id,
+        workspace_id=fixture.workspace_id,
+        provider=primary.model_selection.provider,
+        model=primary.model_selection.model_identifier,
+        compaction_provider_integration_id=None,
+    )
+
+    async def resolve_profile(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        fixture.manager.assert_closed()
+        assert fixture.manager.commits == 2
+        callbacks.append("provider-credentials-input")
+        if outcome == "failure":
+            return Failure(AgentNotFound(agent_id=fixture.agent_id))
+        if outcome == "cancel":
+            raise asyncio.CancelledError("external materialization cancelled")
+        return Success(
+            ResolvedInvokeInputProfile(
+                run_request=request,
+                model_selection=primary.model_selection,
+                model_settings=primary.settings,
+                reasoning_effort=None,
+            )
+        )
+
+    async def resolve_runtime(
+        *, selection: AgentModelSelection, **kwargs: object
+    ) -> object:
+        del kwargs
+        fixture.manager.assert_closed()
+        assert fixture.manager.commits == 2
+        callbacks.append("compaction-runtime-credentials")
+        return Success(
+            ResolvedModelCandidateRuntime(
+                provider=selection.provider,
+                provider_integration_id=selection.llm_provider_integration_id,
+                model=selection.model_identifier,
+                credential_kwargs={},
+                effective_input_tokens=128_000,
+            )
+        )
+
+    metadata = executor.model_metadata_service
+
+    async def capture(*, capability_maximums: Sequence[int | None]) -> object:
+        fixture.manager.assert_closed()
+        assert fixture.manager.commits == 2
+        callbacks.append("local-metadata")
+        return await metadata.capture_for_context(
+            capability_maximums=capability_maximums
+        )
+
+    executor.model_metadata_service = Mock(
+        spec=run_executor_module.ModelMetadataService, wraps=metadata
+    )
+    monkeypatch.setattr(
+        executor.model_metadata_service,
+        "capture_for_context",
+        AsyncMock(side_effect=capture),
+    )
+    monkeypatch.setattr(
+        run_executor_module, "resolve_invoke_input_with_profile", resolve_profile
+    )
+    monkeypatch.setattr(
+        run_executor_module, "resolve_model_candidate_runtime", resolve_runtime
+    )
+    if outcome == "cancel":
+        with pytest.raises(
+            asyncio.CancelledError, match="external materialization cancelled"
+        ):
+            await executor._prepare_fresh_main_model_turn(
+                agent_id=fixture.agent_id,
+                session_id=fixture.session_id,
+                run_id=fixture.run_id,
+                owner_generation=fixture.generation,
+                invoke_input=InvokeInput(
+                    agent_id=fixture.agent_id,
+                    session_id=fixture.session_id,
+                    messages=[],
+                ),
+                override=None,
+            )
+    else:
+        result = await executor._prepare_fresh_main_model_turn(
+            agent_id=fixture.agent_id,
+            session_id=fixture.session_id,
+            run_id=fixture.run_id,
+            owner_generation=fixture.generation,
+            invoke_input=InvokeInput(
+                agent_id=fixture.agent_id, session_id=fixture.session_id, messages=[]
+            ),
+            override=None,
+        )
+        assert result.success is (outcome == "success")
+    rows = await model_rows(fixture)
+    state = rows.run.model_operation_state
+    assert state is not None
+    assert state.foreground is not None and state.compaction is not None
+    if outcome == "success":
+        assert callbacks == [
+            "local-metadata",
+            "provider-credentials-input",
+            "compaction-runtime-credentials",
+        ]
+        assert fixture.manager.commits == len(fixture.manager.sessions) == 3
+        assert rows.session.inference_state is not None
+    else:
+        assert callbacks == ["local-metadata", "provider-credentials-input"]
+        assert fixture.manager.commits == len(fixture.manager.sessions) == 2
+        assert rows.session.inference_state is None
+    fixture.manager.assert_closed()

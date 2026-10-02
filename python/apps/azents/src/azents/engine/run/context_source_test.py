@@ -10,7 +10,6 @@ from azcommon.result import Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.inference_profile import RequestedInferenceProfile
-from azents.engine.run import resolve as resolve_module
 from azents.engine.run import resolve_test as fixtures
 from azents.engine.run.input import InvokeInput
 from azents.engine.run.resolve import (
@@ -18,8 +17,19 @@ from azents.engine.run.resolve import (
     resolve_invoke_input_with_resolved_profile,
     resolve_model_candidate_runtime,
 )
-from azents.repos.model_metadata_source_data import ModelMetadataSourceSnapshot
-from azents.services.model_metadata import CapturedContextSource, ModelMetadataService
+from azents.repos.chatgpt_oauth_runtime import ChatGPTOAuthRuntimeRepository
+from azents.repos.engine_read import (
+    EngineInvokeReadRepository,
+    EngineModelReadRepository,
+)
+from azents.repos.kimi_oauth_runtime import KimiOAuthRuntimeRepository
+from azents.repos.model_metadata_source_data import (
+    CapturedContextSource,
+    ModelMetadataSourceSnapshot,
+)
+from azents.repos.xai_oauth_runtime import XaiOAuthRuntimeRepository
+from azents.services.engine_runtime_tokens import EngineRuntimeTokenResolver
+from azents.services.model_metadata import ModelMetadataService
 from azents.testing.model_metadata import (
     make_test_model_metadata_service,
     make_test_source_payload,
@@ -60,15 +70,14 @@ async def test_real_resolver_respects_captured_context_even_when_new_source_exis
     session_manager = fixtures._session_manager_for(AsyncMock(spec=AsyncSession))
     latest = make_test_model_metadata_service(snapshot=_snapshot("B", 400_000))
     metadata = _ForbidContextRecapture(
-        session_manager=latest.session_manager,
-        source_snapshot_repository=latest.source_snapshot_repository,
+        repository=latest.repository,
     )
     captured = CapturedContextSource(
         snapshot=None if absent else _snapshot("A", 96_000)
     )
     monkeypatch.setattr(
-        resolve_module,
-        "_ensure_provider_runtime_tokens",
+        EngineRuntimeTokenResolver,
+        "ensure",
         AsyncMock(return_value=Success(integration)),
     )
     if operation == "runtime":
@@ -78,9 +87,25 @@ async def test_real_resolver_respects_captured_context_even_when_new_source_exis
             selection=candidate.model_selection,
             settings=candidate.settings,
             context_source=captured,
-            integration_repository=integration_repository,
-            session_manager=session_manager,
             model_metadata_service=metadata,
+            model_read_repository=EngineModelReadRepository(
+                integration_repository=integration_repository,
+                session_manager=session_manager,
+            ),
+            runtime_token_resolver=EngineRuntimeTokenResolver(
+                chatgpt_repository=ChatGPTOAuthRuntimeRepository(
+                    integration_repository=integration_repository,
+                    session_manager=session_manager,
+                ),
+                xai_repository=XaiOAuthRuntimeRepository(
+                    integration_repository=integration_repository,
+                    session_manager=session_manager,
+                ),
+                kimi_repository=KimiOAuthRuntimeRepository(
+                    integration_repository=integration_repository,
+                    session_manager=session_manager,
+                ),
+            ),
         )
         assert isinstance(runtime, Success)
         assert runtime.value.effective_input_tokens == (128_000 if absent else 96_000)
@@ -95,13 +120,29 @@ async def test_real_resolver_respects_captured_context_even_when_new_source_exis
                 reasoning_effort=None,
                 enabled_execution_options=[],
             ),
-            agent_repository=agent_repository,
-            integration_repository=integration_repository,
-            session_manager=session_manager,
             exchange_file_service=AsyncMock(),
             model_file_service=AsyncMock(),
             image_generation_catalog_service=fixtures._make_image_generation_catalog_service(),
             model_metadata_service=metadata,
+            invoke_read_repository=EngineInvokeReadRepository(
+                agent_repository=agent_repository,
+                integration_repository=integration_repository,
+                session_manager=session_manager,
+            ),
+            runtime_token_resolver=EngineRuntimeTokenResolver(
+                chatgpt_repository=ChatGPTOAuthRuntimeRepository(
+                    integration_repository=integration_repository,
+                    session_manager=session_manager,
+                ),
+                xai_repository=XaiOAuthRuntimeRepository(
+                    integration_repository=integration_repository,
+                    session_manager=session_manager,
+                ),
+                kimi_repository=KimiOAuthRuntimeRepository(
+                    integration_repository=integration_repository,
+                    session_manager=session_manager,
+                ),
+            ),
         )
         assert isinstance(profile, Success)
         request = profile.value.run_request
@@ -113,13 +154,29 @@ async def test_real_resolver_respects_captured_context_even_when_new_source_exis
             resolved_model_settings=candidate.settings,
             resolved_reasoning_effort=None,
             resolved_enabled_execution_options=[],
-            agent_repository=agent_repository,
-            integration_repository=integration_repository,
-            session_manager=session_manager,
             exchange_file_service=AsyncMock(),
             model_file_service=AsyncMock(),
             image_generation_catalog_service=fixtures._make_image_generation_catalog_service(),
             model_metadata_service=metadata,
+            invoke_read_repository=EngineInvokeReadRepository(
+                agent_repository=agent_repository,
+                integration_repository=integration_repository,
+                session_manager=session_manager,
+            ),
+            runtime_token_resolver=EngineRuntimeTokenResolver(
+                chatgpt_repository=ChatGPTOAuthRuntimeRepository(
+                    integration_repository=integration_repository,
+                    session_manager=session_manager,
+                ),
+                xai_repository=XaiOAuthRuntimeRepository(
+                    integration_repository=integration_repository,
+                    session_manager=session_manager,
+                ),
+                kimi_repository=KimiOAuthRuntimeRepository(
+                    integration_repository=integration_repository,
+                    session_manager=session_manager,
+                ),
+            ),
         )
         assert isinstance(frozen, Success)
         request = frozen.value

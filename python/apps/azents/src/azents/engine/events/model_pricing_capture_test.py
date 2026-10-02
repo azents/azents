@@ -58,8 +58,7 @@ def _observed_source(
     """Build a deterministic explicit source reader for operation tests."""
     base = make_test_model_metadata_service(snapshot=snapshot)
     return _ObservedMetadataService(
-        session_manager=base.session_manager,
-        source_snapshot_repository=base.source_snapshot_repository,
+        repository=base.repository,
         captures=[],
     )
 

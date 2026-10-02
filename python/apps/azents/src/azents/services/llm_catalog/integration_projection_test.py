@@ -32,6 +32,7 @@ from azents.core.llm_catalog_sync import IntegrationCatalogSyncTrigger
 from azents.core.workspace import WorkspaceCreate
 from azents.rdb.session import SessionManager
 from azents.repos.chatgpt_oauth_runtime import ChatGPTOAuthRuntimeRepository
+from azents.repos.kimi_oauth_runtime import KimiOAuthRuntimeRepository
 from azents.repos.llm_catalog import (
     LLMCatalogRepository,
 )
@@ -114,6 +115,10 @@ async def test_deterministic_integration_sync_does_not_require_source_authority(
                 session_manager=rdb_session_manager,
                 repository=ModelMetadataSourceRepository(),
                 source_adapter=AsyncMock(spec=CatalogSourceAdapter),
+            ),
+            kimi_oauth_runtime_repository=KimiOAuthRuntimeRepository(
+                session_manager=rdb_session_manager,
+                integration_repository=integration_repository,
             ),
         ).sync_integration_catalog(
             integration_id=integration.id,
@@ -315,6 +320,10 @@ async def test_oauth_sync_refresh_preserves_generation_and_user_update_fence(
                 repository=ModelMetadataSourceRepository(),
                 source_adapter=AsyncMock(spec=CatalogSourceAdapter),
             ),
+            kimi_oauth_runtime_repository=KimiOAuthRuntimeRepository(
+                session_manager=rdb_session_manager,
+                integration_repository=integration_repository,
+            ),
         )
         if user_change_during_listing:
             with pytest.raises(
@@ -455,6 +464,10 @@ async def test_xai_failure_preserves_last_successful_snapshot(
                 session_manager=rdb_session_manager,
                 repository=ModelMetadataSourceRepository(),
                 source_adapter=AsyncMock(spec=CatalogSourceAdapter),
+            ),
+            kimi_oauth_runtime_repository=KimiOAuthRuntimeRepository(
+                session_manager=rdb_session_manager,
+                integration_repository=integration_repository,
             ),
         )
         first = await service.sync_integration_catalog(

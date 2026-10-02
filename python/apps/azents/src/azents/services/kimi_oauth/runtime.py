@@ -1,45 +1,37 @@
-"""Kimi OAuth runtime token refresh support."""
+"""Kimi OAuth token orchestration between completed persistence operations."""
 
 import datetime
-from typing import NamedTuple
+from typing import assert_never
 
 import httpx
 from azcommon.result import Failure, Result, Success
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.credentials import KimiOAuthConfig, KimiOAuthSecrets
 from azents.core.enums import LLMProvider
 from azents.core.kimi_oauth import KimiOAuthConnectionMethod, KimiOAuthConnectionStatus
-from azents.rdb.session import SessionManager
-from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
+from azents.repos.kimi_oauth_runtime import KimiOAuthRuntimeRepository
+from azents.repos.kimi_oauth_runtime_data import (
+    KimiOAuthRefreshTokens,
+    KimiRuntimeIntegrationMissing,
+    KimiRuntimeInvalidCredentials,
+    kimi_oauth_credentials,
+)
 from azents.repos.llm_provider_integration.data import LLMProviderIntegrationWithSecrets
 
 from .client import KimiOAuthClient
-from .data import ProviderRejected, ProviderUnavailable, TokenSet
+from .data import ProviderRejected, ProviderUnavailable
 
 _REFRESH_WINDOW = datetime.timedelta(minutes=5)
-
-
-class KimiOAuthCredentials(NamedTuple):
-    """Typed Kimi OAuth credentials extracted from an integration."""
-
-    secrets: KimiOAuthSecrets
-    config: KimiOAuthConfig
 
 
 async def ensure_runtime_tokens(
     *,
     integration: LLMProviderIntegrationWithSecrets,
-    integration_repository: LLMProviderIntegrationRepository,
-    session_manager: SessionManager[AsyncSession],
-) -> Result[
-    LLMProviderIntegrationWithSecrets,
-    ProviderRejected | ProviderUnavailable,
-]:
-    """Ensure Kimi OAuth token freshness before a provider operation."""
+    persistence_repository: KimiOAuthRuntimeRepository,
+) -> Result[LLMProviderIntegrationWithSecrets, ProviderRejected | ProviderUnavailable]:
+    """Ensure Kimi token freshness using the existing status and time predicates."""
     if integration.provider != LLMProvider.KIMI_OAUTH:
         return Success(integration)
-    credentials = _credentials(integration)
+    credentials = kimi_oauth_credentials(integration)
     if credentials is None:
         return Failure(ProviderRejected(reason="Kimi OAuth integration is invalid"))
     secrets, config = credentials
@@ -54,22 +46,17 @@ async def ensure_runtime_tokens(
         return Success(integration)
     return await refresh_runtime_tokens(
         integration=integration,
-        integration_repository=integration_repository,
-        session_manager=session_manager,
+        persistence_repository=persistence_repository,
     )
 
 
 async def refresh_runtime_tokens(
     *,
     integration: LLMProviderIntegrationWithSecrets,
-    integration_repository: LLMProviderIntegrationRepository,
-    session_manager: SessionManager[AsyncSession],
-) -> Result[
-    LLMProviderIntegrationWithSecrets,
-    ProviderRejected | ProviderUnavailable,
-]:
-    """Force one Kimi OAuth refresh for a rejected provider credential."""
-    credentials = _credentials(integration)
+    persistence_repository: KimiOAuthRuntimeRepository,
+) -> Result[LLMProviderIntegrationWithSecrets, ProviderRejected | ProviderUnavailable]:
+    """Perform the existing bounded HTTP refresh before database finalization."""
+    credentials = kimi_oauth_credentials(integration)
     if integration.provider != LLMProvider.KIMI_OAUTH or credentials is None:
         return Failure(ProviderRejected(reason="Kimi OAuth integration is invalid"))
     secrets, config = credentials
@@ -81,138 +68,48 @@ async def refresh_runtime_tokens(
         )
     match refresh_result:
         case Success(tokens):
-            return await _persist_refresh_success(
+            persisted = await persistence_repository.persist_success(
                 integration=integration,
-                integration_repository=integration_repository,
-                session_manager=session_manager,
-                tokens=tokens,
+                tokens=KimiOAuthRefreshTokens(
+                    access_token=tokens.access_token,
+                    refresh_token=tokens.refresh_token,
+                    expires_at=tokens.expires_at,
+                ),
             )
+            match persisted:
+                case Success(value):
+                    return Success(value)
+                case Failure(error):
+                    match error:
+                        case KimiRuntimeInvalidCredentials():
+                            return Failure(
+                                ProviderRejected(
+                                    reason="Kimi OAuth integration is invalid"
+                                )
+                            )
+                        case KimiRuntimeIntegrationMissing():
+                            return Failure(
+                                ProviderRejected(
+                                    reason="Kimi OAuth integration was not found"
+                                )
+                            )
+                        case _:
+                            assert_never(error)
+                case _:
+                    assert_never(persisted)
         case Failure(error):
-            recovered = await _persist_refresh_failure(
+            status = (
+                KimiOAuthConnectionStatus.REFRESH_REQUIRED
+                if isinstance(error, ProviderRejected)
+                else KimiOAuthConnectionStatus.TEMPORARILY_UNAVAILABLE
+            )
+            recovered = await persistence_repository.persist_failure(
                 integration=integration,
-                integration_repository=integration_repository,
-                session_manager=session_manager,
-                error=error,
+                status=status,
+                reason=error.reason,
             )
             if recovered is not None:
                 return Success(recovered)
             return Failure(error)
-
-
-async def _persist_refresh_success(
-    *,
-    integration: LLMProviderIntegrationWithSecrets,
-    integration_repository: LLMProviderIntegrationRepository,
-    session_manager: SessionManager[AsyncSession],
-    tokens: TokenSet,
-) -> Result[
-    LLMProviderIntegrationWithSecrets,
-    ProviderRejected | ProviderUnavailable,
-]:
-    """Store refresh success and return the latest integration."""
-    credentials = _credentials(integration)
-    if credentials is None:
-        return Failure(ProviderRejected(reason="Kimi OAuth integration is invalid"))
-    secrets, config = credentials
-    async with session_manager() as session:
-        latest = await integration_repository.get_by_id_with_secrets_for_update(
-            session, integration.id
-        )
-        if latest is None:
-            return Failure(
-                ProviderRejected(reason="Kimi OAuth integration was not found")
-            )
-        if _credentials_changed(original=integration, latest=latest):
-            return Success(latest)
-        update = await integration_repository.update_runtime_state_by_id(
-            session,
-            integration.id,
-            {
-                "secrets": KimiOAuthSecrets(
-                    access_token=tokens.access_token,
-                    refresh_token=tokens.refresh_token,
-                    expires_at=tokens.expires_at,
-                    device_id=secrets.device_id,
-                ),
-                "config": KimiOAuthConfig(
-                    connection_method=config.connection_method,
-                    status=KimiOAuthConnectionStatus.CONNECTED.value,
-                    connected_at=config.connected_at,
-                    last_refreshed_at=datetime.datetime.now(datetime.UTC),
-                    last_failed_at=None,
-                    last_failure_reason=None,
-                ),
-            },
-        )
-        if isinstance(update, Failure):
-            return Failure(
-                ProviderRejected(reason="Kimi OAuth integration was not found")
-            )
-        refreshed = await integration_repository.get_by_id_with_secrets(
-            session, integration.id
-        )
-    if refreshed is None:
-        return Failure(ProviderRejected(reason="Kimi OAuth integration was not found"))
-    return Success(refreshed)
-
-
-async def _persist_refresh_failure(
-    *,
-    integration: LLMProviderIntegrationWithSecrets,
-    integration_repository: LLMProviderIntegrationRepository,
-    session_manager: SessionManager[AsyncSession],
-    error: ProviderRejected | ProviderUnavailable,
-) -> LLMProviderIntegrationWithSecrets | None:
-    """Store a refresh failure unless a concurrent refresh already won."""
-    credentials = _credentials(integration)
-    if credentials is None:
-        return None
-    _, config = credentials
-    status = (
-        KimiOAuthConnectionStatus.REFRESH_REQUIRED
-        if isinstance(error, ProviderRejected)
-        else KimiOAuthConnectionStatus.TEMPORARILY_UNAVAILABLE
-    )
-    async with session_manager() as session:
-        latest = await integration_repository.get_by_id_with_secrets_for_update(
-            session, integration.id
-        )
-        if latest is None:
-            return None
-        if _credentials_changed(original=integration, latest=latest):
-            return latest
-        await integration_repository.update_runtime_state_by_id(
-            session,
-            integration.id,
-            {
-                "config": KimiOAuthConfig(
-                    connection_method=config.connection_method,
-                    status=status.value,
-                    connected_at=config.connected_at,
-                    last_refreshed_at=config.last_refreshed_at,
-                    last_failed_at=datetime.datetime.now(datetime.UTC),
-                    last_failure_reason=error.reason,
-                )
-            },
-        )
-    return None
-
-
-def _credentials_changed(
-    *,
-    original: LLMProviderIntegrationWithSecrets,
-    latest: LLMProviderIntegrationWithSecrets,
-) -> bool:
-    """Return whether another refresh or reconnect replaced credentials."""
-    return original.secrets != latest.secrets
-
-
-def _credentials(
-    integration: LLMProviderIntegrationWithSecrets,
-) -> KimiOAuthCredentials | None:
-    """Return typed Kimi credentials from one integration."""
-    if not isinstance(integration.secrets, KimiOAuthSecrets) or not isinstance(
-        integration.config, KimiOAuthConfig
-    ):
-        return None
-    return KimiOAuthCredentials(integration.secrets, integration.config)
+        case _:
+            assert_never(refresh_result)

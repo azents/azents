@@ -25,6 +25,7 @@ from azents.core.credentials import (
 from azents.core.enums import LLMProvider
 from azents.core.kimi_oauth import KimiOAuthConnectionMethod
 from azents.core.xai_oauth import XaiOAuthConnectionMethod, XaiOAuthConnectionStatus
+from azents.repos.kimi_oauth_runtime import KimiOAuthRuntimeRepository
 from azents.repos.llm_provider_integration.data import LLMProviderIntegrationWithSecrets
 from azents.services.chatgpt_oauth.data import ProviderRejected, ProviderUnavailable
 from azents.services.kimi_oauth.data import ProviderRejected as KimiProviderRejected
@@ -254,6 +255,9 @@ async def _service(
             xai_usage_base_url="https://xai-usage.example.test/v1",
             openrouter_usage_base_url="https://openrouter.example.test/api/v1",
             kimi_usage_base_url="https://kimi-usage.example.test/coding/v1",
+            kimi_oauth_runtime_repository=KimiOAuthRuntimeRepository(
+                session_manager=_SessionManager(), integration_repository=repository
+            ),
         ),
         repository=repository,
     )

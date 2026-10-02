@@ -41,12 +41,14 @@ from azents.engine.run.provider_failure import (
 from azents.engine.run.resolve import resolve_model_candidate_runtime
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
-from azents.repos.chatgpt_oauth_runtime import ChatGPTOAuthRuntimeRepository
+from azents.repos.engine_read import EngineModelReadRepository
+from azents.repos.engine_read_deps import get_engine_model_read_repository
 from azents.repos.historical_memory import HistoricalMemoryRepository
 from azents.repos.historical_memory.preparation import (
     HistoricalMemoryPreparationRepository,
 )
 from azents.repos.message import MessageRepository
+from azents.services.engine_runtime_tokens import EngineRuntimeTokenResolver
 from azents.services.model_metadata import ModelMetadataService
 
 logger = logging.getLogger(__name__)
@@ -121,9 +123,11 @@ class HistoricalMemoryPreparationService:
         Depends(HistoricalMemoryRepository),
     ]
     message_repository: Annotated[MessageRepository, Depends(MessageRepository)]
-    chatgpt_oauth_runtime_repository: Annotated[
-        ChatGPTOAuthRuntimeRepository,
-        Depends(ChatGPTOAuthRuntimeRepository),
+    model_read_repository: Annotated[
+        EngineModelReadRepository, Depends(get_engine_model_read_repository)
+    ]
+    runtime_token_resolver: Annotated[
+        EngineRuntimeTokenResolver, Depends(EngineRuntimeTokenResolver)
     ]
     model_stream_watchdog: Annotated[
         ModelStreamWatchdog,
@@ -246,11 +250,9 @@ class HistoricalMemoryPreparationService:
             workspace_id=source.workspace_id,
             selection=candidate.model_selection,
             settings=candidate.settings,
-            integration_repository=(
-                self.chatgpt_oauth_runtime_repository.integration_repository
-            ),
-            session_manager=self.chatgpt_oauth_runtime_repository.session_manager,
             model_metadata_service=self.model_metadata_service,
+            model_read_repository=self.model_read_repository,
+            runtime_token_resolver=self.runtime_token_resolver,
         )
         if resolved.failure:
             raise HistoricalMemoryOutputError("runtime_unavailable")

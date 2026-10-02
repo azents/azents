@@ -55,9 +55,11 @@ from azents.engine.run.retry_policy import (
     get_failed_run_retry_policy,
 )
 from azents.repos.agent_session.data import AgentSession
-from azents.repos.chatgpt_oauth_runtime import ChatGPTOAuthRuntimeRepository
+from azents.repos.engine_read import EngineModelReadRepository
+from azents.repos.engine_read_deps import get_engine_model_read_repository
 from azents.repos.session_title import SessionTitleRepository
 from azents.repos.session_title.data import SessionTitleGenerationSnapshot
+from azents.services.engine_runtime_tokens import EngineRuntimeTokenResolver
 from azents.services.external_channel.thread_title import (
     ExternalChannelThreadTitleService,
 )
@@ -279,8 +281,11 @@ class SessionTitleService:
         ModelMetadataService, Depends(ModelMetadataService)
     ]
     sdk_factories: Annotated[ModelSDKFactories, Depends(get_model_sdk_factories)]
-    chatgpt_oauth_runtime_repository: Annotated[
-        ChatGPTOAuthRuntimeRepository, Depends(ChatGPTOAuthRuntimeRepository)
+    model_read_repository: Annotated[
+        EngineModelReadRepository, Depends(get_engine_model_read_repository)
+    ]
+    runtime_token_resolver: Annotated[
+        EngineRuntimeTokenResolver, Depends(EngineRuntimeTokenResolver)
     ]
     model_stream_watchdog: Annotated[
         ModelStreamWatchdog,
@@ -351,11 +356,9 @@ class SessionTitleService:
                 workspace_id=current.workspace_id,
                 selection=selection,
                 settings=candidate.settings,
-                integration_repository=(
-                    self.chatgpt_oauth_runtime_repository.integration_repository
-                ),
-                session_manager=(self.chatgpt_oauth_runtime_repository.session_manager),
                 model_metadata_service=self.model_metadata_service,
+                model_read_repository=self.model_read_repository,
+                runtime_token_resolver=self.runtime_token_resolver,
             )
             if resolved_runtime.failure:
                 return None

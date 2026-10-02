@@ -7,6 +7,7 @@ from azents.core.model_catalog_source import CATALOG_SOURCE_KEY, CATALOG_SOURCE_
 from azents.engine.context.window import resolve_model_input_tokens
 from azents.rdb.models.model_metadata_source import RDBModelMetadataSourceSnapshot
 from azents.rdb.session import SessionManager
+from azents.repos.model_metadata_read import ModelMetadataReadRepository
 from azents.repos.model_metadata_source import ModelMetadataSourceRepository
 from azents.repos.model_metadata_source_data import ModelMetadataSourceSnapshot
 from azents.services.model_metadata import ModelMetadataService
@@ -70,8 +71,9 @@ async def test_capture_uses_only_local_validated_remote_authority(
         authority.current_snapshot_id = source_id
         await session.flush()
     service = ModelMetadataService(
-        session_manager=rdb_session_manager,
-        source_snapshot_repository=repository,
+        repository=ModelMetadataReadRepository(
+            session_manager=rdb_session_manager, source_snapshot_repository=repository
+        )
     )
     assert (
         await service.capture_for_context(capability_maximums=[128_000, 272_000])

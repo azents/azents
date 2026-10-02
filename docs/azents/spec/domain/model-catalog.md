@@ -33,6 +33,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/llm_catalog/data.py
   - python/apps/azents/src/azents/repos/chatgpt_oauth_runtime/**
   - python/apps/azents/src/azents/repos/xai_oauth_runtime/**
+  - python/apps/azents/src/azents/repos/kimi_oauth_runtime*.py
+  - python/apps/azents/src/azents/repos/model_metadata_read.py
   - python/apps/azents/src/azents/repos/model_metadata_source.py
   - python/apps/azents/src/azents/repos/model_metadata_source_data.py
   - python/apps/azents/src/azents/rdb/models/llm_catalog.py
