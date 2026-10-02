@@ -39,19 +39,33 @@ def upgrade() -> None:
               SET current_snapshot_id = NULL
               WHERE c.purpose = 'conversation'
                 AND c.current_snapshot_id IS NOT NULL
-                AND NOT EXISTS (
-                  SELECT 1
-                  FROM llm_catalog_snapshots AS s
-                  JOIN model_metadata_source_snapshots AS ms
-                    ON ms.id = s.metadata_source_snapshot_id
-                  WHERE s.id = c.current_snapshot_id
-                    AND s.catalog_id = c.id
-                    AND s.projection_schema_version IS NOT NULL
-                    AND s.runtime_profile_resolver_revision IS NOT NULL
-                    AND s.pydantic_ai_version IS NOT NULL
-                    AND s.genai_prices_version IS NOT NULL
-                    AND s.projection_fingerprint IS NOT NULL
-                    AND ms.source_key = 'genai_prices'
+                AND (
+                  NOT EXISTS (
+                    SELECT 1
+                    FROM llm_catalog_snapshots AS s
+                    JOIN model_metadata_source_snapshots AS ms
+                      ON ms.id = s.metadata_source_snapshot_id
+                    WHERE s.id = c.current_snapshot_id
+                      AND s.catalog_id = c.id
+                      AND s.projection_schema_version IS NOT NULL
+                      AND s.runtime_profile_resolver_revision IS NOT NULL
+                      AND s.pydantic_ai_version IS NOT NULL
+                      AND s.genai_prices_version IS NOT NULL
+                      AND s.projection_fingerprint IS NOT NULL
+                      AND ms.source_key = 'genai_prices'
+                  )
+                  OR EXISTS (
+                    SELECT 1
+                    FROM llm_catalog_entries AS e
+                    WHERE e.catalog_id = c.id
+                      AND e.snapshot_id = c.current_snapshot_id
+                      AND (
+                        COALESCE(e.source_metadata, '{}'::jsonb)::text ~
+                          '"(litellm_provider|source_model_key|target_projection_key|target_metadata|target_metadata_match_required|exact_projection_key)"[[:space:]]*:'
+                        OR COALESCE(e.projection_metadata, '{}'::jsonb)::text ~
+                          '"(litellm_provider|source_model_key|target_projection_key|target_metadata|target_metadata_match_required|exact_projection_key)"[[:space:]]*:'
+                      )
+                  )
                 );
               IF EXISTS (
                 SELECT 1
@@ -110,7 +124,18 @@ def upgrade() -> None:
         "JOIN llm_catalogs AS c ON c.id = s.catalog_id "
         "WHERE c.purpose = 'conversation' "
         "AND s.id IS DISTINCT FROM c.current_snapshot_id "
-        "AND s.metadata_source_snapshot_id IS NULL"
+        "AND (s.metadata_source_snapshot_id IS NULL OR EXISTS ("
+        "SELECT 1 FROM llm_catalog_entries AS e "
+        "WHERE e.catalog_id = c.id AND e.snapshot_id = s.id AND ("
+        "COALESCE(e.source_metadata, '{}'::jsonb)::text ~ "
+        "'\"(litellm_provider|source_model_key|target_projection_key|"
+        "target_metadata|target_metadata_match_required|exact_projection_key)"
+        "\"[[:space:]]*:' "
+        "OR COALESCE(e.projection_metadata, '{}'::jsonb)::text ~ "
+        "'\"(litellm_provider|source_model_key|target_projection_key|"
+        "target_metadata|target_metadata_match_required|exact_projection_key)"
+        "\"[[:space:]]*:'"
+        ")))"
     )
     op.execute(
         "UPDATE llm_catalogs AS c SET latest_attempt_id = ("

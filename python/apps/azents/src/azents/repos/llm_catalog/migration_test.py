@@ -377,10 +377,10 @@ def test_cleanup_rejects_missing_generic_source_authority(
     _assert_revision(migration_database.engine, _SHADOW_REVISION)
 
 
-def test_cleanup_rejects_legacy_metadata_in_current_generic_entry(
+def test_cleanup_clears_legacy_metadata_in_current_generic_entry(
     migration_database: _MigrationDatabase,
 ) -> None:
-    """Nested provider metadata cannot preserve the retired source identity."""
+    """A contaminated generic snapshot is unpinned and deleted for rebuilding."""
     command.upgrade(migration_database.config, _SHADOW_REVISION)
     _seed_ready_cutover(migration_database.engine)
     with migration_database.engine.begin() as connection:
@@ -403,12 +403,20 @@ def test_cleanup_rejects_legacy_metadata_in_current_generic_entry(
             },
         )
 
-    _assert_upgrade_rejected(
-        migration_database,
-        message="current conversation entry retains legacy metadata",
-    )
+    command.upgrade(migration_database.config, _CLEANUP_REVISION)
 
-    _assert_revision(migration_database.engine, _SHADOW_REVISION)
+    _assert_cleanup_schema(migration_database.engine)
+    with migration_database.engine.connect() as connection:
+        catalog = connection.execute(
+            sa.text("SELECT current_snapshot_id FROM llm_catalogs WHERE id = :catalog"),
+            {"catalog": "c" * 32},
+        ).scalar_one()
+        contaminated_snapshot_count = connection.execute(
+            sa.text("SELECT count(*) FROM llm_catalog_snapshots WHERE id = :snapshot"),
+            {"snapshot": "n" * 32},
+        ).scalar_one()
+    assert catalog is None
+    assert contaminated_snapshot_count == 0
 
 
 def test_cleanup_rejects_invalid_rollback_pin(
