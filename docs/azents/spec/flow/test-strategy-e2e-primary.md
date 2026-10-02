@@ -30,7 +30,7 @@ code_paths:
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
 last_verified_at: 2026-10-02
-spec_version: 80
+spec_version: 81
 ---
 
 # E2E Primary Test Strategy
@@ -568,6 +568,10 @@ Always-on required CI does not depend on external credentials.
   stacked pull requests with non-main bases and does not depend on run-associated PR
   metadata. Candidate completion and exact-base completion use the same evidence-only
   reevaluation path so ordering with initial sticky-comment publication converges.
+  Candidate reevaluation excludes completed-but-cancelled workflow runs: their
+  incomplete diagnostic artifacts cannot supersede valid same-head evidence.
+  Genuine failed runs remain eligible for the existing fail-closed evidence checks;
+  selection does not require a successful conclusion.
   Reevaluation workflows are serialized before evidence is read and publication
   begins. The helper checks current PR head/base identity before publishing status
   and again before replacing the duration block in the sticky observability comment.
@@ -640,6 +644,10 @@ External substrate features such as Agent Runtime Provider are recorded in two l
 Local/PR environment without live substrate does not fake live PASS. Instead, separate prerequisite snapshot state and deterministic evidence in PR body and design QA record. If primary E2E substrate such as Browser runner or Docker/testcontainers is unavailable and product path cannot be executed, do not replace it with PASS. Track scenario, blocker category, observed error, expected verification target, and next action in GitHub Issue, and leave blocked evidence plus issue link in design QA record.
 
 ## Changelog
+
+- **2026-10-02** (spec_version 81) — Excluded cancelled candidate workflow
+  artifacts from duration reevaluation without filtering genuine failed runs
+  or changing validation thresholds and head/base publication guards.
 
 - **2026-10-02** (spec_version 80) — Added credential-free Historical
   product-path evidence and explicit-time service sampling, distinguishing

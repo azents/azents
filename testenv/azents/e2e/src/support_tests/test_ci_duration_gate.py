@@ -10,6 +10,7 @@ import pytest
 from support.ci_duration_gate import (
     EvidenceError,
     Sample,
+    _candidate_report,
     affected_pull_numbers,
     compare,
     evaluate,
@@ -100,6 +101,66 @@ def test_target_selection_rejects_invalid_sha_before_listing() -> None:
 
     with pytest.raises(EvidenceError, match="completed_sha_unavailable"):
         affected_pull_numbers("azents/azents", "invalid", command)
+
+
+@pytest.mark.parametrize("valid_conclusion", ["success", "failure"])
+def test_candidate_skips_cancelled_duplicate_without_hiding_failures(
+    tmp_path: Path, valid_conclusion: str
+) -> None:
+    """Cancelled diagnostics cannot supersede real same-head evidence."""
+    downloads: list[int] = []
+
+    def command(args: Sequence[str]) -> str:
+        values = list(args)
+        joined = " ".join(values)
+        if f"head_sha={_HEAD}" in joined:
+            return json.dumps(
+                {
+                    "workflow_runs": [
+                        {"id": 30, "status": "completed", "conclusion": "cancelled"},
+                        {
+                            "id": 20,
+                            "status": "completed",
+                            "conclusion": valid_conclusion,
+                        },
+                    ]
+                }
+            )
+        if "gh run download 20" in joined:
+            downloads.append(20)
+            destination = Path(values[values.index("--dir") + 1])
+            destination.mkdir(parents=True)
+            (destination / "report.json").write_text(
+                json.dumps({"head_sha": _HEAD, "lanes": {"web-1": "109"}}),
+                encoding="utf-8",
+            )
+            return ""
+        raise AssertionError(values)
+
+    candidate = _candidate_report("azents/azents", _HEAD, tmp_path, command)
+
+    assert candidate.run_id == 20
+    assert downloads == [20]
+
+
+def test_cancelled_candidate_inventory_has_no_validation_evidence(
+    tmp_path: Path,
+) -> None:
+    """Cancellation alone never fabricates a valid candidate or a pass."""
+
+    def command(args: Sequence[str]) -> str:
+        if f"head_sha={_HEAD}" in " ".join(args):
+            return json.dumps(
+                {
+                    "workflow_runs": [
+                        {"id": 30, "status": "completed", "conclusion": "cancelled"}
+                    ]
+                }
+            )
+        raise AssertionError(list(args))
+
+    with pytest.raises(EvidenceError, match="candidate_evidence_unavailable"):
+        _candidate_report("azents/azents", _HEAD, tmp_path, command)
 
 
 def _pull(head_repository: str = "azents/azents") -> str:
