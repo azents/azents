@@ -135,7 +135,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
   - typescript/apps/azents-web/messages/*/chat.json
 last_verified_at: 2026-10-02
-spec_version: 201
+spec_version: 202
 ---
 
 # Agent Execution Loop
@@ -143,6 +143,22 @@ spec_version: 201
 This is the current execution loop specification in which the agent repeatedly receives user input,
 invokes the model, executes tools, stores events, and publishes UI updates. The production path is
 not the OpenAI Agents SDK Runner or legacy `runtime/llm.py`, but the azents-owned event runtime.
+
+The foreground `AgentRunExecution` binds a `ForegroundIterationHost` to the
+execution-neutral `ModelToolIterationCore`. The common core orders preparation,
+model invocation, output admission, tool execution, follow-up and completion;
+its interface contains no public Session/Run identity, durable Event or database
+dependency. The foreground host retains mailbox/stop admission, compaction,
+provider normalization, repository-owned atomic groups, output delivery and
+terminal effects. Adapter closure occurs on every core exit, and hard turn
+exhaustion is interruption rather than successful completion. This extraction
+does not activate a background consolidation consumer or change provider dialects.
+
+Native stream consumption/partial-stop normalization and parallel call/result
+matching, independent settlement and cancellation also use identity-neutral
+shared primitives. Foreground adapters supply their existing normalizer,
+watchdog-wrapped provider iterator and result-admission operations; no second
+parallel-batch or native-stream iteration algorithm is kept in the foreground host.
 
 ## 1. Overview
 
@@ -1710,6 +1726,10 @@ projections retain the dedicated kind, and the UI labels it with a channel/messa
 icon.
 
 ## Changelog
+
+- **2026-10-02** (spec_version 202) — Routed foreground execution through one
+  execution-neutral model/tool iteration core while retaining foreground
+  admission, persistence, delivery, cancellation and terminal semantics.
 
 - **2026-10-02** (spec_version 201) — Completed the assigned Event Engine
   output and terminal repository operations, replaced prepared-output and
