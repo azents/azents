@@ -9,11 +9,11 @@ from azents.engine.events.builders import make_system_error_event
 from azents.engine.events.engine_events import RunComplete
 from azents.engine.events.types import Event
 from azents.engine.run.contracts import AgentEngineProtocol
-from azents.worker.events.publisher import WorkerEventPublisher
-from azents.worker.session.errors import SessionRunnerErrorReporter
-from azents.worker.session.execution_snapshot import (
+from azents.repos.session_execution import (
     CanonicalExecutionOwnerGenerationStaleError,
 )
+from azents.worker.events.publisher import WorkerEventPublisher
+from azents.worker.session.errors import SessionRunnerErrorReporter
 
 
 class _Engine:

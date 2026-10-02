@@ -1,716 +1,211 @@
-"""SessionLifecycleService tests."""
+"""Pure lifecycle orchestration tests using completed-operation mocks."""
 
-from contextlib import AbstractAsyncContextManager
+import dataclasses
 from datetime import UTC, datetime
-from types import SimpleNamespace
-from typing import Any
+from unittest.mock import MagicMock, call, create_autospec
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.enums import (
-    AgentRunPhase,
-    AgentRunStatus,
-    MailboxSchedulingMode,
-)
+from azents.broker.types import SessionBroker
+from azents.core.enums import AgentRunPhase, AgentRunStatus
 from azents.core.inference_profile import RequestedInferenceProfile
-from azents.core.llm_catalog import ModelReasoningEffort
-from azents.core.model_execution_options import ModelExecutionOptionId
-from azents.engine.events.types import AgentRunState
+from azents.repos.session_execution import CanonicalExecutionOwnerGenerationStaleError
 from azents.repos.session_execution.data import PendingCommandSnapshot
+from azents.repos.worker_session import WorkerSessionOperationRepository
+from azents.repos.worker_session_data import (
+    CanonicalExecutionWorkDriftError,
+    WorkerIdleDisposition,
+    WorkerIdleTransition,
+)
 from azents.worker.session.lifecycle import SessionLifecycleService
 
 
-class _Session(AsyncSession):
-    """Minimal async DB session test double."""
+@dataclasses.dataclass(frozen=True)
+class LifecycleFixture:
+    """Typed production collaborators and their independently inspectable mocks."""
 
-    def __init__(self, order: list[str] | None = None) -> None:
-        self.order = order
-
-    async def commit(self) -> None:
-        """Accept transaction commit."""
-        if self.order is not None:
-            self.order.append("commit")
+    service: SessionLifecycleService
+    repository: MagicMock
+    broker: MagicMock
+    timeline: MagicMock
 
 
-class _SessionScope(AbstractAsyncContextManager[AsyncSession]):
-    """DB session context for tests."""
-
-    def __init__(self, order: list[str] | None = None) -> None:
-        self.session = _Session(order)
-
-    async def __aenter__(self) -> AsyncSession:
-        """Return test session."""
-        return self.session
-
-    async def __aexit__(self, *exc_info: object) -> None:
-        """No resources to clean up."""
-
-
-class _SessionManager:
-    """Session manager for tests."""
-
-    def __init__(self, order: list[str] | None = None) -> None:
-        self.order = order
-
-    def __call__(self) -> _SessionScope:
-        """Return new session scope."""
-        return _SessionScope(self.order)
-
-
-class _Broker:
-    """SessionBroker test double."""
-
-    def __init__(self) -> None:
-        self.renewed_session_ids: list[str] = []
-        self.owner_heartbeat_session_ids: list[str] = []
-
-    async def release_session_lock(self, session_id: str) -> None:
-        """This test does not release broker locks."""
-        del session_id
-
-    async def clear_session_activity(
-        self, session_id: str, *, owner_generation: int
-    ) -> bool:
-        """This test does not clear broker activity."""
-        del session_id, owner_generation
-        return True
-
-    async def set_session_activity(
-        self,
-        session_id: str,
-        *,
-        owner_generation: int,
-        run_id: str,
-        phase: AgentRunPhase | None = None,
-    ) -> bool:
-        """This test does not set broker activity."""
-        del session_id, owner_generation, run_id, phase
-        return True
-
-    async def renew_session_ttl(self, session_id: str) -> None:
-        """Record active owner lease renewal."""
-        self.renewed_session_ids.append(session_id)
-
-    async def renew_session_owner_heartbeat(self, session_id: str) -> None:
-        """Record idle-only owner heartbeat renewal."""
-        self.owner_heartbeat_session_ids.append(session_id)
-
-
-class _AgentSessionRepository:
-    """AgentSessionRepository test double."""
-
-    def __init__(
-        self,
-        *,
-        owner_generation: int = 0,
-        pending_command_id: str | None = None,
-        stop_requested_at: datetime | None = None,
-    ) -> None:
-        self.owner_generation = owner_generation
-        self.pending_command_id = pending_command_id
-        self.stop_requested_at = stop_requested_at
-        self.idle_session_ids: list[str] = []
-        self.heartbeat_session_ids: list[str] = []
-
-    async def heartbeat_running(
-        self,
-        session: AsyncSession,
-        session_id: str,
-    ) -> None:
-        """Record durable RUNNING heartbeat renewal."""
-        del session
-        self.heartbeat_session_ids.append(session_id)
-
-    async def wait_for_execution_lock_by_id(
-        self,
-        session: AsyncSession,
-        agent_session_id: str,
-    ) -> Any:  # noqa: ANN401
-        """Return an existing locked Session marker."""
-        del session, agent_session_id
-        return SimpleNamespace(
-            owner_generation=self.owner_generation,
-            stop_requested_at=self.stop_requested_at,
-            pending_command_id=self.pending_command_id,
-            pending_command_name="compact" if self.pending_command_id else None,
-            pending_command_payload={} if self.pending_command_id else None,
-            pending_command_requester_user_id=None,
-            pending_command_created_at=(
-                datetime(2026, 7, 24, tzinfo=UTC) if self.pending_command_id else None
-            ),
-        )
-
-    async def mark_idle(self, session: AsyncSession, runtime_id: str) -> None:
-        """Record idle transition."""
-        del session
-        self.idle_session_ids.append(runtime_id)
-
-
-class _TerminalFinalizationRepository:
-    """Terminal coordinator test double."""
-
-    def __init__(self) -> None:
-        self.finalized_run_ids: list[str] = []
-
-    async def finalize_run_in_session(
-        self,
-        session: AsyncSession,
-        *,
-        run_id: str,
-    ) -> None:
-        del session
-        self.finalized_run_ids.append(run_id)
-
-    async def finalize_runs_in_session(
-        self,
-        session: AsyncSession,
-        *,
-        run_ids: list[str],
-    ) -> None:
-        del session
-        self.finalized_run_ids.extend(run_ids)
-
-
-class _MailboxRepository:
-    """MailboxRepository test double."""
-
-    def __init__(
-        self,
-        pending_scheduling_modes: set[MailboxSchedulingMode],
-    ) -> None:
-        self.pending_scheduling_modes = pending_scheduling_modes
-
-    async def has_by_session_id_and_scheduling_mode(
-        self,
-        session: AsyncSession,
-        *,
-        session_id: str,
-        scheduling_mode: MailboxSchedulingMode,
-    ) -> bool:
-        """Return whether the requested scheduling mode is pending."""
-        del session, session_id
-        return scheduling_mode in self.pending_scheduling_modes
-
-
-class _AgentRunRepository:
-    """AgentRunRepository test double."""
-
-    def __init__(
-        self,
-        running_run: AgentRunState | None,
-        *,
-        activated_run: AgentRunState | None = None,
-        active_lookup_error: Exception | None = None,
-        order: list[str] | None = None,
-    ) -> None:
-        self.running_run = running_run
-        self.activated_run = activated_run
-        self.active_lookup_error = active_lookup_error
-        self.order = order
-        self.terminal_session_ids: list[str] = []
-        self.terminal_run_ids: list[str] = []
-        self.terminal_statuses: list[AgentRunStatus] = []
-        self.suppressed_run_ids: list[str] = []
-        self.activation_run_ids: list[str] = []
-        self.phase_updates: list[tuple[str, AgentRunPhase]] = []
-
-    async def get_active_by_session_id(
-        self,
-        session: AsyncSession,
-        *,
-        session_id: str,
-    ) -> AgentRunState | None:
-        """Return test-specified active run."""
-        del session, session_id
-        if self.active_lookup_error is not None:
-            raise self.active_lookup_error
-        return self.running_run
-
-    async def get_by_id(
-        self,
-        session: AsyncSession,
-        run_id: str,
-    ) -> AgentRunState | None:
-        """Return the configured run only when its ID matches."""
-        del session
-        if self.running_run is None or self.running_run.id != run_id:
-            return None
-        return self.running_run
-
-    async def lock_by_id(
-        self,
-        session: AsyncSession,
-        run_id: str,
-    ) -> AgentRunState | None:
-        """Return the configured run under the bridge predecessor lock."""
-        del session
-        if self.order is not None:
-            self.order.append("lock_run")
-        if self.running_run is None or self.running_run.id != run_id:
-            return None
-        return self.running_run
-
-    async def mark_terminal(
-        self,
-        session: AsyncSession,
-        run_id: str,
-        status: AgentRunStatus,
-        *,
-        ended_at: datetime,
-    ) -> AgentRunState:
-        """Record the bridge predecessor terminal transition."""
-        del session, ended_at
-        if self.running_run is None or self.running_run.id != run_id:
-            raise AssertionError("Bridge predecessor Run was not configured")
-        if self.order is not None:
-            self.order.append(f"mark_terminal:{status.value}")
-        self.terminal_run_ids.append(run_id)
-        self.terminal_statuses.append(status)
-        self.running_run = self.running_run.model_copy(update={"status": status})
-        return self.running_run
-
-    async def mark_parent_result_suppressed(
-        self,
-        session: AsyncSession,
-        *,
-        run_id: str,
-        finalized_at: datetime,
-    ) -> AgentRunState:
-        """Record parent-result suppression after terminal transition."""
-        del session, finalized_at
-        if self.running_run is None or self.running_run.id != run_id:
-            raise AssertionError("Bridge predecessor Run was not configured")
-        if self.order is not None:
-            self.order.append("suppress_parent_result")
-        self.suppressed_run_ids.append(run_id)
-        return self.running_run
-
-    async def mark_terminal_if_running(
-        self,
-        session: AsyncSession,
-        run_id: str,
-        status: AgentRunStatus,
-        *,
-        ended_at: datetime,
-    ) -> AgentRunState | None:
-        """Record a run-level terminal transition."""
-        del session, status, ended_at
-        self.terminal_run_ids.append(run_id)
-        return self.running_run
-
-    async def mark_stopped_for_user_stop(
-        self,
-        session: AsyncSession,
-        run_id: str,
-        *,
-        ended_at: datetime,
-    ) -> AgentRunState | None:
-        """Record User Stop terminal convergence."""
-        del session, ended_at
-        self.terminal_run_ids.append(run_id)
-        if self.running_run is None:
-            return None
-        return self.running_run.model_copy(update={"status": AgentRunStatus.STOPPED})
-
-    async def activate_pending(
-        self,
-        session: AsyncSession,
-        *,
-        run_id: str,
-        activated_at: datetime,
-        requested_model_target_label: str,
-        requested_reasoning_effort: ModelReasoningEffort | None,
-        requested_enabled_execution_options: list[ModelExecutionOptionId],
-    ) -> AgentRunState:
-        """Return the test inherited run selected for activation."""
-        del (
-            session,
-            activated_at,
-            requested_model_target_label,
-            requested_reasoning_effort,
-            requested_enabled_execution_options,
-        )
-        self.activation_run_ids.append(run_id)
-        if self.activated_run is None:
-            raise AssertionError("Activation test run was not configured")
-        return self.activated_run
-
-    async def update_phase(
-        self,
-        session: AsyncSession,
-        run_id: str,
-        phase: AgentRunPhase,
-        *,
-        active_tool_calls: list[object] | None = None,
-    ) -> AgentRunState:
-        """Record the initial durable phase selected during activation."""
-        del session, active_tool_calls
-        self.phase_updates.append((run_id, phase))
-        if self.activated_run is None:
-            raise AssertionError("Activation test run was not configured")
-        return self.activated_run.model_copy(update={"phase": phase})
-
-    async def mark_session_running_terminal(
-        self,
-        session: AsyncSession,
-        *,
-        session_id: str,
-        status: AgentRunStatus,
-        ended_at: datetime,
-    ) -> list[AgentRunState]:
-        """Record broad terminal transition requests."""
-        del session, status, ended_at
-        self.terminal_session_ids.append(session_id)
-        return []
-
-
-def _running_run() -> AgentRunState:
-    """Create a running AgentRunState."""
-    now = datetime.now(UTC)
-    return AgentRunState(
-        id="1123456789abcdef0123456789abcdef",
-        session_id="session-001",
-        scheduled_task_cycle_id=None,
-        run_index=1,
-        phase=AgentRunPhase.EXECUTING_TOOLS,
-        status=AgentRunStatus.RUNNING,
-        parent_agent_run_id=None,
-        requested_model_target_label=None,
-        requested_reasoning_effort=None,
-        active_tool_calls=[],
-        parent_result_delivery_state=None,
-        parent_result_mailbox_item_id=None,
-        parent_result_enqueued_at=None,
-        created_at=now,
-        started_at=now,
-        model_call_started_at=None,
-        updated_at=now,
-        requested_enabled_execution_options=[],
-    )
-
-
-def _construct_service(**kwargs: Any) -> SessionLifecycleService:  # noqa: ANN401
-    """Construct lifecycle service with test-owned dependency doubles."""
-    return SessionLifecycleService(**kwargs)
-
-
-def _service(
-    *,
-    agent_run_repository: _AgentRunRepository,
-    agent_session_repository: _AgentSessionRepository,
-    pending_scheduling_modes: set[MailboxSchedulingMode],
-) -> SessionLifecycleService:
-    """Create SessionLifecycleService with test doubles."""
-    return _construct_service(
-        broker=_Broker(),
-        session_manager=_SessionManager(),
-        agent_session_repository=agent_session_repository,
-        agent_run_repository=agent_run_repository,
-        mailbox_item_repository=_MailboxRepository(pending_scheduling_modes),
-        terminal_finalization_repository=_TerminalFinalizationRepository(),
+def lifecycle_fixture() -> LifecycleFixture:
+    """Autospec completed operations, never a fake SQL session or manager."""
+    repository_mock = create_autospec(WorkerSessionOperationRepository, instance=True)
+    broker_mock = create_autospec(SessionBroker, instance=True)
+    repository: WorkerSessionOperationRepository = repository_mock
+    broker: SessionBroker = broker_mock
+    timeline = MagicMock()
+    timeline.attach_mock(repository_mock, "repository")
+    timeline.attach_mock(broker_mock, "broker")
+    return LifecycleFixture(
+        SessionLifecycleService(broker=broker, repository=repository),
+        repository_mock,
+        broker_mock,
+        timeline,
     )
 
 
 @pytest.mark.asyncio
-async def test_heartbeat_session_refreshes_db_and_active_owner_lease() -> None:
-    """Active Run heartbeat renews DB state and the atomic Redis owner lease."""
-    broker = _Broker()
-    agent_session_repository = _AgentSessionRepository()
-    service = _construct_service(
-        broker=broker,
-        session_manager=_SessionManager(),
-        agent_session_repository=agent_session_repository,
-        agent_run_repository=_AgentRunRepository(None),
-        mailbox_item_repository=_MailboxRepository(set()),
-        terminal_finalization_repository=_TerminalFinalizationRepository(),
-    )
-
-    await service.heartbeat_session("session-001", owner_generation=0)
-
-    assert agent_session_repository.heartbeat_session_ids == ["session-001"]
-    assert broker.renewed_session_ids == ["session-001"]
-    assert broker.owner_heartbeat_session_ids == []
+async def test_heartbeat_completes_database_before_broker_lease() -> None:
+    """The only service-owned heartbeat ordering is completed DB then broker."""
+    fixture = lifecycle_fixture()
+    await fixture.service.heartbeat_session("session", owner_generation=3)
+    assert fixture.timeline.mock_calls == [
+        call.repository.heartbeat_session("session", owner_generation=3),
+        call.broker.renew_session_ttl("session"),
+    ]
 
 
 @pytest.mark.asyncio
-async def test_mark_session_idle_rejects_active_agent_run() -> None:
-    """Active AgentRun blocks Runtime idle transition."""
-    agent_run_repository = _AgentRunRepository(_running_run())
-    agent_session_repository = _AgentSessionRepository()
-    service = _service(
-        agent_run_repository=agent_run_repository,
-        agent_session_repository=agent_session_repository,
-        pending_scheduling_modes=set(),
-    )
-
-    marked_idle = await service.mark_session_idle("session-001", owner_generation=0)
-
-    assert not marked_idle
-    assert agent_session_repository.idle_session_ids == []
-    assert agent_run_repository.terminal_session_ids == []
+async def test_failed_heartbeat_does_not_renew_broker_lease() -> None:
+    fixture = lifecycle_fixture()
+    fixture.repository.heartbeat_session.side_effect = RuntimeError("DB failure")
+    with pytest.raises(RuntimeError, match="DB failure"):
+        await fixture.service.heartbeat_session("session", owner_generation=3)
+    fixture.broker.renew_session_ttl.assert_not_awaited()
 
 
+@pytest.mark.parametrize("disposition", list(WorkerIdleDisposition))
 @pytest.mark.asyncio
-async def test_mark_session_idle_rechecks_queue_under_session_lock() -> None:
-    """A concurrently accepted input prevents the empty boundary from idling."""
-    agent_run_repository = _AgentRunRepository(None)
-    agent_session_repository = _AgentSessionRepository()
-    service = _service(
-        agent_run_repository=agent_run_repository,
-        agent_session_repository=agent_session_repository,
-        pending_scheduling_modes={MailboxSchedulingMode.WAKE_SESSION},
-    )
-
-    marked_idle = await service.mark_session_idle("session-001", owner_generation=0)
-
-    assert not marked_idle
-    assert agent_session_repository.idle_session_ids == []
-
-
-@pytest.mark.asyncio
-async def test_mark_session_idle_rechecks_pending_command_under_session_lock() -> None:
-    """A concurrently accepted command prevents the Session from becoming idle."""
-    agent_run_repository = _AgentRunRepository(None)
-    agent_session_repository = _AgentSessionRepository(pending_command_id="command-001")
-    service = _service(
-        agent_run_repository=agent_run_repository,
-        agent_session_repository=agent_session_repository,
-        pending_scheduling_modes=set(),
-    )
-
-    marked_idle = await service.mark_session_idle(
-        "session-001",
-        owner_generation=0,
-    )
-
-    assert not marked_idle
-    assert agent_session_repository.idle_session_ids == []
-
-
-@pytest.mark.asyncio
-async def test_mark_session_idle_allows_queue_only_pending_input() -> None:
-    """Queue-only mailbox input does not keep a finished session running."""
-    agent_run_repository = _AgentRunRepository(None)
-    agent_session_repository = _AgentSessionRepository()
-    service = _service(
-        agent_run_repository=agent_run_repository,
-        agent_session_repository=agent_session_repository,
-        pending_scheduling_modes={MailboxSchedulingMode.QUEUE_ONLY},
-    )
-
-    marked_idle = await service.mark_session_idle("session-001", owner_generation=0)
-
-    assert marked_idle
-    assert agent_session_repository.idle_session_ids == ["session-001"]
-
-
-@pytest.mark.asyncio
-async def test_mark_session_idle_allows_terminal_run_boundary() -> None:
-    """Runtime becomes idle only when there is no running AgentRun."""
-    agent_run_repository = _AgentRunRepository(None)
-    agent_session_repository = _AgentSessionRepository()
-    service = _service(
-        agent_run_repository=agent_run_repository,
-        agent_session_repository=agent_session_repository,
-        pending_scheduling_modes=set(),
-    )
-
-    marked_idle = await service.mark_session_idle("session-001", owner_generation=0)
-
-    assert marked_idle
-    assert agent_session_repository.idle_session_ids == ["session-001"]
-    assert agent_run_repository.terminal_session_ids == []
-
-
-@pytest.mark.asyncio
-async def test_mark_session_idle_propagates_db_failure() -> None:
-    """A failed DB check cannot be reported as a safe idle boundary."""
-    service = _service(
-        agent_run_repository=_AgentRunRepository(
-            None,
-            active_lookup_error=RuntimeError("database unavailable"),
-        ),
-        agent_session_repository=_AgentSessionRepository(),
-        pending_scheduling_modes=set(),
-    )
-
-    with pytest.raises(RuntimeError, match="database unavailable"):
-        await service.mark_session_idle("session-001", owner_generation=0)
-
-
-@pytest.mark.asyncio
-async def test_terminal_update_rejects_cross_session_run() -> None:
-    """A stale session runner cannot close another session's run by ID."""
-    run = _running_run().model_copy(update={"session_id": "session-002"})
-    agent_run_repository = _AgentRunRepository(run)
-    service = _service(
-        agent_run_repository=agent_run_repository,
-        agent_session_repository=_AgentSessionRepository(),
-        pending_scheduling_modes=set(),
-    )
-
-    with pytest.raises(ValueError, match="AgentRun session mismatch"):
-        await service.mark_agent_run_terminal_if_running(
-            "session-001",
-            owner_generation=0,
-            run_id=run.id,
-            status=AgentRunStatus.STOPPED,
-        )
-
-    assert agent_run_repository.terminal_run_ids == []
-
-
-@pytest.mark.parametrize(
-    ("run_status", "expected_terminal_status"),
-    [
-        (AgentRunStatus.PENDING, AgentRunStatus.CANCELLED),
-        (AgentRunStatus.RUNNING, AgentRunStatus.COMPLETED),
-    ],
-)
-@pytest.mark.asyncio
-async def test_complete_bridge_predecessor_suppresses_parent_result_atomically(
-    run_status: AgentRunStatus,
-    expected_terminal_status: AgentRunStatus,
+async def test_idle_consumes_completed_repository_outcome(
+    disposition: WorkerIdleDisposition,
 ) -> None:
-    """Bridge recovery terminalizes and suppresses before one transaction commits."""
-    order: list[str] = []
-    run = _running_run().model_copy(update={"status": run_status})
-    agent_run_repository = _AgentRunRepository(run, order=order)
-    coordinator = _TerminalFinalizationRepository()
-    service = _construct_service(
-        broker=_Broker(),
-        session_manager=_SessionManager(order),
-        agent_session_repository=_AgentSessionRepository(),
-        agent_run_repository=agent_run_repository,
-        mailbox_item_repository=_MailboxRepository(set()),
-        terminal_finalization_repository=coordinator,
+    """DB predicates belong to repository tests; service maps detached outcomes."""
+    fixture = lifecycle_fixture()
+    fixture.repository.mark_session_idle.return_value = WorkerIdleTransition(
+        disposition=disposition,
+        command_id="command"
+        if disposition is WorkerIdleDisposition.COMMAND_PENDING
+        else None,
+        run_id="run" if disposition is WorkerIdleDisposition.RUN_ACTIVE else None,
     )
-
-    terminal_status = await service.complete_bridge_predecessor_run(
-        "session-001",
-        owner_generation=0,
-        run_id=run.id,
+    result = await fixture.service.mark_session_idle("session", owner_generation=3)
+    assert result is (disposition is WorkerIdleDisposition.IDLE)
+    fixture.repository.mark_session_idle.assert_awaited_once_with(
+        "session", owner_generation=3
     )
+    fixture.broker.renew_session_ttl.assert_not_awaited()
 
-    assert terminal_status is expected_terminal_status
-    assert agent_run_repository.terminal_statuses == [expected_terminal_status]
-    assert agent_run_repository.suppressed_run_ids == [run.id]
-    assert coordinator.finalized_run_ids == []
-    assert order == [
-        "lock_run",
-        f"mark_terminal:{expected_terminal_status.value}",
-        "suppress_parent_result",
-        "commit",
+
+@pytest.mark.asyncio
+async def test_idle_propagates_completed_operation_failure() -> None:
+    fixture = lifecycle_fixture()
+    fixture.repository.mark_session_idle.side_effect = RuntimeError("DB failure")
+    with pytest.raises(RuntimeError, match="DB failure"):
+        await fixture.service.mark_session_idle("session", owner_generation=3)
+
+
+@pytest.mark.parametrize("effect", ["release", "activity"])
+@pytest.mark.asyncio
+async def test_owner_validation_precedes_external_effect(effect: str) -> None:
+    fixture = lifecycle_fixture()
+    if effect == "release":
+        await fixture.service.release_owned_session_lock("session", owner_generation=3)
+        expected = call.broker.release_session_lock("session")
+    else:
+        await fixture.service.set_session_activity(
+            "session", owner_generation=3, run_id="run", phase=AgentRunPhase.IDLE
+        )
+        expected = call.broker.set_session_activity(
+            "session", owner_generation=3, run_id="run", phase=AgentRunPhase.IDLE
+        )
+    assert fixture.timeline.mock_calls == [
+        call.repository.assert_current_owner_generation("session", owner_generation=3),
+        expected,
     ]
 
 
 @pytest.mark.asyncio
-async def test_terminal_update_rejects_superseded_owner_generation() -> None:
-    """A stale Worker cannot terminate the current owner's running Run."""
-    run = _running_run()
-    agent_run_repository = _AgentRunRepository(run)
-    service = _service(
-        agent_run_repository=agent_run_repository,
-        agent_session_repository=_AgentSessionRepository(owner_generation=2),
-        pending_scheduling_modes=set(),
+async def test_stale_generation_blocks_external_effect() -> None:
+    fixture = lifecycle_fixture()
+    fixture.repository.assert_current_owner_generation.side_effect = (
+        CanonicalExecutionOwnerGenerationStaleError("Session owner generation is stale")
     )
+    with pytest.raises(CanonicalExecutionOwnerGenerationStaleError):
+        await fixture.service.release_owned_session_lock("session", owner_generation=3)
+    fixture.broker.release_session_lock.assert_not_awaited()
 
-    with pytest.raises(ValueError, match="owner generation is stale"):
-        await service.mark_agent_run_terminal_if_running(
-            "session-001",
-            owner_generation=1,
-            run_id=run.id,
-            status=AgentRunStatus.FAILED,
-        )
 
-    assert agent_run_repository.terminal_run_ids == []
+@pytest.mark.parametrize("parent_id", [None, "parent"])
+@pytest.mark.asyncio
+async def test_parent_notification_follows_completed_routing_read(
+    parent_id: str | None,
+) -> None:
+    fixture = lifecycle_fixture()
+    fixture.repository.parent_result_activity_session_id.return_value = parent_id
+    await fixture.service.notify_parent_result_activity("run")
+    fixture.repository.parent_result_activity_session_id.assert_awaited_once_with("run")
+    if parent_id is not None:
+        assert fixture.timeline.mock_calls == [
+            call.repository.parent_result_activity_session_id("run"),
+            call.broker.notify_mailbox_activity(parent_id),
+        ]
+    else:
+        fixture.broker.notify_mailbox_activity.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_validate_pending_command_rejects_changed_command_identity() -> None:
-    """A snapshot command cannot be replaced before execution."""
-    service = _service(
-        agent_run_repository=_AgentRunRepository(None),
-        agent_session_repository=_AgentSessionRepository(
-            pending_command_id="command-new"
-        ),
-        pending_scheduling_modes=set(),
+async def test_pending_command_delegates_exact_snapshot_and_drift_error() -> None:
+    fixture = lifecycle_fixture()
+    command = PendingCommandSnapshot(
+        id="command",
+        name="compact",
+        payload={},
+        requester_user_id=None,
+        created_at=datetime.now(UTC),
+    )
+    fixture.repository.validate_pending_command.side_effect = (
+        CanonicalExecutionWorkDriftError("Canonical pending command changed")
+    )
+    with pytest.raises(CanonicalExecutionWorkDriftError):
+        await fixture.service.validate_pending_command(
+            "session", owner_generation=3, command=command
+        )
+    fixture.repository.validate_pending_command.assert_awaited_once_with(
+        "session", owner_generation=3, command=command
     )
 
-    with pytest.raises(ValueError, match="pending command changed"):
-        await service.validate_pending_command(
-            "session-001",
-            owner_generation=0,
-            command=PendingCommandSnapshot(
-                id="command-old",
-                name="compact",
-                payload={},
-                requester_user_id=None,
-                created_at=datetime(2026, 7, 24, tzinfo=UTC),
-            ),
+
+@pytest.mark.parametrize("status", [AgentRunStatus.CANCELLED, AgentRunStatus.COMPLETED])
+@pytest.mark.asyncio
+async def test_bridge_delegates_completed_atomic_operation(
+    status: AgentRunStatus,
+) -> None:
+    fixture = lifecycle_fixture()
+    fixture.repository.complete_bridge_predecessor_run.return_value = status
+    assert (
+        await fixture.service.complete_bridge_predecessor_run(
+            "session", owner_generation=3, run_id="run"
         )
+        is status
+    )
+    fixture.repository.complete_bridge_predecessor_run.assert_awaited_once_with(
+        "session", owner_generation=3, run_id="run"
+    )
 
 
 @pytest.mark.asyncio
-async def test_activate_pending_sets_initial_phase_before_commit() -> None:
-    """Pending activation persists its reconnect-safe initial phase."""
-    activated_run = _running_run().model_copy(update={"phase": AgentRunPhase.IDLE})
-    agent_run_repository = _AgentRunRepository(
-        None,
-        activated_run=activated_run,
+async def test_activation_delegates_profile_phase_and_result() -> None:
+    fixture = lifecycle_fixture()
+    profile = RequestedInferenceProfile(
+        model_target_label="default",
+        reasoning_effort=None,
+        enabled_execution_options=[],
     )
-    service = _service(
-        agent_run_repository=agent_run_repository,
-        agent_session_repository=_AgentSessionRepository(),
-        pending_scheduling_modes=set(),
-    )
-
-    run = await service.activate_pending_agent_run(
-        "session-001",
-        owner_generation=0,
-        run_id=activated_run.id,
+    result = await fixture.service.activate_pending_agent_run(
+        "session",
+        owner_generation=3,
+        run_id="run",
         initial_phase=AgentRunPhase.COMPACTING,
-        requested_profile=RequestedInferenceProfile(
-            model_target_label="default",
-            reasoning_effort=None,
-            enabled_execution_options=[],
-        ),
+        requested_profile=profile,
     )
-
-    assert run.phase == AgentRunPhase.COMPACTING
-    assert agent_run_repository.activation_run_ids == [activated_run.id]
-    assert agent_run_repository.phase_updates == [
-        (activated_run.id, AgentRunPhase.COMPACTING)
-    ]
-
-
-@pytest.mark.asyncio
-async def test_activate_pending_rejects_session_mismatch() -> None:
-    """Pending activation cannot cross the requested session boundary."""
-    activated_run = _running_run().model_copy(update={"session_id": "session-002"})
-    agent_run_repository = _AgentRunRepository(
-        None,
-        activated_run=activated_run,
+    assert result is fixture.repository.activate_pending_agent_run.return_value
+    fixture.repository.activate_pending_agent_run.assert_awaited_once_with(
+        "session",
+        owner_generation=3,
+        run_id="run",
+        initial_phase=AgentRunPhase.COMPACTING,
+        requested_profile=profile,
     )
-    service = _service(
-        agent_run_repository=agent_run_repository,
-        agent_session_repository=_AgentSessionRepository(),
-        pending_scheduling_modes=set(),
-    )
-
-    with pytest.raises(ValueError, match="AgentRun session mismatch"):
-        await service.activate_pending_agent_run(
-            "session-001",
-            owner_generation=0,
-            run_id=activated_run.id,
-            initial_phase=AgentRunPhase.COMPACTING,
-            requested_profile=RequestedInferenceProfile(
-                model_target_label="default",
-                reasoning_effort=None,
-                enabled_execution_options=[],
-            ),
-        )
-
-    assert agent_run_repository.activation_run_ids == [activated_run.id]
-    assert agent_run_repository.phase_updates == []

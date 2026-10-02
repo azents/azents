@@ -1,32 +1,27 @@
-"""User stop finalization."""
+"""User stop finalization over separate completed database stages."""
 
 import dataclasses
-from collections.abc import Awaitable, Callable, Sequence
-from contextlib import AbstractAsyncContextManager
+from collections.abc import Sequence
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.enums import AgentRunStatus, EventKind
+from azents.core.enums import AgentRunStatus
 from azents.engine.events.engine_events import RunStopped
 from azents.engine.events.types import (
     ActiveToolCall,
     AssistantMessagePayload,
     ClientToolCallPayload,
-    ClientToolResultPayload,
     Event,
-    InterruptedPayload,
-    OutputTextPart,
     ReasoningPayload,
-    RunMarkerPayload,
 )
-from azents.rdb.deps import get_session_manager
-from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
-from azents.repos.agent_execution.data import EventCreate
-from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.engine_tool_result_operation import (
-    EngineToolResultOperationRepository,
+from azents.repos.user_stop import UserStopOperationRepository
+from azents.repos.user_stop_data import (
+    UserStopCancelledCallsInput,
+    UserStopDurableEvents,
+    UserStopMarkerInput,
+    UserStopOwnerInput,
+    UserStopPartialInput,
 )
 from azents.services.chat.live_events import RedisLiveEventStore
 from azents.worker.deps import get_live_event_store
@@ -34,28 +29,13 @@ from azents.worker.events.publisher import WorkerEventPublisher
 from azents.worker.live.event_projector import LiveEventProjector
 from azents.worker.session.lifecycle import SessionLifecycleService
 
-SessionManagerFactory = Callable[[], AbstractAsyncContextManager[AsyncSession]]
-
-
-@dataclasses.dataclass(frozen=True)
-class UserStopDurableEvents:
-    """Durable transcript events emitted for a completed User stop."""
-
-    interrupted: Event
-    run_marker: Event
-
 
 @dataclasses.dataclass(frozen=True)
 class UserStopFinalizer:
     """Clean up run observation state after receiving User stop."""
 
-    session_manager: Annotated[SessionManagerFactory, Depends(get_session_manager)]
-    agent_run_repository: Annotated[AgentRunRepository, Depends(AgentRunRepository)]
-    agent_session_repository: Annotated[
-        AgentSessionRepository, Depends(AgentSessionRepository)
-    ]
-    event_transcript_repository: Annotated[
-        EventTranscriptRepository, Depends(EventTranscriptRepository)
+    repository: Annotated[
+        UserStopOperationRepository, Depends(UserStopOperationRepository)
     ]
     live_event_store: Annotated[RedisLiveEventStore, Depends(get_live_event_store)]
     live_event_projector: Annotated[LiveEventProjector, Depends(LiveEventProjector)]
@@ -75,8 +55,7 @@ class UserStopFinalizer:
         """Immediately clean run observation state as terminal after User stop."""
         del active_tool_calls
         running_run = await self.session_lifecycle.get_running_agent_run(
-            session_id,
-            owner_generation=owner_generation,
+            session_id, owner_generation=owner_generation
         )
         effective_run_id = run_id or (
             running_run.id if running_run is not None else None
@@ -85,8 +64,7 @@ class UserStopFinalizer:
             list(running_run.active_tool_calls) if running_run is not None else []
         )
         await self.live_event_projector.flush_session(
-            session_id,
-            owner_generation=owner_generation,
+            session_id, owner_generation=owner_generation
         )
         await self._persist_live_events_for_user_stop(
             session_id,
@@ -114,15 +92,11 @@ class UserStopFinalizer:
                 )
         else:
             await self._mark_agent_run_stopped_for_user_stop(
-                session_id,
-                owner_generation=owner_generation,
-                run_id=effective_run_id,
+                session_id, owner_generation=owner_generation, run_id=effective_run_id
             )
             await self.session_lifecycle.notify_parent_result_activity(effective_run_id)
             durable_events = await self._append_user_stop_events(
-                session_id,
-                owner_generation=owner_generation,
-                run_id=effective_run_id,
+                session_id, owner_generation=owner_generation, run_id=effective_run_id
             )
             await self.event_publisher.dispatch_event(
                 session_id,
@@ -130,57 +104,35 @@ class UserStopFinalizer:
                 owner_generation=owner_generation,
             )
             await self.event_publisher.dispatch_event(
-                session_id,
-                durable_events.run_marker,
-                owner_generation=owner_generation,
+                session_id, durable_events.run_marker, owner_generation=owner_generation
             )
             await self.event_publisher.dispatch_event(
                 session_id,
                 RunStopped(run_id=effective_run_id),
                 owner_generation=owner_generation,
             )
-        await self._clear_stop_request(
-            session_id,
-            owner_generation=owner_generation,
-        )
+        await self._clear_stop_request(session_id, owner_generation=owner_generation)
 
     async def record_interrupted_run(
-        self,
-        session_id: str,
-        *,
-        owner_generation: int,
-        run_id: str,
+        self, session_id: str, *, owner_generation: int, run_id: str
     ) -> None:
         """Record and publish durable User stop history after terminal state."""
         await self._mark_agent_run_stopped_for_user_stop(
-            session_id,
-            owner_generation=owner_generation,
-            run_id=run_id,
+            session_id, owner_generation=owner_generation, run_id=run_id
         )
         durable_events = await self._append_user_stop_events(
-            session_id,
-            owner_generation=owner_generation,
-            run_id=run_id,
+            session_id, owner_generation=owner_generation, run_id=run_id
         )
         await self.event_publisher.dispatch_event(
-            session_id,
-            durable_events.interrupted,
-            owner_generation=owner_generation,
+            session_id, durable_events.interrupted, owner_generation=owner_generation
         )
         await self.event_publisher.dispatch_event(
-            session_id,
-            durable_events.run_marker,
-            owner_generation=owner_generation,
+            session_id, durable_events.run_marker, owner_generation=owner_generation
         )
         await self.event_publisher.dispatch_event(
-            session_id,
-            RunStopped(run_id=run_id),
-            owner_generation=owner_generation,
+            session_id, RunStopped(run_id=run_id), owner_generation=owner_generation
         )
-        await self._clear_stop_request(
-            session_id,
-            owner_generation=owner_generation,
-        )
+        await self._clear_stop_request(session_id, owner_generation=owner_generation)
 
     async def _persist_live_events_for_user_stop(
         self,
@@ -193,9 +145,7 @@ class UserStopFinalizer:
         """Promote live projection to durable history on Stop critical path."""
         live_events = await self.live_event_store.list_by_session_id(session_id)
         await self._append_live_partial_events(
-            session_id,
-            owner_generation=owner_generation,
-            live_events=live_events,
+            session_id, owner_generation=owner_generation, live_events=live_events
         )
         await self._append_cancelled_tool_results(
             session_id,
@@ -204,130 +154,38 @@ class UserStopFinalizer:
             active_tool_calls=active_tool_calls,
         )
         await self._remove_persisted_stop_live_events(
-            session_id,
-            live_events,
-            owner_generation=owner_generation,
+            session_id, live_events, owner_generation=owner_generation
         )
 
     async def _append_live_partial_events(
-        self,
-        session_id: str,
-        *,
-        owner_generation: int,
-        live_events: Sequence[Event],
+        self, session_id: str, *, owner_generation: int, live_events: Sequence[Event]
     ) -> None:
-        """Append live assistant/reasoning projection to durable history."""
-        appendable = [
-            event
-            for event in live_events
-            if isinstance(event.payload, AssistantMessagePayload | ReasoningPayload)
-        ]
-        if not appendable:
-            return
-
-        async def append(db_session: AsyncSession) -> None:
-            await self.session_lifecycle.assert_owner_generation(
-                db_session,
+        """Complete eligible idempotent partial admission before other Stop stages."""
+        await self.repository.append_partial_events(
+            UserStopPartialInput(
                 session_id=session_id,
                 owner_generation=owner_generation,
+                events=tuple(live_events),
             )
-            for event in appendable:
-                get_by_external_id = self.event_transcript_repository.get_by_external_id
-                existing = await get_by_external_id(
-                    db_session,
-                    session_id,
-                    event.id,
-                )
-                if existing is not None:
-                    continue
-                await self.event_transcript_repository.append(
-                    db_session,
-                    EventCreate(
-                        session_id=session_id,
-                        kind=event.kind,
-                        payload=event.payload.model_dump(
-                            mode="json",
-                            exclude_none=True,
-                        ),
-                        external_id=event.id,
-                        adapter=event.adapter,
-                        provider=event.provider,
-                        model=event.model,
-                        native_format=event.native_format,
-                        schema_version=event.schema_version,
-                    ),
-                )
-
-        await self._run_short_db(append)
+        )
 
     async def _append_user_stop_events(
-        self,
-        session_id: str,
-        *,
-        owner_generation: int,
-        run_id: str,
+        self, session_id: str, *, owner_generation: int, run_id: str
     ) -> UserStopDurableEvents:
-        """Record User stop event and run marker to durable history."""
-        interrupted_external_id = f"interrupted:{run_id}:user_requested"
-        marker_external_id = f"run-marker:{run_id}:interrupted"
-
-        async with self.session_manager() as db_session:
-            await self.session_lifecycle.assert_owner_generation(
-                db_session,
-                session_id=session_id,
-                owner_generation=owner_generation,
+        """Complete the interrupted/marker pair before dispatching either event."""
+        return await self.repository.append_user_stop_events(
+            UserStopMarkerInput(
+                session_id=session_id, owner_generation=owner_generation, run_id=run_id
             )
-            interrupted_payload = InterruptedPayload(
-                run_id=run_id,
-                reason="user_requested",
-            )
-            interrupted = await self.event_transcript_repository.append(
-                db_session,
-                EventCreate(
-                    session_id=session_id,
-                    kind=EventKind.INTERRUPTED,
-                    payload=interrupted_payload.model_dump(
-                        mode="json",
-                        exclude_none=True,
-                    ),
-                    external_id=interrupted_external_id,
-                ),
-            )
-            payload = RunMarkerPayload(run_id=run_id, status="interrupted")
-            run_marker = await self.event_transcript_repository.append(
-                db_session,
-                EventCreate(
-                    session_id=session_id,
-                    kind=EventKind.RUN_MARKER,
-                    payload=payload.model_dump(mode="json", exclude_none=True),
-                    external_id=marker_external_id,
-                ),
-            )
-        return UserStopDurableEvents(
-            interrupted=interrupted,
-            run_marker=run_marker,
         )
 
     async def _clear_stop_request(
-        self,
-        session_id: str,
-        *,
-        owner_generation: int,
+        self, session_id: str, *, owner_generation: int
     ) -> None:
-        """Remove consumed durable stop intent."""
-
-        async def clear(db_session: AsyncSession) -> None:
-            await self.session_lifecycle.assert_owner_generation(
-                db_session,
-                session_id=session_id,
-                owner_generation=owner_generation,
-            )
-            await self.agent_session_repository.clear_stop_request(
-                db_session,
-                session_id=session_id,
-            )
-
-        await self._run_short_db(clear)
+        """Clear Stop intent in its guarded later transaction."""
+        await self.repository.clear_stop_request(
+            UserStopOwnerInput(session_id=session_id, owner_generation=owner_generation)
+        )
 
     async def _append_cancelled_tool_results(
         self,
@@ -337,104 +195,35 @@ class UserStopFinalizer:
         run_id: str | None,
         active_tool_calls: Sequence[ActiveToolCall],
     ) -> None:
-        """Record cancelled result for Active tool call to durable history."""
-        calls_by_id = {call.call_id: call for call in active_tool_calls}
-        if not calls_by_id:
-            return
-        if run_id is None:
-            raise RuntimeError("Active tool calls require a running AgentRun")
-        tool_results = EngineToolResultOperationRepository(
-            session_manager=self.session_manager,
-            run_repository=self.agent_run_repository,
-            transcript_repository=self.event_transcript_repository,
-        )
-
-        async def append(db_session: AsyncSession) -> None:
-            await self.session_lifecycle.assert_owner_generation(
-                db_session,
+        """Complete cancelled durable active-call admission as its own stage."""
+        await self.repository.append_cancelled_tool_results(
+            UserStopCancelledCallsInput(
                 session_id=session_id,
                 owner_generation=owner_generation,
+                run_id=run_id,
+                active_tool_calls=tuple(active_tool_calls),
             )
-            for call in calls_by_id.values():
-                payload = ClientToolResultPayload(
-                    call_id=call.call_id,
-                    name=call.name,
-                    wire_dialect=call.wire_dialect,
-                    status="cancelled",
-                    output=[
-                        OutputTextPart(
-                            text=(
-                                "Tool execution was cancelled before a result was "
-                                "recorded."
-                            ),
-                        )
-                    ],
-                )
-                await tool_results.finalize_in_session(
-                    db_session,
-                    run_id=run_id,
-                    session_id=session_id,
-                    call=call,
-                    result=payload,
-                )
-
-        await self._run_short_db(append)
+        )
 
     async def _remove_persisted_stop_live_events(
-        self,
-        session_id: str,
-        live_events: Sequence[Event],
-        *,
-        owner_generation: int,
+        self, session_id: str, live_events: Sequence[Event], *, owner_generation: int
     ) -> None:
         """Remove stop-related live projections converged to History."""
         for event in live_events:
             if isinstance(event.payload, AssistantMessagePayload | ReasoningPayload):
                 await self.live_event_projector.remove_event(
-                    session_id,
-                    event.id,
-                    owner_generation=owner_generation,
+                    session_id, event.id, owner_generation=owner_generation
                 )
                 continue
             if isinstance(event.payload, ClientToolCallPayload):
                 await self.live_event_projector.remove_event(
-                    session_id,
-                    event.id,
-                    owner_generation=owner_generation,
+                    session_id, event.id, owner_generation=owner_generation
                 )
 
-    async def _mark_session_agent_runs_terminal(
-        self,
-        session_id: str,
-        *,
-        owner_generation: int,
-        status: AgentRunStatus,
-    ) -> None:
-        """Close remaining Runs through the terminal coordinator."""
-        await self.session_lifecycle.mark_session_agent_runs_terminal(
-            session_id,
-            owner_generation=owner_generation,
-            status=status,
-        )
-
     async def _mark_agent_run_stopped_for_user_stop(
-        self,
-        session_id: str,
-        *,
-        owner_generation: int,
-        run_id: str,
+        self, session_id: str, *, owner_generation: int, run_id: str
     ) -> None:
         """Converge one Run through the User Stop terminal coordinator."""
         await self.session_lifecycle.mark_agent_run_stopped_for_user_stop(
-            session_id,
-            owner_generation=owner_generation,
-            run_id=run_id,
+            session_id, owner_generation=owner_generation, run_id=run_id
         )
-
-    async def _run_short_db(
-        self,
-        action: Callable[[AsyncSession], Awaitable[object]],
-    ) -> None:
-        """Run ``action`` in a short-lived DB transaction."""
-        async with self.session_manager() as db_session:
-            await action(db_session)

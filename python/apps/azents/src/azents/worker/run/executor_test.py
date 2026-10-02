@@ -128,6 +128,7 @@ from azents.repos.agent.data import Agent
 from azents.repos.agent_execution.data import AgentRunPatch
 from azents.repos.agent_session.data import AgentSession, PendingSessionCommand
 from azents.repos.external_channel.data import ExternalChannelMailboxProjectionItem
+from azents.repos.mailbox import MailboxRepository
 from azents.repos.mailbox.data import MailboxItem
 from azents.repos.model_candidate_health.data import (
     CandidateHealthSettlement,
@@ -140,6 +141,16 @@ from azents.repos.model_operation_completion import (
     ModelOperationCompletion,
     ModelOperationCompletionRepository,
 )
+from azents.repos.session_execution import (
+    CanonicalExecutionOwnerGenerationStaleError,
+)
+from azents.repos.session_execution.data import (
+    CanonicalExecutionSnapshot,
+    PendingCommandSnapshot,
+)
+from azents.repos.terminal_finalization import TerminalRunFinalizationRepository
+from azents.repos.worker_session import WorkerSessionOperationRepository
+from azents.repos.worker_session_data import CanonicalExecutionWorkDriftError
 from azents.services.chat.data import ChatLiveRunState
 from azents.services.mailbox import (
     ExternalChannelMessageMailboxProcessor,
@@ -174,12 +185,6 @@ from azents.worker.run.executor import (
 from azents.worker.run.finalizer import FailedRunFinalizationInput
 from azents.worker.run.results import RunExecutionResult
 from azents.worker.run.turn_action_executor import OperationActionExecutorRegistry
-from azents.worker.session.execution_snapshot import (
-    CanonicalExecutionOwnerGenerationStaleError,
-    CanonicalExecutionSnapshot,
-    CanonicalExecutionWorkDriftError,
-    PendingCommandSnapshot,
-)
 from azents.worker.session.supervisor import ToolAdmissionBarrier
 
 
@@ -484,20 +489,6 @@ class _SessionLifecycle:
         del session_id, owner_generation
         if self.owner_generation_error is not None:
             raise self.owner_generation_error
-
-    async def assert_owner_generation(
-        self,
-        session: AsyncSession,
-        *,
-        session_id: str,
-        owner_generation: int,
-    ) -> None:
-        """Apply the same synthetic owner fence inside a caller transaction."""
-        del session
-        await self.assert_current_owner_generation(
-            session_id,
-            owner_generation=owner_generation,
-        )
 
     async def set_session_activity(
         self,
@@ -1809,6 +1800,11 @@ def _run_executor(**kwargs: Any) -> RunExecutor:  # noqa: ANN401
     return RunExecutor(**kwargs)
 
 
+def _worker_session_repository(**kwargs: Any) -> WorkerSessionOperationRepository:  # noqa: ANN401
+    """Construct the actual completed repository over existing query fixtures."""
+    return WorkerSessionOperationRepository(**kwargs)
+
+
 def _executor(
     session_lifecycle: Any | None = None,  # noqa: ANN401
     *,
@@ -1889,9 +1885,19 @@ def _executor(
         "capabilities": TurnActionCapabilityRegistry(**capability_registry_kwargs),
         "session_git_worktree_service": session_git_worktree_service,
     }
+    session_manager = _SessionManager()
+    worker_session_repository = _worker_session_repository(
+        session_manager=session_manager,
+        agent_session_repository=agent_session_repository,
+        agent_run_repository=session_lifecycle.agent_run_repository,
+        mailbox_item_repository=MailboxRepository(),
+        terminal_finalization_repository=AsyncMock(
+            spec=TerminalRunFinalizationRepository
+        ),
+    )
     return _run_executor(
         broker=object(),
-        session_manager=_SessionManager(),
+        session_manager=session_manager,
         engine=engine,
         agent_repository=_AgentRepository(agent),
         command_registry=command_registry,
@@ -1902,6 +1908,8 @@ def _executor(
         toolkit_repository=object(),
         agent_runtime_repository=object(),
         agent_session_repository=agent_session_repository,
+        agent_run_repository=session_lifecycle.agent_run_repository,
+        worker_session_repository=worker_session_repository,
         event_transcript_repository=object(),
         session_lifecycle=session_lifecycle,
         worker_config=AgentWorkerConfig(
@@ -3757,7 +3765,7 @@ async def test_prepare_compaction_recreates_slot_after_prior_success(
     async with executor.session_manager() as session:
         await ModelOperationCompletionRepository(
             agent_session_repository=executor.agent_session_repository,
-            agent_run_repository=executor.session_lifecycle.agent_run_repository,
+            agent_run_repository=executor.agent_run_repository,
             model_candidate_health_repository=executor.model_candidate_health_repository,
         ).complete_success_in_session(
             session,

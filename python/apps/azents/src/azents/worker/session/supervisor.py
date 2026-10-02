@@ -13,11 +13,11 @@ from azents.engine.run.types import (
     CheckStop,
     PollMessages,
 )
+from azents.repos.session_execution.data import CanonicalExecutionSnapshot
 from azents.worker.events.publisher import WorkerEventPublisher
 from azents.worker.run.executor import RunExecutor
 from azents.worker.run.results import RunExecutionResult
 from azents.worker.session.contracts import PrepareToolkits
-from azents.worker.session.execution_snapshot import CanonicalExecutionSnapshot
 from azents.worker.session.lifecycle import SessionLifecycleService
 from azents.worker.session.mailbox_activity import MailboxActivityObserver
 from azents.worker.session.user_stop_finalizer import UserStopFinalizer

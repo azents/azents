@@ -3,12 +3,9 @@
 import asyncio
 import functools
 import logging
-from collections.abc import Callable
-from contextlib import AbstractAsyncContextManager
 from typing import Annotated, Literal, NamedTuple
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.broker.broadcast import WebSocketBroadcast
 from azents.broker.types import PublishedEvent
@@ -22,9 +19,7 @@ from azents.engine.events.engine_events import (
     RunStopped,
 )
 from azents.engine.events.types import ActiveToolCall, Event
-from azents.rdb.deps import get_session_manager
-from azents.repos.agent_execution import AgentRunRepository
-from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.live_projection_authority import LiveProjectionAuthorityRepository
 from azents.services.chat.data import ChatLiveRunState
 from azents.services.chat.live_events import (
     BaseLiveEventStore,
@@ -44,8 +39,6 @@ from azents.worker.live.partial_batcher import LivePartialBatcher, LivePartialFl
 
 logger = logging.getLogger(__name__)
 
-SessionManagerFactory = Callable[[], AbstractAsyncContextManager[AsyncSession]]
-
 
 class _OwnerKey(NamedTuple):
     """Structured result returned by `_owner_key`."""
@@ -62,19 +55,14 @@ class LiveEventProjector:
         *,
         live_event_store: Annotated[RedisLiveEventStore, Depends(get_live_event_store)],
         broadcast: Annotated[WebSocketBroadcast, Depends(get_broadcast)],
-        session_manager: Annotated[SessionManagerFactory, Depends(get_session_manager)],
-        agent_run_repository: Annotated[
-            AgentRunRepository, Depends(AgentRunRepository)
-        ],
-        agent_session_repository: Annotated[
-            AgentSessionRepository, Depends(AgentSessionRepository)
+        authority_repository: Annotated[
+            LiveProjectionAuthorityRepository,
+            Depends(LiveProjectionAuthorityRepository),
         ],
     ) -> None:
         self._live_event_store = live_event_store
         self._broadcast = broadcast
-        self._session_manager = session_manager
-        self._agent_run_repository = agent_run_repository
-        self._agent_session_repository = agent_session_repository
+        self.authority_repository = authority_repository
         self._partial_batchers: dict[tuple[str, int], LivePartialBatcher] = {}
         self._active_run_ids: dict[tuple[str, int], str] = {}
         self._active_tool_events: dict[tuple[str, int], dict[str, Event]] = {}
@@ -153,12 +141,10 @@ class LiveEventProjector:
         owner_generation: int,
     ) -> BaseLiveEventStore | None:
         """Validate PostgreSQL authority before seeding the ephemeral fence."""
-        async with self._session_manager() as session:
-            current = await self._agent_session_repository.get_by_id(
-                session,
-                session_id,
-            )
-        if current is None or current.owner_generation != owner_generation:
+        if not await self.authority_repository.owns_generation(
+            session_id=session_id,
+            owner_generation=owner_generation,
+        ):
             return None
         advance = await self._live_event_store.advance_owner(
             session_id,
@@ -220,12 +206,10 @@ class LiveEventProjector:
         )
         if active_run_id is not None and active_run_id != run_id:
             return False
-        async with self._session_manager() as session:
-            current = await self._agent_run_repository.get_running_by_session_id(
-                session,
-                session_id=session_id,
-            )
-        return current is None or current.id == run_id
+        return await self.authority_repository.terminal_matches_current_run(
+            session_id=session_id,
+            run_id=run_id,
+        )
 
     async def update(
         self,

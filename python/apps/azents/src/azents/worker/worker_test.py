@@ -3,12 +3,10 @@
 import asyncio
 import contextlib
 from collections.abc import Awaitable, Callable, Sequence
-from contextlib import AbstractAsyncContextManager
 from datetime import datetime, timezone
 
 import pytest
 from pydantic import BaseModel
-from sqlalchemy.ext.asyncio import AsyncSession
 
 import azents.worker.session.supervisor as session_runner_supervisor_module
 import azents.worker.session.waiter as session_runner_waiter_module
@@ -48,10 +46,17 @@ from azents.engine.run.types import (
     PollMessages,
 )
 from azents.repos.agent_session.data import PendingSessionCommand
+from azents.repos.live_projection_authority import LiveProjectionAuthorityRepository
+from azents.repos.session_execution import (
+    CanonicalExecutionOwnerGenerationStaleError,
+    CanonicalExecutionSnapshotError,
+)
 from azents.repos.session_execution.data import (
     CanonicalExecutionSnapshot,
     PendingCommandSnapshot,
 )
+from azents.repos.worker_session import WorkerSessionOperationRepository
+from azents.repos.worker_session_data import CanonicalExecutionWorkDriftError
 from azents.services.chat.live_events import LiveOwnerAdvance
 from azents.services.mailbox import (
     PendingInputInferenceProfile,
@@ -71,11 +76,6 @@ from azents.worker.run.helpers import (
 )
 from azents.worker.run.results import RunExecutionResult
 from azents.worker.session.contracts import PrepareToolkits
-from azents.worker.session.execution_snapshot import (
-    CanonicalExecutionOwnerGenerationStaleError,
-    CanonicalExecutionSnapshotError,
-    CanonicalExecutionWorkDriftError,
-)
 from azents.worker.session.runner import SessionRunner
 from azents.worker.session.supervisor import RunStopController, ToolAdmissionBarrier
 from azents.worker.session.waiter import (
@@ -203,25 +203,6 @@ class _MailboxService:
             )
         self.consumed = True
         return self.promoted
-
-
-class _SessionScope(AbstractAsyncContextManager[AsyncSession]):
-    """DB session context for tests."""
-
-    async def __aenter__(self) -> AsyncSession:
-        """Return test session."""
-        return AsyncSession()
-
-    async def __aexit__(self, *exc_info: object) -> None:
-        """No resources to clean up."""
-
-
-class _SessionManager:
-    """session manager for tests."""
-
-    def __call__(self) -> _SessionScope:
-        """Return new session scope."""
-        return _SessionScope()
 
 
 class _Broker:
@@ -357,47 +338,47 @@ class _LiveEventStore:
         )
 
 
-class _CurrentOwnerRepository:
-    """Return the current owner for live projection tests."""
+class _LiveProjectionAuthorityRepository(LiveProjectionAuthorityRepository):
+    """Provide completed authority reads for focused live projection tests."""
 
-    async def get_by_id(
+    def __init__(self) -> None:
+        """Use the configured test authority without database collaborators."""
+
+    async def owns_generation(
         self,
-        session: AsyncSession,
-        agent_session_id: str,
-    ) -> object:
-        """Return a minimal current-owner snapshot."""
-        del session, agent_session_id
+        *,
+        session_id: str,
+        owner_generation: int,
+    ) -> bool:
+        """Accept the current test owner generation."""
+        del session_id
+        return owner_generation == 1
 
-        class Owner:
-            owner_generation = 1
+    async def terminal_matches_current_run(
+        self,
+        *,
+        session_id: str,
+        run_id: str,
+    ) -> bool:
+        """Accept cleanup with no durable running Run in this fixture."""
+        del session_id, run_id
+        return True
 
-        return Owner()
 
-
-class _AgentSessionRepository:
-    """AgentSessionRepository test double."""
+class _WorkerSessionRepository(WorkerSessionOperationRepository):
+    """Provide completed Worker operations without empty database contexts."""
 
     def __init__(self, host: "_Host") -> None:
         self.host = host
         self.queried_session_ids: list[str] = []
 
-    async def get_pending_command_by_session_id(
+    async def has_pending_command(
         self,
-        session: AsyncSession,
         session_id: str,
-    ) -> PendingSessionCommand | None:
-        """Return pending command specified by test."""
-        del session
+    ) -> bool:
+        """Return the existing pending-command presence predicate."""
         self.queried_session_ids.append(session_id)
-        if not self.host.pending_command_result:
-            return None
-        return PendingSessionCommand(
-            id="command-001",
-            name="compact",
-            payload={},
-            requester_user_id="user-001",
-            created_at=datetime.now(timezone.utc),
-        )
+        return self.host.pending_command_result
 
 
 class _RunExecutor:
@@ -912,8 +893,7 @@ def _make_session_runner(host: _Host) -> SessionRunner:
         event_publisher=_SessionRunnerEventPublisher(host),  # ty: ignore[invalid-argument-type] # Focused publisher implements only dispatch_event().
         session_lifecycle=host,  # ty: ignore[invalid-argument-type] # Host implements only exercised lifecycle operations.
         execution_snapshot_loader=_ExecutionSnapshotLoader(host),  # ty: ignore[invalid-argument-type] # Focused loader implements only load().
-        session_manager=_SessionManager(),
-        agent_session_repository=_AgentSessionRepository(host),  # ty: ignore[invalid-argument-type] # Focused repository implements only exercised operations.
+        worker_session_repository=_WorkerSessionRepository(host),
         mailbox_item_service=_PendingMailboxService(host),  # ty: ignore[invalid-argument-type] # Focused mailbox service implements only exercised operations.
         idle_continuation_service=_IdleContinuationService(host),  # ty: ignore[invalid-argument-type] # Focused continuation service implements only exercised operations.
         user_stop_finalizer=_UserStopFinalizer(host),  # ty: ignore[invalid-argument-type] # Focused finalizer implements only exercised operations.
@@ -948,9 +928,7 @@ def _make_worker_event_publisher(
     projector = LiveEventProjector(
         live_event_store=live_event_store,  # ty: ignore[invalid-argument-type] # Focused store implements only exercised live-event operations.
         broadcast=broadcast,  # ty: ignore[invalid-argument-type] # Focused broadcast implements only publish operations.
-        session_manager=_SessionManager(),
-        agent_run_repository=object(),  # ty: ignore[invalid-argument-type] # These tests never access the run repository.
-        agent_session_repository=_CurrentOwnerRepository(),  # ty: ignore[invalid-argument-type] # Focused repository implements only owner lookup.
+        authority_repository=_LiveProjectionAuthorityRepository(),
     )
     return WorkerEventPublisher(
         broker=broker,  # ty: ignore[invalid-argument-type] # Focused broker implements only exercised operations.
@@ -1574,9 +1552,7 @@ async def test_replace_live_active_tool_calls_broadcasts_without_redis() -> None
     projector = LiveEventProjector(
         live_event_store=live_store,  # ty: ignore[invalid-argument-type] # Focused store implements only exercised live-event operations.
         broadcast=broadcast,  # ty: ignore[invalid-argument-type] # Focused broadcast implements only publish operations.
-        session_manager=_SessionManager(),
-        agent_run_repository=object(),  # ty: ignore[invalid-argument-type] # This test never accesses the run repository.
-        agent_session_repository=_CurrentOwnerRepository(),  # ty: ignore[invalid-argument-type] # Focused repository implements only owner lookup.
+        authority_repository=_LiveProjectionAuthorityRepository(),
     )
     active_tool_call = ActiveToolCall(
         call_id="call-1",

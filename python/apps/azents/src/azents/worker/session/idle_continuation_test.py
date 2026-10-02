@@ -37,10 +37,10 @@ from azents.repos.mailbox.data import (
     MailboxItem,
     ScheduledTaskContinuationMailboxPayload,
 )
-from azents.worker.session.execution_snapshot import (
+from azents.repos.session_execution import (
     CanonicalExecutionOwnerGenerationStaleError,
-    CanonicalExecutionSnapshot,
 )
+from azents.repos.session_execution.data import CanonicalExecutionSnapshot
 from azents.worker.session.idle_continuation import IdleContinuationService
 
 

@@ -8,7 +8,6 @@ from collections.abc import Sequence
 from typing import assert_never
 
 from azcommon.logging import bind_extra
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.broker.types import (
     BrokerMessage,
@@ -20,20 +19,19 @@ from azents.engine.run.contracts import AgentEngineProtocol, ToolkitBinding
 from azents.engine.run.errors import UserVisibleRuntimeError
 from azents.engine.run.model_transport import ModelTransportState
 from azents.engine.run.types import CheckStop, PollMessages, PollMessagesResult
-from azents.rdb.session import SessionManager
-from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.session_execution import (
+    CanonicalExecutionOwnerGenerationStaleError,
+    CanonicalExecutionSnapshotError,
+)
+from azents.repos.session_execution.data import CanonicalExecutionSnapshot
+from azents.repos.worker_session import WorkerSessionOperationRepository
+from azents.repos.worker_session_data import CanonicalExecutionWorkDriftError
 from azents.services.mailbox import MailboxService
 from azents.worker.events.publisher import WorkerEventPublisher
 from azents.worker.run.executor import RunExecutor
 from azents.worker.run.results import RunExecutionResult
 from azents.worker.session.errors import SessionRunnerErrorReporter
-from azents.worker.session.execution_snapshot import (
-    CanonicalExecutionOwnerGenerationStaleError,
-    CanonicalExecutionSnapshot,
-    CanonicalExecutionSnapshotError,
-    CanonicalExecutionSnapshotLoader,
-    CanonicalExecutionWorkDriftError,
-)
+from azents.worker.session.execution_snapshot import CanonicalExecutionSnapshotLoader
 from azents.worker.session.idle_continuation import IdleContinuationService
 from azents.worker.session.inbox import SessionRunnerInbox
 from azents.worker.session.lifecycle import SessionLifecycleService
@@ -87,8 +85,7 @@ class SessionRunner:
         event_publisher: WorkerEventPublisher,
         session_lifecycle: SessionLifecycleService,
         execution_snapshot_loader: CanonicalExecutionSnapshotLoader,
-        session_manager: SessionManager[AsyncSession],
-        agent_session_repository: AgentSessionRepository,
+        worker_session_repository: WorkerSessionOperationRepository,
         mailbox_item_service: MailboxService,
         idle_continuation_service: IdleContinuationService,
         user_stop_finalizer: UserStopFinalizer,
@@ -100,8 +97,7 @@ class SessionRunner:
         self.event_publisher = event_publisher
         self.session_lifecycle = session_lifecycle
         self.execution_snapshot_loader = execution_snapshot_loader
-        self.session_manager = session_manager
-        self.agent_session_repository = agent_session_repository
+        self.worker_session_repository = worker_session_repository
         self.mailbox_item_service = mailbox_item_service
         self.idle_continuation_service = idle_continuation_service
         self.run_executor = run_executor
@@ -307,14 +303,7 @@ class SessionRunner:
 
     async def _has_pending_command(self, session_id: str) -> bool:
         """Return whether a pending runtime command should run next."""
-        async with self.session_manager() as db_session:
-            command = (
-                await self.agent_session_repository.get_pending_command_by_session_id(
-                    db_session,
-                    session_id,
-                )
-            )
-        return command is not None
+        return await self.worker_session_repository.has_pending_command(session_id)
 
     async def _mark_idle_after_no_actionable_wake_up(
         self,
