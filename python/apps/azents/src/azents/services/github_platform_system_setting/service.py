@@ -7,7 +7,6 @@ from typing import Annotated, Any
 import httpx
 from fastapi import Depends
 from pydantic import ValidationError
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.config import Config
 from azents.core.deps import get_config
@@ -17,33 +16,7 @@ from azents.core.github_system_setting import (
     PlatformGitHubAppIncomplete,
     PlatformGitHubAppSecrets,
 )
-from azents.core.system_setting import (
-    ResolvedSystemSetting,
-    SystemSettingFieldSource,
-    SystemSettingHealthStatus,
-    SystemSettingSection,
-    SystemSettingValidationStatus,
-)
-from azents.rdb.deps import get_session_manager
-from azents.rdb.session import SessionManager
-from azents.repos.github_platform_system_setting.data import PlatformGitHubAppImpact
-from azents.repos.github_platform_system_setting.repository import (
-    PlatformGitHubAppSystemSettingRepository,
-)
-from azents.services.system_setting.data import (
-    SystemSettingActivated,
-    SystemSettingCandidateValidationResult,
-    SystemSettingCandidateValidationSnapshot,
-    SystemSettingHealthResult,
-    SystemSettingMutation,
-    SystemSettingMutationResult,
-    SystemSettingState,
-)
-from azents.services.system_setting.service import SystemSettingsService
-
-from .binding import PlatformGitHubAppBindingService
-from .client import PlatformGitHubAppValidationClient
-from .data import (
+from azents.core.github_system_setting_data import (
     PlatformGitHubAppAuditPage,
     PlatformGitHubAppBindingState,
     PlatformGitHubAppCandidateState,
@@ -53,6 +26,28 @@ from .data import (
     PlatformGitHubAppHealthState,
     PlatformGitHubAppInventoryItem,
 )
+from azents.core.system_setting import (
+    ResolvedSystemSetting,
+    SystemSettingFieldSource,
+    SystemSettingHealthStatus,
+    SystemSettingSection,
+    SystemSettingValidationStatus,
+)
+from azents.core.system_setting_data import (
+    SystemSettingActivated,
+    SystemSettingCandidateValidationResult,
+    SystemSettingCandidateValidationSnapshot,
+    SystemSettingHealthResult,
+    SystemSettingMutation,
+    SystemSettingMutationResult,
+    SystemSettingState,
+)
+from azents.repos.github_platform_system_setting.operations import (
+    PlatformGitHubAppImpactRepository,
+)
+from azents.services.system_setting.service import SystemSettingsService
+
+from .client import PlatformGitHubAppValidationClient
 
 
 async def get_platform_github_validation_http_client() -> AsyncIterator[
@@ -96,13 +91,8 @@ class PlatformGitHubAppSystemSettingService:
         Depends(get_platform_github_validation_client),
     ]
     impact_repository: Annotated[
-        PlatformGitHubAppSystemSettingRepository,
-        Depends(PlatformGitHubAppSystemSettingRepository),
-    ]
-    binding_service: Annotated[PlatformGitHubAppBindingService, Depends()]
-    session_manager: Annotated[
-        SessionManager[AsyncSession],
-        Depends(get_session_manager),
+        PlatformGitHubAppImpactRepository,
+        Depends(PlatformGitHubAppImpactRepository),
     ]
 
     async def list_inventory(self) -> list[PlatformGitHubAppInventoryItem]:
@@ -131,7 +121,9 @@ class PlatformGitHubAppSystemSettingService:
         state = await self.system_settings.get_state(
             SystemSettingSection.PLATFORM_GITHUB_APP
         )
-        binding_impact = await self._resolve_current_binding_impact(state.resolved)
+        binding_impact = await self.impact_repository.resolve_current_binding_impact(
+            state.resolved
+        )
         return self._project_detail(state, binding_impact)
 
     async def patch(
@@ -166,36 +158,12 @@ class PlatformGitHubAppSystemSettingService:
     ) -> SystemSettingActivated:
         """Recheck redacted impact and activate the candidate."""
 
-        async def impact_resolver(
-            session: AsyncSession,
-            current: ResolvedSystemSetting,
-            candidate: ResolvedSystemSetting,
-        ) -> dict[str, Any] | None:
-            return await self._resolve_impact(session, current, candidate)
-
-        async def confirmation_handler(
-            session: AsyncSession,
-            action: str,
-            candidate: ResolvedSystemSetting,
-            impact: dict[str, Any] | None,
-        ) -> None:
-            raw_actions = impact.get("confirmation_actions") if impact else None
-            allowed_actions = (
-                tuple(item for item in raw_actions if isinstance(item, str))
-                if isinstance(raw_actions, (list, tuple))
-                else ()
-            )
-            if action not in allowed_actions:
-                raise ValueError("Unsupported Platform GitHub App confirmation action.")
-
         return await self.system_settings.confirm_candidate(
             section=SystemSettingSection.PLATFORM_GITHUB_APP,
             candidate_id=candidate_id,
             expected_version=expected_version,
             confirmation_action=confirmation_action,
             actor_user_id=actor_user_id,
-            impact_resolver=impact_resolver,
-            confirmation_handler=confirmation_handler,
         )
 
     async def cancel_candidate(
@@ -268,13 +236,11 @@ class PlatformGitHubAppSystemSettingService:
         limit: int,
     ) -> PlatformGitHubAppAuditPage:
         """Return metadata-only System Settings audit events."""
-        async with self.session_manager() as session:
-            page = await self.system_settings.repository.list_audit_events(
-                session,
-                section=None,
-                offset=offset,
-                limit=limit,
-            )
+        page = await self.system_settings.repository.list_audit_events(
+            section=None,
+            offset=offset,
+            limit=limit,
+        )
         return PlatformGitHubAppAuditPage(items=page.items, total=page.total)
 
     async def _validate_candidate(
@@ -307,12 +273,10 @@ class PlatformGitHubAppSystemSettingService:
         impact: dict[str, Any] | None = None
         confirmation_required = False
         if validation.status is SystemSettingValidationStatus.VALID:
-            async with self.session_manager() as session:
-                impact = await self._resolve_impact(
-                    session,
-                    snapshot.current_resolved,
-                    snapshot.candidate_resolved,
-                )
+            impact = await self.impact_repository.resolve_impact(
+                snapshot.current_resolved,
+                snapshot.candidate_resolved,
+            )
             confirmation_required = bool(
                 impact is not None and impact.get("confirmation_required") is True
             )
@@ -324,96 +288,6 @@ class PlatformGitHubAppSystemSettingService:
             metadata=validation.metadata,
             impact=impact,
             confirmation_required=confirmation_required,
-        )
-
-    async def _resolve_impact(
-        self,
-        session: AsyncSession,
-        current: ResolvedSystemSetting,
-        candidate: ResolvedSystemSetting,
-    ) -> dict[str, Any] | None:
-        current_config = self._config(current)
-        candidate_config = self._config(candidate)
-        app_id_changed = current_config.app_id != candidate_config.app_id
-        if current_config.app_id is None:
-            affected_user_count = 0
-            affected_installation_count = 0
-            affected_toolkit_ids: set[str] = set()
-        else:
-            installation_impact = await self.impact_repository.get_installation_impact(
-                session,
-                app_id=current_config.app_id,
-            )
-            toolkit_impact = await self.binding_service.inspect_toolkits_bound_to(
-                session,
-                app_id=current_config.app_id,
-            )
-            affected_user_count = installation_impact.affected_user_count
-            affected_installation_count = (
-                installation_impact.affected_installation_count
-            )
-            affected_toolkit_ids = set(toolkit_impact.affected_toolkit_ids)
-        affected_agent_count = await self.impact_repository.count_agents_for_toolkits(
-            session,
-            toolkit_ids=affected_toolkit_ids,
-        )
-        has_current_bindings = affected_installation_count > 0 or bool(
-            affected_toolkit_ids
-        )
-        confirmation_actions = (
-            ("activate",)
-            if current_config.app_id is not None
-            and app_id_changed
-            and has_current_bindings
-            else ()
-        )
-        impact = PlatformGitHubAppImpact(
-            app_id_changed=app_id_changed,
-            affected_user_count=affected_user_count,
-            affected_installation_count=affected_installation_count,
-            affected_toolkit_count=len(affected_toolkit_ids),
-            affected_agent_count=affected_agent_count,
-            current_app_id_source=current.field_sources["app_id"].value,
-            confirmation_actions=confirmation_actions,
-        )
-        metadata = impact.to_metadata()
-        metadata["confirmation_required"] = impact.confirmation_required
-        return metadata
-
-    async def _resolve_current_binding_impact(
-        self,
-        resolved: ResolvedSystemSetting,
-    ) -> PlatformGitHubAppBindingState | None:
-        app_id = self._config(resolved).app_id
-        if app_id is None:
-            return None
-        async with self.session_manager() as session:
-            installation_impact = (
-                await self.impact_repository.get_current_binding_installation_impact(
-                    session,
-                    effective_app_id=app_id,
-                )
-            )
-            toolkit_impact = (
-                await self.binding_service.inspect_toolkits_mismatched_with(
-                    session,
-                    effective_app_id=app_id,
-                )
-            )
-            affected_toolkit_ids = set(toolkit_impact.affected_toolkit_ids)
-            affected_agent_count = (
-                await self.impact_repository.count_agents_for_toolkits(
-                    session,
-                    toolkit_ids=affected_toolkit_ids,
-                )
-            )
-        return PlatformGitHubAppBindingState(
-            affected_user_count=installation_impact.affected_user_count,
-            affected_installation_count=(
-                installation_impact.affected_installation_count
-            ),
-            affected_toolkit_count=len(affected_toolkit_ids),
-            affected_agent_count=affected_agent_count,
         )
 
     @classmethod

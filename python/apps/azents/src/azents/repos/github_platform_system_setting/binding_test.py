@@ -10,7 +10,7 @@ from azents.core.github_credentials import (
     GitHubInstallationTarget,
     GitHubSecretsAppPlatform,
 )
-from azents.repos.github_platform_system_setting.data import (
+from azents.core.github_system_setting_data import (
     PlatformGitHubAppToolkitCredential,
 )
 from azents.repos.github_platform_system_setting.repository import (
@@ -18,7 +18,7 @@ from azents.repos.github_platform_system_setting.repository import (
 )
 from azents.testing.types import require_instance
 
-from .binding import PlatformGitHubAppBindingService
+from .binding import PlatformGitHubAppBindingRepository
 
 
 def _credential(cipher: CredentialCipher, app_id: str) -> str:
@@ -54,7 +54,7 @@ async def test_inspect_toolkits_bound_to_decrypts_current_credentials() -> None:
             ),
         ]
     )
-    service = PlatformGitHubAppBindingService(
+    service = PlatformGitHubAppBindingRepository(
         repository=require_instance(
             repository,
             PlatformGitHubAppSystemSettingRepository,
@@ -87,7 +87,7 @@ async def test_inspect_toolkits_mismatched_with_requires_reconnect() -> None:
             ),
         ]
     )
-    service = PlatformGitHubAppBindingService(
+    service = PlatformGitHubAppBindingRepository(
         repository=require_instance(
             repository,
             PlatformGitHubAppSystemSettingRepository,

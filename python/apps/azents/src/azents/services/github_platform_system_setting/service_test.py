@@ -16,23 +16,28 @@ from azents.core.system_setting import (
     SystemSettingSection,
     SystemSettingValidationStatus,
 )
-from azents.rdb.session import SessionManager
-from azents.repos.github_platform_system_setting.repository import (
-    PlatformGitHubAppSystemSettingRepository,
-)
-from azents.repos.system_setting.repository import SystemSettingRepository
-from azents.services.system_setting.data import (
+from azents.core.system_setting_data import (
     SystemSettingActivated,
     SystemSettingCandidatePending,
     SystemSettingMutation,
 )
-from azents.services.system_setting.service import (
-    SystemSettingsService,
-    get_system_setting_registry,
+from azents.core.system_setting_payload import SystemSettingPayloadResolver
+from azents.core.system_setting_registry import get_system_setting_registry
+from azents.rdb.session import SessionManager
+from azents.repos.github_platform_system_setting.binding import (
+    PlatformGitHubAppBindingRepository,
 )
+from azents.repos.github_platform_system_setting.operations import (
+    PlatformGitHubAppImpactRepository,
+)
+from azents.repos.github_platform_system_setting.repository import (
+    PlatformGitHubAppSystemSettingRepository,
+)
+from azents.repos.system_setting.operations import SystemSettingsRepository
+from azents.repos.system_setting.repository import SystemSettingRepository
+from azents.services.system_setting.service import SystemSettingsService
 from azents.testing.types import require_instance
 
-from .binding import PlatformGitHubAppBindingService
 from .client import (
     PlatformGitHubAppExternalValidation,
     PlatformGitHubAppValidationClient,
@@ -55,24 +60,29 @@ def _service(
 ) -> PlatformGitHubAppSystemSettingService:
     key = Fernet.generate_key().decode()
     cipher = CredentialCipher(key)
-    impact_repository = PlatformGitHubAppSystemSettingRepository()
-    generic = SystemSettingsService(
+    query = PlatformGitHubAppSystemSettingRepository()
+    impact_repository = PlatformGitHubAppImpactRepository(
         session_manager=session_manager,
-        repository=SystemSettingRepository(),
-        registry=get_system_setting_registry(),
-        cipher=cipher,
-        environment=SystemSettingEnvironment(values={}),
-        generation_hasher=SystemSettingGenerationHasher(key),
+        impact_repository=query,
+        bindings=PlatformGitHubAppBindingRepository(repository=query, cipher=cipher),
+    )
+    generic = SystemSettingsService(
+        repository=SystemSettingsRepository(
+            session_manager=session_manager,
+            repository=SystemSettingRepository(),
+            payloads=SystemSettingPayloadResolver(
+                registry=get_system_setting_registry(),
+                cipher=cipher,
+                environment=SystemSettingEnvironment(values={}),
+                generation_hasher=SystemSettingGenerationHasher(key),
+            ),
+            github_impact=impact_repository,
+        )
     )
     return PlatformGitHubAppSystemSettingService(
         system_settings=generic,
         validation_client=validation_client,
         impact_repository=impact_repository,
-        binding_service=PlatformGitHubAppBindingService(
-            repository=impact_repository,
-            cipher=cipher,
-        ),
-        session_manager=session_manager,
     )
 
 

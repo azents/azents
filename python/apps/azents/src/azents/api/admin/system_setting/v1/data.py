@@ -12,6 +12,15 @@ from azents.core.external_channel_file import (
 from azents.core.external_channel_file_system_setting import (
     ExternalChannelFilesConfig,
 )
+from azents.core.github_system_setting_data import (
+    PlatformGitHubAppBindingState,
+    PlatformGitHubAppCandidateState,
+    PlatformGitHubAppDetail,
+    PlatformGitHubAppEffectiveStatus,
+    PlatformGitHubAppFieldState,
+    PlatformGitHubAppHealthState,
+    PlatformGitHubAppInventoryItem,
+)
 from azents.core.system_setting import (
     ResolvedSystemSetting,
     SystemSettingAuditEventType,
@@ -21,18 +30,9 @@ from azents.core.system_setting import (
     SystemSettingSecretActionType,
     SystemSettingValidationStatus,
 )
-from azents.repos.system_setting.data import StoredSystemSettingAuditEvent
+from azents.core.system_setting_data import StoredSystemSettingAuditEvent
 from azents.services.external_account_oauth_system_setting.data import (
     ExternalAccountOAuthDetail,
-)
-from azents.services.github_platform_system_setting.data import (
-    PlatformGitHubAppBindingState,
-    PlatformGitHubAppCandidateState,
-    PlatformGitHubAppDetail,
-    PlatformGitHubAppEffectiveStatus,
-    PlatformGitHubAppFieldState,
-    PlatformGitHubAppHealthState,
-    PlatformGitHubAppInventoryItem,
 )
 
 

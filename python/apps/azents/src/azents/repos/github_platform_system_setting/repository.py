@@ -3,14 +3,13 @@
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.rdb.models.github_user_installation import RDBGithubUserInstallation
-from azents.rdb.models.toolkit import RDBToolkitConfig
-from azents.repos.toolkit import effective_agent_toolkit_relation
-
-from .data import (
+from azents.core.github_system_setting_data import (
     PlatformGitHubAppInstallationImpact,
     PlatformGitHubAppToolkitCredential,
 )
+from azents.rdb.models.github_user_installation import RDBGithubUserInstallation
+from azents.rdb.models.toolkit import RDBToolkitConfig
+from azents.repos.toolkit import effective_agent_toolkit_relation
 
 
 class PlatformGitHubAppSystemSettingRepository:

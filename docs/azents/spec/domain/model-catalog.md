@@ -41,6 +41,8 @@ code_paths:
   - python/apps/azents/src/azents/api/admin/model_catalog/v1/__init__.py
   - python/apps/azents/src/azents/services/agent/__init__.py
   - python/apps/azents/src/azents/services/workspace_model_settings/__init__.py
+  - python/apps/azents/src/azents/repos/workspace_model_settings/**
+  - python/apps/azents/src/azents/repos/model_candidate_chain_cutover/**
   - python/apps/azents/src/azents/services/model_listing/providers.py
   - python/apps/azents/src/azents/services/model_options.py
   - python/apps/azents/src/azents/core/builtin_tools.py
@@ -57,7 +59,7 @@ code_paths:
   - typescript/apps/azents-web/src/trpc/routers/workspace-model-settings.ts
   - typescript/apps/azents-admin-web/src/features/model-catalog/containers/useModelCatalogPageContainer.ts
 last_verified_at: 2026-10-02
-spec_version: 36
+spec_version: 37
 ---
 
 # Model Catalog Domain Spec
@@ -367,6 +369,19 @@ selectable entry. Agent and Workspace save paths share this validation, and
 Workspace defaults copy the complete built-in configuration into newly created
 Agents.
 
+Workspace default current reads, empty-row get-or-create and final writes finish
+inside completed repository operations. Stored-catalog and image-option
+normalization remain outside Workspace database transactions, between the
+completed current read and final write. The existing model-chain downgrade
+marker commits or rolls back with the final settings columns.
+
+This ownership boundary preserves current WorkspaceMember authorization,
+configured-options clear rejection, empty-row behavior, omission and label-null
+fallback, option order/labels/subagent flags, and exact saved source/catalog and
+capability/execution snapshots. It adds no Workspace revision/CAS, enabled-user
+or stronger conversation selection predicate, provider fetch or auto-reselection.
+The adjacent catalog/image services retain their own separate ownership scope.
+
 If no selectable stored catalog entry matches a requested candidate integration and model identifier,
 the service rejects the candidate. Public mutation has no direct singular model-selection
 compatibility field. Submit normalization must not refetch a dynamic provider listing as a fallback.
@@ -410,6 +425,7 @@ Only Workspace Owners receive the explicit image sync action.
 
 | Date | Version | Change |
 |---|---:|---|
+| 2026-10-02 | 37 | Moved Workspace model default reads/get-or-create/writes into completed repository operations while preserving detached normalization, current policies and atomic downgrade marking. |
 | 2026-10-02 | 36 | Fenced ChatGPT and xAI refresh success and failure against original generation and credential identity under one row lock. |
 | 2026-10-02 | 35 | Kept ChatGPT and xAI OAuth runtime refresh persistence on the generation-preserving path while retaining user-update and publication fences. |
 | 2026-10-02 | 34 | Restored effective Grok client-image, native-search, and function-tool support despite omitted listing facts or missing tool prices. |

@@ -1,7 +1,7 @@
 ---
 title: "System Settings"
 created: 2026-07-19
-updated: 2026-07-30
+updated: 2026-10-02
 tags: [backend, frontend, admin, scheduler, security, infra]
 spec_type: domain
 domain: system-settings
@@ -9,7 +9,11 @@ owner: "@Hardtack"
 code_paths:
   - python/apps/azents/src/azents/core/system_setting.py
   - python/apps/azents/src/azents/core/system_setting_registry.py
+  - python/apps/azents/src/azents/core/system_setting_data.py
+  - python/apps/azents/src/azents/core/system_setting_payload.py
+  - python/apps/azents/src/azents/core/system_setting_deps.py
   - python/apps/azents/src/azents/core/github_system_setting.py
+  - python/apps/azents/src/azents/core/github_system_setting_data.py
   - python/apps/azents/src/azents/core/external_channel_file_system_setting.py
   - python/apps/azents/src/azents/core/external_account_oauth_system_setting.py
   - python/apps/azents/src/azents/api/admin/system_setting/**
@@ -51,8 +55,8 @@ api_routes:
   - /system/v1/settings/file-lifecycle
   - /system/v1/settings/file-lifecycle/archive-retention/preview
   - /system/v1/settings/file-lifecycle/retention-applications/{application_id}
-last_verified_at: 2026-09-30
-spec_version: 7
+last_verified_at: 2026-10-02
+spec_version: 8
 ---
 
 # System Settings
@@ -118,6 +122,31 @@ processes restart.
 
 PostgreSQL is read at each operation boundary. Redis, process-local cache, and notification delivery are
 not required for correctness.
+
+### Database operation ownership
+
+Section reads, mutations, candidate preparation/finalization, health persistence
+and audit reads complete inside domain repository operations before returning
+detached typed results to services. Pure schema migration, cipher decoding,
+environment overlays and effective-generation projection share canonical core
+helpers and definitions. Services do not own or receive live database sessions.
+
+The same Section lock and existing identity, version, generation, expiry, impact
+and action predicates remain authoritative. GitHub confirmation composes its
+concrete binding/impact queries and generic lifecycle mutations in the same
+locked database transaction rather than invoking service session callbacks.
+Provider HTTP validation and health checks occur only between completed
+operations; final persistence retains the existing stale-authority checks.
+
+Expired-candidate prepare, confirm, cancel and validation-record paths finish
+ciphertext deletion before the service reports the existing expiry error.
+Cleanup performed inside mutate or state projection retains the same rollback
+group when a later payload/cipher validation fails. Activation, validation,
+current/candidate replacement, audit and health atomic groups are unchanged.
+
+The unused generic service migration runner and its session callback interface
+are removed. Executed migrations, durable outcome markers and repository query
+infrastructure remain intact; no new migration framework is introduced.
 
 ### Mutation, validation, and confirmation
 
@@ -334,6 +363,12 @@ page resumes the application returned by the settings endpoint.
   [`../flow/file-exchange-storage.md`](../flow/file-exchange-storage.md).
 
 ## Changelog
+
+- **2026-10-02** — v8. Moved Section lifecycle, concrete GitHub impact/confirmation
+  and audit lifetimes into completed database-only repository operations, with
+  canonical shared payload/DI contracts and unchanged committed-expiry, fencing,
+  redaction and external validation behavior. Removed the dormant generic service
+  migration callback capability while preserving migration infrastructure.
 
 - **2026-09-30** — v7. Retired the persisted inbound file limit in schema version 2,
   preserved outbound policy, and documented the shared 128 MiB ingress authority.

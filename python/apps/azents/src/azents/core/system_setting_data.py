@@ -1,14 +1,16 @@
-"""System Settings repository data models."""
+"""Canonical detached System Settings contracts."""
 
 import datetime
 from dataclasses import dataclass
 from typing import Any
 
 from azents.core.system_setting import (
+    ResolvedSystemSetting,
     SystemDataMigrationOutcome,
     SystemSettingAuditEventType,
     SystemSettingAuditSource,
     SystemSettingHealthStatus,
+    SystemSettingSecretAction,
     SystemSettingSection,
     SystemSettingValidationStatus,
 )
@@ -179,3 +181,92 @@ class StoredSystemDataMigration:
     outcome: SystemDataMigrationOutcome
     metadata: dict[str, Any]
     completed_at: datetime.datetime
+
+
+@dataclass(frozen=True)
+class SystemSettingMutation:
+    """Internal complete Section mutation request."""
+
+    section: SystemSettingSection
+    expected_version: int
+    config_patch: dict[str, Any]
+    secret_actions: dict[str, SystemSettingSecretAction]
+    actor_user_id: str | None
+
+
+@dataclass(frozen=True)
+class SystemSettingActivated:
+    """Directly activated current Section result."""
+
+    current: StoredSystemSetting
+    resolved: ResolvedSystemSetting
+
+
+@dataclass(frozen=True)
+class SystemSettingCandidatePending:
+    """Candidate stored for external validation."""
+
+    candidate: StoredSystemSettingCandidate
+    resolved: ResolvedSystemSetting
+
+
+SystemSettingMutationResult = SystemSettingActivated | SystemSettingCandidatePending
+
+
+@dataclass(frozen=True)
+class SystemSettingCandidateValidationSnapshot:
+    """Current and candidate effective payloads prepared for validation."""
+
+    candidate: StoredSystemSettingCandidate
+    current_resolved: ResolvedSystemSetting
+    candidate_resolved: ResolvedSystemSetting
+
+
+@dataclass(frozen=True)
+class SystemSettingCandidateValidationResult:
+    """Sanitized external validation and confirmation requirement."""
+
+    status: SystemSettingValidationStatus
+    code: str | None
+    message: str | None
+    action_hint: str | None
+    metadata: dict[str, Any] | None
+    impact: dict[str, Any] | None
+    confirmation_required: bool
+
+
+@dataclass(frozen=True)
+class SystemSettingState:
+    """Current internal Section state for a redacted domain projection."""
+
+    current: StoredSystemSetting | None
+    candidate: StoredSystemSettingCandidate | None
+    resolved: ResolvedSystemSetting
+    health: StoredSystemSettingHealth | None
+
+
+@dataclass(frozen=True)
+class SystemSettingHealthResult:
+    """Sanitized explicit health result to persist."""
+
+    status: SystemSettingHealthStatus
+    code: str | None
+    message: str | None
+    action_hint: str | None
+    metadata: dict[str, Any] | None
+
+
+@dataclass(frozen=True)
+class CurrentSystemSettingHealth:
+    """Health state matched to the currently resolved generation."""
+
+    resolved: ResolvedSystemSetting
+    health: StoredSystemSettingHealth | None
+
+
+@dataclass(frozen=True)
+class SystemSettingExpiryCommitted:
+    """Candidate deletion committed before the application reports expiry."""
+
+    section: SystemSettingSection
+    candidate_id: str
