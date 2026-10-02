@@ -5,15 +5,17 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock
 
+import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.enums import AgentSessionProductMode
+from azents.core.enums import AgentSessionProductMode, EventKind
 from azents.core.historical_memory_snapshot import (
     HistoricalMemorySnapshotCandidate,
     MemoryContextSnapshotState,
     MemorySnapshotConsumer,
     SavedMemorySnapshotEntry,
 )
+from azents.engine.events.types import CompactionSummaryPayload, Event
 from azents.rdb.session import SessionManager
 from azents.repos.historical_memory import HistoricalMemoryRepository
 from azents.repos.memory import MemoryRepository
@@ -217,4 +219,125 @@ async def test_missing_snapshot_outside_explicit_boundary_contributes_no_memory(
         == ""
     )
     memory.list.assert_not_awaited()
+    toolkit_state.save.assert_not_awaited()
+
+
+async def test_committed_compaction_head_reselects_once_then_keeps_snapshot() -> None:
+    """Only a new committed summary head selects the next frozen snapshot."""
+    head = "c" * 32
+    previous = MemoryContextSnapshotState(
+        boundary_head_event_id=None,
+        created_at=_NOW,
+        saved_entries=[],
+        historical_entries=[],
+    )
+    session = AsyncMock(spec=AsyncSession)
+    historical = AsyncMock(spec=HistoricalMemoryRepository)
+    historical.get_snapshot_consumer_in_session.return_value = _consumer(head=head)
+    historical.list_available_snapshot_candidates_in_session.return_value = [
+        _historical()
+    ]
+    memory = AsyncMock(spec=MemoryRepository)
+    memory.list.return_value = [_memory()]
+    memory.list_by_ids.return_value = [_memory()]
+    message = AsyncMock(spec=MessageRepository)
+    message.get_event_by_id.return_value = Event(
+        id=head,
+        session_id="s" * 32,
+        kind=EventKind.COMPACTION_SUMMARY,
+        payload=CompactionSummaryPayload(
+            compaction_id="compaction-1",
+            content="Continue the approved boundary snapshot design.",
+        ),
+        created_at=_NOW,
+    )
+    toolkit_state = AsyncMock(spec=ToolkitStateRepository)
+    toolkit_state.get.return_value = _record(previous)
+    service, session_manager = _service(
+        session=session,
+        historical=historical,
+        memory=memory,
+        message=message,
+        toolkit_state=toolkit_state,
+    )
+
+    prompt = await service.prompt_for_turn(
+        session_id="s" * 32,
+        session_manager=session_manager,
+    )
+
+    assert "boundary snapshot design" in prompt
+    toolkit_state.save.assert_awaited_once()
+    upsert = toolkit_state.save.await_args.args[1]
+    selected = MemoryContextSnapshotState.model_validate(upsert.state_json)
+    assert selected.boundary_head_event_id == head
+    assert upsert.expected_version == 1
+    assert selected.historical_entries[0].source_session_id == "h" * 32
+
+    toolkit_state.get.return_value = _record(selected)
+    toolkit_state.save.reset_mock()
+    memory.list.reset_mock()
+    historical.list_available_snapshot_candidates_in_session.reset_mock()
+    again = await service.prompt_for_turn(
+        session_id="s" * 32,
+        session_manager=session_manager,
+    )
+    assert again == prompt
+    toolkit_state.save.assert_not_awaited()
+    memory.list.assert_not_awaited()
+    query = historical.list_available_snapshot_candidates_in_session.await_args
+    assert query.kwargs["source_session_ids"] == ["h" * 32]
+
+
+@pytest.mark.parametrize("foreign_summary", [False, True])
+async def test_uncommitted_or_foreign_head_cannot_reselect_memory(
+    foreign_summary: bool,
+) -> None:
+    """Missing or other-Session heads are not successful compaction boundaries."""
+    head = "c" * 32
+    session = AsyncMock(spec=AsyncSession)
+    historical = AsyncMock(spec=HistoricalMemoryRepository)
+    historical.get_snapshot_consumer_in_session.return_value = _consumer(head=head)
+    memory = AsyncMock(spec=MemoryRepository)
+    message = AsyncMock(spec=MessageRepository)
+    message.get_event_by_id.return_value = (
+        Event(
+            id=head,
+            session_id="x" * 32,
+            kind=EventKind.COMPACTION_SUMMARY,
+            payload=CompactionSummaryPayload(
+                compaction_id="compaction-foreign",
+                content="Uncommitted or foreign summary",
+            ),
+            created_at=_NOW,
+        )
+        if foreign_summary
+        else None
+    )
+    toolkit_state = AsyncMock(spec=ToolkitStateRepository)
+    toolkit_state.get.return_value = _record(
+        MemoryContextSnapshotState(
+            boundary_head_event_id=None,
+            created_at=_NOW,
+            saved_entries=[],
+            historical_entries=[],
+        )
+    )
+    service, session_manager = _service(
+        session=session,
+        historical=historical,
+        memory=memory,
+        message=message,
+        toolkit_state=toolkit_state,
+    )
+
+    assert (
+        await service.prompt_for_turn(
+            session_id="s" * 32,
+            session_manager=session_manager,
+        )
+        == ""
+    )
+    memory.list.assert_not_awaited()
+    historical.list_available_snapshot_candidates_in_session.assert_not_awaited()
     toolkit_state.save.assert_not_awaited()

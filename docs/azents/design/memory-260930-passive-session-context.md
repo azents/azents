@@ -1,6 +1,7 @@
 ---
 title: "Historical Session Context Design"
 created: 2026-10-01
+implemented: 2026-10-02
 tags: [memory, conversation, security, engine, vfs, frontend]
 document_role: primary
 document_type: design

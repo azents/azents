@@ -4,7 +4,7 @@ created: 2026-05-10
 tags: [backend, engine, frontend]
 spec_type: flow
 owner: "@Hardtack"
-touches_domains: [agent, conversation, workspace, toolkit]
+touches_domains: [agent, conversation, workspace, toolkit, memory]
 code_paths:
   - python/apps/azents/db-schemas/rdb/migrations/versions/097a97177350_create_operational_schema_baseline.py
   - python/apps/azents/src/azents/core/vfs.py
@@ -20,6 +20,9 @@ code_paths:
   - python/apps/azents/src/azents/services/session_resource_authority.py
   - python/apps/azents/src/azents/services/agent_session_input.py
   - python/apps/azents/src/azents/services/vfs.py
+  - python/apps/azents/src/azents/services/vfs_read.py
+  - python/apps/azents/src/azents/services/memory_vfs.py
+  - python/apps/azents/src/azents/engine/tools/readable_storage.py
   - python/apps/azents/src/azents/repos/artifact/**
   - python/apps/azents/src/azents/repos/model_file/**
   - python/apps/azents/src/azents/repos/exchange_file/**
@@ -68,8 +71,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ToolActivityGroup.tsx
   - typescript/apps/azents-web/src/features/chat/components/ToolCallCard.tsx
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
-last_verified_at: 2026-10-01
-spec_version: 54
+last_verified_at: 2026-10-02
+spec_version: 55
 ---
 
 # File Exchange Storage
@@ -174,7 +177,7 @@ not.
 
 ### Agent imports user or internal file
 
-`import_file` tool uses resolver registry by scheme. Supported schemes are `exchange://{object_key}`, `artifact://{storage_key}`, and canonical `azents://` paths present in the current AgentRun projection. URI is storage location, not entity reference. Do not put business logic that extracts entity id from URI string. Default destination is `/tmp/agent/imports/`, and default destination collisions are deduped with numeric suffix. If explicit destination already exists, fail by default and overwrite only when `overwrite=true`.
+`import_file` tool uses resolver registry by scheme. Supported schemes are `exchange://{object_key}`, `artifact://{storage_key}`, and canonical managed Skills `azents://` paths present in the current AgentRun projection. The live `azents://memory` mount has no transfer capability and is unavailable to `import_file`. URI is storage location, not entity reference. Do not put business logic that extracts entity id from URI string. Default destination is `/tmp/agent/imports/`, and default destination collisions are deduped with numeric suffix. If explicit destination already exists, fail by default and overwrite only when `overwrite=true`.
 Sources larger than the shared 128 MiB general-file limit fail before admission, and
 the tool reports the size-limit rejection without presenting it as a destination-path
 failure.
@@ -207,13 +210,26 @@ staging, verifies exact length and SHA-256, and atomically publishes the destina
 Worker and Runtime Control do not relay the complete-file body.
 Original file bytes are not attached directly to the LLM prompt.
 
-`azents://` materializes one immutable managed file from the current run projection.
+Importable managed Skills `azents://` paths materialize one immutable file from
+the current run projection.
 The resolver verifies run, Agent, Session, and Workspace ownership, exact projection
 membership, Base64 decoding, decoded size, and content hash before incrementally staging
-the source into the same Server-to-Runtime transfer service. Ordinary Runtime file
-tools do not resolve the URI directly. The source entry remains in the retained AgentRun
+the source into the same Server-to-Runtime transfer service. Generic `read`, `grep`,
+and `glob` can inspect managed URIs through the Runtime-independent VFS reader;
+Runtime mutation tools remain filesystem-only. The source entry remains in the retained AgentRun
 projection; only the copied Runtime path follows Runtime persistence rules, and a
 default `/tmp/agent/imports/` copy is temporary.
+
+### Read-only Memory VFS is not file exchange
+
+`azents://memory` exposes live authorized Saved/Historical records and original
+Session evidence through generic `read`, `grep`, and `glob`, without starting or
+allocating a Runtime. It is not part of `agent_runs.vfs_projection` and does not
+create ExchangeFile, Artifact, ModelFile, or transferable storage objects.
+Every operation independently checks Memory enablement and current root/source
+authority; broad search omits tool-result bodies and exact results expose only
+bounded persisted text. The mount has no write, import, or transfer capability.
+See [`memory.md`](../domain/memory.md) for namespace, limits, and lifecycle.
 
 ### Agent stores visible Tool output in Runtime
 
@@ -457,6 +473,9 @@ later `import_file` must explicitly copy them into the new Runtime.
 
 ## Changelog
 
+- **2026-10-02** (spec_version 55) — Distinguished generic read-only live
+  Memory VFS access from immutable managed Skills import; Memory creates no
+  transferable file-exchange object and has no import/transfer capability.
 - **2026-10-01** (spec_version 54) — Moved generated provider-output scope,
   retry-metadata, and cleanup-protection reads behind completed repository
   operations while preserving atomic Event/metadata admission and

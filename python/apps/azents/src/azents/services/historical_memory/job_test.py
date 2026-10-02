@@ -63,4 +63,5 @@ async def test_registered_handler_runs_bounded_agent_job() -> None:
     service.prepare_agent.assert_awaited_once_with(
         agent_id="a" * 32,
         deadline=deadline,
+        now=None,
     )

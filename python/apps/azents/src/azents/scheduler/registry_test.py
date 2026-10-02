@@ -427,8 +427,8 @@ async def test_historical_memory_discovery_handler_returns_dispatch_summary() ->
     service.discover_once.assert_awaited_once_with()
 
 
-def test_historical_memory_discovery_is_registered_but_rollout_disabled() -> None:
-    """The five-minute definition exists without enabling final rollout early."""
+def test_historical_memory_discovery_is_registered_and_enabled() -> None:
+    """The completed Memory cutover enables bounded five-minute discovery."""
     definitions = registry.get_task_definitions()
     matches = [
         definition
@@ -441,4 +441,4 @@ def test_historical_memory_discovery_is_registered_but_rollout_disabled() -> Non
     assert definition.interval == datetime.timedelta(minutes=5)
     assert definition.timeout == datetime.timedelta(minutes=2)
     assert definition.retry_policy.kind == "bounded_backoff"
-    assert definition.enabled_by_default is False
+    assert definition.enabled_by_default is True

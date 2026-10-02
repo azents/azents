@@ -13,6 +13,9 @@ code_paths:
   - python/apps/azents/src/azents/job_runtime/local.py
   - python/apps/azents/src/azents/job_runtime/registry.py
   - python/apps/azents/src/azents/job_runtime/types.py
+  - python/apps/azents/src/azents/services/historical_memory/**
+  - python/apps/azents/src/azents/repos/historical_memory/**
+  - python/apps/azents/src/azents/rdb/models/historical_memory.py
   - python/apps/azents/src/azents/services/file_lifecycle_cleanup.py
   - python/apps/azents/src/azents/services/external_account_link.py
   - python/apps/azents/src/azents/services/external_account_oauth/service.py
@@ -44,8 +47,8 @@ code_paths:
   - python/apps/azents/bin/scheduler.sh
   - infra/charts/azents/templates/server/scheduler-deployment.yaml.tpl
   - infra/charts/azents/templates/server/scheduler-pdb.yaml.tpl
-last_verified_at: 2026-10-01
-spec_version: 22
+last_verified_at: 2026-10-02
+spec_version: 23
 ---
 
 # Periodic Execution Flow Spec
@@ -90,7 +93,8 @@ definition that scans that domain.
 Registered tasks include `scheduler_heartbeat`, `model_catalog_system_projection`,
 `archived_session_retention_recalculation`, `archived_session_purge`,
 `session_auto_archive`, `agent_decommission`, `agent_runtime_removal`, `owner_lifecycle`,
-`file_lifecycle_cleanup`, `external_account_oauth_cleanup`, plus the user Scheduled
+`file_lifecycle_cleanup`, `external_account_oauth_cleanup`,
+`historical_memory_discovery`, plus the user Scheduled
 Task dispatcher definition.
 `scheduler_heartbeat` is a no-op heartbeat that returns a small execution
 summary and has no external network dependency.
@@ -267,6 +271,37 @@ under a new token, including by a later attempt in the same scheduler process;
 the stale token cannot settle the new claim. Agent deletion clears only the
 optional diagnostic Agent ID and cannot remove the cleanup snapshot.
 
+## Historical Memory discovery and preparation
+
+`historical_memory_discovery` is enabled by default and runs every five minutes
+with a two-minute discovery timeout and bounded one-to-thirty-minute retry.
+Admission uses current PostgreSQL authority and active root Session state:
+Memory must be enabled, no Run may be ongoing, and latest conversation/Run
+activity must be at least six hours old. A never-prepared source must initially
+fall within the rolling ten-day window. Pinning and Team-primary status do not
+exclude a source.
+
+Each pass admits at most 500 sources and selects at most 25 due Agents. After
+the database operations complete, it submits `historical_memory.prepare` work
+under `historical-memory:{agent_id}` execution keys with absolute thirty-minute
+deadlines. The discovery task waits only for dispatch, not provider preparation.
+Admission, due work, and submitted-job counts form its bounded result summary.
+
+Preparation runs in application Job Runtime, coalescing same-Agent work within
+one process. A job attempts at most ten source operations; its handler defaults
+to 15 of the application's 16 concurrency slots and leaves capacity for other
+jobs. Process-local coalescing does not promise cross-process exactly-once model
+calls. Durable source progress plus later discovery recover interrupted or
+unaccepted work without a persistent Runtime queue or Redis dependency.
+
+Preparation uses the Agent Lightweight chain and rechecks enablement,
+source lifecycle, and current access before publication. Retry/completion for
+admitted sources and retention of prepared summaries are not bounded by the
+initial ten-day admission window. Unchanged content is not repeatedly prepared
+merely because time passes; later activity can permit a fresh inactive
+preparation. No Saved Memory is created or mutated. See
+[`memory.md`](../domain/memory.md) for retry, source, and publication contracts.
+
 ## External account OAuth attempt cleanup task
 
 `external_account_oauth_cleanup` runs hourly with a two-minute timeout and bounded
@@ -378,6 +413,9 @@ Model catalog source sync is a later consumer of this scheduler.
 
 ## Changelog
 
+- **2026-10-02** (spec_version 23) — Added enabled five-minute Historical
+  discovery, bounded rolling admission, and separate coalesced per-Agent
+  preparation with durable recovery and reserved background capacity.
 - **2026-10-01** (spec_version 22) — Removed the temporary integration
   reprojection task after cleanup validated generic provenance on every current
   conversation catalog.

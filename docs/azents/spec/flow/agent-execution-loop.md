@@ -4,7 +4,7 @@ created: 2026-04-20
 tags: [backend, engine]
 spec_type: flow
 owner: "@Hardtack"
-touches_domains: [agent, conversation, toolkit, external-channel]
+touches_domains: [agent, conversation, toolkit, external-channel, memory]
 code_paths:
   - python/apps/azents/src/azents/broker/types.py
   - python/apps/azents/src/azents/broker/redis.py
@@ -66,6 +66,11 @@ code_paths:
   - python/apps/azents/src/azents/services/agent_runtime/**
   - python/apps/azents/src/azents/services/runtime_web/**
   - python/apps/azents/src/azents/services/vfs.py
+  - python/apps/azents/src/azents/services/vfs_read.py
+  - python/apps/azents/src/azents/services/memory_vfs.py
+  - python/apps/azents/src/azents/services/historical_memory/**
+  - python/apps/azents/src/azents/repos/historical_memory/**
+  - python/apps/azents/src/azents/repos/memory_vfs/**
   - python/apps/azents/src/azents/repos/toolkit/**
   - python/apps/azents/src/azents/services/toolkit/**
   - python/apps/azents/src/azents/services/agent_mailbox.py
@@ -116,8 +121,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/toolCallActionPresentation.ts
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
   - typescript/apps/azents-web/messages/*/chat.json
-last_verified_at: 2026-10-01
-spec_version: 196
+last_verified_at: 2026-10-02
+spec_version: 197
 ---
 
 # Agent Execution Loop
@@ -230,7 +235,9 @@ User trees. A stale Worker cannot resume ordinary work after the capability vers
 
 ### Run-scoped managed-file projection
 
-`agent_runs.vfs_projection` is the durable authorization and content snapshot for `azents://` files. `RunExecutor` calls `VfsProjectionService.ensure_run_projection(...)` after it has selected the pending or recoverable run and before the first `poll_run_inputs(...)` call. The repository writes a candidate projection only when the run column is empty; an existing projection is returned unchanged. This ordering also applies to recovery, so an older nullable run receives its projection before any newly promoted input can consume a managed URI.
+`agent_runs.vfs_projection` is the durable authorization and content snapshot for
+managed Skills files. It does not contain the live `azents://memory` mount.
+`RunExecutor` calls `VfsProjectionService.ensure_run_projection(...)` after it has selected the pending or recoverable run and before the first `poll_run_inputs(...)` call. The repository writes a candidate projection only when the run column is empty; an existing projection is returned unchanged. This ordering also applies to recovery, so an older nullable run receives its projection before any newly promoted input can consume a managed Skill URI.
 
 The initial projection source set is the global Azents release bundle plus release bundles owned by Toolkit Providers in the canonical enabled effective Toolkit relation for the run's Agent and Workspace. That relation unions enabled Workspace-shared `AgentToolkit` attachments with enabled direct Agent-owned ToolkitConfigs. Projection construction reads only local package resources and authoritative effective-relation metadata; it does not call provider APIs or inspect credentials or connection health. The flattened projection stores exact file bytes inline, so retries, process restart, worker takeover, and resume do not depend on the currently deployed package after the projection has been persisted.
 
@@ -244,7 +251,7 @@ associated user message. Failure to find or authorize the URI produces the
 unavailable-Skill system input and does not fall back to an idle preview or
 current package resources.
 
-During toolkit resolution, the Skill Toolkit renders the ordered union of filesystem and managed Skill entrypoints. `load_skill` uses the exact current run ID for managed URI resolution. Runtime tool construction registers an `azents` import resolver with the same run, Agent, Session, and Workspace identity; `import_file` verifies projection membership and integrity before creating a Runtime file. Other Runtime file tools remain unaware of the VFS.
+During toolkit resolution, the Skill Toolkit renders the ordered union of filesystem and managed Skill entrypoints. `load_skill` uses the exact current run ID for managed URI resolution. Runtime tool construction registers an `azents` import resolver with the same run, Agent, Session, and Workspace identity; `import_file` verifies Skill projection membership and integrity before creating a Runtime file. One Runtime-independent readable-storage binding owns generic `read`, `grep`, and `glob`: managed URIs route to their registered backend, while absolute Runtime paths use the capability-gated filesystem adapter. Memory reads use live authority and cannot be imported or transferred.
 
 The composer action endpoint has no run snapshot while idle, so it builds a current non-persisted release preview. While a run is active, it reads that run's stored projection. The preview is advisory: action execution always validates against the projection ensured before promotion. Each subagent run follows the same ensure boundary and owns its own projection rather than inheriting the parent run's projection row.
 
@@ -939,21 +946,31 @@ target agent's current run after rejecting the root and the caller itself.
 
 ## 5. Tool Loop
 
-Memory-enabled runs expose three read-only Session-history tools through the
-Memory read binding in root and subagent execution. Each tool is bound to the
-concrete executing Session ID and rechecks its active root's Agent/Workspace and
-Team/User boundary for every target. `search_sessions` accepts `current` as the
-concrete execution Session and can return matching visible event IDs from a
-specified authorized Session. `read_session_history` presents newest pages
-oldest-to-newest with older/newer cursors or a matching event anchor. It filters
-internal and reverted events before paging. `read_session_tool_result` returns
-only a selected client/hosted tool event's text in bounded chunks, never a
-native artifact or file bytes. Archived targets are unavailable on subsequent
-calls even if their IDs were previously observed. The canonical event
-transcript remains the only history source; no new event or write path is added.
-Memory CRUD/search and prompt summary loads, plus each Session-history authority
-and read composition, return from completed repository transactions before the
-Engine renders model-visible output.
+Memory-enabled root and subagent executions receive a prompt-only Memory
+Context binding. At initial context and a newly committed compaction-summary
+head, it persists a deterministic `memory/context_snapshot` containing the Saved
+index and bounded whole Historical source blocks. Ordinary turns reauthorize
+and filter the existing selection without refreshing text or selecting
+replacement entries. Saved mutation or newly prepared history therefore does
+not silently replace a turn's automatic context.
+
+Explicit inspection uses generic `read`, `grep`, and `glob` over the live
+read-only `azents://memory` mount. Each operation independently checks Memory
+enablement, the concrete execution's active root, same Agent/Workspace, and
+current Team/associated-User source access. Paths use authorized database IDs
+and preserve the canonical Session event store as evidence. Broad grep excludes
+tool-result bodies; an exact result path yields bounded persisted text only,
+never artifacts, file bytes, or native result payloads. Archive/access loss
+applies to the next operation even after a path was previously observed.
+
+Root execution retains only `save_memory` and `delete_memory` as Memory domain
+tools. Subagents have context/generic reads but no Saved mutation. Dedicated
+Memory/history read factories are removed without aliases. Snapshot, mutation,
+and VFS read composition return from completed repository transactions before
+model-visible rendering. Background Historical preparation uses the Agent
+Lightweight chain independently of foreground execution; summaries remain
+potentially stale source-linked reference data, not instructions or Saved Memory.
+See [`memory.md`](../domain/memory.md) for selection, authorization, and bounds.
 
 `AgentRunExecution` executes foreground client tool calls in parallel. Each tool result is normalized
 to a `client_tool_result` with status:
@@ -1636,6 +1653,9 @@ icon.
 
 ## Changelog
 
+- **2026-10-02** (spec_version 197) — Promoted persisted Memory boundary
+  snapshots, prompt-only context and mutation-only domain tools, and generic
+  Runtime-independent live Memory VFS reads distinct from immutable Skills.
 - **2026-10-01** (spec_version 196) — Promoted durable effective Toolkit
   namespaces and source snapshots as the shared final-name, Tool Search,
   routing, hook, event, and activity authority while allowing duplicate stored

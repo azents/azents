@@ -46,6 +46,7 @@ async def test_discovery_uses_fresh_window_and_dispatches_agent_keys(
     assert summary.due_agents == 2
     assert summary.dispatched == 2
     repository.admit_eligible_sources.assert_awaited_once_with(
+        agent_id=None,
         now=now,
         oldest_activity_at=now - datetime.timedelta(days=10),
         inactive_before=now - datetime.timedelta(hours=6),
@@ -69,3 +70,45 @@ async def test_discovery_uses_fresh_window_and_dispatches_agent_keys(
     assert all(
         request.deadline == now + datetime.timedelta(minutes=30) for request in requests
     )
+
+
+async def test_explicit_sample_is_scoped_to_one_agent_without_dispatch() -> None:
+    """A testenv sample cannot admit or dispatch another Agent's sources."""
+    sampled_at = datetime.datetime(2099, 1, 1, tzinfo=datetime.UTC)
+    repository = AsyncMock()
+    repository.admit_eligible_sources.return_value = ["s" * 32]
+    repository.list_due_for_agent.return_value = [object()]
+    runtime = AsyncMock()
+    service = HistoricalMemoryDiscoveryService(
+        repository=repository, job_runtime=runtime
+    )
+    sample = await service.admit_and_list_due_agents(
+        now=sampled_at,
+        agent_id="a" * 32,
+    )
+    assert sample.admitted == 1
+    assert sample.due_agent_ids == ("a" * 32,)
+    repository.admit_eligible_sources.assert_awaited_once_with(
+        agent_id="a" * 32,
+        now=sampled_at,
+        oldest_activity_at=sampled_at - datetime.timedelta(days=10),
+        inactive_before=sampled_at - datetime.timedelta(hours=6),
+        limit=500,
+    )
+    repository.list_due_agent_ids.assert_not_awaited()
+    runtime.submit.assert_not_awaited()
+
+
+async def test_sample_rejects_naive_time_before_repository_io() -> None:
+    """A sampling instant cannot silently acquire local timezone authority."""
+    repository = AsyncMock()
+    service = HistoricalMemoryDiscoveryService(
+        repository=repository,
+        job_runtime=AsyncMock(),
+    )
+    with pytest.raises(ValueError, match="aware"):
+        await service.admit_and_list_due_agents(
+            now=datetime.datetime(2099, 1, 1),
+            agent_id="a" * 32,
+        )
+    repository.admit_eligible_sources.assert_not_awaited()

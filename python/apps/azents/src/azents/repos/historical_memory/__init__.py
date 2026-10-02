@@ -99,6 +99,7 @@ class HistoricalMemoryRepository:
     async def admit_eligible_sources(
         self,
         *,
+        agent_id: str | None,
         now: datetime.datetime,
         oldest_activity_at: datetime.datetime,
         inactive_before: datetime.datetime,
@@ -108,6 +109,7 @@ class HistoricalMemoryRepository:
         async with self.session_manager() as session:
             admitted = await self.admit_eligible_sources_in_session(
                 session,
+                agent_id=agent_id,
                 now=now,
                 oldest_activity_at=oldest_activity_at,
                 inactive_before=inactive_before,
@@ -120,6 +122,7 @@ class HistoricalMemoryRepository:
         self,
         session: AsyncSession,
         *,
+        agent_id: str | None,
         now: datetime.datetime,
         oldest_activity_at: datetime.datetime,
         inactive_before: datetime.datetime,
@@ -154,6 +157,8 @@ class HistoricalMemoryRepository:
             .limit(limit)
             .with_for_update(of=RDBAgentSession, skip_locked=True)
         )
+        if agent_id is not None:
+            candidates = candidates.where(RDBAgentSession.agent_id == agent_id)
         source_ids = list((await session.execute(candidates)).scalars())
         if not source_ids:
             return []

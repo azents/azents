@@ -1,6 +1,7 @@
 ---
 title: "Historical Session Context Requirements"
 created: 2026-09-30
+implemented: 2026-10-02
 tags: [memory, conversation, security, engine]
 document_role: primary
 document_type: requirements

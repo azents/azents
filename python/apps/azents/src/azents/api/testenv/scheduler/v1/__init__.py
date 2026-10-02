@@ -1,15 +1,21 @@
 """Credential-free scheduler execution controls."""
 
+import asyncio
+import dataclasses
 import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import AwareDatetime, BaseModel, ConfigDict
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
 from azents.scheduler.deps import get_scheduler_service
 from azents.scheduler.service import SchedulerService
 from azents.scheduler.user_scheduled_task_dispatch import (
     get_user_scheduled_task_dispatcher,
+)
+from azents.services.historical_memory.discovery import HistoricalMemoryDiscoveryService
+from azents.services.historical_memory.preparation import (
+    HistoricalMemoryPreparationService,
 )
 from azents.services.scheduled_task.service import ScheduledTaskDispatcher
 from azents.utils.fastapi.route import RouteMounter
@@ -49,6 +55,70 @@ class ScheduledTaskDispatchResponse(BaseModel):
     coalesced: int
     skipped: int
     wake_failed: int
+
+
+class HistoricalMemorySampleRequest(BaseModel):
+    """Sample one product-created Agent at a deterministic aware instant."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    agent_id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    now: AwareDatetime
+
+
+class HistoricalMemorySampleResponse(BaseModel):
+    """Safe aggregate evidence from ordinary admission and preparation."""
+
+    now: datetime.datetime
+    admitted: int
+    due_agents: int
+    attempted: int
+    prepared: int
+    empty: int
+    failed: int
+    quota_advanced: int
+
+
+@router.post("/historical-memory/sample")
+async def sample_historical_memory(
+    body: HistoricalMemorySampleRequest,
+    discovery: Annotated[HistoricalMemoryDiscoveryService, Depends()],
+    preparation: Annotated[HistoricalMemoryPreparationService, Depends()],
+) -> HistoricalMemorySampleResponse:
+    """Run real bounded services without changing source activity.
+
+    This isolated testenv sampling endpoint proves admission, model execution,
+    and publication. Scheduler dispatch and Job Runtime supervision have
+    separate integration coverage; this endpoint does not bypass their clocks
+    or claim to execute a registered job.
+    """
+    now = body.now.astimezone(datetime.UTC)
+    async with asyncio.timeout(120):
+        sample = await discovery.admit_and_list_due_agents(
+            now=now,
+            agent_id=body.agent_id,
+        )
+        counters = {
+            "attempted": 0,
+            "prepared": 0,
+            "empty": 0,
+            "failed": 0,
+            "quota_advanced": 0,
+        }
+        if body.agent_id in sample.due_agent_ids:
+            summary = await preparation.prepare_agent(
+                agent_id=body.agent_id,
+                deadline=datetime.datetime.now(datetime.UTC)
+                + datetime.timedelta(seconds=110),
+                now=now,
+            )
+            counters = dataclasses.asdict(summary)
+    return HistoricalMemorySampleResponse(
+        now=now,
+        admitted=sample.admitted,
+        due_agents=len(sample.due_agent_ids),
+        **counters,
+    )
 
 
 @router.post("/run")

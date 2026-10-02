@@ -379,7 +379,7 @@ HISTORICAL_MEMORY_DISCOVERY_TASK = ScheduledTaskDefinition(
         max_delay=datetime.timedelta(minutes=30),
     ),
     handler=historical_memory_discovery_handler,
-    enabled_by_default=False,
+    enabled_by_default=True,
 )
 
 

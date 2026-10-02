@@ -144,21 +144,30 @@ class HistoricalMemoryPreparationService:
         *,
         agent_id: str,
         deadline: datetime.datetime,
+        now: datetime.datetime | None,
     ) -> HistoricalMemoryPreparationSummary:
         """Prepare up to one bounded source batch for one Agent."""
+        if now is not None:
+            if now.tzinfo is None or now.utcoffset() is None:
+                raise ValueError("Historical Memory sampling instant must be aware.")
+            now = now.astimezone(datetime.UTC)
+
+        def sample_time() -> datetime.datetime:
+            return now if now is not None else datetime.datetime.now(datetime.UTC)
+
         attempted = 0
         prepared_count = 0
         empty = 0
         failed = 0
         quota_advanced = 0
         while attempted < _SOURCE_BATCH_LIMIT:
-            now = datetime.datetime.now(datetime.UTC)
-            if now >= deadline:
+            if datetime.datetime.now(datetime.UTC) >= deadline:
                 break
+            attempted_at = sample_time()
             source = await self.preparation_repository.begin_next(
                 agent_id=agent_id,
-                attempted_at=now,
-                inactive_before=now - _INACTIVITY,
+                attempted_at=attempted_at,
+                inactive_before=attempted_at - _INACTIVITY,
             )
             if source is None:
                 break
@@ -170,9 +179,8 @@ class HistoricalMemoryPreparationService:
                     advanced = await self.preparation_repository.advance_after_quota(
                         source_session_id=source.source_session_id,
                         failure=exc,
-                        attempted_at=datetime.datetime.now(datetime.UTC),
-                        inactive_before=datetime.datetime.now(datetime.UTC)
-                        - _INACTIVITY,
+                        attempted_at=sample_time(),
+                        inactive_before=sample_time() - _INACTIVITY,
                     )
                     if advanced is not None:
                         quota_advanced += 1
@@ -181,7 +189,7 @@ class HistoricalMemoryPreparationService:
                     continue
                 await self.preparation_repository.record_failure(
                     source=source,
-                    attempted_at=datetime.datetime.now(datetime.UTC),
+                    attempted_at=sample_time(),
                     failure_code=f"provider_{exc.category.value}",
                 )
                 failed += 1
@@ -189,7 +197,7 @@ class HistoricalMemoryPreparationService:
             except ModelStreamTimeoutError as exc:
                 await self.preparation_repository.record_failure(
                     source=source,
-                    attempted_at=datetime.datetime.now(datetime.UTC),
+                    attempted_at=sample_time(),
                     failure_code=exc.failure_code,
                 )
                 failed += 1
@@ -197,7 +205,7 @@ class HistoricalMemoryPreparationService:
             except HistoricalMemoryOutputError as exc:
                 await self.preparation_repository.record_failure(
                     source=source,
-                    attempted_at=datetime.datetime.now(datetime.UTC),
+                    attempted_at=sample_time(),
                     failure_code=exc.code,
                 )
                 failed += 1
@@ -205,7 +213,7 @@ class HistoricalMemoryPreparationService:
             completion = HistoricalMemoryCompletion(
                 source_activity_at=source.source_activity_at,
                 source_tail_event_id=source.source_tail_event_id,
-                prepared_at=datetime.datetime.now(datetime.UTC),
+                prepared_at=sample_time(),
                 source_title_snapshot=source.source_title,
                 summary=summary,
             )
