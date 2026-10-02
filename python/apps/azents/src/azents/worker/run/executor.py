@@ -177,7 +177,6 @@ from azents.repos.model_candidate_health import ModelCandidateHealthRepository
 from azents.repos.model_candidate_health.data import ModelCandidateIdentity
 from azents.repos.model_operation_completion import (
     ModelOperationCompletion,
-    ModelOperationCompletionRepository,
 )
 from azents.repos.toolkit import ToolkitRepository
 from azents.runtime.types import RuntimeDomainConfig
@@ -1432,19 +1431,6 @@ class RunExecutor:
             if isinstance(event, SubagentTreeChanged):
                 await dispatch_tree_change_to_tree(event)
 
-        async def complete_model_operation_in_session(
-            session: AsyncSession,
-            operation_kind: ModelOperationKind,
-        ) -> None:
-            await self._complete_model_operation_success_in_session(
-                session,
-                session_id=snapshot.session_id,
-                run_id=run_id,
-                owner_generation=owner_generation,
-                workspace_id=snapshot.workspace_id,
-                operation_kind=operation_kind,
-            )
-
         async def prepare_compaction_request(
             current_request: RunRequest,
         ) -> RunRequest:
@@ -1475,7 +1461,13 @@ class RunExecutor:
                 owner_generation=owner_generation,
             ),
             mailbox_activity_observer=mailbox_activity_observer,
-            complete_model_operation_in_session=(complete_model_operation_in_session),
+            model_operation_completion=ModelOperationCompletion(
+                workspace_id=snapshot.workspace_id,
+                session_id=snapshot.session_id,
+                run_id=run_id,
+                owner_generation=owner_generation,
+                operation_kind=ModelOperationKind.FOREGROUND,
+            ),
             prepare_compaction_request=prepare_compaction_request,
         )
         context = ToolkitContext(
@@ -2923,52 +2915,6 @@ class RunExecutor:
         return ModelQuotaAdvanceResult(
             operation=resulting_operation,
             exhausted=exhausted,
-        )
-
-    async def _complete_model_operation_success(
-        self,
-        *,
-        session_id: str,
-        run_id: str,
-        owner_generation: int,
-        workspace_id: str,
-        operation_kind: ModelOperationKind,
-    ) -> None:
-        """Settle an exact probe success and close the matching operation."""
-        async with self.session_manager() as session:
-            await self._complete_model_operation_success_in_session(
-                session,
-                session_id=session_id,
-                run_id=run_id,
-                owner_generation=owner_generation,
-                workspace_id=workspace_id,
-                operation_kind=operation_kind,
-            )
-
-    async def _complete_model_operation_success_in_session(
-        self,
-        session: AsyncSession,
-        *,
-        session_id: str,
-        run_id: str,
-        owner_generation: int,
-        workspace_id: str,
-        operation_kind: ModelOperationKind,
-    ) -> None:
-        """Settle operation success inside the caller's output transaction."""
-        await ModelOperationCompletionRepository(
-            agent_session_repository=self.agent_session_repository,
-            agent_run_repository=self.session_lifecycle.agent_run_repository,
-            model_candidate_health_repository=(self.model_candidate_health_repository),
-        ).complete_success_in_session(
-            session,
-            ModelOperationCompletion(
-                workspace_id=workspace_id,
-                session_id=session_id,
-                run_id=run_id,
-                owner_generation=owner_generation,
-                operation_kind=operation_kind,
-            ),
         )
 
     async def _capture_compaction_context(

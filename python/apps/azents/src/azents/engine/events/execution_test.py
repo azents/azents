@@ -15,17 +15,29 @@ from azents.core.inference_profile import SessionInferenceState
 from azents.engine.events.execution import (
     AgentRunExecution,
     AgentRunExecutionRequest,
+    AutoCompactionFilter,
+    ClientToolOutputMaterializerProtocol,
     InputPollResult,
     ModelCallPreparer,
+    PhaseSink,
+    PreModelLowerHook,
     PreparedModelCall,
+    ProviderOutputMaterializerProtocol,
     TurnEndReason,
 )
 from azents.engine.events.generated_files import PendingGeneratedFileOutput
 from azents.engine.events.protocols import (
+    AdapterOutputNormalizer,
     ContentDeltaProjection,
+    ModelAdapter,
     NativeEvent,
     NativeModelRequest,
     NormalizedAdapterOutput,
+    OutputSink,
+    PostLowerFilter,
+    RunStateRepository,
+    SessionHeadRepository,
+    TranscriptRepository,
 )
 from azents.engine.events.types import (
     ActiveToolCall,
@@ -51,10 +63,35 @@ from azents.engine.events.types import (
     UserMessagePayload,
     build_native_compat_key,
 )
+from azents.engine.model_stream import ModelStreamWatchdog
 from azents.engine.run.errors import ModelCallError
 from azents.engine.run.turn_action_bridge import TurnActionBridgeBoundary
 from azents.engine.run.types import USER_STOP_CANCEL_MESSAGE
+from azents.rdb.session import SessionManager
 from azents.repos.agent_execution.data import EventCreate
+from azents.repos.engine_event_mutation import EngineEventMutationRepository
+from azents.repos.engine_execution_operation import EngineExecutionOperationRepository
+from azents.repos.engine_input_projection import EngineInputProjectionRepository
+from azents.repos.engine_model_input_operation import (
+    EngineModelInputOperationRepository,
+)
+from azents.repos.engine_output_operation import (
+    EngineOutputOperationRepository,
+    OutputSystemPromptRepository,
+)
+from azents.repos.engine_run_finalization_operation import (
+    EngineRunFinalizationOperationRepository,
+)
+from azents.repos.engine_tool_result_operation import (
+    EngineToolResultOperationRepository,
+)
+from azents.repos.file_metadata_authority import FileResourceAuthority
+from azents.repos.model_operation_completion import ModelOperationCompletion
+from azents.repos.provider_output_operation import (
+    ProviderOutputFileMetadata,
+    ProviderOutputMetadataAdmission,
+)
+from azents.repos.terminal_finalization import TerminalRunFinalizationRepository
 from azents.testing.model_selection import (
     make_test_model_selection,
     make_test_model_settings,
@@ -736,12 +773,8 @@ class _PreparedProviderOutput:
     def __init__(self, normalized: NormalizedAdapterOutput) -> None:
         self.normalized = normalized
         self.admitted = False
-        self.persist_sessions: list[AsyncSession] = []
+        self.metadata_admission = _metadata_admission()
         self.cleanup_calls = 0
-
-    async def persist(self, session: AsyncSession) -> None:
-        """Record the transaction used for metadata admission."""
-        self.persist_sessions.append(session)
 
     async def cleanup(self) -> None:
         """Record object compensation."""
@@ -775,12 +808,8 @@ class _PreparedClientToolOutput:
             }
         )
         self.admitted = False
-        self.persist_sessions: list[AsyncSession] = []
+        self.metadata_admission = _metadata_admission()
         self.cleanup_calls = 0
-
-    async def persist(self, session: AsyncSession) -> None:
-        """Record the result transaction used for file metadata."""
-        self.persist_sessions.append(session)
 
     async def cleanup(self) -> None:
         """Record compensation before result admission."""
@@ -803,28 +832,134 @@ class _ClientToolOutputMaterializer:
         return self.prepared
 
 
-class _FailingPreparedClientToolOutput(_PreparedClientToolOutput):
-    """Fail after recording the generated-file admission transaction."""
+class _OutputMetadataRepository:
+    """Record admission independently of transient prepared output objects."""
 
-    async def persist(self, session: AsyncSession) -> None:
-        """Simulate storage metadata admission failure after object preparation."""
-        await super().persist(session)
-        raise RuntimeError("generated-file admission failed")
+    def __init__(self, *, failure: Exception | None) -> None:
+        self.failure = failure
+        self.sessions: list[AsyncSession] = []
 
-
-class _FailingClientToolOutputMaterializer:
-    """Prepare a client result whose persistence fails."""
-
-    def __init__(self) -> None:
-        self.prepared: _FailingPreparedClientToolOutput | None = None
-
-    async def prepare_client_result(
+    async def persist_in_session(
         self,
-        result: ClientToolResultPayload,
-    ) -> _FailingPreparedClientToolOutput:
-        """Return the failing prepared result."""
-        self.prepared = _FailingPreparedClientToolOutput(result)
-        return self.prepared
+        session: AsyncSession,
+        *,
+        authority: FileResourceAuthority,
+        generated_images: Sequence[ProviderOutputFileMetadata],
+    ) -> None:
+        """Record the metadata and Event composition's one session."""
+        del authority, generated_images
+        self.sessions.append(session)
+        if self.failure is not None:
+            raise self.failure
+
+
+class _ModelOperationRepository:
+    """Reject unexpected settlement in fixtures without an operation identity."""
+
+    async def complete_success_in_session(
+        self, session: AsyncSession, completion: ModelOperationCompletion
+    ) -> None:
+        """Require a focused settlement fake when a test enables completion."""
+        del session, completion
+        raise AssertionError("Unexpected model-operation settlement")
+
+
+def _metadata_admission() -> ProviderOutputMetadataAdmission:
+    """Create detached metadata data without any persistence callback."""
+    return ProviderOutputMetadataAdmission(
+        authority=FileResourceAuthority(
+            workspace_id="workspace-1",
+            agent_id="agent-1",
+            session_id="session-1",
+            root_session_id="session-1",
+            run_id="run-1",
+            run_index=1,
+            owner_generation=1,
+        ),
+        generated_images=(),
+    )
+
+
+def _execution(
+    *,
+    session_manager: SessionManager[AsyncSession],
+    input_projection_repository: EngineInputProjectionRepository | None,
+    terminal_finalization_repository: TerminalRunFinalizationRepository | None,
+    metadata_repository: _OutputMetadataRepository,
+    model_operation_completion: ModelOperationCompletion | None,
+    post_lower_filter: PostLowerFilter[NativeModelRequest],
+    model_adapter: ModelAdapter[NativeModelRequest, NativeEvent],
+    model_stream_watchdog: ModelStreamWatchdog,
+    model_stream_provider: str,
+    model_stream_provider_integration_id: str | None,
+    model_stream_inference_profile: str | None,
+    output_normalizer: AdapterOutputNormalizer[NativeEvent],
+    model_call_preparer: ModelCallPreparer[NativeModelRequest],
+    run_repo: RunStateRepository,
+    transcript_repo: TranscriptRepository,
+    auto_compaction_filter: AutoCompactionFilter | None = None,
+    output_sink: OutputSink | None = None,
+    phase_sink: PhaseSink | None = None,
+    provider_output_materializer: ProviderOutputMaterializerProtocol | None = None,
+    client_tool_output_materializer: ClientToolOutputMaterializerProtocol | None = None,
+    pre_model_lower_hook: PreModelLowerHook | None = None,
+    session_repo: SessionHeadRepository | None = None,
+    system_prompt_snapshot_repo: OutputSystemPromptRepository | None = None,
+) -> AgentRunExecution[NativeModelRequest, NativeEvent]:
+    """Wire real completed repositories over each test's recording DB primitives."""
+    mutations = EngineEventMutationRepository(transcript_repository=transcript_repo)
+    results = EngineToolResultOperationRepository(
+        session_manager=session_manager,
+        run_repository=run_repo,
+        transcript_repository=transcript_repo,
+    )
+    return AgentRunExecution(
+        execution_operation_repository=EngineExecutionOperationRepository(
+            session_manager=session_manager,
+            run_repository=run_repo,
+            model_file_pin_repository=None,
+        ),
+        model_input_operation_repository=EngineModelInputOperationRepository(
+            session_manager=session_manager,
+            run_repository=run_repo,
+            transcript_repository=transcript_repo,
+            session_head_repository=session_repo,
+            tool_result_repository=results,
+            input_projection_repository=input_projection_repository,
+        ),
+        tool_result_operation_repository=results,
+        output_operation_repository=EngineOutputOperationRepository(
+            session_manager=session_manager,
+            run_repository=run_repo,
+            event_mutation_repository=mutations,
+            metadata_repository=metadata_repository,
+            tool_result_repository=results,
+            system_prompt_repository=system_prompt_snapshot_repo,
+        ),
+        run_finalization_operation_repository=EngineRunFinalizationOperationRepository(
+            session_manager=session_manager,
+            run_repository=run_repo,
+            event_mutation_repository=mutations,
+            model_operation_repository=_ModelOperationRepository(),
+            terminal_finalization_repository=terminal_finalization_repository,
+            model_file_pin_repository=None,
+        ),
+        model_operation_completion=model_operation_completion,
+        post_lower_filter=post_lower_filter,
+        model_adapter=model_adapter,
+        model_stream_watchdog=model_stream_watchdog,
+        model_stream_provider=model_stream_provider,
+        model_stream_provider_integration_id=model_stream_provider_integration_id,
+        model_stream_inference_profile=model_stream_inference_profile,
+        output_normalizer=output_normalizer,
+        model_call_preparer=model_call_preparer,
+        auto_compaction_filter=auto_compaction_filter,
+        output_sink=output_sink,
+        phase_sink=phase_sink,
+        provider_output_materializer=provider_output_materializer,
+        client_tool_output_materializer=client_tool_output_materializer,
+        pre_model_lower_hook=pre_model_lower_hook,
+    )
 
 
 class _SequenceNormalizer:
@@ -1206,10 +1341,12 @@ async def test_text_run_completes() -> None:
     ) -> None:
         emitted_phases.append((phase, model_call_started_at))
 
-    execution = AgentRunExecution(
+    execution = _execution(
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
+        metadata_repository=_OutputMetadataRepository(failure=None),
+        model_operation_completion=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -1274,10 +1411,12 @@ async def test_dialect_follow_up_continues_without_tool_call() -> None:
             ),
         ]
     )
-    execution = AgentRunExecution(
+    execution = _execution(
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
+        metadata_repository=_OutputMetadataRepository(failure=None),
+        model_operation_completion=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -1377,10 +1516,12 @@ async def test_external_run_callbacks_observe_no_open_db_session() -> None:
         del phase, model_call_started_at
         assert open_sessions == 0
 
-    execution = AgentRunExecution(
+    execution = _execution(
         session_manager=session_manager,
         input_projection_repository=None,
         terminal_finalization_repository=None,
+        metadata_repository=_OutputMetadataRepository(failure=None),
+        model_operation_completion=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -1427,10 +1568,12 @@ async def test_model_delta_reaches_output_sink_before_stream_completion() -> Non
         del appended
         sink_outputs.append(normalized)
 
-    execution = AgentRunExecution(
+    execution = _execution(
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
+        metadata_repository=_OutputMetadataRepository(failure=None),
+        model_operation_completion=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -1487,10 +1630,12 @@ async def test_text_run_commits_durable_events_before_output_sink() -> None:
         del normalized, appended
         committed_event_counts_at_sink.append(session.commits[-1])
 
-    execution = AgentRunExecution(
+    execution = _execution(
         session_manager=_session_manager_for(session),
         input_projection_repository=None,
         terminal_finalization_repository=None,
+        metadata_repository=_OutputMetadataRepository(failure=None),
+        model_operation_completion=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -1525,10 +1670,12 @@ async def test_provider_output_shares_event_admission_transaction() -> None:
     """Persist provider files and their event references in one DB transaction."""
     transcript_repo = _TranscriptRepo()
     materializer = _ProviderOutputMaterializer()
-    execution = AgentRunExecution(
+    execution = _execution(
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
+        metadata_repository=_OutputMetadataRepository(failure=None),
+        model_operation_completion=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -1557,19 +1704,21 @@ async def test_provider_output_shares_event_admission_transaction() -> None:
     assert materializer.prepared is not None
     assert materializer.prepared.admitted is True
     assert materializer.prepared.cleanup_calls == 0
-    assert (
-        materializer.prepared.persist_sessions[0] is transcript_repo.append_sessions[0]
-    )
+    metadata_repository = execution.output_repository.metadata_repository
+    assert isinstance(metadata_repository, _OutputMetadataRepository)
+    assert metadata_repository.sessions[0] is transcript_repo.append_sessions[0]
 
 
 async def test_provider_output_cleans_up_after_event_admission_failure() -> None:
     """Compensate uploads when the event transaction rejects provider output."""
     transcript_repo = _FailingTranscriptRepo()
     materializer = _ProviderOutputMaterializer()
-    execution = AgentRunExecution(
+    execution = _execution(
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
+        metadata_repository=_OutputMetadataRepository(failure=None),
+        model_operation_completion=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -1598,9 +1747,9 @@ async def test_provider_output_cleans_up_after_event_admission_failure() -> None
     assert materializer.prepared is not None
     assert materializer.prepared.admitted is False
     assert materializer.prepared.cleanup_calls == 1
-    assert (
-        materializer.prepared.persist_sessions[0] is transcript_repo.append_sessions[0]
-    )
+    metadata_repository = execution.output_repository.metadata_repository
+    assert isinstance(metadata_repository, _OutputMetadataRepository)
+    assert metadata_repository.sessions[0] is transcript_repo.append_sessions[0]
 
 
 async def test_provider_output_admits_terminal_turn_without_durable_event() -> None:
@@ -1608,10 +1757,12 @@ async def test_provider_output_admits_terminal_turn_without_durable_event() -> N
     materializer = _ProviderOutputMaterializer()
     run_repo = _RunRepo()
     transcript_repo = _TranscriptRepo()
-    execution = AgentRunExecution(
+    execution = _execution(
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
+        metadata_repository=_OutputMetadataRepository(failure=None),
+        model_operation_completion=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -1661,10 +1812,12 @@ async def test_output_without_usage_clears_retry_state_before_publish() -> None:
         del normalized, appended
         retry_updates_at_sink.append(list(run_repo.retry_states))
 
-    execution = AgentRunExecution(
+    execution = _execution(
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
+        metadata_repository=_OutputMetadataRepository(failure=None),
+        model_operation_completion=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -1711,10 +1864,12 @@ async def test_text_run_output_sink_receives_run_marker() -> None:
         del normalized
         sink_kinds.append([event.kind for event in appended])
 
-    execution = AgentRunExecution(
+    execution = _execution(
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
+        metadata_repository=_OutputMetadataRepository(failure=None),
+        model_operation_completion=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -1789,10 +1944,12 @@ async def test_model_usage_is_appended_as_turn_marker(
             length=11,
         ),
     )
-    execution = AgentRunExecution(
+    execution = _execution(
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
+        metadata_repository=_OutputMetadataRepository(failure=None),
+        model_operation_completion=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -1875,10 +2032,12 @@ async def test_model_output_without_system_prompt_clears_session_snapshot() -> N
         )
     )
     system_prompt_snapshot_repo = _SystemPromptSnapshotRepo(previous_prompt)
-    execution = AgentRunExecution(
+    execution = _execution(
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
+        metadata_repository=_OutputMetadataRepository(failure=None),
+        model_operation_completion=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -1913,10 +2072,12 @@ async def test_model_output_without_system_prompt_clears_session_snapshot() -> N
 async def test_model_input_uses_session_head_event_id() -> None:
     """After compaction, model input is fetched from session head."""
     transcript_repo = _TranscriptRepo()
-    execution = AgentRunExecution(
+    execution = _execution(
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
+        metadata_repository=_OutputMetadataRepository(failure=None),
+        model_operation_completion=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -1951,10 +2112,12 @@ async def test_closed_admission_barrier_prevents_call_and_handler_start() -> Non
     run_repo = _RunRepo()
     transcript_repo = _TranscriptRepo()
     tool_executor = _ToolExecutor()
-    execution = AgentRunExecution(
+    execution = _execution(
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
+        metadata_repository=_OutputMetadataRepository(failure=None),
+        model_operation_completion=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -1991,10 +2154,12 @@ async def test_tool_run_with_turn_limit_interrupts_after_tool_result() -> None:
     """Append final-turn tool result at turn limit, then end as interrupted."""
     run_repo = _RunRepo()
     transcript_repo = _TranscriptRepo()
-    execution = AgentRunExecution(
+    execution = _execution(
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
+        metadata_repository=_OutputMetadataRepository(failure=None),
+        model_operation_completion=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -2054,10 +2219,12 @@ async def test_terminal_tool_completes_run_without_another_model_turn() -> None:
         ]
     )
     tool_executor = _TerminalToolExecutor(run_repo)
-    execution = AgentRunExecution(
+    execution = _execution(
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
+        metadata_repository=_OutputMetadataRepository(failure=None),
+        model_operation_completion=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -2125,10 +2292,12 @@ async def test_terminal_tool_recovery_finalizes_result_before_model_dispatch() -
     transcript_repo.events.append(_tool_call_event(name="submit_scheduled_task_result"))
     lowerer = _RecordingLowerer()
     normalizer = _OutputSequenceNormalizer([])
-    execution = AgentRunExecution(
+    execution = _execution(
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
+        metadata_repository=_OutputMetadataRepository(failure=None),
+        model_operation_completion=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -2198,10 +2367,12 @@ async def test_bridge_tool_batch_forces_post_tool_poll(
         poll_calls.append(session_id)
         return poll_results.pop(0)
 
-    execution = AgentRunExecution(
+    execution = _execution(
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
+        metadata_repository=_OutputMetadataRepository(failure=None),
+        model_operation_completion=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -2269,10 +2440,12 @@ async def test_multiple_bridge_calls_in_one_batch_force_one_post_tool_poll() -> 
         poll_count += 1
         return poll_results.pop(0)
 
-    execution = AgentRunExecution(
+    execution = _execution(
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
+        metadata_repository=_OutputMetadataRepository(failure=None),
+        model_operation_completion=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -2332,10 +2505,12 @@ async def test_pre_model_bridge_recovery_suppresses_parent_result() -> None:
             suppress_parent_result=True,
         )
 
-    execution = AgentRunExecution(
+    execution = _execution(
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
+        metadata_repository=_OutputMetadataRepository(failure=None),
+        model_operation_completion=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -2370,10 +2545,12 @@ async def test_parallel_calls_finalize_independently() -> None:
     run_repo = _RunRepo()
     transcript_repo = _TranscriptRepo()
     tool_executor = _OrderedToolExecutor()
-    execution = AgentRunExecution(
+    execution = _execution(
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
+        metadata_repository=_OutputMetadataRepository(failure=None),
+        model_operation_completion=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -2433,10 +2610,12 @@ async def test_term_after_admission_keeps_normal_result_and_run_recoverable() ->
     transcript_repo = _TranscriptRepo()
     tool_executor = _OrderedToolExecutor()
     barrier = _MutableToolAdmissionBarrier()
-    execution = AgentRunExecution(
+    execution = _execution(
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
+        metadata_repository=_OutputMetadataRepository(failure=None),
+        model_operation_completion=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -2490,10 +2669,12 @@ async def test_unlimited_tool_run_executes_tool_then_completes() -> None:
     """max_turns None keeps running to next model turn after tool result."""
     run_repo = _RunRepo()
     transcript_repo = _TranscriptRepo()
-    execution = AgentRunExecution(
+    execution = _execution(
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
+        metadata_repository=_OutputMetadataRepository(failure=None),
+        model_operation_completion=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -2550,10 +2731,12 @@ async def test_tool_run_completes_after_empty_terminal_model_turn() -> None:
             ),
         ]
     )
-    execution = AgentRunExecution(
+    execution = _execution(
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
+        metadata_repository=_OutputMetadataRepository(failure=None),
+        model_operation_completion=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -2606,10 +2789,12 @@ async def test_final_tool_turn_executes_tool_then_completes() -> None:
             ),
         ]
     )
-    execution = AgentRunExecution(
+    execution = _execution(
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
+        metadata_repository=_OutputMetadataRepository(failure=None),
+        model_operation_completion=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -2660,10 +2845,12 @@ async def test_client_tool_source_snapshot_is_shared_by_durable_and_active() -> 
     run_repo = _RunRepo()
     transcript_repo = _TranscriptRepo()
     tool_executor = _ToolExecutor()
-    execution = AgentRunExecution(
+    execution = _execution(
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
+        metadata_repository=_OutputMetadataRepository(failure=None),
+        model_operation_completion=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -2714,10 +2901,12 @@ async def test_generated_client_result_materializes_in_result_transaction() -> N
     run_repo = _RunRepo()
     transcript_repo = _TranscriptRepo()
     materializer = _ClientToolOutputMaterializer()
-    execution = AgentRunExecution(
+    execution = _execution(
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
+        metadata_repository=_OutputMetadataRepository(failure=None),
+        model_operation_completion=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -2772,18 +2961,25 @@ async def test_generated_client_result_materializes_in_result_transaction() -> N
         )
         if event.kind == EventKind.CLIENT_TOOL_RESULT
     )
-    assert materializer.prepared.persist_sessions[0] is result_session
+    metadata_repository = execution.output_repository.metadata_repository
+    assert isinstance(metadata_repository, _OutputMetadataRepository)
+    assert metadata_repository.sessions[0] is result_session
 
 
 async def test_generated_client_result_cleans_up_after_admission_failure() -> None:
     """Compensate prepared objects and append a sanitized failed result."""
     run_repo = _RunRepo()
     transcript_repo = _TranscriptRepo()
-    materializer = _FailingClientToolOutputMaterializer()
-    execution = AgentRunExecution(
+    materializer = _ClientToolOutputMaterializer()
+    metadata_repository = _OutputMetadataRepository(
+        failure=RuntimeError("generated-file admission failed")
+    )
+    execution = _execution(
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
+        metadata_repository=metadata_repository,
+        model_operation_completion=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -2841,10 +3037,12 @@ async def test_generated_client_result_without_materializer_fails_safely(
     """Reject transient generated bytes when durable output storage is absent."""
     run_repo = _RunRepo()
     transcript_repo = _TranscriptRepo()
-    execution = AgentRunExecution(
+    execution = _execution(
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
+        metadata_repository=_OutputMetadataRepository(failure=None),
+        model_operation_completion=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -2923,10 +3121,12 @@ async def test_model_call_preparer_runs_for_each_model_turn() -> None:
             on_turn_end=on_turn_end,
         )
 
-    execution = AgentRunExecution(
+    execution = _execution(
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
+        metadata_repository=_OutputMetadataRepository(failure=None),
+        model_operation_completion=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -2992,10 +3192,12 @@ async def test_model_call_preparer_turn_end_receives_error_reason() -> None:
             on_turn_end=on_turn_end,
         )
 
-    execution = AgentRunExecution(
+    execution = _execution(
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
+        metadata_repository=_OutputMetadataRepository(failure=None),
+        model_operation_completion=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -3027,10 +3229,12 @@ async def test_provider_tool_call_completes_without_next_model_turn() -> None:
     """Provider-hosted tool calls do not count as client tool work."""
     run_repo = _RunRepo()
     transcript_repo = _TranscriptRepo()
-    execution = AgentRunExecution(
+    execution = _execution(
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
+        metadata_repository=_OutputMetadataRepository(failure=None),
+        model_operation_completion=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -3074,10 +3278,12 @@ async def test_provider_tool_call_with_message_completes_one_turn() -> None:
     """Provider tool trace plus final message completes in one model turn."""
     run_repo = _RunRepo()
     transcript_repo = _TranscriptRepo()
-    execution = AgentRunExecution(
+    execution = _execution(
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
+        metadata_repository=_OutputMetadataRepository(failure=None),
+        model_operation_completion=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -3123,10 +3329,12 @@ async def test_auto_compaction_does_not_publish_phase_when_threshold_is_not_met(
 ):
     """Ordinary turns do not flash the context-preparation live operation."""
     run_repo = _RunRepo()
-    execution = AgentRunExecution(
+    execution = _execution(
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
+        metadata_repository=_OutputMetadataRepository(failure=None),
+        model_operation_completion=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -3158,10 +3366,12 @@ async def test_auto_compaction_does_not_publish_phase_when_threshold_is_not_met(
 async def test_auto_compaction_restores_preparing_phase_after_success() -> None:
     """Successful compaction closes the live operation before model lowering."""
     run_repo = _RunRepo()
-    execution = AgentRunExecution(
+    execution = _execution(
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
+        metadata_repository=_OutputMetadataRepository(failure=None),
+        model_operation_completion=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -3194,10 +3404,12 @@ async def test_auto_compaction_restores_preparing_phase_after_success() -> None:
 async def test_auto_compaction_keeps_compacting_phase_after_failure() -> None:
     """Failed compaction keeps one live operation while retry owns the error."""
     run_repo = _RunRepo()
-    execution = AgentRunExecution(
+    execution = _execution(
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
+        metadata_repository=_OutputMetadataRepository(failure=None),
+        model_operation_completion=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -3253,10 +3465,12 @@ async def test_compacted_run_continues_with_summary_without_terminal_marker() ->
         created_at=datetime.datetime.now(datetime.UTC),
     )
 
-    execution = AgentRunExecution(
+    execution = _execution(
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
+        metadata_repository=_OutputMetadataRepository(failure=None),
+        model_operation_completion=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -3327,10 +3541,12 @@ async def test_tool_turn_polls_input_before_next_model_call() -> None:
             events=[event],
         )
 
-    execution = AgentRunExecution(
+    execution = _execution(
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
+        metadata_repository=_OutputMetadataRepository(failure=None),
+        model_operation_completion=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -3400,10 +3616,12 @@ async def test_context_invalidation_yields_for_request_refresh() -> None:
             suppress_parent_result=False,
         )
 
-    execution = AgentRunExecution(
+    execution = _execution(
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
+        metadata_repository=_OutputMetadataRepository(failure=None),
+        model_operation_completion=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -3452,10 +3670,12 @@ async def test_orphan_tool_call_without_state_is_cancelled_before_lowering() -> 
     transcript_repo = _TranscriptRepo()
     transcript_repo.events.append(_tool_call_event())
     lowerer = _RecordingLowerer()
-    execution = AgentRunExecution(
+    execution = _execution(
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
+        metadata_repository=_OutputMetadataRepository(failure=None),
+        model_operation_completion=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -3511,10 +3731,12 @@ async def test_active_unresolved_tool_call_is_cancelled_before_lowering() -> Non
     transcript_repo = _TranscriptRepo()
     transcript_repo.events.append(_tool_call_event())
     lowerer = _RecordingLowerer()
-    execution = AgentRunExecution(
+    execution = _execution(
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
+        metadata_repository=_OutputMetadataRepository(failure=None),
+        model_operation_completion=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -3568,10 +3790,12 @@ async def test_stale_active_entry_with_result_is_removed_without_replacement() -
     ]
     transcript_repo = _TranscriptRepo()
     transcript_repo.events.extend([_tool_call_event(), _tool_result_event()])
-    execution = AgentRunExecution(
+    execution = _execution(
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
+        metadata_repository=_OutputMetadataRepository(failure=None),
+        model_operation_completion=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -3621,10 +3845,12 @@ async def test_active_entry_without_call_event_fails_invariant() -> None:
             wire_dialect="json_function",
         )
     ]
-    execution = AgentRunExecution(
+    execution = _execution(
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
+        metadata_repository=_OutputMetadataRepository(failure=None),
+        model_operation_completion=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -3664,10 +3890,12 @@ async def test_model_stream_user_stop_appends_only_assistant_text() -> None:
         EventKind.REASONING,
         ReasoningPayload(text="hidden", native_artifact=_artifact()),
     )
-    execution = AgentRunExecution(
+    execution = _execution(
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
+        metadata_repository=_OutputMetadataRepository(failure=None),
+        model_operation_completion=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -3708,10 +3936,12 @@ async def test_model_stream_user_stop_without_text_appends_only_marker() -> None
     """Store only interrupted marker when assistant text is absent."""
     run_repo = _RunRepo()
     transcript_repo = _TranscriptRepo()
-    execution = AgentRunExecution(
+    execution = _execution(
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
+        metadata_repository=_OutputMetadataRepository(failure=None),
+        model_operation_completion=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -3748,10 +3978,12 @@ async def test_shutdown_tool_cancellation_repairs_before_reraising() -> None:
     run_repo = _RunRepo()
     transcript_repo = _TranscriptRepo()
     tool_executor = _CancellingToolExecutor()
-    execution = AgentRunExecution(
+    execution = _execution(
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
+        metadata_repository=_OutputMetadataRepository(failure=None),
+        model_operation_completion=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -3796,10 +4028,12 @@ async def test_tool_user_stop_preserves_settled_terminal_result() -> None:
     run_repo = _RunRepo()
     transcript_repo = _TranscriptRepo()
     tool_executor = _SettlingToolExecutor()
-    execution = AgentRunExecution(
+    execution = _execution(
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
+        metadata_repository=_OutputMetadataRepository(failure=None),
+        model_operation_completion=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -3851,10 +4085,12 @@ async def test_tool_user_stop_appends_cancelled_result_and_interrupts() -> None:
     run_repo = _RunRepo()
     transcript_repo = _TranscriptRepo()
     tool_executor = _CancellingToolExecutor(user_stop=True)
-    execution = AgentRunExecution(
+    execution = _execution(
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
+        metadata_repository=_OutputMetadataRepository(failure=None),
+        model_operation_completion=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -3911,10 +4147,12 @@ async def test_tool_result_output_sink_receives_tool_result() -> None:
         del normalized
         sink_kinds.append([event.kind for event in appended])
 
-    execution = AgentRunExecution(
+    execution = _execution(
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
+        metadata_repository=_OutputMetadataRepository(failure=None),
+        model_operation_completion=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -3950,10 +4188,12 @@ async def test_tool_failure_appends_failed_tool_result() -> None:
     """Repair tool exception as failed tool result so next turn is not broken."""
     run_repo = _RunRepo()
     transcript_repo = _TranscriptRepo()
-    execution = AgentRunExecution(
+    execution = _execution(
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
+        metadata_repository=_OutputMetadataRepository(failure=None),
+        model_operation_completion=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -3997,10 +4237,12 @@ async def test_tool_failure_appends_failed_tool_result() -> None:
 
 async def test_run_input_preparation_does_not_run_lifecycle_cleanup() -> None:
     """File lifecycle cleanup is scheduler-owned, not run-loop-owned."""
-    execution = AgentRunExecution(
+    execution = _execution(
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
+        metadata_repository=_OutputMetadataRepository(failure=None),
+        model_operation_completion=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -4046,10 +4288,12 @@ async def test_pre_model_lower_hook_runs_before_lowerer() -> None:
     )
     lowerer = _RecordingLowerer()
     hook = _PreModelLowerHook()
-    execution = AgentRunExecution(
+    execution = _execution(
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
+        metadata_repository=_OutputMetadataRepository(failure=None),
+        model_operation_completion=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -4087,10 +4331,12 @@ async def test_model_completion_error_propagates_for_retry() -> None:
     """Normalizer completion failure propagates before durable output append."""
     run_repo = _RunRepo()
     transcript_repo = _TranscriptRepo()
-    execution = AgentRunExecution(
+    execution = _execution(
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
+        metadata_repository=_OutputMetadataRepository(failure=None),
+        model_operation_completion=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -4126,10 +4372,12 @@ async def test_empty_terminal_model_output_completes_run() -> None:
     """Complete a successful terminal model turn without durable output."""
     run_repo = _RunRepo()
     transcript_repo = _TranscriptRepo()
-    execution = AgentRunExecution(
+    execution = _execution(
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
+        metadata_repository=_OutputMetadataRepository(failure=None),
+        model_operation_completion=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -4174,10 +4422,12 @@ async def test_blank_terminal_assistant_message_completes_run() -> None:
         EventKind.ASSISTANT_MESSAGE,
         AssistantMessagePayload(content=" ", native_artifact=_artifact()),
     )
-    execution = AgentRunExecution(
+    execution = _execution(
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
+        metadata_repository=_OutputMetadataRepository(failure=None),
+        model_operation_completion=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -4232,10 +4482,12 @@ async def test_empty_dialect_follow_up_continues_to_terminal_response() -> None:
             ),
         ]
     )
-    execution = AgentRunExecution(
+    execution = _execution(
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
+        metadata_repository=_OutputMetadataRepository(failure=None),
+        model_operation_completion=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -4275,10 +4527,12 @@ async def test_model_call_error_propagates_for_retry() -> None:
     """LLM call error propagates to the worker retry boundary."""
     run_repo = _RunRepo()
     transcript_repo = _TranscriptRepo()
-    execution = AgentRunExecution(
+    execution = _execution(
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
+        metadata_repository=_OutputMetadataRepository(failure=None),
+        model_operation_completion=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -4314,10 +4568,12 @@ async def test_execution_closes_operation_scoped_adapter() -> None:
     run_repo = _RunRepo()
     transcript_repo = _TranscriptRepo()
     model_adapter = _ClosableModelAdapter()
-    execution = AgentRunExecution(
+    execution = _execution(
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
+        metadata_repository=_OutputMetadataRepository(failure=None),
+        model_operation_completion=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",

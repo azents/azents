@@ -10,13 +10,10 @@ import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any, NamedTuple, Protocol, TypeVar
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from azents.core.enums import LLMModelDeveloper, LLMProvider
 from azents.core.inference_profile import SessionInferenceState
 from azents.core.llm_catalog import ModelCapabilities
 from azents.core.model_execution_options import ModelExecutionOptionId
-from azents.core.model_operation import ModelOperationKind
 from azents.core.tools import PublishEventFn, Toolkit
 from azents.engine.context.window import compute_effective_context_window_tokens
 from azents.engine.events.types import Event
@@ -30,6 +27,7 @@ from azents.engine.run.types import (
     CheckStop,
     PollMessages,
 )
+from azents.repos.model_operation_completion import ModelOperationCompletion
 from azents.services.session_resource_authority import SessionResourceAuthority
 
 logger = logging.getLogger(__name__)
@@ -214,11 +212,9 @@ class RunContext:
     turn_action_bridge_boundary: TurnActionBridgeBoundary
     model_transport_state: ModelTransportState
     publish_event: PublishEventFn
+    model_operation_completion: ModelOperationCompletion | None
     resource_authority: SessionResourceAuthority | None = None
     mailbox_activity_observer: object | None = None
-    complete_model_operation_in_session: (
-        Callable[[AsyncSession, ModelOperationKind], Awaitable[None]] | None
-    ) = None
     prepare_compaction_request: Callable[[RunRequest], Awaitable[RunRequest]] | None = (
         None
     )

@@ -38,6 +38,14 @@ class ProviderOutputFileMetadata:
     model_file: ModelFileCreate
 
 
+@dataclasses.dataclass(frozen=True)
+class ProviderOutputMetadataAdmission:
+    """Detached authority and metadata admitted with durable output Events."""
+
+    authority: FileResourceAuthority
+    generated_images: tuple[ProviderOutputFileMetadata, ...]
+
+
 @dataclasses.dataclass
 class ProviderOutputOperationRepository:
     """Own provider-output authority, retry, and cleanup transactions."""

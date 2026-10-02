@@ -81,7 +81,6 @@ from azents.engine.events.output_parts import (
     iter_output_parts,
 )
 from azents.engine.events.protocols import (
-    AgentRunCreateRepository,
     ClientToolExecutor,
     ContentDeltaProjection,
     FunctionCallDeltaProjection,
@@ -205,8 +204,23 @@ from azents.repos.agent_session_system_prompt_snapshot import (
 )
 from azents.repos.chatgpt_oauth_runtime import ChatGPTOAuthRuntimeRepository
 from azents.repos.compaction_operation import CompactionCommitContext
+from azents.repos.engine_event_mutation import EngineEventMutationRepository
 from azents.repos.engine_event_operation import EngineEventOperationRepository
+from azents.repos.engine_execution_operation import EngineExecutionOperationRepository
 from azents.repos.engine_input_projection import EngineInputProjectionRepository
+from azents.repos.engine_model_input_operation import (
+    EngineModelInputOperationRepository,
+)
+from azents.repos.engine_output_operation import (
+    EngineOutputOperationRepository,
+    EngineRunRepository,
+)
+from azents.repos.engine_run_finalization_operation import (
+    EngineRunFinalizationOperationRepository,
+)
+from azents.repos.engine_tool_result_operation import (
+    EngineToolResultOperationRepository,
+)
 from azents.repos.exchange_file import ExchangeFileRepository
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.llm_provider_integration.deps import (
@@ -214,6 +228,7 @@ from azents.repos.llm_provider_integration.deps import (
 )
 from azents.repos.model_file import ModelFileRepository
 from azents.repos.model_file_pin import ModelFilePinRepository
+from azents.repos.model_operation_completion import ModelOperationCompletionRepository
 from azents.repos.provider_output_operation import ProviderOutputOperationRepository
 from azents.repos.session_execution.ownership import OwnerBoundSessionManager
 from azents.repos.terminal_finalization import TerminalRunFinalizationRepository
@@ -394,7 +409,7 @@ class AgentEngineAdapter:
     execution_factory: Annotated[
         RunExecutionFactory, Depends(_agent_run_execution_factory)
     ]
-    run_repo: Annotated[AgentRunCreateRepository, Depends(AgentRunRepository)]
+    run_repo: Annotated[EngineRunRepository, Depends(AgentRunRepository)]
     agent_session_repo: Annotated[
         AgentSessionRepository, Depends(AgentSessionRepository)
     ]
@@ -406,6 +421,9 @@ class AgentEngineAdapter:
     ]
     model_file_pin_repo: Annotated[
         ModelFilePinRepository, Depends(ModelFilePinRepository)
+    ]
+    model_operation_completion_repository: Annotated[
+        ModelOperationCompletionRepository, Depends(ModelOperationCompletionRepository)
     ]
     terminal_finalization_repository: Annotated[
         TerminalRunFinalizationRepository,
@@ -654,9 +672,7 @@ class AgentEngineAdapter:
                 agent_id=request.agent_id,
                 run_id=context.run_id,
                 owner_generation=context.owner_generation,
-                settle_model_operation=(
-                    context.complete_model_operation_in_session is not None
-                ),
+                settle_model_operation=(context.model_operation_completion is not None),
             ),
         )
         yield ephemeral(CompactionComplete())
@@ -1169,9 +1185,7 @@ class AgentEngineAdapter:
                 agent_id=request.agent_id,
                 run_id=context.run_id,
                 owner_generation=context.owner_generation,
-                settle_model_operation=(
-                    context.complete_model_operation_in_session is not None
-                ),
+                settle_model_operation=(context.model_operation_completion is not None),
             ),
         )
         integration_id = (
@@ -1246,8 +1260,46 @@ class AgentEngineAdapter:
             if context.resource_authority is not None
             else None
         )
-        execution = self.execution_factory(
+        event_mutation_repository = EngineEventMutationRepository(
+            transcript_repository=self.transcript_repo
+        )
+        tool_result_operation_repository = EngineToolResultOperationRepository(
             session_manager=owner_session_manager,
+            run_repository=self.run_repo,
+            transcript_repository=self.transcript_repo,
+        )
+        execution = self.execution_factory(
+            execution_operation_repository=EngineExecutionOperationRepository(
+                session_manager=owner_session_manager,
+                run_repository=self.run_repo,
+                model_file_pin_repository=self.model_file_pin_repo,
+            ),
+            model_input_operation_repository=EngineModelInputOperationRepository(
+                session_manager=owner_session_manager,
+                run_repository=self.run_repo,
+                transcript_repository=self.transcript_repo,
+                session_head_repository=self.session_head_repo,
+                tool_result_repository=tool_result_operation_repository,
+                input_projection_repository=input_projection_repository,
+            ),
+            tool_result_operation_repository=tool_result_operation_repository,
+            output_operation_repository=EngineOutputOperationRepository(
+                session_manager=owner_session_manager,
+                run_repository=self.run_repo,
+                event_mutation_repository=event_mutation_repository,
+                metadata_repository=self.provider_output_operation_repository,
+                tool_result_repository=tool_result_operation_repository,
+                system_prompt_repository=self.system_prompt_snapshot_repo,
+            ),
+            run_finalization_operation_repository=EngineRunFinalizationOperationRepository(
+                session_manager=owner_session_manager,
+                run_repository=self.run_repo,
+                event_mutation_repository=event_mutation_repository,
+                model_operation_repository=self.model_operation_completion_repository,
+                terminal_finalization_repository=self.terminal_finalization_repository,
+                model_file_pin_repository=self.model_file_pin_repo,
+            ),
+            model_operation_completion=context.model_operation_completion,
             post_lower_filter=PostLowerFilterPipeline(
                 [
                     NativeRequestSizeGuard(
@@ -1265,7 +1317,6 @@ class AgentEngineAdapter:
                 else None
             ),
             output_normalizer=output_normalizer,
-            input_projection_repository=input_projection_repository,
             auto_compaction_filter=auto_compaction_filter,
             model_call_preparer=prepare_model_call,
             output_sink=emit_queue.extend_from_output,
@@ -1279,15 +1330,6 @@ class AgentEngineAdapter:
             provider_output_materializer=generated_output_materializer,
             client_tool_output_materializer=generated_output_materializer,
             pre_model_lower_hook=model_file_materializer.materialize,
-            model_file_pin_repo=self.model_file_pin_repo,
-            run_repo=self.run_repo,
-            transcript_repo=self.transcript_repo,
-            session_repo=self.session_head_repo,
-            terminal_finalization_repository=self.terminal_finalization_repository,
-            system_prompt_snapshot_repo=self.system_prompt_snapshot_repo,
-            complete_model_operation_in_session=(
-                context.complete_model_operation_in_session
-            ),
         )
 
         async def execute_run() -> AgentRunStatus:

@@ -19,6 +19,7 @@ from azents.engine.events.execution_test import (
     _ModelAdapter,
     _Normalizer,
     _OpenToolAdmissionBarrier,
+    _OutputMetadataRepository,
     _PostFilter,
     _tool_call_event,
     _ToolExecutor,
@@ -44,10 +45,20 @@ from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSessionCreate
 from azents.repos.agent_session.repository_test import _create_agent, _create_workspace
 from azents.repos.compaction_operation import CompactionOperationRepository
-from azents.repos.model_candidate_health import ModelCandidateHealthRepository
-from azents.repos.model_operation_completion import (
-    ModelOperationCompletionRepository,
+from azents.repos.engine_event_mutation import EngineEventMutationRepository
+from azents.repos.engine_execution_operation import EngineExecutionOperationRepository
+from azents.repos.engine_model_input_operation import (
+    EngineModelInputOperationRepository,
 )
+from azents.repos.engine_output_operation import EngineOutputOperationRepository
+from azents.repos.engine_run_finalization_operation import (
+    EngineRunFinalizationOperationRepository,
+)
+from azents.repos.engine_tool_result_operation import (
+    EngineToolResultOperationRepository,
+)
+from azents.repos.model_candidate_health import ModelCandidateHealthRepository
+from azents.repos.model_operation_completion import ModelOperationCompletionRepository
 from azents.repos.session_execution import CanonicalExecutionOwnerGenerationStaleError
 from azents.repos.session_execution.ownership import OwnerBoundSessionManager
 from azents.repos.toolkit_state.engine import ToolWorkingSetStore
@@ -145,10 +156,52 @@ def _execution(
     tool_executor: _ToolExecutor,
 ) -> AgentRunExecution[NativeModelRequest, NativeEvent]:
     """Use actual durable repositories with fake external model/tool providers."""
-    return AgentRunExecution(
+    runs = AgentRunRepository()
+    transcript = EventTranscriptRepository()
+    mutations = EngineEventMutationRepository(transcript_repository=transcript)
+    results = EngineToolResultOperationRepository(
         session_manager=state.owner,
-        input_projection_repository=None,
-        terminal_finalization_repository=None,
+        run_repository=runs,
+        transcript_repository=transcript,
+    )
+    return AgentRunExecution(
+        execution_operation_repository=EngineExecutionOperationRepository(
+            session_manager=state.owner,
+            run_repository=runs,
+            model_file_pin_repository=None,
+        ),
+        model_input_operation_repository=EngineModelInputOperationRepository(
+            session_manager=state.owner,
+            run_repository=runs,
+            transcript_repository=transcript,
+            session_head_repository=None,
+            tool_result_repository=results,
+            input_projection_repository=None,
+        ),
+        tool_result_operation_repository=results,
+        output_operation_repository=EngineOutputOperationRepository(
+            session_manager=state.owner,
+            run_repository=runs,
+            event_mutation_repository=mutations,
+            metadata_repository=_OutputMetadataRepository(failure=None),
+            tool_result_repository=results,
+            system_prompt_repository=None,
+        ),
+        run_finalization_operation_repository=EngineRunFinalizationOperationRepository(
+            session_manager=state.owner,
+            run_repository=runs,
+            event_mutation_repository=mutations,
+            model_operation_repository=ModelOperationCompletionRepository(
+                agent_session_repository=AgentSessionRepository(),
+                agent_run_repository=runs,
+                model_candidate_health_repository=ModelCandidateHealthRepository(
+                    session_manager=state.owner
+                ),
+            ),
+            terminal_finalization_repository=None,
+            model_file_pin_repository=None,
+        ),
+        model_operation_completion=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",

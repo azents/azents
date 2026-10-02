@@ -149,6 +149,15 @@ Historical Memory/VFS paths receive incremental entrypoint/callback inspection;
 the earlier 616/610 lexical checkpoints remain dated discovery evidence rather
 than a claim of current complete coverage.
 
+Phase 28 starts after both rebased PR #2049 and stacked PR #2050 have no
+failed or pending normalized CI checks. It removes the entire assigned Event
+execution/output/terminal boundary and the Worker failed-run atomic group,
+including prepared live-session persistence and model-operation callbacks.
+Output admission and terminal completion retain their existing separate
+transactions. Worker failure retains one Stop-claim/Event/terminal transaction
+with dispatch afterward. Broader Worker, Chat, Runtime, Platform, and newly
+integrated Memory ownership remain subsequent work. No new mechanism is added.
+
 ## Delivery Boundaries
 
 1. Correct the title-generation and ChatGPT OAuth persistence boundary as one
