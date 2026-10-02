@@ -6,6 +6,12 @@ owner: "@Hardtack"
 code_paths:
   - python/apps/azents/db-schemas/rdb/migrations/versions/097a97177350_create_operational_schema_baseline.py
   - python/apps/azents/src/azents/services/workspace/**
+  - python/apps/azents/src/azents/core/workspace.py
+  - python/apps/azents/src/azents/core/account_access.py
+  - python/apps/azents/src/azents/core/auth/deps.py
+  - python/apps/azents/src/azents/repos/workspace/**
+  - python/apps/azents/src/azents/repos/account_access.py
+  - python/apps/azents/src/azents/services/account_access.py
   - python/apps/azents/src/azents/services/workspace_user/**
   - python/apps/azents/src/azents/repos/workspace_user/**
   - python/apps/azents/src/azents/api/admin/workspace_user/**
@@ -131,8 +137,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/agents
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/channel-defaults
-last_verified_at: 2026-10-01
-spec_version: 90
+last_verified_at: 2026-10-02
+spec_version: 91
 ---
 
 # Workspace & Membership
@@ -252,6 +258,23 @@ erDiagram
   This policy is not a recency projection.
 
 ## Behavior
+
+### Workspace Administration and Membership Admission
+
+Workspace create, handle lookup, update, global list, owner creation, and
+User-scoped list execute as completed database-only repository operations.
+Authenticated public creation commits the Workspace and its initial OWNER
+membership together; membership insertion failure rolls back the Workspace.
+Admin Workspace creation remains Workspace-only. Handle uniqueness, omitted
+patch fields, membership ordering, and omission of missing referenced Workspace
+projections retain their existing behavior.
+
+HTTP Workspace admission reads the handle and exact User membership in one
+completed repository operation. Missing Workspace retains `404`; an existing
+Workspace without that membership retains `403`. Detached membership data supplies
+the existing HTTP context and local role/permission projection after the database
+operation finishes. System-administrator assignment still grants no implicit
+Workspace access.
 
 ### Agent Workspace Runtime State
 
@@ -936,6 +959,10 @@ stateDiagram-v2
 
 ## Changelog
 
+- **2026-10-02 (spec_version=91)** — Moved Workspace administration and HTTP
+  membership admission into completed repository operations, retaining atomic
+  Workspace/OWNER creation and existing lookup, conflict, and authorization
+  contracts.
 - **2026-09-30** (spec_version 90) — Documented authorized Workspace browser GET
   handoff after verified Runner direct PUT, shared 128 MiB eligibility, and distinct preview bounds.
 

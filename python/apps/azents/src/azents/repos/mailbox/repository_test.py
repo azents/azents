@@ -19,6 +19,7 @@ from azents.core.enums import (
     RuntimeRunnerState,
 )
 from azents.core.llm_catalog import ModelReasoningEffort
+from azents.core.workspace import WorkspaceCreate
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
@@ -28,7 +29,6 @@ from azents.repos.agent_session.data import AgentSessionCreate
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository
-from azents.repos.workspace.data import WorkspaceCreate
 from azents.testing.model_selection import (
     make_test_model_selection_dict,
     make_test_selectable_model_option_dicts,

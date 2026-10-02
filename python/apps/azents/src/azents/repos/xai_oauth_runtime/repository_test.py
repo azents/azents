@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from azents.core.credentials import XaiOAuthConfig, XaiOAuthSecrets
 from azents.core.crypto import CredentialCipher
 from azents.core.enums import LLMProvider
+from azents.core.workspace import WorkspaceCreate
 from azents.core.xai_oauth import XaiOAuthConnectionMethod
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.models.workspace import RDBWorkspace
@@ -26,7 +27,6 @@ from azents.repos.llm_provider_integration.data import (
     LLMProviderIntegrationWithSecrets,
 )
 from azents.repos.workspace import WorkspaceRepository
-from azents.repos.workspace.data import WorkspaceCreate
 from azents.repos.xai_oauth_runtime import XaiOAuthRuntimeRepository
 from azents.services.xai_oauth.client import XaiOAuthClient
 from azents.services.xai_oauth.data import (

@@ -158,6 +158,38 @@ transactions. Worker failure retains one Stop-claim/Event/terminal transaction
 with dispatch afterward. Broader Worker, Chat, Runtime, Platform, and newly
 integrated Memory ownership remain subsequent work. No new mechanism is added.
 
+Phase 28 PR #2052 is validated at `e5b6ed552` after the requester's second
+conflict report and a documentation-only rebase onto `83231ed4b`. Latest local
+backend validation passed 6,998 cases with three existing Redis-only variant
+skips; ty and pre-commit passed. Latest PR checks are 38 passed, three skipped,
+none failed or unfinished; mergeability is CLEAN/MERGEABLE. No Agent merge.
+
+Phase 29 proceeds from that validated parent with 25 Account/Auth lifetimes:
+User (6), UserEmail (5), Workspace (6), SystemUserRole (6), and HTTP subject /
+Workspace membership admission (2). Preserve account-disable, role cleanup,
+Session revocation and purge-job atomicity, the shared system-role advisory lock,
+last-admin protection, missing versus accepted deletion, post-commit terminal
+invalidation, atomic Workspace plus owner membership, and required/optional HTTP
+authorization behavior. Credential's two scopes and six session-taking
+declarations remain a named later batch, not a prerequisite or exclusion.
+Canonical pure inputs/errors replace touched API-to-repository data imports.
+Public/admin OpenAPI must be identical to the saved pre-implementation baseline.
+The new main Historical Memory context invalidates the earlier 599-context
+checkpoint. A fresh comparable AST scan at the Phase 29 parent finds 600 contexts
+in 111 files: the only added candidate is Historical Memory snapshot refresh.
+This remains discovery evidence rather than a complete violation count.
+
+Phase 29 implements that entire 25-context slice. The requester merged parent
+PR #2052; the phase rebases cleanly onto `main` at `f42dc1f26` without any patch
+change. Latest-base backend validation passed 7,111 cases with three existing
+Redis-specific memory-variant skips; ty, full pre-commit and exact public/admin
+OpenAPI equality passed. The retained independent reviewer covered all 111 files
+with no findings and independently passed 84 regression cases. Exact-head PR CI
+remains the final phase delivery gate. The refreshed current inventory remains
+575 candidates in 106 files, including one test-infrastructure candidate, rather
+than a repository-wide violation count or closure claim. Worker Session/Stop
+ownership and the larger services/Runtime/API groups remain later work.
+
 ## Delivery Boundaries
 
 1. Correct the title-generation and ChatGPT OAuth persistence boundary as one

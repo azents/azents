@@ -14,6 +14,7 @@ from azents.core.enums import (
     ExternalChannelProvider,
     ExternalChannelTransport,
 )
+from azents.core.workspace import WorkspaceCreate
 from azents.rdb.session import SessionManager
 from azents.repos.external_channel.connection import (
     ExternalChannelConnectionRepository,
@@ -21,7 +22,6 @@ from azents.repos.external_channel.connection import (
 from azents.repos.external_channel.data import ExternalChannelConnectionCreate
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.workspace import WorkspaceRepository
-from azents.repos.workspace.data import WorkspaceCreate
 
 
 async def _create_workspace(

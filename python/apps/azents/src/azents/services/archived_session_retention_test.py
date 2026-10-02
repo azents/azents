@@ -15,6 +15,7 @@ from azents.core.enums import (
     ArchivedSessionRetentionApplicationStatus,
     LLMProvider,
 )
+from azents.core.workspace import WorkspaceCreate
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.agent_session import RDBAgentSession
@@ -40,7 +41,6 @@ from azents.repos.session_lifecycle_finalizer import (
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository
-from azents.repos.workspace.data import WorkspaceCreate
 from azents.services.archived_session_retention import (
     ArchivedSessionRetentionService,
     RetentionApplicationInProgress,

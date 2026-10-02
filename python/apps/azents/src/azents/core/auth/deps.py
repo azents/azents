@@ -5,20 +5,15 @@ from typing import Annotated
 
 from fastapi import Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.account_access import ActiveAccountSubjectStatus
 from azents.core.auth.jwt import InvalidTokenError, decode_access_token
 from azents.core.auth.permissions import Permission, has_permission
 from azents.core.auth.roles import get_permissions_for_role
 from azents.core.config import AuthConfig
 from azents.core.deps import get_auth_config
 from azents.core.enums import WorkspaceUserRole
-from azents.rdb.deps import get_session_manager
-from azents.rdb.session import SessionManager
-from azents.repos.session import SessionRepository
-from azents.repos.user import UserRepository
-from azents.repos.workspace import WorkspaceRepository
-from azents.repos.workspace_user import WorkspaceUserRepository
+from azents.services.account_access import AccountAccessService
 from azents.services.system_user_role.service import SystemUserRoleService
 
 bearer_scheme = HTTPBearer(auto_error=False)
@@ -60,51 +55,32 @@ class WorkspaceMember:
 
 async def _require_active_user_session(
     *,
-    session_manager: SessionManager[AsyncSession],
-    user_repository: UserRepository,
-    session_repository: SessionRepository,
+    access_service: AccountAccessService,
     user_id: str,
     session_id: str,
 ) -> None:
     """Reject disabled accounts and revoked/expired auth sessions.
 
-    :param session_manager: Database session manager
-    :param user_repository: User repository
-    :param session_repository: Auth session repository
+    :param access_service: Service returning a completed exact subject read
     :param user_id: Authenticated user ID from JWT
     :param session_id: Auth session ID from JWT
     :raises HTTPException: 401 when the account or auth session is not active
     """
-    async with session_manager() as session:
-        user = await user_repository.get(session, user_id)
-        if user is None or user.access_disabled_at is not None:
-            raise HTTPException(
-                status_code=401,
-                detail="Not authenticated",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-        auth_session = await session_repository.get(session, session_id)
-        if (
-            auth_session is None
-            or auth_session.user_id != user_id
-            or auth_session.is_revoked
-            or auth_session.is_expired
-        ):
-            raise HTTPException(
-                status_code=401,
-                detail="Not authenticated",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
+    status = await access_service.read_active_subject(
+        user_id=user_id, session_id=session_id
+    )
+    if status is not ActiveAccountSubjectStatus.ACTIVE:
+        raise HTTPException(
+            status_code=401,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
 
 async def get_current_user(
     auth_config: Annotated[AuthConfig, Depends(get_auth_config)],
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
-    session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
-    ],
-    user_repository: Annotated[UserRepository, Depends()],
-    session_repository: Annotated[SessionRepository, Depends()],
+    access_service: Annotated[AccountAccessService, Depends(AccountAccessService)],
 ) -> CurrentUser:
     """Return the current authenticated user.
 
@@ -127,9 +103,7 @@ async def get_current_user(
         ) from None
 
     await _require_active_user_session(
-        session_manager=session_manager,
-        user_repository=user_repository,
-        session_repository=session_repository,
+        access_service=access_service,
         user_id=payload.user_id,
         session_id=payload.session_id,
     )
@@ -143,11 +117,7 @@ async def get_current_user(
 async def get_current_user_optional(
     auth_config: Annotated[AuthConfig, Depends(get_auth_config)],
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
-    session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
-    ],
-    user_repository: Annotated[UserRepository, Depends()],
-    session_repository: Annotated[SessionRepository, Depends()],
+    access_service: Annotated[AccountAccessService, Depends(AccountAccessService)],
 ) -> CurrentUser | None:
     """Return the current authenticated user, or None when unauthenticated.
 
@@ -163,9 +133,7 @@ async def get_current_user_optional(
 
     try:
         await _require_active_user_session(
-            session_manager=session_manager,
-            user_repository=user_repository,
-            session_repository=session_repository,
+            access_service=access_service,
             user_id=payload.user_id,
             session_id=payload.session_id,
         )
@@ -216,11 +184,7 @@ async def get_system_admin(
 
 async def get_workspace_member(
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
-    workspace_repo: Annotated[WorkspaceRepository, Depends()],
-    user_repo: Annotated[WorkspaceUserRepository, Depends()],
-    session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
-    ],
+    access_service: Annotated[AccountAccessService, Depends(AccountAccessService)],
     *,
     handle: str,
 ) -> WorkspaceMember:
@@ -229,30 +193,20 @@ async def get_workspace_member(
     :param handle: Workspace handle injected from path parameter
     :raises HTTPException: 403 when not a member, 404 when workspace is missing
     """
-    async with session_manager() as session:
-        workspace_id = await workspace_repo.resolve_id(session, handle)
-        if workspace_id is None:
-            raise HTTPException(
-                status_code=404,
-                detail="Workspace not found.",
-            )
-
-        workspace_user = await user_repo.get_by_workspace_and_user(
-            session, workspace_id, current_user.user_id
-        )
-        if workspace_user is None:
-            raise HTTPException(
-                status_code=403,
-                detail="Not a member of this workspace.",
-            )
-
-    role = workspace_user.role
+    access = await access_service.read_workspace_membership(
+        handle=handle, user_id=current_user.user_id
+    )
+    if access.workspace_id is None:
+        raise HTTPException(status_code=404, detail="Workspace not found.")
+    if access.membership is None:
+        raise HTTPException(status_code=403, detail="Not a member of this workspace.")
+    role = access.membership.role
     permissions = get_permissions_for_role(role)
 
     return WorkspaceMember(
         user_id=current_user.user_id,
-        workspace_id=workspace_id,
-        workspace_user_id=workspace_user.id,
+        workspace_id=access.workspace_id,
+        workspace_user_id=access.membership.workspace_user_id,
         role=role,
         permissions=permissions,
         session_id=current_user.session_id,

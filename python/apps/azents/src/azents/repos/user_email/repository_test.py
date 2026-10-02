@@ -3,11 +3,11 @@
 from azcommon.result import Failure, Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.user_email import DuplicateEmail, UserEmailCreate
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 
 from . import UserEmailRepository
-from .data import DuplicateEmail, UserEmailCreate
 
 _email_counter = 0
 

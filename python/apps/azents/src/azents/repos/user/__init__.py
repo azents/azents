@@ -7,10 +7,11 @@ from azcommon.uuid import uuid7
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
+from azents.core.user import UserUpdate
 from azents.rdb.models.user import RDBUser
 from azents.rdb.models.user_email import RDBUserEmail
 
-from .data import User, UserCreate, UserList, UserUpdate
+from .data import User, UserCreate, UserList
 
 
 class UserRepository:

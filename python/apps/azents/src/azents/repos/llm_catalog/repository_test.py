@@ -26,6 +26,7 @@ from azents.core.llm_catalog_sync import (
     IntegrationCatalogSyncPolicyDecision,
     IntegrationCatalogSyncTrigger,
 )
+from azents.core.workspace import WorkspaceCreate
 from azents.rdb.models.llm_catalog import (
     RDBLLMCatalog,
     RDBLLMCatalogSnapshot,
@@ -49,7 +50,6 @@ from azents.repos.llm_provider_integration.data import (
     LLMProviderIntegrationUpdate,
 )
 from azents.repos.workspace import WorkspaceRepository
-from azents.repos.workspace.data import WorkspaceCreate
 
 pytestmark = pytest.mark.asyncio
 

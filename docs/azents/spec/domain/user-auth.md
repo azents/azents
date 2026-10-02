@@ -4,10 +4,14 @@ spec_type: domain
 domain: user-auth
 owner: "@Hardtack"
 created: 2026-04-20
-updated: 2026-09-16
+updated: 2026-10-02
 tags: [backend, security, api]
 code_paths:
   - python/apps/azents/src/azents/core/auth/**
+  - python/apps/azents/src/azents/core/account_access.py
+  - python/apps/azents/src/azents/core/user.py
+  - python/apps/azents/src/azents/core/user_email.py
+  - python/apps/azents/src/azents/core/system_user_role.py
   - python/apps/azents/src/azents/core/email/**
   - python/apps/azents/src/azents/api/public/auth/v1/**
   - python/apps/azents/src/azents/api/admin/auth/v1/**
@@ -30,6 +34,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/user/**
   - python/apps/azents/src/azents/repos/user_email/**
   - python/apps/azents/src/azents/repos/auth_operation/**
+  - python/apps/azents/src/azents/repos/account_access.py
   - python/apps/azents/src/azents/repos/security_operation/**
   - python/apps/azents/src/azents/repos/session/**
   - python/apps/azents/src/azents/repos/password_login/**
@@ -41,6 +46,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/system_bootstrap/**
   - python/apps/azents/src/azents/repos/owner_lifecycle/**
   - python/apps/azents/src/azents/services/auth/**
+  - python/apps/azents/src/azents/services/account_access.py
   - python/apps/azents/src/azents/services/email_verification/**
   - python/apps/azents/src/azents/services/signup_token/**
   - python/apps/azents/src/azents/services/credential/**
@@ -113,8 +119,8 @@ api_routes:
   - /system/v1
   - /system-setting/v1
   - /debug/v1
-last_verified_at: 2026-09-16
-spec_version: 22
+last_verified_at: 2026-10-02
+spec_version: 23
 ---
 
 # User & Authentication
@@ -339,12 +345,28 @@ Adding System Settings does not alter bootstrap or role lifecycle behavior. Boot
 
 Role revoke and User deletion share one serialized transaction boundary. An operation that would remove the final `system_admin` fails with stable `409 Conflict`, while deleting a non-final administrator cascades that user's assignment.
 
+System-role reads, locked grant/revoke, and account administration finish their
+database work inside completed domain repository operations. Grant returns the
+detached assignment and whether it was created from the same locked operation,
+preserving idempotent assignment metadata and post-commit audit logging. Exact
+normalized-email promotion resolves the User in a completed read, then the grant
+operation rechecks enabled-User authority under the existing shared mutation lock.
+Role mutation and account deletion retain that same database advisory lock.
+
 Private User Session owner lifecycle is coordinated with account and membership changes. Membership
 loss immediately revokes access to owned User Sessions and schedules asynchronous archive after a safe
 stop. Account deletion immediately disables access and revokes live auth Sessions; final User row
 removal waits until owned private User Session purge and private User Memory cleanup complete. Team
 Sessions, Agent Memory, and Workspace-owned Toolkits are not purged by User Session owner cleanup.
 `GET /user/v1/me/system-roles` exposes only the authenticated user's current roles for Main Web navigation. UI visibility is not an authorization control.
+
+Account deletion atomically disables access, removes system roles, revokes all
+authentication Sessions, and creates or retrieves the account-purge job before
+returning to the service. Terminal invalidation and accepted-deletion logging
+follow transaction completion. A missing User remains a successful no-op without
+those effects; an existing already-disabled User still follows the accepted,
+idempotent cleanup and publication path. A failure before commit rolls back the
+whole database group, while publication failure cannot undo committed authority.
 
 The operator CLI accepts one or more repeated `--email` options and grants `system_admin`
 sequentially to each normalized exact email. Every successful grant is committed and reported before
@@ -481,6 +503,12 @@ stateDiagram-v2
 - Logout commits Session revocation before publishing Runtime Terminal
   invalidation. Publication failure does not reopen the completed database
   transaction.
+- Access-token subject admission reads the enabled User and the exact matching,
+  unrevoked, unexpired authentication Session in one completed repository read.
+  Required authentication retains the existing `401`/Bearer challenge and optional
+  authentication returns no identity for invalid subjects. JWT decoding, HTTP
+  errors, elevation context, and permission projection remain outside repository
+  operations.
 
 ## 5. Password and Elevation
 
@@ -501,7 +529,11 @@ transactions. Password setup uses an atomic unique-user upsert. Password removal
 rechecks verified email presence in its final DELETE statement, using the email
 delivery availability supplied before the operation; an earlier eligible
 credential projection alone cannot authorize deletion. Credential projection and
-UserEmail administration retain their separate existing boundaries.
+UserEmail administration retain their separate policy boundaries. User CRUD,
+primary-email creation, and UserEmail administration now call completed
+repository operations without receiving or passing live database sessions.
+Count/page reads remain grouped, and locale patch omission, email uniqueness,
+and existing foreign-key failure semantics are unchanged.
 
 - `[registration-default-signup-token]` — default new signup is signup token redeem.
 - `[legacy-open-registration-explicit]` — email OTP new user auto-creation is allowed only when `registration_mode=open`.
@@ -601,6 +633,10 @@ Admin-issued signup/password-reset token management and other instance-wide oper
 
 ## 9. Changelog
 
+- **2026-10-02** (v23) — Moved User, UserEmail, system-role and authentication
+  admission lifetimes into completed repository operations. Preserved shared
+  role/deletion locking, final-admin protection, atomic access-disable and purge
+  scheduling, post-commit effects, and existing authentication/API behavior.
 - **2026-09-16** (v22) — Removed the public product-marketing landing surface and
   made the Main Web root redirect unauthenticated requests to `/login` and
   authenticated requests to `/workspaces`.

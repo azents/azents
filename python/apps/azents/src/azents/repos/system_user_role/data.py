@@ -1,6 +1,5 @@
 """System User role repository data models."""
 
-import dataclasses
 import datetime
 
 from pydantic import BaseModel, Field
@@ -30,25 +29,3 @@ class SystemUserRoleAssignmentList(BaseModel):
 
     items: list[SystemUserRoleAssignment] = Field(description="Role assignments")
     total: int = Field(description="Total assignment count")
-
-
-@dataclasses.dataclass(frozen=True)
-class SystemUserNotFound:
-    """Target User does not exist."""
-
-    user_id: str
-
-
-@dataclasses.dataclass(frozen=True)
-class SystemRoleAssignmentNotFound:
-    """Target role assignment does not exist."""
-
-    user_id: str
-    role: SystemUserRole
-
-
-@dataclasses.dataclass(frozen=True)
-class LastSystemAdmin:
-    """Operation would remove the final system administrator."""
-
-    user_id: str

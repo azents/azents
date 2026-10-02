@@ -8,7 +8,7 @@ from typing import Annotated, assert_never
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from azents.repos.user_email.data import DuplicateEmail, UserEmailCreate
+from azents.core.user_email import DuplicateEmail, UserEmailCreate
 from azents.services.user_email import UserEmailService
 from azents.utils.fastapi.route import RouteMounter
 

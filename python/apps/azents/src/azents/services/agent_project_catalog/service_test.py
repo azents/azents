@@ -12,6 +12,7 @@ from azents.core.enums import (
     LLMProvider,
     RuntimeRunnerState,
 )
+from azents.core.workspace import WorkspaceCreate
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
@@ -24,7 +25,6 @@ from azents.repos.session_execution import (
     CanonicalExecutionOwnerGenerationStaleError,
 )
 from azents.repos.workspace import WorkspaceRepository
-from azents.repos.workspace.data import WorkspaceCreate
 from azents.runtime.control_protocol.runner_operations import (
     RuntimeFileStatResult,
     RuntimeRunnerOperationClient,

@@ -8,7 +8,7 @@ from typing import Annotated, assert_never
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from azents.repos.workspace.data import HandleConflict, NotFound
+from azents.core.workspace import HandleConflict, NotFound
 from azents.services.workspace import WorkspaceService
 from azents.utils.fastapi.route import RouteMounter
 

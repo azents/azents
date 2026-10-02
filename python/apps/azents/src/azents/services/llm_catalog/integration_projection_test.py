@@ -29,6 +29,7 @@ from azents.core.llm_catalog import (
     ModelModality,
 )
 from azents.core.llm_catalog_sync import IntegrationCatalogSyncTrigger
+from azents.core.workspace import WorkspaceCreate
 from azents.rdb.session import SessionManager
 from azents.repos.chatgpt_oauth_runtime import ChatGPTOAuthRuntimeRepository
 from azents.repos.llm_catalog import (
@@ -41,7 +42,6 @@ from azents.repos.llm_provider_integration.data import (
 )
 from azents.repos.model_metadata_source import ModelMetadataSourceRepository
 from azents.repos.workspace import WorkspaceRepository
-from azents.repos.workspace.data import WorkspaceCreate
 from azents.repos.xai_oauth_runtime import XaiOAuthRuntimeRepository
 from azents.services.llm_catalog import (
     IntegrationCatalogProjectionService,

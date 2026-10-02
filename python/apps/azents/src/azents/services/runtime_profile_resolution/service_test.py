@@ -26,6 +26,7 @@ from azents.core.runtime_profile import (
     RuntimeProfileLifecycle,
     RuntimeReconcileSourceKind,
 )
+from azents.core.workspace import WorkspaceCreate
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
@@ -59,7 +60,6 @@ from azents.repos.runtime_provider_policy.repository import (
     RuntimeProviderPolicyRepository,
 )
 from azents.repos.workspace import WorkspaceRepository
-from azents.repos.workspace.data import WorkspaceCreate
 from azents.services.runtime_profile_reconciliation.service import (
     RuntimeProfileReconciliationService,
 )

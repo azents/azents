@@ -19,6 +19,7 @@ from azents.core.enums import (
     LLMProvider,
 )
 from azents.core.llm_catalog import ModelCapabilities
+from azents.core.workspace import WorkspaceCreate
 from azents.rdb.session import SessionManager
 from azents.repos.llm_catalog import LLMCatalogRepository
 from azents.repos.llm_catalog.data import (
@@ -30,7 +31,6 @@ from azents.repos.llm_catalog.data import (
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.llm_provider_integration.data import LLMProviderIntegrationCreate
 from azents.repos.workspace import WorkspaceRepository
-from azents.repos.workspace.data import WorkspaceCreate
 from azents.services.llm_catalog import ModelCatalogEntryOutput, ModelCatalogReadService
 
 _DESCRIPTORS = {"lowerer_target", "runtime_model_identifier"}

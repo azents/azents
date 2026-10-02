@@ -25,12 +25,12 @@ from azents.core.enums import (
     LLMCatalogPurpose,
     LLMProvider,
 )
+from azents.core.workspace import WorkspaceCreate
 from azents.rdb.models.llm_catalog import RDBLLMCatalog
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.models.workspace import RDBWorkspace
 from azents.repos.llm_catalog import LLMCatalogRepository
 from azents.repos.workspace import WorkspaceRepository
-from azents.repos.workspace.data import WorkspaceCreate
 
 from . import LLMProviderIntegrationRepository
 from .data import (

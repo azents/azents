@@ -25,13 +25,6 @@ class UserEmail(BaseModel):
         return cls.model_validate(data, from_attributes=True)
 
 
-class UserEmailCreate(BaseModel):
-    """UserEmail create schema."""
-
-    user_id: str = Field(description="Owning User ID")
-    email: str = Field(description="Email address")
-
-
 class UserEmailList(BaseModel):
     """UserEmail list."""
 
@@ -44,10 +37,3 @@ class NotFound:
     """UserEmail not found."""
 
     email_id: str
-
-
-@dataclasses.dataclass(frozen=True)
-class DuplicateEmail:
-    """Duplicate email."""
-
-    email: str

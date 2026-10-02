@@ -10,10 +10,8 @@ from azcommon.result import Failure, Result, Success
 from typer.testing import CliRunner
 
 from azents.core.enums import SystemUserRole
-from azents.repos.system_user_role.data import (
-    SystemUserNotFound,
-    SystemUserRoleAssignment,
-)
+from azents.core.system_user_role import SystemUserNotFound
+from azents.repos.system_user_role.data import SystemUserRoleAssignment
 from cli import system_admin
 
 

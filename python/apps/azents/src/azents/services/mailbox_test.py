@@ -47,6 +47,7 @@ from azents.core.skill_projection import (
     SkillProjectionSnapshot,
 )
 from azents.core.vfs import VfsProjection, make_vfs_projection, make_vfs_source_revision
+from azents.core.workspace import WorkspaceCreate
 from azents.engine.events.action_messages import (
     AgentRemoveGitWorktreeAction,
     GoalAction,
@@ -103,7 +104,6 @@ from azents.repos.toolkit_state import ToolkitStateRepository
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository
-from azents.repos.workspace.data import WorkspaceCreate
 from azents.services.exchange_file import (
     ExchangeFileDownload,
     ExchangeFileError,

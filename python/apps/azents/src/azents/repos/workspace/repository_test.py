@@ -3,8 +3,14 @@
 from azcommon.result import Failure, Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.workspace import (
+    HandleConflict,
+    NotFound,
+    WorkspaceCreate,
+    WorkspaceUpdate,
+)
+
 from . import WorkspaceRepository
-from .data import HandleConflict, NotFound, WorkspaceCreate, WorkspaceUpdate
 
 
 class TestWorkspaceRepository:
