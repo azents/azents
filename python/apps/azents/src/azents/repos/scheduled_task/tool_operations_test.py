@@ -1,5 +1,6 @@
 """Completed Scheduled Toolkit operation tests."""
 
+import datetime
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
@@ -18,6 +19,8 @@ from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
 
 async def test_scheduled_tool_operations_close_every_transaction() -> None:
     """Scheduled reads and mutations return only after transaction closure."""
+    now = datetime.datetime(2026, 10, 1, tzinfo=datetime.UTC)
+    scheduled_at = now + datetime.timedelta(days=1)
     session = AsyncMock(spec=AsyncSession)
     transaction_active = False
     transaction_count = 0
@@ -87,12 +90,18 @@ async def test_scheduled_tool_operations_close_every_transaction() -> None:
         session_id="session-1",
         title="Daily report",
         objective="Prepare it.",
-        at="2026-10-02T09:00:00+09:00",
+        at=scheduled_at.isoformat(),
         cron=None,
         timezone=None,
         binding_id=None,
+        now=now,
     )
     assert not transaction_active
+    tasks.create.assert_awaited_once()
+    assert tasks.create.await_args is not None
+    created_task = tasks.create.await_args.args[1]
+    assert created_task.scheduled_at == scheduled_at
+    assert created_task.next_eligible_at == scheduled_at
 
     assert (
         await operations.list_tasks(
