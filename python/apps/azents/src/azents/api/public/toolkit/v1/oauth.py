@@ -4,21 +4,17 @@ Provides toolkit-level OAuth2 connection endpoints and connection test endpoints
 """
 
 import json
-import logging
-from collections.abc import Mapping
-from typing import Annotated, Any, NamedTuple, assert_never
+from typing import Annotated, Any, NoReturn, assert_never
 
 import httpx
 from azcommon.result import Result
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field, TypeAdapter, ValidationError
-from sqlalchemy.ext.asyncio import AsyncSession
+from pydantic import BaseModel, Field
 
 from azents.core.auth.deps import WorkspaceMember, get_workspace_member
 from azents.core.auth.permissions import Permissions
 from azents.core.config import Config
-from azents.core.crypto import CredentialCipher
-from azents.core.deps import get_config, get_credential_cipher
+from azents.core.deps import get_config
 from azents.core.enums import MCPOAuthConnectionStatus
 from azents.core.github_auth import (
     create_github_app_jwt,
@@ -27,74 +23,43 @@ from azents.core.github_auth import (
     list_user_installations,
     revoke_oauth_token,
 )
-from azents.core.mcp_credentials import (
-    McpSecretsOAuth2,
-    McpSecretsOAuth2Dcr,
-    McpSecretsOAuth2Token,
-)
 from azents.core.mcp_discovery import (
     DcrError,
-    DiscoveryError,
-    OAuthServerMetadata,
-    discover_oauth_metadata,
     register_client,
 )
 from azents.core.oauth2 import (
-    OAuthTokenError,
-    OAuthTokenResponse,
     build_authorization_url,
     create_agent_github_platform_oauth_state,
     create_agent_toolkit_oauth_state,
     create_platform_oauth_state,
-    create_toolkit_oauth_state,
-    exchange_authorization_code,
     generate_pkce_pair,
     verify_agent_github_platform_oauth_state,
     verify_agent_toolkit_oauth_state,
-    verify_platform_oauth_state,
-    verify_toolkit_oauth_state,
 )
-from azents.core.tools import McpToolkitConfig, ToolkitProvider
+from azents.core.tools import ToolkitProvider
 from azents.engine.tools.deps import get_toolkit_registry
-from azents.rdb.deps import get_session_manager
-from azents.rdb.session import SessionManager
-from azents.repos.github_user_installation import (
-    GithubUserInstallationRepository,
-)
-from azents.repos.mcp_oauth_connection import MCPOAuthConnectionRepository
-from azents.repos.toolkit import ToolkitRepository
 from azents.repos.toolkit.data import NotFound
 from azents.services.agent.data import NotAdmin
 from azents.services.github_platform_system_setting.runtime import (
     PlatformGitHubAppRuntimeService,
 )
 from azents.services.toolkit import ToolkitService
-from azents.services.toolkit.credential_edits import (
-    merge_kubernetes_credentials,
-    merge_redacted_credential_values,
-)
 from azents.services.toolkit.data import (
     AgentNotBelongToWorkspace,
     AgentToolkitOAuthConnectionInput,
     AgentToolkitOAuthContext,
     ToolkitOutput,
 )
-
-
-class _OAuthClientCredentials(NamedTuple):
-    """Field-named result for ``_extract_oauth_client_credentials``."""
-
-    client_id: str
-    client_secret: str | None
-
-
-logger = logging.getLogger(__name__)
+from azents.services.toolkit_oauth import helpers
+from azents.services.toolkit_oauth.data import (
+    ToolkitConnectionTestInput,
+    ToolkitOAuthError,
+    ToolkitOAuthFailureReason,
+)
+from azents.services.toolkit_oauth.service import ToolkitOAuthService
 
 router = APIRouter()
 
-_OAuthSecretsUnion = McpSecretsOAuth2 | McpSecretsOAuth2Token | McpSecretsOAuth2Dcr
-_oauth_secrets_adapter = TypeAdapter[_OAuthSecretsUnion](_OAuthSecretsUnion)
-_credentials_adapter = TypeAdapter(dict[str, object])
 _AGENT_TOOLKIT_CALLBACK_TARGET = "agent_toolkits"
 _AGENT_GITHUB_CALLBACK_TARGET = "agent_github_installations"
 
@@ -260,11 +225,7 @@ class GitHubPlatformInstallationsResponse(BaseModel):
 @router.post("/workspaces/{handle}/github/platform-installations")
 async def get_github_platform_installations(
     member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
-    config: Annotated[Config, Depends(get_config)],
-    platform_runtime: Annotated[PlatformGitHubAppRuntimeService, Depends()],
-    session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
-    ],
+    service: Annotated[ToolkitOAuthService, Depends()],
     body: GitHubPlatformInstallationsRequest,
     *,
     handle: str,
@@ -281,102 +242,27 @@ async def get_github_platform_installations(
             detail="Toolkit write permission required.",
         )
 
-    oauth_state = verify_platform_oauth_state(
-        body.state,
-        config.credential_encryption.key,
-    )
-    if oauth_state is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid state parameter.",
-        )
-
-    platform = await platform_runtime.resolve()
-    if oauth_state.effective_generation != platform.effective_generation:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={
-                "code": "system_setting_changed",
-                "message": "Platform GitHub App settings changed. Restart OAuth.",
-            },
-        )
-    if (
-        platform.app_id is None
-        or platform.client_id is None
-        or platform.client_secret is None
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="GitHub Platform App OAuth is not configured.",
-        )
-
-    # Exchange OAuth code for access token
     try:
-        user_token = await exchange_oauth_code(
-            platform.client_id,
-            platform.client_secret,
-            body.code,
+        installations = await service.platform_installations(
+            user_id=member.user_id,
+            session_id=member.session_id,
+            workspace_id=member.workspace_id,
+            code=body.code,
+            state=body.state,
         )
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(exc),
-        ) from exc
-    except httpx.HTTPStatusError as exc:
-        raise RuntimeError(
-            f"GitHub OAuth token exchange failed: HTTP {exc.response.status_code}"
-        ) from exc
-
-    # List installations accessible by the user
-    try:
-        raw_installations = await list_user_installations(user_token)
-    except httpx.HTTPStatusError as exc:
-        raise RuntimeError(
-            f"Failed to fetch user installations: HTTP {exc.response.status_code}"
-        ) from exc
-
-    # Sync user installation list to DB for ownership validation
-    install_repo = GithubUserInstallationRepository()
-    async with session_manager() as session:
-        await install_repo.sync(
-            session,
-            member.user_id,
-            platform.app_id,
-            raw_installations,
-        )
-
-    # Immediately revoke the temporary token after use
-    await revoke_oauth_token(
-        platform.client_id,
-        platform.client_secret,
-        user_token,
-    )
-
-    items: list[GitHubInstallationItem] = []
-    for inst in raw_installations:
-        account = inst.get("account")
-        if not isinstance(account, dict):
-            continue
-        login = account.get("login")
-        account_type = account.get("type")
-        avatar_url = account.get("avatar_url")
-        inst_id = inst.get("id")
-        if (
-            isinstance(inst_id, int)
-            and isinstance(login, str)
-            and isinstance(account_type, str)
-            and isinstance(avatar_url, str)
-        ):
-            items.append(
-                GitHubInstallationItem(
-                    id=inst_id,
-                    account_login=login,
-                    account_type=account_type,
-                    account_avatar_url=avatar_url,
-                )
+    except ToolkitOAuthError as exc:
+        _raise_toolkit_oauth_error(exc)
+    return GitHubPlatformInstallationsResponse(
+        installations=[
+            GitHubInstallationItem(
+                id=item.id,
+                account_login=item.account_login,
+                account_type=item.account_type,
+                account_avatar_url=item.account_avatar_url,
             )
-
-    return GitHubPlatformInstallationsResponse(installations=items)
+            for item in installations
+        ]
+    )
 
 
 @router.get("/workspaces/{handle}/agents/{agent_id}/github/platform-install-url")
@@ -586,12 +472,7 @@ async def get_agent_github_platform_installations(
 )
 async def connect_oauth(
     member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
-    cipher: Annotated[CredentialCipher, Depends(get_credential_cipher)],
-    config: Annotated[Config, Depends(get_config)],
-    session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
-    ],
-    registry: Annotated[dict[str, ToolkitProvider[Any]], Depends(get_toolkit_registry)],
+    service: Annotated[ToolkitOAuthService, Depends()],
     *,
     handle: str,
     toolkit_config_id: str,
@@ -606,103 +487,16 @@ async def connect_oauth(
             detail="Toolkit write permission required.",
         )
 
-    toolkit_repo = ToolkitRepository(cipher=cipher)
-    connection_repo = MCPOAuthConnectionRepository(cipher=cipher)
-    async with session_manager() as session:
-        toolkit = await toolkit_repo.get_shared_by_id(session, toolkit_config_id)
-        existing = await connection_repo.get_by_toolkit_id(session, toolkit_config_id)
-
-    if toolkit is None or toolkit.workspace_id != member.workspace_id:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Toolkit config not found.",
-        )
-
-    mcp_config = _resolve_mcp_config(toolkit.toolkit_type, toolkit.config, registry)
-    if mcp_config.auth_type != "oauth2":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Toolkit does not use OAuth2 authentication.",
-        )
-
-    metadata = await _discover_required_metadata(mcp_config, config.mcp_proxy_url)
-    redirect_uri = (
-        f"{config.web_url}/oauth/mcp/callback"
-        f"?handle={handle}&toolkit_config_id={toolkit_config_id}"
-        if config.web_url
-        else ""
-    )
-    client_id = existing.client_id if existing is not None else None
-    client_secret = existing.client_secret if existing is not None else None
-    registration_endpoint = metadata.registration_endpoint
-
-    if client_id is None:
-        manual = _extract_oauth_client_credentials(toolkit.credentials)
-        if manual is not None:
-            client_id, client_secret = manual
-        elif metadata.registration_endpoint is not None:
-            try:
-                dcr = await register_client(
-                    metadata.registration_endpoint,
-                    redirect_uri,
-                    proxy_url=config.mcp_proxy_url,
-                )
-            except DcrError as exc:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Dynamic client registration failed: {exc}",
-                ) from exc
-            client_id = dcr.client_id
-            client_secret = dcr.client_secret
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=(
-                    "OAuth2 client credentials are not configured "
-                    "and server does not support DCR."
-                ),
-            )
-
-    code_verifier, code_challenge = generate_pkce_pair()
-    oauth_state = create_toolkit_oauth_state(
-        toolkit_id=toolkit_config_id,
-        workspace_id=member.workspace_id,
-        user_id=member.user_id,
-        redirect_uri=redirect_uri,
-        code_verifier=code_verifier,
-        secret_key=config.credential_encryption.key,
-    )
-    scope = " ".join(mcp_config.scopes) if mcp_config.scopes else None
-    async with session_manager() as session:
-        await connection_repo.upsert_connected(
-            session,
+    try:
+        authorization_url = await service.connect(
+            user_id=member.user_id,
+            session_id=member.session_id,
+            workspace_id=member.workspace_id,
+            handle=handle,
             toolkit_id=toolkit_config_id,
-            issuer=metadata.issuer,
-            resource=mcp_config.server_url,
-            server_url=mcp_config.server_url,
-            authorization_endpoint=metadata.authorization_endpoint,
-            token_endpoint=metadata.token_endpoint,
-            registration_endpoint=registration_endpoint,
-            client_id=client_id,
-            client_secret=client_secret,
-            token_endpoint_auth_method="client_secret_post"
-            if client_secret is not None
-            else "none",
-            scope=scope,
-            access_token=existing.access_token if existing is not None else None,
-            refresh_token=existing.refresh_token if existing is not None else None,
-            expires_at=existing.expires_at if existing is not None else None,
         )
-
-    authorization_url = build_authorization_url(
-        auth_url=metadata.authorization_endpoint,
-        client_id=client_id,
-        redirect_uri=redirect_uri,
-        scopes=mcp_config.scopes,
-        state=oauth_state,
-        code_challenge=code_challenge,
-        resource=mcp_config.server_url,
-    )
+    except ToolkitOAuthError as exc:
+        _raise_toolkit_oauth_error(exc)
     return OAuthAuthorizeResponse(authorization_url=authorization_url)
 
 
@@ -719,12 +513,7 @@ class OAuthExchangeRequest(BaseModel):
 )
 async def exchange_oauth_connection(
     member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
-    cipher: Annotated[CredentialCipher, Depends(get_credential_cipher)],
-    config: Annotated[Config, Depends(get_config)],
-    session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
-    ],
-    registry: Annotated[dict[str, ToolkitProvider[Any]], Depends(get_toolkit_registry)],
+    service: Annotated[ToolkitOAuthService, Depends()],
     body: OAuthExchangeRequest,
     *,
     handle: str,
@@ -738,78 +527,17 @@ async def exchange_oauth_connection(
         )
     _ = handle
 
-    verified = verify_toolkit_oauth_state(body.state, config.credential_encryption.key)
-    if verified is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid state parameter.",
-        )
-    state_toolkit_id, state_workspace_id, _user_id, redirect_uri, code_verifier = (
-        verified
-    )
-    if (
-        state_toolkit_id != toolkit_config_id
-        or state_workspace_id != member.workspace_id
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="OAuth state does not match toolkit.",
-        )
-
-    toolkit_repo = ToolkitRepository(cipher=cipher)
-    connection_repo = MCPOAuthConnectionRepository(cipher=cipher)
-    async with session_manager() as session:
-        toolkit = await toolkit_repo.get_shared_by_id(session, toolkit_config_id)
-        connection = await connection_repo.get_by_toolkit_id(session, toolkit_config_id)
-
-    if toolkit is None or toolkit.workspace_id != member.workspace_id:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Toolkit config not found.",
-        )
-    if connection is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="OAuth connection not found. Start connect again.",
-        )
-
-    mcp_config = _resolve_mcp_config(toolkit.toolkit_type, toolkit.config, registry)
-    if mcp_config.auth_type != "oauth2":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Toolkit does not use OAuth2 authentication.",
-        )
-
-    token_response = await _exchange_and_handle_errors(
-        token_url=connection.token_endpoint,
-        client_id=connection.client_id,
-        client_secret=connection.client_secret,
-        code=body.code,
-        redirect_uri=redirect_uri,
-        code_verifier=code_verifier,
-        resource=connection.resource or mcp_config.server_url,
-        proxy_url=config.mcp_proxy_url,
-        toolkit_id=toolkit_config_id,
-        user_id=member.user_id,
-    )
-    async with session_manager() as session:
-        await connection_repo.upsert_connected(
-            session,
+    try:
+        await service.exchange(
+            user_id=member.user_id,
+            session_id=member.session_id,
+            workspace_id=member.workspace_id,
             toolkit_id=toolkit_config_id,
-            issuer=connection.issuer,
-            resource=connection.resource,
-            server_url=connection.server_url,
-            authorization_endpoint=connection.authorization_endpoint,
-            token_endpoint=connection.token_endpoint,
-            registration_endpoint=connection.registration_endpoint,
-            client_id=connection.client_id,
-            client_secret=connection.client_secret,
-            token_endpoint_auth_method=connection.token_endpoint_auth_method,
-            scope=connection.scope,
-            access_token=token_response.access_token,
-            refresh_token=token_response.refresh_token,
-            expires_at=token_response.expires_at,
+            code=body.code,
+            state=body.state,
         )
+    except ToolkitOAuthError as exc:
+        _raise_toolkit_oauth_error(exc)
 
 
 @router.delete(
@@ -818,10 +546,7 @@ async def exchange_oauth_connection(
 )
 async def disconnect_oauth_connection(
     member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
-    cipher: Annotated[CredentialCipher, Depends(get_credential_cipher)],
-    session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
-    ],
+    service: Annotated[ToolkitOAuthService, Depends()],
     *,
     handle: str,
     toolkit_config_id: str,
@@ -834,16 +559,13 @@ async def disconnect_oauth_connection(
         )
     _ = handle
 
-    toolkit_repo = ToolkitRepository(cipher=cipher)
-    connection_repo = MCPOAuthConnectionRepository(cipher=cipher)
-    async with session_manager() as session:
-        toolkit = await toolkit_repo.get_shared_by_id(session, toolkit_config_id)
-        if toolkit is None or toolkit.workspace_id != member.workspace_id:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Toolkit config not found.",
-            )
-        await connection_repo.delete_by_toolkit_id(session, toolkit_config_id)
+    try:
+        await service.disconnect(
+            workspace_id=member.workspace_id,
+            toolkit_id=toolkit_config_id,
+        )
+    except ToolkitOAuthError as exc:
+        _raise_toolkit_oauth_error(exc)
 
 
 # ---------------------------------------------------------------------------
@@ -874,13 +596,20 @@ async def connect_agent_oauth(
     )
     toolkit = context.toolkit
     existing = context.connection
-    mcp_config = _resolve_mcp_config(toolkit.toolkit_type, toolkit.config, registry)
+    mcp_config = helpers.resolve_mcp_config(
+        toolkit.toolkit_type, toolkit.config, registry
+    )
     if mcp_config.auth_type != "oauth2":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Toolkit does not use OAuth2 authentication.",
         )
-    metadata = await _discover_required_metadata(mcp_config, config.mcp_proxy_url)
+    try:
+        metadata = await helpers.discover_required_metadata(
+            mcp_config, config.mcp_proxy_url
+        )
+    except ToolkitOAuthError as exc:
+        _raise_toolkit_oauth_error(exc)
     redirect_uri = (
         f"{config.web_url}/oauth/mcp/callback"
         f"?handle={handle}&agent_id={agent_id}"
@@ -891,7 +620,7 @@ async def connect_agent_oauth(
     client_id = existing.client_id if existing is not None else None
     client_secret = existing.client_secret if existing is not None else None
     if client_id is None:
-        manual = _extract_oauth_client_credentials(toolkit.credentials)
+        manual = helpers.extract_oauth_client_credentials(toolkit.credentials)
         if manual is not None:
             client_id, client_secret = manual
         elif metadata.registration_endpoint is not None:
@@ -1026,24 +755,29 @@ async def exchange_agent_oauth_connection(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="OAuth connection not found. Start connect again.",
         )
-    mcp_config = _resolve_mcp_config(toolkit.toolkit_type, toolkit.config, registry)
+    mcp_config = helpers.resolve_mcp_config(
+        toolkit.toolkit_type, toolkit.config, registry
+    )
     if mcp_config.auth_type != "oauth2":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Toolkit does not use OAuth2 authentication.",
         )
-    token_response = await _exchange_and_handle_errors(
-        token_url=connection.token_endpoint,
-        client_id=connection.client_id,
-        client_secret=connection.client_secret,
-        code=body.code,
-        redirect_uri=verified.redirect_uri,
-        code_verifier=verified.code_verifier,
-        resource=connection.resource or mcp_config.server_url,
-        proxy_url=config.mcp_proxy_url,
-        toolkit_id=toolkit_config_id,
-        user_id=member.user_id,
-    )
+    try:
+        token_response = await helpers.exchange_and_handle_errors(
+            token_url=connection.token_endpoint,
+            client_id=connection.client_id,
+            client_secret=connection.client_secret,
+            code=body.code,
+            redirect_uri=verified.redirect_uri,
+            code_verifier=verified.code_verifier,
+            resource=connection.resource or mcp_config.server_url,
+            proxy_url=config.mcp_proxy_url,
+            toolkit_id=toolkit_config_id,
+            user_id=member.user_id,
+        )
+    except ToolkitOAuthError as exc:
+        _raise_toolkit_oauth_error(exc)
     store_result = await service.store_agent_oauth_connection(
         agent_id,
         toolkit_config_id,
@@ -1146,120 +880,41 @@ async def _get_agent_oauth_context_or_404(
     return result.value
 
 
-def _resolve_mcp_config(
-    toolkit_type: str,
-    config: dict[str, Any],
-    registry: Mapping[str, ToolkitProvider[Any]] | None = None,
-) -> McpToolkitConfig:
-    """Build McpToolkitConfig from toolkit_type."""
-    if registry is not None:
-        provider = registry.get(toolkit_type)
-        if provider is not None:
-            typed_config = provider.validate_config(config)
-            return provider.to_mcp_config(typed_config)
-    return McpToolkitConfig.model_validate(config)
-
-
-def _extract_oauth_client_credentials(
-    credentials_json: str | None,
-) -> _OAuthClientCredentials | None:
-    """Extract OAuth client credentials from encrypted Toolkit credentials JSON."""
-    if credentials_json is None:
-        return None
-    try:
-        secrets = _oauth_secrets_adapter.validate_json(credentials_json)
-    except ValidationError:
-        return None
-    return _OAuthClientCredentials(
-        client_id=secrets.client_id,
-        client_secret=secrets.client_secret,
-    )
-
-
-async def _discover_required_metadata(
-    mcp_config: McpToolkitConfig,
-    proxy_url: str | None,
-) -> OAuthServerMetadata:
-    """Discover OAuth metadata and apply explicit endpoint overrides."""
-    try:
-        metadata = await discover_oauth_metadata(
-            mcp_config.server_url,
-            mcp_config.discovery_url,
-            proxy_url=proxy_url,
-        )
-    except DiscoveryError as exc:
-        if mcp_config.auth_url is None or mcp_config.token_url is None:
+def _raise_toolkit_oauth_error(error: ToolkitOAuthError) -> NoReturn:
+    """Project only expected completed-service failures to the existing API."""
+    match error.reason:
+        case ToolkitOAuthFailureReason.INACTIVE_SUBJECT:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"OAuth metadata discovery failed: {exc}",
-            ) from exc
-        return OAuthServerMetadata(
-            authorization_endpoint=mcp_config.auth_url,
-            token_endpoint=mcp_config.token_url,
-            registration_endpoint=None,
-            scopes_supported=[],
-            issuer=None,
-        )
-
-    return OAuthServerMetadata(
-        authorization_endpoint=mcp_config.auth_url or metadata.authorization_endpoint,
-        token_endpoint=mcp_config.token_url or metadata.token_endpoint,
-        registration_endpoint=metadata.registration_endpoint,
-        scopes_supported=metadata.scopes_supported,
-        issuer=metadata.issuer,
-    )
-
-
-async def _exchange_and_handle_errors(
-    *,
-    token_url: str,
-    client_id: str,
-    client_secret: str | None,
-    code: str,
-    redirect_uri: str,
-    code_verifier: str | None,
-    resource: str | None,
-    proxy_url: str | None,
-    toolkit_id: str,
-    user_id: str,
-) -> OAuthTokenResponse:
-    """Perform OAuth2 code-to-token exchange and handle common errors."""
-    try:
-        return await exchange_authorization_code(
-            token_url=token_url,
-            client_id=client_id,
-            client_secret=client_secret,
-            code=code,
-            redirect_uri=redirect_uri,
-            code_verifier=code_verifier,
-            resource=resource,
-            proxy_url=proxy_url,
-        )
-    except httpx.HTTPStatusError as exc:
-        if 400 <= exc.response.status_code < 500:
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=error.detail,
+                headers={"WWW-Authenticate": "Bearer"},
+            ) from error
+        case (
+            ToolkitOAuthFailureReason.WORKSPACE_NOT_FOUND
+            | ToolkitOAuthFailureReason.TOOLKIT_NOT_FOUND
+            | ToolkitOAuthFailureReason.RESOURCE_NOT_FOUND
+        ):
+            code = status.HTTP_404_NOT_FOUND
+        case (
+            ToolkitOAuthFailureReason.MEMBERSHIP_REQUIRED
+            | ToolkitOAuthFailureReason.WRITE_PERMISSION_REQUIRED
+        ):
+            code = status.HTTP_403_FORBIDDEN
+        case ToolkitOAuthFailureReason.INVALID_REQUEST:
+            code = status.HTTP_400_BAD_REQUEST
+        case ToolkitOAuthFailureReason.TOKEN_REJECTED:
+            code = status.HTTP_422_UNPROCESSABLE_ENTITY
+        case ToolkitOAuthFailureReason.PLATFORM_SETTINGS_CHANGED:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=(
-                    "Token exchange rejected by provider:"
-                    f" HTTP {exc.response.status_code}"
-                ),
-            ) from exc
-        raise
-    except OAuthTokenError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Token exchange failed: {exc}",
-        ) from exc
-    except ValidationError as exc:
-        logger.warning(
-            "Invalid token response from provider",
-            extra={"toolkit_id": toolkit_id, "user_id": user_id},
-            exc_info=True,
-        )
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Invalid token response from provider: {exc}",
-        ) from exc
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "system_setting_changed",
+                    "message": "Platform GitHub App settings changed. Restart OAuth.",
+                },
+            ) from error
+        case _:
+            assert_never(error.reason)
+    raise HTTPException(status_code=code, detail=error.detail) from error
 
 
 # ---------------------------------------------------------------------------
@@ -1272,12 +927,7 @@ async def _exchange_and_handle_errors(
 )
 async def test_connection_saved(
     member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
-    cipher: Annotated[CredentialCipher, Depends(get_credential_cipher)],
-    config: Annotated[Config, Depends(get_config)],
-    session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
-    ],
-    registry: Annotated[dict[str, ToolkitProvider[Any]], Depends(get_toolkit_registry)],
+    service: Annotated[ToolkitOAuthService, Depends()],
     *,
     toolkit_config_id: str,
 ) -> TestConnectionResponse:
@@ -1291,28 +941,13 @@ async def test_connection_saved(
             detail="Toolkit read permission required.",
         )
 
-    toolkit_repo = ToolkitRepository(cipher=cipher)
-
-    async with session_manager() as session:
-        toolkit = await toolkit_repo.get_shared_by_id(session, toolkit_config_id)
-
-    if toolkit is None or toolkit.workspace_id != member.workspace_id:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Toolkit config not found.",
+    try:
+        result = await service.test_saved(
+            workspace_id=member.workspace_id,
+            toolkit_id=toolkit_config_id,
         )
-
-    provider = registry.get(toolkit.toolkit_type)
-    if provider is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Unknown toolkit type: {toolkit.toolkit_type}",
-        )
-
-    validated_config = provider.validate_config(toolkit.config)
-    result = await provider.test_connection(
-        validated_config, toolkit.credentials, proxy_url=config.mcp_proxy_url
-    )
+    except ToolkitOAuthError as exc:
+        _raise_toolkit_oauth_error(exc)
     return TestConnectionResponse(
         success=result.success,
         message=result.message,
@@ -1327,13 +962,7 @@ async def test_connection_saved(
 )
 async def test_connection_unsaved(
     member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
-    cipher: Annotated[CredentialCipher, Depends(get_credential_cipher)],
-    config: Annotated[Config, Depends(get_config)],
-    platform_runtime: Annotated[PlatformGitHubAppRuntimeService, Depends()],
-    session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
-    ],
-    registry: Annotated[dict[str, ToolkitProvider[Any]], Depends(get_toolkit_registry)],
+    service: Annotated[ToolkitOAuthService, Depends()],
     *,
     body: TestConnectionRequest,
 ) -> TestConnectionResponse:
@@ -1350,25 +979,18 @@ async def test_connection_unsaved(
             detail="Toolkit read permission required.",
         )
 
-    provider = registry.get(body.toolkit_type)
-    if provider is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Unknown toolkit type: {body.toolkit_type}",
+    try:
+        result = await service.test_unsaved(
+            workspace_id=member.workspace_id,
+            request=ToolkitConnectionTestInput(
+                toolkit_type=body.toolkit_type,
+                config=body.config,
+                credentials=body.credentials,
+                toolkit_config_id=body.toolkit_config_id,
+            ),
         )
-
-    validated_config = provider.validate_config(body.config)
-    credentials_json = await _resolve_test_credentials(
-        body, cipher, session_manager, member.workspace_id
-    )
-    credentials_json = await _bind_platform_app_test_credentials(
-        credentials_json,
-        platform_runtime,
-    )
-
-    result = await provider.test_connection(
-        validated_config, credentials_json, proxy_url=config.mcp_proxy_url
-    )
+    except ToolkitOAuthError as exc:
+        _raise_toolkit_oauth_error(exc)
     return TestConnectionResponse(
         success=result.success,
         message=result.message,
@@ -1446,15 +1068,23 @@ async def test_agent_connection_unsaved(
         )
     validated_config = provider.validate_config(body.config)
     credentials_json = await _resolve_agent_test_credentials(
-        body,
+        ToolkitConnectionTestInput(
+            toolkit_type=body.toolkit_type,
+            config=body.config,
+            credentials=body.credentials,
+            toolkit_config_id=body.toolkit_config_id,
+        ),
         service,
         member,
         agent_id=agent_id,
     )
-    credentials_json = await _bind_platform_app_test_credentials(
-        credentials_json,
-        platform_runtime,
-    )
+    try:
+        credentials_json = await helpers.bind_platform_app_test_credentials(
+            credentials_json,
+            platform_runtime,
+        )
+    except ToolkitOAuthError as exc:
+        _raise_toolkit_oauth_error(exc)
     result = await provider.test_connection(
         validated_config,
         credentials_json,
@@ -1528,7 +1158,7 @@ def _raise_agent_item_error(
 
 
 async def _resolve_agent_test_credentials(
-    body: TestConnectionRequest,
+    body: ToolkitConnectionTestInput,
     service: ToolkitService,
     member: WorkspaceMember,
     *,
@@ -1542,95 +1172,7 @@ async def _resolve_agent_test_credentials(
             agent_id=agent_id,
             toolkit_config_id=body.toolkit_config_id,
         )
-        saved: dict[str, object] = {}
-        if toolkit.credentials is not None:
-            try:
-                saved = _credentials_adapter.validate_json(toolkit.credentials)
-            except ValidationError:
-                pass
-        if body.toolkit_type == "kubernetes":
-            merged = merge_kubernetes_credentials(
-                toolkit.credentials,
-                body.credentials,
-                body.config,
-            )
-            return json.dumps(merged)
-        if body.credentials is not None:
-            saved = merge_redacted_credential_values(saved, body.credentials)
-        return json.dumps(saved) if saved else None
-    if body.credentials is not None:
-        return json.dumps(body.credentials)
-    return None
-
-
-async def _bind_platform_app_test_credentials(
-    credentials_json: str | None,
-    platform_runtime: PlatformGitHubAppRuntimeService,
-) -> str | None:
-    """Bind unsaved Platform GitHub credentials to the server App identity."""
-    if credentials_json is None:
-        return None
-    parsed: object = json.loads(credentials_json)
-    if not isinstance(parsed, dict) or parsed.get("type") != "github_app_platform":
-        return credentials_json
-    platform = await platform_runtime.resolve()
-    if platform.app_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="GitHub Platform App is not configured.",
-        )
-    return json.dumps({**parsed, "app_id": platform.app_id})
-
-
-async def _resolve_test_credentials(
-    body: TestConnectionRequest,
-    cipher: CredentialCipher,
-    session_manager: SessionManager[AsyncSession],
-    workspace_id: str,
-) -> str | None:
-    """Resolve credentials for tests.
-
-    When ``toolkit_config_id`` exists, load stored credentials from DB, then
-    override with non-empty values from the body.
-
-    :param body: Test request body
-    :param cipher: Credential decryption utility
-    :param session_manager: DB session manager
-    :param workspace_id: Workspace ID for ownership validation
-    :return: Merged credentials JSON or None
-    """
-    # When stored credentials must be loaded from DB
-    if body.toolkit_config_id is not None:
-        toolkit_repo = ToolkitRepository(cipher=cipher)
-        async with session_manager() as session:
-            toolkit = await toolkit_repo.get_shared_by_id(
-                session, body.toolkit_config_id
-            )
-
-        if toolkit is not None and toolkit.workspace_id == workspace_id:
-            if body.toolkit_type == "kubernetes":
-                merged = merge_kubernetes_credentials(
-                    toolkit.credentials,
-                    body.credentials,
-                    body.config,
-                )
-                return json.dumps(merged)
-            saved: dict[str, object] = {}
-            if toolkit.credentials is not None:
-                try:
-                    saved = _credentials_adapter.validate_json(toolkit.credentials)
-                except ValidationError:
-                    pass
-
-            # Override with form-entered values, ignoring empty strings
-            if body.credentials is not None:
-                saved = merge_redacted_credential_values(saved, body.credentials)
-
-            if saved:
-                return json.dumps(saved)
-            return None
-
-    # Without toolkit_config_id, use only form values in create mode
+        return helpers.merge_saved_test_credentials(body, toolkit.credentials)
     if body.credentials is not None:
         return json.dumps(body.credentials)
     return None

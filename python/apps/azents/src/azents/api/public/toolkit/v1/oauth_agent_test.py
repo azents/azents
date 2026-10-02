@@ -10,6 +10,7 @@ from azcommon.result import Failure, Success
 from fastapi import HTTPException
 
 import azents.api.public.toolkit.v1.oauth as oauth_module
+import azents.services.toolkit_oauth.helpers as oauth_helpers
 from azents.api.public.toolkit.v1.oauth import (
     GitHubPlatformInstallationsRequest,
     OAuthExchangeRequest,
@@ -245,8 +246,8 @@ async def test_new_agent_oauth_connect_remains_authorization_required(
     )
     service.store_agent_oauth_connection = AsyncMock(return_value=Success(None))
     monkeypatch.setattr(
-        oauth_module,
-        "_discover_required_metadata",
+        oauth_helpers,
+        "discover_required_metadata",
         AsyncMock(
             return_value=OAuthServerMetadata(
                 authorization_endpoint="https://mcp.test/authorize",
@@ -330,7 +331,7 @@ async def test_agent_oauth_exchange_revalidates_current_item_authority(
         return_value=Failure(NotAdmin(agent_id="agent-1"))
     )
     exchange = AsyncMock()
-    monkeypatch.setattr(oauth_module, "_exchange_and_handle_errors", exchange)
+    monkeypatch.setattr(oauth_helpers, "exchange_and_handle_errors", exchange)
 
     with pytest.raises(HTTPException) as raised:
         await exchange_agent_oauth_connection(

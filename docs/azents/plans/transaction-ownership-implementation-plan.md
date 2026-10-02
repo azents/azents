@@ -314,8 +314,63 @@ Provider Ingress 64 record the unchanged internal contracts. Initial/final
 pre-commit passed with source bytes unchanged. The same retained reviewer covered
 all 18 paths with no findings and independently passed 183 cases without skips,
 repeated the overlapping 18 contention cases, and verified bounded OpenAPI and
-final frozen checks. Only execution metadata changed afterward; commit/PR/CI
-pending. No new mechanism, cross-I/O lock or Agent merge.
+final frozen checks. Only execution metadata changed afterward. Commit d1c3a7d47
+is submitted as PR #2067 over #2065. Actual-head workflow attempt 2 succeeded
+with 33 native successes / two path skips; rollup 34 passed / two skipped includes
+one inherited base status, OPEN/MERGEABLE/CLEAN. Attempt 1 Slack history timeout
+and same-head local 1/3-case plus diagnostic rerun passes are preserved without
+root-cause or source-fix claims. No new mechanism, cross-I/O lock or Agent merge.
+
+Phase 35 owns the eight Public Toolkit OAuth/setup/test-credential lifetimes and
+actual service/helper/Agent-caller closure. API/service, repository/authority/data,
+and PostgreSQL proof owners have non-overlapping paths. Root owns shared wiring,
+plans/Specs and all integration/review/delivery gates. Post-HTTP installation and
+shared connection writes repeat existing exact active User/Auth Session, admitted
+Workspace/current membership/TOOLKITS_WRITE predicates and shared Toolkit identity
+inside the completed final group. This is bounded fresh evaluation, not a new
+stable-through-commit lock/isolation guarantee. No new initiating-User/redirect,
+config/version/connection/credential CAS, revoke/compensation or retry policy.
+Current Shared/Agent and setup/refresh distinctions remain. The parent gate is
+confirmed; implementation starts only after the tracked phase plan is reported.
+Design delta None; public schemas, protocol, permissions and lock policy remain.
+
+The requester's subsequent #2058 conflict report repairs the four open phases
+onto main `83fc6e43a`. Phase 31 preserves both Spec records; Phase 32 retains the
+current data-only catalog source and completes its metadata read without
+restoring retired authority. Phase 33/34 patch identities remain unchanged.
+Repaired local heads are `fba0ba1bd`, `5c8e849ae`, `0918ee793`, and `a52ef0254`.
+Root repair QA passed 910 focused and 8,234 full backend cases with three existing
+Redis-only skips, whole ty/Ruff/format/docs/whitespace and final pre-commit.
+The same reviewer completed all 118 repair paths with no findings and 311
+independent cases passed. One atomic explicit-lease push updated all four remote
+heads after checking exact old official tips. Exact new-head CI remains pending;
+previous CI records above are historical evidence, not proof for these new SHAs.
+
+All Phase 35 implementation owners are frozen: 13 Python paths, with separate
+repository regression, application sequencing, real SQL/savepoint/standalone
+fault-cancel, and 45 actual-service independent committed-invalidation evidence.
+Root verified the hashes before and after moving the dirty phase to `a52ef0254`
+through an identified preserved stash. Fresh Public/Admin and candidate baselines
+remain 234/69 and 486/86. Root integrated phase QA passed 328 focused and 8,409
+full backend cases with three existing Redis-only skips, whole ty/Ruff/format,
+full Public/Admin JSON equality, absence/retention/inventory/docs/whitespace and
+pre-commit. All 13 source hashes are stable. Candidates are now 478/85, not
+complete coverage. The same retained reviewer completed all 18 paths with no
+findings, independently passed 328 cases and the overlapping 45 actual-service
+M3 repeat, verified bounded OpenAPI and final frozen state. Only execution
+metadata changes afterward. Stacked PR submission and exact-head CI remain
+root-owned unfinished delivery gates.
+
+The requester externally merged all four repaired parent PRs while Phase 35's
+review was completing, and #2067's remote branch was deleted. The first Phase 35
+PR creation over that branch failed without losing its pushed commit. Current
+main `a500f7594` contains the reviewed a52ef0254 parent; only dependency/hook paths
+changed afterward. A source-identical conflict-free rebase preserved the full
+18-path Phase 35 patch. Fresh dependency-environment QA again passed 328 focused
+and 8,409 full cases with the same three existing Redis-only skips and all nine
+gates. Only execution metadata changes; source/Spec review remains valid.
+The Phase 35 PR now targets main; parent and new exact-head CI are still checked
+separately, not inferred from externally merged state. No Agent merge.
 
 ## Delivery Boundaries
 
