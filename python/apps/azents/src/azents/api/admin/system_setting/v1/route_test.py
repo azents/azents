@@ -11,6 +11,11 @@ from azents.core.external_channel_file_system_setting import (
     ExternalChannelFilesConfig,
     ExternalChannelFilesSecrets,
 )
+from azents.core.github_system_setting_data import (
+    PlatformGitHubAppDetail,
+    PlatformGitHubAppEffectiveStatus,
+    PlatformGitHubAppFieldState,
+)
 from azents.core.system_setting import (
     ResolvedSystemSetting,
     SystemSettingCandidateReplaced,
@@ -19,15 +24,10 @@ from azents.core.system_setting import (
     SystemSettingSection,
     SystemSettingVersionConflict,
 )
-from azents.services.github_platform_system_setting.data import (
-    PlatformGitHubAppDetail,
-    PlatformGitHubAppEffectiveStatus,
-    PlatformGitHubAppFieldState,
-)
+from azents.core.system_setting_data import SystemSettingActivated
 from azents.services.github_platform_system_setting.service import (
     PlatformGitHubAppSystemSettingService,
 )
-from azents.services.system_setting.data import SystemSettingActivated
 from azents.services.system_setting.service import SystemSettingsService
 
 from . import (

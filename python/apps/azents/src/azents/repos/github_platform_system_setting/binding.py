@@ -9,20 +9,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.core.crypto import CredentialCipher
 from azents.core.deps import get_credential_cipher
 from azents.core.github_credentials import GitHubSecretsAppPlatform
+from azents.core.github_system_setting_data import PlatformGitHubAppToolkitBindingImpact
 from azents.repos.github_platform_system_setting.repository import (
     PlatformGitHubAppSystemSettingRepository,
 )
 
 
 @dataclasses.dataclass(frozen=True)
-class PlatformGitHubAppToolkitBindingImpact:
-    """Toolkit IDs affected by one App identity comparison."""
-
-    affected_toolkit_ids: frozenset[str]
-
-
-@dataclasses.dataclass(frozen=True)
-class PlatformGitHubAppBindingService:
+class PlatformGitHubAppBindingRepository:
     """Inspect persisted Platform GitHub App identity bindings."""
 
     repository: Annotated[

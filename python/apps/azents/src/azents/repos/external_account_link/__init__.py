@@ -37,6 +37,10 @@ from azents.core.system_setting import (
     SystemSettingRegistry,
     SystemSettingSection,
 )
+from azents.core.system_setting_deps import (
+    get_system_setting_environment,
+    get_system_setting_generation_hasher,
+)
 from azents.core.system_setting_registry import get_system_setting_registry
 from azents.rdb.deps import get_session_manager
 from azents.rdb.models.external_account_link import RDBExternalAccountLink
@@ -50,10 +54,6 @@ from azents.rdb.models.user import RDBUser
 from azents.rdb.models.workspace import RDBWorkspace
 from azents.rdb.session import SessionManager
 from azents.repos.system_setting.repository import SystemSettingRepository
-from azents.services.system_setting.service import (
-    get_system_setting_environment,
-    get_system_setting_generation_hasher,
-)
 
 from .data import ExternalAccountLink
 

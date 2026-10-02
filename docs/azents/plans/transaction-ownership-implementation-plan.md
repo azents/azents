@@ -190,6 +190,25 @@ remains the final phase delivery gate. The refreshed current inventory remains
 than a repository-wide violation count or closure claim. Worker Session/Stop
 ownership and the larger services/Runtime/API groups remain later work.
 
+Phase 29 PR #2056 is submitted at `574020052` and its normalized exact-head CI
+has no failed or unfinished checks (38 passed, three skipped on the latest
+verification). No Agent merge. Phase 30 starts from that clean validated parent
+with the completed Platform settings discovery rather than waiting for Worker
+call-path mapping. This changes execution order only; Worker scope remains later
+work and Design delta remains None.
+
+Phase 30 owns System Settings (10), concrete GitHub settings (3), Workspace model
+defaults (5), and removal of a dormant generic migration runner (1), with eight
+service session declarations and three session callback aliases. Eighteen
+contexts are reachable ownership violations; the runner is a removed obsolete
+capability, not an infrastructure exemption. Retain executed migrations/marker
+infrastructure, committed expiry deletion before service errors, same Section
+version/generation/impact authority, current Workspace member/null/catalog policy,
+and final settings+downgrade marker atomicity. Generic lifecycle and concrete
+GitHub confirmation share one implementation owner; Workspace defaults is an
+independent workstream. Neighboring catalog reads remain explicit residuals.
+The same reviewer and full root validation/OpenAPI/CI gates apply.
+
 ## Delivery Boundaries
 
 1. Correct the title-generation and ChatGPT OAuth persistence boundary as one

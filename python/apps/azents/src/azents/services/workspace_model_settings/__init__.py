@@ -5,7 +5,6 @@ from typing import Annotated, assert_never
 
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent import (
     AgentModelSelection,
@@ -14,12 +13,12 @@ from azents.core.agent import (
     SelectableModelOptionInput,
     SelectableModelSettings,
 )
-from azents.rdb.deps import get_session_manager
-from azents.rdb.session import SessionManager
-from azents.repos.workspace_model_settings import WorkspaceModelSettingsRepository
 from azents.repos.workspace_model_settings.data import (
     WorkspaceModelSettings,
     WorkspaceModelSettingsUpdate,
+)
+from azents.repos.workspace_model_settings.operations import (
+    WorkspaceModelSettingsOperationRepository,
 )
 from azents.services.image_generation_catalog import ImageGenerationCatalogService
 from azents.services.llm_catalog import ModelCatalogReadService
@@ -43,20 +42,17 @@ class WorkspaceModelSettingsService:
     """Workspace default model settings service."""
 
     repository: Annotated[
-        WorkspaceModelSettingsRepository, Depends(WorkspaceModelSettingsRepository)
+        WorkspaceModelSettingsOperationRepository,
+        Depends(WorkspaceModelSettingsOperationRepository),
     ]
     model_catalog_read_service: Annotated[ModelCatalogReadService, Depends()]
     image_generation_catalog_service: Annotated[
         ImageGenerationCatalogService, Depends()
     ]
-    session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
-    ]
 
     async def get(self, workspace_id: str) -> WorkspaceModelSettingsOutput:
         """Fetch Workspace default model settings."""
-        async with self.session_manager() as session:
-            settings = await self.repository.get_or_create(session, workspace_id)
+        settings = await self.repository.get_or_create(workspace_id)
         return self._build_output_from_settings(settings)
 
     async def update(
@@ -70,8 +66,7 @@ class WorkspaceModelSettingsService:
         | DefaultModelCannotBeCleared,
     ]:
         """Update Workspace default model settings."""
-        async with self.session_manager() as session:
-            current = await self.repository.get(session, workspace_id)
+        current = await self.repository.get(workspace_id)
 
         model_options: NormalizedSelectableModelOptions | None = None
         if (
@@ -83,10 +78,7 @@ class WorkspaceModelSettingsService:
                 and current.default_selectable_model_options is not None
             ):
                 return Failure(DefaultModelCannotBeCleared(workspace_id=workspace_id))
-            async with self.session_manager() as session:
-                current_or_empty = await self.repository.get_or_create(
-                    session, workspace_id
-                )
+            current_or_empty = await self.repository.get_or_create(workspace_id)
             return Success(self._build_output_from_settings(current_or_empty))
         if update.default_selectable_model_options is not None:
             options_result = await self._normalize_option_inputs(
@@ -116,10 +108,7 @@ class WorkspaceModelSettingsService:
             )
 
         if model_options is None:
-            async with self.session_manager() as session:
-                current_or_empty = await self.repository.get_or_create(
-                    session, workspace_id
-                )
+            current_or_empty = await self.repository.get_or_create(workspace_id)
             return Success(self._build_output_from_settings(current_or_empty))
 
         repo_update = WorkspaceModelSettingsUpdate(
@@ -129,8 +118,7 @@ class WorkspaceModelSettingsService:
             default_main_model_label=model_options.main_model_label,
             default_lightweight_model_label=model_options.lightweight_model_label,
         )
-        async with self.session_manager() as session:
-            result = await self.repository.update(session, workspace_id, repo_update)
+        result = await self.repository.update(workspace_id, repo_update)
         match result:
             case Success(value):
                 return Success(self._build_output_from_settings(value))

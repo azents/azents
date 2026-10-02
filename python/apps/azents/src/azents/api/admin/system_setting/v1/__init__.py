@@ -19,14 +19,14 @@ from azents.core.system_setting import (
     SystemSettingSection,
     SystemSettingVersionConflict,
 )
+from azents.core.system_setting_data import (
+    SystemSettingMutation,
+)
 from azents.services.external_account_oauth_system_setting.service import (
     ExternalAccountOAuthSystemSettingService,
 )
 from azents.services.github_platform_system_setting.service import (
     PlatformGitHubAppSystemSettingService,
-)
-from azents.services.system_setting.data import (
-    SystemSettingMutation,
 )
 from azents.services.system_setting.service import SystemSettingsService
 from azents.utils.fastapi.route import RouteMounter

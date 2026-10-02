@@ -13,15 +13,7 @@ from azents.core.system_setting import (
     SystemSettingSection,
     SystemSettingValidationStatus,
 )
-from azents.rdb.models.system_setting import (
-    RDBSystemDataMigration,
-    RDBSystemSetting,
-    RDBSystemSettingAuditEvent,
-    RDBSystemSettingCandidate,
-    RDBSystemSettingHealth,
-)
-
-from .data import (
+from azents.core.system_setting_data import (
     StoredSystemDataMigration,
     StoredSystemSetting,
     StoredSystemSettingAuditEvent,
@@ -32,6 +24,13 @@ from .data import (
     SystemSettingCandidateCreate,
     SystemSettingCurrentWrite,
     SystemSettingHealthWrite,
+)
+from azents.rdb.models.system_setting import (
+    RDBSystemDataMigration,
+    RDBSystemSetting,
+    RDBSystemSettingAuditEvent,
+    RDBSystemSettingCandidate,
+    RDBSystemSettingHealth,
 )
 
 

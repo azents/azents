@@ -27,6 +27,10 @@ from azents.core.system_setting import (
     SystemSettingAuditSource,
     SystemSettingSection,
 )
+from azents.core.system_setting_data import (
+    SystemSettingAuditEventCreate,
+    SystemSettingCurrentWrite,
+)
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.runtime_provider.data import (
@@ -46,10 +50,6 @@ from azents.repos.runtime_provider_binding.data import (
 )
 from azents.repos.runtime_provider_binding.repository import (
     RuntimeProviderAuthBindingRepository,
-)
-from azents.repos.system_setting.data import (
-    SystemSettingAuditEventCreate,
-    SystemSettingCurrentWrite,
 )
 from azents.repos.system_setting.repository import SystemSettingRepository
 

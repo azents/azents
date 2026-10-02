@@ -32,8 +32,8 @@ from azents.core.system_setting import (
     SystemSettingSecretAction,
     SystemSettingSection,
 )
-from azents.repos.system_setting.data import StoredSystemSetting
-from azents.services.system_setting.data import (
+from azents.core.system_setting_data import (
+    StoredSystemSetting,
     SystemSettingHealthResult,
     SystemSettingMutation,
     SystemSettingMutationResult,
