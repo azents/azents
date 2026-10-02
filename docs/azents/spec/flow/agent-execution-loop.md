@@ -96,6 +96,10 @@ code_paths:
   - python/apps/azents/src/azents/repos/engine_event_operation.py
   - python/apps/azents/src/azents/repos/engine_execution_operation.py
   - python/apps/azents/src/azents/repos/engine_tool_result_operation.py
+  - python/apps/azents/src/azents/repos/engine_model_input_operation.py
+  - python/apps/azents/src/azents/repos/engine_input_projection.py
+  - python/apps/azents/src/azents/engine/events/input_projection.py
+  - python/apps/azents/src/azents/engine/events/tool_results.py
   - python/apps/azents/src/azents/repos/session_execution/**
   - python/apps/azents/src/azents/repos/model_candidate_health/**
   - python/apps/azents/src/azents/services/model_listing/**
@@ -122,7 +126,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
   - typescript/apps/azents-web/messages/*/chat.json
 last_verified_at: 2026-10-02
-spec_version: 197
+spec_version: 198
 ---
 
 # Agent Execution Loop
@@ -1485,6 +1489,16 @@ locks the Run, removes only the matching active call, and selects
 generated-file metadata admission retains the same in-session primitive so file
 metadata and the result Event remain one atomic transaction.
 
+Model-input preparation completes in one repository-owned transaction: capture
+the input head, load its transcript, reconcile unresolved durable tool calls,
+reload from the same head when results were repaired, update `preparing_input`,
+and persist attachment availability and unavailable ModelFile placeholders.
+Scheduled terminal-tool recovery retains its committed-result identity rather
+than replaying the tool. Repaired-result publication, phase publication, and
+automatic compaction follow transaction completion. Availability projection is
+an explicit database-only repository composition, not an Engine callback that
+receives a live session.
+
 ExchangeFile, ModelFile, and Artifact creation preallocates the entity ID and object key, closes its
 authorization snapshot, uploads the blob without an open database session, and then revalidates
 ownership in the short metadata transaction. A failed revalidation or metadata commit deletes the
@@ -1653,6 +1667,9 @@ icon.
 
 ## Changelog
 
+- **2026-10-02** (spec_version 198) — Moved the complete model-input preparation
+  atomic group and availability projection into repository-owned database work,
+  replacing the live-session Engine pre-lower filter interface.
 - **2026-10-02** (spec_version 197) — Promoted persisted Memory boundary
   snapshots, prompt-only context and mutation-only domain tools, and generic
   Runtime-independent live Memory VFS reads distinct from immutable Skills.

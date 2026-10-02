@@ -470,20 +470,23 @@ class _SessionRepo:
         return self._state
 
 
-class _PreFilter:
-    """Pre-lower filter for tests."""
+class _CompactedInput:
+    """Completed auto-compaction result for transcript selection tests."""
 
     def __init__(self, events: Sequence[Event]) -> None:
         self._events = list(events)
         self.was_compacted = True
 
-    async def apply(
+    async def compact(
         self,
-        session: AsyncSession,
         transcript: Sequence[Event],
+        *,
+        on_started: Callable[[], Awaitable[None]] | None = None,
     ) -> list[Event]:
         """Return transcript after compaction."""
-        del session, transcript
+        del transcript
+        assert on_started is not None
+        await on_started()
         return list(self._events)
 
 
@@ -1205,6 +1208,7 @@ async def test_text_run_completes() -> None:
 
     execution = AgentRunExecution(
         session_manager=_session_context,
+        input_projection_repository=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -1271,6 +1275,7 @@ async def test_dialect_follow_up_continues_without_tool_call() -> None:
     )
     execution = AgentRunExecution(
         session_manager=_session_context,
+        input_projection_repository=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -1372,6 +1377,7 @@ async def test_external_run_callbacks_observe_no_open_db_session() -> None:
 
     execution = AgentRunExecution(
         session_manager=session_manager,
+        input_projection_repository=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -1420,6 +1426,7 @@ async def test_model_delta_reaches_output_sink_before_stream_completion() -> Non
 
     execution = AgentRunExecution(
         session_manager=_session_context,
+        input_projection_repository=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -1478,6 +1485,7 @@ async def test_text_run_commits_durable_events_before_output_sink() -> None:
 
     execution = AgentRunExecution(
         session_manager=_session_manager_for(session),
+        input_projection_repository=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -1514,6 +1522,7 @@ async def test_provider_output_shares_event_admission_transaction() -> None:
     materializer = _ProviderOutputMaterializer()
     execution = AgentRunExecution(
         session_manager=_session_context,
+        input_projection_repository=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -1553,6 +1562,7 @@ async def test_provider_output_cleans_up_after_event_admission_failure() -> None
     materializer = _ProviderOutputMaterializer()
     execution = AgentRunExecution(
         session_manager=_session_context,
+        input_projection_repository=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -1593,6 +1603,7 @@ async def test_provider_output_admits_terminal_turn_without_durable_event() -> N
     transcript_repo = _TranscriptRepo()
     execution = AgentRunExecution(
         session_manager=_session_context,
+        input_projection_repository=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -1644,6 +1655,7 @@ async def test_output_without_usage_clears_retry_state_before_publish() -> None:
 
     execution = AgentRunExecution(
         session_manager=_session_context,
+        input_projection_repository=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -1692,6 +1704,7 @@ async def test_text_run_output_sink_receives_run_marker() -> None:
 
     execution = AgentRunExecution(
         session_manager=_session_context,
+        input_projection_repository=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -1768,6 +1781,7 @@ async def test_model_usage_is_appended_as_turn_marker(
     )
     execution = AgentRunExecution(
         session_manager=_session_context,
+        input_projection_repository=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -1852,6 +1866,7 @@ async def test_model_output_without_system_prompt_clears_session_snapshot() -> N
     system_prompt_snapshot_repo = _SystemPromptSnapshotRepo(previous_prompt)
     execution = AgentRunExecution(
         session_manager=_session_context,
+        input_projection_repository=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -1888,6 +1903,7 @@ async def test_model_input_uses_session_head_event_id() -> None:
     transcript_repo = _TranscriptRepo()
     execution = AgentRunExecution(
         session_manager=_session_context,
+        input_projection_repository=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -1924,6 +1940,7 @@ async def test_closed_admission_barrier_prevents_call_and_handler_start() -> Non
     tool_executor = _ToolExecutor()
     execution = AgentRunExecution(
         session_manager=_session_context,
+        input_projection_repository=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -1962,6 +1979,7 @@ async def test_tool_run_with_turn_limit_interrupts_after_tool_result() -> None:
     transcript_repo = _TranscriptRepo()
     execution = AgentRunExecution(
         session_manager=_session_context,
+        input_projection_repository=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -2023,6 +2041,7 @@ async def test_terminal_tool_completes_run_without_another_model_turn() -> None:
     tool_executor = _TerminalToolExecutor(run_repo)
     execution = AgentRunExecution(
         session_manager=_session_context,
+        input_projection_repository=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -2092,6 +2111,7 @@ async def test_terminal_tool_recovery_finalizes_result_before_model_dispatch() -
     normalizer = _OutputSequenceNormalizer([])
     execution = AgentRunExecution(
         session_manager=_session_context,
+        input_projection_repository=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -2163,6 +2183,7 @@ async def test_bridge_tool_batch_forces_post_tool_poll(
 
     execution = AgentRunExecution(
         session_manager=_session_context,
+        input_projection_repository=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -2232,6 +2253,7 @@ async def test_multiple_bridge_calls_in_one_batch_force_one_post_tool_poll() -> 
 
     execution = AgentRunExecution(
         session_manager=_session_context,
+        input_projection_repository=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -2293,6 +2315,7 @@ async def test_pre_model_bridge_recovery_suppresses_parent_result() -> None:
 
     execution = AgentRunExecution(
         session_manager=_session_context,
+        input_projection_repository=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -2329,6 +2352,7 @@ async def test_parallel_calls_finalize_independently() -> None:
     tool_executor = _OrderedToolExecutor()
     execution = AgentRunExecution(
         session_manager=_session_context,
+        input_projection_repository=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -2390,6 +2414,7 @@ async def test_term_after_admission_keeps_normal_result_and_run_recoverable() ->
     barrier = _MutableToolAdmissionBarrier()
     execution = AgentRunExecution(
         session_manager=_session_context,
+        input_projection_repository=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -2445,6 +2470,7 @@ async def test_unlimited_tool_run_executes_tool_then_completes() -> None:
     transcript_repo = _TranscriptRepo()
     execution = AgentRunExecution(
         session_manager=_session_context,
+        input_projection_repository=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -2503,6 +2529,7 @@ async def test_tool_run_completes_after_empty_terminal_model_turn() -> None:
     )
     execution = AgentRunExecution(
         session_manager=_session_context,
+        input_projection_repository=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -2557,6 +2584,7 @@ async def test_final_tool_turn_executes_tool_then_completes() -> None:
     )
     execution = AgentRunExecution(
         session_manager=_session_context,
+        input_projection_repository=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -2609,6 +2637,7 @@ async def test_client_tool_source_snapshot_is_shared_by_durable_and_active() -> 
     tool_executor = _ToolExecutor()
     execution = AgentRunExecution(
         session_manager=_session_context,
+        input_projection_repository=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -2661,6 +2690,7 @@ async def test_generated_client_result_materializes_in_result_transaction() -> N
     materializer = _ClientToolOutputMaterializer()
     execution = AgentRunExecution(
         session_manager=_session_context,
+        input_projection_repository=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -2725,6 +2755,7 @@ async def test_generated_client_result_cleans_up_after_admission_failure() -> No
     materializer = _FailingClientToolOutputMaterializer()
     execution = AgentRunExecution(
         session_manager=_session_context,
+        input_projection_repository=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -2784,6 +2815,7 @@ async def test_generated_client_result_without_materializer_fails_safely(
     transcript_repo = _TranscriptRepo()
     execution = AgentRunExecution(
         session_manager=_session_context,
+        input_projection_repository=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -2864,6 +2896,7 @@ async def test_model_call_preparer_runs_for_each_model_turn() -> None:
 
     execution = AgentRunExecution(
         session_manager=_session_context,
+        input_projection_repository=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -2931,6 +2964,7 @@ async def test_model_call_preparer_turn_end_receives_error_reason() -> None:
 
     execution = AgentRunExecution(
         session_manager=_session_context,
+        input_projection_repository=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -2964,6 +2998,7 @@ async def test_provider_tool_call_completes_without_next_model_turn() -> None:
     transcript_repo = _TranscriptRepo()
     execution = AgentRunExecution(
         session_manager=_session_context,
+        input_projection_repository=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -3009,6 +3044,7 @@ async def test_provider_tool_call_with_message_completes_one_turn() -> None:
     transcript_repo = _TranscriptRepo()
     execution = AgentRunExecution(
         session_manager=_session_context,
+        input_projection_repository=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -3056,6 +3092,7 @@ async def test_auto_compaction_does_not_publish_phase_when_threshold_is_not_met(
     run_repo = _RunRepo()
     execution = AgentRunExecution(
         session_manager=_session_context,
+        input_projection_repository=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -3089,6 +3126,7 @@ async def test_auto_compaction_restores_preparing_phase_after_success() -> None:
     run_repo = _RunRepo()
     execution = AgentRunExecution(
         session_manager=_session_context,
+        input_projection_repository=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -3123,6 +3161,7 @@ async def test_auto_compaction_keeps_compacting_phase_after_failure() -> None:
     run_repo = _RunRepo()
     execution = AgentRunExecution(
         session_manager=_session_context,
+        input_projection_repository=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -3180,6 +3219,7 @@ async def test_compacted_run_continues_with_summary_without_terminal_marker() ->
 
     execution = AgentRunExecution(
         session_manager=_session_context,
+        input_projection_repository=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -3190,7 +3230,7 @@ async def test_compacted_run_continues_with_summary_without_terminal_marker() ->
         model_call_preparer=_model_call_preparer(
             lowerer=lowerer, tool_executor=_ToolExecutor()
         ),
-        pre_lower_filter=_PreFilter([summary_event, run_marker]),
+        auto_compaction_filter=_CompactedInput([summary_event, run_marker]),
         run_repo=run_repo,
         transcript_repo=transcript_repo,
     )
@@ -3252,6 +3292,7 @@ async def test_tool_turn_polls_input_before_next_model_call() -> None:
 
     execution = AgentRunExecution(
         session_manager=_session_context,
+        input_projection_repository=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -3323,6 +3364,7 @@ async def test_context_invalidation_yields_for_request_refresh() -> None:
 
     execution = AgentRunExecution(
         session_manager=_session_context,
+        input_projection_repository=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -3373,6 +3415,7 @@ async def test_orphan_tool_call_without_state_is_cancelled_before_lowering() -> 
     lowerer = _RecordingLowerer()
     execution = AgentRunExecution(
         session_manager=_session_context,
+        input_projection_repository=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -3430,6 +3473,7 @@ async def test_active_unresolved_tool_call_is_cancelled_before_lowering() -> Non
     lowerer = _RecordingLowerer()
     execution = AgentRunExecution(
         session_manager=_session_context,
+        input_projection_repository=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -3485,6 +3529,7 @@ async def test_stale_active_entry_with_result_is_removed_without_replacement() -
     transcript_repo.events.extend([_tool_call_event(), _tool_result_event()])
     execution = AgentRunExecution(
         session_manager=_session_context,
+        input_projection_repository=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -3536,6 +3581,7 @@ async def test_active_entry_without_call_event_fails_invariant() -> None:
     ]
     execution = AgentRunExecution(
         session_manager=_session_context,
+        input_projection_repository=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -3577,6 +3623,7 @@ async def test_model_stream_user_stop_appends_only_assistant_text() -> None:
     )
     execution = AgentRunExecution(
         session_manager=_session_context,
+        input_projection_repository=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -3619,6 +3666,7 @@ async def test_model_stream_user_stop_without_text_appends_only_marker() -> None
     transcript_repo = _TranscriptRepo()
     execution = AgentRunExecution(
         session_manager=_session_context,
+        input_projection_repository=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -3657,6 +3705,7 @@ async def test_shutdown_tool_cancellation_repairs_before_reraising() -> None:
     tool_executor = _CancellingToolExecutor()
     execution = AgentRunExecution(
         session_manager=_session_context,
+        input_projection_repository=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -3703,6 +3752,7 @@ async def test_tool_user_stop_preserves_settled_terminal_result() -> None:
     tool_executor = _SettlingToolExecutor()
     execution = AgentRunExecution(
         session_manager=_session_context,
+        input_projection_repository=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -3756,6 +3806,7 @@ async def test_tool_user_stop_appends_cancelled_result_and_interrupts() -> None:
     tool_executor = _CancellingToolExecutor(user_stop=True)
     execution = AgentRunExecution(
         session_manager=_session_context,
+        input_projection_repository=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -3814,6 +3865,7 @@ async def test_tool_result_output_sink_receives_tool_result() -> None:
 
     execution = AgentRunExecution(
         session_manager=_session_context,
+        input_projection_repository=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -3851,6 +3903,7 @@ async def test_tool_failure_appends_failed_tool_result() -> None:
     transcript_repo = _TranscriptRepo()
     execution = AgentRunExecution(
         session_manager=_session_context,
+        input_projection_repository=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -3896,6 +3949,7 @@ async def test_run_input_preparation_does_not_run_lifecycle_cleanup() -> None:
     """File lifecycle cleanup is scheduler-owned, not run-loop-owned."""
     execution = AgentRunExecution(
         session_manager=_session_context,
+        input_projection_repository=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -3943,6 +3997,7 @@ async def test_pre_model_lower_hook_runs_before_lowerer() -> None:
     hook = _PreModelLowerHook()
     execution = AgentRunExecution(
         session_manager=_session_context,
+        input_projection_repository=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -3982,6 +4037,7 @@ async def test_model_completion_error_propagates_for_retry() -> None:
     transcript_repo = _TranscriptRepo()
     execution = AgentRunExecution(
         session_manager=_session_context,
+        input_projection_repository=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -4019,6 +4075,7 @@ async def test_empty_terminal_model_output_completes_run() -> None:
     transcript_repo = _TranscriptRepo()
     execution = AgentRunExecution(
         session_manager=_session_context,
+        input_projection_repository=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -4065,6 +4122,7 @@ async def test_blank_terminal_assistant_message_completes_run() -> None:
     )
     execution = AgentRunExecution(
         session_manager=_session_context,
+        input_projection_repository=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -4121,6 +4179,7 @@ async def test_empty_dialect_follow_up_continues_to_terminal_response() -> None:
     )
     execution = AgentRunExecution(
         session_manager=_session_context,
+        input_projection_repository=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -4162,6 +4221,7 @@ async def test_model_call_error_propagates_for_retry() -> None:
     transcript_repo = _TranscriptRepo()
     execution = AgentRunExecution(
         session_manager=_session_context,
+        input_projection_repository=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -4199,6 +4259,7 @@ async def test_execution_closes_operation_scoped_adapter() -> None:
     model_adapter = _ClosableModelAdapter()
     execution = AgentRunExecution(
         session_manager=_session_context,
+        input_projection_repository=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",

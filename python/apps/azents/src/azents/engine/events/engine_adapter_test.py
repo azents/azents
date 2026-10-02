@@ -65,7 +65,6 @@ from azents.engine.events.execution import (
 )
 from azents.engine.events.filters import (
     EventAutoCompactionFilter,
-    EventPreLowerFilterPipeline,
     PostLowerFilterPipeline,
 )
 from azents.engine.events.openai_responses import (
@@ -134,6 +133,7 @@ from azents.engine.tools.run_tool_to_file import (
 )
 from azents.engine.tools.xai_image_generation import XaiImagineClientFactory
 from azents.rdb.session import SessionManager
+from azents.repos.agent_execution import EventTranscriptRepository
 from azents.repos.agent_execution.data import AgentRunCreate, EventCreate
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession, SessionAgent
@@ -141,6 +141,9 @@ from azents.repos.agent_session_system_prompt_snapshot import (
     AgentSessionSystemPromptSnapshotRepository,
 )
 from azents.repos.compaction_operation import CompactionCommitContext
+from azents.repos.engine_input_projection import EngineInputProjectionRepository
+from azents.repos.exchange_file import ExchangeFileRepository
+from azents.repos.model_file import ModelFileRepository
 from azents.repos.model_file_pin import ModelFilePinRepository
 from azents.repos.provider_output_operation import ProviderOutputOperationRepository
 from azents.repos.session_execution import (
@@ -2585,16 +2588,24 @@ async def test_adapter_wires_event_filters_and_session_head_repo() -> None:
         )
     ]
 
-    pre_lower_filter = captured["pre_lower_filter"]
+    input_projection_repository = captured["input_projection_repository"]
     auto_compaction_filter = captured["auto_compaction_filter"]
     post_lower_filter = captured["post_lower_filter"]
-    assert isinstance(pre_lower_filter, EventPreLowerFilterPipeline)
+    assert isinstance(input_projection_repository, EngineInputProjectionRepository)
     assert isinstance(auto_compaction_filter, EventAutoCompactionFilter)
     assert isinstance(post_lower_filter, PostLowerFilterPipeline)
-    assert [item.__class__.__name__ for item in pre_lower_filter.filters] == [
-        "EventAttachmentAvailabilityFilter",
-        "EventFilePartPlaceholderFilter",
-    ]
+    assert isinstance(
+        input_projection_repository.exchange_file_repository,
+        ExchangeFileRepository,
+    )
+    assert isinstance(
+        input_projection_repository.model_file_repository,
+        ModelFileRepository,
+    )
+    assert isinstance(
+        input_projection_repository.transcript_repository,
+        EventTranscriptRepository,
+    )
     assert [item.__class__.__name__ for item in post_lower_filter.filters] == [
         "NativeRequestSizeGuard",
     ]

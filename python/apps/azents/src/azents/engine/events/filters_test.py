@@ -20,13 +20,9 @@ from azents.core.enums import (
     ModelFileStatus,
 )
 from azents.engine.events.filters import (
-    EventAttachmentAvailabilityFilter,
     EventAutoCompactionFilter,
     EventCompactor,
-    EventFilePartPlaceholderFilter,
-    EventPreLowerFilterPipeline,
     NativeRequestSizeGuard,
-    NoopPreLowerFilter,
     PostLowerFilterPipeline,
 )
 from azents.engine.events.protocols import NativeModelRequest
@@ -57,6 +53,7 @@ from azents.repos.compaction_operation import (
     CompactionCommitContext,
     CompactionOperationRepository,
 )
+from azents.repos.engine_input_projection import EngineInputProjectionRepository
 from azents.repos.model_operation_completion import ModelOperationCompletion
 from azents.repos.toolkit_state.engine import ToolWorkingSetStore
 from azents.testing.types import is_string_object_dict
@@ -391,10 +388,11 @@ async def test_attachment_availability_filter_marks_expired_attachment() -> None
         {"exchange/workspace/files/random/original": ExchangeFileStatus.EXPIRED}
     )
 
-    result = await EventAttachmentAvailabilityFilter(
+    result = await EngineInputProjectionRepository(
         exchange_file_repository=status_repo,
-        transcript_repo=transcript_repo,
-    ).apply(_Session(), transcript)
+        model_file_repository=_ModelFileStatusRepo({}),
+        transcript_repository=transcript_repo,
+    ).apply_in_session(_Session(), session_id="session-1", transcript=transcript)
 
     assert status_repo.calls == [("exchange/workspace/files/random/original",)]
     payload = result[0].payload
@@ -418,10 +416,11 @@ async def test_attachment_availability_filter_marks_missing_exchange_unavailable
     transcript_repo = _TranscriptRepo(transcript)
     status_repo = _ExchangeFileStatusRepo({})
 
-    result = await EventAttachmentAvailabilityFilter(
+    result = await EngineInputProjectionRepository(
         exchange_file_repository=status_repo,
-        transcript_repo=transcript_repo,
-    ).apply(_Session(), transcript)
+        model_file_repository=_ModelFileStatusRepo({}),
+        transcript_repository=transcript_repo,
+    ).apply_in_session(_Session(), session_id="session-1", transcript=transcript)
 
     payload = result[0].payload
     assert isinstance(payload, UserMessagePayload)
@@ -442,10 +441,11 @@ async def test_attachment_availability_filter_ignores_non_exchange_uri() -> None
     transcript_repo = _TranscriptRepo(transcript)
     status_repo = _ExchangeFileStatusRepo({})
 
-    result = await EventAttachmentAvailabilityFilter(
+    result = await EngineInputProjectionRepository(
         exchange_file_repository=status_repo,
-        transcript_repo=transcript_repo,
-    ).apply(_Session(), transcript)
+        model_file_repository=_ModelFileStatusRepo({}),
+        transcript_repository=transcript_repo,
+    ).apply_in_session(_Session(), session_id="session-1", transcript=transcript)
 
     assert status_repo.calls == []
     assert result == transcript
@@ -477,10 +477,11 @@ async def test_attachment_availability_filter_updates_tool_output_part() -> None
         {"exchange/workspace/files/result/original": ExchangeFileStatus.EXPIRED}
     )
 
-    result = await EventAttachmentAvailabilityFilter(
+    result = await EngineInputProjectionRepository(
         exchange_file_repository=status_repo,
-        transcript_repo=transcript_repo,
-    ).apply(_Session(), transcript)
+        model_file_repository=_ModelFileStatusRepo({}),
+        transcript_repository=transcript_repo,
+    ).apply_in_session(_Session(), session_id="session-1", transcript=transcript)
 
     payload = result[0].payload
     assert isinstance(payload, ClientToolResultPayload)
@@ -508,11 +509,11 @@ async def test_filepart_placeholder_filter_rewrites_deleted_user_filepart() -> N
     transcript_repo = _TranscriptRepo(transcript)
     status_repo = _ModelFileStatusRepo({"m" * 32: ModelFileStatus.DELETED})
 
-    result = await EventFilePartPlaceholderFilter(
-        session_id="session-1",
+    result = await EngineInputProjectionRepository(
+        exchange_file_repository=_ExchangeFileStatusRepo({}),
         model_file_repository=status_repo,
-        transcript_repo=transcript_repo,
-    ).apply(_Session(), transcript)
+        transcript_repository=transcript_repo,
+    ).apply_in_session(_Session(), session_id="session-1", transcript=transcript)
 
     assert status_repo.calls == [("session-1", ("m" * 32,))]
     payload = result[0].payload
@@ -548,11 +549,11 @@ async def test_filepart_placeholder_filter_rewrites_missing_tool_filepart() -> N
     transcript_repo = _TranscriptRepo(transcript)
     status_repo = _ModelFileStatusRepo({})
 
-    result = await EventFilePartPlaceholderFilter(
-        session_id="session-1",
+    result = await EngineInputProjectionRepository(
+        exchange_file_repository=_ExchangeFileStatusRepo({}),
         model_file_repository=status_repo,
-        transcript_repo=transcript_repo,
-    ).apply(_Session(), transcript)
+        transcript_repository=transcript_repo,
+    ).apply_in_session(_Session(), session_id="session-1", transcript=transcript)
 
     payload = result[0].payload
     assert isinstance(payload, ClientToolResultPayload)
@@ -586,11 +587,11 @@ async def test_filepart_placeholder_filter_rewrites_missing_assistant_filepart()
     transcript_repo = _TranscriptRepo(transcript)
     status_repo = _ModelFileStatusRepo({})
 
-    result = await EventFilePartPlaceholderFilter(
-        session_id="session-1",
+    result = await EngineInputProjectionRepository(
+        exchange_file_repository=_ExchangeFileStatusRepo({}),
         model_file_repository=status_repo,
-        transcript_repo=transcript_repo,
-    ).apply(_Session(), transcript)
+        transcript_repository=transcript_repo,
+    ).apply_in_session(_Session(), session_id="session-1", transcript=transcript)
 
     payload = result[0].payload
     assert isinstance(payload, AssistantMessagePayload)
@@ -619,11 +620,11 @@ async def test_filepart_placeholder_filter_keeps_available_filepart() -> None:
     transcript_repo = _TranscriptRepo(transcript)
     status_repo = _ModelFileStatusRepo({"m" * 32: ModelFileStatus.AVAILABLE})
 
-    result = await EventFilePartPlaceholderFilter(
-        session_id="session-1",
+    result = await EngineInputProjectionRepository(
+        exchange_file_repository=_ExchangeFileStatusRepo({}),
         model_file_repository=status_repo,
-        transcript_repo=transcript_repo,
-    ).apply(_Session(), transcript)
+        transcript_repository=transcript_repo,
+    ).apply_in_session(_Session(), session_id="session-1", transcript=transcript)
 
     assert result == transcript
     assert transcript_repo.events == transcript
@@ -2024,19 +2025,8 @@ async def test_auto_compaction_counts_events_after_latest_turn_marker() -> None:
     assert result[0].kind == EventKind.COMPACTION_SUMMARY
 
 
-async def test_pre_lower_pipeline_and_native_request_guard() -> None:
-    """Pipeline is applied in order, and post-lower guard rejects oversized input."""
-    event = _event(
-        "1",
-        EventKind.USER_MESSAGE,
-        UserMessagePayload(sender_user_id=None, content="hello"),
-    )
-    result = await EventPreLowerFilterPipeline([NoopPreLowerFilter()]).apply(
-        _Session(),
-        [event],
-    )
-    assert result == [event]
-
+async def test_native_request_guard_and_post_lower_pipeline() -> None:
+    """Post-lower guard rejects oversized input and counts all request parts."""
     guard = NativeRequestSizeGuard(max_input_chars=4)
     request = NativeModelRequest(model="gpt-5.1", input=[{"content": "too long"}])
     try:

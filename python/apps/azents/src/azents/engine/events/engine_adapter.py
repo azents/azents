@@ -63,11 +63,8 @@ from azents.engine.events.external_channel_rendering import (
 )
 from azents.engine.events.file_parts import RequestLocalModelFileResolver
 from azents.engine.events.filters import (
-    EventAttachmentAvailabilityFilter,
     EventAutoCompactionFilter,
     EventCompactor,
-    EventFilePartPlaceholderFilter,
-    EventPreLowerFilterPipeline,
     NativeRequestSizeGuard,
     PostLowerFilterPipeline,
 )
@@ -209,10 +206,13 @@ from azents.repos.agent_session_system_prompt_snapshot import (
 from azents.repos.chatgpt_oauth_runtime import ChatGPTOAuthRuntimeRepository
 from azents.repos.compaction_operation import CompactionCommitContext
 from azents.repos.engine_event_operation import EngineEventOperationRepository
+from azents.repos.engine_input_projection import EngineInputProjectionRepository
+from azents.repos.exchange_file import ExchangeFileRepository
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.llm_provider_integration.deps import (
     get_llm_provider_integration_repository,
 )
+from azents.repos.model_file import ModelFileRepository
 from azents.repos.model_file_pin import ModelFilePinRepository
 from azents.repos.provider_output_operation import ProviderOutputOperationRepository
 from azents.repos.session_execution.ownership import OwnerBoundSessionManager
@@ -1142,11 +1142,10 @@ class AgentEngineAdapter:
                 ),
             )
 
-        pre_lower_filter = EventPreLowerFilterPipeline(
-            [
-                EventAttachmentAvailabilityFilter(),
-                EventFilePartPlaceholderFilter(session_id=request.session_id),
-            ]
+        input_projection_repository = EngineInputProjectionRepository(
+            exchange_file_repository=ExchangeFileRepository(),
+            model_file_repository=ModelFileRepository(),
+            transcript_repository=EventTranscriptRepository(),
         )
         auto_compaction_filter = EventAutoCompactionFilter(
             session_id=request.session_id,
@@ -1266,7 +1265,7 @@ class AgentEngineAdapter:
                 else None
             ),
             output_normalizer=output_normalizer,
-            pre_lower_filter=pre_lower_filter,
+            input_projection_repository=input_projection_repository,
             auto_compaction_filter=auto_compaction_filter,
             model_call_preparer=prepare_model_call,
             output_sink=emit_queue.extend_from_output,

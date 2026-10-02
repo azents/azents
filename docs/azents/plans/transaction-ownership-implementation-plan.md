@@ -11,7 +11,9 @@ tags: [backend, architecture, database]
 - Design: [transaction-260908/DESIGN](../design/transaction-260908-repository-ownership.md), revision 1
 - Execution authority: direct requester implementation instruction for M1–M5.
 - Design delta: None.
-- Independent reviewer: `/root/tx-review` (read-only).
+- Independent reviewer: `/root/phase25-independent-review` (read-only, retained
+  for every integrated phase from Phase 26 onward; replaces the historical
+  `/root/tx-review` role).
 - Integration owner: `/root`.
 
 ## Resumed Stack — 2026-10-01
@@ -100,6 +102,32 @@ completed repository operation while retaining the same in-session primitive for
 atomic user-stop recovery. Successful generated-file metadata admission,
 model-output admission, model-input preparation, and terminal finalization remain
 later execution phases.
+
+## Continuous Completion — 2026-10-02
+
+The requester renewed continuous execution through the point at which issue #1718
+can be closed. PR #2033 is merged; the new baseline is `origin/main` at
+`4b05fc9f6`. Remaining delivery is not limited to one Engine slice. Keep opening
+reviewable sequential phases, own corrective work and CI to completion, and do
+not merge or close the issue before all confirmed violations and coverage gaps
+have a verified disposition.
+
+The refreshed AST candidate inventory finds 616 managed session contexts in 113
+non-repository, non-RDB backend files, including a test-infrastructure candidate.
+This is not a confirmed violation count. Counts also differ from earlier lexical
+checkpoints because the baseline and discovery method changed. Read-only domain
+scouts classify Chat/Mailbox/External Channel, Runtime/Worker/Scheduler, and
+Account/Workspace/Configuration/API entrypoints while Engine implementation
+continues. Empty scopes, dependency factories, migrations, test setup and
+read-only diagnostics receive explicit exclusions; reachable helpers and live
+transaction callbacks remain covered.
+
+Phase 26 moves the complete model-input atomic group into a domain repository:
+head and transcript reads, tool-result reconciliation, PREPARING_INPUT mutation,
+and persisted availability projections. Concrete database-only repository
+composition replaces the live-session pre-lower filter API. Output publication
+and compaction remain after transaction completion. Terminal/mailbox composition
+and provider/model-output admission are subsequent Engine prerequisites/slices.
 
 ## Delivery Boundaries
 
