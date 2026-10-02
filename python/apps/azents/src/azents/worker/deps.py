@@ -29,7 +29,10 @@ from azents.engine.run.retry_policy import (
 )
 from azents.engine.tools.builtin import BuiltinToolkitProvider
 from azents.engine.tools.claude_rules import ClaudeRulesToolkitProvider
-from azents.engine.tools.deps import get_vfs_projection_service
+from azents.engine.tools.deps import (
+    get_vfs_projection_service,
+    get_vfs_read_router,
+)
 from azents.engine.tools.dynamic_worktree import DynamicWorktreeToolkitProvider
 from azents.engine.tools.external_channel import ExternalChannelToolkitProvider
 from azents.engine.tools.import_file import ImportFileStagingConfiguration
@@ -128,6 +131,7 @@ from azents.services.session_working_folder_binding import (
 )
 from azents.services.system_setting.service import SystemSettingsService
 from azents.services.vfs import VfsProjectionService
+from azents.services.vfs_read import VfsReadRouter
 from azents.utils.appctx import AppContext
 
 from .config import AgentWorkerConfig
@@ -245,6 +249,10 @@ def get_builtin_toolkit_provider(
         VfsProjectionService[AsyncSession],
         Depends(get_vfs_projection_service),
     ],
+    vfs_read_router: Annotated[
+        VfsReadRouter,
+        Depends(get_vfs_read_router),
+    ],
     agent_runtime_service: Annotated[
         AgentRuntimeService,
         Depends(),
@@ -281,6 +289,7 @@ def get_builtin_toolkit_provider(
         artifact_service=artifact_service,
         model_file_service=model_file_service,
         vfs_projection_service=vfs_projection_service,
+        vfs_read_router=vfs_read_router,
         agents_store=ToolkitAgentsAppendixDedupeStateStore(
             session_manager=session_manager,
         ),

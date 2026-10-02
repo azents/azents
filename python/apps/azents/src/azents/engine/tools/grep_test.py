@@ -2,6 +2,7 @@
 
 import json
 from typing import List
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -9,6 +10,7 @@ from azents.engine.io.attachments import RuntimeAttachment
 from azents.engine.run.types import FunctionTool, FunctionToolError
 from azents.engine.tools.grep import make_grep_tool
 from azents.engine.tools.testing import FakeSharedStorage
+from azents.services.file_storage import GrepResult
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -64,6 +66,30 @@ class TestGrep:
         assert "notes.txt" in result
         assert "1: line1 hello" in result
         assert "3: line3 hello world" in result
+
+    async def test_renders_backend_deadline_truncation(self) -> None:
+        """Deadline truncation is not mislabeled as a matching-file limit."""
+        storage = AsyncMock()
+        storage.grep.return_value = GrepResult(
+            files=(),
+            searched_file_count=1,
+            matched_file_count=0,
+            truncated=True,
+            stopped_reason="deadline",
+        )
+        tool = make_grep_tool(session_storage=storage, agent_id="agent-1")
+
+        result = await tool.handler(
+            json.dumps(
+                {
+                    "pattern": "needle",
+                    "path": "azents://skills",
+                }
+            )
+        )
+
+        assert isinstance(result, str)
+        assert "backend deadline reached" in result
 
     async def test_find_pattern_in_multiple_files(self) -> None:
         """Find pattern in multiple files."""

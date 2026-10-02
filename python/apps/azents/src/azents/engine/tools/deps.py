@@ -61,6 +61,12 @@ from azents.services.scheduled_task.channel import (
 )
 from azents.services.scheduled_task.terminal import ScheduledTaskTerminalService
 from azents.services.vfs import ReleaseVfsCatalog, VfsProjectionService
+from azents.services.vfs_read import (
+    OwnerBoundVfsReadAuthorityValidator,
+    SkillsVfsReadBackend,
+    VfsReadBackendRegistry,
+    VfsReadRouter,
+)
 from azents.testing.runtime_hooks import TestenvRuntimeHookQAProvider
 from azents.utils.appctx import AppContext
 
@@ -201,6 +207,26 @@ def get_vfs_projection_service(
         required_provider_sources={
             scheduled_toolkit_provider.slug: scheduled_toolkit_provider
         },
+    )
+
+
+def get_vfs_read_router(
+    session_manager: Annotated[
+        SessionManager[AsyncSession], Depends(get_session_manager)
+    ],
+    projection_service: Annotated[
+        VfsProjectionService[AsyncSession],
+        Depends(get_vfs_projection_service),
+    ],
+) -> VfsReadRouter:
+    """Create the registered Skills VFS read router."""
+    return VfsReadRouter(
+        registry=VfsReadBackendRegistry(
+            [SkillsVfsReadBackend(projection_service=projection_service)]
+        ),
+        authority_validator=OwnerBoundVfsReadAuthorityValidator(
+            session_manager=session_manager
+        ),
     )
 
 

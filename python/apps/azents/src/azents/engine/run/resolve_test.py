@@ -488,6 +488,7 @@ def _make_builtin_provider() -> BuiltinToolkitProvider:
         artifact_service=AsyncMock(),
         model_file_service=AsyncMock(),
         vfs_projection_service=None,
+        vfs_read_router=AsyncMock(),
         agents_store=_FakeAgentsAppendixDedupeStateStore(),
         session_manager=_session_manager_for(session),
         memory_repo=AsyncMock(),
@@ -1410,6 +1411,7 @@ class TestResolveAgentTools:
         assert [binding.slug for binding in bindings] == [
             "memory_read",
             "memory_write",
+            "readable_storage",
             "runtime",
             "claude_rules",
         ]
@@ -1460,7 +1462,11 @@ class TestResolveAgentTools:
             runtime_capability_resolver=_runtime_capability_resolver(enabled=False),
         )
 
-        assert [binding.slug for binding in bindings] == ["memory_read", "memory_write"]
+        assert [binding.slug for binding in bindings] == [
+            "memory_read",
+            "memory_write",
+            "readable_storage",
+        ]
 
     async def test_auto_binds_subagent_toolkit_in_root_mode(self) -> None:
         """Root sessions receive the coherent subagent collaboration bundle."""
@@ -1533,6 +1539,7 @@ class TestResolveAgentTools:
 
         assert [binding.slug for binding in bindings] == [
             "memory_read",
+            "readable_storage",
             "runtime",
             "claude_rules",
         ]
@@ -1581,11 +1588,15 @@ class TestResolveAgentTools:
             runtime_capability_resolver=_runtime_capability_resolver(enabled=False),
         )
 
-        assert [binding.slug for binding in root] == ["runtime", "scheduled"]
-        assert root[1].use_prefix is False
-        assert root[1].toolkit_type is None
-        assert root[1].toolkit_config_id is None
-        assert root[1].source_revision is not None
-        assert isinstance(root[1].toolkit, ScheduledToolkit)
-        assert root[1].toolkit.runtime_context_store is not None
+        assert [binding.slug for binding in root] == [
+            "readable_storage",
+            "runtime",
+            "scheduled",
+        ]
+        assert root[2].use_prefix is False
+        assert root[2].toolkit_type is None
+        assert root[2].toolkit_config_id is None
+        assert root[2].source_revision is not None
+        assert isinstance(root[2].toolkit, ScheduledToolkit)
+        assert root[2].toolkit.runtime_context_store is not None
         assert subagent == []

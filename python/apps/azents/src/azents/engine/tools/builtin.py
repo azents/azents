@@ -82,6 +82,10 @@ from azents.engine.tools.memory import (
 from azents.engine.tools.present_file import make_present_file_tool
 from azents.engine.tools.read_image import make_read_image_tool
 from azents.engine.tools.read_text import make_read_text_tool
+from azents.engine.tools.readable_storage import (
+    RoutedReadableStorage,
+    RuntimeReadableStorageProvider,
+)
 from azents.engine.tools.run_tool_to_file import (
     LateBoundClientToolInvoker,
     RunToolToFileRuntimeContext,
@@ -135,6 +139,7 @@ from azents.services.artifact import ArtifactService
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.file_storage import (
     FileStorage,
+    GlobResult,
     GrepFileMatch,
     GrepLineMatch,
     GrepResult,
@@ -159,6 +164,7 @@ from azents.services.session_working_folder_binding import (
     SessionWorkingFolderBindingService,
 )
 from azents.services.vfs import VfsProjectionService
+from azents.services.vfs_read import VfsReadContext, VfsReadRouter
 
 logger = logging.getLogger(__name__)
 _SYSTEM_TOOL_GUIDANCE = (
@@ -624,6 +630,124 @@ class MemoryWriteToolkit(Toolkit[ShellToolkitConfig]):
         return _MEMORY_WRITE_RULES_PROMPT
 
 
+class ReadableStorageToolkit(Toolkit[ShellToolkitConfig]):
+    """Runtime-independent generic read, grep, and glob capability."""
+
+    def __init__(
+        self,
+        config: ShellToolkitConfig,
+        agent_id: str,
+        session_id: str,
+        session_manager: SessionManager[AsyncSession],
+        memory_repo: MemoryRepository,
+        vfs_read_router: VfsReadRouter,
+    ) -> None:
+        self._config = config
+        self._agent_id = agent_id
+        self._session_id = session_id
+        self.session_manager = session_manager
+        self.memory_repo = memory_repo
+        self.vfs_read_router = vfs_read_router
+        self.runtime_capability_resolver: RuntimeCapabilityResolver | None = None
+        self.runtime_storage_provider: RuntimeReadableStorageProvider | None = None
+        self._execution_owner: SessionExecutionOwner | None = None
+        self._execution_authority: SessionResourceAuthority | None = None
+
+    def bind_execution_owner(self, owner: SessionExecutionOwner) -> None:
+        """Bind execution-owned read state to one concrete Session owner."""
+        if accepts_execution_owner(
+            self._execution_owner,
+            owner,
+            session_id=self._session_id,
+        ):
+            self.session_manager = OwnerBoundSessionManager(
+                session_manager=self.session_manager,
+                session_id=owner.session_id,
+                owner_generation=owner.owner_generation,
+            )
+            self._execution_owner = owner
+
+    def bind_execution_authority(
+        self,
+        authority: SessionResourceAuthority,
+    ) -> None:
+        """Bind the exact current Run and durable Session execution owner."""
+        if authority.agent_id != self._agent_id:
+            raise ValueError("Execution authority Agent does not match Toolkit")
+        if authority.session_id != self._session_id:
+            raise ValueError("Execution authority Session does not match Toolkit")
+        self.bind_execution_owner(authority.execution_owner)
+        self._execution_authority = authority
+
+    def set_runtime_capability_resolver(
+        self,
+        resolver: RuntimeCapabilityResolver,
+    ) -> None:
+        """Set Runtime filesystem capability admission for absolute paths."""
+        self.runtime_capability_resolver = resolver
+
+    def set_runtime_storage_provider(
+        self,
+        provider: RuntimeReadableStorageProvider,
+    ) -> None:
+        """Attach the Runtime Toolkit bridge when Runtime tools are available."""
+        self.runtime_storage_provider = provider
+
+    async def update_context(self, context: TurnContext) -> ToolkitState:
+        """Return generic read tools independently of Runtime availability."""
+        if context.resource_authority is not None:
+            self.bind_execution_authority(context.resource_authority)
+        authority = context.resource_authority or self._execution_authority
+        resolver = self.runtime_capability_resolver
+        if authority is None or resolver is None:
+            return ToolkitState(status=ToolkitStatus.DISABLED, tools=[])
+        operations = _memory_operations(
+            session_manager=self.session_manager,
+            memory_repository=self.memory_repo,
+        )
+        associated_user_id = await _resolve_associated_user_id(
+            operations=operations,
+            session_id=authority.root_session_id,
+        )
+        vfs_context = VfsReadContext(
+            run_id=authority.run_id,
+            session_id=authority.session_id,
+            root_session_id=authority.root_session_id,
+            agent_id=authority.agent_id,
+            workspace_id=authority.workspace_id,
+            associated_user_id=associated_user_id,
+            owner_generation=authority.owner_generation,
+            memory_enabled=self._config.memory_enabled,
+        )
+        provider = self.runtime_storage_provider
+        storage = RoutedReadableStorage(
+            agent_id=self._agent_id,
+            vfs_router=self.vfs_read_router,
+            vfs_context=vfs_context,
+            runtime_storage_factory=(
+                provider.make_readable_storage if provider is not None else None
+            ),
+            runtime_capability_resolver=resolver,
+        )
+        return ToolkitState(
+            status=ToolkitStatus.ENABLED,
+            tools=[
+                make_read_text_tool(
+                    session_storage=storage,
+                    agent_id=self._agent_id,
+                ),
+                make_glob_tool(
+                    session_storage=storage,
+                    agent_id=self._agent_id,
+                ),
+                make_grep_tool(
+                    session_storage=storage,
+                    agent_id=self._agent_id,
+                ),
+            ],
+        )
+
+
 class BuiltinToolkit(Toolkit[ShellToolkitConfig]):
     """Default builtin tool execution instance independent of Runtime Runner.
 
@@ -842,6 +966,7 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         self._expected_runtime_authority: RuntimeOperationAuthority | None = None
         self._run_tool_to_file_context: RunToolToFileRuntimeContext | None = None
         self._execution_owner: SessionExecutionOwner | None = None
+        self._readable_file_storage: RuntimeRunnerFileStorage | None = None
 
     def bind_execution_owner(self, owner: SessionExecutionOwner) -> None:
         """Bind execution-owned Runtime Toolkit state to one Session owner."""
@@ -883,6 +1008,20 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
     ) -> None:
         """Set the shared Agent Runtime capability resolver."""
         self.runtime_capability_resolver = resolver
+
+    def make_readable_storage(self) -> FileStorage:
+        """Return one lazy Runtime storage adapter for generic read tools."""
+        if self._readable_file_storage is not None:
+            return self._readable_file_storage
+        return RuntimeRunnerFileStorage(
+            runner_operations=self.runner_operations,
+            agent_runtime_repo=self.agent_runtime_repo,
+            agent_runtime_service=self.agent_runtime_service,
+            session_manager=self.session_manager,
+            runtime_agent_id=self._runtime_agent_id,
+            owner_session_id=self._runtime_session_id,
+            expected_authority_provider=self._required_runtime_authority,
+        )
 
     def set_peer_toolkits(self, peers: Sequence[RuntimeEnvProvider]) -> None:
         """Register peer toolkits that collect env during Shell execution.
@@ -1062,6 +1201,7 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
             owner_session_id=self._runtime_session_id,
             expected_authority_provider=self._required_runtime_authority,
         )
+        self._readable_file_storage = file_ss
 
         async def resolve_exact_runtime_target() -> RuntimeOperationTarget:
             return await _ready_runtime_for_agent(
@@ -1119,23 +1259,11 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
             agent_id=runtime_agent_id,
         )
         file_tools = [
-            make_read_text_tool(
-                session_storage=file_ss,
-                agent_id=self._agent_id,
-            ),
             make_write_tool(
                 session_storage=file_ss,
                 agent_id=self._agent_id,
             ),
             make_delete_file_tool(
-                session_storage=file_ss,
-                agent_id=self._agent_id,
-            ),
-            make_glob_tool(
-                session_storage=file_ss,
-                agent_id=self._agent_id,
-            ),
-            make_grep_tool(
                 session_storage=file_ss,
                 agent_id=self._agent_id,
             ),
@@ -1556,8 +1684,8 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
 class BuiltinToolkitProvider(ToolkitProvider[ShellToolkitConfig]):
     """Builtin/runtime toolkit provider.
 
-    Create Runtime Runner independent default tools as BuiltinToolkit, and runner
-    dependent shell/file tools as RuntimeToolkit.
+    Create Runtime-independent memory and readable-storage capabilities separately
+    from Runtime-dependent process, mutation, and transfer tools.
     """
 
     slug = "shell"
@@ -1583,6 +1711,7 @@ class BuiltinToolkitProvider(ToolkitProvider[ShellToolkitConfig]):
         artifact_service: ArtifactService,
         model_file_service: ModelFileService,
         vfs_projection_service: VfsProjectionService[AsyncSession] | None,
+        vfs_read_router: VfsReadRouter,
         agents_store: AgentsAppendixDedupeStateStore,
         session_manager: SessionManager[AsyncSession],
         memory_repo: MemoryRepository,
@@ -1603,6 +1732,7 @@ class BuiltinToolkitProvider(ToolkitProvider[ShellToolkitConfig]):
         self.artifact_service = artifact_service
         self.model_file_service = model_file_service
         self.vfs_projection_service = vfs_projection_service
+        self.vfs_read_router = vfs_read_router
         self.session_manager = session_manager
         self.memory_repo = memory_repo
         self.memory_context_snapshot_service = memory_context_snapshot_service
@@ -1696,6 +1826,21 @@ class BuiltinToolkitProvider(ToolkitProvider[ShellToolkitConfig]):
             session_manager=self.session_manager,
             memory_repo=self.memory_repo,
             memory_context_snapshot_service=self.memory_context_snapshot_service,
+        )
+
+    async def resolve_readable_storage(
+        self,
+        config: ShellToolkitConfig,
+        context: ResolveContext,
+    ) -> Toolkit[ShellToolkitConfig]:
+        """Return the auto-bound Runtime-independent generic read capability."""
+        return ReadableStorageToolkit(
+            config=config,
+            agent_id=context.agent_id,
+            session_id=context.session_id,
+            session_manager=self.session_manager,
+            memory_repo=self.memory_repo,
+            vfs_read_router=self.vfs_read_router,
         )
 
     async def resolve_memory_write(
@@ -2038,7 +2183,7 @@ class RuntimeRunnerFileStorage:
         *,
         agent_id: str,
         exclude_patterns: List[str] | None,
-    ) -> List[RuntimeAttachment]:
+    ) -> GlobResult:
         """Match Runtime file entries through one native Runner operation."""
         runtime = await self._ready_runtime(agent_id)
         try:
@@ -2058,21 +2203,24 @@ class RuntimeRunnerFileStorage:
             RuntimeRunnerOperationGenerationError,
         ) as exc:
             raise RuntimeStorageError(str(exc)) from exc
-        return [
-            RuntimeAttachment(
-                uri=entry.path,
-                media_type=(
-                    "inode/directory"
-                    if entry.type == "directory"
-                    else guess_media_type(entry.path)
-                ),
-                size=entry.size_bytes or 0,
-                name=PurePosixPath(entry.path).name,
-                text_preview=None,
-            )
-            for entry in result.entries
-            if entry.type in {"file", "directory"}
-        ]
+        return GlobResult(
+            files=tuple(
+                RuntimeAttachment(
+                    uri=entry.path,
+                    media_type=(
+                        "inode/directory"
+                        if entry.type == "directory"
+                        else guess_media_type(entry.path)
+                    ),
+                    size=entry.size_bytes or 0,
+                    name=PurePosixPath(entry.path).name,
+                    text_preview=None,
+                )
+                for entry in result.entries
+                if entry.type in {"file", "directory"}
+            ),
+            truncated=False,
+        )
 
     async def list_dirs(self, path: str, *, agent_id: str) -> List[str]:
         """List directory names below a Runtime directory."""

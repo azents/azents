@@ -100,6 +100,7 @@ from azents.services.external_channel.slack_events import (
 )
 from azents.services.file_storage import (
     FileStorage,
+    GlobResult,
     GrepResult,
     TextReadResult,
 )
@@ -394,7 +395,7 @@ class _UnusedFileOperations:
 
     async def glob(
         self, pattern: str, *, agent_id: str, exclude_patterns: List[str] | None
-    ) -> List[RuntimeAttachment]:
+    ) -> GlobResult:
         raise AssertionError("Unexpected storage glob")
 
     async def list_dirs(self, path: str, *, agent_id: str) -> List[str]:

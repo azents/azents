@@ -70,7 +70,7 @@ from azents.runtime.transfer.server_to_runtime import (
 )
 from azents.services.artifact import ArtifactTransferSource
 from azents.services.exchange_file import ExchangeFileTransferSource
-from azents.services.file_storage import GrepResult, TextReadResult
+from azents.services.file_storage import GlobResult, GrepResult, TextReadResult
 from azents.services.model_file import ModelFileDownload
 from azents.services.runtime_storage_error import RuntimeStorageError
 from azents.services.session_resource_authority import SessionResourceAuthority
@@ -195,7 +195,7 @@ class _Storage:
         *,
         agent_id: str,
         exclude_patterns: List[str] | None,
-    ) -> List[RuntimeAttachment]:
+    ) -> GlobResult:
         del pattern, agent_id, exclude_patterns
         raise NotImplementedError
 

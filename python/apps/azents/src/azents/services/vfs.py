@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.tools import ToolkitExecutionMode, ToolkitProvider
 from azents.core.vfs import (
-    AZENTS_VFS_SUPPORTED_MOUNTS,
+    AZENTS_VFS_SKILLS_MOUNT,
     VfsFileEntry,
     VfsProjection,
     VfsSourceRevision,
@@ -443,7 +443,7 @@ class VfsProjectionService(Generic[VfsSessionT_contra]):
         except VfsUriError as exc:
             raise VfsFileResolutionError("invalid_uri", str(exc)) from exc
         mount = canonical_uri.split("://", 1)[1].split("/", 1)[0]
-        if mount not in AZENTS_VFS_SUPPORTED_MOUNTS:
+        if mount != AZENTS_VFS_SKILLS_MOUNT:
             raise VfsFileResolutionError(
                 "unsupported_mount",
                 f"Unsupported azents:// mount: {mount}",
@@ -522,7 +522,7 @@ def _load_release_source(spec: VfsSourceSpec) -> VfsSourceRevision:
             raise ValueError(
                 f"VFS source file must be below a mount directory: {relative_path}"
             )
-        if mount not in AZENTS_VFS_SUPPORTED_MOUNTS:
+        if mount != AZENTS_VFS_SKILLS_MOUNT:
             raise ValueError(f"Unsupported VFS source mount: {mount}")
         canonical_uri = make_vfs_uri(mount, spec.namespace, mount_relative)
         body = item.read_bytes()
