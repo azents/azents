@@ -281,8 +281,41 @@ groups. No new cross-I/O lock or protocol/TTL/retry/fallback policy; Design delt
 remains None. Initial/final pre-commit passed with source bytes unchanged. The same
 retained reviewer covered all 24 paths with no findings and independently passed
 867 cases with the same three existing skips; final frozen checks passed.
-Only execution metadata changed afterward. Commit/PR and exact-head CI pending.
-Later OAuth/Scheduler inputs are read-only discovery, not implementation authority.
+Only execution metadata changed afterward. Commit 24bc7d8b1 is submitted as
+stacked PR #2065 over #2060; its actual-head workflow passed with 33 native
+successes and two path-condition skips. Rollup 34 passed / two skipped includes
+one inherited base status. Required E2E four shards, web shard and aggregate
+passed; OPEN/MERGEABLE/CLEAN, no Agent merge.
+
+Phase 34 owns nine bounded Scheduler/ingress contexts: seven Scheduler state
+groups, guarded Testenv release one and explicitly included diagnostic read one.
+The diagnostic is completed rather than silently excluded. Separate Scheduler
+source and PostgreSQL owners share a published completed contract; the ingress
+owner closes both reads and API/service/CLI callers. Root owns scheduler/deps.py,
+plans/Specs and all integration/review/delivery gates. Preserve application clock,
+whole-loop now, strict lease cutoff, task-key/lease-owner-only settlement, prior
+ensure/claim commits, JobRuntime cancellation and error ordering, explicit ingress
+read commit before 404/submit, and bounded sanitizer/metrics projection.
+The exact Phase 33 parent gate is confirmed; implementation may start after the
+tracked phase plan is reported. Design delta None. Public OAuth eight contexts
+and concrete Runtime-facing service/shared-Session helpers remain later scope.
+
+Phase 34 implementation and frozen owner handoffs are complete. Root passed
+183 focused and 7,664 full backend cases, with three existing Redis-specific
+memory contract skips only in the full suite. Whole type checking, Ruff/format
+for 13 Python paths, OpenAPI 234/69 plus bounded three-path ingress equality,
+docs/whitespace and removal/caller/import scans passed; source bytes stayed
+stable. Eighteen actual distinct-connection claim/reclaim/settlement cases carry
+PID/blocking witnesses; separate real SQL/LocalJobRuntime/API/CLI proofs establish
+completion before external effects. Old definitions and narrow query bytes remain.
+Candidate inventory is 486/86 (services 477, API 8, fixture 1), not complete
+indirect coverage or remaining violation counts. Periodic Execution 24 and
+Provider Ingress 64 record the unchanged internal contracts. Initial/final
+pre-commit passed with source bytes unchanged. The same retained reviewer covered
+all 18 paths with no findings and independently passed 183 cases without skips,
+repeated the overlapping 18 contention cases, and verified bounded OpenAPI and
+final frozen checks. Only execution metadata changed afterward; commit/PR/CI
+pending. No new mechanism, cross-I/O lock or Agent merge.
 
 ## Delivery Boundaries
 

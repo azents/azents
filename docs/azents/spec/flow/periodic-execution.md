@@ -8,6 +8,8 @@ code_paths:
   - python/apps/azents/src/azents/scheduler/registry.py
   - python/apps/azents/src/azents/scheduler/executor.py
   - python/apps/azents/src/azents/scheduler/service.py
+  - python/apps/azents/src/azents/scheduler/deps.py
+  - python/apps/azents/src/azents/repos/scheduler_state_operations.py
   - python/apps/azents/src/azents/scheduler/user_scheduled_task_dispatch.py
   - python/apps/azents/src/azents/job_runtime/deps.py
   - python/apps/azents/src/azents/job_runtime/local.py
@@ -48,7 +50,7 @@ code_paths:
   - infra/charts/azents/templates/server/scheduler-deployment.yaml.tpl
   - infra/charts/azents/templates/server/scheduler-pdb.yaml.tpl
 last_verified_at: 2026-10-02
-spec_version: 23
+spec_version: 24
 ---
 
 # Periodic Execution Flow Spec
@@ -160,6 +162,14 @@ Session-scoped Scheduled Toolkit State. Neither is projected into
 
 On startup, the scheduler ensures that all registered task definitions have state rows.
 
+Registration is one completed database-only operation for all ordered code keys,
+including disabled definitions. List, get, and trigger retain a separate completed
+registration pass before their own completed read or mutation. An unknown code key
+returns no trigger result after registration without submitting a job. The application
+retains code-registry access, enable filtering, clock/retry calculation, job construction,
+and logging; repositories receive captured keys and scalar/domain facts, not handlers
+or database callbacks.
+
 Each loop iteration:
 
 1. Reads registered task definitions from code.
@@ -175,6 +185,12 @@ success/failure state recording, and task-result logging—is isolated to that t
 later registered tasks in the same scheduler process. If failure-state recording itself fails, the
 task's existing lease is left for expiry and a later scheduler loop may reclaim it.
 
+Each iteration captures one application UTC timestamp for its entire ordered claim
+loop. Claim completion precedes Job Runtime submit/wait/handler execution. Success or
+failure settlement is a separate completed operation afterward. A success-recording
+error is not reclassified into failure-recording. A cancelled waiter leaves the committed
+claim for existing expiry and does not cancel the shielded accepted LocalJobRuntime job.
+
 ## Row lease
 
 The scheduler claims a task with a conditional row update on `scheduled_task_states`.
@@ -188,6 +204,10 @@ A claim succeeds only when:
 A successful claim stores `latest_status=running`, `last_started_at`, `lease_owner`, `leased_at`, and `lease_until`. A failed claim returns no row and the scheduler skips execution for that task.
 
 Only the scheduler instance whose claim update returns a row executes the task. Expired leases can be reclaimed by a later scheduler loop.
+
+Due equality is eligible (`next_run_at <= now`); lease equality is not expired
+(`lease_until < now` is required). Application time, the existing timeout plus
+30-second lease margin, and the ten-second poll interval are unchanged.
 
 ## Success and failure recording
 
@@ -214,6 +234,12 @@ On failure, the scheduler stores:
 - cleared lease fields
 - cleared manual request marker
 - next run time based on the task retry policy
+
+Both settlements retain the existing task-key and lease-owner predicate. They add no
+attempt-start, expiry, status, or version fence. A normal stale no-row result still
+permits the existing application log. Error or cancellation after actual writes rolls
+back only that operation; earlier completed registration or claim remains committed.
+The nullable result-summary shape and current failure-streak/backoff rules are unchanged.
 
 ## Retry policy
 
@@ -413,6 +439,9 @@ Model catalog source sync is a later consumer of this scheduler.
 
 ## Changelog
 
+- **2026-10-02** (spec_version 24) — Completed Scheduler registration/read/trigger/
+  claim/settlement transaction ownership while preserving clock, lease, Job Runtime,
+  normal stale outcomes, and cancellation/error ordering.
 - **2026-10-02** (spec_version 23) — Added enabled five-minute Historical
   discovery, bounded rolling admission, and separate coalesced per-Agent
   preparation with durable recovery and reserved background capacity.

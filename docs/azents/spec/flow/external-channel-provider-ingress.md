@@ -52,10 +52,12 @@ code_paths:
   - python/apps/azents/src/azents/services/external_channel/ingress_recovery.py
   - python/apps/azents/src/azents/services/external_channel/ingress_metrics.py
   - python/apps/azents/src/azents/services/external_channel/ingress_observability.py
+  - python/apps/azents/src/azents/services/external_channel/ingress_release.py
   - python/apps/azents/src/azents/services/external_channel/ingestion_replay.py
   - python/apps/azents/src/azents/services/external_channel/mailbox_ingestion_store.py
   - python/apps/azents/src/azents/services/external_channel/mailbox_wake.py
   - python/apps/azents/src/azents/repos/external_channel/ingress_queue.py
+  - python/apps/azents/src/azents/repos/external_channel/ingress_control_read.py
   - python/apps/azents/src/azents/rdb/models/external_channel_ingress.py
   - python/apps/azents/src/azents/api/testenv/external_channel_ingress/**
   - python/apps/azents/src/azents/cli/external_channel_ingress.py
@@ -84,8 +86,8 @@ code_paths:
 api_routes:
   - /external-channel/v1/slack/events
   - /external-channel/v1/discord/interactions/{selector}
-last_verified_at: 2026-10-01
-spec_version: 63
+last_verified_at: 2026-10-02
+spec_version: 64
 ---
 
 # External Channel Provider Ingress
@@ -564,10 +566,21 @@ bounded-failure counts, cursor suppressions, mailbox rows committed, post-commit
 attempts/failures, active Runtime tasks, and shutdown drain time.
 
 The operator surface has no release, retry, delete, or other mutation command. The
-guarded credential-free Testenv API may submit one exact Session through the real Job
+guarded credential-free Testenv API may submit one exact active-owner lifecycle through the real Job
 Runtime and inject one exact one-shot wake failure. Neither surface exposes callback
 bodies, message text, participant data, credentials, tokens, signatures, private URLs,
 or raw provider errors.
+
+The sanitized queue snapshot is a completed repository-owned read with its explicit
+commit and session closure before process metrics, Runtime counts, or CLI formatting.
+Testenv release uses a separate completed owner-by-ID read, also committed and closed
+before either the existing not-found 404 or actual Job Runtime submission. Table
+presence remains the read predicate; no new active flag, lease, lock, or expiry gate
+is added. The request retains the exact owner-created-at lifecycle identity and
+existing application-now plus ten-minute deadline. Acceptance does not wait for drain;
+submission errors and cancellation propagate without accepted success or retained SQL.
+The operator CLI remains read-only and Testenv app guards, schemas, limits, redaction,
+wake control, and downstream drain/lease behavior are unchanged.
 
 ## File Metadata Projection
 
@@ -624,6 +637,9 @@ persistent provider connections.
 
 ## Changelog
 
+- **2026-10-02** (spec_version 64) — Completed bounded ingress observation and
+  owner-release read ownership before metrics, not-found responses, and Job Runtime
+  submission, without changing the guarded control or sanitizer policy.
 - **2026-09-13** (spec_version 63) — Replaced provider-native account-link
   code/modal controls with direct authenticated Web OAuth URLs and retained only
   actor-private model controls after verified provider ingress.
