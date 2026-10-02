@@ -9,7 +9,7 @@ snapshot_id: capability-261002
 
 # Phase Execution Plan
 
-- Phase: 1 of 4, source/evidence foundation.
+- Phase: 1 of 3, source/evidence foundation (later consumer/pricing phases consolidated under the shared snapshot contract).
 - Branch/base: `design/catalog-data-only-261002` -> current main baseline `602b1720e`.
 - PR boundary: pure data-only source ingestion and additive saved support contract; no active catalog/estimator switch or production shadow mode.
 - Inputs: confirmed Requirements, accepted D1–D3, approved Design revision 2 (M1–M13), historical/current/upstream evidence reports.

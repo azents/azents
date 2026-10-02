@@ -20,12 +20,11 @@ snapshot_id: capability-261002
 
 ## Delivery Shape
 
-A sequential four-PR stack provides reviewable boundaries. Intermediate branches are implementation scaffolding, not separately deployable production shadow modes. Ship the complete stack as one replacement release after required validation. Do not merge or apply production resources from this task.
+A sequential three-PR stack provides reviewable boundaries. The initial four-phase decomposition combined projection and pricing into one connection phase after confirming they share the same snapshot contract; no temporary dual-source adapter is added to split that dependency. Intermediate branches are implementation scaffolding, not separately deployable production shadow modes. Ship the complete stack as one replacement release after required validation. Do not merge or apply production resources from this task.
 
 1. **Foundation:** pure versioned JSON source/evidence decoder, strict source collection and additive saved-capability semantics with deterministic tests. M1–M4/M6 foundation; no active source reader switch.
-2. **Projection/runtime:** fieldwise provider/source projection, listing-presence handling, native/Pydantic boundary alignment, save/API/UI consumers and generated artifacts. M2–M7/M9; depends on phase 1.
-3. **Pricing/removal:** typed Azents estimator, local source/pricing capture, direct genai source/estimator/dependency removal and runtime pricing tests. M1/M7–M10/M13; depends on phase 2.
-4. **Cutover/verification:** SQL-only DB fence/migration, pointer/deletion integrity, one-release drain/recovery instructions, full E2E/QA/spec promotion and plan cleanup. M5/M9/M11–M13; depends on phase 3.
+2. **Single-source connection:** fieldwise provider/source projection, listing-presence handling, native/Pydantic boundary alignment, save/API/UI consumers, typed Azents estimator, durable source/context/price capture, direct genai source/estimator/dependency removal and generated artifacts. M1–M10/M13; depends on phase 1.
+3. **Cutover/verification:** SQL-only DB fence/migration, pointer/deletion integrity, one-release drain/recovery instructions, full E2E/QA/spec promotion and plan cleanup. M5/M9/M11–M13; depends on phase 2.
 
 Every phase has a tracked execution plan before code work. Root freezes and validates each integrated diff, then requests the exact reviewer. Open each phase PR before the next phase begins. Create all stack PRs before waiting on CI. Changes discovered inside approved mechanisms remain local implementation details; new material behavior returns to design.
 
@@ -35,15 +34,15 @@ Phase-1 new pure source contract lives in `core/model_catalog_source.py`, with e
 
 A versioned support descriptor in `core/model_capability_contract.py` and additive field on `core/llm_catalog.py` separates unknown/conditional/exact-derived facts from legacy effective boolean/list views. Missing descriptor means historical snapshot semantics, not an old source fallback. Source decoder and later projection translate into this descriptor; source-native execution fields never flow to model construction.
 
-Source collection uses `services/catalog_source_collection.py` with injected HTTP client and new-source URL/config validation, but active publication switches only in the stack's responsible activation/removal phase. Pricing rules/estimator have an explicit typed boundary; no source provider-name heuristics or genai calculator use remains after phase 3. Migration fences are introduced together with final writer contract, not a public runtime toggle.
+Source collection uses `services/catalog_source_collection.py` with injected HTTP client and new-source URL/config validation, but active publication switches only in phase 2 together with its source consumers and estimator. Pricing rules/estimator have an explicit typed boundary; no source provider-name heuristics or genai calculator use remains after phase 2. Phase-3 migration fences complete the final release writer contract, not a public runtime toggle.
 
 Ownership for each phase is recorded in its execution plan. Agents never edit each other's assigned files concurrently. Source owner and descriptor owner coordinate through root before changing shared interfaces.
 
 ## Removal Obligations
 
 - Phase 2: replace native Pydantic capability derivation, lossy provider-array intersections, sparse-default denial and strict/structured conflation; preserve actual Pydantic encoding profiles where used operationally.
-- Phase 3: remove direct genai dependency/import/fetch/match/evaluate/config/source selection; retain transitive counter extraction and inert historical provenance.
-- Phase 4: retire old DB current authority without deleting catalogs or saved selections; reject old publishers/source writes and unsafe rollback; replace current Spec and obsolete authoritative test assumptions.
+- Phase 2 also removes direct genai dependency/import/fetch/match/evaluate/config/source selection; retain transitive counter extraction and inert historical provenance.
+- Phase 3: retire old DB current authority without deleting catalogs or saved selections; reject old publishers/source writes and unsafe rollback; replace current Spec and obsolete authoritative test assumptions.
 - Final cleanup: remove phase plans only after full QA/spec promotion; approved Requirements/ADR/Design remain. Do not change historical implemented snapshots or executed migrations.
 
 Absence verification combines targeted repository/import/dependency scans, captured-source/price replay, native profile/updater poison tests and old-SQL-shape migration tests. Do not claim a zero-genai transitive dependency graph.
