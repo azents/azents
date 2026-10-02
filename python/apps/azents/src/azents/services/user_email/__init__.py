@@ -5,12 +5,9 @@ from typing import Annotated, assert_never
 
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.rdb.deps import get_session_manager
-from azents.rdb.session import SessionManager
-from azents.repos.user_email import UserEmailRepository
-from azents.repos.user_email.data import DuplicateEmail, UserEmailCreate
+from azents.core.user_email import DuplicateEmail, UserEmailCreate
+from azents.repos.user_email.operations import UserEmailOperationRepository
 
 from .data import UserEmailListOutput, UserEmailOutput
 
@@ -19,9 +16,8 @@ from .data import UserEmailListOutput, UserEmailOutput
 class UserEmailService:
     """UserEmail CRUD service."""
 
-    user_email_repository: Annotated[UserEmailRepository, Depends()]
-    session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+    repository: Annotated[
+        UserEmailOperationRepository, Depends(UserEmailOperationRepository)
     ]
 
     async def create(
@@ -32,8 +28,7 @@ class UserEmailService:
         :param create: Create data
         :return: Created UserEmail or duplicate email error
         """
-        async with self.session_manager() as session:
-            result = await self.user_email_repository.create(session, create)
+        result = await self.repository.create(create)
 
         match result:
             case Success(value):
@@ -49,8 +44,7 @@ class UserEmailService:
         :param email_id: UserEmail ID
         :return: UserEmail or None
         """
-        async with self.session_manager() as session:
-            email = await self.user_email_repository.get(session, email_id)
+        email = await self.repository.get(email_id)
         if email is None:
             return None
         return UserEmailOutput.convert_from(email)
@@ -61,11 +55,10 @@ class UserEmailService:
         :param user_id: User ID
         :return: UserEmail list
         """
-        async with self.session_manager() as session:
-            items = await self.user_email_repository.list_by_user(session, user_id)
+        result = await self.repository.list_by_user(user_id)
         return UserEmailListOutput(
-            items=[UserEmailOutput.convert_from(e) for e in items],
-            total=len(items),
+            items=[UserEmailOutput.convert_from(e) for e in result.items],
+            total=result.total,
         )
 
     async def list_all(
@@ -77,10 +70,7 @@ class UserEmailService:
         :param limit: Maximum record count to return
         :return: UserEmail list
         """
-        async with self.session_manager() as session:
-            result = await self.user_email_repository.list_all(
-                session, offset=offset, limit=limit
-            )
+        result = await self.repository.list_all(offset=offset, limit=limit)
         return UserEmailListOutput(
             items=[UserEmailOutput.convert_from(e) for e in result.items],
             total=result.total,
@@ -91,5 +81,4 @@ class UserEmailService:
 
         :param email_id: UserEmail ID
         """
-        async with self.session_manager() as session:
-            await self.user_email_repository.delete(session, email_id)
+        await self.repository.delete(email_id)

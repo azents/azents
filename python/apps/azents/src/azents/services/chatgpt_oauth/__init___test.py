@@ -15,6 +15,7 @@ from azents.core.chatgpt_oauth import (
 from azents.core.credentials import ChatGPTOAuthSecrets
 from azents.core.crypto import CredentialCipher
 from azents.core.enums import LLMCatalogPurpose, LLMCatalogScope, LLMProvider
+from azents.core.workspace import WorkspaceCreate
 from azents.rdb.session import SessionManager
 from azents.repos.chatgpt_oauth_session import ChatGPTOAuthSessionRepository
 from azents.repos.chatgpt_oauth_session.operations import ChatGPTOAuthOperations
@@ -23,7 +24,6 @@ from azents.repos.llm_provider_integration import LLMProviderIntegrationReposito
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository
-from azents.repos.workspace.data import WorkspaceCreate
 
 from . import ChatGPTOAuthService
 from .client import ChatGPTOAuthClient

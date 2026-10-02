@@ -27,6 +27,7 @@ from azents.core.skill_projection import (
     SkillProjectionSnapshot,
     SkillProjectionState,
 )
+from azents.core.workspace import WorkspaceCreate
 from azents.engine.tools.skill import SkillStateStore
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
@@ -73,7 +74,6 @@ from azents.repos.skill_state import SkillStateRepository
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository
-from azents.repos.workspace.data import WorkspaceCreate
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.repos.workspace_user.data import WorkspaceUserCreate
 from azents.runtime.control_protocol.runner_operations import (

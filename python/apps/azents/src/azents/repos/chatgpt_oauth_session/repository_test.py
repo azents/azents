@@ -13,11 +13,11 @@ from azents.core.chatgpt_oauth import (
     ChatGPTOAuthSessionStatus,
 )
 from azents.core.crypto import CredentialCipher
+from azents.core.workspace import WorkspaceCreate
 from azents.rdb.models.chatgpt_oauth_session import RDBChatGPTOAuthSession
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository
-from azents.repos.workspace.data import WorkspaceCreate
 
 from . import ChatGPTOAuthSessionRepository
 from .data import ChatGPTOAuthSessionCreate, NotFound

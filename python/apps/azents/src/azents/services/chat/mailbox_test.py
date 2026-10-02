@@ -23,6 +23,7 @@ from azents.core.enums import (
 )
 from azents.core.inference_profile import SessionInferenceState
 from azents.core.llm_catalog import ModelReasoningEffort
+from azents.core.workspace import WorkspaceCreate
 from azents.engine.events.types import (
     ActiveToolCall,
     ClientToolCallPayload,
@@ -58,7 +59,6 @@ from azents.repos.toolkit_state import ToolkitStateRepository
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository
-from azents.repos.workspace.data import WorkspaceCreate
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.repos.workspace_user.data import WorkspaceUserCreate
 from azents.services.chat.data import PendingMailboxUserMessagePresentation

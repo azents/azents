@@ -44,6 +44,7 @@ from azents.core.model_availability import (
 )
 from azents.core.model_execution_options import ModelExecutionOptionId
 from azents.core.session_working_folder import build_session_working_folder_path
+from azents.core.workspace import WorkspaceCreate
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.agent_session import RDBAgentSession
@@ -65,7 +66,6 @@ from azents.repos.session_lifecycle_finalizer import (
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository
-from azents.repos.workspace.data import WorkspaceCreate
 from azents.testing.model_selection import (
     make_test_model_selection,
     make_test_model_selection_dict,

@@ -1,23 +1,17 @@
-"""User service."""
+"""User service over completed account repository operations."""
 
 import dataclasses
 import datetime
 import logging
-from typing import Annotated
+from typing import Annotated, assert_never
 
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.enums import SystemUserRole
-from azents.rdb.deps import get_session_manager
-from azents.rdb.session import SessionManager
-from azents.repos.owner_lifecycle import OwnerLifecycleRepository
-from azents.repos.session import SessionRepository
-from azents.repos.system_user_role.data import LastSystemAdmin
-from azents.repos.system_user_role.repository import SystemUserRoleRepository
-from azents.repos.user import UserRepository
-from azents.repos.user.data import NotFound, UserCreate, UserUpdate
+from azents.core.system_user_role import LastSystemAdmin
+from azents.core.user import NotFound, UserDeletionStatus, UserUpdate
+from azents.repos.user.data import UserCreate
+from azents.repos.user.operations import UserOperationRepository
 from azents.services.runtime_terminal.invalidation import (
     RuntimeTerminalInvalidationPublisherDependency,
 )
@@ -29,124 +23,60 @@ logger = logging.getLogger(__name__)
 
 @dataclasses.dataclass
 class UserService:
-    """User CRUD service."""
+    """Project completed User operations and publish committed invalidation."""
 
-    user_repository: Annotated[UserRepository, Depends()]
-    system_role_repository: Annotated[SystemUserRoleRepository, Depends()]
-    session_repository: Annotated[SessionRepository, Depends()]
-    owner_lifecycle_repository: Annotated[OwnerLifecycleRepository, Depends()]
-    session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
-    ]
+    repository: Annotated[UserOperationRepository, Depends()]
     terminal_invalidation_publisher: RuntimeTerminalInvalidationPublisherDependency
 
     async def create(self, create: UserCreate) -> UserOutput:
-        """Create User.
-
-        :param create: Create data
-        :return: Created User
-        """
-        async with self.session_manager() as session:
-            user = await self.user_repository.create(session, create)
-        return UserOutput.convert_from(user)
+        """Create User and primary email."""
+        return UserOutput.convert_from(await self.repository.create(create))
 
     async def get(self, user_id: str) -> UserOutput | None:
-        """Fetch User by ID.
-
-        :param user_id: User ID
-        :return: User or None
-        """
-        async with self.session_manager() as session:
-            user = await self.user_repository.get(session, user_id)
-        if user is None:
-            return None
-        return UserOutput.convert_from(user)
+        """Fetch User by ID."""
+        user = await self.repository.get(user_id)
+        return None if user is None else UserOutput.convert_from(user)
 
     async def get_by_email(self, email: str) -> UserOutput | None:
-        """Fetch User by email.
-
-        :param email: Email address
-        :return: User or None
-        """
-        async with self.session_manager() as session:
-            user = await self.user_repository.get_by_email(session, email)
-        if user is None:
-            return None
-        return UserOutput.convert_from(user)
+        """Fetch User by exact email."""
+        user = await self.repository.get_by_email(email)
+        return None if user is None else UserOutput.convert_from(user)
 
     async def update(
-        self,
-        user_id: str,
-        update: UserUpdate,
+        self, user_id: str, update: UserUpdate
     ) -> Result[UserOutput, NotFound]:
-        """Update User."""
-        async with self.session_manager() as session:
-            user = await self.user_repository.update(session, user_id, update)
+        """Update User with the existing partial-update semantics."""
+        user = await self.repository.update(user_id, update)
         if user is None:
             return Failure(NotFound(user_id=user_id))
         return Success(UserOutput.convert_from(user))
 
     async def list_all(self, *, offset: int = 0, limit: int = 50) -> UserListOutput:
-        """Fetch all Users.
-
-        :param offset: Record count to skip
-        :param limit: Maximum record count to return
-        :return: User list
-        """
-        async with self.session_manager() as session:
-            result = await self.user_repository.list_all(
-                session, offset=offset, limit=limit
-            )
+        """Fetch the existing User count and page."""
+        result = await self.repository.list_all(offset=offset, limit=limit)
         return UserListOutput(
             items=[UserOutput.convert_from(u) for u in result.items],
             total=result.total,
         )
 
     async def delete(self, user_id: str) -> Result[None, LastSystemAdmin]:
-        """Disable User access and enqueue durable account-purge lifecycle.
-
-        The User row remains until owned User Session purge and private User
-        Memory cleanup complete in the owner-lifecycle worker.
-
-        :param user_id: User ID
-        :return: Success or final-admin invariant error
-        """
-        now = datetime.datetime.now(datetime.UTC)
-        async with self.session_manager() as session:
-            await self.system_role_repository.acquire_mutation_lock(session)
-            system_admin = await self.system_role_repository.get(
-                session,
-                user_id,
-                SystemUserRole.SYSTEM_ADMIN,
+        """Disable User access and enqueue durable account purge before effects."""
+        result = await self.repository.delete(
+            user_id, disabled_at=datetime.datetime.now(datetime.UTC)
+        )
+        if isinstance(result, Failure):
+            logger.warning(
+                "Final system administrator deletion denied",
+                extra={"target_user_id": user_id},
             )
-            if system_admin is not None:
-                count = await self.system_role_repository.count_by_role(
-                    session,
-                    SystemUserRole.SYSTEM_ADMIN,
-                )
-                if count <= 1:
-                    logger.warning(
-                        "Final system administrator deletion denied",
-                        extra={"target_user_id": user_id},
-                    )
-                    return Failure(LastSystemAdmin(user_id=user_id))
-            user = await self.user_repository.get(session, user_id)
-            if user is None:
+            return Failure(result.error)
+        match result.value:
+            case UserDeletionStatus.MISSING:
                 return Success(None)
-            await self.user_repository.disable_access(
-                session,
-                user_id,
-                disabled_at=now,
-            )
-            # Drop system roles immediately so final-admin accounting stays current
-            # while the User row waits for owned Session purge finalization.
-            for role in SystemUserRole:
-                await self.system_role_repository.delete(session, user_id, role)
-            await self.session_repository.revoke_all_by_user(session, user_id)
-            await self.owner_lifecycle_repository.create_or_get_account_purge(
-                session,
-                user_id=user_id,
-            )
+            case UserDeletionStatus.ACCEPTED:
+                pass
+            case _:
+                assert_never(result.value)
         await self.terminal_invalidation_publisher.publish_user_terminal_invalidation(
             user_id
         )

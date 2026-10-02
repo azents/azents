@@ -11,6 +11,7 @@ from azcommon.datetime import tznow
 from azcommon.result import Failure, Result, Success
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from azents.core.system_user_role import LastSystemAdmin
 from azents.rdb.models.owner_lifecycle import RDBOwnerLifecycleJob
 from azents.rdb.models.session import RDBSession
 from azents.rdb.session import SessionManager
@@ -19,10 +20,10 @@ from azents.repos.password_login import PasswordLoginRepository
 from azents.repos.password_login.data import PasswordLoginCreate
 from azents.repos.session import SessionRepository
 from azents.repos.session.data import NotFound, Session, SessionCreate
-from azents.repos.system_user_role.data import LastSystemAdmin
 from azents.repos.system_user_role.repository import SystemUserRoleRepository
 from azents.repos.user import UserRepository
 from azents.repos.user.data import User, UserCreate
+from azents.repos.user.operations import UserOperationRepository
 from azents.repos.user_email import UserEmailRepository
 from azents.services.runtime_terminal.invalidation import (
     NoopRuntimeTerminalInvalidationPublisher,
@@ -552,11 +553,13 @@ async def test_session_issue_share_lock_serializes_account_deletion(
     auth_repository = _make_repository(gated_session_manager)
     disable_user_repository = _DisableAttemptUserRepository()
     user_service = UserService(
-        user_repository=disable_user_repository,
-        system_role_repository=SystemUserRoleRepository(),
-        session_repository=SessionRepository(),
-        owner_lifecycle_repository=OwnerLifecycleRepository(),
-        session_manager=session_manager,
+        repository=UserOperationRepository(
+            user_repository=disable_user_repository,
+            system_role_repository=SystemUserRoleRepository(),
+            session_repository=SessionRepository(),
+            owner_lifecycle_repository=OwnerLifecycleRepository(),
+            session_manager=session_manager,
+        ),
         terminal_invalidation_publisher=NoopRuntimeTerminalInvalidationPublisher(),
     )
 

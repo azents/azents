@@ -25,6 +25,7 @@ from azents.core.enums import (
     RuntimeRunnerState,
     RuntimeTerminalDeleteAcknowledgementKind,
 )
+from azents.core.workspace import WorkspaceCreate
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
@@ -34,7 +35,6 @@ from azents.repos.agent_runtime.data import AgentRuntimeFailurePatch
 from azents.repos.runtime_provider.data import RuntimeProviderCreate
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
 from azents.repos.workspace import WorkspaceRepository
-from azents.repos.workspace.data import WorkspaceCreate
 from azents.testing.model_selection import (
     make_test_model_selection_dict,
     make_test_selectable_model_option_dicts,

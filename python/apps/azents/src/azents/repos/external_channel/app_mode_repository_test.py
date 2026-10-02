@@ -37,6 +37,7 @@ from azents.core.enums import (
     MailboxSchedulingMode,
     ScheduledTaskScheduleType,
 )
+from azents.core.workspace import WorkspaceCreate
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.agent_session import RDBAgentSession
@@ -66,7 +67,6 @@ from azents.repos.toolkit_state import ToolkitStateRepository
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository
-from azents.repos.workspace.data import WorkspaceCreate
 from azents.testing.model_selection import (
     make_test_model_selection_dict,
     make_test_selectable_model_option_dicts,

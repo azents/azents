@@ -9,17 +9,19 @@ from azcommon.result import Failure, Success
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from azents.core.enums import SystemUserRole
-from azents.rdb.session import SessionManager
-from azents.repos.owner_lifecycle import OwnerLifecycleRepository
-from azents.repos.session import SessionRepository
-from azents.repos.system_user_role.data import (
+from azents.core.system_user_role import (
     LastSystemAdmin,
     SystemRoleAssignmentNotFound,
     SystemUserNotFound,
 )
+from azents.rdb.session import SessionManager
+from azents.repos.owner_lifecycle import OwnerLifecycleRepository
+from azents.repos.session import SessionRepository
+from azents.repos.system_user_role.operations import SystemUserRoleOperationRepository
 from azents.repos.system_user_role.repository import SystemUserRoleRepository
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
+from azents.repos.user.operations import UserOperationRepository
 from azents.services.runtime_terminal.invalidation import (
     NoopRuntimeTerminalInvalidationPublisher,
 )
@@ -32,9 +34,11 @@ def _make_role_service(
 ) -> SystemUserRoleService:
     """Create a system role service for tests."""
     return SystemUserRoleService(
-        system_role_repository=SystemUserRoleRepository(),
-        user_repository=UserRepository(),
-        session_manager=session_manager,
+        repository=SystemUserRoleOperationRepository(
+            system_role_repository=SystemUserRoleRepository(),
+            user_repository=UserRepository(),
+            session_manager=session_manager,
+        ),
     )
 
 
@@ -43,11 +47,13 @@ def _make_user_service(
 ) -> UserService:
     """Create a UserService with owner-lifecycle collaborators for tests."""
     return UserService(
-        user_repository=UserRepository(),
-        system_role_repository=SystemUserRoleRepository(),
-        session_repository=SessionRepository(),
-        owner_lifecycle_repository=OwnerLifecycleRepository(),
-        session_manager=session_manager,
+        repository=UserOperationRepository(
+            user_repository=UserRepository(),
+            system_role_repository=SystemUserRoleRepository(),
+            session_repository=SessionRepository(),
+            owner_lifecycle_repository=OwnerLifecycleRepository(),
+            session_manager=session_manager,
+        ),
         terminal_invalidation_publisher=NoopRuntimeTerminalInvalidationPublisher(),
     )
 

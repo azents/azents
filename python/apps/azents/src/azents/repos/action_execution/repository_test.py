@@ -11,6 +11,7 @@ from azents.core.enums import (
     EventKind,
     LLMProvider,
 )
+from azents.core.workspace import WorkspaceCreate
 from azents.engine.events.action_messages import (
     ActionMessagePayload,
     CreateGitWorktreeAction,
@@ -27,7 +28,6 @@ from azents.repos.action_execution.data import (
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSessionCreate
 from azents.repos.workspace import WorkspaceRepository
-from azents.repos.workspace.data import WorkspaceCreate
 from azents.testing.model_selection import (
     make_test_model_selection_dict,
     make_test_selectable_model_option_dicts,

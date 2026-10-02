@@ -13,11 +13,11 @@ from azents.core.credentials import (
 )
 from azents.core.crypto import CredentialCipher
 from azents.core.enums import LLMCatalogPurpose, LLMCatalogScope, LLMProvider
+from azents.core.workspace import WorkspaceCreate
 from azents.rdb.session import SessionManager
 from azents.repos.llm_catalog import LLMCatalogRepository
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.workspace import WorkspaceRepository
-from azents.repos.workspace.data import WorkspaceCreate
 from azents.services.llm_provider_integration import (
     LLMProviderIntegrationService,
     catalog_sync_required_for_update,

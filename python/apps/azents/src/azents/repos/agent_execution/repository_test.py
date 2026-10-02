@@ -40,6 +40,7 @@ from azents.core.model_operation import (
     ModelOperationState,
 )
 from azents.core.vfs import make_vfs_projection, make_vfs_source_revision
+from azents.core.workspace import WorkspaceCreate
 from azents.engine.events.action_messages import ActionMessagePayload, GoalAction
 from azents.engine.events.filters import EventCompactor
 from azents.engine.events.types import (
@@ -71,7 +72,6 @@ from azents.repos.model_operation_completion import (
 )
 from azents.repos.toolkit_state.engine import ToolWorkingSetStore
 from azents.repos.workspace import WorkspaceRepository
-from azents.repos.workspace.data import WorkspaceCreate
 from azents.testing.model_selection import (
     make_test_model_selection_dict,
     make_test_model_settings,

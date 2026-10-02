@@ -40,6 +40,7 @@ from azents.core.inference_profile import (
 )
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.core.model_execution_options import ModelExecutionOptionId
+from azents.core.workspace import WorkspaceCreate
 from azents.engine.run.input import InputMessage
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_automatic_project_setting import (
@@ -85,7 +86,6 @@ from azents.repos.toolkit_state import ToolkitStateRepository
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository
-from azents.repos.workspace.data import WorkspaceCreate
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.repos.workspace_user.data import WorkspaceUser, WorkspaceUserCreate
 from azents.services.exchange_file import (

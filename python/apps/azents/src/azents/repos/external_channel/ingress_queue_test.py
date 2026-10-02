@@ -26,6 +26,7 @@ from azents.core.enums import (
     ExternalChannelTransport,
     LLMProvider,
 )
+from azents.core.workspace import WorkspaceCreate
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.external_channel_ingress import (
     RDBExternalChannelIngressItem,
@@ -48,7 +49,6 @@ from azents.repos.external_channel.ingress_queue_data import (
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.workspace import WorkspaceRepository
-from azents.repos.workspace.data import WorkspaceCreate
 from azents.testing.model_selection import (
     make_test_model_selection_dict,
     make_test_selectable_model_option_dicts,

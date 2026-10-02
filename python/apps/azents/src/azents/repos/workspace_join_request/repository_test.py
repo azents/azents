@@ -4,10 +4,10 @@ from azcommon.result import Failure, Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import JoinRequestStatus
+from azents.core.workspace import WorkspaceCreate
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository
-from azents.repos.workspace.data import WorkspaceCreate
 
 from . import WorkspaceJoinRequestRepository
 from .data import NotFound, WorkspaceJoinRequestCreate, WorkspaceJoinRequestUpdate

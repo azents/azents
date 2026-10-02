@@ -28,6 +28,7 @@ from azents.core.enums import (
     RuntimeProviderScope,
     RuntimeRunnerState,
 )
+from azents.core.workspace import WorkspaceCreate
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
@@ -38,7 +39,6 @@ from azents.repos.runtime_profile.repository import RuntimeProfileRepository
 from azents.repos.runtime_provider.data import RuntimeProviderCreate
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
 from azents.repos.workspace import WorkspaceRepository
-from azents.repos.workspace.data import WorkspaceCreate
 from azents.runtime.control_protocol.grpc.state_sinks import (
     RuntimeProviderReportRepositorySink,
     RuntimeRunnerStateRepositorySink,

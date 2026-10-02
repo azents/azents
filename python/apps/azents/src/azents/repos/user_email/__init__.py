@@ -6,9 +6,10 @@ from azcommon.sqlalchemy.postgres import is_constrained_by
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.user_email import DuplicateEmail, UserEmailCreate
 from azents.rdb.models.user_email import RDBUserEmail
 
-from .data import DuplicateEmail, UserEmail, UserEmailCreate, UserEmailList
+from .data import UserEmail, UserEmailList
 
 
 class UserEmailRepository:

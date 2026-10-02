@@ -1,10 +1,9 @@
 """User repository data models."""
 
-import dataclasses
 import datetime
 
 from pydantic import BaseModel, Field
-from typing_extensions import Self, TypedDict
+from typing_extensions import Self
 
 from azents.core.locale import SupportedLocale
 
@@ -38,21 +37,8 @@ class UserCreate(BaseModel):
     email: str = Field(description="Primary email address")
 
 
-class UserUpdate(TypedDict, total=False):
-    """User update schema (partial update)."""
-
-    locale: SupportedLocale
-
-
 class UserList(BaseModel):
     """User list."""
 
     items: list[User] = Field(description="User list")
     total: int = Field(description="Total record count")
-
-
-@dataclasses.dataclass(frozen=True)
-class NotFound:
-    """User not found."""
-
-    user_id: str

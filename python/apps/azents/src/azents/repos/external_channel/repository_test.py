@@ -43,6 +43,7 @@ from azents.core.external_model_settings import (
     ExternalModelStale,
     ExternalModelTargetContext,
 )
+from azents.core.workspace import WorkspaceCreate
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.agent_session import RDBAgentSession
@@ -99,7 +100,6 @@ from azents.repos.session_model_profile.repository import (
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository
-from azents.repos.workspace.data import WorkspaceCreate
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.repos.workspace_user.data import WorkspaceUserCreate
 from azents.testing.model_selection import (

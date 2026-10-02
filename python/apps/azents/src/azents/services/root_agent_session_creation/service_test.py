@@ -14,6 +14,7 @@ from azents.core.enums import (
     LLMProvider,
     RuntimeRunnerState,
 )
+from azents.core.workspace import WorkspaceCreate
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_automatic_project_item import (
     RDBAgentAutomaticProjectItem,
@@ -32,7 +33,6 @@ from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSessionCreate
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 from azents.repos.workspace import WorkspaceRepository
-from azents.repos.workspace.data import WorkspaceCreate
 from azents.testing.model_selection import (
     make_test_model_selection_dict,
     make_test_selectable_model_option_dicts,

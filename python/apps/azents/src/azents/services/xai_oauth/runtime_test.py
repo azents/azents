@@ -16,6 +16,7 @@ from azents.api.public.llm_provider_integration.v1.data import (
 from azents.core.credentials import XaiOAuthConfig, XaiOAuthSecrets
 from azents.core.crypto import CredentialCipher
 from azents.core.enums import LLMProvider
+from azents.core.workspace import WorkspaceCreate
 from azents.core.xai_oauth import (
     XaiOAuthConnectionMethod,
     XaiOAuthConnectionStatus,
@@ -24,7 +25,6 @@ from azents.rdb.session import SessionManager
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.llm_provider_integration.data import LLMProviderIntegrationCreate
 from azents.repos.workspace import WorkspaceRepository
-from azents.repos.workspace.data import WorkspaceCreate
 from azents.repos.xai_oauth_runtime import XaiOAuthRuntimeRepository
 
 from .client import XaiOAuthClient

@@ -8,11 +8,11 @@ from cryptography.fernet import Fernet
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.crypto import CredentialCipher
+from azents.core.workspace import WorkspaceCreate
 from azents.core.xai_oauth import XaiOAuthConnectionMethod
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository
-from azents.repos.workspace.data import WorkspaceCreate
 
 from . import XaiOAuthSessionRepository
 from .data import XaiOAuthSessionCreate

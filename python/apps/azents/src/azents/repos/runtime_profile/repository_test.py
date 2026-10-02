@@ -32,6 +32,7 @@ from azents.core.runtime_profile import (
     RuntimeRecreationOperationStatus,
     RuntimeRecreationTargetKind,
 )
+from azents.core.workspace import WorkspaceCreate
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
@@ -52,10 +53,7 @@ from azents.repos.runtime_provider_policy.repository import (
     RuntimeProviderPolicyRepository,
 )
 from azents.repos.workspace import WorkspaceRepository
-from azents.repos.workspace.data import (
-    WorkspaceCreate,
-    WorkspaceRuntimeProfileDefaultReplace,
-)
+from azents.repos.workspace.data import WorkspaceRuntimeProfileDefaultReplace
 from azents.testing.model_selection import (
     make_test_model_selection_dict,
     make_test_selectable_model_option_dicts,

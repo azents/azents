@@ -4,7 +4,7 @@ import dataclasses
 import datetime
 
 from pydantic import BaseModel, Field
-from typing_extensions import Self, TypedDict
+from typing_extensions import Self
 
 
 class Workspace(BaseModel):
@@ -27,20 +27,6 @@ class Workspace(BaseModel):
         return cls.model_validate(data, from_attributes=True)
 
 
-class WorkspaceCreate(BaseModel):
-    """Workspace create schema."""
-
-    name: str = Field(description="Workspace name")
-    handle: str = Field(description="Workspace unique handle")
-
-
-class WorkspaceUpdate(TypedDict, total=False):
-    """Workspace update schema (partial update)."""
-
-    name: str
-    handle: str
-
-
 class WorkspaceList(BaseModel):
     """Workspace list."""
 
@@ -53,17 +39,3 @@ class WorkspaceRuntimeProfileDefaultReplace:
 
     expected_version: int
     runtime_profile_id: str | None
-
-
-@dataclasses.dataclass(frozen=True)
-class HandleConflict:
-    """Duplicate handle error."""
-
-    handle: str
-
-
-@dataclasses.dataclass(frozen=True)
-class NotFound:
-    """Workspace not found."""
-
-    handle: str

@@ -9,9 +9,8 @@ from typing import Annotated, assert_never
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from azents.core.auth.deps import CurrentUser, get_current_user
-from azents.repos.workspace.data import HandleConflict
+from azents.core.workspace import CreateWithOwnerInput, HandleConflict
 from azents.services.workspace import WorkspaceService
-from azents.services.workspace.data import CreateWithOwnerInput
 from azents.utils.fastapi.route import RouteMounter
 
 from .data import (

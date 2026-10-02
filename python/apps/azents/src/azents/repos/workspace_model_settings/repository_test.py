@@ -6,8 +6,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.core.agent import AgentModelSelection
 from azents.core.enums import LLMModelDeveloper, LLMProvider
 from azents.core.llm_catalog import ModelCapabilities
+from azents.core.workspace import WorkspaceCreate
 from azents.repos.workspace import WorkspaceRepository
-from azents.repos.workspace.data import WorkspaceCreate
 
 from . import WorkspaceModelSettingsRepository
 

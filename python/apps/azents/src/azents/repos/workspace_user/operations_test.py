@@ -13,12 +13,13 @@ from azcommon.result import Failure, Success
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from azents.core.enums import WorkspaceUserRole
+from azents.core.workspace import WorkspaceCreate
 from azents.rdb.models.workspace import RDBWorkspace
 from azents.repos.owner_lifecycle import OwnerLifecycleRepository
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository
-from azents.repos.workspace.data import Workspace, WorkspaceCreate
+from azents.repos.workspace.data import Workspace
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.repos.workspace_user.data import NotFound, WorkspaceUser
 from azents.testing.types import require_instance

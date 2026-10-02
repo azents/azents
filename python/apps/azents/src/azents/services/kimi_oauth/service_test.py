@@ -18,6 +18,7 @@ from azents.core.kimi_oauth import (
     KimiOAuthConnectionMethod,
     KimiOAuthSessionStatus,
 )
+from azents.core.workspace import WorkspaceCreate
 from azents.rdb.session import SessionManager
 from azents.repos.kimi_oauth_session.data import KimiOAuthSessionWithSecrets
 from azents.repos.kimi_oauth_session.repository import KimiOAuthSessionRepository
@@ -29,7 +30,6 @@ from azents.repos.llm_provider_integration.data import (
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository
-from azents.repos.workspace.data import WorkspaceCreate
 
 from .client import KimiOAuthClient
 from .data import TokenSet

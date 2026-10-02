@@ -19,6 +19,7 @@ from azents.core.enums import (
     WorkspaceUserRole,
 )
 from azents.core.exchange_upload import ExchangeUploadError, ExchangeUploadState
+from azents.core.workspace import WorkspaceCreate
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.exchange_file import RDBExchangeFile
 from azents.rdb.models.exchange_upload_operation import RDBExchangeUploadOperation
@@ -40,7 +41,6 @@ from azents.repos.exchange_file.upload_data import ExchangeUploadOperation
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository
-from azents.repos.workspace.data import WorkspaceCreate
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.repos.workspace_user.data import WorkspaceUserCreate
 from azents.testing.model_selection import (

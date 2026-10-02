@@ -19,6 +19,7 @@ from azents.core.chatgpt_oauth import (
 from azents.core.credentials import ChatGPTOAuthConfig, ChatGPTOAuthSecrets
 from azents.core.crypto import CredentialCipher
 from azents.core.enums import LLMProvider
+from azents.core.workspace import WorkspaceCreate
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.models.workspace import RDBWorkspace
 from azents.repos.chatgpt_oauth_runtime import ChatGPTOAuthRuntimeRepository
@@ -28,7 +29,6 @@ from azents.repos.llm_provider_integration.data import (
     LLMProviderIntegrationWithSecrets,
 )
 from azents.repos.workspace import WorkspaceRepository
-from azents.repos.workspace.data import WorkspaceCreate
 from azents.services.chatgpt_oauth.data import (
     ProviderRejected,
     ProviderUnavailable,

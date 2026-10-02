@@ -9,8 +9,8 @@ from azcommon.result import Failure, Success
 
 from azents.core.config import Config
 from azents.core.enums import SystemUserRole
+from azents.core.system_user_role import SystemUserNotFound
 from azents.process_lifecycle import run_with_container
-from azents.repos.system_user_role.data import SystemUserNotFound
 from azents.services.system_user_role.service import SystemUserRoleService
 
 app = typer.Typer(help="Manage Azents instance system administrators")

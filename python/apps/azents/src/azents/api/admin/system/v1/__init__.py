@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from azents.core.auth.deps import SystemAdmin, get_system_admin
 from azents.core.enums import SystemUserRole
-from azents.repos.system_user_role.data import (
+from azents.core.system_user_role import (
     LastSystemAdmin,
     SystemRoleAssignmentNotFound,
     SystemUserNotFound,

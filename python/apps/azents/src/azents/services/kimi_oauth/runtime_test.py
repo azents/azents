@@ -18,11 +18,11 @@ from azents.core.kimi_oauth import (
     KimiOAuthConnectionMethod,
     KimiOAuthConnectionStatus,
 )
+from azents.core.workspace import WorkspaceCreate
 from azents.rdb.session import SessionManager
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.llm_provider_integration.data import LLMProviderIntegrationCreate
 from azents.repos.workspace import WorkspaceRepository
-from azents.repos.workspace.data import WorkspaceCreate
 
 from .client import KimiOAuthClient
 from .data import ProviderRejected, ProviderUnavailable, TokenSet
