@@ -9,6 +9,7 @@ import hashlib
 import json
 import logging
 from collections.abc import Awaitable, Callable
+from urllib.parse import urlsplit
 
 import httpx
 from pydantic import TypeAdapter, ValidationError
@@ -112,6 +113,22 @@ class McpToolkitProvider(ToolkitProvider[McpToolkitConfig]):
         "accomplish the user's request."
     )
     config_model = McpToolkitConfig
+
+    @classmethod
+    def source_identity(
+        cls,
+        config: McpToolkitConfig,
+    ) -> tuple[tuple[str, str], ...]:
+        """Return a credential-free MCP server origin."""
+        parsed = urlsplit(config.server_url)
+        if not parsed.scheme or parsed.hostname is None:
+            return ()
+        try:
+            parsed_port = parsed.port
+        except ValueError:
+            return ()
+        port = f":{parsed_port}" if parsed_port is not None else ""
+        return (("server", f"{parsed.scheme}://{parsed.hostname}{port}"),)
 
     def __init__(
         self,

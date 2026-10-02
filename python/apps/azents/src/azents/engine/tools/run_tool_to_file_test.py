@@ -931,6 +931,7 @@ def _catalog(tools: Mapping[str, FunctionTool]) -> ToolCatalog:
     typed_tools = {name: tool for name, tool in tools.items()}
     source = ToolCatalogSource(
         slug="builtin",
+        namespace="builtin",
         toolkit_type=None,
         toolkit_class="RuntimeBuiltinTool",
         display_name="Runtime",

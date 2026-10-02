@@ -550,7 +550,7 @@ async def test_consume_failure_publishes_no_event_or_wakeup() -> None:
         agent_session_repository=repository,
     ).consume(
         _snapshot(),
-        toolkits=[ToolkitBinding(toolkit, "goal", False)],
+        toolkits=[ToolkitBinding(toolkit, "goal", "goal", False)],
         run_id="run-001",
     )
 
@@ -577,7 +577,7 @@ async def test_consume_defers_when_new_pending_input_exists() -> None:
         mailbox_item_repository=mailbox_item_repository,
     ).consume(
         _snapshot(),
-        toolkits=[ToolkitBinding(toolkit, "goal", False)],
+        toolkits=[ToolkitBinding(toolkit, "goal", "goal", False)],
         run_id="run-001",
     )
 
@@ -607,7 +607,7 @@ async def test_consume_rejects_owner_generation_takeover() -> None:
             agent_session_repository=_AgentSessionRepository(owner_generation=2),
         ).consume(
             _snapshot(),
-            toolkits=[ToolkitBinding(toolkit, "goal", False)],
+            toolkits=[ToolkitBinding(toolkit, "goal", "goal", False)],
             run_id="run-001",
         )
 
@@ -640,7 +640,7 @@ async def test_consume_stores_continuation_and_sends_wake_up() -> None:
         agent_session_repository=repository,
     ).consume(
         snapshot := _snapshot(),
-        toolkits=[ToolkitBinding(toolkit, "goal", False)],
+        toolkits=[ToolkitBinding(toolkit, "goal", "goal", False)],
         run_id="run-001",
     )
 
@@ -699,7 +699,14 @@ async def test_consume_stores_external_channel_continuation_separately() -> None
         agent_session_repository=repository,
     ).consume(
         snapshot := _snapshot(),
-        toolkits=[ToolkitBinding(toolkit, "external_channel", False)],
+        toolkits=[
+            ToolkitBinding(
+                toolkit,
+                "external_channel",
+                "external_channel",
+                False,
+            )
+        ],
         run_id="run-001",
     )
 
@@ -744,7 +751,7 @@ async def test_consume_stores_typed_scheduled_task_continuation() -> None:
         agent_session_repository=repository,
     ).consume(
         snapshot := _snapshot(),
-        toolkits=[ToolkitBinding(toolkit, "scheduled", False)],
+        toolkits=[ToolkitBinding(toolkit, "scheduled", "scheduled", False)],
         run_id="run-001",
     )
 
@@ -801,7 +808,7 @@ async def test_archived_session_keeps_only_matching_scheduled_continuation() -> 
         agent_session_repository=repository,
     ).consume(
         snapshot := _snapshot(),
-        toolkits=[ToolkitBinding(toolkit, "scheduled", False)],
+        toolkits=[ToolkitBinding(toolkit, "scheduled", "scheduled", False)],
         run_id="run-001",
     )
 
@@ -830,7 +837,7 @@ async def test_consume_uses_snapshot_workspace_for_idle_hook() -> None:
         agent_session_repository=repository,
     ).consume(
         _snapshot(workspace_id="workspace-snapshot"),
-        toolkits=[ToolkitBinding(toolkit, "goal", False)],
+        toolkits=[ToolkitBinding(toolkit, "goal", "goal", False)],
         run_id="run-001",
     )
 

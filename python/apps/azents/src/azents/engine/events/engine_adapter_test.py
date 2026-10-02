@@ -1099,6 +1099,7 @@ def test_hooked_tool_executor_forwards_request_cancel() -> None:
         inner=inner,
         dispatcher=RuntimeHookDispatcher(),
         providers=[],
+        toolkit_namespaces={},
         workspace_id="workspace-1",
         agent_id="agent-1",
         session_id="session-1",
@@ -1124,6 +1125,7 @@ async def test_working_set_recency_refreshes_before_hook_denial() -> None:
         inner=_RecordingToolInvoker(),
         dispatcher=RuntimeHookDispatcher(),
         providers=[RuntimeHookProviderRef(slug="deny", toolkit=_DenyHookToolkit())],
+        toolkit_namespaces={"service__probe": "deny"},
         workspace_id="workspace-1",
         agent_id="agent-1",
         session_id="session-1",
@@ -1171,6 +1173,7 @@ async def test_assembled_tool_chain_rechecks_owner_after_before_hook() -> None:
             ToolkitBinding(
                 toolkit=toolkit,
                 slug="takeover",
+                base_slug="takeover",
                 use_prefix=True,
                 toolkit_type="github",
             )
@@ -1282,6 +1285,7 @@ async def test_disabled_tool_search_exposes_complete_catalog() -> None:
             ToolkitBinding(
                 toolkit=toolkit,
                 slug="service",
+                base_slug="service",
                 use_prefix=True,
                 toolkit_type="github",
             )
@@ -1481,6 +1485,7 @@ async def test_tool_search_activation_updates_the_next_prepared_call() -> None:
             ToolkitBinding(
                 toolkit=toolkit,
                 slug="service",
+                base_slug="service",
                 use_prefix=True,
                 toolkit_type="github",
             )
@@ -1597,6 +1602,7 @@ async def test_runtime_provider_adds_run_tool_to_file_as_direct_tool() -> None:
             ToolkitBinding(
                 toolkit=_RunToolProviderToolkit(),
                 slug="runtime",
+                base_slug="runtime",
                 use_prefix=False,
                 toolkit_type=None,
             )
@@ -1668,6 +1674,7 @@ async def _prepare_profiled_model_call(
             ToolkitBinding(
                 toolkit=_ProfiledCandidateToolkit(),
                 slug="profiled",
+                base_slug="profiled",
                 use_prefix=False,
                 toolkit_type=None,
             )
@@ -2239,7 +2246,7 @@ async def test_event_engine_adapter_includes_turn_start_injected_prompts() -> No
                 session_id="session-1",
                 user_messages=[],
                 agent_prompt="agent prompt",
-                toolkits=[ToolkitBinding(_PromptHookToolkit(), "hooks", True)],
+                toolkits=[ToolkitBinding(_PromptHookToolkit(), "hooks", "hooks", True)],
                 model="gpt-5.1",
                 credential_kwargs={"api_key": "test"},
                 workspace_id="workspace-1",
@@ -2795,7 +2802,7 @@ async def test_manual_compact_runs_compaction_summary_hook() -> None:
                 session_id="session-1",
                 user_messages=[],
                 agent_prompt=None,
-                toolkits=[ToolkitBinding(toolkit, "hookkit", True)],
+                toolkits=[ToolkitBinding(toolkit, "hookkit", "hookkit", True)],
                 model="gpt-5.1",
                 credential_kwargs={"api_key": "test"},
                 workspace_id="workspace-1",

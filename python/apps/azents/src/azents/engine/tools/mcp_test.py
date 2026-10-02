@@ -15,6 +15,18 @@ from azents.repos.mcp_oauth_connection.data import MCPOAuthConnection
 from . import mcp as mcp_module
 
 
+def test_source_identity_exposes_only_mcp_server_origin() -> None:
+    """Exclude paths, query parameters, and credentials from catalog identity."""
+    identity = mcp_module.McpToolkitProvider.source_identity(
+        mcp_module.McpToolkitConfig(
+            server_url="https://user:secret@mcp.example.test:8443/private?token=secret",
+            auth_type="none",
+        )
+    )
+
+    assert identity == (("server", "https://mcp.example.test:8443"),)
+
+
 def _connection(*, access_token: str, updated_second: int = 0) -> MCPOAuthConnection:
     """Build one refreshable OAuth connection snapshot."""
     now = datetime.datetime(2026, 1, 1, tzinfo=datetime.UTC)

@@ -4471,6 +4471,7 @@ def test_dynamic_worktree_binding_receives_current_run_boundary() -> None:
     binding = ToolkitBinding(
         toolkit=toolkit,
         slug="dynamic_worktree",
+        base_slug="dynamic_worktree",
         use_prefix=False,
     )
     boundary = TurnActionBridgeBoundary()

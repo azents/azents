@@ -1568,6 +1568,7 @@ class RunExecutor:
                     )
                 ),
                 "wait",
+                "wait",
                 False,
             )
         )

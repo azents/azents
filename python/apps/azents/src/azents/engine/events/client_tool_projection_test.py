@@ -229,6 +229,7 @@ async def test_prefixing_preserves_declared_variants() -> None:
             ToolkitBinding(
                 toolkit=_VariantToolkit(_DualDialectHandler()),
                 slug="runtime",
+                base_slug="runtime",
                 use_prefix=True,
             )
         ],
@@ -250,6 +251,7 @@ async def _candidate_catalog(handler: FunctionToolHandler) -> ToolCatalog:
             ToolkitBinding(
                 toolkit=_VariantToolkit(handler),
                 slug="runtime",
+                base_slug="runtime",
                 use_prefix=False,
             )
         ],

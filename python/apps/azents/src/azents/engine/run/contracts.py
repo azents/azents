@@ -45,7 +45,9 @@ class ToolkitBinding(NamedTuple):
     """Toolkit binding injected into Engine.
 
     :param toolkit: Toolkit instance
-    :param slug: Logging/toolkit_prompts label identifier; may be empty
+    :param slug: Effective namespace used for final registered tool names
+    :param base_slug: Persisted ToolkitConfig Slug; equal to slug for auto-bound
+        Toolkits
     :param use_prefix: When True, apply ``{slug}__`` prefix to tool names.
         Single-instance builtin toolkits use False;
         DB-registered MCP toolkits where the same user can connect multiple
@@ -64,6 +66,7 @@ class ToolkitBinding(NamedTuple):
 
     toolkit: Toolkit[Any]
     slug: str
+    base_slug: str
     use_prefix: bool
     toolkit_type: str | None = None
     toolkit_config_id: str | None = None

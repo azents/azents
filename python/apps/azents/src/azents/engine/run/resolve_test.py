@@ -58,7 +58,7 @@ from azents.repos.exchange_file.data import ExchangeFile
 from azents.repos.llm_provider_integration.data import LLMProviderIntegrationWithSecrets
 from azents.repos.toolkit.data import (
     EffectiveToolkitConfig,
-    EffectiveToolkitSlugConflict,
+    EffectiveToolkitNamespaceMissing,
     EffectiveToolkitSource,
     ToolkitConfig,
 )
@@ -399,6 +399,7 @@ async def _resolve_failing_registered_toolkit(
             ),
             source=EffectiveToolkitSource.SHARED_ATTACHMENT,
             agent_toolkit_id="agent-toolkit-1",
+            namespace="test_2",
         )
     ]
     return await resolve_agent_tools(
@@ -429,22 +430,22 @@ async def test_registered_toolkit_binding_captures_direct_exposure_policy() -> N
 
     assert len(bindings) == 1
     assert bindings[0].always_expose_tools is True
+    assert bindings[0].slug == "test_2"
+    assert bindings[0].base_slug == "test"
+    assert bindings[0].toolkit.display_name == "Test"
 
 
-async def test_registered_toolkit_duplicate_slug_fails_before_provider_resolution() -> (
-    None
-):
-    """Fail the effective namespace before resolving any provider."""
-    conflict = EffectiveToolkitSlugConflict(
+async def test_registered_toolkit_missing_namespace_fails_before_resolution() -> None:
+    """Fail missing Foundation namespace authority before provider resolution."""
+    conflict = EffectiveToolkitNamespaceMissing(
         agent_id="agent-1",
-        slug="duplicate",
-        toolkit_ids=("toolkit-1", "toolkit-2"),
+        toolkit_id="toolkit-1",
     )
     toolkit_repository = AsyncMock()
     toolkit_repository.list_effective_for_agent.side_effect = conflict
     provider = AsyncMock()
 
-    with pytest.raises(EffectiveToolkitSlugConflict) as exc_info:
+    with pytest.raises(EffectiveToolkitNamespaceMissing) as exc_info:
         await resolve_agent_tools(
             "agent-1",
             _make_toolkit_context(),

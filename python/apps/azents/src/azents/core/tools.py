@@ -202,6 +202,9 @@ class Toolkit(ABC, Generic[ConfigT]):
     display_name: str = ""
     """Name displayed in toolkit prompt. Injected by Provider.resolve()."""
 
+    source_identity: tuple[tuple[str, str], ...] = ()
+    """Bounded non-secret connection identity included in catalog source metadata."""
+
     async def update_context(self, context: TurnContext) -> ToolkitState:
         """Receive current turn context and immediately return tool state.
 
@@ -362,6 +365,12 @@ class ToolkitProvider(ABC, Generic[ConfigT]):
         return McpToolkitConfig.model_validate(
             config.model_dump() if isinstance(config, BaseModel) else config
         )
+
+    @classmethod
+    def source_identity(cls, config: ConfigT) -> tuple[tuple[str, str], ...]:
+        """Return bounded non-secret connection identity for catalog source metadata."""
+        del config
+        return ()
 
     async def validate_credentials(
         self,

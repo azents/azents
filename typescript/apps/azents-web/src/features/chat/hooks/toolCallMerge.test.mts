@@ -51,3 +51,43 @@ void test("preserves malformed non-null Toolkit sources as non-specializable", (
   );
   assert.equal(toolkitSourceFromValue(null), null);
 });
+
+void test("parses Foundation Toolkit namespace and safe identity metadata", () => {
+  assert.deepEqual(
+    toolkitSourceFromValue({
+      toolkit_config_id: "toolkit-1",
+      toolkit_type: "mcp",
+      toolkit_name: "Production MCP",
+      toolkit_slug: "mcp",
+      toolkit_namespace: "mcp_2",
+      source_identity: { server: "https://mcp.example" },
+    }),
+    {
+      toolkit_config_id: "toolkit-1",
+      toolkit_type: "mcp",
+      toolkit_name: "Production MCP",
+      toolkit_slug: "mcp",
+      toolkit_namespace: "mcp_2",
+      source_identity: { server: "https://mcp.example" },
+    },
+  );
+});
+
+void test("keeps historical Toolkit source snapshots readable", () => {
+  assert.deepEqual(
+    toolkitSourceFromValue({
+      toolkit_config_id: "toolkit-1",
+      toolkit_type: "mcp",
+      toolkit_name: "Legacy MCP",
+      toolkit_slug: "mcp",
+    }),
+    {
+      toolkit_config_id: "toolkit-1",
+      toolkit_type: "mcp",
+      toolkit_name: "Legacy MCP",
+      toolkit_slug: "mcp",
+      toolkit_namespace: null,
+      source_identity: {},
+    },
+  );
+});

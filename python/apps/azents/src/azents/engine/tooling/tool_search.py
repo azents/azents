@@ -45,12 +45,14 @@ class ToolCatalogSource:
     """Toolkit source metadata retained for one executable tool."""
 
     slug: str
+    namespace: str
     toolkit_type: str | None
     toolkit_class: str
     display_name: str
     use_prefix: bool
     always_expose_tools: bool = False
     toolkit_config_id: str | None = None
+    source_identity: tuple[tuple[str, str], ...] = ()
     routing_metadata: tuple[tuple[str, str], ...] = ()
 
     @property
