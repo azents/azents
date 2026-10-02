@@ -42,14 +42,10 @@ from azents_runtime_control.runtime_web_capacity import (
     RuntimeWebCapacityCoordinator,
 )
 from azents_runtime_control.system_metrics import RunnerRuntimeWebMetrics
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.runtime_runner_credential import RuntimeRunnerCredential
-from azents.rdb.session import SessionManager
+from azents.repos.runtime_stream_route import RuntimeStreamRouteOperationRepository
 from azents.repos.runtime_web.data import RuntimeWebSessionRoute
-from azents.repos.runtime_web.session_route_repository import (
-    RuntimeWebSessionRouteRepository,
-)
 from azents.runtime.control_protocol.grpc.auth import (
     RuntimeRunnerCredentialAuthenticator,
     RuntimeRunnerCredentialGrpcAuth,
@@ -1217,8 +1213,7 @@ class RuntimeStreamControlDataPlane:
     def __init__(
         self,
         *,
-        session_manager: SessionManager[AsyncSession],
-        route_repository: RuntimeWebSessionRouteRepository,
+        route_repository: RuntimeStreamRouteOperationRepository,
         owner_replica_id: str,
         control_boot_id: str,
         capacity_registry: RuntimeWebCapacityRegistry,
@@ -1238,7 +1233,6 @@ class RuntimeStreamControlDataPlane:
             or finite_grace_seconds <= long_lived_grace_seconds
         ):
             raise ValueError("Runtime Web Control lifecycle settings are invalid")
-        self.session_manager = session_manager
         self.route_repository = route_repository
         self.owner_replica_id = owner_replica_id
         self.control_boot_id = control_boot_id
@@ -2256,14 +2250,12 @@ class RuntimeStreamControlDataPlane:
         desired_generation: int,
         runner_generation: int,
     ) -> RuntimeWebSessionRoute | None:
-        async with self.session_manager() as session:
-            route = await self.route_repository.resolve(
-                session,
-                runtime_id=runtime_id,
-                desired_generation=desired_generation,
-                runner_generation=runner_generation,
-                protocol_fingerprint=RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
-            )
+        route = await self.route_repository.resolve(
+            runtime_id=runtime_id,
+            desired_generation=desired_generation,
+            runner_generation=runner_generation,
+            protocol_fingerprint=RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
+        )
         if route is not None:
             async with self.lock:
                 self.owner_addresses[_route_owner(route)] = route.owner_address

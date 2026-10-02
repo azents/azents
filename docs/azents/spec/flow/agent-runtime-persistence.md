@@ -23,6 +23,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/agent_runtime_removal_scope/**
   - python/apps/azents/src/azents/repos/agent_runtime_removal_finalizer/**
   - python/apps/azents/src/azents/repos/runtime_profile/**
+  - python/apps/azents/src/azents/repos/runtime_report*
+  - python/apps/azents/src/azents/repos/runtime_stream_route*
   - python/apps/azents/src/azents/services/agent_runtime/**
   - python/apps/azents/src/azents/services/runtime_terminal/**
   - python/apps/azents/src/azents/services/runtime_web/**
@@ -47,8 +49,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/workspace/**
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
   - infra/charts/azents/**
-last_verified_at: 2026-09-30
-spec_version: 40
+last_verified_at: 2026-10-02
+spec_version: 41
 ---
 
 # Agent Runtime Persistence
@@ -102,6 +104,12 @@ join-nonce hash, protocol fingerprint, lease timestamps, and bounded drain marke
 needed to fence the persistent Runner Web session. Exact acquisition, renewal, and
 release compare the complete epoch. The row is deleted when the Owner session ends;
 no route history is retained.
+
+Each stream route operation owns and closes its database transaction. SQL time and the
+existing exact epoch/generation predicates govern acquisition, renewal, resolution,
+nonce consumption, and draining. Exact-epoch release has no added expiry or draining
+predicate. One-time nonce consumption remains committed if the subsequent local
+offer-deadline check rejects registration; local cleanup cannot remove a replacement epoch.
 
 Runtime Web stream counts, pending opens, buffer and bandwidth grants, fair-scheduler
 state, logical-stream registries, tombstones, and live session state are ephemeral.
@@ -172,6 +180,15 @@ its current connection generation and by the authenticated current-generation Ru
 changes therefore become visible immediately while the running incarnation may remain applied to
 an older sequence or wait for explicit recreation. Returning to an earlier canonical document
 still allocates a higher sequence, so old Provider or Runner evidence cannot become current again.
+
+Provider and Runner report operations compose configuration evidence/promotion with
+their existing state, path, connection, and failure writes in one database-only
+transaction per report. A normal stale state compare-and-set can still commit evidence
+written earlier in that operation; an exception or cancellation rolls back the entire
+operation. Successful restart rearm uses its own later transaction rather than
+collapsing into report persistence. Runner registration accepts current or retained-applied
+evidence, and heartbeat reads expose only the existing eligible Provider-first pending
+configuration before transport output.
 
 There is no persisted process-containment lifecycle enum, boolean, status table, or qualification
 record. Product status is derived from bounded desired/applied current state, exact
@@ -461,6 +478,8 @@ Required checks:
 
 ## Changelog
 
+- **2026-10-02** (spec_version 41) — Recorded completed route/report transaction
+  ownership with unchanged nonce, epoch, atomicity, and retained-applied evidence semantics.
 - **2026-09-30** (spec_version 40) — Included the exact Platform object-storage route
   in strict-mode direct-transfer prerequisites without changing Workspace persistence.
 

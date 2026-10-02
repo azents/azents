@@ -6,7 +6,6 @@ import datetime
 import hashlib
 import secrets
 from collections.abc import Callable
-from typing import Protocol
 
 from azents_runtime_control.proto import runtime_stream_session_pb2
 from azents_runtime_control.runtime_stream_session import (
@@ -17,13 +16,10 @@ from azents_runtime_control.runtime_stream_session import (
     RunnerSessionOffer,
     SessionProfile,
 )
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.rdb.session import SessionManager
+from azents.repos.runtime_stream_route import RuntimeStreamRouteOperationRepository
+from azents.repos.runtime_stream_route_data import RuntimeStreamRouteEpoch
 from azents.repos.runtime_web.data import RuntimeWebSessionRoute
-from azents.repos.runtime_web.session_route_repository import (
-    RuntimeWebSessionRouteRepository,
-)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -54,21 +50,14 @@ class RuntimeStreamAuthenticatedRunnerConnection:
     runner_generation: int
 
 
-class RuntimeStreamSessionJoinRepository(Protocol):
-    """Consume one exact durable Runner join authority."""
-
-    async def consume_join(
-        self,
-        session: AsyncSession,
-        *,
-        runtime_id: str,
-        owner_boot_id: str,
-        session_lease_id: str,
-        lease_generation: int,
-        protocol_fingerprint: str,
-        join_nonce_hash: str,
-        join_deadline_at: datetime.datetime,
-    ) -> RuntimeWebSessionRoute: ...
+def _route_epoch(route: RuntimeWebSessionRoute) -> RuntimeStreamRouteEpoch:
+    """Project the original exact route identity, with no additional authority."""
+    return RuntimeStreamRouteEpoch(
+        runtime_id=route.runtime_id,
+        owner_boot_id=route.owner_boot_id,
+        session_lease_id=route.session_lease_id,
+        lease_generation=route.lease_generation,
+    )
 
 
 class RuntimeStreamOwnerSessionRegistry:
@@ -77,11 +66,9 @@ class RuntimeStreamOwnerSessionRegistry:
     def __init__(
         self,
         *,
-        session_manager: SessionManager[AsyncSession],
-        repository: RuntimeStreamSessionJoinRepository,
+        repository: RuntimeStreamRouteOperationRepository,
         clock: Callable[[], datetime.datetime],
     ) -> None:
-        self.session_manager = session_manager
         self.repository = repository
         self.clock = clock
         self.lock = asyncio.Lock()
@@ -132,19 +119,17 @@ class RuntimeStreamOwnerSessionRegistry:
             request_session_window_bytes=hello.request_session_window_bytes,
             response_session_window_bytes=hello.response_session_window_bytes,
         )
-        async with self.session_manager() as session:
-            await self.repository.consume_join(
-                session,
+        await self.repository.consume_join(
+            epoch=RuntimeStreamRouteEpoch(
                 runtime_id=owner.runtime_id,
                 owner_boot_id=owner.owner_boot_id,
                 session_lease_id=owner.session_lease_id,
                 lease_generation=owner.lease_generation,
-                protocol_fingerprint=owned.offer.protocol_fingerprint,
-                join_nonce_hash=hashlib.sha256(
-                    hello.session_nonce.encode()
-                ).hexdigest(),
-                join_deadline_at=owned.offer.deadline_at,
-            )
+            ),
+            protocol_fingerprint=owned.offer.protocol_fingerprint,
+            join_nonce_hash=hashlib.sha256(hello.session_nonce.encode()).hexdigest(),
+            join_deadline_at=owned.offer.deadline_at,
+        )
         if owned.offer.deadline_at <= self._now():
             raise ValueError("Runtime Web Runner session offer expired during join")
         accepted = RuntimeStreamAcceptedRunnerSession(
@@ -181,8 +166,7 @@ class RuntimeStreamSessionOwnerManager:
     def __init__(
         self,
         *,
-        session_manager: SessionManager[AsyncSession],
-        repository: RuntimeWebSessionRouteRepository,
+        repository: RuntimeStreamRouteOperationRepository,
         owner_replica_id: str,
         owner_boot_id: str,
         trusted_owner_address: str,
@@ -198,7 +182,6 @@ class RuntimeStreamSessionOwnerManager:
         ):
             if not value:
                 raise ValueError(f"Runtime Web {name} must not be empty")
-        self.session_manager = session_manager
         self.repository = repository
         self.owner_replica_id = owner_replica_id
         self.owner_boot_id = owner_boot_id
@@ -216,19 +199,17 @@ class RuntimeStreamSessionOwnerManager:
         """Acquire one Owner epoch and return its plaintext join offer once."""
         nonce = secrets.token_urlsafe(32)
         nonce_hash = hashlib.sha256(nonce.encode()).hexdigest()
-        async with self.session_manager() as session:
-            route = await self.repository.acquire(
-                session,
-                runtime_id=runtime_id,
-                desired_generation=desired_generation,
-                runner_generation=runner_generation,
-                owner_replica_id=self.owner_replica_id,
-                owner_boot_id=self.owner_boot_id,
-                owner_address=self.trusted_owner_address,
-                join_nonce_hash=nonce_hash,
-                protocol_fingerprint=RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
-                lease_seconds=self.lease_seconds,
-            )
+        route = await self.repository.acquire(
+            runtime_id=runtime_id,
+            desired_generation=desired_generation,
+            runner_generation=runner_generation,
+            owner_replica_id=self.owner_replica_id,
+            owner_boot_id=self.owner_boot_id,
+            owner_address=self.trusted_owner_address,
+            join_nonce_hash=nonce_hash,
+            protocol_fingerprint=RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
+            lease_seconds=self.lease_seconds,
+        )
         owner = OwnerSessionEpoch(
             owner_boot_id=route.owner_boot_id,
             session_lease_id=route.session_lease_id,
@@ -255,16 +236,11 @@ class RuntimeStreamSessionOwnerManager:
         self, owned: RuntimeStreamOwnedSession
     ) -> RuntimeStreamOwnedSession:
         """Renew the exact lease without extending the one-time join deadline."""
-        async with self.session_manager() as session:
-            route = await self.repository.renew(
-                session,
-                runtime_id=owned.route.runtime_id,
-                owner_boot_id=owned.route.owner_boot_id,
-                session_lease_id=owned.route.session_lease_id,
-                lease_generation=owned.route.lease_generation,
-                protocol_fingerprint=owned.route.protocol_fingerprint,
-                lease_seconds=self.lease_seconds,
-            )
+        route = await self.repository.renew(
+            epoch=_route_epoch(owned.route),
+            protocol_fingerprint=owned.route.protocol_fingerprint,
+            lease_seconds=self.lease_seconds,
+        )
         return dataclasses.replace(owned, route=route)
 
     async def mark_draining(
@@ -272,26 +248,16 @@ class RuntimeStreamSessionOwnerManager:
         owned: RuntimeStreamOwnedSession,
     ) -> RuntimeStreamOwnedSession:
         """Fence new work while the exact Owner drains existing streams."""
-        async with self.session_manager() as session:
-            route = await self.repository.mark_draining(
-                session,
-                runtime_id=owned.route.runtime_id,
-                owner_boot_id=owned.route.owner_boot_id,
-                session_lease_id=owned.route.session_lease_id,
-                lease_generation=owned.route.lease_generation,
-            )
+        route = await self.repository.mark_draining(
+            epoch=_route_epoch(owned.route),
+        )
         return dataclasses.replace(owned, route=route)
 
     async def release(self, owned: RuntimeStreamOwnedSession) -> bool:
         """Release only the exact current Owner epoch."""
-        async with self.session_manager() as session:
-            return await self.repository.release(
-                session,
-                runtime_id=owned.route.runtime_id,
-                owner_boot_id=owned.route.owner_boot_id,
-                session_lease_id=owned.route.session_lease_id,
-                lease_generation=owned.route.lease_generation,
-            )
+        return await self.repository.release(
+            epoch=_route_epoch(owned.route),
+        )
 
     def _now(self) -> datetime.datetime:
         now = self.clock()

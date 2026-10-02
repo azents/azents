@@ -5,9 +5,9 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
-from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
-from typing import AsyncContextManager, NamedTuple
+from typing import NamedTuple
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from azents_runtime_control.proto import runtime_stream_session_pb2
@@ -35,6 +35,15 @@ from azents_runtime_control.system_metrics import (
 from redis.exceptions import ConnectionError as RedisConnectionError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.rdb.session import SessionManager
+from azents.repos.runtime_stream_route import RuntimeStreamRouteOperationRepository
+from azents.repos.runtime_stream_route_data import RuntimeStreamRouteEpoch
+from azents.repos.runtime_stream_route_test import (
+    acquire,
+    expire,
+    route_fixture,
+    stored_route,
+)
 from azents.repos.runtime_web.data import RuntimeWebSessionRoute
 from azents.repos.runtime_web.session_route_repository import (
     RuntimeWebSessionRouteRepository,
@@ -64,7 +73,10 @@ from azents.runtime.stream_session_owner import (
     RuntimeStreamAcceptedRunnerSession,
     RuntimeStreamOwnedSession,
     RuntimeStreamOwnerSessionRegistry,
+    RuntimeStreamSessionOwnerManager,
 )
+from azents.runtime.stream_session_owner_test import _evidence
+from azents.runtime.stream_session_owner_test import _hello as _runner_join_hello
 from azents.runtime.stream_session_relay import (
     PersistentRelayConnection,
     RelaySessionKey,
@@ -91,17 +103,6 @@ class _Redis:
             raise RedisConnectionError("unavailable")
         self.values[name] = value
         return True
-
-
-class _UnusedSessionManager:
-    def __call__(self) -> AsyncContextManager[AsyncSession]:
-        return _unused_session()
-
-
-@asynccontextmanager
-async def _unused_session() -> AsyncIterator[AsyncSession]:
-    raise AssertionError("database access was not expected")
-    yield AsyncSession()
 
 
 class _UnusedRelayConnector:
@@ -190,20 +191,18 @@ class _RecordingOwnerRegistry(RuntimeStreamOwnerSessionRegistry):
         return True
 
 
-class _RouteRepository(RuntimeWebSessionRouteRepository):
+class _CompletedRouteRead:
     def __init__(self, route: RuntimeWebSessionRoute) -> None:
         self.route = route
 
     async def resolve(
         self,
-        session: AsyncSession,
         *,
         runtime_id: str,
         desired_generation: int,
         runner_generation: int,
         protocol_fingerprint: str,
     ) -> RuntimeWebSessionRoute | None:
-        del session
         if (
             runtime_id,
             desired_generation,
@@ -217,16 +216,6 @@ class _RouteRepository(RuntimeWebSessionRouteRepository):
         ):
             return None
         return self.route
-
-
-class _RouteSessionManager:
-    def __call__(self) -> AsyncContextManager[AsyncSession]:
-        return _route_session()
-
-
-@asynccontextmanager
-async def _route_session() -> AsyncIterator[AsyncSession]:
-    yield AsyncSession()
 
 
 def _capacity_config(
@@ -428,8 +417,12 @@ def _data_plane(
         peer_boot_id="control-boot",
     )
     return RuntimeStreamControlDataPlane(
-        session_manager=_UnusedSessionManager(),
-        route_repository=RuntimeWebSessionRouteRepository(),
+        route_repository=Mock(
+            spec=RuntimeStreamRouteOperationRepository,
+            resolve=AsyncMock(
+                side_effect=AssertionError("Route read was not expected")
+            ),
+        ),
         owner_replica_id="control-a",
         control_boot_id="control-boot",
         capacity_registry=capacity,
@@ -488,8 +481,10 @@ def _local_data_plane(
     effective_lifecycle = lifecycle or _OwnerLifecycle()
     return _LocalDataPlane(
         data_plane=RuntimeStreamControlDataPlane(
-            session_manager=_RouteSessionManager(),
-            route_repository=_RouteRepository(route),
+            route_repository=Mock(
+                spec=RuntimeStreamRouteOperationRepository,
+                wraps=_CompletedRouteRead(route),
+            ),
             owner_replica_id="control-a",
             control_boot_id="control-boot",
             capacity_registry=capacity,
@@ -1984,3 +1979,152 @@ async def test_control_drain_marks_owner_and_resets_long_lived_stream() -> None:
     await data_plane.unregister_source(source)
     await data_plane.unregister_runner(accepted)
     await data_plane.close()
+
+
+@pytest.mark.parametrize("outcome", ["route", "missing", "error", "cancel"])
+async def test_data_plane_route_snapshot_closes_pg_before_local_projection(
+    rdb_session_manager: SessionManager[AsyncSession],
+    outcome: str,
+) -> None:
+    fixture = await route_fixture(rdb_session_manager, f"data-route-{outcome}")
+    data_plane = _data_plane()
+    projected: list[bool] = []
+
+    class ClosedProjectionLock(asyncio.Lock):
+        async def __aenter__(self) -> None:
+            fixture.manager.assert_closed()
+            projected.append(True)
+            await super().__aenter__()
+
+    class ReadFailure(RuntimeWebSessionRouteRepository):
+        async def resolve(
+            self,
+            session: AsyncSession,
+            *,
+            runtime_id: str,
+            desired_generation: int,
+            runner_generation: int,
+            protocol_fingerprint: str,
+        ) -> RuntimeWebSessionRoute | None:
+            result = await super().resolve(
+                session,
+                runtime_id=runtime_id,
+                desired_generation=desired_generation,
+                runner_generation=runner_generation,
+                protocol_fingerprint=protocol_fingerprint,
+            )
+            if outcome == "error":
+                raise RuntimeError("route database failure")
+            if outcome == "cancel":
+                raise asyncio.CancelledError("route read cancelled")
+            return result
+
+    route = await fixture.repository.acquire(
+        runtime_id=fixture.runtime_id,
+        desired_generation=3,
+        runner_generation=4,
+        owner_replica_id="control-a",
+        owner_boot_id="control-boot",
+        owner_address="control-a.internal:8032",
+        join_nonce_hash="a" * 64,
+        protocol_fingerprint=RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
+        lease_seconds=90,
+    )
+    data_plane.route_repository = RuntimeStreamRouteOperationRepository(
+        fixture.manager, ReadFailure()
+    )
+    data_plane.lock = ClosedProjectionLock()
+    try:
+        if outcome in {"error", "cancel"}:
+            expected = RuntimeError if outcome == "error" else asyncio.CancelledError
+            with pytest.raises(expected):
+                await data_plane._resolve_route(
+                    runtime_id=fixture.runtime_id,
+                    desired_generation=3,
+                    runner_generation=4,
+                )
+        else:
+            result = await data_plane._resolve_route(
+                runtime_id=fixture.runtime_id,
+                desired_generation=3,
+                runner_generation=5 if outcome == "missing" else 4,
+            )
+            assert result == (route if outcome == "route" else None)
+        assert projected == ([True] if outcome == "route" else [])
+        fixture.manager.assert_closed()
+    finally:
+        await data_plane.close()
+
+
+@pytest.mark.parametrize("cancel", [False, True])
+@pytest.mark.parametrize("replacement", [False, True])
+async def test_join_registration_failure_closes_pg_and_releases_only_original_epoch(
+    rdb_session_manager: SessionManager[AsyncSession],
+    cancel: bool,
+    replacement: bool,
+) -> None:
+    fixture = await route_fixture(
+        rdb_session_manager, f"join-cleanup-{cancel}-{replacement}"
+    )
+    manager = RuntimeStreamSessionOwnerManager(
+        repository=fixture.repository,
+        owner_replica_id="control-a",
+        owner_boot_id="control-boot",
+        trusted_owner_address="control-a.internal:8032",
+        lease_seconds=30,
+        clock=lambda: datetime.now(UTC),
+    )
+    owned = await manager.acquire(
+        runtime_id=fixture.runtime_id, desired_generation=3, runner_generation=4
+    )
+    registry = RuntimeStreamOwnerSessionRegistry(
+        repository=fixture.repository, clock=lambda: datetime.now(UTC)
+    )
+    accepted = await registry.accept(owned, _runner_join_hello(owned), _evidence(owned))
+    consumed = await stored_route(fixture)
+    assert consumed is not None
+    assert consumed.join_nonce_hash != owned.route.join_nonce_hash
+    current = None
+    if replacement:
+        await expire(fixture)
+        current = await acquire(fixture, boot="replacement")
+
+    class FailedRegistration(RuntimeStreamControlDataPlane):
+        def __init__(self) -> None:
+            pass
+
+        async def register_runner(
+            self, accepted: RuntimeStreamAcceptedRunnerSession
+        ) -> _RunnerConnection:
+            del accepted
+            fixture.manager.assert_closed()
+            if cancel:
+                raise asyncio.CancelledError("registration cancelled")
+            raise RuntimeError("registration failed")
+
+    class ExactRelease(_OwnerLifecycle):
+        async def release_owner(self, owner: OwnerSessionEpoch) -> bool:
+            fixture.manager.assert_closed()
+            self.released.append(owner)
+            return await fixture.repository.release(
+                RuntimeStreamRouteEpoch(
+                    owner.runtime_id,
+                    owner.owner_boot_id,
+                    owner.session_lease_id,
+                    owner.lease_generation,
+                )
+            )
+
+    lifecycle = ExactRelease()
+    expected = asyncio.CancelledError if cancel else RuntimeError
+    with pytest.raises(expected):
+        await _register_joined_runner(
+            data_plane=FailedRegistration(),
+            offer_provider=lifecycle,
+            registry=registry,
+            accepted=accepted,
+        )
+    assert lifecycle.released == [accepted.owner]
+    assert not registry.sessions
+    assert await stored_route(fixture) == current
+    fixture.manager.assert_closed()

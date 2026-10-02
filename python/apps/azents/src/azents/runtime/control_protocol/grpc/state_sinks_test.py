@@ -38,6 +38,7 @@ from azents.repos.agent_runtime.data import AgentRuntimeFailurePatch
 from azents.repos.runtime_profile.repository import RuntimeProfileRepository
 from azents.repos.runtime_provider.data import RuntimeProviderCreate
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
+from azents.repos.runtime_report_operations import RuntimeReportOperationRepository
 from azents.repos.workspace import WorkspaceRepository
 from azents.runtime.control_protocol.grpc.state_sinks import (
     RuntimeProviderReportRepositorySink,
@@ -77,9 +78,11 @@ async def test_runner_heartbeat_configuration_waits_for_provider_ack(
         profile_repository.configuration_evidence_matches_current,
     ).return_value = True
     sink = RuntimeRunnerStateRepositorySink(
-        cast(AgentRuntimeRepository, runtime_repository),
-        cast(RuntimeProfileRepository, profile_repository),
-        rdb_session_manager,
+        repository=RuntimeReportOperationRepository(
+            runtime_repository=cast(AgentRuntimeRepository, runtime_repository),
+            profile_repository=cast(RuntimeProfileRepository, profile_repository),
+            session_manager=rdb_session_manager,
+        ),
     )
 
     evidence = await sink.configuration_evidence_for_runner_heartbeat(
@@ -118,9 +121,11 @@ async def test_runner_heartbeat_configuration_stops_after_runner_report(
         profile_repository.configuration_evidence_matches_current,
     ).return_value = True
     sink = RuntimeRunnerStateRepositorySink(
-        cast(AgentRuntimeRepository, runtime_repository),
-        cast(RuntimeProfileRepository, profile_repository),
-        rdb_session_manager,
+        repository=RuntimeReportOperationRepository(
+            runtime_repository=cast(AgentRuntimeRepository, runtime_repository),
+            profile_repository=cast(RuntimeProfileRepository, profile_repository),
+            session_manager=rdb_session_manager,
+        ),
     )
 
     evidence = await sink.configuration_evidence_for_runner_heartbeat(
@@ -169,9 +174,11 @@ async def test_runner_heartbeat_configuration_rejects_stale_current_target(
     )
     current_match.return_value = False
     sink = RuntimeRunnerStateRepositorySink(
-        cast(AgentRuntimeRepository, runtime_repository),
-        cast(RuntimeProfileRepository, profile_repository),
-        rdb_session_manager,
+        repository=RuntimeReportOperationRepository(
+            runtime_repository=cast(AgentRuntimeRepository, runtime_repository),
+            profile_repository=cast(RuntimeProfileRepository, profile_repository),
+            session_manager=rdb_session_manager,
+        ),
     )
 
     evidence = await sink.configuration_evidence_for_runner_heartbeat(
@@ -200,9 +207,11 @@ async def test_runner_heartbeat_configuration_skips_already_applied_target(
         applied=Mock(sequence=2),
     )
     sink = RuntimeRunnerStateRepositorySink(
-        cast(AgentRuntimeRepository, runtime_repository),
-        cast(RuntimeProfileRepository, profile_repository),
-        rdb_session_manager,
+        repository=RuntimeReportOperationRepository(
+            runtime_repository=cast(AgentRuntimeRepository, runtime_repository),
+            profile_repository=cast(RuntimeProfileRepository, profile_repository),
+            session_manager=rdb_session_manager,
+        ),
     )
 
     evidence = await sink.configuration_evidence_for_runner_heartbeat(
@@ -240,9 +249,11 @@ async def test_provider_running_report_clears_start_timeout_failure(
             ),
         )
     sink = RuntimeProviderReportRepositorySink(
-        repo,
-        _profile_repository(),
-        rdb_session_manager,
+        repository=RuntimeReportOperationRepository(
+            runtime_repository=repo,
+            profile_repository=_profile_repository(),
+            session_manager=rdb_session_manager,
+        ),
     )
 
     await sink.record_provider_report(
@@ -294,9 +305,11 @@ async def test_provider_sink_completes_current_restart_handoff(
             command.desired_generation,
         )
     sink = RuntimeProviderReportRepositorySink(
-        repo,
-        _profile_repository(),
-        rdb_session_manager,
+        repository=RuntimeReportOperationRepository(
+            runtime_repository=repo,
+            profile_repository=_profile_repository(),
+            session_manager=rdb_session_manager,
+        ),
     )
     report = RuntimeProviderReport(
         runtime_id=runtime_id,
@@ -354,9 +367,11 @@ async def test_provider_starting_report_does_not_acknowledge_configuration(
     ).return_value = runtime
     profile_repository = _profile_repository()
     sink = RuntimeProviderReportRepositorySink(
-        cast(AgentRuntimeRepository, runtime_repository),
-        profile_repository,
-        rdb_session_manager,
+        repository=RuntimeReportOperationRepository(
+            runtime_repository=cast(AgentRuntimeRepository, runtime_repository),
+            profile_repository=profile_repository,
+            session_manager=rdb_session_manager,
+        ),
     )
 
     await sink.record_provider_report(
@@ -409,9 +424,11 @@ async def test_provider_running_report_without_enforcement_ack_skips_configurati
     ).return_value = runtime
     profile_repository = _profile_repository()
     sink = RuntimeProviderReportRepositorySink(
-        cast(AgentRuntimeRepository, runtime_repository),
-        profile_repository,
-        rdb_session_manager,
+        repository=RuntimeReportOperationRepository(
+            runtime_repository=cast(AgentRuntimeRepository, runtime_repository),
+            profile_repository=profile_repository,
+            session_manager=rdb_session_manager,
+        ),
     )
 
     await sink.record_provider_report(
@@ -449,9 +466,11 @@ async def test_provider_report_ignores_finalized_runtime(
     repo = AgentRuntimeRepository()
     profile_repository = _profile_repository()
     sink = RuntimeProviderReportRepositorySink(
-        repo,
-        profile_repository,
-        rdb_session_manager,
+        repository=RuntimeReportOperationRepository(
+            runtime_repository=repo,
+            profile_repository=profile_repository,
+            session_manager=rdb_session_manager,
+        ),
     )
 
     await sink.record_provider_report(
@@ -492,9 +511,11 @@ async def test_provider_report_rejects_bound_runtime_provider_mismatch(
             .values(runtime_provider_id="provider-bound")
         )
     sink = RuntimeProviderReportRepositorySink(
-        repo,
-        _profile_repository(),
-        rdb_session_manager,
+        repository=RuntimeReportOperationRepository(
+            runtime_repository=repo,
+            profile_repository=_profile_repository(),
+            session_manager=rdb_session_manager,
+        ),
     )
 
     with pytest.raises(ValueError, match="immutable Runtime Provider binding"):
@@ -527,9 +548,11 @@ async def test_provider_terminal_delete_acknowledgement_clears_runtime_path(
         requested = await repo.request_terminal_delete(session, runtime_id)
         assert requested is not None
     sink = RuntimeProviderReportRepositorySink(
-        repo,
-        _profile_repository(),
-        rdb_session_manager,
+        repository=RuntimeReportOperationRepository(
+            runtime_repository=repo,
+            profile_repository=_profile_repository(),
+            session_manager=rdb_session_manager,
+        ),
     )
 
     await sink.record_provider_report(
@@ -568,9 +591,11 @@ async def test_runner_state_sink_persists_runner_workspace_path(
     async with rdb_session_manager() as session:
         runtime_id = await _create_runtime(session, "runner-sink-workspace")
     sink = RuntimeRunnerStateRepositorySink(
-        repo,
-        _profile_repository(),
-        rdb_session_manager,
+        repository=RuntimeReportOperationRepository(
+            runtime_repository=repo,
+            profile_repository=_profile_repository(),
+            session_manager=rdb_session_manager,
+        ),
     )
 
     await sink.record_runner_state(_report(runtime_id, "/runtime/home"))
@@ -591,9 +616,11 @@ async def test_runner_state_sink_rejects_missing_workspace_path(
     async with rdb_session_manager() as session:
         runtime_id = await _create_runtime(session, "runner-sink-missing-workspace")
     sink = RuntimeRunnerStateRepositorySink(
-        repo,
-        _profile_repository(),
-        rdb_session_manager,
+        repository=RuntimeReportOperationRepository(
+            runtime_repository=repo,
+            profile_repository=_profile_repository(),
+            session_manager=rdb_session_manager,
+        ),
     )
 
     await sink.record_runner_state(_report(runtime_id, ""))
@@ -614,9 +641,11 @@ async def test_runner_state_sink_normalizes_workspace_path(
     async with rdb_session_manager() as session:
         runtime_id = await _create_runtime(session, "runner-sink-normalized-workspace")
     sink = RuntimeRunnerStateRepositorySink(
-        repo,
-        _profile_repository(),
-        rdb_session_manager,
+        repository=RuntimeReportOperationRepository(
+            runtime_repository=repo,
+            profile_repository=_profile_repository(),
+            session_manager=rdb_session_manager,
+        ),
     )
 
     await sink.record_runner_state(_report(runtime_id, "/runtime/home/../agent"))
@@ -642,9 +671,11 @@ async def test_runner_state_sink_rejects_relative_workspace_path(
         profile_repository.record_runner_configuration_evidence,
     ).return_value = None
     sink = RuntimeRunnerStateRepositorySink(
-        repo,
-        profile_repository,
-        rdb_session_manager,
+        repository=RuntimeReportOperationRepository(
+            runtime_repository=repo,
+            profile_repository=profile_repository,
+            session_manager=rdb_session_manager,
+        ),
     )
 
     await sink.record_runner_state(_report(runtime_id, "runtime/home"))
@@ -672,9 +703,11 @@ async def test_runner_state_sink_treats_busy_runner_as_ready(
             3,
         )
     sink = RuntimeRunnerStateRepositorySink(
-        repo,
-        _profile_repository(),
-        rdb_session_manager,
+        repository=RuntimeReportOperationRepository(
+            runtime_repository=repo,
+            profile_repository=_profile_repository(),
+            session_manager=rdb_session_manager,
+        ),
     )
 
     await sink.record_runner_state(
@@ -703,9 +736,11 @@ async def test_runner_state_sink_records_runner_stream_closed_as_disconnected(
             3,
         )
     sink = RuntimeRunnerStateRepositorySink(
-        repo,
-        _profile_repository(),
-        rdb_session_manager,
+        repository=RuntimeReportOperationRepository(
+            runtime_repository=repo,
+            profile_repository=_profile_repository(),
+            session_manager=rdb_session_manager,
+        ),
     )
 
     await sink.record_runner_state(
@@ -747,9 +782,11 @@ async def test_runner_state_sink_ignores_stale_report_with_lower_generation(
             workspace_path="/runtime/home",
         )
     sink = RuntimeRunnerStateRepositorySink(
-        repo,
-        _profile_repository(),
-        rdb_session_manager,
+        repository=RuntimeReportOperationRepository(
+            runtime_repository=repo,
+            profile_repository=_profile_repository(),
+            session_manager=rdb_session_manager,
+        ),
     )
 
     await sink.record_runner_state(
@@ -792,9 +829,11 @@ async def test_runner_state_sink_ignores_previous_desired_generation(
         )
     profile_repository = _profile_repository()
     sink = RuntimeRunnerStateRepositorySink(
-        repo,
-        profile_repository,
-        rdb_session_manager,
+        repository=RuntimeReportOperationRepository(
+            runtime_repository=repo,
+            profile_repository=profile_repository,
+            session_manager=rdb_session_manager,
+        ),
     )
 
     await sink.record_runner_state(
@@ -851,9 +890,11 @@ async def test_runner_state_sink_fences_generation_changed_during_validation(
     )
     evidence_record.side_effect = replace_generation
     sink = RuntimeRunnerStateRepositorySink(
-        repo,
-        profile_repository,
-        rdb_session_manager,
+        repository=RuntimeReportOperationRepository(
+            runtime_repository=repo,
+            profile_repository=profile_repository,
+            session_manager=rdb_session_manager,
+        ),
     )
 
     await sink.record_runner_state(

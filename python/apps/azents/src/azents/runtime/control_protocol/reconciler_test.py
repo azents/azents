@@ -76,6 +76,9 @@ from azents.repos.runtime_profile.data import (
 from azents.repos.runtime_profile.repository import RuntimeProfileRepository
 from azents.repos.runtime_provider.data import RuntimeProviderCreate
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
+from azents.repos.runtime_reconciliation import (
+    RuntimeReconciliationOperationRepository,
+)
 from azents.repos.workspace import WorkspaceRepository
 from azents.runtime.control_protocol.data import (
     RuntimeDispatchResult,
@@ -152,8 +155,8 @@ class SessionBoundaryProbe:
         self.active_contexts += 1
         try:
             async with self.base_session_manager() as session:
-                yield session
                 self.completed_sessions.append(session)
+                yield session
         finally:
             self.active_contexts -= 1
 
@@ -279,10 +282,11 @@ def _direct_dispatch_reconciler(
 ) -> RuntimeLifecycleReconciler:
     """Build a reconciler for direct dispatch-boundary tests."""
     return RuntimeLifecycleReconciler(
-        agent_repository=AgentRepository(),
-        runtime_repository=runtime_repository,
-        profile_repository=profile_repository,
-        session_manager=session_manager,
+        repository=RuntimeReconciliationOperationRepository(
+            session_manager=session_manager,
+            runtime_repository=runtime_repository,
+            profile_repository=profile_repository,
+        ),
         dispatch_repository=_dispatch_repository(
             runtime_repository=runtime_repository,
             profile_repository=profile_repository,
@@ -847,10 +851,11 @@ async def test_reconciler_refreshes_stale_provider_connection_before_start_timeo
 
     store = InMemoryRuntimeCoordinationStore()
     reconciler = RuntimeLifecycleReconciler(
-        agent_repository=AgentRepository(),
-        runtime_repository=runtime_repository,
-        profile_repository=RuntimeProfileRepository(),
-        session_manager=rdb_session_manager,
+        repository=RuntimeReconciliationOperationRepository(
+            session_manager=rdb_session_manager,
+            runtime_repository=runtime_repository,
+            profile_repository=RuntimeProfileRepository(),
+        ),
         dispatch_repository=_dispatch_repository(
             runtime_repository=runtime_repository,
             profile_repository=RuntimeProfileRepository(),
@@ -956,10 +961,11 @@ async def test_reconciler_observes_active_runtime_without_restarting_it(
         registered_at=datetime.datetime.now(datetime.UTC),
     )
     reconciler = RuntimeLifecycleReconciler(
-        agent_repository=AgentRepository(),
-        runtime_repository=runtime_repository,
-        profile_repository=RuntimeProfileRepository(),
-        session_manager=rdb_session_manager,
+        repository=RuntimeReconciliationOperationRepository(
+            session_manager=rdb_session_manager,
+            runtime_repository=runtime_repository,
+            profile_repository=RuntimeProfileRepository(),
+        ),
         dispatch_repository=_dispatch_repository(
             runtime_repository=runtime_repository,
             profile_repository=RuntimeProfileRepository(),
@@ -1095,10 +1101,11 @@ async def test_reconciler_repairs_current_network_drift_once(
         registered_at=datetime.datetime.now(datetime.UTC),
     )
     reconciler = RuntimeLifecycleReconciler(
-        agent_repository=AgentRepository(),
-        runtime_repository=runtime_repository,
-        profile_repository=profile_repository,
-        session_manager=rdb_session_manager,
+        repository=RuntimeReconciliationOperationRepository(
+            session_manager=rdb_session_manager,
+            runtime_repository=runtime_repository,
+            profile_repository=profile_repository,
+        ),
         dispatch_repository=_dispatch_repository(
             runtime_repository=runtime_repository,
             profile_repository=profile_repository,
@@ -1220,10 +1227,11 @@ async def test_reconcile_observe_completion_rejects_stale_provider_generation(
         registered_at=datetime.datetime.now(datetime.UTC),
     )
     reconciler = RuntimeLifecycleReconciler(
-        agent_repository=AgentRepository(),
-        runtime_repository=runtime_repository,
-        profile_repository=profile_repository,
-        session_manager=rdb_session_manager,
+        repository=RuntimeReconciliationOperationRepository(
+            session_manager=rdb_session_manager,
+            runtime_repository=runtime_repository,
+            profile_repository=profile_repository,
+        ),
         dispatch_repository=_dispatch_repository(
             runtime_repository=runtime_repository,
             profile_repository=profile_repository,
@@ -1313,10 +1321,11 @@ async def test_drift_repair_rechecks_runtime_snapshot_before_dispatch(
         registered_at=datetime.datetime.now(datetime.UTC),
     )
     reconciler = RuntimeLifecycleReconciler(
-        agent_repository=AgentRepository(),
-        runtime_repository=runtime_repository,
-        profile_repository=profile_repository,
-        session_manager=rdb_session_manager,
+        repository=RuntimeReconciliationOperationRepository(
+            session_manager=rdb_session_manager,
+            runtime_repository=runtime_repository,
+            profile_repository=profile_repository,
+        ),
         dispatch_repository=_dispatch_repository(
             runtime_repository=runtime_repository,
             profile_repository=profile_repository,
@@ -1433,10 +1442,11 @@ async def test_reconciler_fences_adoption_then_finishes_restart_replacement(
         registered_at=datetime.datetime.now(datetime.UTC),
     )
     reconciler = RuntimeLifecycleReconciler(
-        agent_repository=AgentRepository(),
-        runtime_repository=runtime_repository,
-        profile_repository=RuntimeProfileRepository(),
-        session_manager=rdb_session_manager,
+        repository=RuntimeReconciliationOperationRepository(
+            session_manager=rdb_session_manager,
+            runtime_repository=runtime_repository,
+            profile_repository=RuntimeProfileRepository(),
+        ),
         dispatch_repository=_dispatch_repository(
             runtime_repository=runtime_repository,
             profile_repository=RuntimeProfileRepository(),
@@ -1615,10 +1625,11 @@ async def test_reconciler_observes_recreated_configuration_missing_provider_evid
         registered_at=datetime.datetime.now(datetime.UTC),
     )
     reconciler = RuntimeLifecycleReconciler(
-        agent_repository=AgentRepository(),
-        runtime_repository=runtime_repository,
-        profile_repository=profile_repository,
-        session_manager=rdb_session_manager,
+        repository=RuntimeReconciliationOperationRepository(
+            session_manager=rdb_session_manager,
+            runtime_repository=runtime_repository,
+            profile_repository=profile_repository,
+        ),
         dispatch_repository=_dispatch_repository(
             runtime_repository=runtime_repository,
             profile_repository=profile_repository,
@@ -1708,10 +1719,11 @@ async def test_reconciler_repairs_stale_stop_configuration_generation(
         registered_at=datetime.datetime.now(datetime.UTC),
     )
     reconciler = RuntimeLifecycleReconciler(
-        agent_repository=AgentRepository(),
-        runtime_repository=runtime_repository,
-        profile_repository=profile_repository,
-        session_manager=rdb_session_manager,
+        repository=RuntimeReconciliationOperationRepository(
+            session_manager=rdb_session_manager,
+            runtime_repository=runtime_repository,
+            profile_repository=profile_repository,
+        ),
         dispatch_repository=_dispatch_repository(
             runtime_repository=runtime_repository,
             profile_repository=profile_repository,
@@ -1902,10 +1914,11 @@ async def test_reconciler_observes_stopping_runtime_after_provider_reconnect(
         request_id_factory=lambda: "request-disconnected-stopping",
     )
     reconciler = RuntimeLifecycleReconciler(
-        agent_repository=AgentRepository(),
-        runtime_repository=runtime_repository,
-        profile_repository=RuntimeProfileRepository(),
-        session_manager=rdb_session_manager,
+        repository=RuntimeReconciliationOperationRepository(
+            session_manager=rdb_session_manager,
+            runtime_repository=runtime_repository,
+            profile_repository=RuntimeProfileRepository(),
+        ),
         dispatch_repository=_dispatch_repository(
             runtime_repository=runtime_repository,
             profile_repository=RuntimeProfileRepository(),
@@ -2017,10 +2030,11 @@ async def test_reconciler_dispatches_terminal_delete_until_acknowledged(
         registered_at=datetime.datetime.now(datetime.UTC),
     )
     reconciler = RuntimeLifecycleReconciler(
-        agent_repository=AgentRepository(),
-        runtime_repository=runtime_repository,
-        profile_repository=RuntimeProfileRepository(),
-        session_manager=rdb_session_manager,
+        repository=RuntimeReconciliationOperationRepository(
+            session_manager=rdb_session_manager,
+            runtime_repository=runtime_repository,
+            profile_repository=RuntimeProfileRepository(),
+        ),
         dispatch_repository=_dispatch_repository(
             runtime_repository=runtime_repository,
             profile_repository=RuntimeProfileRepository(),

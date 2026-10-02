@@ -257,7 +257,32 @@ contract skips; type/Ruff48/format/pre-commit/OpenAPI234/69/removal checks passe
 Candidate inventory is 511/93, not a verified remaining-violation count. All
 21 assigned lifetimes and factory/canonical interfaces are removed. The same
 retained reviewer covered all 53 raw paths / 52 Git changes with no findings and
-independently passed 624 cases. Stacked PR/CI remain pending. Design delta is None.
+independently passed 624 cases. Stacked PR #2060 is open over #2058 at
+`b71c391fb`; exact-head CI passed (34 passed, two path-condition skips, none
+failed/pending), MERGEABLE/CLEAN. Design delta is None; no Agent merge.
+
+Phase 33 owns 16 Runtime protocol contexts: Owner/route six,
+Provider/Runner reports five and reconciliation five. Three non-overlapping
+owners retain route epoch/SQL-clock lease/nonce, distinct report/handoff groups
+and post-coordination dispatch authority; root owns shared control-server
+constructors and wrappers. Preserve current lock-order asymmetry, committed nonce
+expiry behavior, stale normal-return commits, optional Redis and no-replay policy.
+Implementation and frozen owner handoffs are complete. Root integrated validation
+passed 867 focused and 7,570 full backend cases with three existing Redis-only
+memory contract skips. Whole type checking, Ruff/format for 19 Python paths,
+OpenAPI 234/69 equality, docs/whitespace and removal/caller/import scans passed;
+source hashes remained stable. Eight real distinct-connection PostgreSQL races
+prove route contention, with separate actual write-fault/cancellation and
+post-coordination revalidation evidence. All old test definitions remain.
+Comparable candidates are 495/89 (services 478, API 9, Scheduler 7, conftest 1);
+zero direct Runtime candidates is not complete alias/indirect-call coverage.
+Runtime Control 92, Persistence 41 and Run Resume 38 record the completed internal
+groups. No new cross-I/O lock or protocol/TTL/retry/fallback policy; Design delta
+remains None. Initial/final pre-commit passed with source bytes unchanged. The same
+retained reviewer covered all 24 paths with no findings and independently passed
+867 cases with the same three existing skips; final frozen checks passed.
+Only execution metadata changed afterward. Commit/PR and exact-head CI pending.
+Later OAuth/Scheduler inputs are read-only discovery, not implementation authority.
 
 ## Delivery Boundaries
 

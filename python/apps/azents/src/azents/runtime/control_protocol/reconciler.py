@@ -16,7 +16,6 @@ from azents_runtime_control.provider import (
 from azents_runtime_control.provider import (
     RuntimeProviderReconciliationStatus as SharedProviderReconciliationStatus,
 )
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     RuntimeDesiredState,
@@ -30,9 +29,6 @@ from azents.core.runtime_profile import (
     RuntimeConfigurationStateStatus,
     classify_runtime_configuration_application,
 )
-from azents.rdb.session import SessionManager
-from azents.repos.agent import AgentRepository
-from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime.data import AgentRuntime
 from azents.repos.runtime_lifecycle_dispatch.data import (
     RuntimeLifecycleDispatchAdmission,
@@ -43,7 +39,10 @@ from azents.repos.runtime_lifecycle_dispatch.data import (
 from azents.repos.runtime_lifecycle_dispatch.repository import (
     RuntimeLifecycleDispatchRepository,
 )
-from azents.repos.runtime_profile.repository import RuntimeProfileRepository
+from azents.repos.runtime_reconciliation import (
+    RuntimeReconciliationOperationRepository,
+)
+from azents.repos.runtime_reconciliation_data import RuntimeObserveRepairInput
 from azents.runtime.control_protocol.data import (
     RuntimeDispatchResult,
     RuntimeProtocolRouteUnavailable,
@@ -99,20 +98,14 @@ class RuntimeLifecycleReconciler:
     def __init__(
         self,
         *,
-        agent_repository: AgentRepository,
-        runtime_repository: AgentRuntimeRepository,
-        profile_repository: RuntimeProfileRepository,
-        session_manager: SessionManager[AsyncSession],
+        repository: RuntimeReconciliationOperationRepository,
         dispatch_repository: RuntimeLifecycleDispatchRepository,
         coordination_store: RuntimeCoordinationStore,
         control_protocol: RuntimeControlProtocolService,
         config: RuntimeLifecycleDispatchConfig,
     ) -> None:
         """Initialize the reconciler."""
-        self._agent_repository = agent_repository
-        self._runtime_repository = runtime_repository
-        self._profile_repository = profile_repository
-        self._session_manager = session_manager
+        self.repository = repository
         self._dispatch_repository = dispatch_repository
         self._coordination_store = coordination_store
         self._control_protocol = control_protocol
@@ -120,27 +113,14 @@ class RuntimeLifecycleReconciler:
 
     async def reconcile_once(self, *, limit: int = _DEFAULT_LIMIT) -> int:
         """Dispatch one batch of pending lifecycle commands."""
-        async with self._session_manager() as session:
-            runtimes = (
-                await self._runtime_repository.find_lifecycle_dispatch_candidates(
-                    session,
-                    limit=limit,
-                    retry_delay=self._config.lifecycle_retry_delay,
-                )
-            )
-            reconcile_runtimes = (
-                await self._runtime_repository.find_provider_observe_candidates(
-                    session,
-                    limit=limit,
-                    observe_interval=self._config.observe_interval,
-                )
-            )
-            configuration_runtimes = (
-                await self._runtime_repository.find_configuration_adoption_candidates(
-                    session,
-                    limit=limit,
-                )
-            )
+        candidates = await self.repository.collect_candidates(
+            limit=limit,
+            retry_delay=self._config.lifecycle_retry_delay,
+            observe_interval=self._config.observe_interval,
+        )
+        runtimes = candidates.lifecycle
+        reconcile_runtimes = candidates.observe
+        configuration_runtimes = candidates.configuration_adoption
 
         dispatched = 0
         for runtime in runtimes:
@@ -167,17 +147,15 @@ class RuntimeLifecycleReconciler:
         # actual Provider stream. Give the current coordination registry a chance to
         # refresh that cache (or dispatch and refresh the start timer) before turning
         # an old start attempt into a terminal timeout.
-        async with self._session_manager() as session:
-            timed_out = await self._runtime_repository.mark_start_timeouts(
-                session,
-                stale_threshold=self._config.start_timeout,
-                limit=limit,
-            )
-        if timed_out:
+        timed_out = await self.repository.mark_start_timeouts(
+            stale_threshold=self._config.start_timeout,
+            limit=limit,
+        )
+        if timed_out.count:
             _LOGGER.warning(
                 "Runtime lifecycle start timed out",
                 extra={
-                    "count": len(timed_out),
+                    "count": timed_out.count,
                     "start_timeout_seconds": (
                         self._config.start_timeout.total_seconds()
                     ),
@@ -197,27 +175,8 @@ class RuntimeLifecycleReconciler:
         )
 
     async def _dispatch_periodic_reconcile(self, runtime: AgentRuntime) -> bool:
-        async with self._session_manager() as session:
-            state = await self._profile_repository.get_configuration_state(
-                session,
-                runtime_id=runtime.id,
-            )
-            if (
-                runtime.desired_state is RuntimeDesiredState.RUNNING
-                and runtime.provider_observed_state
-                is RuntimeProviderObservedState.RUNNING
-                and state is not None
-                and state.desired.status is RuntimeConfigurationStateStatus.READY
-                and state.applied is not None
-                and state.desired.sequence != state.applied.sequence
-                and state.desired.provider_acknowledged_at is not None
-                and state.desired.provider_reported_digest == state.desired.digest
-            ):
-                return False
-            await self._runtime_repository.mark_provider_observe_requested(
-                session,
-                runtime.id,
-            )
+        if not await self.repository.prepare_periodic_observation(runtime):
+            return False
         command_type = (
             RuntimeProviderCommandType.START
             if (
@@ -241,11 +200,7 @@ class RuntimeLifecycleReconciler:
         self,
         runtime: AgentRuntime,
     ) -> bool:
-        async with self._session_manager() as session:
-            state = await self._profile_repository.get_configuration_state(
-                session,
-                runtime_id=runtime.id,
-            )
+        state = await self.repository.load_adoption_state(runtime_id=runtime.id)
         if state is None or state.applied is None:
             return False
         desired = state.desired
@@ -303,50 +258,17 @@ class RuntimeLifecycleReconciler:
             or observation.status is not SharedProviderReconciliationStatus.DRIFTED
         ):
             return False
-        repair_target: AgentRuntime | None = None
-        async with self._session_manager() as session:
-            runtime = await self._runtime_repository.get_by_id(
-                session,
-                report.runtime_id,
+        repair_target = await self.repository.load_observe_repair_target(
+            RuntimeObserveRepairInput(
+                runtime_id=report.runtime_id,
+                provider_id=report.provider_id,
+                provider_generation=report.provider_generation,
+                observed_desired_generation=report.observed_desired_generation,
+                runtime_configuration=report.runtime_configuration,
             )
-            if (
-                runtime is None
-                or runtime.runtime_provider_id != report.provider_id
-                or runtime.runtime_provider_resource_id is None
-                or runtime.desired_state is not RuntimeDesiredState.RUNNING
-                or runtime.provider_observed_state
-                is not RuntimeProviderObservedState.RUNNING
-                or runtime.provider_generation != report.provider_generation
-                or runtime.provider_observed_generation
-                != report.observed_desired_generation
-                or runtime.desired_generation != report.observed_desired_generation
-            ):
-                return False
-            state = await self._profile_repository.get_configuration_state(
-                session,
-                runtime_id=runtime.id,
-            )
-            if (
-                state is None
-                or state.applied is None
-                or state.desired.status is not RuntimeConfigurationStateStatus.READY
-                or state.desired.sequence != state.applied.sequence
-                or state.desired.sequence
-                != report.runtime_configuration.configuration_sequence
-            ):
-                return False
-            evidence_matches_current = (
-                await self._profile_repository.configuration_evidence_matches_current(
-                    session,
-                    runtime_id=runtime.id,
-                    provider_id=runtime.runtime_provider_resource_id,
-                    evidence=report.runtime_configuration,
-                )
-            )
-            if not evidence_matches_current:
-                return False
-            repair_target = runtime
-        assert repair_target is not None
+        )
+        if repair_target is None:
+            return False
         _LOGGER.info(
             "Runtime network enforcement drift repair handed off",
             extra={
