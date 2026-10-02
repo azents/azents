@@ -4,7 +4,7 @@ created: 2026-05-10
 tags: [backend, engine]
 spec_type: flow
 owner: "@Hardtack"
-touches_domains: [agent, conversation, external-channel]
+touches_domains: [agent, conversation, external-channel, memory]
 code_paths:
   - python/apps/azents/src/azents/engine/context/compaction.py
   - python/apps/azents/src/azents/engine/context/window.py
@@ -17,6 +17,10 @@ code_paths:
   - python/apps/azents/src/azents/core/goal.py
   - python/apps/azents/src/azents/core/toolkit_state.py
   - python/apps/azents/src/azents/core/engine_tool_state.py
+  - python/apps/azents/src/azents/core/historical_memory_snapshot.py
+  - python/apps/azents/src/azents/services/historical_memory/context_snapshot.py
+  - python/apps/azents/src/azents/services/historical_memory/snapshot.py
+  - python/apps/azents/src/azents/repos/historical_memory/**
   - python/apps/azents/src/azents/repos/goal/**
   - python/apps/azents/src/azents/repos/toolkit_state/**
   - python/apps/azents/src/azents/repos/compaction_operation.py
@@ -31,8 +35,8 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/agent_session.py
   - python/apps/azents/src/azents/rdb/models/agent_run.py
   - python/apps/azents/src/azents/rdb/models/agent.py
-last_verified_at: 2026-10-01
-spec_version: 44
+last_verified_at: 2026-10-02
+spec_version: 45
 ---
 
 # Context Compaction
@@ -84,6 +88,30 @@ Old events remain queryable. The head pointer changes which ascending event-ID r
 future model input. Input appended while summary generation is running invalidates the fixed plan;
 the completed summary is discarded without a marker or head change, and a later attempt rebuilds
 from current durable history.
+
+## Memory Context Boundary
+
+Memory context selection is independent of transcript summary generation.
+Enabled execution selects and persists its Saved index and bounded Historical
+source blocks only at initial model context or when a committed
+`compaction_summary` becomes the model-input head. The next Memory prompt load
+detects that new head and replaces `memory/context_snapshot`; the compaction
+transaction itself does not write that state.
+
+The new summary supplies the deterministic topic relevance signal. Selection
+uses no integration-model overview, embeddings, or extra summarization call.
+Whole Historical blocks fit a 10,000-byte budget with stable relevance, recency,
+and source-ID ordering. Saved entries remain an index rather than copied full
+content. Historical text is explicitly source-linked and potentially stale;
+it is neither a fresh instruction nor independent corroboration.
+
+Ordinary turns retain the selected text and paths while filtering deleted,
+archived, inaccessible, or disabled entries. They do not reselect replacements,
+refresh edited Saved descriptions, or include newly prepared summaries.
+Explicit generic VFS reads inspect live permitted records without refreshing
+the automatic snapshot. A failed or stale compaction cannot create a new Memory
+boundary because it does not change the model-input head. See
+[`memory.md`](../domain/memory.md) for the complete snapshot contract.
 
 ## Summary Model
 
@@ -313,6 +341,8 @@ terminalizes.
 
 ## Changelog
 
+- **2026-10-02** (spec_version 45) — Documented initial/new-summary Memory
+  snapshot selection and ordinary-turn authorization filtering without reselection.
 - **2026-10-01** (spec_version 44) — Moved compaction plan capture and atomic
   marker/summary/head, model-operation success, and Tool Search reset
   finalization into completed repository-owned operations. Summary generation

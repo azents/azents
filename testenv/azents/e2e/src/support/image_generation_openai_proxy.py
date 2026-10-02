@@ -70,6 +70,87 @@ Preserve provider-hosted tool semantics across compaction.
 - Continue the deterministic provider semantic transcript verification.
 """
 
+_HISTORICAL_MEMORY_PREFIX = "Historical Memory E2E "
+_HISTORICAL_MEMORY_INSPECT_PREFIX = f"{_HISTORICAL_MEMORY_PREFIX}inspect "
+_HISTORICAL_MEMORY_SUMMARY = (
+    "User correction: retain the approved blue rollout, not the Agent's red proposal.\n"
+    "Evidence: the source reports a passed local check, not a production deployment.\n"
+    "Unfinished work: verify the pending rollout before release.\n"
+    "Delivery uncertainty: no external completion is verified."
+)
+
+
+def historical_memory_summary_response(request: dict[str, object]) -> str | None:
+    """Match isolated Historical fixtures and enforce the real strict schema."""
+    text = request.get("text")
+    if not isinstance(text, dict):
+        return None
+    format_value = text.get("format")
+    if (
+        not isinstance(format_value, dict)
+        or format_value.get("name") != "historical_memory"
+    ):
+        return None
+    source = json.dumps(request.get("input"), ensure_ascii=False)
+    if _HISTORICAL_MEMORY_PREFIX not in source:
+        return None
+    schema = format_value.get("schema")
+    if (
+        format_value.get("type") != "json_schema"
+        or format_value.get("strict") is not True
+        or not isinstance(schema, dict)
+        or schema.get("additionalProperties") is not False
+        or schema.get("required") != ["summary"]
+        or not isinstance(schema.get("properties"), dict)
+        or set(schema["properties"]) != {"summary"}
+    ):
+        raise ValueError("Historical fixture requires the strict one-field schema.")
+    if f"{_HISTORICAL_MEMORY_PREFIX}empty" in source:
+        return '{"summary":""}'
+    if f"{_HISTORICAL_MEMORY_PREFIX}malformed" in source:
+        return '{"summary":42,"unexpected":true}'
+    if f"{_HISTORICAL_MEMORY_PREFIX}oversized" in source:
+        return json.dumps({"summary": "Bounded evidence " * 1_000})
+    return json.dumps({"summary": _HISTORICAL_MEMORY_SUMMARY})
+
+
+class HistoricalMemoryInspection(NamedTuple):
+    """One deterministic generic-read call with explicit field identity."""
+
+    call_id: str
+    name: str
+    arguments: dict[str, object]
+
+
+def historical_memory_inspection(
+    request: dict[str, object],
+) -> HistoricalMemoryInspection | None:
+    """Match one current read/glob/grep fixture without historical-call bleed."""
+    user_text = _last_user_text(request)
+    if not isinstance(user_text, str) or not user_text.startswith(
+        _HISTORICAL_MEMORY_INSPECT_PREFIX
+    ):
+        return None
+    value = _object(json.loads(user_text[len(_HISTORICAL_MEMORY_INSPECT_PREFIX) :]))
+    operation = value.get("operation")
+    path = value.get("path")
+    if operation not in {"read", "grep", "glob"} or not isinstance(path, str):
+        raise ValueError("Historical inspection requires one read/glob/grep location.")
+    name = str(operation)
+    call_id = f"call_historical_memory_{sha256(user_text.encode()).hexdigest()[:16]}"
+    arguments: dict[str, object]
+    if name == "glob":
+        arguments = {"pattern": path}
+    elif name == "grep":
+        arguments = {"path": path, "pattern": "blue"}
+    else:
+        arguments = {"path": path}
+    return HistoricalMemoryInspection(
+        call_id=call_id,
+        name=name,
+        arguments=arguments,
+    )
+
 
 class _DynamicWorktreeScenario(NamedTuple):
     """Dynamic worktree operation, exact path, and force flag."""
@@ -1652,6 +1733,79 @@ class _Handler(BaseHTTPRequestHandler):
     def _dispatch_model_request(self, request: dict[str, object], body: bytes) -> None:
         """Route one generation-fenced local model request."""
         user_text = _last_user_text(request)
+        if self.path == "/v1/responses":
+            try:
+                historical_summary = historical_memory_summary_response(request)
+                historical_inspection = historical_memory_inspection(request)
+            except ValueError, json.JSONDecodeError:
+                self._write_json(
+                    409, {"error": {"message": "Invalid Historical fixture request."}}
+                )
+                return
+            previous = request.get("previous_response_id")
+            historical_continuation = isinstance(previous, str) and previous.startswith(
+                "resp_historical_memory_"
+            )
+            if historical_summary is not None:
+                with _State.lock:
+                    _State.requests.append(request)
+                if f"{_HISTORICAL_MEMORY_PREFIX}provider-failure" in json.dumps(
+                    request.get("input")
+                ):
+                    self._write_json(
+                        500,
+                        {
+                            "error": {
+                                "message": "Deterministic Historical provider failure."
+                            }
+                        },
+                    )
+                    return
+                self._write_text_response(
+                    request,
+                    historical_summary,
+                    response_id="resp_historical_memory_summary",
+                )
+                return
+            if (
+                isinstance(user_text, str)
+                and user_text.startswith(_HISTORICAL_MEMORY_PREFIX)
+            ) or historical_continuation:
+                with _State.lock:
+                    _State.requests.append(request)
+                instructions = str(request.get("instructions", ""))
+                if _SESSION_TITLE_SYSTEM_MARKER in instructions:
+                    self._write_text_response(
+                        request,
+                        '{"title":"Historical Memory E2E"}',
+                        response_id="resp_historical_memory_title",
+                    )
+                    return
+                if historical_inspection is not None:
+                    if not has_current_tool_output(
+                        request, historical_inspection.call_id
+                    ):
+                        if not _request_has_named_tool(
+                            request, historical_inspection.name
+                        ):
+                            self._write_json(
+                                409,
+                                {"error": {"message": "Generic read tool is missing."}},
+                            )
+                            return
+                        self._write_function_call_response(
+                            request,
+                            call_id=historical_inspection.call_id,
+                            name=historical_inspection.name,
+                            arguments=historical_inspection.arguments,
+                        )
+                        return
+                self._write_text_response(
+                    request,
+                    "HISTORICAL_MEMORY_E2E_TURN_COMPLETED",
+                    response_id="resp_historical_memory_turn",
+                )
+                return
         compaction_request = _is_semantic_compaction_request(request)
         if self.path == "/v1/responses" and is_inference_profile_title_request(request):
             with _State.lock:

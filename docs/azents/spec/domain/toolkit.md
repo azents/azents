@@ -19,6 +19,10 @@ code_paths:
   - python/apps/azents/src/azents/repos/github_user_installation/**
   - python/apps/azents/src/azents/services/toolkit/**
   - python/apps/azents/src/azents/services/vfs.py
+  - python/apps/azents/src/azents/services/vfs_read.py
+  - python/apps/azents/src/azents/services/memory_vfs.py
+  - python/apps/azents/src/azents/services/historical_memory/**
+  - python/apps/azents/src/azents/repos/memory_vfs/**
   - python/apps/azents/src/azents/services/github_platform_system_setting/runtime.py
   - python/apps/azents/src/azents/services/github_platform_system_setting/binding.py
   - python/apps/azents/src/azents/api/public/toolkit/v1/**
@@ -76,8 +80,8 @@ code_paths:
   - typescript/apps/azents-web/src/trpc/routers/toolkit.ts
 api_routes:
   - /toolkit/v1
-last_verified_at: 2026-10-01
-spec_version: 126
+last_verified_at: 2026-10-02
+spec_version: 127
 ---
 
 # Toolkit
@@ -91,7 +95,9 @@ This domain covers four feature groups.
 1. **Toolkit bundle** — external service integration tools such as MCP / GitHub / GCP / AWS / Notion / Sentry / GoogleAnalytics / Kubernetes. Implemented by `ToolkitConfig`, Workspace-sharing `ToolkitScope`, and shared attachment `AgentToolkit`.
 2. **MCP OAuth2 connection** — toolkit-level OAuth2 client/token state for remote MCP servers. Implemented by `MCPOAuthConnection`.
 3. **Auto-bound platform capabilities** — Runtime, Runtime Web, Memory, Goal, Todo, Skill, Subagent, Scheduled Task, and other platform-owned Toolkits resolved from the current Agent, Session, Run, and Runtime capability snapshot without a persisted ToolkitConfig.
-4. **Managed Skill VFS** — immutable run-scoped `azents://` resources for release-bundled global and Toolkit Provider Skills. Managed files remain outside the Runtime filesystem until `import_file` materializes one selected entry.
+4. **Registered read-only VFS** — immutable run-scoped Skills and live authorized
+   Memory resources behind generic read tools. Skills remain outside Runtime until
+   `import_file` materializes one selected entry; Memory has no transfer capability.
 
 All credentials are stored in DB with Fernet (`AZ_CREDENTIAL_ENCRYPTION_KEY`) symmetric encryption and are never exposed in agent prompt. (`CredentialCipher`, [`python/apps/azents/src/azents/core/crypto.py`](../../../../python/apps/azents/src/azents/core/crypto.py))
 
@@ -256,7 +262,12 @@ ToolkitConfig `slug` is the administrator-visible, non-unique base alias. One Ag
 
 Catalog construction rejects duplicate final names before publication and reports both source ToolkitConfig IDs; dictionary overwrite is never collision handling. The catalog source retains ToolkitConfig ID, Type, persisted Name, base Slug, effective namespace, revision, and a bounded allowlisted non-secret connection identity. Tool Search, executor routing, runtime hooks, durable source snapshots, and activity projections consume that exact selected source rather than parsing the final name.
 
-Auto-bound single-instance toolkits use `use_prefix=False`; their tool names are exposed as-is. This applies to Memory Read, Memory Write, Runtime file/process tools, Subagent collaboration tools, and the session-bound Goal/Todo tools. For example, `list_memories`, `save_memory`, `exec_command`, `write_stdin`, `read`, `run_tool_to_file`, `spawn_agent`, `wait_agent`, `get_goal`, and `update_todo` are not prefixed.
+Auto-bound single-instance toolkits use `use_prefix=False`; names are exposed as-is.
+This includes Saved Memory writes, generic readable-storage tools, Runtime mutation/
+process tools, Subagent collaboration, and Session Goal/Todo tools. For example,
+`save_memory`, `delete_memory`, `read`, `grep`, `glob`, `exec_command`,
+`write_stdin`, `run_tool_to_file`, `spawn_agent`, `wait_agent`, `get_goal`, and
+`update_todo` are not prefixed. Memory context is a prompt-only binding.
 
 Some toolkits may add their own internal segment before the outer effective namespace is applied. GitHub multi-installation routing does this by prefixing each installation's MCP tools with a safe account-login segment. With effective namespace `github`, installation `azents`, and MCP tool `get_file_contents`, the final model-visible name becomes:
 
@@ -317,6 +328,44 @@ and save it through authorized Runtime transfer. Target failure cannot be reclas
 output. Stored parts are suppressed from the outer result; only failed parts and a final
 already-executed notice remain model-visible after partial Runtime storage failure.
 
+### Registered VFS and Generic Read Ownership
+
+The DI-owned VFS backend registry maps canonical mounts to native read backends;
+duplicate registration is fatal. There is no static supported-mount allowlist
+or whole-backend materialization fallback. Exact-file, file/directory search,
+and glob-pattern URI validation are separate; traversal, encoded aliases,
+backslashes, user info, ports, queries, and fragments are rejected.
+
+One auto-bound `readable_storage` Toolkit owns exactly one `read`, `grep`, and
+`glob` for both root and subagent execution, even without Runtime. Absolute
+Runtime paths lazily resolve the existing filesystem adapter under the current
+Runtime capability/version gate. Canonical `azents://` paths route to their
+registered backend under a server-created Run/concrete/root Session/Agent/
+Workspace/User/owner context. Relative or ambiguous locations are invalid.
+Unsupported backend operations fail explicitly.
+
+Skills reads use the immutable current AgentRun projection. Memory reads use live
+PostgreSQL queries and independently recheck Memory enablement and current root/
+source authority. The Memory tree includes a README, Saved Agent/User entries,
+Historical Team/User summaries, and source Session/event/exact result files using
+database IDs. Broad regex search excludes tool-result bodies; exact result reads
+contain persisted text only, not inputs, artifacts, references, or bytes.
+Denied source use is non-enumerating and archive/access loss applies to the next
+operation. See [`memory.md`](memory.md) for namespace and lifecycle detail.
+
+Read results use common bounded character ranges, grep file/line results, and
+sorted canonical glob URIs. Backend limits are no greater than common tool caps,
+and truncation plus exact stop reason survives through generic output, including
+empty truncated results. Skills/Memory regex work runs in a killable subprocess;
+deadline or cancellation kills and reaps the child. Memory operations have a
+two-second bound, at most 1,000 glob candidates/results, and row/byte admission
+bounds. Content-free logs retain backend/operation/duration/count/stop metadata.
+
+RuntimeToolkit owns process, mutation, image, and transfer tools, not generic
+read/grep/glob. Generic VFS write/edit/delete/patch is unsupported. Optional
+transfer-read is a backend capability: Skills retains its immutable import path,
+while Memory explicitly does not support transfer or import.
+
 ### Managed Skill VFS
 
 Azents-managed Skill packages use a read-only virtual filesystem distinct from the Agent Runtime filesystem. The first registered mount is `skills`, and every managed Skill entrypoint has the canonical form:
@@ -327,7 +376,15 @@ azents://skills/{namespace}/{skill}/SKILL.md
 
 The `azents` namespace is reserved for approved global release-bundled packages. A Toolkit Provider may declare one approved release resource root under the namespace equal to its stable Provider slug, such as `github`. A Provider package is eligible only when the Agent has an enabled attachment to an enabled ToolkitConfig of that Provider type. Credential state, provider connection health, and the Workspace-local ToolkitConfig slug do not change content eligibility or rewrite the URI. The initial projection records source identity but not a concrete ToolkitConfig tool prefix, so managed package instructions cannot assume one Workspace-local prefix.
 
-Every AgentRun stores one self-contained immutable VFS projection in `agent_runs.vfs_projection`. The projection records schema and revision identity, deterministic source records, canonical entries, content hashes, media types, decoded sizes, and Base64 bodies. Release sources are scanned from local Python package resources. A process-local catalog may retain the last successful source slice, but recovery authority is the projection persisted on the AgentRun. Once set, retries, worker takeover, and resume never replace it with current package bytes.
+Every AgentRun stores one self-contained immutable Skills VFS projection in
+`agent_runs.vfs_projection`; this does not store the live Memory tree. The
+projection records schema/revision identity, deterministic source records,
+canonical entries, hashes, media types, decoded sizes, and Base64 bodies.
+Release sources are scanned from local package resources. A process-local catalog
+may retain the last successful source slice, but recovery authority is the
+persisted projection. Retries, takeover, and resume never replace it with current
+package bytes. Existing hashes/source revisions and the at-most-eight-MiB
+projection bound remain unchanged.
 
 The Skill Toolkit combines managed entrypoints with the existing filesystem Skill snapshot. Filesystem Skills keep absolute `SKILL.md` paths and the session-scoped `latest`/`active` adoption lifecycle. Managed Skills use their exact `azents://` URI as `skill_path`; equal slugs remain separate when their locators differ. `load_skill` dispatches absolute paths only to the active filesystem projection and canonical managed URIs only to the current run VFS projection, with no cross-source fallback.
 
@@ -352,7 +409,14 @@ revalidates the exact active projection item before emitting the durable
 Eligibility drift between an idle preview and run creation therefore produces the
 normal unavailable-Skill error rather than reading stale preview content.
 
-`import_file` registers an `azents` resolver alongside `exchange` and `artifact`. The resolver validates the canonical URI, current run ownership, exact projection membership, Base64 content, decoded size, and SHA-256 hash before passing bytes to the existing Runtime materialization path. Ordinary Runtime `read`, `glob`, `grep`, `write`, and `edit` tools remain path-only and never resolve `azents://` directly. Only the materialized Runtime copy follows Runtime path retention rules; the source entry remains part of the retained immutable AgentRun projection.
+`import_file` registers an `azents` resolver alongside `exchange` and `artifact`.
+For importable Skills it validates the canonical URI, current run ownership,
+exact projection membership, Base64 content, decoded size, and SHA-256 hash
+before passing bytes to Runtime materialization. Generic `read`, `glob`, and
+`grep` resolve managed URIs through readable storage without import. Runtime
+mutation tools remain filesystem-only, and Memory has no import/transfer
+capability. Only the materialized Runtime copy follows Runtime path retention
+rules; the Skill source remains in the retained immutable AgentRun projection.
 
 Root and subagent executions use the same admission contract. Each AgentRun independently ensures a projection for its resolved Agent, Session, and Workspace context rather than inheriting another run's projection.
 
@@ -532,9 +596,12 @@ Strong invariant: **raw credential is never exposed in agent prompt**.
 
 ### Runtime Tool Execution and Network Authority
 
-Runtime file/process tools (`exec_command` / `write_stdin` / `import_file` / `present_file` /
-`read` / `write` / `grep` / `glob` / ...) are auto-bound only when the captured Agent capability
-snapshot grants the declared Runtime capability. The current Workspace Runtime Profile and its
+Runtime mutation/process/transfer tools (`exec_command`, `write_stdin`,
+`write`, `delete`, `edit`, `apply_patch`, `import_file`, `present_file`, and
+`read_image`) are auto-bound only when the captured Agent capability
+snapshot grants the declared Runtime capability. Generic `read`/`grep`/`glob`
+remain independently bound; only their absolute Runtime branch requires that
+capability. The current Workspace Runtime Profile and its
 resolved Provider configuration own outbound network authority. ToolkitConfig owns persisted
 external-service integration configuration.
 
@@ -544,7 +611,15 @@ the capability before Runtime ensure, Profile resolution, Runner dispatch, or cr
 Every admitted operation rechecks the captured capability version and current state before external
 side effects; a concurrent removal fails closed instead of retargeting another Runtime incarnation.
 
-Memory Read and Memory Write are resolved as separate auto-bound capabilities. Memory Read exposes `list_memories`, `get_memory`, and `search_memories`. Memory Write exposes `save_memory` and `delete_memory`. Root execution mode binds both when Agent memory is enabled. Subagent execution mode keeps Memory Read eligible and excludes Memory Write from auto-binding.
+Memory Context and Memory Write are separate auto-bound capabilities. Enabled
+root/subagent `memory_context` contributes the root's persisted initial or
+post-compaction boundary snapshot and live VFS lookup guidance, with no domain
+read tools. Ordinary turns filter unavailable entries without reselection.
+Root-only `memory_write` exposes Saved `save_memory` and `delete_memory`; subagents
+do not receive those mutation tools. The six dedicated Memory/history read
+factories are removed without aliases. Disabled Memory contributes no automatic
+context/mutation tools and denies the live Memory mount while generic tools can
+still read other authorized backends.
 
 - `ShellToolkitConfig` is the internal shared configuration model for auto-bound Builtin, Memory,
   and Runtime Toolkit instances. It carries `allowed_domains`, `denied_domains`, `agent_data_root`,
@@ -800,7 +875,8 @@ Goal and Todo auto-bound toolkits expose fixed tool definitions independent of c
 
 | Toolkit | Activation condition | Credential source |
 |---|---|---|
-| `memory_read` | auto-bound when Agent memory is enabled; eligible for root and subagent execution modes | — |
+| `memory_context` | prompt-only boundary snapshot and VFS guidance when Memory is enabled; root and subagent | — |
+| `readable_storage` | generic `read`/`grep`/`glob` for root and subagent, independently of Runtime; backend/absolute-path authority applies at execution | — |
 | `subagent` | auto-bound collaboration toolkit; eligible for root and subagent execution modes | `spawn_agent`, `send_message`, `followup_task`, `wait_agent`, `interrupt_agent`, `list_agents` |
 | `memory_write` | auto-bound when Agent memory is enabled and execution mode is root | — |
 | `runtime` | auto-bound only when the Agent is `managed`; every declared Runtime capability is granted at the captured/current capability version. Network authority comes from the current Workspace Runtime Profile configuration. | — |
@@ -814,8 +890,9 @@ Goal and Todo auto-bound toolkits expose fixed tool definitions independent of c
 
 ### Runtime-Only Toolkit Boundary
 
-Memory Read/Write, Goal, Todo, managed VFS Skills, subagent collaboration, schedule, and compatible
-remote Toolkit operations do not require a managed Runtime. Runtime file/process tools,
+Memory Context/Write, generic VFS reads, Goal, Todo, managed VFS Skills, subagent
+collaboration, schedule, and compatible remote Toolkit operations do not require
+a managed Runtime. Absolute-path read branches, Runtime mutation/process tools,
 filesystem Skill discovery/materialization, AGENTS.md/Claude Rules filesystem projection, Runtime
 transfer, Workspace/Project/Git operations, and Runtime credential exposure declare stable Runtime
 capabilities and are projected exactly when the captured and current Agent capability is `managed`
@@ -825,9 +902,9 @@ independent browser `terminal_enabled` policy is never read by Toolkit resolutio
 Toolkit resolution receives an execution mode. Root sessions use root mode. Child sessions whose
 `AgentSession.session_kind` is `subagent` use subagent mode. This filter keeps root/user-facing
 capabilities such as Memory Write and Goal Toolkit out of subagent auto-binding without changing
-DB-registered ToolkitConfig resolution. Runtime-free mode retains compatible server and remote
-capabilities while omitting every Runtime-dependent tool, prompt, hook, filesystem projection, and
-credential injection path.
+DB-registered ToolkitConfig resolution. Runtime-free mode retains generic VFS
+reads and compatible server/remote capabilities while omitting Runtime-dependent
+tool branches, prompts, hooks, filesystem projection, and credential injection.
 
 
 ## Business Rules
@@ -1099,6 +1176,9 @@ notification execute only after the operation returns.
 
 ## Changelog
 
+- **2026-10-02** (spec_version 127) — Promoted prompt-only Memory boundary
+  context, mutation-only domain tools, and one generic Runtime-independent
+  read/grep/glob binding for immutable Skills and live read-only Memory mounts.
 - **2026-10-01** (spec_version 126) — Made Toolkit Name and Slug create inputs
   backend-defaulted, added shared Python/TypeScript conformance vectors and
   placeholder-only Web previews, made stored Slugs non-unique, and promoted

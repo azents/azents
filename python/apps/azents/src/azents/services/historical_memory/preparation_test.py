@@ -47,8 +47,13 @@ def _source() -> SimpleNamespace:
     )
 
 
+@pytest.mark.parametrize(
+    "sampled_at",
+    [None, datetime.datetime(2099, 1, 1, tzinfo=datetime.UTC)],
+)
 async def test_prepare_agent_publishes_bounded_batch_result(
     monkeypatch: pytest.MonkeyPatch,
+    sampled_at: datetime.datetime | None,
 ) -> None:
     """Successful model output publishes source markers and summary atomically."""
     preparation_repository = AsyncMock()
@@ -73,6 +78,7 @@ async def test_prepare_agent_publishes_bounded_batch_result(
     summary = await service.prepare_agent(
         agent_id="a" * 32,
         deadline=datetime.datetime.now(datetime.UTC) + datetime.timedelta(minutes=5),
+        now=sampled_at,
     )
 
     assert summary.attempted == 1
@@ -84,6 +90,44 @@ async def test_prepare_agent_publishes_bounded_batch_result(
     assert completion.source_activity_at == _NOW - datetime.timedelta(hours=8)
     assert completion.source_tail_event_id == "e" * 32
     assert completion.summary == "Useful summary"
+    if sampled_at is not None:
+        assert completion.prepared_at == sampled_at
+        assert all(
+            call.kwargs["attempted_at"] == sampled_at
+            and call.kwargs["inactive_before"]
+            == sampled_at - datetime.timedelta(hours=6)
+            for call in preparation_repository.begin_next.await_args_list
+        )
+
+
+async def test_explicit_sampling_does_not_extend_real_execution_deadline() -> None:
+    """An old domain sample cannot run work after a wallclock deadline."""
+    repository = AsyncMock()
+    service = HistoricalMemoryPreparationService(
+        preparation_repository=repository,
+        historical_repository=AsyncMock(),
+        message_repository=AsyncMock(),
+        chatgpt_oauth_runtime_repository=AsyncMock(),
+        model_stream_watchdog=AsyncMock(),
+        model_metadata_service=AsyncMock(),
+        sdk_factories=_SDK_FACTORIES,
+        session_manager=AsyncMock(),
+    )
+    summary = await service.prepare_agent(
+        agent_id="a" * 32,
+        deadline=datetime.datetime.now(datetime.UTC) - datetime.timedelta(seconds=1),
+        now=datetime.datetime(2000, 1, 1, tzinfo=datetime.UTC),
+    )
+    assert summary.attempted == 0
+    repository.begin_next.assert_not_awaited()
+    with pytest.raises(ValueError, match="aware"):
+        await service.prepare_agent(
+            agent_id="a" * 32,
+            deadline=datetime.datetime.now(datetime.UTC)
+            + datetime.timedelta(minutes=1),
+            now=datetime.datetime(2099, 1, 1),
+        )
+    repository.begin_next.assert_not_awaited()
 
 
 async def test_generate_historical_memory_decodes_strict_json(

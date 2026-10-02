@@ -55,6 +55,7 @@ async def execute_historical_memory_preparation_job(
     summary = await service.prepare_agent(
         agent_id=payload.agent_id,
         deadline=context.request.deadline,
+        now=None,
     )
     return validate_job_payload(dataclasses.asdict(summary))
 

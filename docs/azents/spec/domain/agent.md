@@ -94,6 +94,8 @@ api_routes:
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/admins
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/memories
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/memories/{memory_id}
+  - /agent/v1/workspaces/{handle}/agents/{agent_id}/historical-memories
+  - /agent/v1/workspaces/{handle}/agents/{agent_id}/historical-memories/{source_session_id}
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/avatar
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/automatic-session-projects
   - /agent-runtime/v1/workspaces/{handle}/agents/{agent_id}/runtime
@@ -116,8 +118,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/default-response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack
-last_verified_at: 2026-10-01
-spec_version: 86
+last_verified_at: 2026-10-02
+spec_version: 87
 ---
 
 # Agent Domain Spec
@@ -157,7 +159,7 @@ Session or Agent settings operates on the same Agent-owned service.
 | `runtime_profile_selection_version` | positive optimistic version for replacing or clearing the Agent selection |
 | `toolkit_management_available` | requester-relative true only for a Workspace Owner or explicit AgentAdmin of this active Agent; grants the enhanced saved-Agent Toolkit management flow but does not disclose any Toolkit state itself |
 | `terminal_enabled` | Agent-owned default-true browser Terminal policy. It is independently editable from Runtime capability and never gates Worker Runtime Toolkit access |
-| `memory_enabled` | whether memory prompt/tool is exposed |
+| `memory_enabled` | gates Saved/Historical automatic context, preparation, mutation tools, and model-facing live Memory VFS access; retained human settings inspection remains available |
 | `max_turns` | run turn limit. null means unlimited |
 | `auto_archive_ttl_days` | positive whole-day inactivity TTL for automatic archive of this Agent's non-primary root Sessions. Defaults to `30` and applies dynamically to existing active Sessions |
 | `external_channel_default_response_mode` | required `mention_only` or `all_messages` value copied into each newly selected provider-channel participation setting and into legacy isolated-thread Bindings that have no setup claim. Existing Agents default to `all_messages` |
@@ -553,9 +555,17 @@ POST /agent/v1/workspaces/{handle}/agents/{agent_id}/memories
 GET /agent/v1/workspaces/{handle}/agents/{agent_id}/memories/{memory_id}
 PATCH /agent/v1/workspaces/{handle}/agents/{agent_id}/memories/{memory_id}
 DELETE /agent/v1/workspaces/{handle}/agents/{agent_id}/memories/{memory_id}
+GET /agent/v1/workspaces/{handle}/agents/{agent_id}/historical-memories?scope={team|user}
+GET /agent/v1/workspaces/{handle}/agents/{agent_id}/historical-memories/{source_session_id}
 ```
 
-These routes are Agent-scoped because Memory belongs to Agent. The Agent settings UI also updates `memory_enabled` through the normal Agent update endpoint. Detailed Memory visibility, conflict, and scope semantics are defined in [`memory.md`](memory.md).
+These routes are Agent-scoped because Memory belongs to Agent. Saved routes
+retain CRUD; Historical routes expose only authorized source-linked inspection,
+with cursor pagination and no human edit/delete. The settings page separates
+Saved and Historical kinds and retains the existing `memory_enabled` toggle
+through the normal Agent update endpoint. Inspection remains available while
+Memory is disabled. Detailed visibility, source lifecycle, conflict, scope, and
+pagination semantics are defined in [`memory.md`](memory.md).
 
 Public integration model listing uses stored model catalog projections. The picker reads catalog entries for the selected integration, falling back to provider system catalog entries where applicable. Submit normalization resolves direct transition inputs and selectable model option entries through stored catalog projection and must not refetch dynamic provider listing as a fallback.
 
@@ -689,7 +699,9 @@ Prepared foreground turns use the prompt-selected option instead of the default 
 
 ## 6. Memory / toolkit / avatar
 
-- Agent with `memory_enabled=false` does not expose memory prompt/tool.
+- Agent with `memory_enabled=false` suppresses automatic Memory context,
+  Historical discovery/preparation, Saved mutation tools, and model-facing
+  Memory VFS access; retained human settings inspection remains available.
 - Toolkit CRUD, ownership, OAuth, and runtime state follow [`toolkit.md`](toolkit.md). A saved Agent response includes requester-relative `toolkit_management_available`; it is derived from Workspace Owner or explicit AgentAdmin authority for that exact active Agent. When false, saved-Agent settings retain the legacy shared attach/detach section and disclose no Agent-only Toolkit state. When true, `Add Toolkit` begins with Toolkit type selection and then offers eligible Workspace-shared candidates or an Agent-only configuration flow without changing Agent creation or Chat.
 - Avatar is stored as stored image metadata through upload service image handler and resolved to public URL in Agent response.
 - Main Web provides available avatar variants as responsive width candidates and
@@ -723,6 +735,9 @@ Following contracts do not exist in current system.
 
 ## 8. Change History
 
+- **2026-10-02** (spec_version 87) — Added read-only Historical settings
+  routes and Saved/Historical kind selection under the existing Memory toggle,
+  including retained disabled-state human inspection.
 - **2026-10-01** (spec_version 86) — Moved effective built-in model capability policy into the core validation authority shared by catalog projection and Agent settings.
 - **2026-09-29** (spec_version 84) — Added registry-owned exclusive processing
   speeds while preserving saved support, inference snapshots, and inheritance.

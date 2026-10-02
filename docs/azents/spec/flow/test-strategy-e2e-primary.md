@@ -30,7 +30,7 @@ code_paths:
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
 last_verified_at: 2026-10-02
-spec_version: 79
+spec_version: 81
 ---
 
 # E2E Primary Test Strategy
@@ -132,6 +132,35 @@ Reached, queued input, explicit release, and durable turn markers establish
 ordering. Teardown removes the replacement and restores the same original Worker,
 its readiness, and log capture. Public/Admin services, database, bootstrap state,
 and the default fast-watchdog policy remain unchanged.
+
+### Historical Memory Deterministic Journey
+
+The required Historical Memory public journey creates a Runtime-free Agent,
+integration and source Sessions through product APIs. Its
+credential-free provider fixture returns strict `{"summary": ...}` output
+through the ordinary Lightweight summary SDK path, separately from foreground
+model behavior. It verifies preparation, boundary context, live generic VFS
+inspection, retained human settings, and source archive/restore/Memory-disable
+effects without live provider credentials or direct product DB writes.
+
+The isolated testenv `POST /scheduler/v1/historical-memory/sample`
+endpoint accepts an aware sampling instant and exact Agent ID, then invokes
+the real bounded discovery admission/due-source and preparation/publication
+services. It does not rewrite source activity, replace production real-time
+semantics, bypass source authorization, or add a production configuration mode.
+An outer 120-second timeout and preparation's 110-second real deadline keep
+the fixture operation bounded.
+
+This product journey proves service admission, provider summary execution,
+publication, and visible consumption; it does not claim Scheduler dispatch,
+Job Runtime supervision/coalescing, or precise concurrent interleavings.
+Focused backend integration tests own those boundaries, plus retry/capacity,
+scope/access loss, source purge, and snapshot no-reselection cases. Settings
+presentation is covered by component/container tests and Storybook; the current
+Historical Storybook interaction asserts loaded read-only presentation while
+Memory is disabled. Switching and pagination belong to component/container
+coverage, not that interaction. Report-style scale/query-plan evidence remains
+a one-time validation artifact rather than a permanent load suite.
 
 ## Local Bootstrap and Fixture Flow
 
@@ -539,6 +568,10 @@ Always-on required CI does not depend on external credentials.
   stacked pull requests with non-main bases and does not depend on run-associated PR
   metadata. Candidate completion and exact-base completion use the same evidence-only
   reevaluation path so ordering with initial sticky-comment publication converges.
+  Candidate reevaluation excludes completed-but-cancelled workflow runs: their
+  incomplete diagnostic artifacts cannot supersede valid same-head evidence.
+  Genuine failed runs remain eligible for the existing fail-closed evidence checks;
+  selection does not require a successful conclusion.
   Reevaluation workflows are serialized before evidence is read and publication
   begins. The helper checks current PR head/base identity before publishing status
   and again before replacing the duration block in the sticky observability comment.
@@ -612,6 +645,13 @@ Local/PR environment without live substrate does not fake live PASS. Instead, se
 
 ## Changelog
 
+- **2026-10-02** (spec_version 81) — Excluded cancelled candidate workflow
+  artifacts from duration reevaluation without filtering genuine failed runs
+  or changing validation thresholds and head/base publication guards.
+
+- **2026-10-02** (spec_version 80) — Added credential-free Historical
+  product-path evidence and explicit-time service sampling, distinguishing
+  preparation/publication from separately tested Scheduler/Job Runtime dispatch.
 - **2026-10-02** (spec_version 79) — Selected all same-repository PRs whose head
   or base matches a completed CI SHA, including dependents of non-main stacked bases.
 - **2026-10-02** (spec_version 78) — Made missing base duration evidence

@@ -66,6 +66,7 @@ class WorkflowRun:
     run_id: int
     status: str
     url: str
+    conclusion: str | None
 
 
 @dataclass(frozen=True)
@@ -213,11 +214,14 @@ def _runs(repository: str, sha: str, command: Runner) -> list[WorkflowRun]:
         run_id = row["id"]
         status = row.get("status")
         url = row.get("html_url")
+        conclusion = row.get("conclusion")
+        if conclusion is not None and not isinstance(conclusion, str):
+            raise EvidenceError("invalid_run_conclusion")
         if not isinstance(status, str):
             status = "completed"
         if not isinstance(url, str) or not url:
             url = f"https://github.com/{repository}/actions/runs/{run_id}"
-        runs.append(WorkflowRun(run_id, status, url))
+        runs.append(WorkflowRun(run_id, status, url, conclusion))
     return runs
 
 
@@ -570,7 +574,7 @@ def _candidate_report(
     repository: str, head_sha: str, work_dir: Path, command: Runner
 ) -> CandidateReport:
     for run in _runs(repository, head_sha, command):
-        if run.status != "completed":
+        if run.status != "completed" or run.conclusion == "cancelled":
             continue
         destination = work_dir / f"candidate-{run.run_id}"
         try:

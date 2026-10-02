@@ -197,6 +197,34 @@ def test_failure_progress_rejects_non_historical_model_operation() -> None:
         )
 
 
+async def test_explicit_agent_admission_leaves_other_agents_unmodified(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """A scoped sampler executes production admission without cross-test writes."""
+    async with rdb_session_manager() as session:
+        selected = await _create_source(
+            session,
+            slug="historical-sample-selected",
+            activity_at=_NOW - datetime.timedelta(hours=8),
+        )
+        unrelated = await _create_source(
+            session,
+            slug="historical-sample-unrelated",
+            activity_at=_NOW - datetime.timedelta(hours=8),
+        )
+        await session.commit()
+    repository = HistoricalMemoryRepository(session_manager=rdb_session_manager)
+    admitted = await repository.admit_eligible_sources(
+        agent_id=selected.agent_id,
+        now=_NOW,
+        oldest_activity_at=_NOW - datetime.timedelta(days=10),
+        inactive_before=_NOW - datetime.timedelta(hours=6),
+        limit=500,
+    )
+    assert admitted == [selected.session_id]
+    assert await repository.get(unrelated.session_id) is None
+
+
 async def test_admission_applies_window_execution_and_user_membership_authority(
     rdb_session_manager: SessionManager[AsyncSession],
 ) -> None:
@@ -247,6 +275,7 @@ async def test_admission_applies_window_execution_and_user_membership_authority(
         session_manager=rdb_session_manager,
     )
     admitted = await repository.admit_eligible_sources(
+        agent_id=None,
         now=_NOW,
         oldest_activity_at=_NOW - datetime.timedelta(days=10),
         inactive_before=_NOW - datetime.timedelta(hours=6),
@@ -256,6 +285,7 @@ async def test_admission_applies_window_execution_and_user_membership_authority(
     assert admitted == [member.session_id, eligible.session_id]
     assert (
         await repository.admit_eligible_sources(
+            agent_id=None,
             now=_NOW,
             oldest_activity_at=_NOW - datetime.timedelta(days=10),
             inactive_before=_NOW - datetime.timedelta(hours=6),
