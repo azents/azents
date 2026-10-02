@@ -55,9 +55,12 @@ from azents.core.enums import (
     ExternalChannelResourceType,
     LLMProvider,
 )
-from azents.core.llm_catalog import ModelCapabilities
+from azents.core.llm_catalog import ModelCapabilities, ModelReasoningEffort
+from azents.core.model_capability_evidence import ProviderCapabilityEvidence
+from azents.core.model_capability_projection import project_capabilities
+from azents.core.model_catalog_source import CatalogFact
 from azents.core.model_execution_options import ModelExecutionOptionId
-from azents.core.model_pricing import GenAIModelPricing
+from azents.core.model_pricing import CapturedModelPricing
 from azents.core.openai_client_config import openai_responses_client_config
 from azents.engine.events.file_parts import ModelFileLoweringContent
 from azents.engine.events.openai_responses import (
@@ -333,7 +336,7 @@ def _response(*, text: str = "done") -> Response:
     )
 
 
-def _standard_openai_pricing() -> GenAIModelPricing:
+def _standard_openai_pricing() -> CapturedModelPricing:
     """Return deterministic standard token/cache rates from the fixture."""
     return make_test_model_pricing(
         provider=LLMProvider.OPENAI,
@@ -2294,6 +2297,79 @@ async def test_official_sdk_wire_request_preserves_presence_and_stop() -> None:
     assert "store" not in captured_body
     assert "tools" not in captured_body
     assert "previous_response_id" not in captured_body
+
+
+@pytest.mark.parametrize(
+    "effort", [ModelReasoningEffort.XHIGH, ModelReasoningEffort.MAX]
+)
+async def test_official_sdk_preserves_saved_v2_effort_wire(
+    effort: ModelReasoningEffort,
+) -> None:
+    """The selected canonical scalar survives the complete official SDK boundary."""
+    captured_body: dict[str, object] = {}
+
+    async def respond(wire_request: httpx2.Request) -> httpx2.Response:
+        body = json.loads((await wire_request.aread()).decode())
+        assert isinstance(body, dict)
+        captured_body.update(body)
+        event = _completed_event().model_dump_json(exclude_unset=True)
+        return httpx2.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            content=f"data: {event}\n\ndata: [DONE]\n\n",
+            request=wire_request,
+        )
+
+    capabilities = project_capabilities(
+        provider=LLMProvider.OPENAI,
+        exact_model="exact-supported-model",
+        source_model=None,
+        model_developer=None,
+        evidence=ProviderCapabilityEvidence(
+            reasoning=CatalogFact(state="value", value=True),
+            reasoning_efforts=CatalogFact(state="value", value=(effort,)),
+            reasoning_summaries=CatalogFact(state="value", value=False),
+        ),
+    )
+    request = OpenAIResponsesLowerer(
+        provider=LLMProvider.OPENAI,
+        model="exact-supported-model",
+        credential_kwargs={},
+        tools=None,
+        model_capabilities=capabilities,
+        supported_execution_options=[],
+        enabled_execution_options=[],
+        reasoning_effort=effort.value,
+    ).lower([_event()], model="exact-supported-model")
+    sdk_client = AsyncOpenAI(
+        api_key="synthetic-test-key",
+        base_url="https://provider.example/v1",
+        http_client=httpx2.AsyncClient(transport=httpx2.MockTransport(respond)),
+    )
+    adapter = OpenAIResponsesModelAdapter(
+        client=OpenAISDKResponsesClient(sdk_client, websocket_headers=None),
+        continuation_planner=None,
+        transport_state=None,
+        transport_key=None,
+        websocket_endpoint_eligible=False,
+    )
+    watchdog = make_test_model_stream_watchdog()
+    try:
+        events = [
+            event
+            async for event in adapter.stream(
+                request,
+                watchdog=watchdog,
+                timeout_policy=watchdog.resolve_policy(
+                    provider="openai", model=request.model, inference_profile=None
+                ),
+                call_context=_sampling_context(),
+            )
+        ]
+    finally:
+        await adapter.close()
+    assert len(events) == 1
+    assert captured_body["reasoning"] == {"effort": effort.value}
 
 
 async def test_official_sdk_wire_request_sanitizes_unstored_generated_image() -> None:

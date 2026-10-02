@@ -76,8 +76,8 @@ class CatalogProjectionProvenance:
     source_snapshot_id: str | None
     projection_schema_version: str
     runtime_profile_resolver_revision: str
-    pydantic_ai_version: str
-    genai_prices_version: str
+    pydantic_ai_version: str | None
+    genai_prices_version: str | None
     projection_fingerprint: str
 
 

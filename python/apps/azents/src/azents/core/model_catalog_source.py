@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+import datetime
 import hashlib
 import json
 import re
@@ -14,6 +15,8 @@ from pydantic import BaseModel, ConfigDict, model_validator
 
 from azents.core.llm_catalog import ModelReasoningEffort
 
+CATALOG_SOURCE_KEY = "litellm_catalog"
+CATALOG_SOURCE_KIND = "litellm_json"
 CATALOG_SOURCE_SCHEMA_VERSION = "1"
 CATALOG_SOURCE_INTERPRETER_VERSION = "1"
 CATALOG_SOURCE_MAX_BYTES = 12 * 1024 * 1024
@@ -84,6 +87,8 @@ class CatalogSourceFacts(_FrozenModel):
     @model_validator(mode="after")
     def validate_domain_bounds(self) -> CatalogSourceFacts:
         """Keep restored facts within the same domain as freshly decoded facts."""
+        if self.deprecation_date.value is not None:
+            _date_string(self.deprecation_date.value)
         for fact in (
             self.max_input_tokens,
             self.max_output_tokens,
@@ -388,6 +393,18 @@ def _string(value: object) -> str:
     return value
 
 
+def _date_string(value: object) -> str:
+    """Consume only an exact calendar date for lifecycle decisions."""
+    text = _string(value)
+    try:
+        parsed = datetime.date.fromisoformat(text)
+    except ValueError:
+        raise CatalogSourceDecodeError("Invalid source calendar date.") from None
+    if parsed.isoformat() != text:
+        raise CatalogSourceDecodeError("Source calendar date must use YYYY-MM-DD.")
+    return text
+
+
 def _identity(value: object) -> str:
     text = _string(value)
     if (
@@ -447,7 +464,7 @@ def _decode_facts(raw: Mapping[str, object]) -> CatalogSourceFacts:
     return CatalogSourceFacts(
         mode=_fact(raw, "mode", _string),
         display_name=_fact(raw, "display_name", _string),
-        deprecation_date=_fact(raw, "deprecation_date", _string),
+        deprecation_date=_fact(raw, "deprecation_date", _date_string),
         supported_endpoints=_fact(raw, "supported_endpoints", _strings),
         input_modalities=_fact(raw, "supported_modalities", _strings),
         output_modalities=_fact(raw, "supported_output_modalities", _strings),

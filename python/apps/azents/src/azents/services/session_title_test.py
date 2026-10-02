@@ -38,6 +38,9 @@ from azents.core.enums import (
 )
 from azents.core.inference_profile import RequestedInferenceProfile
 from azents.core.llm_catalog import ModelCapabilities, ModelToolCallingCapabilities
+from azents.core.model_capability_evidence import ProviderCapabilityEvidence
+from azents.core.model_capability_projection import project_capabilities
+from azents.core.model_catalog_source import CatalogFact
 from azents.core.model_operation import (
     ModelOperationCandidateOutcomeReason,
     ModelOperationKind,
@@ -367,6 +370,58 @@ class TestSessionTitleHelpers:
             snapshot=_generation_snapshot(capability),
         )
 
+        assert result == "Generated title"
+        assert modes == [expected_mode]
+
+    @pytest.mark.parametrize(
+        ("strict", "structured", "expected_mode"),
+        [
+            (True, False, TitleOutputMode.PLAIN_TEXT),
+            (False, True, TitleOutputMode.STRUCTURED),
+            (True, None, TitleOutputMode.STRUCTURED),
+        ],
+    )
+    async def test_v2_title_uses_response_support_independently_from_strict_tools(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        strict: bool,
+        structured: bool | None,
+        expected_mode: TitleOutputMode,
+    ) -> None:
+        modes: list[TitleOutputMode] = []
+
+        async def generate(**kwargs: object) -> str:
+            mode = kwargs["output_mode"]
+            assert isinstance(mode, TitleOutputMode)
+            modes.append(mode)
+            return "Generated title"
+
+        monkeypatch.setattr(
+            session_title_module, "generate_session_title_with_model", generate
+        )
+        snapshot = _generation_snapshot(strict)
+        caps = project_capabilities(
+            provider=LLMProvider.OPENAI,
+            exact_model="gpt-test",
+            source_model=None,
+            model_developer=LLMModelDeveloper.OPENAI,
+            evidence=ProviderCapabilityEvidence(
+                function_calling=CatalogFact(state="value", value=True),
+                strict_function_schema=CatalogFact(state="value", value=strict),
+                structured_response=CatalogFact(
+                    state="null" if structured is None else "value", value=structured
+                ),
+            ),
+        )
+        snapshot.operation.current_candidate.model_selection.normalized_capabilities = (
+            caps
+        )
+        result = await _title_service(strict)._generate_title(
+            session_id="session-001",
+            generation_event_id="0" * 32,
+            context="Compare two insurance options",
+            snapshot=snapshot,
+        )
         assert result == "Generated title"
         assert modes == [expected_mode]
 

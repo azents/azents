@@ -1,6 +1,6 @@
 """An explicitly captured context view is never replaced inside a resolver."""
 
-import datetime
+import dataclasses
 from collections.abc import Sequence
 from typing import Literal
 from unittest.mock import AsyncMock
@@ -10,12 +10,6 @@ from azcommon.result import Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.inference_profile import RequestedInferenceProfile
-from azents.core.model_metadata_source import (
-    ModelMetadataSourcePayload,
-    SourceEqualsClause,
-    SourceModelRecord,
-    SourceProviderRecord,
-)
 from azents.engine.run import resolve as resolve_module
 from azents.engine.run import resolve_test as fixtures
 from azents.engine.run.input import InvokeInput
@@ -26,7 +20,11 @@ from azents.engine.run.resolve import (
 )
 from azents.repos.model_metadata_source_data import ModelMetadataSourceSnapshot
 from azents.services.model_metadata import CapturedContextSource, ModelMetadataService
-from azents.testing.model_metadata import make_test_model_metadata_service
+from azents.testing.model_metadata import (
+    make_test_model_metadata_service,
+    make_test_source_payload,
+    make_test_source_snapshot,
+)
 
 
 class _ForbidContextRecapture(ModelMetadataService):
@@ -38,42 +36,10 @@ class _ForbidContextRecapture(ModelMetadataService):
 
 
 def _snapshot(identifier: str, maximum: int) -> ModelMetadataSourceSnapshot:
-    payload = ModelMetadataSourcePayload(
-        providers=[
-            SourceProviderRecord(
-                id="openai",
-                name="OpenAI",
-                api_pattern=r"https://api\.openai\.com/.*",
-                model_match=None,
-                provider_match=None,
-                fallback_model_providers=None,
-                models=[
-                    SourceModelRecord(
-                        id="gpt-4o",
-                        name="GPT-4o",
-                        match=SourceEqualsClause(value="gpt-4o"),
-                        context_window=maximum,
-                        deprecated=False,
-                        prices=[],
-                    )
-                ],
-            )
-        ]
+    payload = make_test_source_payload(
+        {"gpt-4o": {"litellm_provider": "openai", "max_input_tokens": maximum}}
     )
-    return ModelMetadataSourceSnapshot(
-        id=identifier,
-        source_key="genai_prices",
-        source_kind="genai_prices",
-        source_schema_version="1",
-        source_url="https://source.example.test/models.json",
-        source_hash=payload.content_hash(),
-        producer_name="genai-prices",
-        producer_version="0.1.9",
-        provider_count=payload.provider_count,
-        model_count=payload.model_count,
-        payload=payload,
-        created_at=datetime.datetime.now(datetime.UTC),
-    )
+    return dataclasses.replace(make_test_source_snapshot(payload), id=identifier)
 
 
 @pytest.mark.parametrize("operation", ["profile", "frozen", "runtime"])

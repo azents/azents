@@ -35,6 +35,7 @@ from azents.core.llm_catalog_sync import (
     IntegrationCatalogSyncTrigger,
     evaluate_integration_catalog_sync_policy,
 )
+from azents.core.model_catalog_source import CATALOG_SOURCE_KEY
 from azents.core.model_execution_options import ModelExecutionOptionId
 from azents.engine.providers.model_profiles import (
     RUNTIME_MODEL_PROFILE_RESOLVER_REVISION,
@@ -81,7 +82,6 @@ from azents.services.model_metadata_projection import (
     project_integration_replacement_entries,
 )
 from azents.services.model_metadata_source import (
-    GENAI_PRICES_SOURCE_KEY,
     ModelMetadataSourceSyncService,
 )
 from azents.services.xai_oauth.data import (
@@ -699,7 +699,7 @@ class IntegrationCatalogProjectionService:
                 session,
                 catalog_id=catalog.id,
                 workspace_id=workspace_id,
-                source_key=GENAI_PRICES_SOURCE_KEY,
+                source_key=CATALOG_SOURCE_KEY,
                 started_at=started_at,
                 trigger=trigger,
             )
@@ -843,7 +843,7 @@ class IntegrationCatalogProjectionService:
                     RUNTIME_MODEL_PROFILE_RESOLVER_REVISION
                 ),
                 pydantic_ai_version=importlib.metadata.version("pydantic-ai-slim"),
-                genai_prices_version=importlib.metadata.version("genai-prices"),
+                genai_prices_version=None,
                 projection_fingerprint=fingerprint,
             )
             async with self.session_manager() as session:

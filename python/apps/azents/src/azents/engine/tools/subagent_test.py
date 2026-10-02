@@ -40,6 +40,7 @@ from azents.core.inference_profile import (
     SessionInferenceState,
 )
 from azents.core.llm_catalog import ModelReasoningEffort
+from azents.core.model_catalog_source import CATALOG_SOURCE_KEY
 from azents.core.model_execution_options import ModelExecutionOptionId
 from azents.core.tools import PublishEventFn, ToolkitStatus, TurnContext
 from azents.engine.events.engine_events import SubagentTreeChanged
@@ -785,7 +786,7 @@ class _SourceSnapshotRepository:
     ) -> None:
         """Return no fallback metadata source."""
         del session
-        assert source_key == "genai_prices"
+        assert source_key == CATALOG_SOURCE_KEY
         return None
 
 

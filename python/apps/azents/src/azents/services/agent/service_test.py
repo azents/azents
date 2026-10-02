@@ -1,5 +1,6 @@
 """AgentService model snapshot behavior tests."""
 
+import dataclasses
 import datetime
 from types import SimpleNamespace
 from typing import Annotated
@@ -26,12 +27,7 @@ from azents.core.enums import (
     ExternalChannelResponseMode,
     WorkspaceUserRole,
 )
-from azents.core.model_metadata_source import (
-    ModelMetadataSourcePayload,
-    SourceEqualsClause,
-    SourceModelRecord,
-    SourceProviderRecord,
-)
+from azents.core.model_catalog_source import CATALOG_SOURCE_KEY
 from azents.repos.agent.data import Agent
 from azents.repos.agent_operations import (
     AgentOperationNotAdmin,
@@ -51,7 +47,11 @@ from azents.services.uploads.schema import (
     StoredImageFile,
     StoredImageThumbnails,
 )
-from azents.testing.model_metadata import make_test_model_metadata_service
+from azents.testing.model_metadata import (
+    make_test_model_metadata_service,
+    make_test_source_payload,
+    make_test_source_snapshot,
+)
 from azents.testing.model_selection import (
     make_test_model_selection,
     make_test_model_settings,
@@ -89,7 +89,7 @@ class _CountingMetadataRepository(ModelMetadataSourceRepository):
         self, session: AsyncSession, *, source_key: str
     ) -> ModelMetadataSourceSnapshot:
         del session
-        assert source_key == "genai_prices"
+        assert source_key == CATALOG_SOURCE_KEY
         self.capture_count += 1
         return self.snapshot
 
@@ -99,45 +99,17 @@ def _metadata_snapshot(
     model_id: str | None,
     context_window: int | None,
 ) -> ModelMetadataSourceSnapshot:
-    models = (
-        [
-            SourceModelRecord(
-                id=model_id,
-                name=model_id,
-                match=SourceEqualsClause(value=model_id),
-                context_window=context_window,
-                deprecated=False,
-                prices=[],
-            )
-        ]
-        if model_id is not None
-        else []
+    payload = make_test_source_payload(
+        {
+            model_id if model_id is not None else "unmatched-fixture": {
+                "litellm_provider": "openai",
+                "max_input_tokens": context_window,
+            }
+        }
     )
-    payload = ModelMetadataSourcePayload(
-        providers=[
-            SourceProviderRecord(
-                id="openai",
-                name="OpenAI",
-                api_pattern=r"https://api\.openai\.com/.*",
-                model_match=None,
-                provider_match=None,
-                fallback_model_providers=None,
-                models=models,
-            )
-        ]
-    )
-    return ModelMetadataSourceSnapshot(
+    return dataclasses.replace(
+        make_test_source_snapshot(payload),
         id="source-id",
-        source_key="genai_prices",
-        source_kind="genai_prices",
-        source_schema_version="1",
-        source_url="https://metadata.example/data.json",
-        source_hash=payload.content_hash(),
-        producer_name="genai-prices",
-        producer_version="0.1.9",
-        provider_count=payload.provider_count,
-        model_count=payload.model_count,
-        payload=payload,
         created_at=_NOW,
     )
 

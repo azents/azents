@@ -1,4 +1,4 @@
-"""Replacement catalog projections from durable Pydantic ecosystem metadata."""
+"""Stored conversation catalog projections from captured data-only evidence."""
 
 import dataclasses
 import datetime
@@ -17,22 +17,16 @@ from azents.core.enums import (
     LLMModelLifecycleStatus,
     LLMProvider,
 )
-from azents.core.llm_catalog import (
-    ModelCapabilities,
-    ModelParameterCapabilities,
-    model_freshness_rank,
+from azents.core.llm_catalog import model_freshness_rank
+from azents.core.model_capability_projection import (
+    CAPABILITY_PROJECTION_REVISION,
+    project_capabilities,
 )
-from azents.core.model_metadata_source import (
-    ModelMetadataSourcePayload,
-    SourceModelMatch,
-    SourceModelRecord,
-    SourceProviderRecord,
-    lookup_source_model,
-)
-from azents.engine.model_assembly import ModelAssemblyMetadata
+from azents.core.model_catalog_identity import system_catalog_models
+from azents.core.model_catalog_source import CatalogSourceModel
 from azents.engine.providers.model_profiles import (
     RUNTIME_MODEL_PROFILE_RESOLVER_REVISION,
-    resolve_runtime_model_profile,
+    protocol_for_provider,
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
@@ -44,23 +38,22 @@ from azents.repos.llm_catalog.data import (
 )
 from azents.repos.model_metadata_source_data import ModelMetadataSourceSnapshot
 from azents.services.model_listing.data import NormalizedModelCandidate
-from azents.services.model_listing.providers import (
-    _openai_supported_execution_options,
-)
+from azents.services.model_listing.providers import _openai_supported_execution_options
+from azents.services.model_metadata import ModelMetadataService
 from azents.services.model_metadata_source import ModelMetadataSourceSyncService
 
-MODEL_METADATA_PROJECTION_SCHEMA_VERSION = "1"
-MODEL_METADATA_PROJECTION_POLICY_REVISION = "2"
-_SYSTEM_SOURCE_PROVIDERS: dict[LLMProvider, str] = {
-    LLMProvider.OPENAI: "openai",
-    LLMProvider.ANTHROPIC: "anthropic",
-    LLMProvider.GOOGLE_GEMINI: "google",
-}
+MODEL_METADATA_PROJECTION_SCHEMA_VERSION = "2"
+MODEL_METADATA_PROJECTION_POLICY_REVISION = "3"
+_SYSTEM_PROVIDERS = (
+    LLMProvider.OPENAI,
+    LLMProvider.ANTHROPIC,
+    LLMProvider.GOOGLE_GEMINI,
+)
 
 
 @dataclasses.dataclass(frozen=True)
 class SystemCatalogCandidateSummary:
-    """One prepared non-current replacement candidate."""
+    """One complete replacement projection awaiting atomic publication."""
 
     provider: LLMProvider
     catalog_id: str
@@ -73,7 +66,7 @@ class SystemCatalogCandidateSummary:
 
 @dataclasses.dataclass(frozen=True)
 class SystemCatalogCutoverSummary:
-    """One replacement system projection published as current authority."""
+    """Result of an existing scheduled or administrator publication operation."""
 
     provider: LLMProvider
     catalog_id: str
@@ -85,7 +78,7 @@ class SystemCatalogCutoverSummary:
 
 
 class ModelMetadataProjectionError(RuntimeError):
-    """Replacement metadata cannot produce a complete system projection."""
+    """Source evidence cannot produce a complete system projection."""
 
 
 class _SystemCatalogPublicationBusy(RuntimeError):
@@ -94,7 +87,7 @@ class _SystemCatalogPublicationBusy(RuntimeError):
 
 @dataclasses.dataclass(frozen=True)
 class SystemCatalogReplacementProjectionService:
-    """Prepare replacement system projections without changing current pointers."""
+    """Refresh and publish stored catalogs through the established lifecycle."""
 
     session_manager: Annotated[
         SessionManager[AsyncSession], Depends(get_session_manager)
@@ -105,29 +98,21 @@ class SystemCatalogReplacementProjectionService:
     ]
 
     async def prepare_candidates(self) -> list[SystemCatalogCandidateSummary]:
-        """Refresh the replacement source and create non-current candidates."""
+        """Create non-current candidates within the existing refresh operation."""
         source = await self.source_sync_service.sync_current_source()
         return await self._prepare_candidates(
-            source=source,
-            providers=tuple(_SYSTEM_SOURCE_PROVIDERS),
+            source=source, providers=_SYSTEM_PROVIDERS
         )
 
     async def prepare_and_publish_cutover(
-        self,
-        *,
-        provider: LLMProvider | None,
+        self, *, provider: LLMProvider | None
     ) -> list[SystemCatalogCutoverSummary]:
-        """Refresh, prepare, and atomically publish replacement system catalogs."""
-        if provider is not None and provider not in _SYSTEM_SOURCE_PROVIDERS:
+        """Collect and atomically publish through existing system refresh ownership."""
+        if provider is not None and provider not in _SYSTEM_PROVIDERS:
             raise ValueError("Unsupported system catalog provider.")
         source = await self.source_sync_service.sync_current_source()
-        providers = (
-            (provider,) if provider is not None else tuple(_SYSTEM_SOURCE_PROVIDERS)
-        )
-        candidates = await self._prepare_candidates(
-            source=source,
-            providers=providers,
-        )
+        providers = (provider,) if provider is not None else _SYSTEM_PROVIDERS
+        candidates = await self._prepare_candidates(source=source, providers=providers)
         attempt_ids: dict[str, str] = {}
         try:
             async with self.session_manager() as session:
@@ -144,28 +129,24 @@ class SystemCatalogReplacementProjectionService:
         except _SystemCatalogPublicationBusy:
             return [
                 SystemCatalogCutoverSummary(
-                    provider=candidate.provider,
-                    catalog_id=candidate.catalog_id,
+                    provider=item.provider,
+                    catalog_id=item.catalog_id,
                     snapshot_id=None,
-                    visible_count=0,
-                    hidden_count=0,
-                    projection_fingerprint=candidate.projection_fingerprint,
+                    visible_count=item.visible_count,
+                    hidden_count=item.hidden_count,
+                    projection_fingerprint=item.projection_fingerprint,
                     status="running",
                 )
-                for candidate in candidates
+                for item in candidates
             ]
-
         snapshot_ids: dict[str, str] = {}
         try:
             async with self.session_manager() as session:
                 for candidate in candidates:
-                    latest_attempt_id = await (
+                    latest = await (
                         self.catalog_repository.lock_catalog_for_attempt_completion
-                    )(
-                        session,
-                        catalog_id=candidate.catalog_id,
-                    )
-                    if latest_attempt_id != attempt_ids[candidate.catalog_id]:
+                    )(session, catalog_id=candidate.catalog_id)
+                    if latest != attempt_ids[candidate.catalog_id]:
                         raise RuntimeError("The system catalog refresh was superseded.")
                     snapshot_ids[
                         candidate.catalog_id
@@ -173,13 +154,9 @@ class SystemCatalogReplacementProjectionService:
                         session,
                         catalog_id=candidate.catalog_id,
                         candidate_snapshot_id=candidate.candidate_snapshot_id,
-                        expected_current_snapshot_id=(
-                            candidate.expected_current_snapshot_id
-                        ),
+                        expected_current_snapshot_id=candidate.expected_current_snapshot_id,
                         expected_catalog_configuration_version=None,
-                        expected_projection_fingerprint=(
-                            candidate.projection_fingerprint
-                        ),
+                        expected_projection_fingerprint=candidate.projection_fingerprint,
                         expected_source_key=source.source_key,
                         expected_source_snapshot_id=source.id,
                         fence_latest_attempt=True,
@@ -192,17 +169,13 @@ class SystemCatalogReplacementProjectionService:
                         finished_at=datetime.datetime.now(datetime.UTC),
                         produced_snapshot_id=snapshot_ids[candidate.catalog_id],
                         fetched_count=source.model_count,
-                        matched_count=(
-                            candidate.visible_count + candidate.hidden_count
-                        ),
+                        matched_count=candidate.visible_count + candidate.hidden_count,
                         skipped_count=0,
                         hidden_count=candidate.hidden_count,
                         diagnostics={
                             "provider": candidate.provider.value,
                             "source_snapshot_id": source.id,
-                            "projection_fingerprint": (
-                                candidate.projection_fingerprint
-                            ),
+                            "projection_fingerprint": candidate.projection_fingerprint,
                         },
                     )
         except Exception as error:
@@ -220,42 +193,35 @@ class SystemCatalogReplacementProjectionService:
                         diagnostics={
                             "provider": candidate.provider.value,
                             "source_snapshot_id": source.id,
-                            "projection_fingerprint": (
-                                candidate.projection_fingerprint
-                            ),
+                            "projection_fingerprint": candidate.projection_fingerprint,
                         },
                     )
             raise
-
         return [
             SystemCatalogCutoverSummary(
-                provider=candidate.provider,
-                catalog_id=candidate.catalog_id,
-                snapshot_id=snapshot_ids[candidate.catalog_id],
-                visible_count=candidate.visible_count,
-                hidden_count=candidate.hidden_count,
-                projection_fingerprint=candidate.projection_fingerprint,
+                provider=item.provider,
+                catalog_id=item.catalog_id,
+                snapshot_id=snapshot_ids[item.catalog_id],
+                visible_count=item.visible_count,
+                hidden_count=item.hidden_count,
+                projection_fingerprint=item.projection_fingerprint,
             )
-            for candidate in candidates
+            for item in candidates
         ]
 
     async def _prepare_candidates(
-        self,
-        *,
-        source: ModelMetadataSourceSnapshot,
-        providers: tuple[LLMProvider, ...],
+        self, *, source: ModelMetadataSourceSnapshot, providers: tuple[LLMProvider, ...]
     ) -> list[SystemCatalogCandidateSummary]:
-        """Create complete candidates for one captured source."""
+        """Capture one lifecycle date for projection and fingerprint together."""
+        effective_date = datetime.datetime.now(datetime.UTC).date()
         projections = [
             (
                 provider,
                 project_system_entries(
-                    provider=provider,
-                    source=source,
+                    provider=provider, source=source, effective_date=effective_date
                 ),
                 projection_fingerprint(
-                    provider=provider,
-                    source=source,
+                    provider=provider, source=source, effective_date=effective_date
                 ),
             )
             for provider in providers
@@ -265,18 +231,14 @@ class SystemCatalogReplacementProjectionService:
             provenance = CatalogProjectionProvenance(
                 source_snapshot_id=source.id,
                 projection_schema_version=MODEL_METADATA_PROJECTION_SCHEMA_VERSION,
-                runtime_profile_resolver_revision=(
-                    RUNTIME_MODEL_PROFILE_RESOLVER_REVISION
-                ),
-                pydantic_ai_version=importlib.metadata.version("pydantic-ai-slim"),
-                genai_prices_version=importlib.metadata.version("genai-prices"),
+                runtime_profile_resolver_revision=RUNTIME_MODEL_PROFILE_RESOLVER_REVISION,
+                pydantic_ai_version=_adapter_version(provider),
+                genai_prices_version=None,
                 projection_fingerprint=fingerprint,
             )
             async with self.session_manager() as session:
                 catalog = await self.catalog_repository.ensure_system_catalog(
-                    session,
-                    provider=provider,
-                    purpose=LLMCatalogPurpose.CONVERSATION,
+                    session, provider=provider, purpose=LLMCatalogPurpose.CONVERSATION
                 )
                 candidate_id = await self.catalog_repository.create_candidate_snapshot(
                     session,
@@ -286,12 +248,13 @@ class SystemCatalogReplacementProjectionService:
                         "source_kind": source.source_kind,
                         "source_snapshot_id": source.id,
                         "projection_fingerprint": fingerprint,
-                        "resolver_revision": (RUNTIME_MODEL_PROFILE_RESOLVER_REVISION),
+                        "resolver_revision": RUNTIME_MODEL_PROFILE_RESOLVER_REVISION,
+                        "effective_date": effective_date.isoformat(),
                     },
                     provenance=provenance,
                     catalog_configuration_version=None,
                 )
-            visible_count = sum(
+            visible = sum(
                 entry.visibility_status == LLMCatalogEntryVisibility.SELECTABLE
                 for entry in entries
             )
@@ -301,8 +264,8 @@ class SystemCatalogReplacementProjectionService:
                     catalog_id=catalog.id,
                     candidate_snapshot_id=candidate_id,
                     expected_current_snapshot_id=catalog.current_snapshot_id,
-                    visible_count=visible_count,
-                    hidden_count=len(entries) - visible_count,
+                    visible_count=visible,
+                    hidden_count=len(entries) - visible,
                     projection_fingerprint=fingerprint,
                 )
             )
@@ -313,25 +276,25 @@ def project_system_entries(
     *,
     provider: LLMProvider,
     source: ModelMetadataSourceSnapshot,
+    effective_date: datetime.date,
 ) -> list[LLMCatalogEntryCreate]:
-    """Project one system provider through the shared runtime resolver."""
-    source_provider = _find_source_provider(source.payload, provider=provider)
-    if source_provider is None:
+    """Project source-owned system inventory without price or name capability gates."""
+    if provider not in _SYSTEM_PROVIDERS:
+        raise ValueError("Provider does not have a system metadata source.")
+    models = system_catalog_models(source.payload, provider=provider)
+    if not models:
         raise ModelMetadataProjectionError(
             f"The model metadata source is missing provider {provider.value}."
-        )
-    if not source_provider.models:
-        raise ModelMetadataProjectionError(
-            f"The model metadata source provider {provider.value} has no models."
         )
     return [
         _project_system_model(
             provider=provider,
-            source_provider=source_provider,
-            model=model,
+            identifier=item.execution_model_identifier,
+            model=item.source_model,
             source=source,
+            effective_date=effective_date,
         )
-        for model in source_provider.models
+        for item in models
     ]
 
 
@@ -343,38 +306,18 @@ def project_integration_replacement_entries(
     source: ModelMetadataSourceSnapshot | None,
     provider_listing_source: str,
 ) -> list[LLMCatalogEntryCreate]:
-    """Project provider-visible models without making source matching a gate."""
+    """Publish every valid provider-visible identifier with presence-aware facts."""
     entries: list[LLMCatalogEntryCreate] = []
     for candidate in candidates:
-        source_match = (
-            lookup_source_model(
-                source.payload,
-                provider=provider,
-                model_identifier=candidate.model_identifier,
-            )
-            if source is not None
-            else None
+        source_model = ModelMetadataService.lookup(
+            source, provider=provider, model_identifier=candidate.model_identifier
         )
-        source_model = source_match.model if source_match is not None else None
-        resolution = resolve_runtime_model_profile(
+        capabilities = project_capabilities(
             provider=provider,
-            model=candidate.model_identifier,
-            profile_model=candidate.model_identifier,
-            assembly_metadata=ModelAssemblyMetadata(
-                model_developer=candidate.model_developer,
-                model_family=candidate.model_family,
-                capabilities=candidate.normalized_capabilities,
-            ),
-            context_window=(
-                source_model.context_window if source_model is not None else None
-            ),
-            context_window_explicit=source_model is not None,
+            exact_model=candidate.model_identifier,
             source_model=source_model,
-        )
-        capabilities = _merge_provider_listing_capabilities(
-            candidate=candidate,
-            resolved=resolution.normalized_capabilities,
-            source_match=source_match,
+            evidence=candidate.capability_evidence,
+            model_developer=candidate.model_developer,
         )
         entries.append(
             LLMCatalogEntryCreate(
@@ -391,24 +334,34 @@ def project_integration_replacement_entries(
                 publisher=candidate.model_developer.value,
                 family=candidate.model_family,
                 source_metadata={
-                    "source_kind": source.source_kind if source is not None else None,
-                    "source_snapshot_id": source.id if source is not None else None,
-                    "source_hash": source.source_hash if source is not None else None,
-                    "source_provider_id": (
-                        source_match.provider.id if source_match is not None else None
-                    ),
-                    "source_model_id": (
-                        source_match.model.id if source_match is not None else None
-                    ),
+                    "source_kind": source.source_kind if source else None,
+                    "source_snapshot_id": source.id if source else None,
+                    "source_hash": source.source_hash if source else None,
+                    "source_provider_id": source_model.provider
+                    if source_model
+                    else None,
+                    "source_model_id": source_model.source_key
+                    if source_model
+                    else None,
                     "provider_listing_source": provider_listing_source,
                     "provider_metadata": candidate.source_metadata,
+                    "capability_evidence": (
+                        candidate.capability_evidence.model_dump(mode="json")
+                        if candidate.capability_evidence is not None
+                        else None
+                    ),
                 },
                 projection_metadata={
-                    "matched": source_match is not None,
-                    "resolver_revision": resolution.resolver_revision,
-                    "runtime_model_kind": resolution.model_kind,
-                    "native_protocol": resolution.protocol,
+                    "matched": source_model is not None,
+                    "resolver_revision": RUNTIME_MODEL_PROFILE_RESOLVER_REVISION,
+                    "capability_projection_revision": CAPABILITY_PROJECTION_REVISION,
+                    "native_protocol": protocol_for_provider(
+                        provider=provider, model=candidate.model_identifier
+                    ),
                     "freshness_rank": model_freshness_rank(candidate.model_identifier),
+                    "diagnostics": list(source_model.reasoning.diagnostics)
+                    if source_model
+                    else [],
                 },
                 hidden_reason=None,
             )
@@ -416,148 +369,44 @@ def project_integration_replacement_entries(
     return entries
 
 
-def _merge_provider_listing_capabilities(
-    *,
-    candidate: NormalizedModelCandidate,
-    resolved: ModelCapabilities,
-    source_match: SourceModelMatch | None,
-) -> ModelCapabilities:
-    """Intersect provider-visible evidence with shared runtime compatibility."""
-    if candidate.provider in {LLMProvider.XAI, LLMProvider.XAI_OAUTH}:
-        return _merge_xai_listing_capabilities(
-            candidate=candidate,
-            resolved=resolved,
-        )
-    runtime = resolved
-    listing = candidate.normalized_capabilities
-    merged = runtime.model_copy(deep=True)
-    if listing.context_window.default_input_tokens is not None:
-        merged.context_window.default_input_tokens = (
-            listing.context_window.default_input_tokens
-        )
-    if listing.context_window.max_input_tokens is not None:
-        merged.context_window.max_input_tokens = listing.context_window.max_input_tokens
-    elif source_match is not None:
-        merged.context_window.max_input_tokens = source_match.model.context_window
-    merged.context_window.max_output_tokens = listing.context_window.max_output_tokens
-    if listing.modalities.input:
-        merged.modalities.input = [
-            modality
-            for modality in merged.modalities.input
-            if modality in listing.modalities.input
-        ]
-    if listing.modalities.output:
-        merged.modalities.output = [
-            modality
-            for modality in merged.modalities.output
-            if modality in listing.modalities.output
-        ]
-    merged.tool_calling.supported = (
-        merged.tool_calling.supported and listing.tool_calling.supported
+def _adapter_version(provider: LLMProvider) -> str | None:
+    return (
+        None
+        if provider in {LLMProvider.OPENAI, LLMProvider.CHATGPT_OAUTH}
+        else importlib.metadata.version("pydantic-ai-slim")
     )
-    if listing.tool_calling.parallel_tool_calls is not None:
-        merged.tool_calling.parallel_tool_calls = (
-            listing.tool_calling.parallel_tool_calls
-            if merged.tool_calling.supported
-            else False
-        )
-    if listing.tool_calling.strict_json_schema is not None:
-        merged.tool_calling.strict_json_schema = (
-            listing.tool_calling.strict_json_schema
-            and merged.tool_calling.strict_json_schema is True
-        )
-    merged.reasoning.supported = (
-        merged.reasoning.supported and listing.reasoning.supported
-    )
-    if listing.reasoning.effort_levels:
-        merged.reasoning.effort_levels = [
-            effort
-            for effort in merged.reasoning.effort_levels
-            if effort in listing.reasoning.effort_levels
-        ]
-    elif not merged.reasoning.supported:
-        merged.reasoning.effort_levels = []
-    merged.reasoning.summaries = listing.reasoning.summaries
-    merged.built_in_tools.supported = [
-        tool
-        for tool in merged.built_in_tools.supported
-        if tool in listing.built_in_tools.supported
-    ]
-    merged.parameters = ModelParameterCapabilities(
-        temperature=(merged.parameters.temperature and listing.parameters.temperature),
-        max_output_tokens=(
-            merged.parameters.max_output_tokens and listing.parameters.max_output_tokens
-        ),
-        top_p=merged.parameters.top_p and listing.parameters.top_p,
-        top_k=merged.parameters.top_k and listing.parameters.top_k,
-        stop_sequences=(
-            merged.parameters.stop_sequences and listing.parameters.stop_sequences
-        ),
-    )
-    if listing.compatibility.provider_family is not None:
-        merged.compatibility.provider_family = listing.compatibility.provider_family
-    if listing.compatibility.responses_api is not None:
-        merged.compatibility.responses_api = listing.compatibility.responses_api
-    if listing.compatibility.unsupported_media_policy is not None:
-        merged.compatibility.unsupported_media_policy = (
-            listing.compatibility.unsupported_media_policy
-        )
-    return merged
 
 
-def _merge_xai_listing_capabilities(
-    *,
-    candidate: NormalizedModelCandidate,
-    resolved: ModelCapabilities,
-) -> ModelCapabilities:
-    """Narrow Grok only with facts actually supplied by its listing API."""
-    merged = resolved.model_copy(deep=True)
-    listing = candidate.normalized_capabilities
-    metadata = candidate.source_metadata or {}
-    if listing.context_window.max_input_tokens is not None:
-        merged.context_window.max_input_tokens = listing.context_window.max_input_tokens
-    if "supports_reasoning_effort" in metadata:
-        merged.reasoning.supported = (
-            merged.reasoning.supported and listing.reasoning.supported
-        )
-    if not merged.reasoning.supported:
-        merged.reasoning.effort_levels = []
-    elif "reasoning_efforts" in metadata:
-        merged.reasoning.effort_levels = [
-            effort
-            for effort in merged.reasoning.effort_levels
-            if effort in listing.reasoning.effort_levels
-        ]
-    if metadata.get("supports_backend_search") is False:
-        merged.built_in_tools.supported = [
-            tool for tool in merged.built_in_tools.supported if tool != "web_search"
-        ]
-    if listing.compatibility.responses_api is not None:
-        merged.compatibility.responses_api = listing.compatibility.responses_api
-    merged.compatibility.provider_family = listing.compatibility.provider_family
-    return merged
+def _fingerprint(value: dict[str, object]) -> str:
+    return hashlib.sha256(
+        json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
 
 
 def projection_fingerprint(
     *,
     provider: LLMProvider,
     source: ModelMetadataSourceSnapshot,
+    effective_date: datetime.date,
 ) -> str:
-    """Fingerprint source, resolver, dependency, and projection policy authority."""
-    value = {
-        "provider": provider.value,
-        "purpose": LLMCatalogPurpose.CONVERSATION.value,
-        "source_snapshot_id": source.id,
-        "source_hash": source.source_hash,
-        "source_schema_version": source.source_schema_version,
-        "genai_prices_version": importlib.metadata.version("genai-prices"),
-        "pydantic_ai_version": importlib.metadata.version("pydantic-ai-slim"),
-        "resolver_revision": RUNTIME_MODEL_PROFILE_RESOLVER_REVISION,
-        "projection_schema_version": MODEL_METADATA_PROJECTION_SCHEMA_VERSION,
-        "projection_policy_revision": MODEL_METADATA_PROJECTION_POLICY_REVISION,
-    }
-    encoded = json.dumps(value, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+    """Fingerprint all source, interpreter, transport and lifecycle inputs."""
+    return _fingerprint(
+        {
+            "provider": provider.value,
+            "purpose": LLMCatalogPurpose.CONVERSATION.value,
+            "source_snapshot_id": source.id,
+            "source_hash": source.source_hash,
+            "source_kind": source.source_kind,
+            "source_schema_version": source.source_schema_version,
+            "source_interpreter_revision": source.payload.interpreter_version,
+            "pydantic_ai_version": _adapter_version(provider),
+            "resolver_revision": RUNTIME_MODEL_PROFILE_RESOLVER_REVISION,
+            "capability_projection_revision": CAPABILITY_PROJECTION_REVISION,
+            "projection_schema_version": MODEL_METADATA_PROJECTION_SCHEMA_VERSION,
+            "projection_policy_revision": MODEL_METADATA_PROJECTION_POLICY_REVISION,
+            "effective_date": effective_date.isoformat(),
+        }
+    )
 
 
 def integration_projection_fingerprint(
@@ -567,163 +416,132 @@ def integration_projection_fingerprint(
     entries: list[LLMCatalogEntryCreate],
     catalog_configuration_version: int,
 ) -> str:
-    """Fingerprint the complete persisted replacement projection inputs."""
-    value = {
-        "provider": provider.value,
-        "purpose": LLMCatalogPurpose.CONVERSATION.value,
-        "source_snapshot_id": source.id if source is not None else None,
-        "source_hash": source.source_hash if source is not None else None,
-        "source_schema_version": (
-            source.source_schema_version if source is not None else None
-        ),
-        "genai_prices_version": importlib.metadata.version("genai-prices"),
-        "pydantic_ai_version": importlib.metadata.version("pydantic-ai-slim"),
-        "resolver_revision": RUNTIME_MODEL_PROFILE_RESOLVER_REVISION,
-        "projection_schema_version": MODEL_METADATA_PROJECTION_SCHEMA_VERSION,
-        "projection_policy_revision": MODEL_METADATA_PROJECTION_POLICY_REVISION,
-        "catalog_configuration_version": catalog_configuration_version,
-        "entries": [
-            {
-                "provider": entry.provider.value,
-                "model_identifier": entry.provider_model_identifier,
-                "display_name": entry.display_name,
-                "capabilities": entry.normalized_capabilities,
-                "execution_options": entry.supported_execution_options,
-                "lifecycle_status": entry.lifecycle_status.value,
-                "visibility_status": entry.visibility_status.value,
-                "provider_integration_id": entry.provider_integration_id,
-                "publisher": entry.publisher,
-                "family": entry.family,
-                "source_metadata": entry.source_metadata,
-                "projection_metadata": entry.projection_metadata,
-                "hidden_reason": entry.hidden_reason,
-            }
-            for entry in sorted(
-                entries,
-                key=lambda entry: (
-                    entry.provider.value,
-                    entry.provider_model_identifier,
-                    entry.provider_integration_id or "",
-                ),
-            )
-        ],
-    }
-    encoded = json.dumps(value, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
-
-
-def _find_source_provider(
-    payload: ModelMetadataSourcePayload,
-    *,
-    provider: LLMProvider,
-) -> SourceProviderRecord | None:
-    source_provider_id = _SYSTEM_SOURCE_PROVIDERS.get(provider)
-    if source_provider_id is None:
-        raise ValueError("Provider does not have a system metadata source.")
-    return next(
-        (
-            source_provider
-            for source_provider in payload.providers
-            if source_provider.id == source_provider_id
-        ),
-        None,
+    """Fingerprint complete persisted facts rather than sparse normalized defaults."""
+    return _fingerprint(
+        {
+            "provider": provider.value,
+            "purpose": LLMCatalogPurpose.CONVERSATION.value,
+            "source_snapshot_id": source.id if source else None,
+            "source_hash": source.source_hash if source else None,
+            "source_kind": source.source_kind if source else None,
+            "source_schema_version": source.source_schema_version if source else None,
+            "source_interpreter_revision": source.payload.interpreter_version
+            if source
+            else None,
+            "pydantic_ai_version": _adapter_version(provider),
+            "resolver_revision": RUNTIME_MODEL_PROFILE_RESOLVER_REVISION,
+            "capability_projection_revision": CAPABILITY_PROJECTION_REVISION,
+            "projection_schema_version": MODEL_METADATA_PROJECTION_SCHEMA_VERSION,
+            "projection_policy_revision": MODEL_METADATA_PROJECTION_POLICY_REVISION,
+            "catalog_configuration_version": catalog_configuration_version,
+            "entries": [
+                dataclasses.asdict(entry)
+                for entry in sorted(
+                    entries,
+                    key=lambda entry: (
+                        entry.provider.value,
+                        entry.provider_model_identifier,
+                        entry.provider_integration_id or "",
+                    ),
+                )
+            ],
+        }
     )
 
 
 def _project_system_model(
     *,
     provider: LLMProvider,
-    source_provider: SourceProviderRecord,
-    model: SourceModelRecord,
+    identifier: str,
+    model: CatalogSourceModel,
     source: ModelMetadataSourceSnapshot,
+    effective_date: datetime.date,
 ) -> LLMCatalogEntryCreate:
-    hidden_reason = _hidden_reason(provider=provider, model=model)
-    resolution = resolve_runtime_model_profile(
-        provider=provider,
-        model=model.id,
-        profile_model=model.id,
-        assembly_metadata=None,
-        context_window=model.context_window,
-        context_window_explicit=True,
-        source_model=model,
+    deprecated = False
+    if model.facts.deprecation_date.value is not None:
+        try:
+            deprecated = (
+                datetime.date.fromisoformat(model.facts.deprecation_date.value)
+                <= effective_date
+            )
+        except ValueError as error:
+            raise ModelMetadataProjectionError(
+                "The source deprecation date is invalid."
+            ) from error
+    hidden_reason = _hidden_reason(
+        provider=provider, model=model, deprecated=deprecated
     )
-    visibility = (
-        LLMCatalogEntryVisibility.HIDDEN
-        if hidden_reason is not None
-        else LLMCatalogEntryVisibility.SELECTABLE
+    capabilities = project_capabilities(
+        provider=provider,
+        exact_model=identifier,
+        source_model=model,
+        evidence=None,
+        model_developer=_developer(provider),
     )
     return LLMCatalogEntryCreate(
         provider=provider,
-        provider_model_identifier=model.id,
-        display_name=model.name or model.id,
-        normalized_capabilities=resolution.normalized_capabilities.model_dump(
-            mode="json"
-        ),
+        provider_model_identifier=identifier,
+        display_name=model.facts.display_name.value or identifier,
+        normalized_capabilities=capabilities.model_dump(mode="json"),
         supported_execution_options=(
-            [option.value for option in _openai_supported_execution_options(model.id)]
-            if provider is LLMProvider.OPENAI
+            [option.value for option in _openai_supported_execution_options(identifier)]
+            if provider == LLMProvider.OPENAI
             else []
         ),
-        lifecycle_status=(
-            LLMModelLifecycleStatus.DEPRECATED
-            if model.deprecated is True
-            else LLMModelLifecycleStatus.ACTIVE
-        ),
-        visibility_status=visibility,
+        lifecycle_status=LLMModelLifecycleStatus.DEPRECATED
+        if deprecated
+        else LLMModelLifecycleStatus.ACTIVE,
+        visibility_status=LLMCatalogEntryVisibility.HIDDEN
+        if hidden_reason
+        else LLMCatalogEntryVisibility.SELECTABLE,
         provider_integration_id=None,
         publisher=_developer(provider).value,
-        family=_family(model.id),
+        family=None,
         source_metadata={
             "source_kind": source.source_kind,
-            "source_provider_id": source_provider.id,
-            "source_model_id": model.id,
+            "source_provider_id": model.provider,
+            "source_model_id": model.source_key,
             "source_hash": source.source_hash,
-            "context_window": model.context_window,
-            "deprecated": model.deprecated,
+            "deprecation_date": model.facts.deprecation_date.value,
+            "facts": model.facts.model_dump(mode="json"),
         },
         projection_metadata={
             "projection_mode": "replacement",
-            "resolver_revision": resolution.resolver_revision,
-            "freshness_rank": model_freshness_rank(model.id),
-            "runtime_model_kind": resolution.model_kind,
-            "native_protocol": resolution.protocol,
+            "resolver_revision": RUNTIME_MODEL_PROFILE_RESOLVER_REVISION,
+            "capability_projection_revision": CAPABILITY_PROJECTION_REVISION,
+            "freshness_rank": model_freshness_rank(identifier),
+            "native_protocol": protocol_for_provider(
+                provider=provider, model=identifier
+            ),
+            "effective_date": effective_date.isoformat(),
+            "diagnostics": list(model.reasoning.diagnostics),
         },
         hidden_reason=hidden_reason,
     )
 
 
 def _hidden_reason(
-    *,
-    provider: LLMProvider,
-    model: SourceModelRecord,
+    *, provider: LLMProvider, model: CatalogSourceModel, deprecated: bool
 ) -> str | None:
-    if model.deprecated is True:
+    if deprecated:
         return "deprecated"
-    identifier = model.id.lower()
-    blocked_fragments = (
-        "embedding",
-        "moderation",
-        "realtime",
-        "transcribe",
-        "transcription",
-        "tts",
-        "whisper",
-        "image",
-    )
-    if any(fragment in identifier for fragment in blocked_fragments):
-        return "unsupported_model_kind"
-    match provider:
-        case LLMProvider.OPENAI:
-            if not identifier.startswith(("chatgpt-", "gpt-", "o1", "o3", "o4")):
-                return "unsupported_model_family"
-        case LLMProvider.ANTHROPIC:
-            if not identifier.startswith("claude-"):
-                return "unsupported_model_family"
-        case LLMProvider.GOOGLE_GEMINI:
-            if not identifier.startswith(("gemini-", "gemma-")):
-                return "unsupported_model_family"
-        case _:
-            raise ValueError("Provider does not have a system metadata projection.")
+    facts = model.facts
+    if facts.mode.value not in {"chat", "responses"}:
+        return (
+            "unsupported_model_kind"
+            if facts.mode.state == "value"
+            else "conversation_support_unknown"
+        )
+    if facts.output_modalities.state == "value" and "text" not in (
+        facts.output_modalities.value or ()
+    ):
+        return "unsupported_output_modality"
+    if (
+        provider == LLMProvider.OPENAI
+        and facts.supported_endpoints.state == "value"
+        and "/v1/responses" not in (facts.supported_endpoints.value or ())
+    ):
+        return "unsupported_endpoint"
     return None
 
 
@@ -737,10 +555,3 @@ def _developer(provider: LLMProvider) -> LLMModelDeveloper:
             return LLMModelDeveloper.GOOGLE
         case _:
             raise ValueError("Provider does not have a system metadata projection.")
-
-
-def _family(model_id: str) -> str:
-    parts = model_id.split("-")
-    if len(parts) >= 2 and parts[0] in {"claude", "gemini"}:
-        return "-".join(parts[:2])
-    return parts[0]

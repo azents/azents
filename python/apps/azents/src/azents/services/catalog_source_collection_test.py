@@ -7,9 +7,11 @@ import anyio
 import httpx2
 import pytest
 
-from azents.services.catalog_source_collection import (
+from azents.core.model_catalog_source import (
     CATALOG_SOURCE_KEY,
     CATALOG_SOURCE_KIND,
+)
+from azents.services.catalog_source_collection import (
     CatalogCollectionPolicy,
     CatalogSourceCollector,
     validate_catalog_source_url,

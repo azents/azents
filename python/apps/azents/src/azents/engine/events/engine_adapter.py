@@ -15,6 +15,7 @@ from fastapi import Depends
 from openai import AsyncOpenAI
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.builtin_tools import builtin_tool_configurable
 from azents.core.credentials import ChatGPTOAuthSecrets, XaiOAuthSecrets
 from azents.core.enums import (
     AgentRunPhase,
@@ -27,7 +28,7 @@ from azents.core.image_generation_config import (
 )
 from azents.core.model_pricing import (
     CapturedModelPricing,
-    normalize_genai_model_pricing,
+    normalize_model_pricing,
 )
 from azents.core.openai_client_config import openai_responses_client_config
 from azents.core.tools import TurnContext
@@ -69,6 +70,10 @@ from azents.engine.events.filters import (
     PostLowerFilterPipeline,
 )
 from azents.engine.events.model_file_materializer import ModelFileMaterializer
+from azents.engine.events.model_support_contract import (
+    resolve_model_support_context,
+    saved_builtin_tool_allowed,
+)
 from azents.engine.events.openai_responses import (
     OpenAIResponsesLowerer,
     OpenAIResponsesModelAdapter,
@@ -152,6 +157,7 @@ from azents.engine.model_factory_types import ModelSDKFactories
 from azents.engine.model_stream import ModelStreamWatchdog, get_model_stream_watchdog
 from azents.engine.run.builtin_tools import (
     ClientBuiltinToolImplementationUnavailableError,
+    UnsupportedRequiredBuiltinToolError,
     resolve_builtin_tools,
 )
 from azents.engine.run.client_tool_compatibility import (
@@ -813,7 +819,13 @@ class AgentEngineAdapter:
             resolved_builtin_tools = resolve_builtin_tools(
                 selected=request.builtin_tools,
                 provider=request.provider,
-                supported=request.model_capabilities.built_in_tools.supported,
+                supported=[
+                    tool.name
+                    for tool in request.builtin_tools
+                    if builtin_tool_configurable(
+                        request.model_capabilities, tool=tool.name
+                    )
+                ],
             )
             client_builtin_tools: list[FunctionTool] = []
             for tool in resolved_builtin_tools.client_executed:
@@ -1002,6 +1014,26 @@ class AgentEngineAdapter:
                         "tool_count": len(provider_visible_tool_names),
                     },
                 )
+            if request.model_capabilities.semantic_contract is not None:
+                builtin_context = resolve_model_support_context(
+                    request.model_capabilities,
+                    requested_effort=request.reasoning_effort,
+                    function_tools=any(
+                        catalog.wire_dialects[name] == "json_function"
+                        for name in provider_visible_tool_names
+                    ),
+                )
+                for tool in resolved_builtin_tools.client_executed:
+                    # The saved row is projected for this provider's execution
+                    # owner; hosted image denial cannot override a client row.
+                    if not saved_builtin_tool_allowed(
+                        request.model_capabilities,
+                        tool=tool.name,
+                        context=builtin_context,
+                    ):
+                        raise UnsupportedRequiredBuiltinToolError(
+                            f"Required builtin tool is not supported: {tool.name}"
+                        )
             system_prompt_result = build_system_prompt(
                 agent_prompt=request.agent_prompt,
                 static_toolkit_prompts=catalog.static_prompt_fragment_inputs_for(
@@ -1432,13 +1464,12 @@ async def _capture_model_pricing(
         provider=provider,
         model_identifier=model_identifier,
     )
-    return normalize_genai_model_pricing(
+    return normalize_model_pricing(
         provider=provider,
         model_identifier=model_identifier,
         source_snapshot_id=snapshot.id if snapshot is not None else None,
         source_hash=snapshot.source_hash if snapshot is not None else None,
-        source_provider=metadata.provider if metadata is not None else None,
-        source_model=metadata.model if metadata is not None else None,
+        source_model=metadata,
         request_timestamp=datetime.datetime.now(datetime.UTC),
     )
 

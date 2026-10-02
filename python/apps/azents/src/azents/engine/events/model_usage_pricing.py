@@ -102,6 +102,16 @@ def _decode_usage_billing_details(raw: Mapping[str, object]) -> _UsageBillingDet
     unknown_media = any(
         raw.get(key) not in (None, 0) for key in ("audio_tokens", "image_tokens")
     )
+    malformed_details = any(
+        raw.get(key) is not None and not is_string_object_dict(raw[key])
+        for key in (
+            "input_tokens_details",
+            "prompt_tokens_details",
+            "output_tokens_details",
+            "completion_tokens_details",
+            "cache_creation",
+        )
+    )
     return _UsageBillingDetails(
         cache_write_5m_tokens=write_5m.value,
         cache_write_1h_tokens=write_1h.value,
@@ -110,6 +120,7 @@ def _decode_usage_billing_details(raw: Mapping[str, object]) -> _UsageBillingDet
         output_audio_tokens=output_audio.value,
         output_image_tokens=output_image.value,
         unknown_billable_components=unknown_media
+        or malformed_details
         or any(quantity.invalid for quantity in quantities),
     )
 

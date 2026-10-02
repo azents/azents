@@ -1,4 +1,4 @@
-"""Operation-local reads of the validated generic model metadata authority."""
+"""Operation-local reads of the selected descriptive model source."""
 
 import dataclasses
 from collections.abc import Sequence
@@ -8,24 +8,24 @@ from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import LLMProvider
-from azents.core.model_metadata_source import SourceModelMatch, lookup_source_model
+from azents.core.model_catalog_identity import lookup_catalog_model
+from azents.core.model_catalog_source import CATALOG_SOURCE_KEY, CatalogSourceModel
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.model_metadata_source import ModelMetadataSourceRepository
 from azents.repos.model_metadata_source_data import ModelMetadataSourceSnapshot
-from azents.services.model_metadata_source import GENAI_PRICES_SOURCE_KEY
 
 
 @dataclasses.dataclass(frozen=True)
 class CapturedContextSource:
-    """One captured context authority, including an explicitly absent source."""
+    """One local context capture, including an explicitly absent source."""
 
     snapshot: ModelMetadataSourceSnapshot | None
 
 
 @dataclasses.dataclass(frozen=True)
 class ModelMetadataService:
-    """Capture local validated metadata without source or provider fetches."""
+    """Read stored new-source evidence, never a remote or retired source."""
 
     session_manager: Annotated[
         SessionManager[AsyncSession], Depends(get_session_manager)
@@ -35,17 +35,16 @@ class ModelMetadataService:
     ]
 
     async def capture(self) -> ModelMetadataSourceSnapshot | None:
-        """Capture the explicitly selected generic source snapshot."""
+        """Capture only the explicitly selected new source family."""
         async with self.session_manager() as session:
             return await self.source_snapshot_repository.get_current(
-                session,
-                source_key=GENAI_PRICES_SOURCE_KEY,
+                session, source_key=CATALOG_SOURCE_KEY
             )
 
     async def capture_for_context(
         self, *, capability_maximums: Sequence[int | None]
     ) -> ModelMetadataSourceSnapshot | None:
-        """Read fallback metadata only when a saved maximum needs supplementation."""
+        """Skip optional source work when every saved maximum is already known."""
         if all(maximum is not None for maximum in capability_maximums):
             return None
         return await self.capture()
@@ -56,14 +55,12 @@ class ModelMetadataService:
         *,
         provider: LLMProvider,
         model_identifier: str,
-    ) -> SourceModelMatch | None:
-        """Resolve one semantic model from a captured generic source snapshot."""
+    ) -> CatalogSourceModel | None:
+        """Resolve exact adopted source addressing without provider/name inference."""
         if snapshot is None:
             return None
-        return lookup_source_model(
-            snapshot.payload,
-            provider=provider,
-            model_identifier=model_identifier,
+        return lookup_catalog_model(
+            snapshot.payload, provider=provider, model_identifier=model_identifier
         )
 
     @staticmethod
@@ -73,10 +70,11 @@ class ModelMetadataService:
         provider: LLMProvider,
         model_identifier: str,
     ) -> int | None:
-        """Read one positive source maximum from a captured local snapshot."""
-        match = ModelMetadataService.lookup(
-            snapshot,
-            provider=provider,
-            model_identifier=model_identifier,
+        """Read an explicit positive input maximum from one immutable capture."""
+        model = ModelMetadataService.lookup(
+            snapshot, provider=provider, model_identifier=model_identifier
         )
-        return match.model.context_window if match is not None else None
+        if model is None:
+            return None
+        maximum = model.facts.max_input_tokens.value
+        return maximum if maximum is not None and maximum > 0 else None

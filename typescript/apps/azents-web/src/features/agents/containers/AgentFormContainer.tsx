@@ -3,7 +3,7 @@
 import { useForm } from "@mantine/form";
 import { useEffect, useMemo, useState } from "react";
 import {
-  normalizeReasoningEffort,
+  normalizeReasoningEffortForCapabilities,
   reasoningEffortLevels,
 } from "@/shared/lib/reasoning-effort";
 import { AgentForm } from "../components/AgentForm";
@@ -65,11 +65,9 @@ export function AgentFormContainer(props: AgentFormProps): React.ReactElement {
       const mainOption = agent.selectable_model_options.find(
         (option) => option.label === agent.main_model_label,
       );
-      const defaultReasoningEffort = normalizeReasoningEffort(
+      const defaultReasoningEffort = normalizeReasoningEffortForCapabilities(
         agent.model_parameters?.reasoning_effort ?? null,
-        reasoningEffortLevels(
-          mainOption?.candidates[0]?.model_selection.normalized_capabilities,
-        ),
+        mainOption?.candidates[0]?.model_selection.normalized_capabilities,
       );
       form.setValues({
         name: agent.name,
@@ -122,11 +120,9 @@ export function AgentFormContainer(props: AgentFormProps): React.ReactElement {
       main_model_label: mainModelLabel,
       lightweight_model_label:
         props.workspaceModelSettings.default_lightweight_model_label ?? null,
-      reasoning_effort: normalizeReasoningEffort(
+      reasoning_effort: normalizeReasoningEffortForCapabilities(
         null,
-        reasoningEffortLevels(
-          mainOption?.candidates[0]?.normalized_capabilities,
-        ),
+        mainOption?.candidates[0]?.normalized_capabilities,
       ),
     });
     form.resetDirty();
@@ -147,18 +143,19 @@ export function AgentFormContainer(props: AgentFormProps): React.ReactElement {
   );
 
   useEffect(() => {
-    const normalizedEffort = normalizeReasoningEffort(
+    const normalizedEffort = normalizeReasoningEffortForCapabilities(
       form.values.reasoning_effort ?? null,
-      selectedModelEffortLevels,
+      selectedMainModelOption?.candidates[0]?.normalized_capabilities,
     );
     if (form.values.reasoning_effort !== normalizedEffort) {
       form.setFieldValue("reasoning_effort", normalizedEffort);
     }
-  }, [form, form.values.reasoning_effort, selectedModelEffortLevels]);
+  }, [form, form.values.reasoning_effort, selectedMainModelOption?.candidates]);
 
   const imageCatalogs = useImageGenerationCatalogs(
     props.handle,
     form.values.selectable_model_options,
+    form.values.reasoning_effort ?? null,
   );
 
   return (

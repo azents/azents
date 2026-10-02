@@ -4,7 +4,7 @@ import dataclasses
 import datetime
 from collections.abc import AsyncGenerator, Sequence
 from contextlib import asynccontextmanager
-from typing import ClassVar
+from typing import ClassVar, Literal
 from unittest.mock import AsyncMock
 
 import pytest
@@ -12,7 +12,11 @@ from azcommon.result import Failure, Success
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.agent import BuiltinToolConfig, SelectableModelSettings
+from azents.core.agent import (
+    BuiltinToolConfig,
+    ModelParameters,
+    SelectableModelSettings,
+)
 from azents.core.credentials import ApiKeySecrets
 from azents.core.engine_tool_state import (
     AgentsAppendixDedupeState,
@@ -30,6 +34,14 @@ from azents.core.enums import (
 )
 from azents.core.inference_profile import RequestedInferenceProfile
 from azents.core.llm_catalog import ModelReasoningEffort
+from azents.core.model_capability_contract import (
+    BuiltinToolSupport,
+    CapabilitySupport,
+    SupportPredicate,
+)
+from azents.core.model_capability_evidence import ProviderCapabilityEvidence
+from azents.core.model_capability_projection import project_capabilities
+from azents.core.model_catalog_source import CatalogFact
 from azents.core.model_execution_options import ModelExecutionOptionId
 from azents.core.runtime_capabilities import RuntimeCapabilityResolver
 from azents.core.tools import (
@@ -40,8 +52,10 @@ from azents.core.tools import (
     ToolkitProvider,
     TurnContext,
 )
+from azents.engine.events.openai_responses import OpenAIResponsesLowerer
 from azents.engine.run.contracts import ToolkitBinding
 from azents.engine.run.input import InputMessage, InvalidModelParameters, InvokeInput
+from azents.engine.run.types import BuiltinToolSpec
 from azents.engine.tools.builtin import BuiltinToolkitProvider
 from azents.engine.tools.claude_rules import ClaudeRulesToolkitProvider
 from azents.engine.tools.dynamic_worktree import (
@@ -527,6 +541,209 @@ def _make_dynamic_worktree_provider() -> DynamicWorktreeToolkitProvider:
 
 class TestResolveInvokeInput:
     """resolve_invoke_input tests."""
+
+    @pytest.mark.parametrize("builtin", ["web_search", "image_generation"])
+    async def test_conditional_builtin_setting_reaches_existing_catalog_preparation(
+        self,
+        builtin: Literal["web_search", "image_generation"],
+    ) -> None:
+        agent = _make_agent(
+            reasoning_supported=True, effort_levels=[ModelReasoningEffort.HIGH]
+        )
+        caps = project_capabilities(
+            provider=LLMProvider.OPENAI,
+            exact_model="gpt-4o",
+            source_model=None,
+            model_developer=None,
+            evidence=ProviderCapabilityEvidence(
+                reasoning=CatalogFact(state="value", value=True),
+                reasoning_efforts=CatalogFact(
+                    state="value", value=(ModelReasoningEffort.HIGH,)
+                ),
+            ),
+        )
+        assert caps.semantic_contract is not None
+        caps.semantic_contract = caps.semantic_contract.model_copy(
+            update={
+                "built_in_tools": (
+                    BuiltinToolSupport(
+                        tool=builtin,
+                        support=CapabilitySupport(
+                            state="conditional",
+                            origin="explicit",
+                            predicate=SupportPredicate(
+                                reasoning_efforts=("none",), function_tools=None
+                            ),
+                        ),
+                    ),
+                )
+            }
+        )
+        caps.built_in_tools.supported = []
+        agent.model_parameters = ModelParameters(
+            reasoning_effort=ModelReasoningEffort.HIGH
+        )
+        agent.model_selection.normalized_capabilities = caps
+        for option in agent.selectable_model_options:
+            for candidate in option.candidates:
+                candidate.model_selection.normalized_capabilities = caps
+                candidate.settings.builtin_tools = [
+                    BuiltinToolConfig(name=builtin, config={})
+                ]
+        agent_repository = AsyncMock()
+        agent_repository.get_by_id.return_value = agent
+        integration_repository = AsyncMock()
+        integration_repository.get_by_id_with_secrets.return_value = _make_integration()
+        result = await resolve_invoke_input(
+            InvokeInput(agent_id="agent-1", session_id="session-1", messages=[]),
+            agent_repository=agent_repository,
+            integration_repository=integration_repository,
+            session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
+            exchange_file_service=AsyncMock(),
+            model_file_service=AsyncMock(),
+            image_generation_catalog_service=(
+                image_catalog_service := _make_image_generation_catalog_service()
+            ),
+            model_metadata_service=make_test_model_metadata_service(snapshot=None),
+        )
+        assert isinstance(result, Success)
+        assert result.value.reasoning_effort == ModelReasoningEffort.HIGH
+        image_catalog_service.validate_runtime.assert_awaited_once()
+        catalog_args = image_catalog_service.validate_runtime.call_args.kwargs
+        assert catalog_args["image_generation_supported"] is (
+            builtin == "image_generation"
+        )
+        assert catalog_args["integration_enabled"] is True
+        assert catalog_args["settings"].builtin_tools == [
+            BuiltinToolConfig(name=builtin, config={})
+        ]
+        if builtin == "image_generation":
+            # EngineAdapter's actual SDK-boundary test covers the subsequent
+            # client-owned dispatch rejection without routing it as hosted.
+            return
+        lowerer = OpenAIResponsesLowerer(
+            provider=LLMProvider.OPENAI,
+            model=result.value.model,
+            credential_kwargs={},
+            model_capabilities=caps,
+            supported_execution_options=[],
+            enabled_execution_options=[],
+            reasoning_effort=result.value.reasoning_effort,
+            tools=None,
+            hosted_tools=[BuiltinToolSpec(name="web_search", config={})],
+        )
+        with pytest.raises(ValueError, match="Required builtin tool is not supported"):
+            lowerer.lower([], model=result.value.model)
+
+    async def test_v2_agent_effort_is_rejected_instead_of_silently_omitted(
+        self,
+    ) -> None:
+        agent = _make_agent()
+        caps = project_capabilities(
+            provider=LLMProvider.OPENAI,
+            exact_model="gpt-4o",
+            source_model=None,
+            model_developer=None,
+            evidence=ProviderCapabilityEvidence(
+                reasoning=CatalogFact(state="value", value=True),
+                reasoning_efforts=CatalogFact(state="value", value=()),
+            ),
+        )
+        agent.model_parameters = ModelParameters(
+            reasoning_effort=ModelReasoningEffort.HIGH
+        )
+        agent.model_selection.normalized_capabilities = caps
+        for option in agent.selectable_model_options:
+            for candidate in option.candidates:
+                candidate.model_selection.normalized_capabilities = caps
+        agent_repository = AsyncMock()
+        agent_repository.get_by_id.return_value = agent
+        integration_repository = AsyncMock()
+        integration_repository.get_by_id_with_secrets.return_value = _make_integration()
+        result = await resolve_invoke_input(
+            InvokeInput(agent_id="agent-1", session_id="session-1", messages=[]),
+            agent_repository=agent_repository,
+            integration_repository=integration_repository,
+            session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
+            exchange_file_service=AsyncMock(),
+            model_file_service=AsyncMock(),
+            image_generation_catalog_service=_make_image_generation_catalog_service(),
+            model_metadata_service=make_test_model_metadata_service(snapshot=None),
+        )
+        assert result == Failure(
+            ReasoningEffortUnsupported(
+                model_target_label="default", reasoning_effort=ModelReasoningEffort.HIGH
+            )
+        )
+        assert agent.model_parameters.reasoning_effort is ModelReasoningEffort.HIGH
+
+    async def test_v2_sampling_condition_is_checked_during_profile_preparation(
+        self,
+    ) -> None:
+        agent = _make_agent(
+            reasoning_supported=True, effort_levels=[ModelReasoningEffort.HIGH]
+        )
+        caps = project_capabilities(
+            provider=LLMProvider.OPENAI,
+            exact_model="gpt-4o",
+            source_model=None,
+            model_developer=None,
+            evidence=ProviderCapabilityEvidence(
+                reasoning=CatalogFact(state="value", value=True),
+                reasoning_efforts=CatalogFact(
+                    state="value", value=(ModelReasoningEffort.HIGH,)
+                ),
+            ),
+        )
+        assert caps.semantic_contract is not None
+        caps.semantic_contract = caps.semantic_contract.model_copy(
+            update={
+                "parameters": caps.semantic_contract.parameters.model_copy(
+                    update={
+                        "temperature": CapabilitySupport(
+                            state="conditional",
+                            origin="explicit",
+                            predicate=SupportPredicate(
+                                reasoning_efforts=("none",), function_tools=None
+                            ),
+                        )
+                    }
+                )
+            }
+        )
+        agent.model_parameters = ModelParameters(temperature=0.3)
+        agent.model_selection.normalized_capabilities = caps
+        for option in agent.selectable_model_options:
+            for candidate in option.candidates:
+                candidate.model_selection.normalized_capabilities = caps
+        agent_repository = AsyncMock()
+        agent_repository.get_by_id.return_value = agent
+        integration_repository = AsyncMock()
+        integration_repository.get_by_id_with_secrets.return_value = _make_integration()
+        result = await resolve_invoke_input_with_profile(
+            InvokeInput(agent_id="agent-1", session_id="session-1", messages=[]),
+            context_source=None,
+            requested_profile=RequestedInferenceProfile(
+                model_target_label="default",
+                reasoning_effort=ModelReasoningEffort.HIGH,
+                enabled_execution_options=[],
+            ),
+            agent_repository=agent_repository,
+            integration_repository=integration_repository,
+            session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
+            exchange_file_service=AsyncMock(),
+            model_file_service=AsyncMock(),
+            image_generation_catalog_service=_make_image_generation_catalog_service(),
+            model_metadata_service=make_test_model_metadata_service(snapshot=None),
+        )
+        assert result == Failure(
+            InvalidModelParameters(
+                agent_id="agent-1",
+                errors=[
+                    "The selected request does not satisfy temperature conditions."
+                ],
+            )
+        )
 
     async def test_resolves_run_request_from_agent_snapshot(self) -> None:
         """Build RunRequest from Agent snapshot and integration."""

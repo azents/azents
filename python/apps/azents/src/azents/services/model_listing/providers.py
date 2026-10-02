@@ -67,6 +67,8 @@ from azents.core.llm_catalog import (
     ModelReasoningEffort,
     ModelToolCallingCapabilities,
 )
+from azents.core.model_capability_evidence import ProviderCapabilityEvidence
+from azents.core.model_catalog_source import CatalogFact
 from azents.core.model_execution_options import (
     ModelExecutionOptionId,
     validate_supported_execution_options,
@@ -182,7 +184,7 @@ _VERTEX_MODEL_ADAPTER = TypeAdapter[dict[str, object]](dict[str, object])
 class _XaiOAuthReasoningEffortPayload(BaseModel):
     """Validated xAI OAuth reasoning-effort metadata."""
 
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="allow", strict=True)
 
     id: str | None = None
     value: str | None = None
@@ -192,7 +194,7 @@ class _XaiOAuthReasoningEffortPayload(BaseModel):
 class _XaiOAuthModelPayload(BaseModel):
     """Validated xAI OAuth model-list entry."""
 
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="allow", strict=True)
 
     id: str
     model: str | None = None
@@ -210,9 +212,412 @@ class _XaiOAuthModelPayload(BaseModel):
 class _XaiOAuthModelsPayload(BaseModel):
     """Validated xAI OAuth model-list response."""
 
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="allow", strict=True)
 
     data: list[_XaiOAuthModelPayload]
+
+
+class _ListingEvidencePayload(BaseModel):
+    """Decode consumed fields while retaining opaque provider extensions."""
+
+    model_config = ConfigDict(extra="allow", strict=True)
+
+
+class _ChatGPTReasoningLevel(_ListingEvidencePayload):
+    effort: str
+
+
+class _ChatGPTEvidencePayload(_ListingEvidencePayload):
+    context_window: int | None = None
+    max_context_window: int | None = None
+    input_modalities: list[str] | None = None
+    supported_reasoning_levels: list[_ChatGPTReasoningLevel] | None = None
+    default_reasoning_level: str | None = None
+    supports_parallel_tool_calls: bool | None = None
+    supports_reasoning_summaries: bool | None = None
+    experimental_supported_tools: list[str] | None = None
+
+
+class _KimiEvidencePayload(_ListingEvidencePayload):
+    context_length: int | None = None
+    supports_reasoning: bool | None = None
+    supports_image_in: bool | None = None
+    supports_video_in: bool | None = None
+
+
+class _BedrockEvidencePayload(_ListingEvidencePayload):
+    inputModalities: list[str] | None = None
+    outputModalities: list[str] | None = None
+
+
+class _VertexEvidencePayload(_ListingEvidencePayload):
+    inputTokenLimit: int | None = None
+    outputTokenLimit: int | None = None
+
+
+class _OpenRouterArchitectureEvidence(_ListingEvidencePayload):
+    input_modalities: list[str] | None = None
+    output_modalities: list[str] | None = None
+
+
+class _OpenRouterTopProviderEvidence(_ListingEvidencePayload):
+    max_completion_tokens: int | None = None
+
+
+class _OpenRouterEvidencePayload(_ListingEvidencePayload):
+    context_length: int | None = None
+    architecture: _OpenRouterArchitectureEvidence | None = None
+    top_provider: _OpenRouterTopProviderEvidence | None = None
+    supported_parameters: list[str] | None = None
+
+
+class _XaiApiCapabilitiesEvidence(_ListingEvidencePayload):
+    reasoning: bool | None = None
+    reasoning_effort: bool | list[str] | None = None
+    default_reasoning_effort: str | None = None
+
+
+class _XaiApiEvidencePayload(_ListingEvidencePayload):
+    context_length: int | None = None
+    capabilities: _XaiApiCapabilitiesEvidence | None = None
+
+
+def _listing_fact[T](payload: BaseModel, field: str, value: T | None) -> CatalogFact[T]:
+    """Capture presence at ingress, before candidate serialization."""
+    if field not in payload.model_fields_set:
+        return CatalogFact(state="absent", value=None)
+    if value is None:
+        return CatalogFact(state="null", value=None)
+    return CatalogFact(state="value", value=value)
+
+
+def _nested_listing_fact[T](
+    payload: BaseModel,
+    field: str,
+    nested: BaseModel | None,
+    nested_field: str,
+    value: T | None,
+) -> CatalogFact[T]:
+    """Preserve an explicitly unknown parent without fabricating child defaults."""
+    if field not in payload.model_fields_set:
+        return CatalogFact(state="absent", value=None)
+    if nested is None:
+        return CatalogFact(state="null", value=None)
+    return _listing_fact(nested, nested_field, value)
+
+
+def _modality_values(values: list[str] | None) -> tuple[str, ...] | None:
+    """Normalize token spelling without discarding future modality declarations."""
+    return tuple(value.lower() for value in values) if values is not None else None
+
+
+def _effort_values(values: list[str] | None) -> tuple[ModelReasoningEffort, ...] | None:
+    """Preserve canonical controls without adding levels for future provider values."""
+    if values is None:
+        return None
+    canonical = {effort.value: effort for effort in ModelReasoningEffort}
+    return tuple(canonical[value] for value in values if value in canonical)
+
+
+def _canonical_effort(value: str | None) -> ModelReasoningEffort | None:
+    """Keep unsupported provider defaults unknown rather than choosing another level."""
+    return next(
+        (effort for effort in ModelReasoningEffort if effort.value == value), None
+    )
+
+
+def _effort_diagnostics(values: list[str]) -> dict[str, object]:
+    """Explain filtering of unsupported wire labels while retaining raw metadata."""
+    unsupported = [value for value in values if _canonical_effort(value) is None]
+    return (
+        {
+            "capability_evidence_diagnostics": {
+                "unsupported_reasoning_effort_labels": unsupported,
+            }
+        }
+        if unsupported
+        else {}
+    )
+
+
+def _chatgpt_capability_evidence(
+    model: dict[str, object],
+) -> ProviderCapabilityEvidence:
+    """Keep account declarations independent of model-name and SDK profile rules."""
+    payload = _ChatGPTEvidencePayload.model_validate(model)
+    levels = _effort_values(
+        [level.effort for level in payload.supported_reasoning_levels]
+        if payload.supported_reasoning_levels is not None
+        else None
+    )
+    context = _listing_fact(payload, "context_window", payload.context_window)
+    return ProviderCapabilityEvidence(
+        default_input_tokens=context,
+        max_input_tokens=(
+            _listing_fact(payload, "max_context_window", payload.max_context_window)
+            if "max_context_window" in payload.model_fields_set
+            else context
+        ),
+        input_modalities=_listing_fact(
+            payload, "input_modalities", _modality_values(payload.input_modalities)
+        ),
+        parallel_function_calling=_listing_fact(
+            payload,
+            "supports_parallel_tool_calls",
+            payload.supports_parallel_tool_calls,
+        ),
+        reasoning=(
+            CatalogFact(state="value", value=True)
+            if levels
+            else CatalogFact(state="absent", value=None)
+        ),
+        reasoning_efforts=_listing_fact(payload, "supported_reasoning_levels", levels),
+        default_reasoning_effort=_listing_fact(
+            payload,
+            "default_reasoning_level",
+            _canonical_effort(payload.default_reasoning_level),
+        ),
+        reasoning_summaries=_listing_fact(
+            payload,
+            "supports_reasoning_summaries",
+            payload.supports_reasoning_summaries,
+        ),
+        client_image_generation=(
+            CatalogFact(state="value", value=True)
+            if payload.experimental_supported_tools is not None
+            and "image_generation" in payload.experimental_supported_tools
+            else CatalogFact(state="absent", value=None)
+        ),
+    )
+
+
+def _kimi_capability_evidence(model: dict[str, object]) -> ProviderCapabilityEvidence:
+    """Record Kimi's independent flags; missing media/effort facts are not denials."""
+    payload = _KimiEvidencePayload.model_validate(model)
+    return ProviderCapabilityEvidence(
+        max_input_tokens=_listing_fact(
+            payload, "context_length", payload.context_length
+        ),
+        image_input=_listing_fact(
+            payload, "supports_image_in", payload.supports_image_in
+        ),
+        video_input=_listing_fact(
+            payload, "supports_video_in", payload.supports_video_in
+        ),
+        reasoning=_listing_fact(
+            payload, "supports_reasoning", payload.supports_reasoning
+        ),
+    )
+
+
+def _bedrock_capability_evidence(
+    model: dict[str, object],
+) -> ProviderCapabilityEvidence:
+    """Summary media is evidence; synthetic reasoning/function defaults are not."""
+    payload = _BedrockEvidencePayload.model_validate(model)
+    return ProviderCapabilityEvidence(
+        input_modalities=_listing_fact(
+            payload, "inputModalities", _modality_values(payload.inputModalities)
+        ),
+        output_modalities=_listing_fact(
+            payload, "outputModalities", _modality_values(payload.outputModalities)
+        ),
+    )
+
+
+def _vertex_capability_evidence(model: dict[str, object]) -> ProviderCapabilityEvidence:
+    """Publisher token fields do not imply placeholder capability denials."""
+    payload = _VertexEvidencePayload.model_validate(model)
+    return ProviderCapabilityEvidence(
+        max_input_tokens=_listing_fact(
+            payload, "inputTokenLimit", payload.inputTokenLimit
+        ),
+        max_output_tokens=_listing_fact(
+            payload, "outputTokenLimit", payload.outputTokenLimit
+        ),
+    )
+
+
+def _openrouter_capability_evidence(
+    model: dict[str, object],
+) -> ProviderCapabilityEvidence:
+    """Use complete parameter declarations without inventing model effort levels."""
+    payload = _OpenRouterEvidencePayload.model_validate(model)
+    parameters = payload.supported_parameters
+
+    def parameter(*names: str) -> CatalogFact[bool]:
+        return _listing_fact(
+            payload,
+            "supported_parameters",
+            any(name in parameters for name in names)
+            if parameters is not None
+            else None,
+        )
+
+    architecture = payload.architecture
+    top = payload.top_provider
+    effort_parameter = parameter("reasoning", "reasoning_effort")
+    return ProviderCapabilityEvidence(
+        max_input_tokens=_listing_fact(
+            payload, "context_length", payload.context_length
+        ),
+        max_output_tokens=_nested_listing_fact(
+            payload,
+            "top_provider",
+            top,
+            "max_completion_tokens",
+            top.max_completion_tokens if top is not None else None,
+        ),
+        input_modalities=_nested_listing_fact(
+            payload,
+            "architecture",
+            architecture,
+            "input_modalities",
+            _modality_values(architecture.input_modalities)
+            if architecture is not None
+            else None,
+        ),
+        output_modalities=_nested_listing_fact(
+            payload,
+            "architecture",
+            architecture,
+            "output_modalities",
+            _modality_values(architecture.output_modalities)
+            if architecture is not None
+            else None,
+        ),
+        function_calling=parameter("tools"),
+        parallel_function_calling=parameter("parallel_tool_calls"),
+        structured_response=parameter("structured_outputs"),
+        reasoning=parameter("reasoning", "reasoning_effort", "include_reasoning"),
+        reasoning_efforts=(
+            CatalogFact(state="value", value=())
+            if effort_parameter.state == "value" and effort_parameter.value is False
+            else CatalogFact(state="null", value=None)
+            if effort_parameter.state == "null"
+            else CatalogFact(state="absent", value=None)
+        ),
+        temperature=parameter("temperature"),
+        top_p=parameter("top_p"),
+        top_k=parameter("top_k"),
+        stop_sequences=parameter("stop"),
+        max_output_parameter=parameter("max_tokens", "max_completion_tokens"),
+    )
+
+
+def _xai_api_capability_evidence(
+    extra: dict[str, object] | None,
+) -> ProviderCapabilityEvidence:
+    """Validate SDK model extensions without transferring opaque request hints."""
+    payload = _XaiApiEvidencePayload.model_validate(extra if extra is not None else {})
+    caps = payload.capabilities
+    raw_efforts = caps.reasoning_effort if caps is not None else None
+    effort_fact: CatalogFact[tuple[ModelReasoningEffort, ...]]
+    if isinstance(raw_efforts, list):
+        effort_fact = _nested_listing_fact(
+            payload,
+            "capabilities",
+            caps,
+            "reasoning_effort",
+            _effort_values(raw_efforts),
+        )
+    elif raw_efforts is False:
+        effort_fact = CatalogFact(state="value", value=())
+    elif raw_efforts is True:
+        effort_fact = CatalogFact(state="absent", value=None)
+    else:
+        effort_fact = _nested_listing_fact(
+            payload, "capabilities", caps, "reasoning_effort", None
+        )
+    reasoning = _nested_listing_fact(
+        payload,
+        "capabilities",
+        caps,
+        "reasoning",
+        caps.reasoning if caps is not None else None,
+    )
+    if reasoning.state == "absent" and (raw_efforts is True or bool(effort_fact.value)):
+        reasoning = CatalogFact(state="value", value=True)
+    return ProviderCapabilityEvidence(
+        max_input_tokens=_listing_fact(
+            payload, "context_length", payload.context_length
+        ),
+        reasoning=reasoning,
+        reasoning_efforts=effort_fact,
+        default_reasoning_effort=_nested_listing_fact(
+            payload,
+            "capabilities",
+            caps,
+            "default_reasoning_effort",
+            _canonical_effort(caps.default_reasoning_effort)
+            if caps is not None
+            else None,
+        ),
+    )
+
+
+def _xai_oauth_capability_evidence(
+    payload: _XaiOAuthModelPayload,
+) -> ProviderCapabilityEvidence:
+    """Preserve proxy declarations without treating empty controls as no reasoning."""
+    levels = None
+    default = None
+    if payload.reasoning_efforts is not None:
+        values = []
+        defaults = []
+        for preset in payload.reasoning_efforts:
+            value = preset.id if preset.id is not None else preset.value
+            if value is None:
+                raise ValueError("Provider reasoning preset must contain an effort.")
+            effort = _canonical_effort(value)
+            if effort is not None:
+                values.append(effort)
+            if preset.default is True:
+                defaults.append(effort)
+        levels = tuple(values)
+        default = defaults[0] if len(defaults) == 1 else None
+    control = _listing_fact(
+        payload, "supports_reasoning_effort", payload.supports_reasoning_effort
+    )
+    effort_fact: CatalogFact[tuple[ModelReasoningEffort, ...]] = _listing_fact(
+        payload, "reasoning_efforts", levels
+    )
+    if (
+        effort_fact.state == "absent"
+        and control.state == "value"
+        and control.value is False
+    ):
+        effort_fact = CatalogFact(state="value", value=())
+    elif effort_fact.state == "absent" and control.state == "null":
+        effort_fact = CatalogFact(state="null", value=None)
+    backend = _listing_fact(payload, "api_backend", payload.api_backend)
+    return ProviderCapabilityEvidence(
+        max_input_tokens=_listing_fact(
+            payload, "context_window", payload.context_window
+        ),
+        reasoning=(
+            CatalogFact(state="value", value=True)
+            if payload.supports_reasoning_effort is True or bool(levels)
+            else CatalogFact(state="absent", value=None)
+        ),
+        reasoning_efforts=effort_fact,
+        default_reasoning_effort=(
+            CatalogFact(state="value", value=default)
+            if default is not None
+            else CatalogFact(state="null", value=None)
+            if payload.reasoning_efforts is not None
+            and any(preset.default is True for preset in payload.reasoning_efforts)
+            else CatalogFact(state="absent", value=None)
+        ),
+        web_search=_listing_fact(
+            payload, "supports_backend_search", payload.supports_backend_search
+        ),
+        responses_api=(
+            CatalogFact(state="value", value=backend.value == "responses")
+            if backend.state == "value"
+            else CatalogFact(state=backend.state, value=None)
+        ),
+    )
 
 
 class ListingProviderError(Exception):
@@ -530,6 +935,7 @@ def _candidate_from_bedrock_summary(
         model_display_name=_str_value(summary, "modelName") or model_id,
         model_developer=developer,
         model_family=_bedrock_family(model_id),
+        capability_evidence=_bedrock_capability_evidence(summary),
         normalized_capabilities=ModelCapabilities(
             modalities=modalities,
             tool_calling=ModelToolCallingCapabilities(supported=True),
@@ -651,6 +1057,7 @@ def _candidate_from_chatgpt_model(
         model_display_name=display_name,
         model_developer=LLMModelDeveloper.OPENAI,
         model_family=_chatgpt_family(model_id),
+        capability_evidence=_chatgpt_capability_evidence(model),
         normalized_capabilities=capabilities,
         supported_execution_options=_chatgpt_supported_execution_options(model),
         model_snapshot={
@@ -685,7 +1092,13 @@ def _chatgpt_source_metadata(model: dict[str, object]) -> dict[str, object]:
         "tool_mode",
         "visibility",
     )
-    return {key: model[key] for key in keys if key in model}
+    payload = _ChatGPTEvidencePayload.model_validate(model)
+    return {
+        **{key: model[key] for key in keys if key in model},
+        **_effort_diagnostics(
+            [preset.effort for preset in payload.supported_reasoning_levels or []]
+        ),
+    }
 
 
 async def _list_kimi_models(
@@ -783,6 +1196,7 @@ def _candidate_from_kimi_model(
         model_display_name=display_name,
         model_developer=LLMModelDeveloper.MOONSHOT,
         model_family=_kimi_family(model_id),
+        capability_evidence=_kimi_capability_evidence(model),
         normalized_capabilities=capabilities,
         supported_execution_options=[],
         model_snapshot={
@@ -821,6 +1235,7 @@ async def _list_xai_api_key_models(
         _candidate_from_xai_api_key_model(
             model_id=model.id,
             created=model.created,
+            extra=model.model_extra,
             fetched_at=fetched_at,
         )
         for model in page.data
@@ -894,6 +1309,7 @@ def _candidate_from_xai_api_key_model(
     *,
     model_id: str,
     created: int,
+    extra: dict[str, object] | None,
     fetched_at: datetime,
 ) -> NormalizedModelCandidate:
     """Normalize one xAI developer API model."""
@@ -903,6 +1319,7 @@ def _candidate_from_xai_api_key_model(
         model_display_name=model_id,
         model_developer=LLMModelDeveloper.XAI,
         model_family=_xai_family(model_id),
+        capability_evidence=_xai_api_capability_evidence(extra),
         normalized_capabilities=_conservative_xai_capabilities(),
         supported_execution_options=[],
         model_snapshot={
@@ -912,9 +1329,34 @@ def _candidate_from_xai_api_key_model(
             "model_display_name": model_id,
             "model_developer": LLMModelDeveloper.XAI.value,
         },
-        source_metadata={"created": created},
+        source_metadata=_xai_api_source_metadata(created=created, extra=extra),
         last_refreshed_at=fetched_at,
     )
+
+
+def _xai_api_source_metadata(
+    *, created: int, extra: dict[str, object] | None
+) -> dict[str, object]:
+    """Persist only consumed model facts, not arbitrary SDK provider extensions."""
+    payload = _XaiApiEvidencePayload.model_validate(extra if extra is not None else {})
+    metadata: dict[str, object] = {"created": created}
+    if "context_length" in payload.model_fields_set:
+        metadata["context_length"] = payload.context_length
+    if "capabilities" in payload.model_fields_set:
+        metadata["capabilities"] = (
+            payload.capabilities.model_dump(
+                mode="json",
+                exclude_unset=True,
+                include={"reasoning", "reasoning_effort", "default_reasoning_effort"},
+            )
+            if payload.capabilities is not None
+            else None
+        )
+    if payload.capabilities is not None and isinstance(
+        payload.capabilities.reasoning_effort, list
+    ):
+        metadata.update(_effort_diagnostics(payload.capabilities.reasoning_effort))
+    return metadata
 
 
 async def _list_xai_oauth_models(
@@ -985,8 +1427,24 @@ def _candidate_from_xai_oauth_model(
     )
     source_metadata = model.model_dump(
         mode="json",
-        exclude_none=True,
-        exclude={"id", "model", "name"},
+        exclude_unset=True,
+        include={
+            "context_window": True,
+            "api_backend": True,
+            "supports_reasoning_effort": True,
+            "reasoning_efforts": {"__all__": {"id", "value", "default"}},
+            "supports_backend_search": True,
+            "auto_compact_threshold_percent": True,
+            "compaction_at_tokens": True,
+            "show_model_fingerprint": True,
+        },
+    )
+    raw_efforts = [
+        preset.id if preset.id is not None else preset.value
+        for preset in model.reasoning_efforts or []
+    ]
+    source_metadata.update(
+        _effort_diagnostics([value for value in raw_efforts if value is not None])
     )
     display_name = model.name or model.model or model.id
     return NormalizedModelCandidate(
@@ -995,6 +1453,7 @@ def _candidate_from_xai_oauth_model(
         model_display_name=display_name,
         model_developer=LLMModelDeveloper.XAI,
         model_family=_xai_family(model.id),
+        capability_evidence=_xai_oauth_capability_evidence(model),
         normalized_capabilities=capabilities,
         supported_execution_options=[],
         model_snapshot={
@@ -1128,15 +1587,7 @@ def _candidate_from_openrouter_model(
         ),
         reasoning=ModelReasoningCapabilities(
             supported=reasoning_supported,
-            effort_levels=(
-                [
-                    ModelReasoningEffort.LOW,
-                    ModelReasoningEffort.MEDIUM,
-                    ModelReasoningEffort.HIGH,
-                ]
-                if "reasoning_effort" in supported_parameters
-                else []
-            ),
+            effort_levels=[],
         ),
         built_in_tools=ModelBuiltInToolCapabilities(supported=["web_search"]),
         parameters=ModelParameterCapabilities(
@@ -1159,6 +1610,7 @@ def _candidate_from_openrouter_model(
         model_display_name=display_name,
         model_developer=developer,
         model_family=_openrouter_family(model_id),
+        capability_evidence=_openrouter_capability_evidence(model),
         normalized_capabilities=capabilities,
         supported_execution_options=[],
         model_snapshot={
@@ -1305,6 +1757,7 @@ def _candidate_from_vertex_model(
         model_display_name=display_name,
         model_developer=developer,
         model_family=_vertex_family(model_id),
+        capability_evidence=_vertex_capability_evidence(model),
         normalized_capabilities=ModelCapabilities(
             context_window=_vertex_context_window(model),
             modalities=ModelModalities(

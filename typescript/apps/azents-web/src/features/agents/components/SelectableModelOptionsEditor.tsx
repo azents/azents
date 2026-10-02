@@ -48,6 +48,7 @@ import {
 } from "@tabler/icons-react";
 import { useFormatter, useTranslations } from "next-intl";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { supportedBuiltinTools } from "@/shared/lib/model-capability-support";
 import { ModelCatalogPickerContainer } from "../containers/ModelCatalogPickerContainer";
 import {
   copyCompatiblePrimarySettings,
@@ -75,6 +76,7 @@ import type {
   SelectableModelCandidateFormValue,
   SelectableModelOptionFormValue,
 } from "../model-selection";
+import type { ModelReasoningEffort } from "@azents/public-client";
 import type { DragEndEvent } from "@dnd-kit/core";
 import type { ReactNode } from "react";
 
@@ -86,6 +88,7 @@ export interface SelectableModelOptionsEditorProps {
   mainModelLabel: string | null;
   lightweightModelLabel: string | null;
   defaultReasoningEffortControl?: ReactNode;
+  reasoningEffort?: ModelReasoningEffort | null;
   providerOptions: ProviderIntegrationOption[];
   canEdit: boolean;
   showValidationErrors?: boolean;
@@ -474,6 +477,7 @@ interface SelectableModelSettingsModalProps {
   opened: boolean;
   label: string;
   candidate: SelectableModelCandidateFormValue;
+  reasoningEffort: ModelReasoningEffort | null;
   imageGenerationCatalogStates: ReadonlyMap<
     string,
     ImageGenerationCatalogState
@@ -490,6 +494,7 @@ function SelectableModelSettingsModal({
   opened,
   label,
   candidate,
+  reasoningEffort,
   imageGenerationCatalogStates,
   canSyncImageCatalog,
   onClose,
@@ -504,8 +509,12 @@ function SelectableModelSettingsModal({
   const outputLimit =
     candidate.normalized_capabilities?.context_window?.max_output_tokens ??
     null;
-  const supportedTools =
-    candidate.normalized_capabilities?.built_in_tools?.supported ?? [];
+  const supportedTools = supportedBuiltinTools(
+    candidate.normalized_capabilities,
+    {
+      reasoningEffort,
+    },
+  );
   const imageGenerationEnabled =
     candidate.builtin_tools.includes("image_generation");
   const integrationId = candidate.model_provider_integration_id;
@@ -907,6 +916,7 @@ export function SelectableModelOptionsEditor({
   mainModelLabel,
   lightweightModelLabel,
   defaultReasoningEffortControl,
+  reasoningEffort = null,
   providerOptions,
   canEdit,
   showValidationErrors = false,
@@ -1043,7 +1053,9 @@ export function SelectableModelOptionsEditor({
     if (primary == null || target == null || primary.id === target.id) {
       return;
     }
-    const copied = copyCompatiblePrimarySettings(primary, target);
+    const copied = copyCompatiblePrimarySettings(primary, target, {
+      reasoningEffort,
+    });
     handleChangeOptions(
       updateCandidate(
         options,
@@ -1125,7 +1137,7 @@ export function SelectableModelOptionsEditor({
             }
             handleChangeOptions(
               updateCandidate(options, pickerTarget, (candidate) =>
-                selectCandidateModel(candidate, model),
+                selectCandidateModel(candidate, model, { reasoningEffort }),
               ),
             );
           }}
@@ -1138,6 +1150,7 @@ export function SelectableModelOptionsEditor({
           opened={settingsTarget != null}
           label={settings.option.label || t("newOption")}
           candidate={settings.candidate}
+          reasoningEffort={reasoningEffort}
           imageGenerationCatalogStates={imageGenerationCatalogStates}
           canSyncImageCatalog={canSyncImageCatalog}
           onClose={() => setSettingsTarget(null)}

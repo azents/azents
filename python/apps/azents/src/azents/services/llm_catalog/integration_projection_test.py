@@ -52,7 +52,7 @@ from azents.services.model_listing.data import (
     NormalizedModelCandidate,
 )
 from azents.services.model_metadata_source import (
-    GenAIPricesSourceAdapter,
+    CatalogSourceAdapter,
     ModelMetadataSourceSyncService,
 )
 
@@ -113,7 +113,7 @@ async def test_deterministic_integration_sync_does_not_require_source_authority(
             source_sync_service=ModelMetadataSourceSyncService(
                 session_manager=rdb_session_manager,
                 repository=ModelMetadataSourceRepository(),
-                source_adapter=AsyncMock(spec=GenAIPricesSourceAdapter),
+                source_adapter=AsyncMock(spec=CatalogSourceAdapter),
             ),
         ).sync_integration_catalog(
             integration_id=integration.id,
@@ -313,7 +313,7 @@ async def test_oauth_sync_refresh_preserves_generation_and_user_update_fence(
             source_sync_service=ModelMetadataSourceSyncService(
                 session_manager=rdb_session_manager,
                 repository=ModelMetadataSourceRepository(),
-                source_adapter=AsyncMock(spec=GenAIPricesSourceAdapter),
+                source_adapter=AsyncMock(spec=CatalogSourceAdapter),
             ),
         )
         if user_change_during_listing:
@@ -454,7 +454,7 @@ async def test_xai_failure_preserves_last_successful_snapshot(
             source_sync_service=ModelMetadataSourceSyncService(
                 session_manager=rdb_session_manager,
                 repository=ModelMetadataSourceRepository(),
-                source_adapter=AsyncMock(spec=GenAIPricesSourceAdapter),
+                source_adapter=AsyncMock(spec=CatalogSourceAdapter),
             ),
         )
         first = await service.sync_integration_catalog(
