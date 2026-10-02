@@ -444,6 +444,7 @@ class RunnerTransferManager:
                                 "operation_id": result.operation_id,
                                 "dispatch_id": result.dispatch_id,
                             },
+                            exc_info=True,
                         )
             raise
         finally:

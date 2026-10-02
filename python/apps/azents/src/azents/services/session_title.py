@@ -409,6 +409,7 @@ class SessionTitleService:
                                 "title_output_mode_transitioned": True,
                                 "title_output_contract_incompatibility": exc.kind,
                             },
+                            exc_info=True,
                         )
                         active_mode = TitleOutputMode.PLAIN_TEXT
                         compatibility_transitioned = True
@@ -430,6 +431,7 @@ class SessionTitleService:
                             ),
                             "title_output_contract_incompatibility": exc.kind,
                         },
+                        exc_info=True,
                     )
                     return None
                 except ModelProviderFailure as exc:
@@ -463,7 +465,8 @@ class SessionTitleService:
                             },
                         )
                         attempt_logger.warning(
-                            "Automatic session title output contract is unavailable"
+                            "Automatic session title output contract is unavailable",
+                            exc_info=True,
                         )
                         active_mode = TitleOutputMode.PLAIN_TEXT
                         compatibility_transitioned = True
@@ -490,7 +493,8 @@ class SessionTitleService:
                             },
                         )
                         attempt_logger.warning(
-                            "Automatic session title candidate quota failed"
+                            "Automatic session title candidate quota failed",
+                            exc_info=True,
                         )
                         if advanced is None:
                             return None
@@ -518,7 +522,8 @@ class SessionTitleService:
                         },
                     )
                     attempt_logger.warning(
-                        "Automatic session title provider attempt failed"
+                        "Automatic session title provider attempt failed",
+                        exc_info=True,
                     )
                     if not retry_available:
                         return None
@@ -548,6 +553,7 @@ class SessionTitleService:
                             "model_stream_deadline_seconds": exc.deadline_seconds,
                             "model_stream_elapsed_seconds": exc.elapsed_seconds,
                         },
+                        exc_info=True,
                     )
                     return None
                 except ModelCallError, ResponsesOutputError:

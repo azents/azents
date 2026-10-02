@@ -251,6 +251,7 @@ class DiscordGatewayManagerService:
                         _READINESS_TIMEOUT.total_seconds()
                     ),
                 },
+                exc_info=True,
             )
             await self._record_gap(
                 connection_id=connection_id,

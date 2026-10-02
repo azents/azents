@@ -306,6 +306,7 @@ def _log_runtime_web_container(
                 "container_name": name,
                 "diagnostic_error": type(error).__name__,
             },
+            exc_info=True,
         )
         return
     logger.warning(

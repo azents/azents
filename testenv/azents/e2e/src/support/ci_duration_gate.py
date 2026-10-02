@@ -69,6 +69,14 @@ class WorkflowRun:
 
 
 @dataclass(frozen=True)
+class CandidateReport:
+    """Candidate workflow run and its parsed report."""
+
+    run_id: int
+    report: dict[str, object]
+
+
+@dataclass(frozen=True)
 class LaneEvidence:
     """Blocking call totals plus non-blocking phase and wall diagnostics."""
 
@@ -560,7 +568,7 @@ def evaluate(
 
 def _candidate_report(
     repository: str, head_sha: str, work_dir: Path, command: Runner
-) -> tuple[int, dict[str, object]]:
+) -> CandidateReport:
     for run in _runs(repository, head_sha, command):
         if run.status != "completed":
             continue
@@ -586,7 +594,7 @@ def _candidate_report(
         except (EvidenceError, OSError):
             continue
         if report.get("head_sha") == head_sha and isinstance(report.get("lanes"), dict):
-            return run.run_id, report
+            return CandidateReport(run_id=run.run_id, report=report)
     raise EvidenceError("candidate_evidence_unavailable")
 
 
@@ -781,9 +789,11 @@ def recheck(repository: str, pull_number: int, work_dir: Path, command: Runner) 
     if not isinstance(head_sha, str) or not isinstance(base_sha, str):
         raise EvidenceError("invalid_pull_request")
     try:
-        run_id, report = _candidate_report(repository, head_sha, work_dir, command)
+        candidate = _candidate_report(repository, head_sha, work_dir, command)
     except (EvidenceError, OSError):
         return f"PR #{pull_number}: no duration evidence"
+    run_id = candidate.run_id
+    report = candidate.report
     candidate_target = f"https://github.com/{repository}/actions/runs/{run_id}"
     try:
         raw = report["lanes"]

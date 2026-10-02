@@ -7,7 +7,7 @@ Also validate background connection (__aenter__ -> update_context -> __aexit__).
 """
 
 import asyncio
-from typing import AsyncContextManager
+from typing import AsyncContextManager, NamedTuple
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx2 as httpx
@@ -28,10 +28,26 @@ from azents.engine.tools.gcp import (
 from azents.testing.types import is_object_factory
 
 
+class _ToolkitStateKey(NamedTuple):
+    """Stable identity for one in-memory Toolkit State entry."""
+
+    agent_id: str
+    session_id: str
+    toolkit_namespace: str
+    state_name: str
+
+
+class _McpToolListResult(NamedTuple):
+    """MCP discovery result returned by local test doubles."""
+
+    tools: list[McpBaseTool]
+    use_streamable_http: bool
+
+
 class _FakeToolkitStateHandle:
     """In-memory Toolkit State handle for tests."""
 
-    _states: dict[tuple[str, str, str, str], object] = {}
+    _states: dict[_ToolkitStateKey, object] = {}
 
     def __init__(self, identity: ToolkitStateIdentity) -> None:
         self.identity = identity
@@ -54,12 +70,12 @@ class _FakeToolkitStateHandle:
         """Clear stored Toolkit State."""
         cls._states.clear()
 
-    def _key(self) -> tuple[str, str, str, str]:
-        return (
-            self.identity.agent_id,
-            self.identity.session_id,
-            self.identity.toolkit_namespace,
-            self.identity.state_name,
+    def _key(self) -> _ToolkitStateKey:
+        return _ToolkitStateKey(
+            agent_id=self.identity.agent_id,
+            session_id=self.identity.session_id,
+            toolkit_namespace=self.identity.toolkit_namespace,
+            state_name=self.identity.state_name,
         )
 
 
@@ -249,10 +265,10 @@ class TestGcpToolkitUpdateContext:
             *,
             proxy_url: str | None = None,
             auth: object = None,
-        ) -> tuple[list[McpBaseTool], bool]:
+        ) -> _McpToolListResult:
             if "logging" in endpoint:
-                return [_make_mcp_tool("log_query")], False
-            return [_make_mcp_tool("metric_query")], False
+                return _McpToolListResult([_make_mcp_tool("log_query")], False)
+            return _McpToolListResult([_make_mcp_tool("metric_query")], False)
 
         with patch(
             "azents.engine.tools.gcp.mcp_list_tools",
@@ -400,11 +416,11 @@ class TestGcpToolkitConnectionFailure:
             *,
             proxy_url: str | None = None,
             auth: object = None,
-        ) -> tuple[list[McpBaseTool], bool]:
+        ) -> _McpToolListResult:
             nonlocal call_count
             call_count += 1
             if "logging" in endpoint:
-                return [_make_mcp_tool("log_query")], False
+                return _McpToolListResult([_make_mcp_tool("log_query")], False)
             msg = "Connection refused"
             raise ConnectionError(msg)
 
@@ -552,12 +568,12 @@ class TestGcpToolkitBackgroundConnect:
             *,
             proxy_url: str | None = None,
             auth: object = None,
-        ) -> tuple[list[McpBaseTool], bool]:
+        ) -> _McpToolListResult:
             refresh_started.set()
             await continue_refresh.wait()
             if "logging" in endpoint:
-                return [_make_mcp_tool("log_query")], False
-            return [_make_mcp_tool("metric_query")], False
+                return _McpToolListResult([_make_mcp_tool("log_query")], False)
+            return _McpToolListResult([_make_mcp_tool("metric_query")], False)
 
         with patch(
             "azents.engine.tools.gcp.mcp_list_tools",
@@ -593,9 +609,9 @@ class TestGcpToolkitBackgroundConnect:
             *,
             proxy_url: str | None = None,
             auth: object = None,
-        ) -> tuple[list[McpBaseTool], bool]:
+        ) -> _McpToolListResult:
             if "logging" in endpoint:
-                return [_make_mcp_tool("log_query")], False
+                return _McpToolListResult([_make_mcp_tool("log_query")], False)
             msg = "Connection refused"
             raise ConnectionError(msg)
 
@@ -621,10 +637,10 @@ class TestGcpToolkitBackgroundConnect:
 
         async def forever_list_tools(
             *args: object, **kwargs: object
-        ) -> tuple[list[McpBaseTool], bool]:
+        ) -> _McpToolListResult:
             started.set()
             await release.wait()
-            return ([], False)
+            return _McpToolListResult([], False)
 
         with patch(
             "azents.engine.tools.gcp.mcp_list_tools",

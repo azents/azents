@@ -141,6 +141,7 @@ def _sanitize_tool_call_arguments(arguments: str, *, tc_id: str) -> str:
         logger.warning(
             "Malformed tool call arguments sanitized",
             extra={"tool_call_id": tc_id, "raw_arguments": arguments[:200]},
+            exc_info=True,
         )
         return "{}"
     return arguments

@@ -3,6 +3,7 @@
 import datetime
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import NamedTuple
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -193,18 +194,22 @@ class _ToolWorkingSetStore(ToolWorkingSetStore):
         return ToolWorkingSetState()
 
 
+class _RepositoryFixture(NamedTuple):
+    """Compaction repository and assertion-visible collaborators."""
+
+    repository: CompactionOperationRepository
+    manager: _SessionManager
+    transcript: _TranscriptRepository
+    sessions: _AgentSessionRepository
+    completions: _ModelOperationCompletionRepository
+    working_set: _ToolWorkingSetStore
+
+
 def _repository(
     *,
     current: bool = True,
     completion_error: Exception | None = None,
-) -> tuple[
-    CompactionOperationRepository,
-    _SessionManager,
-    _TranscriptRepository,
-    _AgentSessionRepository,
-    _ModelOperationCompletionRepository,
-    _ToolWorkingSetStore,
-]:
+) -> _RepositoryFixture:
     """Build one focused completed-operation fixture."""
     manager = _SessionManager()
     transcript = _TranscriptRepository(manager)
@@ -216,19 +221,19 @@ def _repository(
         error=completion_error,
     )
     working_set = _ToolWorkingSetStore(manager, completions)
-    return (
-        CompactionOperationRepository(
+    return _RepositoryFixture(
+        repository=CompactionOperationRepository(
             session_manager=manager,
             transcript_repository=transcript,
             agent_session_repository=sessions,
             model_operation_completion_repository=completions,
             tool_working_set_store=working_set,
         ),
-        manager,
-        transcript,
-        sessions,
-        completions,
-        working_set,
+        manager=manager,
+        transcript=transcript,
+        sessions=sessions,
+        completions=completions,
+        working_set=working_set,
     )
 
 

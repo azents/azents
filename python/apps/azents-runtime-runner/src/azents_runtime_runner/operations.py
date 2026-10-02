@@ -419,6 +419,7 @@ class RunnerOperations:
                     "process_count": len(records),
                     "timeout_seconds": _PROCESS_CLOSE_TIMEOUT_SECONDS,
                 },
+                exc_info=True,
             )
         except asyncio.CancelledError:
             for task in tasks:
@@ -2142,6 +2143,7 @@ class RunnerOperations:
                             "reason": reason,
                             "timeout_seconds": _PROCESS_KILL_TIMEOUT_SECONDS,
                         },
+                        exc_info=True,
                     )
         finally:
             if not wait_task.done():

@@ -6,7 +6,7 @@ authentication and creates prompt correctly. Also validate background connection
 """
 
 import asyncio
-from typing import AsyncContextManager
+from typing import AsyncContextManager, NamedTuple
 from unittest.mock import AsyncMock, patch
 
 import httpx2 as httpx
@@ -21,10 +21,26 @@ from azents.engine.tools.aws import AwsCredentialProvider, AwsSigV4Auth, AwsTool
 from azents.testing.types import is_object_factory
 
 
+class _ToolkitStateKey(NamedTuple):
+    """Stable identity for one in-memory Toolkit State entry."""
+
+    agent_id: str
+    session_id: str
+    toolkit_namespace: str
+    state_name: str
+
+
+class _McpToolListResult(NamedTuple):
+    """MCP discovery result returned by local test doubles."""
+
+    tools: list[McpBaseTool]
+    use_streamable_http: bool
+
+
 class _FakeToolkitStateHandle:
     """In-memory Toolkit State handle for tests."""
 
-    _states: dict[tuple[str, str, str, str], object] = {}
+    _states: dict[_ToolkitStateKey, object] = {}
 
     def __init__(self, identity: ToolkitStateIdentity) -> None:
         self.identity = identity
@@ -47,12 +63,12 @@ class _FakeToolkitStateHandle:
         """Clear stored Toolkit State."""
         cls._states.clear()
 
-    def _key(self) -> tuple[str, str, str, str]:
-        return (
-            self.identity.agent_id,
-            self.identity.session_id,
-            self.identity.toolkit_namespace,
-            self.identity.state_name,
+    def _key(self) -> _ToolkitStateKey:
+        return _ToolkitStateKey(
+            agent_id=self.identity.agent_id,
+            session_id=self.identity.session_id,
+            toolkit_namespace=self.identity.toolkit_namespace,
+            state_name=self.identity.state_name,
         )
 
 
@@ -317,9 +333,9 @@ class TestAwsToolkitBackgroundConnect:
 
         async def slow_list_tools(
             *args: object, **kwargs: object
-        ) -> tuple[list[McpBaseTool], bool]:
+        ) -> _McpToolListResult:
             await connect_event.wait()
-            return mock_tools, False
+            return _McpToolListResult(mock_tools, False)
 
         with patch(
             "azents.engine.tools.aws.mcp_list_tools",
@@ -349,7 +365,7 @@ class TestAwsToolkitBackgroundConnect:
 
         async def failing_list_tools(
             *args: object, **kwargs: object
-        ) -> tuple[list[McpBaseTool], bool]:
+        ) -> _McpToolListResult:
             msg = "Connection refused"
             raise ConnectionError(msg)
 
@@ -376,10 +392,10 @@ class TestAwsToolkitBackgroundConnect:
 
         async def forever_list_tools(
             *args: object, **kwargs: object
-        ) -> tuple[list[McpBaseTool], bool]:
+        ) -> _McpToolListResult:
             started.set()
             await release.wait()
-            return ([], False)
+            return _McpToolListResult([], False)
 
         with patch(
             "azents.engine.tools.aws.mcp_list_tools",

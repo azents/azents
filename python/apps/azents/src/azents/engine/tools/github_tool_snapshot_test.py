@@ -2,7 +2,7 @@
 
 import asyncio
 from collections.abc import Awaitable, Callable
-from typing import AsyncContextManager
+from typing import AsyncContextManager, NamedTuple
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -24,10 +24,19 @@ from azents.testing.types import is_object_factory
 _GITHUB_MCP_URL = "https://api.githubcopilot.com/mcp/"
 
 
+class _ToolkitStateKey(NamedTuple):
+    """Stable identity for one in-memory Toolkit State entry."""
+
+    agent_id: str
+    session_id: str
+    toolkit_namespace: str
+    state_name: str
+
+
 class _FakeToolkitStateHandle:
     """In-memory Toolkit State handle for tests."""
 
-    _states: dict[tuple[str, str, str, str], object] = {}
+    _states: dict[_ToolkitStateKey, object] = {}
 
     def __init__(self, identity: ToolkitStateIdentity) -> None:
         """Create fake handle."""
@@ -50,11 +59,11 @@ class _FakeToolkitStateHandle:
     def save_state(cls, identity: ToolkitStateIdentity, state: object) -> None:
         """Seed state for identity."""
         cls._states[
-            (
-                identity.agent_id,
-                identity.session_id,
-                identity.toolkit_namespace,
-                identity.state_name,
+            _ToolkitStateKey(
+                agent_id=identity.agent_id,
+                session_id=identity.session_id,
+                toolkit_namespace=identity.toolkit_namespace,
+                state_name=identity.state_name,
             )
         ] = state
 
@@ -63,12 +72,12 @@ class _FakeToolkitStateHandle:
         """Clear stored Toolkit State."""
         cls._states.clear()
 
-    def _key(self) -> tuple[str, str, str, str]:
-        return (
-            self.identity.agent_id,
-            self.identity.session_id,
-            self.identity.toolkit_namespace,
-            self.identity.state_name,
+    def _key(self) -> _ToolkitStateKey:
+        return _ToolkitStateKey(
+            agent_id=self.identity.agent_id,
+            session_id=self.identity.session_id,
+            toolkit_namespace=self.identity.toolkit_namespace,
+            state_name=self.identity.state_name,
         )
 
 

@@ -2364,6 +2364,7 @@ def make_exec_command_tool(
             logger.warning(
                 "Runtime Runner process start operation failed",
                 extra={"agent_id": agent_id, "error": message},
+                exc_info=True,
             )
             raise FunctionToolError(message) from None
 
@@ -2439,6 +2440,7 @@ def make_write_stdin_tool(
             logger.warning(
                 "Runtime Runner process write operation failed",
                 extra={"agent_id": agent_id, "error": message},
+                exc_info=True,
             )
             raise FunctionToolError(message) from None
 
