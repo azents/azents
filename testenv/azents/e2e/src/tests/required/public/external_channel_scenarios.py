@@ -831,13 +831,6 @@ def _external_channel_input_evidence(
     include_pending: bool = True,
 ) -> list[dict[str, object]]:
     """Read logical External Channel input through public live and history APIs."""
-    history_response = requests.get(
-        f"{public_server_url}/chat/v1/sessions/{session_id}/history?limit=100",
-        headers={"Authorization": f"Bearer {token}"},
-        timeout=10,
-    )
-    history_response.raise_for_status()
-
     candidates: list[dict[str, object]] = []
     if include_pending:
         live_response = requests.get(
@@ -869,6 +862,14 @@ def _external_channel_input_evidence(
                         if presentation_item.get("type") == "external_channel_message":
                             candidates.append(presentation_item)
 
+    # Promotion moves input from the mailbox to history. Read the source first
+    # so a move between requests can overlap, but cannot hide the input in both.
+    history_response = requests.get(
+        f"{public_server_url}/chat/v1/sessions/{session_id}/history?limit=100",
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=10,
+    )
+    history_response.raise_for_status()
     history_payload = history_response.json()
     if isinstance(history_payload, dict):
         events = _object(history_payload).get("items")
@@ -908,6 +909,32 @@ def _external_channel_input_evidence(
             )
         logical_items[key] = evidence
     return list(logical_items.values())
+
+
+def _wait_for_single_external_channel_history_input(
+    *,
+    public_server_url: str,
+    token: str,
+    session_id: str,
+) -> dict[str, object]:
+    """Wait for durable input, then enforce exact logical message cardinality."""
+    evidence = _objects(
+        wait_until(
+            lambda: _external_channel_input_evidence(
+                public_server_url=public_server_url,
+                token=token,
+                session_id=session_id,
+                include_pending=False,
+            ),
+            timeout=30,
+            interval=0.2,
+            message="External Channel input was not promoted into Session history",
+        )
+    )
+    assert len(evidence) == 1, (
+        f"Expected one External Channel history input, observed {len(evidence)}"
+    )
+    return evidence[0]
 
 
 def _approval_request_id(slack_provider_fake_url: str) -> str:
@@ -4038,13 +4065,15 @@ def test_socket_mode_recovers_then_acknowledges_and_preserves_route(
         _headers=headers,
     )
     assert detail.id == socket_session.id
-    input_evidence = _external_channel_input_evidence(
+    input_evidence = _wait_for_single_external_channel_history_input(
         public_server_url=azents_public_server_url,
         token=token,
         session_id=socket_session.id,
     )
-    assert len(input_evidence) == 1
-    assert input_evidence[0]["provider"] == "slack"
+    assert input_evidence["provider"] == "slack"
+    assert input_evidence["external_message_id"] == (
+        f"slack:{socket_team_id}:{_CHANNEL_ID}:{root_timestamp}"
+    )
     expected_session_path = (
         f"/w/{handle}/agents/{agent_id}/sessions/{socket_session.id}"
     )
