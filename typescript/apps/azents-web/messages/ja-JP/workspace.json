@@ -1535,6 +1535,7 @@
     "toolLabel": "ツール",
     "toolPlaceholder": "ツールを選択してください",
     "nameLabel": "名前",
+    "mcpNamePlaceholder": "このMCP接続を識別する名前を入力してください",
     "descriptionLabel": "説明",
     "descriptionPlaceholder": "このツールキットの役割を簡単に説明してください",
     "allowedDomainsLabel": "許可ドメイン",
@@ -1555,8 +1556,8 @@
     "save": "保存",
     "create": "追加",
     "slugLabel": "スラグ",
-    "slugDescription": "ツール名のプレフィックスとして使用される一意の識別子",
-    "slugPlaceholder": "例: my-shell",
+    "slugDescription": "ツール名のプレフィックスに使う任意の基本エイリアスです。重複するエイリアスも使用できます。",
+    "slugPlaceholder": "名前から自動生成",
     "customPromptLabel": "カスタムプロンプト",
     "customPromptDescription": "システムメッセージに追加されるオプションのプロンプト",
     "customPromptPlaceholder": "このツールキット使用時のAIへの追加指示...",
@@ -1669,7 +1670,7 @@
       "reconnect": "再接続",
       "disconnect": "切断"
     },
-    "agentSlugDescription": "このエージェントで有効なツールキット内で一意にします。英小文字、数字、アンダースコアのみ使用できます。"
+    "agentSlugDescription": "ツール名のプレフィックスに使う任意の基本エイリアスです。実行時の最終名は自動的に一意になります。"
   },
   "dashboard": {
     "headline": "ワークスペース",

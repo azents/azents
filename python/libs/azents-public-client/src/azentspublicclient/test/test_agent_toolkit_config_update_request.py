@@ -35,7 +35,7 @@ class TestAgentToolkitConfigUpdateRequest(unittest.TestCase):
         model = AgentToolkitConfigUpdateRequest()
         if include_optional:
             return AgentToolkitConfigUpdateRequest(
-                slug = 'p0',
+                slug = '',
                 name = '',
                 description = '',
                 config = { },

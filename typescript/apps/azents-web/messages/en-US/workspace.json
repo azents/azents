@@ -1535,6 +1535,7 @@
     "toolLabel": "Tool",
     "toolPlaceholder": "Select a tool",
     "nameLabel": "Name",
+    "mcpNamePlaceholder": "Enter a name for this MCP connection",
     "descriptionLabel": "Description",
     "descriptionPlaceholder": "Briefly describe what this toolkit does",
     "allowedDomainsLabel": "Allowed Domains",
@@ -1555,8 +1556,8 @@
     "save": "Save",
     "create": "Add",
     "slugLabel": "Slug",
-    "slugDescription": "Unique identifier used as tool name prefix",
-    "slugPlaceholder": "e.g. my-shell",
+    "slugDescription": "Optional base alias used as the tool name prefix. Duplicate aliases are allowed.",
+    "slugPlaceholder": "Derived from Name",
     "customPromptLabel": "Custom Prompt",
     "customPromptDescription": "Optional prompt appended to the system message",
     "customPromptPlaceholder": "Additional instructions for the AI when using this toolkit...",
@@ -1669,7 +1670,7 @@
       "reconnect": "Reconnect",
       "disconnect": "Disconnect"
     },
-    "agentSlugDescription": "Unique within this agent’s effective toolkit namespace. Use lowercase letters, numbers, and underscores."
+    "agentSlugDescription": "Optional base alias used as the tool name prefix. Final runtime names stay unique automatically."
   },
   "dashboard": {
     "headline": "Workspace",

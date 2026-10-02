@@ -15,6 +15,7 @@ dependencies = [
     "python-on-whales==0.81.0",
     "selenium==4.48.0",
     "redis==8.1.0",
+    "mcp==2.2.0",
     # local dependencies
     "az-common",
     "azents-admin-client",

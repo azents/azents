@@ -23,7 +23,6 @@ from .data import (
     AgentToolkitCreate,
     DuplicateAgentToolkit,
     DuplicateScope,
-    DuplicateSlug,
     EffectiveToolkitConfig,
     EffectiveToolkitNamespaceMismatch,
     EffectiveToolkitNamespaceMissing,
@@ -84,72 +83,29 @@ class ToolkitRepository:
         self,
         session: AsyncSession,
         create: ToolkitCreate,
-    ) -> Result[ToolkitConfig, DuplicateSlug]:
+    ) -> ToolkitConfig:
         """Create Toolkit.
 
         :param session: Database session
         :param create: Create data
-        :return: Created Toolkit or error
+        :return: Created Toolkit
         """
-        try:
-            rdb_toolkit = RDBToolkitConfig(
-                workspace_id=create.workspace_id,
-                owner_agent_id=create.owner_agent_id,
-                toolkit_type=create.toolkit_type,
-                slug=create.slug,
-                name=create.name,
-                description=create.description,
-                config=create.config,
-                prompt=create.prompt,
-                encrypted_credentials=self._encrypt(create.credentials),
-                enabled=create.enabled,
-                always_expose_tools=create.always_expose_tools,
-            )
-            session.add(rdb_toolkit)
-            await session.flush()
-            return Success(self._build(rdb_toolkit))
-        except IntegrityError as e:
-            await session.rollback()
-            if is_constrained_by(
-                e,
-                RDBToolkitConfig.UQ_SHARED_WORKSPACE_SLUG.name or "",
-            ) or is_constrained_by(
-                e,
-                RDBToolkitConfig.UQ_OWNER_AGENT_SLUG.name or "",
-            ):
-                return Failure(
-                    DuplicateSlug(
-                        workspace_id=create.workspace_id,
-                        owner_agent_id=create.owner_agent_id,
-                        slug=create.slug,
-                    )
-                )
-            raise
-
-    async def has_ownership_slug_conflict(
-        self,
-        session: AsyncSession,
-        *,
-        workspace_id: str,
-        owner_agent_id: str | None,
-        toolkit_id: str,
-        slug: str,
-    ) -> bool:
-        """Return whether another Toolkit in the ownership scope uses the Slug."""
-        owner_condition = (
-            RDBToolkitConfig.owner_agent_id.is_(None)
-            if owner_agent_id is None
-            else RDBToolkitConfig.owner_agent_id == owner_agent_id
+        rdb_toolkit = RDBToolkitConfig(
+            workspace_id=create.workspace_id,
+            owner_agent_id=create.owner_agent_id,
+            toolkit_type=create.toolkit_type,
+            slug=create.slug,
+            name=create.name,
+            description=create.description,
+            config=create.config,
+            prompt=create.prompt,
+            encrypted_credentials=self._encrypt(create.credentials),
+            enabled=create.enabled,
+            always_expose_tools=create.always_expose_tools,
         )
-        conflict = await session.scalar(
-            sa.select(RDBToolkitConfig.id).where(
-                RDBToolkitConfig.workspace_id == workspace_id,
-                owner_condition,
-                RDBToolkitConfig.id != toolkit_id,
-                RDBToolkitConfig.slug == slug,
-            )
-        )
-        return conflict is not None
+        session.add(rdb_toolkit)
+        await session.flush()
+        return self._build(rdb_toolkit)
 
     async def get_by_id(
         self, session: AsyncSession, toolkit_id: str
@@ -342,35 +298,12 @@ class ToolkitRepository:
             if namespace is not None
         ]
 
-    async def has_effective_slug_conflict(
-        self,
-        session: AsyncSession,
-        *,
-        agent_id: str,
-        workspace_id: str,
-        toolkit_id: str,
-        slug: str,
-        enabled: bool,
-    ) -> bool:
-        """Return whether a candidate conflicts with another effective Toolkit."""
-        if not enabled:
-            return False
-        effective = await self.list_effective_for_agent(
-            session,
-            agent_id,
-            workspace_id=workspace_id,
-        )
-        return any(
-            item.toolkit.id != toolkit_id and item.toolkit.slug == slug
-            for item in effective
-        )
-
     async def update_by_id(
         self,
         session: AsyncSession,
         toolkit_id: str,
         update: ToolkitUpdate,
-    ) -> Result[ToolkitConfig, NotFound | DuplicateSlug]:
+    ) -> Result[ToolkitConfig, NotFound]:
         """Update Toolkit by ID.
 
         :param session: Database session
@@ -384,41 +317,22 @@ class ToolkitRepository:
                 return Failure(NotFound(toolkit_id=toolkit_id))
             return Success(toolkit)
 
-        try:
-            values: dict[str, object] = dict(update)
-            if "credentials" in update:
-                raw = update["credentials"]
-                values.pop("credentials")
-                values["encrypted_credentials"] = self._encrypt(raw)
-            values["revision"] = RDBToolkitConfig.revision + 1
-            result = await session.execute(
-                sa.update(RDBToolkitConfig)
-                .where(RDBToolkitConfig.id == toolkit_id)
-                .values(**values)
-                .returning(RDBToolkitConfig)
-            )
-            rdb = result.scalar_one_or_none()
-            if rdb is None:
-                return Failure(NotFound(toolkit_id=toolkit_id))
-            return Success(self._build(rdb))
-        except IntegrityError as e:
-            await session.rollback()
-            if is_constrained_by(
-                e,
-                RDBToolkitConfig.UQ_SHARED_WORKSPACE_SLUG.name or "",
-            ) or is_constrained_by(
-                e,
-                RDBToolkitConfig.UQ_OWNER_AGENT_SLUG.name or "",
-            ):
-                slug = update.get("slug", "")
-                return Failure(
-                    DuplicateSlug(
-                        workspace_id="",
-                        owner_agent_id=None,
-                        slug=slug or "",
-                    )
-                )
-            raise
+        values: dict[str, object] = dict(update)
+        if "credentials" in update:
+            raw = update["credentials"]
+            values.pop("credentials")
+            values["encrypted_credentials"] = self._encrypt(raw)
+        values["revision"] = RDBToolkitConfig.revision + 1
+        result = await session.execute(
+            sa.update(RDBToolkitConfig)
+            .where(RDBToolkitConfig.id == toolkit_id)
+            .values(**values)
+            .returning(RDBToolkitConfig)
+        )
+        rdb = result.scalar_one_or_none()
+        if rdb is None:
+            return Failure(NotFound(toolkit_id=toolkit_id))
+        return Success(self._build(rdb))
 
     async def delete_by_id(self, session: AsyncSession, toolkit_id: str) -> None:
         """Delete Toolkit by ID.

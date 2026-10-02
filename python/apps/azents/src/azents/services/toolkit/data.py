@@ -16,19 +16,16 @@ from azents.services.github_platform_system_setting.runtime import (
     PlatformGitHubAppAuthorizationState,
 )
 
-TOOLKIT_SLUG_PATTERN = r"^[a-z0-9_]+$"
-TOOLKIT_SLUG_DESCRIPTION = (
-    "Workspace-unique slug. Use lowercase letters, numbers, and underscores only."
-)
-ToolkitSlug = Annotated[
+ToolkitSlugInput = Annotated[
     str,
     Field(
-        min_length=1,
-        max_length=100,
-        pattern=TOOLKIT_SLUG_PATTERN,
-        description=TOOLKIT_SLUG_DESCRIPTION,
+        description=(
+            "Optional base alias. Explicit values are normalized to lowercase ASCII "
+            "letters, numbers, and underscores."
+        ),
     ),
 ]
+ToolkitNameInput = Annotated[str, Field(max_length=255, description="Display name")]
 
 
 class ToolkitOutput(ToolkitConfig):
@@ -132,14 +129,18 @@ class ToolkitCreateInput(BaseModel):
 
     workspace_id: str = Field(description="Workspace ID")
     toolkit_type: str = Field(description="Tool type")
-    slug: ToolkitSlug | None = Field(
+    slug: ToolkitSlugInput | None = Field(
         default=None,
         description=(
-            "Unique slug within workspace (uses toolkit_type when unspecified). "
-            "Use lowercase letters, numbers, and underscores only."
+            "Optional base alias; omitted or blank values use the Name default."
         ),
     )
-    name: str = Field(description="Display name")
+    name: ToolkitNameInput | None = Field(
+        default=None,
+        description=(
+            "Optional display name for registered Providers; generic MCP requires one."
+        ),
+    )
     description: str | None = Field(default=None, description="Description")
     config: dict[str, object] = Field(description="Tool settings")
     prompt: str | None = Field(default=None, description="Custom prompt")
@@ -159,8 +160,8 @@ class ToolkitUpdateInput(TypedDict, total=False):
     Defined as separate TypedDict because service needs json.dumps() conversion.
     """
 
-    slug: ToolkitSlug
-    name: Annotated[str, Field(description="Display name")]
+    slug: ToolkitSlugInput
+    name: ToolkitNameInput
     description: Annotated[str | None, Field(description="Description")]
     config: Annotated[dict[str, Any], Field(description="Tool settings")]
     prompt: Annotated[str | None, Field(description="Custom prompt")]
@@ -219,20 +220,6 @@ class ToolkitNotAvailable:
 
 
 @dataclasses.dataclass(frozen=True)
-class DuplicateSlug:
-    """Same slug already exists in workspace."""
-
-    slug: str
-
-
-@dataclasses.dataclass(frozen=True)
-class EffectiveSlugConflict:
-    """Another enabled Toolkit already uses the slug for one Agent."""
-
-    slug: str
-
-
-@dataclasses.dataclass(frozen=True)
 class InvalidToolkitType:
     """Toolkit type absent from TOOL_REGISTRY."""
 
@@ -244,6 +231,14 @@ class InvalidConfig:
     """config schema validation failed."""
 
     toolkit_type: str
+    detail: str
+
+
+@dataclasses.dataclass(frozen=True)
+class InvalidIdentifier:
+    """Name or Slug validation failed after default resolution."""
+
+    field: Literal["name", "slug"]
     detail: str
 
 

@@ -1,7 +1,6 @@
 import datetime
 
-import pytest
-from pydantic import TypeAdapter, ValidationError
+from pydantic import TypeAdapter
 
 from azents.api.public.toolkit.v1.data import (
     AgentToolkitConfigCreateRequest,
@@ -25,14 +24,25 @@ def test_toolkit_config_create_request_accepts_underscore_slug() -> None:
     assert request.always_expose_tools is False
 
 
-def test_toolkit_config_create_request_rejects_dash_slug() -> None:
-    with pytest.raises(ValidationError):
-        ToolkitConfigCreateRequest(
-            toolkit_type="kubernetes",
-            slug="home-kubernetes",
-            name="Home Kubernetes",
-            config={},
-        )
+def test_toolkit_config_create_request_accepts_omitted_identifiers() -> None:
+    request = ToolkitConfigCreateRequest(
+        toolkit_type="kubernetes",
+        config={},
+    )
+
+    assert request.slug is None
+    assert request.name is None
+
+
+def test_toolkit_config_create_request_defers_slug_normalization() -> None:
+    request = ToolkitConfigCreateRequest(
+        toolkit_type="kubernetes",
+        slug="Home-Kubernetes",
+        name="Home Kubernetes",
+        config={},
+    )
+
+    assert request.slug == "Home-Kubernetes"
 
 
 def test_toolkit_config_update_request_accepts_underscore_slug() -> None:
@@ -55,13 +65,16 @@ def test_toolkit_config_update_request_accepts_always_expose_tools() -> None:
     assert request.get("always_expose_tools") is True
 
 
-def test_toolkit_config_update_request_rejects_dash_slug() -> None:
+def test_toolkit_config_update_request_accepts_blank_and_unormalized_slug() -> None:
     adapter: TypeAdapter[ToolkitConfigUpdateRequest] = TypeAdapter(
         ToolkitConfigUpdateRequest
     )
 
-    with pytest.raises(ValidationError):
-        adapter.validate_python({"slug": "home-kubernetes"})
+    assert adapter.validate_python({"slug": ""})["slug"] == ""
+    assert (
+        adapter.validate_python({"slug": "Home-Kubernetes"})["slug"]
+        == "Home-Kubernetes"
+    )
 
 
 def test_toolkit_config_response_redacts_owner_and_credentials() -> None:
@@ -91,8 +104,8 @@ def test_toolkit_config_response_redacts_owner_and_credentials() -> None:
     assert "owner_agent_id" not in body
 
 
-def test_agent_toolkit_slug_contract_describes_agent_local_namespace() -> None:
-    """Agent-owned create and update schemas document the effective Agent namespace."""
+def test_agent_toolkit_slug_contract_describes_non_unique_base_alias() -> None:
+    """Agent-owned schemas expose a backend-materialized base alias."""
     create_description = AgentToolkitConfigCreateRequest.model_fields[
         "slug"
     ].description
@@ -100,5 +113,5 @@ def test_agent_toolkit_slug_contract_describes_agent_local_namespace() -> None:
     update_description = update_schema["properties"]["slug"]["description"]
 
     assert create_description is not None
-    assert "owning Agent" in create_description
-    assert "owning Agent" in update_description
+    assert "non-unique base alias" in create_description
+    assert "base alias" in update_description

@@ -17,6 +17,9 @@ from azentspublicclient.models.agent_create_request import AgentCreateRequest
 from azentspublicclient.models.agent_model_selection_input import (
     AgentModelSelectionInput,
 )
+from azentspublicclient.models.agent_toolkit_config_create_request import (
+    AgentToolkitConfigCreateRequest,
+)
 from azentspublicclient.models.agent_type import AgentType
 from azentspublicclient.models.api_key_secrets import ApiKeySecrets
 from azentspublicclient.models.create_invitation_request import (
@@ -272,6 +275,23 @@ def test_agent_owned_toolkit_owner_management_and_member_legacy_view(
     )
     toolkit_name = f"Agent-only MCP {unique()}"
     toolkit_slug = f"agent_mcp_{unique()}"
+    existing_name = f"Existing duplicate MCP {unique()}"
+    ToolkitV1Api(public_api_client).toolkit_v1_create_agent_toolkit_config(
+        handle=context.handle,
+        agent_id=agent.id,
+        agent_toolkit_config_create_request=AgentToolkitConfigCreateRequest(
+            toolkit_type="mcp",
+            slug=toolkit_slug,
+            name=existing_name,
+            config={
+                "server_url": "https://example.com/mcp/existing",
+                "auth_type": "none",
+                "timeout": 30.0,
+            },
+            enabled=True,
+        ),
+        _headers=_headers(context.owner_token),
+    )
 
     _login_main_web(
         browser_driver,
@@ -364,8 +384,34 @@ def test_agent_owned_toolkit_owner_management_and_member_legacy_view(
         )
     )
     configure_button.send_keys(Keys.ENTER)
+    name_input = _wait(browser_driver).until(
+        ec.element_to_be_clickable(
+            (
+                By.XPATH,
+                "//label[normalize-space(text())='Name']/following::input[1]",
+            )
+        )
+    )
+    slug_input = _wait(browser_driver).until(
+        ec.element_to_be_clickable(
+            (
+                By.XPATH,
+                "//label[normalize-space(text())='Slug']/following::input[1]",
+            )
+        )
+    )
+    assert name_input.get_attribute("required") is not None
+    assert name_input.get_attribute("placeholder") == (
+        "Enter a name for this MCP connection"
+    )
+    assert slug_input.get_attribute("required") is None
+    assert slug_input.get_attribute("placeholder") == "mcp"
     unsaved_name = f"Unsaved MCP {unique()}"
     _fill_text_input(browser_driver, "Name", unsaved_name)
+    expected_unsaved_slug = unsaved_name.lower().replace(" ", "_")
+    _wait(browser_driver).until(
+        lambda _driver: slug_input.get_attribute("placeholder") == expected_unsaved_slug
+    )
     _click_button(browser_driver, "Cancel")
     assert not browser_driver.find_elements(
         By.XPATH,
@@ -455,9 +501,14 @@ def test_agent_owned_toolkit_owner_management_and_member_legacy_view(
     _click_button(browser_driver, "Enable")
     _assert_visible_text(browser_driver, "Ready")
 
-    _wait(browser_driver).until(
-        ec.element_to_be_clickable((By.XPATH, "//button[@aria-label='Delete']"))
-    ).click()
+    toolkit_card = browser_driver.find_element(
+        By.XPATH,
+        (
+            f"//*[normalize-space()={toolkit_name!r}]"
+            "/ancestor::div[contains(@class, 'mantine-Card-root')][1]"
+        ),
+    )
+    toolkit_card.find_element(By.XPATH, ".//button[@aria-label='Delete']").click()
     _assert_visible_text(browser_driver, "Delete agent-only toolkit")
     _assert_visible_text(
         browser_driver,
@@ -472,7 +523,7 @@ def test_agent_owned_toolkit_owner_management_and_member_legacy_view(
             (By.XPATH, f"//*[normalize-space()={toolkit_name!r}]")
         )
     )
-    _assert_visible_text(browser_driver, "No toolkits attached")
+    _assert_visible_text(browser_driver, existing_name)
 
     _login_main_web(
         browser_driver,

@@ -222,6 +222,238 @@
     {
       "match": {
         "endpoint": "chat",
+        "userMessage": "Invoke duplicate MCP routes initial",
+        "hasToolResult": false
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_duplicate_mcp_initial_search",
+            "name": "tool_search",
+            "arguments": {
+              "query": "Shared duplicate MCP Owned duplicate MCP instance",
+              "limit": 2
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_duplicate_mcp_initial_search"
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_duplicate_mcp_initial_shared",
+            "name": "dupmcp__instance",
+            "arguments": {}
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_duplicate_mcp_initial_shared"
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_duplicate_mcp_initial_owned",
+            "name": "dupmcp_2__instance",
+            "arguments": {}
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_duplicate_mcp_initial_owned"
+      },
+      "response": {
+        "content": "Duplicate MCP initial routes completed."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Invoke duplicate MCP routes after lifecycle reuse",
+        "hasToolResult": false
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_duplicate_mcp_reuse_search",
+            "name": "tool_search",
+            "arguments": {
+              "query": "Shared duplicate MCP Owned duplicate MCP instance",
+              "limit": 2
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_duplicate_mcp_reuse_search"
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_duplicate_mcp_reuse_shared",
+            "name": "dupmcp__instance",
+            "arguments": {}
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_duplicate_mcp_reuse_shared"
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_duplicate_mcp_reuse_owned",
+            "name": "dupmcp_2__instance",
+            "arguments": {}
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_duplicate_mcp_reuse_owned"
+      },
+      "response": {
+        "content": "Duplicate MCP lifecycle routes completed."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Invoke duplicate MCP routes after slug change",
+        "hasToolResult": false
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_duplicate_mcp_renamed_search",
+            "name": "tool_search",
+            "arguments": {
+              "query": "Shared duplicate MCP Owned duplicate MCP instance",
+              "limit": 2
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_duplicate_mcp_renamed_search"
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_duplicate_mcp_renamed_shared",
+            "name": "dupmcp_new__instance",
+            "arguments": {}
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_duplicate_mcp_renamed_shared"
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_duplicate_mcp_renamed_owned",
+            "name": "dupmcp_2__instance",
+            "arguments": {}
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_duplicate_mcp_renamed_owned"
+      },
+      "response": {
+        "content": "Duplicate MCP renamed routes completed."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Invoke duplicate MCP routes after replacement",
+        "hasToolResult": false
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_duplicate_mcp_replacement_search",
+            "name": "tool_search",
+            "arguments": {
+              "query": "Shared duplicate MCP Owned duplicate MCP instance",
+              "limit": 2
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_duplicate_mcp_replacement_search"
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_duplicate_mcp_replacement_shared",
+            "name": "dupmcp_new_2__instance",
+            "arguments": {}
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_duplicate_mcp_replacement_shared"
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_duplicate_mcp_replacement_owned",
+            "name": "dupmcp_2__instance",
+            "arguments": {}
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_duplicate_mcp_replacement_owned"
+      },
+      "response": {
+        "content": "Duplicate MCP replacement routes completed."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
         "userMessage": "init",
         "hasToolResult": false
       },

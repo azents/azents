@@ -178,6 +178,11 @@ class TestenvRuntimeHookQAToolkit(Toolkit[TestenvRuntimeHookQAConfig]):
 
     def _log(self, lifecycle: str, context: object) -> None:
         """Leave QA lifecycle event without sensitive payload."""
+        toolkit_slug = (
+            context.toolkit_slug
+            if isinstance(context, BeforeToolCallHookContext | AfterToolCallHookContext)
+            else None
+        )
         logger.info(
             "Runtime hook QA lifecycle event: %s",
             lifecycle,
@@ -189,6 +194,7 @@ class TestenvRuntimeHookQAToolkit(Toolkit[TestenvRuntimeHookQAConfig]):
                 "run_id": getattr(context, "run_id", None),
                 "reason": getattr(context, "reason", None),
                 "tool_name": getattr(context, "tool_name", None),
+                "toolkit_slug": toolkit_slug,
             },
         )
 

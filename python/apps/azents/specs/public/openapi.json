@@ -19984,22 +19984,28 @@
             "anyOf": [
               {
                 "type": "string",
-                "maxLength": 100,
-                "minLength": 1,
-                "pattern": "^[a-z0-9_]+$",
-                "description": "Unique within the owning Agent's effective Toolkit namespace. Use lowercase letters, numbers, and underscores only."
+                "description": "Optional base alias. Explicit values are normalized to lowercase ASCII letters, numbers, and underscores."
               },
               {
                 "type": "null"
               }
             ],
             "title": "Slug",
-            "description": "Unique within the owning Agent's effective Toolkit namespace. Use lowercase letters, numbers, and underscores only."
+            "description": "Optional non-unique base alias; blank values use the Name default."
           },
           "name": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255,
+                "description": "Display name"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Name",
-            "description": "Display name"
+            "description": "Optional display name for registered Providers; generic MCP requires one."
           },
           "description": {
             "anyOf": [
@@ -20060,7 +20066,6 @@
         "type": "object",
         "required": [
           "toolkit_type",
-          "name",
           "config"
         ],
         "title": "AgentToolkitConfigCreateRequest",
@@ -20070,11 +20075,8 @@
         "properties": {
           "slug": {
             "type": "string",
-            "maxLength": 100,
-            "minLength": 1,
-            "pattern": "^[a-z0-9_]+$",
             "title": "Slug",
-            "description": "Unique within the owning Agent's effective Toolkit namespace. Use lowercase letters, numbers, and underscores only."
+            "description": "Optional base alias. Explicit values are normalized to lowercase ASCII letters, numbers, and underscores."
           },
           "name": {
             "type": "string",
@@ -34802,22 +34804,28 @@
             "anyOf": [
               {
                 "type": "string",
-                "maxLength": 100,
-                "minLength": 1,
-                "pattern": "^[a-z0-9_]+$",
-                "description": "Workspace-unique slug. Use lowercase letters, numbers, and underscores only."
+                "description": "Optional base alias. Explicit values are normalized to lowercase ASCII letters, numbers, and underscores."
               },
               {
                 "type": "null"
               }
             ],
             "title": "Slug",
-            "description": "Workspace-unique slug. Use lowercase letters, numbers, and underscores only."
+            "description": "Optional non-unique base alias; blank values use the Name default."
           },
           "name": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255,
+                "description": "Display name"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Name",
-            "description": "Display name"
+            "description": "Optional display name for registered Providers; generic MCP requires one."
           },
           "description": {
             "anyOf": [
@@ -34878,7 +34886,6 @@
         "type": "object",
         "required": [
           "toolkit_type",
-          "name",
           "config"
         ],
         "title": "ToolkitConfigCreateRequest",
@@ -35017,14 +35024,12 @@
         "properties": {
           "slug": {
             "type": "string",
-            "maxLength": 100,
-            "minLength": 1,
-            "pattern": "^[a-z0-9_]+$",
             "title": "Slug",
-            "description": "Workspace-unique slug. Use lowercase letters, numbers, and underscores only."
+            "description": "Optional base alias. Explicit values are normalized to lowercase ASCII letters, numbers, and underscores."
           },
           "name": {
             "type": "string",
+            "maxLength": 255,
             "title": "Name",
             "description": "Display name"
           },

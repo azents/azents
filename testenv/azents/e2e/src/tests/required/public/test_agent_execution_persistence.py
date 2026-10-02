@@ -1,8 +1,15 @@
 """Agent execution durable persistence E2E test."""
 
 import json
+import os
+import socket
+import subprocess
+import sys
 import time
+from collections.abc import Generator
+from contextlib import contextmanager
 from dataclasses import dataclass
+from pathlib import Path
 
 import azentsadminclient
 import azentspublicclient
@@ -22,6 +29,12 @@ from azentspublicclient.models.agent_model_selection_input import (
 from azentspublicclient.models.agent_toolkit_attach_request import (
     AgentToolkitAttachRequest,
 )
+from azentspublicclient.models.agent_toolkit_config_create_request import (
+    AgentToolkitConfigCreateRequest,
+)
+from azentspublicclient.models.agent_toolkit_config_update_request import (
+    AgentToolkitConfigUpdateRequest,
+)
 from azentspublicclient.models.agent_type import AgentType
 from azentspublicclient.models.api_key_secrets import ApiKeySecrets
 from azentspublicclient.models.create_workspace_request import CreateWorkspaceRequest
@@ -33,7 +46,11 @@ from azentspublicclient.models.secrets import Secrets
 from azentspublicclient.models.toolkit_config_create_request import (
     ToolkitConfigCreateRequest,
 )
+from azentspublicclient.models.toolkit_config_update_request import (
+    ToolkitConfigUpdateRequest,
+)
 from pydantic import TypeAdapter, ValidationError
+from testcontainers.core.container import DockerContainer
 from websockets.sync.client import connect as ws_connect
 from websockets.sync.connection import Connection
 
@@ -86,6 +103,9 @@ _TOOL_PROMPT = "Start chat input buffer long tool"
 _TOOL_RESPONSE = "Chat input buffer long tool completed."
 _TOOL_NAME = "bufferqa__runtime_hook_qa_probe"
 _TOOL_CALL_ID = "call_chat_input_buffer_delay"
+_DUPLICATE_MCP_BASE_SLUG = "dupmcp"
+_TESTENV_ROOT = Path(__file__).parents[5]
+_MOCK_MCP_SCRIPT = _TESTENV_ROOT / "fixtures" / "mock_mcp_server.py"
 _RETRY_ONCE = "Failed run retry once then succeed"
 _RETRY_ONCE_RESPONSE = "Failed run retry recovered after one attempt."
 _RETRY_ACROSS_TURNS = "Failed run retry resets across model turns"
@@ -130,6 +150,63 @@ class _RunResult:
 def _headers(token: str) -> dict[str, str]:
     """Bearer auth header t t."""
     return {"Authorization": f"Bearer {token}"}
+
+
+@contextmanager
+def _mock_mcp_instance(
+    identity: str,
+    *,
+    docker_gateway: str,
+    delay_once_seconds: float = 0,
+) -> Generator[str, None, None]:
+    """Run one distinguishable mock MCP server on an ephemeral host port."""
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        port = listener.getsockname()[1]
+    environment = {
+        **os.environ,
+        "MOCK_MCP_HOST": "0.0.0.0",
+        "MOCK_MCP_PORT": str(port),
+        "MOCK_MCP_INSTANCE": identity,
+        "MOCK_MCP_INSTANCE_DELAY_ONCE_SECONDS": str(delay_once_seconds),
+    }
+    process = subprocess.Popen(
+        [sys.executable, str(_MOCK_MCP_SCRIPT)],
+        cwd=_TESTENV_ROOT,
+        env=environment,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline:
+            try:
+                with socket.create_connection(("127.0.0.1", port), timeout=0.2):
+                    break
+            except OSError:
+                time.sleep(0.1)
+        else:
+            raise TimeoutError(f"Mock MCP instance {identity!r} did not start.")
+        yield f"http://{docker_gateway}:{port}/mcp"
+    finally:
+        process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=5)
+
+
+def _docker_gateway(container: DockerContainer) -> str:
+    """Return the host gateway reachable from one E2E container network."""
+    wrapped = container.get_wrapped_container()
+    wrapped.reload()
+    networks = wrapped.attrs["NetworkSettings"]["Networks"]
+    for network in networks.values():
+        gateway = network.get("Gateway")
+        if isinstance(gateway, str) and gateway:
+            return gateway
+    raise AssertionError("E2E container network did not expose a Docker gateway.")
 
 
 def _json_object_payload(payload: object, *, label: str) -> dict[str, object]:
@@ -395,6 +472,7 @@ def _create_agent(
     workspace: _Workspace,
     *,
     with_toolkit: bool = False,
+    tool_search_enabled: bool = False,
 ) -> str:
     """testt agent t t API t createt."""
     headers = _headers(workspace.token)
@@ -424,7 +502,7 @@ def _create_agent(
             lightweight_model_label="default",
             type=AgentType.PUBLIC,
             runtime_profile_id=workspace.runtime_profile_id,
-            tool_search_enabled=False,
+            tool_search_enabled=tool_search_enabled,
         ),
         _headers=headers,
     )
@@ -889,6 +967,161 @@ def _tool_result_call_ids(payload: dict[str, object]) -> list[str]:
         if isinstance(tool_call_id, str) and tool_call_id:
             call_ids.append(tool_call_id)
     return call_ids
+
+
+def _tool_result_content(payload: dict[str, object], call_id: str) -> object:
+    """Return one durable client-tool result payload by call ID."""
+    for item in _message_items(payload):
+        if item.get("tool_call_id") == call_id:
+            return item.get("content")
+    raise AssertionError(f"tool result not found for call: {call_id!r}")
+
+
+def _assert_toolkit_call_source(
+    payload: dict[str, object],
+    call_id: str,
+    *,
+    toolkit_config_id: str,
+    toolkit_name: str,
+    toolkit_slug: str,
+    toolkit_namespace: str,
+    source_identity: dict[str, str],
+) -> None:
+    """Require one durable call to retain its exact Toolkit source identity."""
+    events = _json_object_list_payload(payload.get("items"), label="REST history items")
+    for event in events:
+        if event.get("kind") != "client_tool_call":
+            continue
+        event_payload = _json_object_payload(
+            event.get("payload"),
+            label="client tool call payload",
+        )
+        if event_payload.get("call_id") != call_id:
+            continue
+        source = _json_object_payload(
+            event_payload.get("toolkit_source"),
+            label="Toolkit source",
+        )
+        _assert_toolkit_source(
+            source,
+            toolkit_config_id=toolkit_config_id,
+            toolkit_name=toolkit_name,
+            toolkit_slug=toolkit_slug,
+            toolkit_namespace=toolkit_namespace,
+            source_identity=source_identity,
+        )
+        return
+    raise AssertionError(f"Toolkit source not found for call: {call_id!r}")
+
+
+def _assert_toolkit_source(
+    source: dict[str, object],
+    *,
+    toolkit_config_id: str,
+    toolkit_name: str,
+    toolkit_slug: str,
+    toolkit_namespace: str,
+    source_identity: dict[str, str],
+) -> None:
+    """Require one public Toolkit source projection to match its catalog identity."""
+    assert source.get("toolkit_config_id") == toolkit_config_id
+    assert source.get("toolkit_name") == toolkit_name
+    assert source.get("toolkit_slug") == toolkit_slug
+    assert source.get("toolkit_namespace") == toolkit_namespace
+    assert source.get("source_identity") == source_identity
+
+
+def _wait_for_live_toolkit_source(
+    *,
+    server_url: str,
+    token: str,
+    session_id: str,
+    call_id: str,
+    toolkit_config_id: str,
+    toolkit_name: str,
+    toolkit_slug: str,
+    toolkit_namespace: str,
+    source_identity: dict[str, str],
+    timeout: float = 15,
+) -> None:
+    """Require user-visible live activity to retain the selected Toolkit source."""
+    deadline = time.monotonic() + timeout
+    latest: dict[str, object] | None = None
+    while time.monotonic() < deadline:
+        latest = _list_live(
+            server_url=server_url,
+            token=token,
+            session_id=session_id,
+        )
+        partial_history = _json_object_payload(
+            latest.get("partial_history"),
+            label="live partial history",
+        )
+        events = _json_object_list_payload(
+            partial_history.get("items"),
+            label="live partial history items",
+        )
+        for event in events:
+            if event.get("kind") != "client_tool_call":
+                continue
+            event_payload = _json_object_payload(
+                event.get("payload"),
+                label="live client tool call payload",
+            )
+            if event_payload.get("call_id") != call_id:
+                continue
+            source = _json_object_payload(
+                event_payload.get("toolkit_source"),
+                label="live Toolkit source",
+            )
+            _assert_toolkit_source(
+                source,
+                toolkit_config_id=toolkit_config_id,
+                toolkit_name=toolkit_name,
+                toolkit_slug=toolkit_slug,
+                toolkit_namespace=toolkit_namespace,
+                source_identity=source_identity,
+            )
+            return
+        time.sleep(0.05)
+    raise TimeoutError(
+        f"Live Toolkit source was not observed for {call_id!r}: {latest!r}"
+    )
+
+
+def _wait_for_runtime_hook_source(
+    container: DockerContainer,
+    *,
+    tool_name: str,
+    toolkit_namespace: str,
+    timeout: float = 15,
+) -> None:
+    """Require the runtime hook to observe the final selected tool namespace."""
+    deadline = time.monotonic() + timeout
+    latest = ""
+    while time.monotonic() < deadline:
+        stdout, stderr = container.get_logs()
+        latest = stdout.decode(errors="replace") + stderr.decode(errors="replace")
+        for line in latest.splitlines():
+            try:
+                value = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(value, dict):
+                continue
+            if (
+                value.get("message")
+                == "Runtime hook QA lifecycle event: on_before_tool_call"
+                and value.get("tool_name") == tool_name
+                and value.get("toolkit_slug") == toolkit_namespace
+            ):
+                return
+        time.sleep(0.1)
+    raise TimeoutError(
+        "Runtime hook did not observe Toolkit source: "
+        f"tool={tool_name!r}, namespace={toolkit_namespace!r}, "
+        f"logs={latest[-4000:]!r}"
+    )
 
 
 def _run_complete_ids(payload: dict[str, object]) -> list[str]:
@@ -1591,8 +1824,7 @@ class TestAgentExecutionPersistence:
         )
 
         response = requests.post(
-            f"{azents_public_server_url}/chat/v1/sessions/"
-            f"{result.session_id}/retry-failed-run",
+            f"{azents_public_server_url}/chat/v1/sessions/{result.session_id}/retry-failed-run",
             headers={**_headers(workspace.token), "Content-Type": "application/json"},
             json={
                 "agent_id": agent_id,
@@ -1602,6 +1834,369 @@ class TestAgentExecutionPersistence:
             timeout=10,
         )
         assert response.status_code == 409
+
+    def test_duplicate_mcp_namespaces_route_and_survive_lifecycle_changes(
+        self,
+        public_api_client: azentspublicclient.ApiClient,
+        admin_api_client: azentsadminclient.ApiClient,
+        azents_public_server_url: str,
+        azents_engine_worker_container: DockerContainer,
+    ) -> None:
+        """Route duplicate MCP tools through stable Agent namespaces."""
+        docker_gateway = _docker_gateway(azents_engine_worker_container)
+        with (
+            _mock_mcp_instance(
+                "shared",
+                docker_gateway=docker_gateway,
+                delay_once_seconds=5,
+            ) as shared_server_url,
+            _mock_mcp_instance(
+                "owned",
+                docker_gateway=docker_gateway,
+            ) as owned_server_url,
+        ):
+            shared_source_identity = {"server": shared_server_url.removesuffix("/mcp")}
+            owned_source_identity = {"server": owned_server_url.removesuffix("/mcp")}
+            workspace = _setup_workspace(
+                public_api_client,
+                admin_api_client,
+                azents_public_server_url,
+            )
+            agent_id = _create_agent(
+                public_api_client,
+                workspace,
+                tool_search_enabled=True,
+            )
+            headers = _headers(workspace.token)
+            toolkit_api = ToolkitV1Api(public_api_client)
+            shared = toolkit_api.toolkit_v1_create_toolkit_config(
+                handle=workspace.handle,
+                toolkit_config_create_request=ToolkitConfigCreateRequest(
+                    toolkit_type="mcp",
+                    slug=_DUPLICATE_MCP_BASE_SLUG,
+                    name="Shared duplicate MCP",
+                    config={
+                        "server_url": shared_server_url,
+                        "auth_type": "none",
+                        "timeout": 30.0,
+                    },
+                    enabled=True,
+                ),
+                _headers=headers,
+            )
+            attachment = toolkit_api.toolkit_v1_attach_toolkit_to_agent(
+                handle=workspace.handle,
+                agent_id=agent_id,
+                agent_toolkit_attach_request=AgentToolkitAttachRequest(
+                    toolkit_id=shared.id,
+                ),
+                _headers=headers,
+            )
+            owned = toolkit_api.toolkit_v1_create_agent_toolkit_config(
+                handle=workspace.handle,
+                agent_id=agent_id,
+                agent_toolkit_config_create_request=AgentToolkitConfigCreateRequest(
+                    toolkit_type="mcp",
+                    slug=_DUPLICATE_MCP_BASE_SLUG,
+                    name="Owned duplicate MCP",
+                    config={
+                        "server_url": owned_server_url,
+                        "auth_type": "none",
+                        "timeout": 30.0,
+                    },
+                    enabled=True,
+                ),
+                _headers=headers,
+            )
+            hook = toolkit_api.toolkit_v1_create_toolkit_config(
+                handle=workspace.handle,
+                toolkit_config_create_request=ToolkitConfigCreateRequest(
+                    toolkit_type="runtime_hook_qa",
+                    slug="source_hook",
+                    name="Duplicate MCP source hook",
+                    config={"mode": "observe"},
+                    enabled=True,
+                ),
+                _headers=headers,
+            )
+            toolkit_api.toolkit_v1_attach_toolkit_to_agent(
+                handle=workspace.handle,
+                agent_id=agent_id,
+                agent_toolkit_attach_request=AgentToolkitAttachRequest(
+                    toolkit_id=hook.id,
+                ),
+                _headers=headers,
+            )
+
+            first = _run_message(
+                public_api_client=public_api_client,
+                public_url=azents_public_server_url,
+                token=workspace.token,
+                agent_id=agent_id,
+                message="Invoke duplicate MCP routes initial",
+            )
+            _wait_for_live_toolkit_source(
+                server_url=azents_public_server_url,
+                token=workspace.token,
+                session_id=first.session_id,
+                call_id="call_duplicate_mcp_initial_shared",
+                toolkit_config_id=shared.id,
+                toolkit_name="Shared duplicate MCP",
+                toolkit_slug="dupmcp",
+                toolkit_namespace="dupmcp",
+                source_identity=shared_source_identity,
+            )
+            initial = _wait_for_completed_rest_contents(
+                server_url=azents_public_server_url,
+                token=workspace.token,
+                session_id=first.session_id,
+                expected=["Duplicate MCP initial routes completed."],
+            )
+            initial_search = str(
+                _tool_result_content(initial, "call_duplicate_mcp_initial_search")
+            )
+            assert '"name": "dupmcp__instance"' in initial_search
+            assert '"name": "dupmcp_2__instance"' in initial_search
+            assert "shared" in str(
+                _tool_result_content(initial, "call_duplicate_mcp_initial_shared")
+            )
+            assert "owned" in str(
+                _tool_result_content(initial, "call_duplicate_mcp_initial_owned")
+            )
+            _assert_toolkit_call_source(
+                initial,
+                "call_duplicate_mcp_initial_shared",
+                toolkit_config_id=shared.id,
+                toolkit_name="Shared duplicate MCP",
+                toolkit_slug="dupmcp",
+                toolkit_namespace="dupmcp",
+                source_identity=shared_source_identity,
+            )
+            _assert_toolkit_call_source(
+                initial,
+                "call_duplicate_mcp_initial_owned",
+                toolkit_config_id=owned.id,
+                toolkit_name="Owned duplicate MCP",
+                toolkit_slug="dupmcp",
+                toolkit_namespace="dupmcp_2",
+                source_identity=owned_source_identity,
+            )
+            _wait_for_runtime_hook_source(
+                azents_engine_worker_container,
+                tool_name="dupmcp__instance",
+                toolkit_namespace="dupmcp",
+            )
+            _wait_for_runtime_hook_source(
+                azents_engine_worker_container,
+                tool_name="dupmcp_2__instance",
+                toolkit_namespace="dupmcp_2",
+            )
+
+            toolkit_api.toolkit_v1_update_agent_toolkit_config(
+                handle=workspace.handle,
+                agent_id=agent_id,
+                toolkit_config_id=owned.id,
+                agent_toolkit_config_update_request=AgentToolkitConfigUpdateRequest(
+                    enabled=False
+                ),
+                _headers=headers,
+            )
+            toolkit_api.toolkit_v1_update_agent_toolkit_config(
+                handle=workspace.handle,
+                agent_id=agent_id,
+                toolkit_config_id=owned.id,
+                agent_toolkit_config_update_request=AgentToolkitConfigUpdateRequest(
+                    enabled=True
+                ),
+                _headers=headers,
+            )
+            toolkit_api.toolkit_v1_detach_toolkit_from_agent(
+                handle=workspace.handle,
+                agent_id=agent_id,
+                agent_toolkit_id=attachment.id,
+                _headers=headers,
+            )
+            toolkit_api.toolkit_v1_attach_toolkit_to_agent(
+                handle=workspace.handle,
+                agent_id=agent_id,
+                agent_toolkit_attach_request=AgentToolkitAttachRequest(
+                    toolkit_id=shared.id,
+                ),
+                _headers=headers,
+            )
+            reused_session_id = _create_execution_session(
+                server_url=azents_public_server_url,
+                token=workspace.token,
+                agent_id=agent_id,
+            )
+            reused_run = _run_message(
+                public_api_client=public_api_client,
+                public_url=azents_public_server_url,
+                token=workspace.token,
+                agent_id=agent_id,
+                session_id=reused_session_id,
+                message="Invoke duplicate MCP routes after lifecycle reuse",
+            )
+            reused = _wait_for_completed_rest_contents(
+                server_url=azents_public_server_url,
+                token=workspace.token,
+                session_id=reused_run.session_id,
+                expected=["Duplicate MCP lifecycle routes completed."],
+            )
+            assert "shared" in str(
+                _tool_result_content(reused, "call_duplicate_mcp_reuse_shared")
+            )
+            assert "owned" in str(
+                _tool_result_content(reused, "call_duplicate_mcp_reuse_owned")
+            )
+            _assert_toolkit_call_source(
+                reused,
+                "call_duplicate_mcp_reuse_shared",
+                toolkit_config_id=shared.id,
+                toolkit_name="Shared duplicate MCP",
+                toolkit_slug="dupmcp",
+                toolkit_namespace="dupmcp",
+                source_identity=shared_source_identity,
+            )
+            _assert_toolkit_call_source(
+                reused,
+                "call_duplicate_mcp_reuse_owned",
+                toolkit_config_id=owned.id,
+                toolkit_name="Owned duplicate MCP",
+                toolkit_slug="dupmcp",
+                toolkit_namespace="dupmcp_2",
+                source_identity=owned_source_identity,
+            )
+
+            toolkit_api.toolkit_v1_update_toolkit_config(
+                handle=workspace.handle,
+                toolkit_config_id=shared.id,
+                toolkit_config_update_request=ToolkitConfigUpdateRequest(
+                    slug="dupmcp_new"
+                ),
+                _headers=headers,
+            )
+            renamed_session_id = _create_execution_session(
+                server_url=azents_public_server_url,
+                token=workspace.token,
+                agent_id=agent_id,
+            )
+            renamed_run = _run_message(
+                public_api_client=public_api_client,
+                public_url=azents_public_server_url,
+                token=workspace.token,
+                agent_id=agent_id,
+                session_id=renamed_session_id,
+                message="Invoke duplicate MCP routes after slug change",
+            )
+            renamed = _wait_for_completed_rest_contents(
+                server_url=azents_public_server_url,
+                token=workspace.token,
+                session_id=renamed_run.session_id,
+                expected=["Duplicate MCP renamed routes completed."],
+            )
+            assert "shared" in str(
+                _tool_result_content(renamed, "call_duplicate_mcp_renamed_shared")
+            )
+            assert "owned" in str(
+                _tool_result_content(renamed, "call_duplicate_mcp_renamed_owned")
+            )
+            _assert_toolkit_call_source(
+                renamed,
+                "call_duplicate_mcp_renamed_shared",
+                toolkit_config_id=shared.id,
+                toolkit_name="Shared duplicate MCP",
+                toolkit_slug="dupmcp_new",
+                toolkit_namespace="dupmcp_new",
+                source_identity=shared_source_identity,
+            )
+            _assert_toolkit_call_source(
+                renamed,
+                "call_duplicate_mcp_renamed_owned",
+                toolkit_config_id=owned.id,
+                toolkit_name="Owned duplicate MCP",
+                toolkit_slug="dupmcp",
+                toolkit_namespace="dupmcp_2",
+                source_identity=owned_source_identity,
+            )
+
+            toolkit_api.toolkit_v1_delete_toolkit_config(
+                handle=workspace.handle,
+                toolkit_config_id=shared.id,
+                _headers=headers,
+            )
+            replacement = toolkit_api.toolkit_v1_create_toolkit_config(
+                handle=workspace.handle,
+                toolkit_config_create_request=ToolkitConfigCreateRequest(
+                    toolkit_type="mcp",
+                    slug="dupmcp_new",
+                    name="Replacement duplicate MCP",
+                    config={
+                        "server_url": shared_server_url,
+                        "auth_type": "none",
+                        "timeout": 30.0,
+                    },
+                    enabled=True,
+                ),
+                _headers=headers,
+            )
+            toolkit_api.toolkit_v1_attach_toolkit_to_agent(
+                handle=workspace.handle,
+                agent_id=agent_id,
+                agent_toolkit_attach_request=AgentToolkitAttachRequest(
+                    toolkit_id=replacement.id,
+                ),
+                _headers=headers,
+            )
+            replacement_session_id = _create_execution_session(
+                server_url=azents_public_server_url,
+                token=workspace.token,
+                agent_id=agent_id,
+            )
+            replacement_run = _run_message(
+                public_api_client=public_api_client,
+                public_url=azents_public_server_url,
+                token=workspace.token,
+                agent_id=agent_id,
+                session_id=replacement_session_id,
+                message="Invoke duplicate MCP routes after replacement",
+            )
+            replaced = _wait_for_completed_rest_contents(
+                server_url=azents_public_server_url,
+                token=workspace.token,
+                session_id=replacement_run.session_id,
+                expected=["Duplicate MCP replacement routes completed."],
+            )
+            assert "shared" in str(
+                _tool_result_content(
+                    replaced,
+                    "call_duplicate_mcp_replacement_shared",
+                )
+            )
+            assert "owned" in str(
+                _tool_result_content(
+                    replaced,
+                    "call_duplicate_mcp_replacement_owned",
+                )
+            )
+            _assert_toolkit_call_source(
+                replaced,
+                "call_duplicate_mcp_replacement_shared",
+                toolkit_config_id=replacement.id,
+                toolkit_name="Replacement duplicate MCP",
+                toolkit_slug="dupmcp_new",
+                toolkit_namespace="dupmcp_new_2",
+                source_identity=shared_source_identity,
+            )
+            _assert_toolkit_call_source(
+                replaced,
+                "call_duplicate_mcp_replacement_owned",
+                toolkit_config_id=owned.id,
+                toolkit_name="Owned duplicate MCP",
+                toolkit_slug="dupmcp",
+                toolkit_namespace="dupmcp_2",
+                source_identity=owned_source_identity,
+            )
 
     def test_tool_call_result_and_followup_response_survive_rest_reload(
         self,

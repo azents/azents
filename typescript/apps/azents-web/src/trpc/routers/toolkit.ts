@@ -44,9 +44,14 @@ import {
 } from "@azents/public-client";
 import { z } from "zod/v4";
 import { normalizeCredentialEdits } from "@/shared/lib/redacted-credentials";
-import { TOOLKIT_SLUG_REGEX } from "@/shared/lib/toolkit-slug";
+import { normalizeExplicitToolkitSlug } from "@/shared/lib/toolkit-identifiers";
 import { mapExpectedError } from "../api-error";
 import { publicProcedure, router } from "../init";
+
+const toolkitSlugInput = z.string().refine((value) => {
+  const normalized = normalizeExplicitToolkitSlug(value);
+  return normalized == null || typeof normalized === "string";
+});
 
 export const toolkitRouter = router({
   /**
@@ -144,8 +149,8 @@ export const toolkitRouter = router({
       z.object({
         handle: z.string().min(1),
         toolkitType: z.string().min(1).max(100),
-        slug: z.string().min(1).max(100).regex(TOOLKIT_SLUG_REGEX),
-        name: z.string().min(1).max(255),
+        slug: toolkitSlugInput.optional(),
+        name: z.string().max(255).optional(),
         description: z.string().optional(),
         prompt: z.string().optional(),
         config: z.record(z.string(), z.unknown()),
@@ -191,8 +196,8 @@ export const toolkitRouter = router({
       z.object({
         handle: z.string().min(1),
         toolkitId: z.string().min(1),
-        slug: z.string().min(1).max(100).regex(TOOLKIT_SLUG_REGEX).optional(),
-        name: z.string().min(1).max(255).optional(),
+        slug: toolkitSlugInput.optional(),
+        name: z.string().max(255).optional(),
         description: z.string().nullable().optional(),
         prompt: z.string().nullable().optional(),
         config: z.record(z.string(), z.unknown()).optional(),
@@ -729,8 +734,8 @@ export const toolkitRouter = router({
         handle: z.string().min(1),
         agentId: z.string().min(1),
         toolkitType: z.string().min(1).max(100),
-        slug: z.string().min(1).max(100).regex(TOOLKIT_SLUG_REGEX),
-        name: z.string().min(1).max(255),
+        slug: toolkitSlugInput.optional(),
+        name: z.string().max(255).optional(),
         description: z.string().optional(),
         prompt: z.string().optional(),
         config: z.record(z.string(), z.unknown()),
@@ -763,7 +768,6 @@ export const toolkitRouter = router({
           400: "BAD_REQUEST",
           401: "UNAUTHORIZED",
           403: "FORBIDDEN",
-          409: "CONFLICT",
           422: "BAD_REQUEST",
         });
       }
@@ -803,8 +807,8 @@ export const toolkitRouter = router({
         handle: z.string().min(1),
         agentId: z.string().min(1),
         toolkitConfigId: z.string().min(1),
-        slug: z.string().min(1).max(100).regex(TOOLKIT_SLUG_REGEX).optional(),
-        name: z.string().min(1).max(255).optional(),
+        slug: toolkitSlugInput.optional(),
+        name: z.string().max(255).optional(),
         description: z.string().nullable().optional(),
         prompt: z.string().nullable().optional(),
         config: z.record(z.string(), z.unknown()).optional(),
@@ -839,7 +843,6 @@ export const toolkitRouter = router({
         throw mapExpectedError(e, {
           401: "UNAUTHORIZED",
           404: "NOT_FOUND",
-          409: "CONFLICT",
           422: "BAD_REQUEST",
         });
       }

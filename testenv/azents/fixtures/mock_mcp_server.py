@@ -2,10 +2,11 @@
 # ruff: noqa: E501
 """Mock streamable-HTTP MCP server for local and E2E tests.
 
-The server exposes three tools:
+The server exposes four tools:
 
 - ``echo`` returns its input unchanged.
 - ``info`` returns one environment variable from the server process.
+- ``instance`` returns the fixture instance identity.
 - ``error`` raises an intentional exception for failure-path tests.
 
 Run it with ``uv run python fixtures/mock_mcp_server.py``. Configure the bind
@@ -13,12 +14,19 @@ address with ``MOCK_MCP_HOST`` and ``MOCK_MCP_PORT``; the MCP endpoint is
 available at ``/mcp``.
 """
 
+import itertools
 import os
+import time
 
 from mcp.server.mcpserver import MCPServer
 
 _DEFAULT_HOST = os.environ.get("MOCK_MCP_HOST", "0.0.0.0")  # noqa: S104
 _DEFAULT_PORT = int(os.environ.get("MOCK_MCP_PORT", "9100"))
+_INSTANCE_DELAY_ONCE_SECONDS = float(os.environ.get("MOCK_MCP_INSTANCE_DELAY_ONCE_SECONDS", "0"))
+_INSTANCE_DELAYS = itertools.chain(
+    [_INSTANCE_DELAY_ONCE_SECONDS],
+    itertools.repeat(0.0),
+)
 
 server = MCPServer("azents-testenv-mock")
 
@@ -42,6 +50,15 @@ def info(key: str) -> str:
     when the variable is not set.
     """
     return os.environ.get(key, "")
+
+
+@server.tool()
+def instance() -> str:
+    """Return a safe identity that distinguishes parallel fixture instances."""
+    delay_seconds = next(_INSTANCE_DELAYS)
+    if delay_seconds > 0:
+        time.sleep(delay_seconds)
+    return os.environ.get("MOCK_MCP_INSTANCE", "default")
 
 
 @server.tool()

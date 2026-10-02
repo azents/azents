@@ -283,6 +283,7 @@ class TestToolkitCrud:
         assert created.id is not None
         assert created.toolkit_type == "mcp"
         assert created.name == "My MCP Toolkit"
+        assert created.slug == "my_mcp_toolkit"
         assert created.description == "test toolkit"
         assert created.enabled is True
         assert created.config["server_url"] == "https://example.com/mcp"
@@ -293,6 +294,63 @@ class TestToolkitCrud:
         )
         assert fetched.id == created.id
         assert fetched.name == "My MCP Toolkit"
+
+    def test_identifier_defaults_and_generic_mcp_name_validation(
+        self,
+        public_api_client: azentspublicclient.ApiClient,
+        admin_api_client: azentsadminclient.ApiClient,
+    ) -> None:
+        """Materialize Provider defaults and reject a nameless generic MCP."""
+        owner_token, handle, _, _ = _setup_workspace(
+            public_api_client, admin_api_client
+        )
+        api = ToolkitV1Api(public_api_client)
+        headers = {"Authorization": f"Bearer {owner_token}"}
+
+        envvar = api.toolkit_v1_create_toolkit_config(
+            handle=handle,
+            toolkit_config_create_request=ToolkitConfigCreateRequest(
+                toolkit_type="envvar",
+                config={"entries": []},
+                enabled=True,
+            ),
+            _headers=headers,
+        )
+        assert envvar.name == "Environment Variables"
+        assert envvar.slug == "environment_variables"
+
+        non_latin = api.toolkit_v1_create_toolkit_config(
+            handle=handle,
+            toolkit_config_create_request=ToolkitConfigCreateRequest(
+                toolkit_type="mcp",
+                name="내부 검색",
+                config={
+                    "server_url": "https://example.com/mcp",
+                    "auth_type": "none",
+                    "timeout": 30.0,
+                },
+                enabled=True,
+            ),
+            _headers=headers,
+        )
+        assert non_latin.name == "내부 검색"
+        assert non_latin.slug == "mcp"
+
+        with pytest.raises(ApiException) as missing_name:
+            api.toolkit_v1_create_toolkit_config(
+                handle=handle,
+                toolkit_config_create_request=ToolkitConfigCreateRequest(
+                    toolkit_type="mcp",
+                    config={
+                        "server_url": "https://example.com/mcp",
+                        "auth_type": "none",
+                        "timeout": 30.0,
+                    },
+                    enabled=True,
+                ),
+                _headers=headers,
+            )
+        assert missing_name.value.status == 422
 
     def test_list_toolkits(
         self,
@@ -725,6 +783,70 @@ class TestToolkitAvailableAndAttach:
                 _headers=headers,
             )
         assert exc_info.value.status == 409
+
+    def test_duplicate_stored_slugs_attach_to_the_same_agent(
+        self,
+        public_api_client: azentspublicclient.ApiClient,
+        admin_api_client: azentsadminclient.ApiClient,
+    ) -> None:
+        """Persist and attach two different Toolkits with one shared base Slug."""
+        owner_token, handle, integration_id, model_selection = _setup_workspace(
+            public_api_client, admin_api_client
+        )
+        headers = {"Authorization": f"Bearer {owner_token}"}
+        agent_id = _create_agent(
+            public_api_client,
+            token=owner_token,
+            handle=handle,
+            integration_id=integration_id,
+            model_selection=model_selection,
+        )
+        api = ToolkitV1Api(public_api_client)
+        duplicate_slug = f"duplicate_{unique()}"
+        toolkits = [
+            api.toolkit_v1_create_toolkit_config(
+                handle=handle,
+                toolkit_config_create_request=ToolkitConfigCreateRequest(
+                    toolkit_type="mcp",
+                    slug=duplicate_slug,
+                    name=f"Duplicate MCP {index}",
+                    config={
+                        "server_url": f"https://example.com/mcp/{index}",
+                        "auth_type": "none",
+                        "timeout": 30.0,
+                    },
+                    enabled=True,
+                ),
+                _headers=headers,
+            )
+            for index in (1, 2)
+        ]
+
+        attachments = [
+            api.toolkit_v1_attach_toolkit_to_agent(
+                handle=handle,
+                agent_id=agent_id,
+                agent_toolkit_attach_request=AgentToolkitAttachRequest(
+                    toolkit_id=toolkit.id,
+                ),
+                _headers=headers,
+            )
+            for toolkit in toolkits
+        ]
+
+        assert len({attachment.toolkit_id for attachment in attachments}) == 2
+        management = api.toolkit_v1_list_agent_toolkit_management(
+            handle=handle,
+            agent_id=agent_id,
+            _headers=headers,
+        )
+        toolkit_ids = {toolkit.id for toolkit in toolkits}
+        stored_slugs = [
+            item.toolkit.slug
+            for item in management.items
+            if item.toolkit.id in toolkit_ids
+        ]
+        assert stored_slugs == [duplicate_slug, duplicate_slug]
 
     def test_unavailable_toolkit_returns_403(
         self,

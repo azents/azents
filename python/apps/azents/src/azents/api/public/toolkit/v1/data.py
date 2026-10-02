@@ -11,20 +11,17 @@ from azents.services.github_platform_system_setting.runtime import (
     PlatformGitHubAppAuthorizationReason,
 )
 from azents.services.toolkit.data import (
-    TOOLKIT_SLUG_PATTERN,
-    ToolkitSlug,
+    ToolkitNameInput,
+    ToolkitSlugInput,
     ToolkitUpdateInput,
 )
 
 AgentToolkitSlug = Annotated[
     str,
     Field(
-        min_length=1,
-        max_length=100,
-        pattern=TOOLKIT_SLUG_PATTERN,
         description=(
-            "Unique within the owning Agent's effective Toolkit namespace. "
-            "Use lowercase letters, numbers, and underscores only."
+            "Optional base alias. Explicit values are normalized to lowercase ASCII "
+            "letters, numbers, and underscores."
         ),
     ),
 ]
@@ -81,14 +78,18 @@ class ToolkitConfigCreateRequest(BaseModel):
     """Toolkit Config creation request."""
 
     toolkit_type: str = Field(description="Tool slug")
-    slug: ToolkitSlug | None = Field(
+    slug: ToolkitSlugInput | None = Field(
         default=None,
         description=(
-            "Workspace-unique slug. Use lowercase letters, numbers, "
-            "and underscores only."
+            "Optional non-unique base alias; blank values use the Name default."
         ),
     )
-    name: str = Field(description="Display name")
+    name: ToolkitNameInput | None = Field(
+        default=None,
+        description=(
+            "Optional display name for registered Providers; generic MCP requires one."
+        ),
+    )
     description: str | None = Field(default=None, description="Description")
     config: dict[str, Any] = Field(description="Tool configuration")
     prompt: str | None = Field(default=None, description="Custom prompt")
@@ -109,8 +110,7 @@ class AgentToolkitConfigCreateRequest(ToolkitConfigCreateRequest):
     slug: AgentToolkitSlug | None = Field(
         default=None,
         description=(
-            "Unique within the owning Agent's effective Toolkit namespace. "
-            "Use lowercase letters, numbers, and underscores only."
+            "Optional non-unique base alias; blank values use the Name default."
         ),
     )
 

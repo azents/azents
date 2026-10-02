@@ -192,15 +192,6 @@ class DuplicateScope:
 
 
 @dataclasses.dataclass(frozen=True)
-class DuplicateSlug:
-    """Toolkit with the same slug already exists in its ownership scope."""
-
-    workspace_id: str
-    owner_agent_id: str | None
-    slug: str
-
-
-@dataclasses.dataclass(frozen=True)
 class DuplicateAgentToolkit:
     """Same Toolkit is already mounted on agent."""
 

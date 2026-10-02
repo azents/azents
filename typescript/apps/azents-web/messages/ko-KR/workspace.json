@@ -1535,6 +1535,7 @@
     "toolLabel": "도구",
     "toolPlaceholder": "도구를 선택하세요",
     "nameLabel": "이름",
+    "mcpNamePlaceholder": "이 MCP 연결을 구분할 이름을 입력하세요",
     "descriptionLabel": "설명",
     "descriptionPlaceholder": "이 툴킷의 역할을 간단히 설명하세요",
     "allowedDomainsLabel": "허용 도메인",
@@ -1555,8 +1556,8 @@
     "save": "저장",
     "create": "추가",
     "slugLabel": "슬러그",
-    "slugDescription": "도구 이름 접두사로 사용되는 고유 식별자",
-    "slugPlaceholder": "예: my-shell",
+    "slugDescription": "도구 이름 접두사로 사용할 선택적 기본 별칭입니다. 중복 별칭도 사용할 수 있습니다.",
+    "slugPlaceholder": "이름에서 자동 생성",
     "customPromptLabel": "커스텀 프롬프트",
     "customPromptDescription": "시스템 메시지에 추가되는 선택적 프롬프트",
     "customPromptPlaceholder": "이 툴킷 사용 시 AI에게 전달할 추가 지침...",
@@ -1669,7 +1670,7 @@
       "reconnect": "다시 연결",
       "disconnect": "연결 해제"
     },
-    "agentSlugDescription": "이 에이전트에서 사용하는 툴킷 이름은 서로 달라야 합니다. 영문 소문자, 숫자, 밑줄만 사용할 수 있습니다."
+    "agentSlugDescription": "도구 이름 접두사로 사용할 선택적 기본 별칭입니다. 실행 시 최종 이름은 자동으로 구분됩니다."
   },
   "dashboard": {
     "headline": "워크스페이스",

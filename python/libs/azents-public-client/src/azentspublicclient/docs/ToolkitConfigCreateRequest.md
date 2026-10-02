@@ -7,8 +7,8 @@ Toolkit Config creation request.
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **toolkit_type** | **str** | Tool slug | 
-**slug** | **str** | Workspace-unique slug. Use lowercase letters, numbers, and underscores only. | [optional] 
-**name** | **str** | Display name | 
+**slug** | **str** | Optional base alias. Explicit values are normalized to lowercase ASCII letters, numbers, and underscores. | [optional] 
+**name** | **str** | Display name | [optional] 
 **description** | **str** |  | [optional] 
 **config** | **Dict[str, object]** | Tool configuration | 
 **prompt** | **str** |  | [optional] 
