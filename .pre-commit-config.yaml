@@ -6,17 +6,17 @@ repos:
         entry: bash scripts/ensure-claude-md-link.sh
         language: system
         files: AGENTS\.md$
-      - id: gen-azents-docs-index
-        name: Validate and regenerate azents docs INDEX
+      - id: validate-azents-docs-frontmatter
+        name: Validate azents docs frontmatter
         language: python
-        entry: python scripts/gen_docs_index.py --docs-root docs/azents --project-name azents
-        files: ^docs/azents/.*\.md$
+        entry: python scripts/docs_catalog.py validate
+        files: ^(docs/azents/.*\.md|scripts/docs_catalog\.py)$
         pass_filenames: false
-      - id: test-azents-docs-index
-        name: Test azents docs snapshot validation
+      - id: test-azents-docs-catalog
+        name: Test azents docs catalog
         language: python
-        entry: python -m unittest scripts.tests.test_gen_docs_index
-        files: ^(scripts/gen_docs_index\.py|scripts/tests/test_gen_docs_index\.py|docs/azents/AGENTS\.md)$
+        entry: python -m unittest scripts.tests.test_docs_catalog
+        files: ^(scripts/docs_catalog\.py|scripts/tests/test_docs_catalog\.py|docs/azents/AGENTS\.md)$
         pass_filenames: false
       - id: generate-conventions-index
         name: Regenerate .claude/rules/*-conventions.md tables from convention bodies
