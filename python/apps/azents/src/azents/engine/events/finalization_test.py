@@ -25,7 +25,7 @@ from azents.engine.events.types import Event, RunMarkerPayload, SystemErrorPaylo
 from azents.engine.run.failure import FailedRunAttempt, FailedRunRetryState
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_execution.data import EventCreate
-from azents.services.terminal_finalization import TerminalRunFinalizationCoordinator
+from azents.repos.terminal_finalization import TerminalRunFinalizationRepository
 from azents.testing.model_selection import (
     make_test_model_selection,
     make_test_model_settings,
@@ -155,8 +155,8 @@ async def test_failed_run_event_store_appends_terminal_failed_run() -> None:
     store = FailedRunEventStore(
         transcript_repo=cast(TranscriptRepository, transcript_repo),
         run_repo=cast(AgentRunRepository, run_repo),
-        terminal_finalization_coordinator=cast(
-            TerminalRunFinalizationCoordinator,
+        terminal_finalization_repository=cast(
+            TerminalRunFinalizationRepository,
             coordinator,
         ),
     )
@@ -249,8 +249,8 @@ async def test_failed_run_event_store_retains_terminal_candidate_outcomes() -> N
     store = FailedRunEventStore(
         transcript_repo=cast(TranscriptRepository, _TranscriptRepository()),
         run_repo=cast(AgentRunRepository, run_repo),
-        terminal_finalization_coordinator=cast(
-            TerminalRunFinalizationCoordinator,
+        terminal_finalization_repository=cast(
+            TerminalRunFinalizationRepository,
             _TerminalFinalizationCoordinator(),
         ),
     )

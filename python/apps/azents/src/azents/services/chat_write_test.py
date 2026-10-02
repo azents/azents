@@ -58,6 +58,7 @@ from azents.repos.chat_write_request.data import (
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.mailbox import MailboxRepository
+from azents.repos.mailbox.admission import MailboxAdmissionRepository
 from azents.repos.mailbox.data import MailboxItem
 from azents.repos.message import MessageRepository
 from azents.repos.scheduled_task.repository import ScheduledTaskRepository
@@ -274,6 +275,11 @@ def _service(
         message_repository=MessageRepository(),
         exchange_file_service=_ExchangeFileService(),
         mailbox_item_service=mailbox_item_service,
+        mailbox_admission_repository=MailboxAdmissionRepository(
+            session_manager=rdb_session_manager,
+            mailbox_item_repository=MailboxRepository(),
+            agent_session_repository=agent_session_repository,
+        ),
         session_model_profile_repository=SessionModelProfileRepository(
             agent_repository=agent_repository,
             agent_session_repository=agent_session_repository,
@@ -580,6 +586,11 @@ def _control_service(
         message_repository=cast(MessageRepository, object()),
         exchange_file_service=cast(ExchangeFileService, object()),
         mailbox_item_service=cast(MailboxService, _ControlMailboxService()),
+        mailbox_admission_repository=MailboxAdmissionRepository(
+            session_manager=_session_manager_double,
+            mailbox_item_repository=MailboxRepository(),
+            agent_session_repository=agent_session_repository,
+        ),
         session_model_profile_repository=SessionModelProfileRepository(
             agent_repository=agent_repository,
             agent_session_repository=agent_session_repository,
@@ -1123,6 +1134,11 @@ class TestChatWriteService:
             message_repository=cast(MessageRepository, object()),
             exchange_file_service=_ExchangeFileService(),
             mailbox_item_service=cast(MailboxService, object()),
+            mailbox_admission_repository=MailboxAdmissionRepository(
+                session_manager=_session_manager_double,
+                mailbox_item_repository=MailboxRepository(),
+                agent_session_repository=AgentSessionRepository(),
+            ),
             session_model_profile_repository=cast(
                 SessionModelProfileRepository,
                 object(),
@@ -1163,6 +1179,11 @@ class TestChatWriteService:
             ),
             message_repository=MessageRepository(),
             exchange_file_service=_ExchangeFileService(),
+            mailbox_admission_repository=MailboxAdmissionRepository(
+                session_manager=rdb_session_manager,
+                mailbox_item_repository=MailboxRepository(),
+                agent_session_repository=AgentSessionRepository(),
+            ),
             mailbox_item_service=MailboxService(
                 session_manager=rdb_session_manager,
                 mailbox_item_repository=MailboxRepository(),

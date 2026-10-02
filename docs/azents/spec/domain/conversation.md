@@ -72,7 +72,11 @@ code_paths:
   - python/apps/azents/src/azents/repos/runtime_web/**
   - python/apps/azents/src/azents/runtime/terminal_coordination/**
   - python/apps/azents/src/azents/services/session_working_folder_binding*
-  - python/apps/azents/src/azents/services/agent_mailbox.py
+  - python/apps/azents/src/azents/repos/agent_mailbox.py
+  - python/apps/azents/src/azents/repos/terminal_finalization.py
+  - python/apps/azents/src/azents/repos/terminal_finalization_data.py
+  - python/apps/azents/src/azents/repos/subagent_terminal_result.py
+  - python/apps/azents/src/azents/core/terminal_result.py
   - python/apps/azents/src/azents/services/subagent_terminal_result.py
   - python/apps/azents/src/azents/services/subagent_coordination.py
   - python/apps/azents/src/azents/services/session_workspace_project/**
@@ -140,8 +144,8 @@ api_routes:
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ticket
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ws
-last_verified_at: 2026-10-01
-spec_version: 176
+last_verified_at: 2026-10-02
+spec_version: 177
 ---
 
 # Conversation & Events
@@ -302,6 +306,13 @@ item changes the active Session to `running` in the same transaction, including 
 `queue_only` admission leaves the current state unchanged. After acquiring the Session lease, a
 Worker reads the Session without a row lock and refuses to inspect mailbox or recoverable execution
 work unless that durable state is `running`.
+
+Mailbox admission inputs and results have canonical detached definitions in
+`repos/mailbox/admission_data.py`. Database-only admission composes through
+`MailboxAdmissionRepository`; normal batch admission applies distinct wakes in
+Session-ID order, whereas idle-continuation composition retains its no-wake
+semantics. Larger input-acceptance atomic groups retain the shared in-session
+primitive until their complete owning compositions are migrated.
 
 Only one team primary session may exist per agent in the current product state. Additional active
 non-primary team sessions may exist under the same agent with `primary_kind = null`.
@@ -1430,6 +1441,9 @@ presentations.
 
 ## 13. Changelog
 
+- **2026-10-02** — v177. Canonicalized Mailbox admission and terminal database
+  compositions in repositories and completed best-effort terminal-result repair
+  operations without changing wake, parent-result, or rollback semantics.
 - **2026-10-01** — v176. Moved Todo persisted payloads and completed state
   transactions to core/repository ownership while preserving Chat snapshots and
   `todo_state_changed` publication behavior.

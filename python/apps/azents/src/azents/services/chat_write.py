@@ -38,6 +38,8 @@ from azents.repos.chat_write_request.data import (
     ChatWriteRequest,
     ChatWriteRequestCreate,
 )
+from azents.repos.mailbox.admission import MailboxAdmissionRepository
+from azents.repos.mailbox.admission_data import MailboxEnqueue
 from azents.repos.mailbox.data import MailboxItem
 from azents.repos.message import MessageRepository
 from azents.repos.session_model_profile.repository import (
@@ -52,7 +54,7 @@ from azents.services.exchange_file import (
     FileRetentionOwnerConflict,
     FileUnavailable,
 )
-from azents.services.mailbox import MailboxEnqueue, MailboxService
+from azents.services.mailbox import MailboxService
 
 
 def _raise_attachment_claim_error(error: object) -> None:
@@ -150,6 +152,9 @@ class ChatWriteService:
     message_repository: Annotated[MessageRepository, Depends(MessageRepository)]
     exchange_file_service: Annotated[ExchangeFileService, Depends(ExchangeFileService)]
     mailbox_item_service: Annotated[MailboxService, Depends(MailboxService)]
+    mailbox_admission_repository: Annotated[
+        MailboxAdmissionRepository, Depends(MailboxAdmissionRepository)
+    ]
     session_model_profile_repository: Annotated[
         SessionModelProfileRepository, Depends(SessionModelProfileRepository)
     ]
@@ -247,7 +252,7 @@ class ChatWriteService:
                 session,
                 session_id,
             )
-            result = await self.mailbox_item_service.enqueue(
+            result = await self.mailbox_admission_repository.enqueue_in_session(
                 session,
                 MailboxEnqueue(
                     session_id=session_id,

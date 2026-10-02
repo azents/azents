@@ -18,8 +18,8 @@ from azents.repos.agent_session.repository_test import (
 )
 from azents.worker.session.idle_continuation_test import (
     _Broker,
+    _ContinuationRecorder,
     _EventPublisher,
-    _MailboxService,
     _service,
 )
 
@@ -100,7 +100,7 @@ async def test_idle_admission_yields_to_child_terminal_parent_lock(
         await setup.commit()
 
     service = _service(
-        mailbox_item_service=_MailboxService(),
+        continuation_recorder=_ContinuationRecorder(),
         event_publisher=_EventPublisher(),
         broker=_Broker(),
         agent_session_repository=repository,

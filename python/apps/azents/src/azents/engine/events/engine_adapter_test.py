@@ -149,11 +149,11 @@ from azents.repos.provider_output_operation import ProviderOutputOperationReposi
 from azents.repos.session_execution import (
     CanonicalExecutionOwnerGenerationStaleError,
 )
+from azents.repos.terminal_finalization import TerminalRunFinalizationRepository
 from azents.repos.toolkit_state.engine import ToolWorkingSetStore
 from azents.services.artifact import ArtifactService
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.model_file import ModelFileService
-from azents.services.terminal_finalization import TerminalRunFinalizationCoordinator
 from azents.services.xai_imagine import (
     XaiImagineAuthenticationError,
     XaiImagineClient,
@@ -3215,9 +3215,9 @@ def _agent_engine_adapter(
         transcript_repo=transcript_repo or _TranscriptRepo([]),
         system_prompt_snapshot_repo=AgentSessionSystemPromptSnapshotRepository(),
         model_file_pin_repo=_ModelFilePinRepo(),
-        terminal_finalization_coordinator=require_instance(
-            AsyncMock(spec=TerminalRunFinalizationCoordinator),
-            TerminalRunFinalizationCoordinator,
+        terminal_finalization_repository=require_instance(
+            AsyncMock(spec=TerminalRunFinalizationRepository),
+            TerminalRunFinalizationRepository,
         ),
         compactor=compactor or _Compactor(),
         summary_model_call=summary_model_call

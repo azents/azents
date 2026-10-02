@@ -216,6 +216,7 @@ from azents.repos.model_file import ModelFileRepository
 from azents.repos.model_file_pin import ModelFilePinRepository
 from azents.repos.provider_output_operation import ProviderOutputOperationRepository
 from azents.repos.session_execution.ownership import OwnerBoundSessionManager
+from azents.repos.terminal_finalization import TerminalRunFinalizationRepository
 from azents.repos.toolkit_state.engine import ToolWorkingSetStore
 from azents.repos.xai_oauth_runtime import XaiOAuthRuntimeRepository
 from azents.services.artifact import ArtifactService
@@ -231,7 +232,6 @@ from azents.services.chatgpt_oauth.runtime import (
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.model_file import ModelFileService
 from azents.services.model_metadata import ModelMetadataService
-from azents.services.terminal_finalization import TerminalRunFinalizationCoordinator
 from azents.services.xai_imagine import XaiImagineClient
 from azents.services.xai_oauth.data import (
     ProviderEntitlementDenied,
@@ -407,9 +407,9 @@ class AgentEngineAdapter:
     model_file_pin_repo: Annotated[
         ModelFilePinRepository, Depends(ModelFilePinRepository)
     ]
-    terminal_finalization_coordinator: Annotated[
-        TerminalRunFinalizationCoordinator,
-        Depends(TerminalRunFinalizationCoordinator),
+    terminal_finalization_repository: Annotated[
+        TerminalRunFinalizationRepository,
+        Depends(TerminalRunFinalizationRepository),
     ]
     compactor: Annotated[ManualCompactor, Depends(EventCompactor)]
     summary_model_call: Annotated[SummaryModelCall, Depends(_summary_model_call)]
@@ -1283,7 +1283,7 @@ class AgentEngineAdapter:
             run_repo=self.run_repo,
             transcript_repo=self.transcript_repo,
             session_repo=self.session_head_repo,
-            terminal_finalization_coordinator=self.terminal_finalization_coordinator,
+            terminal_finalization_repository=self.terminal_finalization_repository,
             system_prompt_snapshot_repo=self.system_prompt_snapshot_repo,
             complete_model_operation_in_session=(
                 context.complete_model_operation_in_session

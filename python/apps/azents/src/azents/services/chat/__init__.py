@@ -69,6 +69,11 @@ from azents.repos.goal.store import (
     GoalInvalidStatusTransitionError,
     GoalStateStore,
 )
+from azents.repos.mailbox.admission import MailboxAdmissionRepository
+from azents.repos.mailbox.admission_data import (
+    MailboxAdmissionResult,
+    MailboxEnqueue,
+)
 from azents.repos.message import MessageRepository
 from azents.repos.session_git_worktree import SessionGitWorktreeRepository
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
@@ -85,11 +90,7 @@ from azents.runtime.deps import get_runtime_runner_operation_client
 from azents.services.agent_runtime.lifecycle_data import RuntimeOperationTargetResolver
 from azents.services.agent_runtime.service import AgentRuntimeService
 from azents.services.external_channel.lifecycle import ExternalChannelLifecycleService
-from azents.services.mailbox import (
-    MailboxAdmissionResult,
-    MailboxEnqueue,
-    MailboxService,
-)
+from azents.services.mailbox import MailboxService
 from azents.services.root_agent_session_creation import (
     RootAgentSessionCreationService,
 )
@@ -463,6 +464,9 @@ class ChatSessionService:
         Depends(SessionWorkspaceProjectRepository),
     ]
     mailbox_item_service: Annotated[MailboxService, Depends(MailboxService)]
+    mailbox_admission_repository: Annotated[
+        MailboxAdmissionRepository, Depends(MailboxAdmissionRepository)
+    ]
     session_git_worktree_service: Annotated[
         SessionGitWorktreeService,
         Depends(SessionGitWorktreeService),
@@ -1371,7 +1375,7 @@ class ChatSessionService:
             "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
             "source": "system",
         }
-        await self.mailbox_item_service.enqueue(
+        await self.mailbox_admission_repository.enqueue_in_session(
             session,
             MailboxEnqueue(
                 session_id=agent_session.id,
@@ -1404,7 +1408,7 @@ class ChatSessionService:
                         source_project_path=source_project_path,
                         starting_ref=starting_ref,
                     )
-                    result = await self.mailbox_item_service.enqueue(
+                    result = await self.mailbox_admission_repository.enqueue_in_session(
                         session,
                         MailboxEnqueue(
                             session_id=agent_session.id,
@@ -1995,7 +1999,7 @@ class ChatSessionService:
                 participant_operation=restore_participant,
                 transition=restore_tree,
             )
-            await self.mailbox_item_service.enqueue(
+            await self.mailbox_admission_repository.enqueue_in_session(
                 session,
                 MailboxEnqueue(
                     session_id=session_id,
@@ -2557,7 +2561,7 @@ class ChatSessionService:
                 return Failure(authorized)
             if agent_session.session_kind is AgentSessionKind.SUBAGENT:
                 return Failure(SubagentSessionReadOnly())
-            admission = await self.mailbox_item_service.enqueue(
+            admission = await self.mailbox_admission_repository.enqueue_in_session(
                 session,
                 MailboxEnqueue(
                     session_id=session_id,

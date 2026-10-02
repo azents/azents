@@ -39,7 +39,11 @@ code_paths:
   - python/apps/azents/src/azents/engine/run/contracts.py
   - python/apps/azents/src/azents/engine/run/input.py
   - python/apps/azents/src/azents/engine/tools/**
-  - python/apps/azents/src/azents/services/agent_mailbox.py
+  - python/apps/azents/src/azents/repos/agent_mailbox.py
+  - python/apps/azents/src/azents/repos/terminal_finalization.py
+  - python/apps/azents/src/azents/repos/terminal_finalization_data.py
+  - python/apps/azents/src/azents/repos/subagent_terminal_result.py
+  - python/apps/azents/src/azents/core/terminal_result.py
   - python/apps/azents/src/azents/services/turn_action.py
   - python/apps/azents/src/azents/services/subagent_terminal_result.py
   - python/apps/azents/src/azents/services/subagent_coordination.py
@@ -81,7 +85,7 @@ code_paths:
 api_routes:
   - /toolkit/v1
 last_verified_at: 2026-10-02
-spec_version: 127
+spec_version: 128
 ---
 
 # Toolkit
@@ -792,6 +796,13 @@ woken in its existing Session subject to the ordinary active-capacity check.
 Terminal-result delivery, parent observation cursors, and the public Subagent Tree
 remain independent and complete.
 
+Historical terminal-result repair loads candidates and direct children through
+completed repository reads and commits each eligible parent delivery through a
+separate database-only repair operation. Repair logging and outcome counting run
+after those operations. Normal terminal finalization and repair share canonical
+AgentMailbox database admission and safe result text but retain their distinct
+parent-ineligibility and User Stop behavior.
+
 `spawn_agent` currently supports only `agent_type = default`; unsupported values fail as tool errors.
 Its `fork_turns` parameter defaults to `all`, so the child starts with the parent's current
 model-visible context unless the caller explicitly selects no context or a bounded number of turns.
@@ -1176,6 +1187,9 @@ notification execute only after the operation returns.
 
 ## Changelog
 
+- **2026-10-02** (spec_version 128) — Canonicalized AgentMailbox and terminal
+  database composition and completed historical result-repair operations while
+  preserving parent validation, idempotency, and queue-only scheduling.
 - **2026-10-02** (spec_version 127) — Promoted prompt-only Memory boundary
   context, mutation-only domain tools, and one generic Runtime-independent
   read/grep/glob binding for immutable Skills and live read-only Memory mounts.

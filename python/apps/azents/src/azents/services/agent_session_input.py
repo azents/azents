@@ -46,6 +46,8 @@ from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession, AgentSessionCreate
 from azents.repos.chat_write_request import ChatWriteRequestRepository
 from azents.repos.chat_write_request.data import ChatWriteRequestCreate
+from azents.repos.mailbox.admission import MailboxAdmissionRepository
+from azents.repos.mailbox.admission_data import MailboxEnqueue
 from azents.repos.mailbox.data import MailboxItem
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 from azents.repos.session_workspace_project.data import SessionWorkspaceProjectCreate
@@ -54,7 +56,7 @@ from azents.services.exchange_file import (
     ExchangeFileInputClaimError,
     ExchangeFileService,
 )
-from azents.services.mailbox import MailboxEnqueue, MailboxService
+from azents.services.mailbox import MailboxService
 from azents.services.root_agent_session_creation import (
     RootAgentSessionCreationService,
 )
@@ -196,6 +198,9 @@ class AgentSessionInputService:
     ]
     exchange_file_service: Annotated[ExchangeFileService, Depends(ExchangeFileService)]
     mailbox_item_service: Annotated[MailboxService, Depends(MailboxService)]
+    mailbox_admission_repository: Annotated[
+        MailboxAdmissionRepository, Depends(MailboxAdmissionRepository)
+    ]
     session_manager: Annotated[
         SessionManager[AsyncSession], Depends(get_session_manager)
     ]
@@ -393,7 +398,7 @@ class AgentSessionInputService:
                     session,
                     agent_session=agent_session,
                 )
-            result = await self.mailbox_item_service.enqueue(
+            result = await self.mailbox_admission_repository.enqueue_in_session(
                 session,
                 MailboxEnqueue(
                     session_id=agent_session.id,
@@ -1052,7 +1057,7 @@ class AgentSessionInputService:
     ) -> None:
         """Enqueue ordered setup TurnActions before the first user message."""
         if create_session_working_folder:
-            await self.mailbox_item_service.enqueue(
+            await self.mailbox_admission_repository.enqueue_in_session(
                 session,
                 MailboxEnqueue(
                     session_id=agent_session.id,
@@ -1089,7 +1094,7 @@ class AgentSessionInputService:
                         source_project_path=source_project_path,
                         starting_ref=starting_ref,
                     )
-                    await self.mailbox_item_service.enqueue(
+                    await self.mailbox_admission_repository.enqueue_in_session(
                         session,
                         MailboxEnqueue(
                             session_id=agent_session.id,
@@ -1144,7 +1149,7 @@ class AgentSessionInputService:
             SessionWorkingFolderBindingState.BOUND,
         }:
             return
-        await self.mailbox_item_service.enqueue(
+        await self.mailbox_admission_repository.enqueue_in_session(
             session,
             MailboxEnqueue(
                 session_id=agent_session.id,
@@ -1179,7 +1184,7 @@ class AgentSessionInputService:
         client_request_id: str | None,
     ) -> Result[MailboxItem, ExchangeFileInputClaimError]:
         """Enqueue one user message and claim its ExchangeFiles atomically."""
-        result = await self.mailbox_item_service.enqueue(
+        result = await self.mailbox_admission_repository.enqueue_in_session(
             session,
             MailboxEnqueue(
                 session_id=agent_session.id,

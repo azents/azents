@@ -29,7 +29,7 @@ from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.session_execution.data import PendingCommandSnapshot
-from azents.services.terminal_finalization import TerminalRunFinalizationCoordinator
+from azents.repos.terminal_finalization import TerminalRunFinalizationRepository
 from azents.worker.deps import get_worker_broker
 from azents.worker.session.execution_snapshot import (
     CanonicalExecutionOwnerGenerationStaleError,
@@ -53,9 +53,9 @@ class SessionLifecycleService:
     ]
     agent_run_repository: Annotated[AgentRunRepository, Depends(AgentRunRepository)]
     mailbox_item_repository: Annotated[MailboxRepository, Depends(MailboxRepository)]
-    terminal_finalization_coordinator: Annotated[
-        TerminalRunFinalizationCoordinator,
-        Depends(TerminalRunFinalizationCoordinator),
+    terminal_finalization_repository: Annotated[
+        TerminalRunFinalizationRepository,
+        Depends(TerminalRunFinalizationRepository),
     ]
 
     async def claim_owner_generation(self, session_id: str) -> int:
@@ -581,7 +581,7 @@ class SessionLifecycleService:
                 AgentRunStatus.CANCELLED,
                 ended_at=datetime.datetime.now(datetime.UTC),
             )
-            await self.terminal_finalization_coordinator.finalize_run_in_session(
+            await self.terminal_finalization_repository.finalize_run_in_session(
                 db_session,
                 run_id=run_id,
             )
@@ -712,7 +712,7 @@ class SessionLifecycleService:
                 ended_at=datetime.datetime.now(datetime.UTC),
             )
             transitioned_run_ids.extend(run.id for run in runs)
-            await self.terminal_finalization_coordinator.finalize_runs_in_session(
+            await self.terminal_finalization_repository.finalize_runs_in_session(
                 db_session,
                 run_ids=transitioned_run_ids,
             )
@@ -745,7 +745,7 @@ class SessionLifecycleService:
                 status,
                 ended_at=datetime.datetime.now(datetime.UTC),
             )
-            await self.terminal_finalization_coordinator.finalize_run_in_session(
+            await self.terminal_finalization_repository.finalize_run_in_session(
                 db_session,
                 run_id=run_id,
             )
@@ -775,7 +775,7 @@ class SessionLifecycleService:
                 run_id,
                 ended_at=datetime.datetime.now(datetime.UTC),
             )
-            await self.terminal_finalization_coordinator.finalize_run_in_session(
+            await self.terminal_finalization_repository.finalize_run_in_session(
                 db_session,
                 run_id=run_id,
             )

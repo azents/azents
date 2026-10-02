@@ -108,6 +108,7 @@ from azents.repos.agent_session.data import (
     AgentSessionUnreadTerminalRunProjection,
 )
 from azents.repos.chat_write_request.data import ChatWriteRequest
+from azents.repos.mailbox.admission_data import MailboxAdmissionResult
 from azents.repos.mailbox.data import MailboxItem
 from azents.services.agent_session_input import (
     AgentSessionInputService,
@@ -157,7 +158,6 @@ from azents.services.chat_write import (
     AcceptedStopRequest,
     ChatWriteService,
 )
-from azents.services.mailbox import MailboxAdmissionResult
 from azents.services.session_git_worktree import (
     GitWorktreeCleanupRequest,
     GitWorktreeCleanupRequestError,

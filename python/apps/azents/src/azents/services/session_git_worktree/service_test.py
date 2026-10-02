@@ -71,6 +71,7 @@ from azents.repos.agent_session.data import AgentSession, AgentSessionCreate
 from azents.repos.chat_write_request import ChatWriteRequestRepository
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.mailbox import MailboxRepository
+from azents.repos.mailbox.admission import MailboxAdmissionRepository
 from azents.repos.mailbox.data import (
     AgentRemoveGitWorktreeContinuationResult,
     TurnActionContinuationMailboxPayload,
@@ -1002,6 +1003,11 @@ def _input_service(
         session_workspace_project_repository=SessionWorkspaceProjectRepository(),
         workspace_user_repository=WorkspaceUserRepository(),
         exchange_file_service=_ExchangeFileService(),
+        mailbox_admission_repository=MailboxAdmissionRepository(
+            session_manager=session_manager,
+            mailbox_item_repository=MailboxRepository(),
+            agent_session_repository=AgentSessionRepository(),
+        ),
         mailbox_item_service=MailboxService(
             session_manager=session_manager,
             mailbox_item_repository=MailboxRepository(),

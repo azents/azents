@@ -67,6 +67,8 @@ from azents.repos.external_channel.data import (
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.external_channel.work import ExternalChannelWorkRepository
 from azents.repos.external_channel.work_state import ChannelWorkState
+from azents.repos.mailbox.admission import MailboxAdmissionRepository
+from azents.repos.mailbox.admission_data import MailboxEnqueue
 from azents.services.external_channel.conversation import ExternalChannelHistoryRange
 from azents.services.external_channel.conversation_provisioning import (
     ExternalChannelConversationPreparation,
@@ -101,7 +103,6 @@ from azents.services.external_channel.selector_state import (
     selector_state_from_interaction,
 )
 from azents.services.mailbox import (
-    MailboxEnqueue,
     MailboxService,
     build_external_channel_mailbox_payload,
 )
@@ -176,6 +177,9 @@ class ExternalChannelMailboxIngestionStore:
         Depends(RootAgentSessionCreationService),
     ]
     mailbox_service: Annotated[MailboxService, Depends(MailboxService)]
+    mailbox_admission_repository: Annotated[
+        MailboxAdmissionRepository, Depends(MailboxAdmissionRepository)
+    ]
     config: Annotated[Config, Depends(get_config)]
 
     async def create_configured_binding(
@@ -702,7 +706,7 @@ class ExternalChannelMailboxIngestionStore:
                 invocation_id=idempotency_key,
             )
             order_group = uuid7().hex
-            enqueues = await self.mailbox_service.enqueue_many(
+            enqueues = await self.mailbox_admission_repository.enqueue_many_in_session(
                 session,
                 [
                     MailboxEnqueue(

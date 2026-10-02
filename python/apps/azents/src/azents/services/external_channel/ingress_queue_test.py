@@ -45,6 +45,8 @@ from azents.repos.external_channel.ingress_queue_data import (
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.external_channel.work import ExternalChannelWorkRepository
+from azents.repos.mailbox.admission import MailboxAdmissionRepository
+from azents.repos.mailbox.admission_data import MailboxAdmissionResult
 from azents.repos.mailbox.data import MailboxItem
 from azents.services.external_channel.conversation import (
     ExternalChannelHistoryPermissionDenied,
@@ -77,10 +79,6 @@ from azents.services.external_channel.mailbox_wake import (
 )
 from azents.services.external_channel.provider_control import (
     ExternalChannelProviderControlService,
-)
-from azents.services.mailbox import (
-    MailboxAdmissionResult,
-    MailboxService,
 )
 from azents.testing.external_channel import make_provider_effect_plan
 from azents.testing.types import require_instance
@@ -316,7 +314,7 @@ def _service(
     session_manager: SessionManager[AsyncSession],
     repository: MagicMock,
     queue_repository: MagicMock,
-    mailbox_service: MagicMock,
+    mailbox_admission_repository: MagicMock,
     agent_session_repository: MagicMock,
     wake_dispatcher: MagicMock,
     work_repository: MagicMock | None = None,
@@ -340,7 +338,7 @@ def _service(
     queue_repository.mock_add_spec(ExternalChannelIngressQueueRepository)
     agent_session_repository.mock_add_spec(AgentSessionRepository)
     work.mock_add_spec(ExternalChannelWorkRepository)
-    mailbox_service.mock_add_spec(MailboxService)
+    mailbox_admission_repository.mock_add_spec(MailboxAdmissionRepository)
     wake_dispatcher.mock_add_spec(ExternalChannelMailboxWakeDispatcher)
     control.mock_add_spec(ExternalChannelProviderControlService)
     return ExternalChannelIngressDrainService(
@@ -363,7 +361,9 @@ def _service(
             ExternalChannelIngressProvisioningService,
         ),
         work_repository=require_instance(work, ExternalChannelWorkRepository),
-        mailbox_service=require_instance(mailbox_service, MailboxService),
+        mailbox_admission_repository=require_instance(
+            mailbox_admission_repository, MailboxAdmissionRepository
+        ),
         wake_dispatcher=require_instance(
             wake_dispatcher,
             ExternalChannelMailboxWakeDispatcher,
@@ -381,7 +381,7 @@ class _Collaborators(NamedTuple):
 
     repository: MagicMock
     queue_repository: MagicMock
-    mailbox_service: MagicMock
+    mailbox_admission_repository: MagicMock
     agent_session_repository: MagicMock
     wake_dispatcher: MagicMock
     drain: SimpleNamespace
@@ -426,7 +426,7 @@ def _collaborators(
     queue_repository.move_to_retry_tail = AsyncMock()
     queue_repository.finish_batch = AsyncMock()
 
-    mailbox_service = MagicMock(spec=MailboxService)
+    mailbox_admission_repository = MagicMock(spec=MailboxAdmissionRepository)
 
     async def enqueue_many(
         _session: AsyncSession,
@@ -447,7 +447,9 @@ def _collaborators(
             for index, _enqueue in enumerate(enqueues)
         ]
 
-    mailbox_service.enqueue_many = AsyncMock(side_effect=enqueue_many)
+    mailbox_admission_repository.enqueue_many_in_session = AsyncMock(
+        side_effect=enqueue_many
+    )
     agent_session_repository = MagicMock(spec=AgentSessionRepository)
     agent_session_repository.lock_by_id = AsyncMock()
     agent_session_repository.get_by_id = AsyncMock(
@@ -465,7 +467,7 @@ def _collaborators(
     return _Collaborators(
         repository,
         queue_repository,
-        mailbox_service,
+        mailbox_admission_repository,
         agent_session_repository,
         wake_dispatcher,
         drain,
@@ -482,7 +484,7 @@ async def test_ownership_check_reads_session_without_a_row_lock() -> None:
     (
         repository,
         queue_repository,
-        mailbox_service,
+        mailbox_admission_repository,
         agent_session_repository,
         wake_dispatcher,
         _drain,
@@ -491,7 +493,7 @@ async def test_ownership_check_reads_session_without_a_row_lock() -> None:
         session_manager=_session_manager(_Session()),
         repository=repository,
         queue_repository=queue_repository,
-        mailbox_service=mailbox_service,
+        mailbox_admission_repository=mailbox_admission_repository,
         agent_session_repository=agent_session_repository,
         wake_dispatcher=wake_dispatcher,
     )
@@ -526,7 +528,7 @@ async def test_late_cursor_cas_conflict_rolls_back_and_resets_claim(
     (
         repository,
         queue_repository,
-        mailbox_service,
+        mailbox_admission_repository,
         agent_session_repository,
         wake_dispatcher,
         drain,
@@ -541,7 +543,7 @@ async def test_late_cursor_cas_conflict_rolls_back_and_resets_claim(
         session_manager=_session_manager(transaction, reset_transaction),
         repository=repository,
         queue_repository=queue_repository,
-        mailbox_service=mailbox_service,
+        mailbox_admission_repository=mailbox_admission_repository,
         agent_session_repository=agent_session_repository,
         wake_dispatcher=wake_dispatcher,
     )
@@ -587,7 +589,7 @@ async def test_session_admission_cas_failure_rolls_back_and_resets_claim(
     (
         repository,
         queue_repository,
-        mailbox_service,
+        mailbox_admission_repository,
         agent_session_repository,
         wake_dispatcher,
         _drain,
@@ -599,7 +601,7 @@ async def test_session_admission_cas_failure_rolls_back_and_resets_claim(
         session_manager=_session_manager(transaction, reset_transaction),
         repository=repository,
         queue_repository=queue_repository,
-        mailbox_service=mailbox_service,
+        mailbox_admission_repository=mailbox_admission_repository,
         agent_session_repository=agent_session_repository,
         wake_dispatcher=wake_dispatcher,
     )
@@ -661,7 +663,7 @@ async def test_coordination_exhaustion_releases_current_lease(
         session_manager=_session_manager(*transactions),
         repository=MagicMock(),
         queue_repository=queue_repository,
-        mailbox_service=MagicMock(),
+        mailbox_admission_repository=MagicMock(),
         agent_session_repository=MagicMock(),
         wake_dispatcher=MagicMock(),
     )
@@ -784,7 +786,7 @@ async def test_finalization_connection_first_order_prevents_admission_deadlock(
         session_manager=session_manager,
         repository=repository,
         queue_repository=queue_repository,
-        mailbox_service=MagicMock(),
+        mailbox_admission_repository=MagicMock(),
         agent_session_repository=MagicMock(),
         wake_dispatcher=MagicMock(),
     )
@@ -892,7 +894,7 @@ async def test_preparation_locks_connection_before_owner() -> None:
         session_manager=_session_manager(transaction),
         repository=repository,
         queue_repository=queue_repository,
-        mailbox_service=MagicMock(),
+        mailbox_admission_repository=MagicMock(),
         agent_session_repository=MagicMock(),
         wake_dispatcher=MagicMock(),
         provider_control=provider_control,
@@ -968,7 +970,7 @@ async def test_unready_discord_nonmention_starts_hidden_without_progress() -> No
         session_manager=_session_manager(transaction),
         repository=repository,
         queue_repository=queue_repository,
-        mailbox_service=MagicMock(),
+        mailbox_admission_repository=MagicMock(),
         agent_session_repository=MagicMock(),
         wake_dispatcher=MagicMock(),
         provider_control=provider_control,
@@ -1023,7 +1025,7 @@ async def test_success_covers_earlier_retry_and_dispatches_one_batch_wake(
     (
         repository,
         queue_repository,
-        mailbox_service,
+        mailbox_admission_repository,
         agent_session_repository,
         wake_dispatcher,
         _drain,
@@ -1033,7 +1035,7 @@ async def test_success_covers_earlier_retry_and_dispatches_one_batch_wake(
         session_manager=_session_manager(transaction),
         repository=repository,
         queue_repository=queue_repository,
-        mailbox_service=mailbox_service,
+        mailbox_admission_repository=mailbox_admission_repository,
         agent_session_repository=agent_session_repository,
         wake_dispatcher=wake_dispatcher,
     )
@@ -1065,8 +1067,11 @@ async def test_success_covers_earlier_retry_and_dispatches_one_batch_wake(
     queue_repository.move_to_retry_tail.assert_not_awaited()
     finish_args = queue_repository.finish_batch.await_args
     assert finish_args.kwargs["deleted_items"] == [failed_row, successful_row]
-    assert mailbox_service.enqueue_many.await_count == 1
-    assert len(mailbox_service.enqueue_many.await_args.args[1]) == 2
+    assert mailbox_admission_repository.enqueue_many_in_session.await_count == 1
+    assert (
+        len(mailbox_admission_repository.enqueue_many_in_session.await_args.args[1])
+        == 2
+    )
     repository.advance_conversation_position_if_current.assert_awaited_once_with(
         transaction,
         position_id="position-1",
@@ -1102,7 +1107,7 @@ async def test_missing_trigger_warns_and_is_ignored_while_batch_continues(
     (
         repository,
         queue_repository,
-        mailbox_service,
+        mailbox_admission_repository,
         agent_session_repository,
         wake_dispatcher,
         _drain,
@@ -1112,7 +1117,7 @@ async def test_missing_trigger_warns_and_is_ignored_while_batch_continues(
         session_manager=_session_manager(transaction),
         repository=repository,
         queue_repository=queue_repository,
-        mailbox_service=mailbox_service,
+        mailbox_admission_repository=mailbox_admission_repository,
         agent_session_repository=agent_session_repository,
         wake_dispatcher=wake_dispatcher,
     )
@@ -1147,7 +1152,7 @@ async def test_missing_trigger_warns_and_is_ignored_while_batch_continues(
     queue_repository.move_to_retry_tail.assert_not_awaited()
     finish_args = queue_repository.finish_batch.await_args
     assert finish_args.kwargs["deleted_items"] == [missing_row, successful_row]
-    enqueues = mailbox_service.enqueue_many.await_args.args[1]
+    enqueues = mailbox_admission_repository.enqueue_many_in_session.await_args.args[1]
     assert len(enqueues) == 1
     assert (
         enqueues[0]
@@ -1187,7 +1192,7 @@ async def test_admitted_all_messages_trigger_is_invocation_with_retained_context
     (
         repository,
         queue_repository,
-        mailbox_service,
+        mailbox_admission_repository,
         agent_session_repository,
         wake_dispatcher,
         _drain,
@@ -1203,7 +1208,7 @@ async def test_admitted_all_messages_trigger_is_invocation_with_retained_context
         session_manager=_session_manager(transaction),
         repository=repository,
         queue_repository=queue_repository,
-        mailbox_service=mailbox_service,
+        mailbox_admission_repository=mailbox_admission_repository,
         agent_session_repository=agent_session_repository,
         wake_dispatcher=wake_dispatcher,
     )
@@ -1225,7 +1230,7 @@ async def test_admitted_all_messages_trigger_is_invocation_with_retained_context
     )
 
     assert stale is False
-    enqueues = mailbox_service.enqueue_many.await_args.args[1]
+    enqueues = mailbox_admission_repository.enqueue_many_in_session.await_args.args[1]
     messages = [
         enqueue.payload.items[0].metadata["external_channel_message"]
         for enqueue in enqueues
@@ -1266,7 +1271,7 @@ async def test_explicit_followup_controls_precede_wake(
     (
         repository,
         queue_repository,
-        mailbox_service,
+        mailbox_admission_repository,
         agent_session_repository,
         wake_dispatcher,
         _drain,
@@ -1292,7 +1297,7 @@ async def test_explicit_followup_controls_precede_wake(
         session_manager=_session_manager(transaction),
         repository=repository,
         queue_repository=queue_repository,
-        mailbox_service=mailbox_service,
+        mailbox_admission_repository=mailbox_admission_repository,
         agent_session_repository=agent_session_repository,
         wake_dispatcher=wake_dispatcher,
         work_repository=work_repository,
@@ -1366,7 +1371,7 @@ async def test_followup_visibility_uses_explicit_invocation(
     (
         repository,
         queue_repository,
-        mailbox_service,
+        mailbox_admission_repository,
         agent_session_repository,
         wake_dispatcher,
         _drain,
@@ -1382,7 +1387,7 @@ async def test_followup_visibility_uses_explicit_invocation(
         session_manager=_session_manager(transaction),
         repository=repository,
         queue_repository=queue_repository,
-        mailbox_service=mailbox_service,
+        mailbox_admission_repository=mailbox_admission_repository,
         agent_session_repository=agent_session_repository,
         wake_dispatcher=wake_dispatcher,
         work_repository=work_repository,
@@ -1426,7 +1431,7 @@ async def test_unmentioned_discord_input_requests_hidden_tracker_visibility(
     (
         repository,
         queue_repository,
-        mailbox_service,
+        mailbox_admission_repository,
         agent_session_repository,
         wake_dispatcher,
         _drain,
@@ -1442,7 +1447,7 @@ async def test_unmentioned_discord_input_requests_hidden_tracker_visibility(
         session_manager=_session_manager(transaction),
         repository=repository,
         queue_repository=queue_repository,
-        mailbox_service=mailbox_service,
+        mailbox_admission_repository=mailbox_admission_repository,
         agent_session_repository=agent_session_repository,
         wake_dispatcher=wake_dispatcher,
         work_repository=work_repository,
@@ -1492,7 +1497,7 @@ async def test_late_discord_mention_keeps_tracker_hidden(
     (
         repository,
         queue_repository,
-        mailbox_service,
+        mailbox_admission_repository,
         agent_session_repository,
         wake_dispatcher,
         _drain,
@@ -1508,7 +1513,7 @@ async def test_late_discord_mention_keeps_tracker_hidden(
         session_manager=_session_manager(transaction),
         repository=repository,
         queue_repository=queue_repository,
-        mailbox_service=mailbox_service,
+        mailbox_admission_repository=mailbox_admission_repository,
         agent_session_repository=agent_session_repository,
         wake_dispatcher=wake_dispatcher,
         work_repository=work_repository,
@@ -1557,7 +1562,7 @@ async def test_duplicate_explicit_invocation_does_not_project_tracker(
     (
         repository,
         queue_repository,
-        mailbox_service,
+        mailbox_admission_repository,
         agent_session_repository,
         wake_dispatcher,
         _drain,
@@ -1571,7 +1576,7 @@ async def test_duplicate_explicit_invocation_does_not_project_tracker(
         session_manager=_session_manager(transaction),
         repository=repository,
         queue_repository=queue_repository,
-        mailbox_service=mailbox_service,
+        mailbox_admission_repository=mailbox_admission_repository,
         agent_session_repository=agent_session_repository,
         wake_dispatcher=wake_dispatcher,
         work_repository=work_repository,
@@ -1613,7 +1618,7 @@ async def test_new_context_with_duplicate_trigger_does_not_resume_work(
     (
         repository,
         queue_repository,
-        mailbox_service,
+        mailbox_admission_repository,
         agent_session_repository,
         wake_dispatcher,
         _drain,
@@ -1631,7 +1636,7 @@ async def test_new_context_with_duplicate_trigger_does_not_resume_work(
         session_manager=_session_manager(transaction),
         repository=repository,
         queue_repository=queue_repository,
-        mailbox_service=mailbox_service,
+        mailbox_admission_repository=mailbox_admission_repository,
         agent_session_repository=agent_session_repository,
         wake_dispatcher=wake_dispatcher,
         work_repository=work_repository,
@@ -1675,7 +1680,7 @@ async def test_duplicate_discord_mention_does_not_request_tracker_promotion(
     (
         repository,
         queue_repository,
-        mailbox_service,
+        mailbox_admission_repository,
         agent_session_repository,
         wake_dispatcher,
         _drain,
@@ -1689,7 +1694,7 @@ async def test_duplicate_discord_mention_does_not_request_tracker_promotion(
         session_manager=_session_manager(transaction),
         repository=repository,
         queue_repository=queue_repository,
-        mailbox_service=mailbox_service,
+        mailbox_admission_repository=mailbox_admission_repository,
         agent_session_repository=agent_session_repository,
         wake_dispatcher=wake_dispatcher,
         work_repository=work_repository,
@@ -1728,7 +1733,7 @@ async def test_tracker_control_failure_does_not_gate_wake(
     (
         repository,
         queue_repository,
-        mailbox_service,
+        mailbox_admission_repository,
         agent_session_repository,
         wake_dispatcher,
         _drain,
@@ -1749,7 +1754,7 @@ async def test_tracker_control_failure_does_not_gate_wake(
         session_manager=_session_manager(transaction),
         repository=repository,
         queue_repository=queue_repository,
-        mailbox_service=mailbox_service,
+        mailbox_admission_repository=mailbox_admission_repository,
         agent_session_repository=agent_session_repository,
         wake_dispatcher=wake_dispatcher,
         work_repository=work_repository,
@@ -1792,7 +1797,7 @@ async def test_stale_ownership_does_not_enqueue_or_advance_cursor_and_logs_safel
     (
         repository,
         queue_repository,
-        mailbox_service,
+        mailbox_admission_repository,
         agent_session_repository,
         wake_dispatcher,
         _drain,
@@ -1802,7 +1807,7 @@ async def test_stale_ownership_does_not_enqueue_or_advance_cursor_and_logs_safel
         session_manager=_session_manager(transaction),
         repository=repository,
         queue_repository=queue_repository,
-        mailbox_service=mailbox_service,
+        mailbox_admission_repository=mailbox_admission_repository,
         agent_session_repository=agent_session_repository,
         wake_dispatcher=wake_dispatcher,
     )
@@ -1825,7 +1830,7 @@ async def test_stale_ownership_does_not_enqueue_or_advance_cursor_and_logs_safel
         )
 
     assert stale is False
-    mailbox_service.enqueue_many.assert_not_awaited()
+    mailbox_admission_repository.enqueue_many_in_session.assert_not_awaited()
     repository.advance_conversation_position_if_current.assert_not_awaited()
     agent_session_repository.admit_input_wakeup.assert_not_awaited()
     wake_dispatcher.dispatch.assert_not_awaited()

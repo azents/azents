@@ -1,8 +1,7 @@
-"""Transaction-aware terminal Run finalization and parent delivery."""
+"""Repository-owned terminal Run finalization and direct-parent delivery."""
 
 import dataclasses
 import datetime
-from enum import StrEnum
 from typing import Annotated
 
 from fastapi import Depends
@@ -14,34 +13,20 @@ from azents.core.enums import (
     AgentSessionStatus,
     SessionAgentKind,
 )
-from azents.engine.events.types import AgentRunState
+from azents.core.terminal_result import terminal_result_content
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent_execution import AgentRunRepository
+from azents.repos.agent_mailbox import AgentMailboxRepository
 from azents.repos.agent_session import AgentSessionRepository
-from azents.services.agent_mailbox import AgentMailboxService
-
-
-class TerminalDeliveryDisposition(StrEnum):
-    """Outcome of one terminal Run's direct-parent delivery attempt."""
-
-    ENQUEUED = "enqueued"
-    SUPPRESSED = "suppressed"
-    ALREADY_FINALIZED = "already_finalized"
-    INELIGIBLE = "ineligible"
+from azents.repos.terminal_finalization_data import (
+    TerminalDeliveryDisposition,
+    TerminalFinalizationOutcome,
+)
 
 
 @dataclasses.dataclass(frozen=True)
-class TerminalFinalizationOutcome:
-    """Structured terminal Run finalization outcome."""
-
-    run_id: str
-    disposition: TerminalDeliveryDisposition
-    mailbox_item_id: str | None = None
-
-
-@dataclasses.dataclass(frozen=True)
-class TerminalRunFinalizationCoordinator:
+class TerminalRunFinalizationRepository:
     """Finalize terminal Runs and direct-parent mailbox delivery atomically."""
 
     session_manager: Annotated[
@@ -51,13 +36,15 @@ class TerminalRunFinalizationCoordinator:
     agent_session_repository: Annotated[
         AgentSessionRepository, Depends(AgentSessionRepository)
     ]
-    agent_mailbox_service: Annotated[AgentMailboxService, Depends(AgentMailboxService)]
+    agent_mailbox_repository: Annotated[
+        AgentMailboxRepository, Depends(AgentMailboxRepository)
+    ]
 
     async def finalize_run(
         self,
         run_id: str,
     ) -> TerminalFinalizationOutcome:
-        """Finalize one already-terminal Run in a managed transaction."""
+        """Finalize one already-terminal Run in a completed transaction."""
         async with self.session_manager() as session:
             return await self.finalize_run_in_session(session, run_id=run_id)
 
@@ -67,7 +54,7 @@ class TerminalRunFinalizationCoordinator:
         *,
         run_id: str,
     ) -> TerminalFinalizationOutcome:
-        """Finalize one terminal Run in the caller's prelocked transaction."""
+        """Finalize one terminal Run in a composing repository transaction."""
         await self.lock_run_finalization(session, run_id=run_id)
         candidate = await self.agent_run_repository.get_by_id(session, run_id)
         if candidate is None:
@@ -145,12 +132,15 @@ class TerminalRunFinalizationCoordinator:
             or parent_session.status is not AgentSessionStatus.ACTIVE
         ):
             return await self._suppress(session, run_id=run_id)
-        mailbox_item = await self.agent_mailbox_service.enqueue_terminal_result(
+        mailbox_item = await self.agent_mailbox_repository.enqueue_terminal_result(
             session,
             source=source,
             target=parent,
             run=run,
-            content=_terminal_result_content(run),
+            content=terminal_result_content(
+                status=run.status,
+                message=run.terminal_result_message,
+            ),
         )
         finalized = await self.agent_run_repository.mark_parent_result_enqueued(
             session,
@@ -175,7 +165,7 @@ class TerminalRunFinalizationCoordinator:
         *,
         run_id: str,
     ) -> None:
-        """Prelock tree and Session authority before the caller mutates a Run.
+        """Prelock tree and Session authority before a composing Run mutation.
 
         This single attempt never retries while the caller may retain locks.
         Execution admission normally owns these same locks already.
@@ -192,7 +182,7 @@ class TerminalRunFinalizationCoordinator:
         session: AsyncSession,
         run_ids: list[str],
     ) -> list[TerminalFinalizationOutcome]:
-        """Finalize multiple terminal Runs in one caller transaction."""
+        """Finalize multiple terminal Runs in one repository transaction."""
         return [
             await self.finalize_run_in_session(session, run_id=run_id)
             for run_id in run_ids
@@ -223,37 +213,3 @@ _TERMINAL_RUN_STATUSES = {
     AgentRunStatus.INTERRUPTED,
     AgentRunStatus.CANCELLED,
 }
-
-
-def _terminal_result_content(run: AgentRunState) -> str:
-    """Return the user-safe terminal projection or a fixed status fallback."""
-    message = _sanitized_terminal_result_message(run)
-    if message is not None:
-        return message
-    match run.status:
-        case AgentRunStatus.COMPLETED:
-            return "The agent run completed without a result message."
-        case AgentRunStatus.FAILED:
-            return "The agent run failed."
-        case AgentRunStatus.STOPPED:
-            return "The agent run was stopped."
-        case AgentRunStatus.INTERRUPTED:
-            return "The agent run was interrupted."
-        case AgentRunStatus.CANCELLED:
-            return "The agent run was cancelled before completing."
-        case _:
-            raise ValueError("Terminal result content requires a terminal Run")
-
-
-def _sanitized_terminal_result_message(run: AgentRunState) -> str | None:
-    """Return safe terminal text after removing provider failure details."""
-    if run.terminal_result_message is None:
-        return None
-    message = run.terminal_result_message.strip()
-    if not message:
-        return None
-    if run.status is AgentRunStatus.FAILED and message.startswith(
-        "Model provider error:"
-    ):
-        return None
-    return message

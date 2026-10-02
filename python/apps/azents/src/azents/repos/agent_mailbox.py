@@ -1,4 +1,4 @@
-"""Typed agent-to-agent mailbox operations."""
+"""Database-only operation-specific Agent mailbox composition."""
 
 import dataclasses
 from typing import Annotated, Literal
@@ -16,17 +16,20 @@ from azents.core.enums import (
 from azents.engine.events.types import AgentRunState
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import SessionAgent
+from azents.repos.mailbox.admission import MailboxAdmissionRepository
+from azents.repos.mailbox.admission_data import MailboxEnqueue
 from azents.repos.mailbox.data import MailboxItem
-from azents.services.mailbox import MailboxEnqueue, MailboxService
 
 InstructionMessageKind = Literal["spawn_agent", "send_message", "followup_task"]
 
 
 @dataclasses.dataclass(frozen=True)
-class AgentMailboxService:
-    """Persist operation-specific agent mailbox messages."""
+class AgentMailboxRepository:
+    """Compose Agent mailbox admission inside one owning repository transaction."""
 
-    mailbox_item_service: Annotated[MailboxService, Depends(MailboxService)]
+    mailbox_admission_repository: Annotated[
+        MailboxAdmissionRepository, Depends(MailboxAdmissionRepository)
+    ]
     agent_session_repository: Annotated[
         AgentSessionRepository, Depends(AgentSessionRepository)
     ]
@@ -57,7 +60,7 @@ class AgentMailboxService:
         target: SessionAgent,
         content: str,
     ) -> MailboxItem:
-        """Enqueue an ordinary message without waking the target session."""
+        """Enqueue an ordinary message without waking the target Session."""
         return await self._enqueue_instruction(
             session,
             source=source,
@@ -189,7 +192,7 @@ class AgentMailboxService:
             and locked_target.stop_requested_at is not None
         ):
             raise ValueError("Target AgentSession is stopping")
-        result = await self.mailbox_item_service.enqueue(
+        result = await self.mailbox_admission_repository.enqueue_in_session(
             session,
             MailboxEnqueue(
                 session_id=target.agent_session_id,
