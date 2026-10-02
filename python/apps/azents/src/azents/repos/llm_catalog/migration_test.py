@@ -8,7 +8,8 @@ import pytest
 import sqlalchemy as sa
 from alembic import command
 from alembic.config import Config as AlembicConfig
-from sqlalchemy.engine import Engine
+from sqlalchemy import event
+from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import ProgrammingError
 from testcontainers.postgres import PostgresContainer
 
@@ -403,7 +404,32 @@ def test_cleanup_clears_legacy_metadata_in_current_generic_entry(
             },
         )
 
-    command.upgrade(migration_database.config, _CLEANUP_REVISION)
+    executed_statements: list[str] = []
+
+    def capture_statement(
+        connection: Connection,
+        cursor: object,
+        statement: str,
+        parameters: object,
+        context: object,
+        executemany: bool,
+    ) -> None:
+        del connection, cursor, parameters, context, executemany
+        executed_statements.append(statement)
+
+    event.listen(
+        Engine,
+        "before_cursor_execute",
+        capture_statement,
+    )
+    try:
+        command.upgrade(migration_database.config, _CLEANUP_REVISION)
+    finally:
+        event.remove(
+            Engine,
+            "before_cursor_execute",
+            capture_statement,
+        )
 
     _assert_cleanup_schema(migration_database.engine)
     with migration_database.engine.connect() as connection:
@@ -417,6 +443,17 @@ def test_cleanup_clears_legacy_metadata_in_current_generic_entry(
         ).scalar_one()
     assert catalog is None
     assert contaminated_snapshot_count == 0
+    constraint_flush_index = next(
+        index
+        for index, statement in enumerate(executed_statements)
+        if "SET CONSTRAINTS ALL IMMEDIATE" in statement
+    )
+    catalog_ddl_index = next(
+        index
+        for index, statement in enumerate(executed_statements)
+        if "ALTER TABLE llm_catalogs DROP COLUMN rollback_snapshot_id" in statement
+    )
+    assert constraint_flush_index < catalog_ddl_index
 
 
 def test_cleanup_rejects_invalid_rollback_pin(
