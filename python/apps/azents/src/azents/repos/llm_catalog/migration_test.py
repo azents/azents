@@ -298,10 +298,10 @@ def test_cleanup_allows_conversation_catalog_without_current_snapshot(
     _assert_cleanup_schema(migration_database.engine)
 
 
-def test_cleanup_rejects_system_catalog_without_current_snapshot(
+def test_cleanup_allows_system_catalog_without_current_snapshot(
     migration_database: _MigrationDatabase,
 ) -> None:
-    """Every supported system catalog must publish replacement authority first."""
+    """A missing system current pin can be rebuilt from generic metadata."""
     command.upgrade(migration_database.config, _SHADOW_REVISION)
     with migration_database.engine.begin() as connection:
         connection.execute(
@@ -313,17 +313,21 @@ def test_cleanup_rejects_system_catalog_without_current_snapshot(
             {"id": "c" * 32},
         )
 
-    _assert_upgrade_rejected(
-        migration_database,
-        message="conversation catalog lacks generic provenance",
-    )
-    _assert_revision(migration_database.engine, _SHADOW_REVISION)
+    command.upgrade(migration_database.config, _CLEANUP_REVISION)
+
+    _assert_cleanup_schema(migration_database.engine)
+    with migration_database.engine.connect() as connection:
+        current_snapshot_id = connection.execute(
+            sa.text("SELECT current_snapshot_id FROM llm_catalogs WHERE id = :catalog"),
+            {"catalog": "c" * 32},
+        ).scalar_one()
+    assert current_snapshot_id is None
 
 
-def test_cleanup_rejects_current_conversation_catalog_without_generic_provenance(
+def test_cleanup_clears_current_conversation_catalog_without_generic_provenance(
     migration_database: _MigrationDatabase,
 ) -> None:
-    """Cleanup rejects a current conversation snapshot that missed cutover."""
+    """Cleanup clears a stale current pin so generic projection can rebuild it."""
     command.upgrade(migration_database.config, _SHADOW_REVISION)
     _seed_ready_cutover(migration_database.engine)
     with migration_database.engine.begin() as connection:
@@ -335,12 +339,20 @@ def test_cleanup_rejects_current_conversation_catalog_without_generic_provenance
             {"id": "c" * 32},
         )
 
-    _assert_upgrade_rejected(
-        migration_database,
-        message="conversation catalog lacks generic provenance",
-    )
+    command.upgrade(migration_database.config, _CLEANUP_REVISION)
 
-    _assert_revision(migration_database.engine, _SHADOW_REVISION)
+    _assert_cleanup_schema(migration_database.engine)
+    with migration_database.engine.connect() as connection:
+        catalog = connection.execute(
+            sa.text("SELECT current_snapshot_id FROM llm_catalogs WHERE id = :catalog"),
+            {"catalog": "c" * 32},
+        ).scalar_one()
+        stale_snapshot_count = connection.execute(
+            sa.text("SELECT count(*) FROM llm_catalog_snapshots WHERE id = :snapshot"),
+            {"snapshot": "o" * 32},
+        ).scalar_one()
+    assert catalog is None
+    assert stale_snapshot_count == 0
 
 
 def test_cleanup_rejects_missing_generic_source_authority(

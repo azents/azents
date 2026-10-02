@@ -35,6 +35,24 @@ def upgrade() -> None:
               ) THEN
                 RAISE EXCEPTION 'catalog attempts are still running';
               END IF;
+              UPDATE llm_catalogs AS c
+              SET current_snapshot_id = NULL
+              WHERE c.purpose = 'conversation'
+                AND c.current_snapshot_id IS NOT NULL
+                AND NOT EXISTS (
+                  SELECT 1
+                  FROM llm_catalog_snapshots AS s
+                  JOIN model_metadata_source_snapshots AS ms
+                    ON ms.id = s.metadata_source_snapshot_id
+                  WHERE s.id = c.current_snapshot_id
+                    AND s.catalog_id = c.id
+                    AND s.projection_schema_version IS NOT NULL
+                    AND s.runtime_profile_resolver_revision IS NOT NULL
+                    AND s.pydantic_ai_version IS NOT NULL
+                    AND s.genai_prices_version IS NOT NULL
+                    AND s.projection_fingerprint IS NOT NULL
+                    AND ms.source_key = 'genai_prices'
+                );
               IF EXISTS (
                 SELECT 1
                 FROM llm_catalogs
@@ -49,32 +67,6 @@ def upgrade() -> None:
                   AND snapshot.source_key = 'genai_prices'
               ) THEN
                 RAISE EXCEPTION 'generic model metadata source is unavailable';
-              END IF;
-              IF EXISTS (
-                SELECT 1
-                FROM llm_catalogs AS c
-                LEFT JOIN llm_catalog_snapshots AS s ON s.id = c.current_snapshot_id
-                LEFT JOIN model_metadata_source_snapshots AS ms
-                  ON ms.id = s.metadata_source_snapshot_id
-                WHERE c.purpose = 'conversation'
-                  AND (
-                    (c.scope = 'system' AND c.current_snapshot_id IS NULL)
-                    OR (
-                      c.current_snapshot_id IS NOT NULL
-                      AND (
-                        s.catalog_id IS DISTINCT FROM c.id
-                        OR s.metadata_source_snapshot_id IS NULL
-                        OR s.projection_schema_version IS NULL
-                        OR s.runtime_profile_resolver_revision IS NULL
-                        OR s.pydantic_ai_version IS NULL
-                        OR s.genai_prices_version IS NULL
-                        OR s.projection_fingerprint IS NULL
-                        OR ms.source_key IS DISTINCT FROM 'genai_prices'
-                      )
-                    )
-                  )
-              ) THEN
-                RAISE EXCEPTION 'conversation catalog lacks generic provenance';
               END IF;
               IF EXISTS (
                 SELECT 1
@@ -117,7 +109,7 @@ def upgrade() -> None:
         "SELECT s.id FROM llm_catalog_snapshots AS s "
         "JOIN llm_catalogs AS c ON c.id = s.catalog_id "
         "WHERE c.purpose = 'conversation' "
-        "AND s.id <> c.current_snapshot_id "
+        "AND s.id IS DISTINCT FROM c.current_snapshot_id "
         "AND s.metadata_source_snapshot_id IS NULL"
     )
     op.execute(
