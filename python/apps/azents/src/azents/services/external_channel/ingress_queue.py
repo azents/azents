@@ -49,6 +49,8 @@ from azents.repos.external_channel.ingress_queue_data import (
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.external_channel.work import ExternalChannelWorkRepository
+from azents.repos.mailbox.admission import MailboxAdmissionRepository
+from azents.repos.mailbox.admission_data import MailboxEnqueue
 from azents.services.external_channel.conversation import (
     ExternalChannelHistoryCredentialsInvalid,
     ExternalChannelHistoryDeadlineExceeded,
@@ -90,11 +92,7 @@ from azents.services.external_channel.provider_control import (
     ExternalChannelProviderControlService,
     get_external_channel_provider_control_service,
 )
-from azents.services.mailbox import (
-    MailboxEnqueue,
-    MailboxService,
-    build_external_channel_mailbox_payload,
-)
+from azents.services.mailbox import build_external_channel_mailbox_payload
 
 logger = logging.getLogger(__name__)
 
@@ -221,7 +219,9 @@ class ExternalChannelIngressDrainService:
         ExternalChannelWorkRepository,
         Depends(ExternalChannelWorkRepository.create),
     ]
-    mailbox_service: Annotated[MailboxService, Depends(MailboxService)]
+    mailbox_admission_repository: Annotated[
+        MailboxAdmissionRepository, Depends(MailboxAdmissionRepository)
+    ]
     wake_dispatcher: Annotated[
         ExternalChannelMailboxWakeDispatcher,
         Depends(ExternalChannelMailboxWakeDispatcher),
@@ -800,7 +800,9 @@ class ExternalChannelIngressDrainService:
             mailbox_results = (
                 []
                 if not enqueues
-                else await self.mailbox_service.enqueue_many(session, enqueues)
+                else await self.mailbox_admission_repository.enqueue_many_in_session(
+                    session, enqueues
+                )
             )
             trigger_result = next(
                 (

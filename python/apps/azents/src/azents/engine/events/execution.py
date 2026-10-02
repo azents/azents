@@ -69,7 +69,7 @@ from azents.repos.engine_tool_result_operation import (
 from azents.repos.session_execution import (
     CanonicalExecutionOwnerGenerationStaleError,
 )
-from azents.services.terminal_finalization import TerminalRunFinalizationCoordinator
+from azents.repos.terminal_finalization import TerminalRunFinalizationRepository
 
 logger = logging.getLogger(__name__)
 
@@ -308,6 +308,7 @@ class AgentRunExecution[
         output_normalizer: AdapterOutputNormalizer[TNativeStreamEvent],
         model_call_preparer: ModelCallPreparer[TNativeRequest],
         input_projection_repository: EngineInputProjectionRepository | None,
+        terminal_finalization_repository: TerminalRunFinalizationRepository | None,
         auto_compaction_filter: AutoCompactionFilter | None = None,
         output_sink: OutputSink | None = None,
         phase_sink: PhaseSink | None = None,
@@ -319,8 +320,6 @@ class AgentRunExecution[
         run_repo: RunStateRepository | None = None,
         transcript_repo: TranscriptRepository | None = None,
         session_repo: SessionHeadRepository | None = None,
-        terminal_finalization_coordinator: TerminalRunFinalizationCoordinator
-        | None = None,
         system_prompt_snapshot_repo: SystemPromptSnapshotRepositoryProtocol
         | None = None,
         complete_model_operation_in_session: (
@@ -365,7 +364,7 @@ class AgentRunExecution[
             input_projection_repository=input_projection_repository,
         )
         self.session_repo = session_repo
-        self.terminal_finalization_coordinator = terminal_finalization_coordinator
+        self.terminal_finalization_repository = terminal_finalization_repository
         self.system_prompt_snapshot_repo = system_prompt_snapshot_repo
         self.complete_model_operation_in_session = complete_model_operation_in_session
 
@@ -1328,8 +1327,8 @@ class AgentRunExecution[
         suppress_parent_result: bool = False,
     ) -> None:
         """Record run terminal state."""
-        if self.terminal_finalization_coordinator is not None:
-            await self.terminal_finalization_coordinator.lock_run_finalization(
+        if self.terminal_finalization_repository is not None:
+            await self.terminal_finalization_repository.lock_run_finalization(
                 session,
                 run_id=run_id,
             )
@@ -1348,8 +1347,8 @@ class AgentRunExecution[
                 run_id=run_id,
                 finalized_at=terminal_at,
             )
-        elif self.terminal_finalization_coordinator is not None:
-            await self.terminal_finalization_coordinator.finalize_run_in_session(
+        elif self.terminal_finalization_repository is not None:
+            await self.terminal_finalization_repository.finalize_run_in_session(
                 session,
                 run_id=run_id,
             )

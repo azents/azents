@@ -34,7 +34,9 @@ code_paths:
   - python/apps/azents/src/azents/services/external_channel/channel_action.py
   - python/apps/azents/src/azents/services/external_channel/mailbox_ingestion_store.py
   - python/apps/azents/src/azents/services/mailbox.py
-  - python/apps/azents/src/azents/services/terminal_finalization.py
+  - python/apps/azents/src/azents/repos/terminal_finalization.py
+  - python/apps/azents/src/azents/repos/terminal_finalization_data.py
+  - python/apps/azents/src/azents/core/terminal_result.py
   - python/apps/azents/src/azents/services/turn_action.py
   - python/apps/azents/src/azents/repos/external_channel/repository.py
   - python/apps/azents/src/azents/repos/external_channel/work.py
@@ -73,7 +75,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/memory_vfs/**
   - python/apps/azents/src/azents/repos/toolkit/**
   - python/apps/azents/src/azents/services/toolkit/**
-  - python/apps/azents/src/azents/services/agent_mailbox.py
+  - python/apps/azents/src/azents/repos/agent_mailbox.py
+  - python/apps/azents/src/azents/repos/subagent_terminal_result.py
   - python/apps/azents/src/azents/services/subagent_terminal_result.py
   - python/apps/azents/src/azents/services/subagent_coordination.py
   - python/apps/azents/src/azents/services/model_file.py
@@ -126,7 +129,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
   - typescript/apps/azents-web/messages/*/chat.json
 last_verified_at: 2026-10-02
-spec_version: 198
+spec_version: 199
 ---
 
 # Agent Execution Loop
@@ -924,9 +927,14 @@ Mailbox enqueue holds the root `SessionAgent` row lock, then locks the target `A
 mailbox target must still be active; `spawn_agent` and `followup_task` additionally reject a target
 whose stop request is already present before they create input or wake side effects.
 
-When a current subagent Run becomes terminal, `SubagentTerminalResultService` locks the root
-`SessionAgent` tree boundary before locking the Run, validates its direct parent, inserts one
-idempotent queue-only `agent_result`, and writes the Run delivery marker in the same transaction.
+Normal terminal database finalization composes `TerminalRunFinalizationRepository`
+and `AgentMailboxRepository`: tree/Session authority is prelocked before the Run
+mutation, and an eligible direct-parent delivery inserts one idempotent queue-only
+`agent_result` with activity and Run delivery markers in the same transaction.
+Best-effort historical repair uses separate completed
+`SubagentTerminalResultRepository` candidate, direct-child, and delivery operations.
+Its root-before-Run locking and parent-validation failure semantics remain distinct
+from normal finalization's ineligible-parent suppression and User Stop convergence.
 Normal terminal handling attempts this side effect before idle evaluation. Parent `wait_agent`
 polling repairs eligible results from direct children, and a later Run in the source child session
 repairs older eligible terminal results. Delivery failure is logged but does not roll the Run back or
@@ -1667,6 +1675,10 @@ icon.
 
 ## Changelog
 
+- **2026-10-02** (spec_version 199) — Moved Mailbox admission and terminal
+  database composition into canonical repositories and completed the historical
+  terminal-result repair boundaries, preserving parent delivery atomicity,
+  single-attempt execution prelocks, and distinct repair failure semantics.
 - **2026-10-02** (spec_version 198) — Moved the complete model-input preparation
   atomic group and availability projection into repository-owned database work,
   replacing the live-session Engine pre-lower filter interface.

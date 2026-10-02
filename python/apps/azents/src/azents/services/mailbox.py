@@ -5,7 +5,7 @@ import dataclasses
 import datetime
 import enum
 import logging
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Annotated, Protocol, assert_never
 
@@ -27,8 +27,6 @@ from azents.core.inference_profile import (
     RequestedInferenceProfile,
     SessionInferenceState,
 )
-from azents.core.llm_catalog import ModelReasoningEffort
-from azents.core.model_execution_options import ModelExecutionOptionId
 from azents.engine.events.action_messages import (
     OperationAction,
     TurnAction,
@@ -65,9 +63,7 @@ from azents.repos.mailbox.data import (
     AgentCreateGitWorktreeContinuationResult,
     AgentRemoveGitWorktreeContinuationResult,
     ExternalChannelMessageMailboxPayload,
-    MailboxEnvelopePayload,
     MailboxItem,
-    MailboxItemCreate,
     MailboxPresentationItem,
     ScheduledTaskContinuationMailboxPayload,
     ScheduledTaskTriggerMailboxPayload,
@@ -107,36 +103,6 @@ _EXTERNAL_CHANNEL_CONTEXT_OMITTED_REMINDER = (
     "Earlier messages from this external conversation were omitted. "
     "Only the newest 20 provider messages are included below."
 )
-
-
-@dataclasses.dataclass(frozen=True)
-class MailboxEnqueue:
-    """Input buffer enqueue request."""
-
-    session_id: str
-    kind: MailboxItemKind
-    scheduling_mode: MailboxSchedulingMode
-    requested_model_target_label: str | None
-    requested_reasoning_effort: ModelReasoningEffort | None
-    requested_enabled_execution_options: list[ModelExecutionOptionId]
-    sender_user_id: str | None
-    order_group: str | None
-    order_sequence: int
-    content: str
-    idempotency_key: str | None
-    metadata: dict[str, str]
-    attachments: list[str]
-    file_parts: list[FileOutputPart]
-    action: dict[str, JSONValue] | None = None
-    payload: MailboxEnvelopePayload | None = None
-
-
-@dataclasses.dataclass(frozen=True)
-class MailboxAdmissionResult:
-    """Input buffer enqueue result."""
-
-    mailbox_item: MailboxItem
-    created: bool
 
 
 @dataclasses.dataclass(frozen=True)
@@ -315,128 +281,6 @@ class MailboxService:
         ExternalChannelRepository,
         Depends(ExternalChannelRepository.create),
     ]
-
-    async def enqueue(
-        self,
-        session: AsyncSession,
-        input: MailboxEnqueue,
-    ) -> MailboxAdmissionResult:
-        """Create one pending input and persist its wake transition."""
-        result = await self._enqueue_without_running_transition(session, input)
-        if input.scheduling_mode is MailboxSchedulingMode.WAKE_SESSION:
-            await self.agent_session_repository.mark_running_for_input_wakeup(
-                session,
-                input.session_id,
-            )
-        return result
-
-    async def _enqueue_without_running_transition(
-        self,
-        session: AsyncSession,
-        input: MailboxEnqueue,
-    ) -> MailboxAdmissionResult:
-        """Create one pending input before applying its Session transition."""
-        existing = None
-        if input.idempotency_key is not None:
-            existing = await self.mailbox_item_repository.get_by_idempotency_key(
-                session,
-                session_id=input.session_id,
-                kind=input.kind,
-                idempotency_key=input.idempotency_key,
-            )
-        if existing is None:
-            created = True
-            create = MailboxItemCreate(
-                session_id=input.session_id,
-                kind=input.kind,
-                scheduling_mode=input.scheduling_mode,
-                requested_model_target_label=input.requested_model_target_label,
-                requested_reasoning_effort=input.requested_reasoning_effort,
-                requested_enabled_execution_options=(
-                    input.requested_enabled_execution_options
-                ),
-                sender_user_id=input.sender_user_id,
-                order_group=input.order_group,
-                order_sequence=input.order_sequence,
-                content=input.content,
-                idempotency_key=input.idempotency_key,
-                metadata=input.metadata,
-                action=input.action,
-                attachments=input.attachments,
-                file_parts=input.file_parts,
-                payload=input.payload,
-            )
-            if input.idempotency_key is None:
-                mailbox_item = await self.mailbox_item_repository.create(
-                    session,
-                    create,
-                )
-            else:
-                mailbox_item = await self.mailbox_item_repository.create_idempotent(
-                    session,
-                    create,
-                    idempotency_key=input.idempotency_key,
-                )
-        else:
-            created = False
-            mailbox_item = existing
-        if mailbox_item.scheduling_mode != input.scheduling_mode:
-            raise ValueError(
-                "Input idempotency key already used for another scheduling mode"
-            )
-        if (
-            mailbox_item.requested_model_target_label
-            != input.requested_model_target_label
-            or mailbox_item.requested_reasoning_effort
-            != input.requested_reasoning_effort
-            or mailbox_item.requested_enabled_execution_options
-            != input.requested_enabled_execution_options
-        ):
-            raise ValueError(
-                "Input idempotency key already used for another inference profile"
-            )
-        return MailboxAdmissionResult(mailbox_item=mailbox_item, created=created)
-
-    async def enqueue_many(
-        self,
-        session: AsyncSession,
-        inputs: Sequence[MailboxEnqueue],
-    ) -> list[MailboxAdmissionResult]:
-        """Create pending inputs and persist each distinct wake transition."""
-        results = [
-            await self._enqueue_without_running_transition(session, input)
-            for input in inputs
-        ]
-        wake_session_ids = {
-            input.session_id
-            for input in inputs
-            if input.scheduling_mode is MailboxSchedulingMode.WAKE_SESSION
-        }
-        for session_id in sorted(wake_session_ids):
-            await self.agent_session_repository.mark_running_for_input_wakeup(
-                session,
-                session_id,
-            )
-        return results
-
-    async def enqueue_idle_continuations(
-        self,
-        session: AsyncSession,
-        inputs: Sequence[MailboxEnqueue],
-    ) -> list[MailboxAdmissionResult]:
-        """Create idle-hook inputs whose caller owns the resulting Session state."""
-        return [
-            await self._enqueue_without_running_transition(session, input)
-            for input in inputs
-        ]
-
-    async def enqueue_many_in_transaction(
-        self,
-        inputs: Sequence[MailboxEnqueue],
-    ) -> list[MailboxAdmissionResult]:
-        """Create pending inputs in one transaction."""
-        async with self.session_manager() as session:
-            return await self.enqueue_many(session, inputs)
 
     async def list_by_session_id(
         self,

@@ -148,6 +148,7 @@ def _execution(
     return AgentRunExecution(
         session_manager=state.owner,
         input_projection_repository=None,
+        terminal_finalization_repository=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",

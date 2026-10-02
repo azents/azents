@@ -147,7 +147,7 @@ class _AgentSessionRepository:
         self.idle_session_ids.append(runtime_id)
 
 
-class _TerminalFinalizationCoordinator:
+class _TerminalFinalizationRepository:
     """Terminal coordinator test double."""
 
     def __init__(self) -> None:
@@ -408,7 +408,7 @@ def _service(
         agent_session_repository=agent_session_repository,
         agent_run_repository=agent_run_repository,
         mailbox_item_repository=_MailboxRepository(pending_scheduling_modes),
-        terminal_finalization_coordinator=_TerminalFinalizationCoordinator(),
+        terminal_finalization_repository=_TerminalFinalizationRepository(),
     )
 
 
@@ -423,7 +423,7 @@ async def test_heartbeat_session_refreshes_db_and_active_owner_lease() -> None:
         agent_session_repository=agent_session_repository,
         agent_run_repository=_AgentRunRepository(None),
         mailbox_item_repository=_MailboxRepository(set()),
-        terminal_finalization_coordinator=_TerminalFinalizationCoordinator(),
+        terminal_finalization_repository=_TerminalFinalizationRepository(),
     )
 
     await service.heartbeat_session("session-001", owner_generation=0)
@@ -577,14 +577,14 @@ async def test_complete_bridge_predecessor_suppresses_parent_result_atomically(
     order: list[str] = []
     run = _running_run().model_copy(update={"status": run_status})
     agent_run_repository = _AgentRunRepository(run, order=order)
-    coordinator = _TerminalFinalizationCoordinator()
+    coordinator = _TerminalFinalizationRepository()
     service = _construct_service(
         broker=_Broker(),
         session_manager=_SessionManager(order),
         agent_session_repository=_AgentSessionRepository(),
         agent_run_repository=agent_run_repository,
         mailbox_item_repository=_MailboxRepository(set()),
-        terminal_finalization_coordinator=coordinator,
+        terminal_finalization_repository=coordinator,
     )
 
     terminal_status = await service.complete_bridge_predecessor_run(

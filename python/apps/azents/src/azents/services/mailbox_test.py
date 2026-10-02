@@ -80,6 +80,8 @@ from azents.repos.external_channel.data import (
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.goal.store import GoalStateStore
 from azents.repos.mailbox import MailboxRepository
+from azents.repos.mailbox.admission import MailboxAdmissionRepository
+from azents.repos.mailbox.admission_data import MailboxEnqueue
 from azents.repos.mailbox.data import (
     AgentCreateGitWorktreeContinuationResult,
     ExternalChannelMessageMailboxPayload,
@@ -134,7 +136,6 @@ from azents.testing.model_selection import (
 
 from .mailbox import (
     ExternalChannelMessageMailboxProcessor,
-    MailboxEnqueue,
     MailboxOwnerGenerationStaleError,
     MailboxPreparationContext,
     MailboxPreparationStaleError,
@@ -1951,7 +1952,11 @@ class TestMailboxService:
             rdb_session_manager,
             "input-buffer-enqueue-running",
         )
-        service = _mailbox_item_service(rdb_session_manager)
+        service = MailboxAdmissionRepository(
+            session_manager=rdb_session_manager,
+            mailbox_item_repository=MailboxRepository(),
+            agent_session_repository=AgentSessionRepository(),
+        )
 
         async with rdb_session_manager() as session:
             before = await AgentSessionRepository().get_by_id(
@@ -1961,7 +1966,7 @@ class TestMailboxService:
             assert before is not None
             assert before.run_state == AgentSessionRunState.IDLE
 
-            result = await service.enqueue(
+            result = await service.enqueue_in_session(
                 session,
                 MailboxEnqueue(
                     session_id=session_id,
@@ -2001,10 +2006,14 @@ class TestMailboxService:
             rdb_session_manager,
             "input-buffer-enqueue-queue-only",
         )
-        service = _mailbox_item_service(rdb_session_manager)
+        service = MailboxAdmissionRepository(
+            session_manager=rdb_session_manager,
+            mailbox_item_repository=MailboxRepository(),
+            agent_session_repository=AgentSessionRepository(),
+        )
 
         async with rdb_session_manager() as session:
-            result = await service.enqueue(
+            result = await service.enqueue_in_session(
                 session,
                 MailboxEnqueue(
                     session_id=session_id,
@@ -2042,7 +2051,11 @@ class TestMailboxService:
             rdb_session_manager,
             "input-buffer-enqueue-replay-running",
         )
-        service = _mailbox_item_service(rdb_session_manager)
+        service = MailboxAdmissionRepository(
+            session_manager=rdb_session_manager,
+            mailbox_item_repository=MailboxRepository(),
+            agent_session_repository=AgentSessionRepository(),
+        )
         enqueue = MailboxEnqueue(
             session_id=session_id,
             kind=MailboxItemKind.USER_MESSAGE,
@@ -2062,9 +2075,9 @@ class TestMailboxService:
         )
 
         async with rdb_session_manager() as session:
-            created = await service.enqueue(session, enqueue)
+            created = await service.enqueue_in_session(session, enqueue)
             await AgentSessionRepository().mark_idle(session, session_id)
-            replay = await service.enqueue(session, enqueue)
+            replay = await service.enqueue_in_session(session, enqueue)
             agent_session = await AgentSessionRepository().get_by_id(
                 session,
                 session_id,
@@ -2115,7 +2128,11 @@ class TestMailboxService:
             rdb_session_manager,
             "input-buffer-profile-idempotency",
         )
-        service = _mailbox_item_service(rdb_session_manager)
+        service = MailboxAdmissionRepository(
+            session_manager=rdb_session_manager,
+            mailbox_item_repository=MailboxRepository(),
+            agent_session_repository=AgentSessionRepository(),
+        )
         enqueue = MailboxEnqueue(
             session_id=session_id,
             kind=MailboxItemKind.USER_MESSAGE,
@@ -2135,8 +2152,8 @@ class TestMailboxService:
         )
 
         async with rdb_session_manager() as session:
-            created = await service.enqueue(session, enqueue)
-            deduplicated = await service.enqueue(session, enqueue)
+            created = await service.enqueue_in_session(session, enqueue)
+            deduplicated = await service.enqueue_in_session(session, enqueue)
 
             assert created.created is True
             assert deduplicated.created is False
@@ -2146,7 +2163,7 @@ class TestMailboxService:
                 ValueError,
                 match="idempotency key already used for another scheduling mode",
             ):
-                await service.enqueue(
+                await service.enqueue_in_session(
                     session,
                     dataclasses.replace(
                         enqueue,
@@ -2158,7 +2175,7 @@ class TestMailboxService:
                 ValueError,
                 match="idempotency key already used for another inference profile",
             ):
-                await service.enqueue(
+                await service.enqueue_in_session(
                     session,
                     dataclasses.replace(
                         enqueue,
@@ -2170,7 +2187,7 @@ class TestMailboxService:
                 ValueError,
                 match="idempotency key already used for another inference profile",
             ):
-                await service.enqueue(
+                await service.enqueue_in_session(
                     session,
                     dataclasses.replace(
                         enqueue,
@@ -2205,25 +2222,10 @@ class TestMailboxService:
             requested_enabled_execution_options=[],
         )
         agent_session_repository = AgentSessionRepository()
-        service = MailboxService(
+        admission = MailboxAdmissionRepository(
             session_manager=rdb_session_manager,
             mailbox_item_repository=repository,
-            exchange_file_service=_ExchangeFileService(),
-            model_file_service=_ModelFileService(),
             agent_session_repository=agent_session_repository,
-            event_transcript_repository=EventTranscriptRepository(),
-            agent_run_repository=AgentRunRepository(),
-            scheduled_task_repository=ScheduledTaskRepository(),
-            scheduled_task_cycle_repository=ScheduledTaskCycleRepository(
-                toolkit_state_repository=ToolkitStateRepository(),
-            ),
-            action_execution_repository=ActionExecutionRepository(),
-            promotion_repository=AsyncMock(spec=MailboxPromotionRepository),
-            turn_action_capabilities=_turn_action_capabilities(
-                rdb_session_manager,
-                agent_session_repository,
-            ),
-            external_channel_repository=ExternalChannelRepository(),
         )
         enqueue = MailboxEnqueue(
             session_id="session-001",
@@ -2247,7 +2249,7 @@ class TestMailboxService:
             ValueError,
             match="idempotency key already used for another inference profile",
         ):
-            await service.enqueue(AsyncMock(spec=AsyncSession), enqueue)
+            await admission.enqueue_in_session(AsyncMock(spec=AsyncSession), enqueue)
 
     async def test_flush_promotes_buffer_and_deletes_row(
         self,

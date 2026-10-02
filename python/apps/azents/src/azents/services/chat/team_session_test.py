@@ -53,6 +53,7 @@ from azents.repos.external_channel.lifecycle import ExternalChannelLifecycleRepo
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.goal.store import GoalStateStore
 from azents.repos.mailbox import MailboxRepository
+from azents.repos.mailbox.admission import MailboxAdmissionRepository
 from azents.repos.message import MessageRepository
 from azents.repos.scheduled_task.data import ScheduledTaskCreate
 from azents.repos.scheduled_task.lifecycle import ScheduledTaskLifecycleRepository
@@ -465,6 +466,11 @@ def _service(
         archived_session_retention_repository=ArchivedSessionRetentionRepository(),
         workspace_user_repository=WorkspaceUserRepository(),
         session_workspace_project_repository=SessionWorkspaceProjectRepository(),
+        mailbox_admission_repository=MailboxAdmissionRepository(
+            session_manager=rdb_session_manager,
+            mailbox_item_repository=MailboxRepository(),
+            agent_session_repository=AgentSessionRepository(),
+        ),
         mailbox_item_service=_make_mailbox_service(
             session_manager=rdb_session_manager,
             mailbox_item_repository=MailboxRepository(),

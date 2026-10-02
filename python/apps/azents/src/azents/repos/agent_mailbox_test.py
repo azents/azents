@@ -1,4 +1,4 @@
-"""Typed agent mailbox service tests."""
+"""Typed Agent mailbox database composition tests."""
 
 import datetime
 from typing import Any
@@ -16,15 +16,12 @@ from azents.core.enums import (
     SessionAgentKind,
 )
 from azents.engine.events.types import AgentRunState
+from azents.repos.agent_mailbox import AgentMailboxRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession, SessionAgent
+from azents.repos.mailbox.admission import MailboxAdmissionRepository
+from azents.repos.mailbox.admission_data import MailboxAdmissionResult, MailboxEnqueue
 from azents.repos.mailbox.data import MailboxItem
-from azents.services.agent_mailbox import AgentMailboxService
-from azents.services.mailbox import (
-    MailboxAdmissionResult,
-    MailboxEnqueue,
-    MailboxService,
-)
 from azents.testing.types import require_instance
 
 _NOW = datetime.datetime.now(datetime.UTC)
@@ -87,11 +84,11 @@ def _terminal_run(status: AgentRunStatus) -> AgentRunState:
     )
 
 
-class _MailboxService(MailboxService):
+class _MailboxAdmissionRepository(MailboxAdmissionRepository):
     def __init__(self) -> None:
         self.inputs: list[MailboxEnqueue] = []
 
-    async def enqueue(
+    async def enqueue_in_session(
         self,
         session: AsyncSession,
         input: MailboxEnqueue,
@@ -182,27 +179,27 @@ class _AgentSessionRepository(AgentSessionRepository):
         self.running_session_ids.append(session_id)
 
 
-def _service(
+def _repository(
     *,
     target_status: AgentSessionStatus = AgentSessionStatus.ACTIVE,
     target_stopping: bool = False,
 ) -> tuple[
-    AgentMailboxService,
-    _MailboxService,
+    AgentMailboxRepository,
+    _MailboxAdmissionRepository,
     _AgentSessionRepository,
 ]:
-    mailbox_item_service = _MailboxService()
-    agent_session_repository = _AgentSessionRepository(
+    admission = _MailboxAdmissionRepository()
+    sessions = _AgentSessionRepository(
         target_status=target_status,
         target_stopping=target_stopping,
     )
     return (
-        AgentMailboxService(
-            mailbox_item_service=mailbox_item_service,
-            agent_session_repository=agent_session_repository,
+        AgentMailboxRepository(
+            mailbox_admission_repository=admission,
+            agent_session_repository=sessions,
         ),
-        mailbox_item_service,
-        agent_session_repository,
+        admission,
+        sessions,
     )
 
 
@@ -219,7 +216,7 @@ async def test_instruction_operations_own_scheduling_intent(
     expected_kind: str,
     expected_mode: MailboxSchedulingMode,
 ) -> None:
-    service, input_service, session_repository = _service()
+    repository, admission, sessions = _repository()
     source = _session_agent(
         id="root-agent",
         session_id="root-session",
@@ -235,25 +232,23 @@ async def test_instruction_operations_own_scheduling_intent(
         parent_id="root-agent",
     )
     methods: dict[str, Any] = {
-        "spawn": service.enqueue_spawn_assignment,
-        "message": service.enqueue_message,
-        "followup": service.enqueue_followup_task,
+        "spawn": repository.enqueue_spawn_assignment,
+        "message": repository.enqueue_message,
+        "followup": repository.enqueue_followup_task,
     }
-
     await methods[operation](
         require_instance(MagicMock(spec=AsyncSession), AsyncSession),
         source=source,
         target=target,
         content="Do the work.",
     )
-
-    [input] = input_service.inputs
+    [input] = admission.inputs
     assert input.kind is MailboxItemKind.AGENT_MESSAGE
     assert input.scheduling_mode is expected_mode
     assert input.sender_user_id is None
     assert input.metadata["message_kind"] == expected_kind
-    assert session_repository.activity_ids == ["root-agent", "child-agent"]
-    assert session_repository.running_session_ids == []
+    assert sessions.activity_ids == ["root-agent", "child-agent"]
+    assert sessions.running_session_ids == []
 
 
 @pytest.mark.parametrize(
@@ -269,7 +264,7 @@ async def test_instruction_operations_own_scheduling_intent(
 async def test_terminal_result_is_queue_only_and_contains_run_metadata(
     status: AgentRunStatus,
 ) -> None:
-    service, input_service, session_repository = _service()
+    repository, admission, sessions = _repository()
     parent = _session_agent(
         id="root-agent",
         session_id="root-session",
@@ -284,16 +279,14 @@ async def test_terminal_result_is_queue_only_and_contains_run_metadata(
         kind=SessionAgentKind.SUBAGENT,
         parent_id="root-agent",
     )
-
-    result = await service.enqueue_terminal_result(
+    result = await repository.enqueue_terminal_result(
         require_instance(MagicMock(spec=AsyncSession), AsyncSession),
         source=source,
         target=parent,
         run=_terminal_run(status),
         content="Finished safely.",
     )
-
-    [input] = input_service.inputs
+    [input] = admission.inputs
     assert result.id == "buffer-1"
     assert input.scheduling_mode is MailboxSchedulingMode.QUEUE_ONLY
     assert input.sender_user_id is None
@@ -310,12 +303,12 @@ async def test_terminal_result_is_queue_only_and_contains_run_metadata(
         "run_status": status.value,
         "source_terminal_result_event_id": "event-3",
     }
-    assert session_repository.activity_ids == ["child-agent", "root-agent"]
-    assert session_repository.running_session_ids == []
+    assert sessions.activity_ids == ["child-agent", "root-agent"]
+    assert sessions.running_session_ids == []
 
 
 async def test_terminal_result_requires_direct_parent() -> None:
-    service, input_service, session_repository = _service()
+    repository, admission, sessions = _repository()
     source = _session_agent(
         id="child-agent",
         session_id="child-session",
@@ -330,24 +323,22 @@ async def test_terminal_result_requires_direct_parent() -> None:
         kind=SessionAgentKind.SUBAGENT,
         parent_id="root-agent",
     )
-
     with pytest.raises(ValueError, match="direct parent"):
-        await service.enqueue_terminal_result(
+        await repository.enqueue_terminal_result(
             require_instance(MagicMock(spec=AsyncSession), AsyncSession),
             source=source,
             target=wrong_target,
             run=_terminal_run(AgentRunStatus.COMPLETED),
             content="Finished safely.",
         )
-
-    assert input_service.inputs == []
-    assert session_repository.locked_session_ids == []
+    assert admission.inputs == []
+    assert sessions.locked_session_ids == []
 
 
 async def test_mailbox_rejects_archived_target_before_enqueue() -> None:
     """Archived descendants reject collaboration input and wake side effects."""
-    service, input_service, session_repository = _service(
-        target_status=AgentSessionStatus.ARCHIVED
+    repository, admission, sessions = _repository(
+        target_status=AgentSessionStatus.ARCHIVED,
     )
     source = _session_agent(
         id="root-agent",
@@ -363,23 +354,21 @@ async def test_mailbox_rejects_archived_target_before_enqueue() -> None:
         kind=SessionAgentKind.SUBAGENT,
         parent_id="root-agent",
     )
-
     with pytest.raises(ValueError, match="Target AgentSession is not active"):
-        await service.enqueue_followup_task(
+        await repository.enqueue_followup_task(
             require_instance(MagicMock(spec=AsyncSession), AsyncSession),
             source=source,
             target=target,
             content="Resume work.",
         )
-
-    assert input_service.inputs == []
-    assert session_repository.activity_ids == []
-    assert session_repository.running_session_ids == []
+    assert admission.inputs == []
+    assert sessions.activity_ids == []
+    assert sessions.running_session_ids == []
 
 
 async def test_wake_mailbox_rejects_stopping_target_before_enqueue() -> None:
     """Wake-producing collaboration cannot escape an existing stop request."""
-    service, input_service, session_repository = _service(target_stopping=True)
+    repository, admission, sessions = _repository(target_stopping=True)
     source = _session_agent(
         id="root-agent",
         session_id="root-session",
@@ -394,15 +383,13 @@ async def test_wake_mailbox_rejects_stopping_target_before_enqueue() -> None:
         kind=SessionAgentKind.SUBAGENT,
         parent_id="root-agent",
     )
-
     with pytest.raises(ValueError, match="Target AgentSession is stopping"):
-        await service.enqueue_followup_task(
+        await repository.enqueue_followup_task(
             require_instance(MagicMock(spec=AsyncSession), AsyncSession),
             source=source,
             target=target,
             content="Resume work.",
         )
-
-    assert input_service.inputs == []
-    assert session_repository.activity_ids == []
-    assert session_repository.running_session_ids == []
+    assert admission.inputs == []
+    assert sessions.activity_ids == []
+    assert sessions.running_session_ids == []

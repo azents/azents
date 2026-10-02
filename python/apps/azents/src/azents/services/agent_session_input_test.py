@@ -74,6 +74,8 @@ from azents.repos.agent_session.data import (
 from azents.repos.chat_write_request import ChatWriteRequestRepository
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.mailbox import MailboxRepository
+from azents.repos.mailbox.admission import MailboxAdmissionRepository
+from azents.repos.mailbox.admission_data import MailboxAdmissionResult, MailboxEnqueue
 from azents.repos.mailbox.data import MailboxItem
 from azents.repos.scheduled_task.repository import ScheduledTaskRepository
 from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
@@ -117,8 +119,6 @@ from .agent_session_input import (
     CreatedAgentSessionInputResult,
 )
 from .mailbox import (
-    MailboxAdmissionResult,
-    MailboxEnqueue,
     MailboxService,
 )
 
@@ -314,15 +314,15 @@ class _AgentSessionRepositoryDouble(AgentSessionRepository):
         )
 
 
-class _MailboxServiceDouble(MailboxService):
-    """MailboxService double for tests."""
+class _MailboxAdmissionRepositoryDouble(MailboxAdmissionRepository):
+    """Record admission independently of the mixed-I/O Mailbox service."""
 
     def __init__(self, calls: list[str]) -> None:
         self.calls = calls
         self.enqueued: MailboxEnqueue | None = None
         self.moved: tuple[str, str] | None = None
 
-    async def enqueue(
+    async def enqueue_in_session(
         self,
         session: AsyncSession,
         input: MailboxEnqueue,
@@ -351,18 +351,12 @@ class _MailboxServiceDouble(MailboxService):
         )
         return MailboxAdmissionResult(mailbox_item=mailbox_item, created=True)
 
-    async def move_by_session_id(
-        self,
-        session: AsyncSession,
-        *,
-        from_session_id: str,
-        to_session_id: str,
-    ) -> int:
-        """Record MailboxItem move request."""
-        del session
-        self.calls.append("move_mailbox_item")
-        self.moved = (from_session_id, to_session_id)
-        return 1
+
+class _MailboxServiceDouble(MailboxService):
+    """Provide only non-admission Mailbox service queries."""
+
+    def __init__(self, calls: list[str]) -> None:
+        self.calls = calls
 
     async def has_seen_action_type(
         self,
@@ -420,6 +414,17 @@ def _root_agent_session_creation_service() -> RootAgentSessionCreationService:
         agent_repository=AgentRepository(),
         automatic_project_repository=AgentAutomaticProjectRepository(),
         session_workspace_project_repository=SessionWorkspaceProjectRepository(),
+    )
+
+
+def _mailbox_admission_repository(
+    session_manager: SessionManager[AsyncSession],
+) -> MailboxAdmissionRepository:
+    """Create database-only admission for integration tests."""
+    return MailboxAdmissionRepository(
+        session_manager=session_manager,
+        mailbox_item_repository=MailboxRepository(),
+        agent_session_repository=AgentSessionRepository(),
     )
 
 
@@ -622,6 +627,7 @@ class TestAgentSessionInputService:
         runtime_repository = _RuntimeRepositoryDouble(calls)
         session_repository = _AgentSessionRepositoryDouble(calls)
         mailbox_item_service = _MailboxServiceDouble(calls)
+        mailbox_admission_repository = _MailboxAdmissionRepositoryDouble(calls)
         service = AgentSessionInputService(
             agent_repository=_ActiveAgentRepositoryDouble(),
             agent_project_preset_repository=AgentProjectPresetRepository(),
@@ -635,6 +641,7 @@ class TestAgentSessionInputService:
             workspace_user_repository=_WorkspaceUserRepositoryDouble(),
             exchange_file_service=_ExchangeFileService(),
             mailbox_item_service=mailbox_item_service,
+            mailbox_admission_repository=mailbox_admission_repository,
             session_manager=rdb_session_manager,
         )
 
@@ -663,13 +670,13 @@ class TestAgentSessionInputService:
             "ensure_for_agent",
             "enqueue_mailbox_item",
         ]
-        assert mailbox_item_service.enqueued is not None
-        assert mailbox_item_service.enqueued.session_id == "session-1"
+        assert mailbox_admission_repository.enqueued is not None
+        assert mailbox_admission_repository.enqueued.session_id == "session-1"
         assert (
-            mailbox_item_service.enqueued.scheduling_mode
+            mailbox_admission_repository.enqueued.scheduling_mode
             == MailboxSchedulingMode.WAKE_SESSION
         )
-        assert mailbox_item_service.enqueued.content == "restore me"
+        assert mailbox_admission_repository.enqueued.content == "restore me"
 
     async def test_invalid_profile_rejects_before_mailbox_and_applied_state(
         self,
@@ -735,6 +742,9 @@ class TestAgentSessionInputService:
             workspace_user_repository=WorkspaceUserRepository(),
             exchange_file_service=_ExchangeFileService(),
             mailbox_item_service=_mailbox_item_service(rdb_session_manager),
+            mailbox_admission_repository=_mailbox_admission_repository(
+                rdb_session_manager
+            ),
             session_manager=rdb_session_manager,
         )
 
@@ -806,6 +816,7 @@ class TestAgentSessionInputService:
             yield db_session
 
         mailbox_item_service = _MailboxServiceDouble(calls)
+        mailbox_admission_repository = _MailboxAdmissionRepositoryDouble(calls)
         service = AgentSessionInputService(
             agent_repository=_ActiveAgentRepositoryDouble(),
             agent_project_preset_repository=AgentProjectPresetRepository(),
@@ -819,6 +830,7 @@ class TestAgentSessionInputService:
             workspace_user_repository=_WorkspaceUserRepositoryDouble(),
             exchange_file_service=_RejectingExchangeFileService(),
             mailbox_item_service=mailbox_item_service,
+            mailbox_admission_repository=mailbox_admission_repository,
             session_manager=session_manager,
         )
 
@@ -844,7 +856,7 @@ class TestAgentSessionInputService:
             "ensure_for_agent",
             "enqueue_mailbox_item",
         ]
-        assert mailbox_item_service.enqueued is not None
+        assert mailbox_admission_repository.enqueued is not None
 
     async def test_create_buffered_agent_input_rejects_subagent_before_wake(
         self,
@@ -857,6 +869,7 @@ class TestAgentSessionInputService:
             session_kind=AgentSessionKind.SUBAGENT,
         )
         mailbox_item_service = _MailboxServiceDouble(calls)
+        mailbox_admission_repository = _MailboxAdmissionRepositoryDouble(calls)
         service = AgentSessionInputService(
             agent_repository=AgentRepository(),
             agent_project_preset_repository=AgentProjectPresetRepository(),
@@ -870,6 +883,7 @@ class TestAgentSessionInputService:
             workspace_user_repository=_WorkspaceUserRepositoryDouble(),
             exchange_file_service=_ExchangeFileService(),
             mailbox_item_service=mailbox_item_service,
+            mailbox_admission_repository=mailbox_admission_repository,
             session_manager=_session_manager_double,
         )
 
@@ -890,7 +904,7 @@ class TestAgentSessionInputService:
         assert isinstance(result, Failure)
         assert isinstance(result.error, AgentSessionInputSubagentReadOnly)
         assert calls == ["get_by_id"]
-        assert mailbox_item_service.enqueued is None
+        assert mailbox_admission_repository.enqueued is None
 
     async def test_create_team_session_with_buffered_input_bootstraps_session(
         self,
@@ -934,6 +948,9 @@ class TestAgentSessionInputService:
             workspace_user_repository=WorkspaceUserRepository(),
             exchange_file_service=_ExchangeFileService(),
             mailbox_item_service=_mailbox_item_service(rdb_session_manager),
+            mailbox_admission_repository=_mailbox_admission_repository(
+                rdb_session_manager
+            ),
             session_manager=rdb_session_manager,
         )
 
@@ -1033,6 +1050,9 @@ class TestAgentSessionInputService:
             workspace_user_repository=WorkspaceUserRepository(),
             exchange_file_service=_ExchangeFileService(),
             mailbox_item_service=_mailbox_item_service(rdb_session_manager),
+            mailbox_admission_repository=_mailbox_admission_repository(
+                rdb_session_manager
+            ),
             session_manager=rdb_session_manager,
         )
 
@@ -1127,6 +1147,9 @@ class TestAgentSessionInputService:
             workspace_user_repository=WorkspaceUserRepository(),
             exchange_file_service=_ExchangeFileService(),
             mailbox_item_service=_mailbox_item_service(rdb_session_manager),
+            mailbox_admission_repository=_mailbox_admission_repository(
+                rdb_session_manager
+            ),
             session_manager=rdb_session_manager,
         )
 
@@ -1195,6 +1218,9 @@ class TestAgentSessionInputService:
             workspace_user_repository=WorkspaceUserRepository(),
             exchange_file_service=_ExchangeFileService(),
             mailbox_item_service=_mailbox_item_service(rdb_session_manager),
+            mailbox_admission_repository=_mailbox_admission_repository(
+                rdb_session_manager
+            ),
             session_manager=rdb_session_manager,
         )
         message = InputMessage(
@@ -1325,6 +1351,9 @@ class TestAgentSessionInputService:
                     mailbox_item_service=_mailbox_item_service(
                         independent_session_manager
                     ),
+                    mailbox_admission_repository=_mailbox_admission_repository(
+                        independent_session_manager
+                    ),
                     session_manager=independent_session_manager,
                 )
 
@@ -1441,6 +1470,9 @@ class TestAgentSessionInputService:
             workspace_user_repository=WorkspaceUserRepository(),
             exchange_file_service=_ExchangeFileService(),
             mailbox_item_service=_mailbox_item_service(rdb_session_manager),
+            mailbox_admission_repository=_mailbox_admission_repository(
+                rdb_session_manager
+            ),
             session_manager=rdb_session_manager,
         )
         message = InputMessage(
@@ -1525,6 +1557,9 @@ class TestAgentSessionInputService:
             workspace_user_repository=WorkspaceUserRepository(),
             exchange_file_service=_RejectingExchangeFileService(),
             mailbox_item_service=_mailbox_item_service(rdb_session_manager),
+            mailbox_admission_repository=_mailbox_admission_repository(
+                rdb_session_manager
+            ),
             session_manager=rdb_session_manager,
         )
 
@@ -1598,6 +1633,9 @@ class TestAgentSessionInputService:
             workspace_user_repository=WorkspaceUserRepository(),
             exchange_file_service=_ExchangeFileService(),
             mailbox_item_service=_mailbox_item_service(rdb_session_manager),
+            mailbox_admission_repository=_mailbox_admission_repository(
+                rdb_session_manager
+            ),
             session_manager=rdb_session_manager,
         )
 
@@ -1667,6 +1705,9 @@ class TestAgentSessionInputService:
             workspace_user_repository=WorkspaceUserRepository(),
             exchange_file_service=_ExchangeFileService(),
             mailbox_item_service=_mailbox_item_service(rdb_session_manager),
+            mailbox_admission_repository=_mailbox_admission_repository(
+                rdb_session_manager
+            ),
             session_manager=rdb_session_manager,
         )
 
@@ -1731,6 +1772,9 @@ class TestAgentSessionInputService:
             workspace_user_repository=WorkspaceUserRepository(),
             exchange_file_service=_ExchangeFileService(),
             mailbox_item_service=_mailbox_item_service(rdb_session_manager),
+            mailbox_admission_repository=_mailbox_admission_repository(
+                rdb_session_manager
+            ),
             session_manager=rdb_session_manager,
         )
 
@@ -1797,6 +1841,9 @@ class TestAgentSessionInputService:
             workspace_user_repository=WorkspaceUserRepository(),
             exchange_file_service=_ExchangeFileService(),
             mailbox_item_service=_mailbox_item_service(rdb_session_manager),
+            mailbox_admission_repository=_mailbox_admission_repository(
+                rdb_session_manager
+            ),
             session_manager=rdb_session_manager,
         )
 
@@ -1921,6 +1968,9 @@ class TestAgentSessionInputService:
                 workspace_user_repository=WorkspaceUserRepository(),
                 exchange_file_service=_ExchangeFileService(),
                 mailbox_item_service=_mailbox_item_service(session_manager),
+                mailbox_admission_repository=_mailbox_admission_repository(
+                    session_manager
+                ),
                 session_manager=session_manager,
             )
 
@@ -2027,6 +2077,9 @@ class TestAgentSessionInputService:
             workspace_user_repository=WorkspaceUserRepository(),
             exchange_file_service=_ExchangeFileService(),
             mailbox_item_service=_mailbox_item_service(rdb_session_manager),
+            mailbox_admission_repository=_mailbox_admission_repository(
+                rdb_session_manager
+            ),
             session_manager=rdb_session_manager,
         )
 
@@ -2165,6 +2218,9 @@ class TestAgentSessionInputService:
             workspace_user_repository=WorkspaceUserRepository(),
             exchange_file_service=_ExchangeFileService(),
             mailbox_item_service=_mailbox_item_service(rdb_session_manager),
+            mailbox_admission_repository=_mailbox_admission_repository(
+                rdb_session_manager
+            ),
             session_manager=rdb_session_manager,
         )
 

@@ -29,6 +29,8 @@ from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSessionCreate
 from azents.repos.archived_session_retention import ArchivedSessionRetentionRepository
+from azents.repos.mailbox import MailboxRepository
+from azents.repos.mailbox.admission import MailboxAdmissionRepository
 from azents.repos.message import MessageRepository
 from azents.repos.scheduled_task.lifecycle import ScheduledTaskLifecycleRepository
 from azents.repos.session_git_worktree import SessionGitWorktreeRepository
@@ -206,6 +208,11 @@ def _service(rdb_session_manager: SessionManager[AsyncSession]) -> ChatSessionSe
         workspace_user_repository=WorkspaceUserRepository(),
         session_workspace_project_repository=SessionWorkspaceProjectRepository(),
         mailbox_item_service=object(),
+        mailbox_admission_repository=MailboxAdmissionRepository(
+            session_manager=rdb_session_manager,
+            mailbox_item_repository=MailboxRepository(),
+            agent_session_repository=AgentSessionRepository(),
+        ),
         session_git_worktree_service=object(),
         lifecycle_orchestrator=get_session_lifecycle_orchestrator(),
         external_channel_lifecycle_service=object(),

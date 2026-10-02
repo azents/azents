@@ -126,8 +126,28 @@ Phase 26 moves the complete model-input atomic group into a domain repository:
 head and transcript reads, tool-result reconciliation, PREPARING_INPUT mutation,
 and persisted availability projections. Concrete database-only repository
 composition replaces the live-session pre-lower filter API. Output publication
-and compaction remain after transaction completion. Terminal/mailbox composition
-and provider/model-output admission are subsequent Engine prerequisites/slices.
+and compaction remain after transaction completion. Phase 26 PR #2049 passed
+all applicable CI at commit `833bd9c59`.
+
+Phase 27 is stacked on that commit and extracts canonical Mailbox admission,
+AgentMailbox, terminal finalization, and completed terminal-result repair
+operations. The Mailbox and terminal workstreams have non-overlapping ownership;
+root retains integration, validation, and the same independent reviewer. Preserve
+single-attempt tree/Session prelock before Run writes, queue-only direct-parent
+results, activity/delivery-marker atomicity, and the distinct repair/coordinator
+failure semantics. Larger Chat/External Channel acceptance contexts and
+Engine/Worker terminal outer contexts remain explicit residual violations until
+their complete atomic compositions migrate. This prerequisite does not claim
+complete repository ownership for those callers.
+
+The Historical Memory stack subsequently advanced `main` to `cf881e8c5`.
+The requester's conflict report triggered a stack rebase; Phase 26 now has tip
+`456d1c39c`. Documentation-only conflicts retain both feature records, with
+execution Specs 198/199 and Toolkit Spec 128. Latest-base full backend validation
+passed 6,931 cases with three existing Redis-only memory-variant skips. New
+Historical Memory/VFS paths receive incremental entrypoint/callback inspection;
+the earlier 616/610 lexical checkpoints remain dated discovery evidence rather
+than a claim of current complete coverage.
 
 ## Delivery Boundaries
 

@@ -1,10 +1,12 @@
 """Durable subagent terminal result delivery tests."""
 
+import asyncio
 import datetime
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,7 +22,9 @@ from azents.core.enums import (
 from azents.engine.events.types import AgentRunState
 from azents.repos.agent_session.data import SessionAgent
 from azents.repos.mailbox.data import MailboxItem
+from azents.repos.subagent_terminal_result import SubagentTerminalResultRepository
 from azents.services.subagent_terminal_result import SubagentTerminalResultService
+from azents.testing.types import require_instance
 
 _NOW = datetime.datetime.now(datetime.UTC)
 _RUN_ID = "run-1".rjust(32, "0")
@@ -116,18 +120,24 @@ class _Transaction:
 class _SessionManager:
     def __init__(self, store: _Store) -> None:
         self.store = store
+        self.active_scopes = 0
+        self.closed_scopes = 0
 
     @asynccontextmanager
     async def __call__(self) -> AsyncGenerator[_Transaction, None]:
         transaction = _Transaction()
+        self.active_scopes += 1
         try:
             yield transaction
-        except Exception:
+        except BaseException:
             self.store.rollback_count += 1
             raise
         else:
             self.store.committed_buffers.extend(transaction.pending_buffers)
             self.store.runs.update(transaction.pending_runs)
+        finally:
+            self.active_scopes -= 1
+            self.closed_scopes += 1
 
 
 class _AgentRunRepository:
@@ -242,7 +252,7 @@ class _AgentSessionRepository:
         return self.store.descendants_by_id.get(session_agent_id, [])
 
 
-class _AgentMailboxService:
+class _AgentMailboxRepository:
     def __init__(self) -> None:
         self.attempts: list[tuple[str, str, str, str]] = []
 
@@ -282,7 +292,9 @@ class _AgentMailboxService:
 
 def _make_service(**kwargs: Any) -> SubagentTerminalResultService:  # noqa: ANN401
     """Construct service with test-owned dependency doubles."""
-    return SubagentTerminalResultService(**kwargs)
+    return SubagentTerminalResultService(
+        repository=SubagentTerminalResultRepository(**kwargs),
+    )
 
 
 def _service(
@@ -294,7 +306,7 @@ def _service(
     SubagentTerminalResultService,
     _Store,
     _AgentRunRepository,
-    _AgentMailboxService,
+    _AgentMailboxRepository,
 ]:
     parent = _session_agent(
         id="root-agent",
@@ -324,12 +336,12 @@ def _service(
         fail_list=fail_list,
         fail_finalize=fail_finalize,
     )
-    mailbox_service = _AgentMailboxService()
+    mailbox_service = _AgentMailboxRepository()
     service = _make_service(
         session_manager=_SessionManager(store),
         agent_run_repository=run_repository,
         agent_session_repository=_AgentSessionRepository(store),
-        agent_mailbox_service=mailbox_service,
+        agent_mailbox_repository=mailbox_service,
     )
     return service, store, run_repository, mailbox_service
 
@@ -503,3 +515,42 @@ async def test_parent_repair_only_scans_direct_children() -> None:
         ("child-agent", "root-agent", _RUN_ID, "Child done.")
     ]
     assert store.runs[_GRANDCHILD_RUN_ID].parent_result_delivery_state is None
+
+
+async def test_repair_snapshot_operations_close_before_returning() -> None:
+    service, _store, _runs, _mailbox = _service(
+        _run(AgentRunStatus.COMPLETED, message="Done."),
+    )
+    manager = service.repository.session_manager
+    assert isinstance(manager, _SessionManager)
+    assert await service.repository.list_candidate_run_ids("child-session") == [_RUN_ID]
+    assert manager.active_scopes == 0
+    assert manager.closed_scopes == 1
+    assert await service.repository.list_direct_child_session_ids("root-session") == [
+        "child-session",
+    ]
+    assert manager.active_scopes == 0
+    assert manager.closed_scopes == 2
+    assert await service.repository.deliver_one(_RUN_ID)
+    assert manager.active_scopes == 0
+    assert manager.closed_scopes == 3
+
+
+@pytest.mark.parametrize("phase", ["snapshot", "delivery"])
+async def test_repair_cancellation_propagates_without_best_effort_conversion(
+    phase: str,
+) -> None:
+    mock = AsyncMock(spec=SubagentTerminalResultRepository)
+    if phase == "snapshot":
+        mock.list_candidate_run_ids.side_effect = asyncio.CancelledError()
+    else:
+        mock.list_candidate_run_ids.return_value = [_RUN_ID]
+        mock.deliver_one.side_effect = asyncio.CancelledError()
+    service = SubagentTerminalResultService(
+        repository=require_instance(mock, SubagentTerminalResultRepository),
+    )
+    with pytest.raises(asyncio.CancelledError):
+        await service.deliver_pending_for_source_session(
+            "child-session",
+            repair_source="terminal_boundary",
+        )
