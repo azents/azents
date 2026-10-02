@@ -49,6 +49,11 @@ from azents.engine.events.engine_events import (
     RuntimeProcessOutputDeltaEvent,
     RuntimeReadyEvent,
 )
+from azents.engine.hooks.types import (
+    RunStartHookContext,
+    RuntimeHooks,
+    SessionCompactHookContext,
+)
 from azents.engine.io.attachments import RuntimeAttachment
 from azents.engine.run.types import (
     FunctionTool,
@@ -363,6 +368,38 @@ class MemoryContextToolkit(Toolkit[ShellToolkitConfig]):
         self.session_manager = session_manager
         self.memory_context_snapshot_service = memory_context_snapshot_service
         self._execution_owner: SessionExecutionOwner | None = None
+        self._snapshot_available = True
+        self._compaction_refresh_pending = False
+
+    def hooks(self) -> RuntimeHooks:
+        """Refresh root Memory during Run preparation and invalidate on compaction."""
+        if not self._config.memory_enabled:
+            return {}
+        return {
+            "on_run_start": self._on_run_start,
+            "on_session_compact": self._on_session_compact,
+        }
+
+    async def _on_run_start(self, context: RunStartHookContext) -> None:
+        """Select current summaries before the root Run loop begins."""
+        del context
+        if self._session_id != self._root_session_id:
+            return
+        self._compaction_refresh_pending = False
+        self._snapshot_available = False
+        self._snapshot_available = (
+            await self.memory_context_snapshot_service.refresh_snapshot(
+                session_id=self._root_session_id,
+                after_compaction=False,
+                session_manager=self.session_manager,
+            )
+        )
+
+    async def _on_session_compact(self, context: SessionCompactHookContext) -> None:
+        """Defer selection until model context observes the committed summary."""
+        del context
+        if self._session_id == self._root_session_id:
+            self._compaction_refresh_pending = True
 
     def bind_execution_owner(self, owner: SessionExecutionOwner) -> None:
         """Bind this resolved Toolkit to one immutable Session owner."""
@@ -413,9 +450,23 @@ class MemoryContextToolkit(Toolkit[ShellToolkitConfig]):
         del context
         if not self._config.memory_enabled:
             return ""
-        snapshot = await self.memory_context_snapshot_service.prompt_for_turn(
-            session_id=self._root_session_id,
-            session_manager=self.session_manager,
+        if self._compaction_refresh_pending:
+            self._compaction_refresh_pending = False
+            self._snapshot_available = False
+            self._snapshot_available = (
+                await self.memory_context_snapshot_service.refresh_snapshot(
+                    session_id=self._root_session_id,
+                    after_compaction=True,
+                    session_manager=self.session_manager,
+                )
+            )
+        snapshot = (
+            await self.memory_context_snapshot_service.prompt_for_turn(
+                session_id=self._root_session_id,
+                session_manager=self.session_manager,
+            )
+            if self._snapshot_available
+            else ""
         )
         return "\n\n".join(
             part for part in (snapshot, _MEMORY_CONTEXT_RULES_PROMPT) if part

@@ -36,7 +36,7 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/agent_run.py
   - python/apps/azents/src/azents/rdb/models/agent.py
 last_verified_at: 2026-10-02
-spec_version: 45
+spec_version: 46
 ---
 
 # Context Compaction
@@ -92,11 +92,15 @@ from current durable history.
 ## Memory Context Boundary
 
 Memory context selection is independent of transcript summary generation.
-Enabled execution selects and persists its Saved index and bounded Historical
-source blocks only at initial model context or when a committed
-`compaction_summary` becomes the model-input head. The next Memory prompt load
-detects that new head and replaces `memory/context_snapshot`; the compaction
-transaction itself does not write that state.
+Enabled root execution reselects its Saved index and bounded Historical source
+blocks in `on_run_start` preparation before entering the Run loop. Independently,
+`on_session_compact` marks a pending Memory refresh. Since that hook runs before
+compaction commits, the following model-context reconstruction refreshes only
+when a new committed `compaction_summary` becomes the model-input head. This
+includes auto-compaction inside an ongoing Run, without waiting for a new Run.
+The compaction transaction itself does not write `memory/context_snapshot`.
+Identical selection reuses existing content; a changed compaction head is
+persisted without replacing unchanged summary text or its creation time.
 
 The new summary supplies the deterministic topic relevance signal. Selection
 uses no integration-model overview, embeddings, or extra summarization call.
@@ -105,7 +109,7 @@ and source-ID ordering. Saved entries remain an index rather than copied full
 content. Historical text is explicitly source-linked and potentially stale;
 it is neither a fresh instruction nor independent corroboration.
 
-Ordinary turns retain the selected text and paths while filtering deleted,
+Other model/tool turns retain the selected text and paths while filtering deleted,
 archived, inaccessible, or disabled entries. They do not reselect replacements,
 refresh edited Saved descriptions, or include newly prepared summaries.
 Explicit generic VFS reads inspect live permitted records without refreshing
@@ -341,6 +345,9 @@ terminalizes.
 
 ## Changelog
 
+- **2026-10-02** (spec_version 46) — Added root Run-start Memory preparation and
+  existing-hook invalidation followed by same-Run committed-compaction refresh,
+  preserving unchanged selected content and failed-compaction isolation.
 - **2026-10-02** (spec_version 45) — Documented initial/new-summary Memory
   snapshot selection and ordinary-turn authorization filtering without reselection.
 - **2026-10-01** (spec_version 44) — Moved compaction plan capture and atomic
