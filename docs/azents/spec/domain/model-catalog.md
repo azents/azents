@@ -24,6 +24,8 @@ code_paths:
   - python/apps/azents/src/azents/services/kimi_oauth/**
   - python/apps/azents/src/azents/repos/llm_catalog/__init__.py
   - python/apps/azents/src/azents/repos/llm_catalog/data.py
+  - python/apps/azents/src/azents/repos/chatgpt_oauth_runtime/**
+  - python/apps/azents/src/azents/repos/xai_oauth_runtime/**
   - python/apps/azents/src/azents/repos/model_metadata_source.py
   - python/apps/azents/src/azents/repos/model_metadata_source_data.py
   - python/apps/azents/src/azents/rdb/models/llm_catalog.py
@@ -55,7 +57,7 @@ code_paths:
   - typescript/apps/azents-web/src/trpc/routers/workspace-model-settings.ts
   - typescript/apps/azents-admin-web/src/features/model-catalog/containers/useModelCatalogPageContainer.ts
 last_verified_at: 2026-10-02
-spec_version: 34
+spec_version: 35
 ---
 
 # Model Catalog Domain Spec
@@ -246,8 +248,13 @@ Built-in tool capability projection is filtered through the implemented configur
 Each catalog sync records an attempt with status, counts, failure metadata, action hint, and diagnostics. Failed syncs keep the last successful snapshot available when one exists.
 
 Integration catalogs and their attempts carry the integration's positive
-`catalog_configuration_version`. Credential/configuration changes advance that
-version. An image sync publishes only when its claimed attempt is still latest and
+`catalog_configuration_version`. User credential/configuration changes advance
+that version. Runtime OAuth token rotation and connection-status persistence use
+the separate runtime-state update path and preserve the generation, so a refresh
+initiated by catalog synchronization does not invalidate its own publication.
+This applies to ChatGPT, xAI, and Kimi OAuth. Genuine concurrent user changes
+continue to fence stale conversation and image publications. An image sync
+publishes only when its claimed attempt is still latest and
 its version still matches the integration. The last successful snapshot remains
 diagnostic after a generation change or failed sync, but `generation_current =
 false` prevents it from authorizing new saves or runtime dispatch.
@@ -393,6 +400,8 @@ Only Workspace Owners receive the explicit image sync action.
 
 | Date | Version | Change |
 |---|---:|---|
+| 2026-10-02 | 35 | Kept ChatGPT and xAI OAuth runtime refresh persistence on the generation-preserving path while retaining user-update and publication fences. |
+| 2026-10-02 | 34 | Restored effective Grok client-image, native-search, and function-tool support despite omitted listing facts or missing tool prices. |
 | 2026-10-01 | 33 | Removed the former metadata source schema, rollback pins, temporary reprojection task, and compatibility code after validating generic provenance on every current conversation catalog. |
 | 2026-10-01 | 32 | Cut over system publication, integration projection, runtime context fallback, and estimated pricing to generic genai-prices authority with rollback pins and bounded network-free integration reprojection. |
 | 2026-10-01 | 31 | Added independent genai-prices source shadow collection, shared runtime profile resolution, generic source persistence, non-current replacement candidates, and inert rollback/projection provenance without changing current catalog authority. |

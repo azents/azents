@@ -187,6 +187,10 @@ async def test_provider_refresh_runs_after_completed_database_operations(
     )
     assert stored is not None and isinstance(stored.config, XaiOAuthConfig)
     assert stored.config.status == status
+    assert (
+        stored.catalog_configuration_version
+        == harness.integration.catalog_configuration_version
+    )
     if error is None:
         assert isinstance(result, Success)
         assert isinstance(stored.secrets, XaiOAuthSecrets)
@@ -309,6 +313,10 @@ async def test_concurrent_success_preserves_fresh_credentials_and_metadata(
         assert stored.config.last_failed_at is None
         assert stored.config == success.value.config
         assert stored.secrets == success.value.secrets
+        assert (
+            stored.catalog_configuration_version
+            == harness.integration.catalog_configuration_version
+        )
         assert isinstance(harness.integration.config, XaiOAuthConfig)
         assert (
             stored.config.last_refreshed_at
