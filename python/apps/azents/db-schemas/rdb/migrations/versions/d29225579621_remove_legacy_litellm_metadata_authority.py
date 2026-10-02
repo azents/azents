@@ -158,6 +158,7 @@ def upgrade() -> None:
         "DELETE FROM llm_catalog_snapshots "
         "WHERE id IN (SELECT id FROM legacy_catalog_snapshots)"
     )
+    op.execute("SET CONSTRAINTS ALL IMMEDIATE")
     op.drop_column("llm_catalogs", "rollback_snapshot_id")
     op.drop_constraint(
         "llm_catalog_snapshots_source_snapshot_id_fkey",
