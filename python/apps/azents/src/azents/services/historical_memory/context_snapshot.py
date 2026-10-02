@@ -70,36 +70,11 @@ class MemoryContextSnapshotService:
                 state_name=_CONTEXT_SNAPSHOT_STATE,
             )
             snapshot = self._decode_snapshot(record)
-            boundary_topic = await self._boundary_topic(
-                session,
-                session_id=consumer.session_id,
-                head_event_id=consumer.model_input_head_event_id,
-            )
-            initial_boundary = (
-                consumer.model_input_head_event_id is None
-                and not await self.message_repository.has_non_reverted_kind(
-                    session,
-                    session_id=consumer.session_id,
-                    kind=EventKind.TURN_MARKER,
-                )
-            )
-            explicit_boundary = initial_boundary or boundary_topic is not None
-            boundary_matches = (
-                snapshot is not None
-                and snapshot.boundary_head_event_id
-                == consumer.model_input_head_event_id
-            )
-            if not boundary_matches:
-                if not explicit_boundary:
-                    return ""
-                snapshot = await self._select_snapshot(
-                    session,
-                    consumer=consumer,
-                    record=record,
-                    topic=boundary_topic,
-                )
-                if snapshot is None:
-                    return ""
+            if (
+                snapshot is None
+                or snapshot.boundary_head_event_id != consumer.model_input_head_event_id
+            ):
+                return ""
 
             filtered = await self._filter_snapshot(
                 session,
@@ -108,6 +83,62 @@ class MemoryContextSnapshotService:
             )
             return render_memory_context_snapshot(filtered)
 
+    async def refresh_snapshot(
+        self,
+        *,
+        session_id: str,
+        after_compaction: bool,
+        session_manager: SessionManager[AsyncSession],
+    ) -> bool:
+        """Prepare Memory at Run start or after a committed compaction.
+
+        Compaction notification precedes commit, so an unchanged head preserves
+        the current snapshot without admitting summaries during failed compaction.
+        """
+        async with session_manager() as session:
+            consumer = (
+                await self.historical_repository.get_snapshot_consumer_in_session(
+                    session,
+                    session_id=session_id,
+                )
+            )
+            if consumer is None:
+                return False
+            record = await self.toolkit_state_repository.get(
+                session,
+                agent_id=consumer.agent_id,
+                session_id=consumer.session_id,
+                toolkit_namespace=_MEMORY_NAMESPACE,
+                state_name=_CONTEXT_SNAPSHOT_STATE,
+            )
+            previous = self._decode_snapshot(record)
+            if after_compaction:
+                if (
+                    previous is not None
+                    and previous.boundary_head_event_id
+                    == consumer.model_input_head_event_id
+                ):
+                    return True
+                if consumer.model_input_head_event_id is None:
+                    return False
+            topic = await self._boundary_topic(
+                session,
+                session_id=consumer.session_id,
+                head_event_id=consumer.model_input_head_event_id,
+            )
+            if consumer.model_input_head_event_id is not None and topic is None:
+                return False
+            return (
+                await self._select_snapshot(
+                    session,
+                    consumer=consumer,
+                    record=record,
+                    topic=topic,
+                    previous=previous,
+                )
+                is not None
+            )
+
     async def _select_snapshot(
         self,
         session: AsyncSession,
@@ -115,6 +146,7 @@ class MemoryContextSnapshotService:
         consumer: MemorySnapshotConsumer,
         record: ToolkitStateRecord | None,
         topic: str | None,
+        previous: MemoryContextSnapshotState | None,
     ) -> MemoryContextSnapshotState | None:
         historical_repository = self.historical_repository
         saved = await self.memory_repository.list(
@@ -151,6 +183,18 @@ class MemoryContextSnapshotService:
             historical_candidates=historical,
             topic=topic,
         )
+        if (
+            previous is not None
+            and previous.saved_entries == snapshot.saved_entries
+            and previous.historical_entries == snapshot.historical_entries
+        ):
+            snapshot = previous.model_copy(
+                update={
+                    "boundary_head_event_id": consumer.model_input_head_event_id,
+                }
+            )
+            if snapshot == previous:
+                return previous
         try:
             await self.toolkit_state_repository.save(
                 session,

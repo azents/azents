@@ -42,7 +42,7 @@ from azents.engine.events.engine_events import (
     RuntimeReadyEvent,
 )
 from azents.engine.events.types import ClientToolResultPayload, Event
-from azents.engine.hooks.types import SessionCompactHookContext
+from azents.engine.hooks.types import RunStartHookContext, SessionCompactHookContext
 from azents.engine.run.emit import PublishedEvent, durable, handle_engine_event
 from azents.engine.run.types import (
     FunctionTool,
@@ -289,6 +289,22 @@ class _MemoryContextSnapshotServiceDouble(MemoryContextSnapshotService):
     def __init__(self, prompt: str) -> None:
         self.prompt = prompt
         self.session_ids: list[str] = []
+        self.refresh_session_ids: list[str] = []
+        self.compaction_refreshes: list[bool] = []
+        self.refresh_available = True
+
+    async def refresh_snapshot(
+        self,
+        *,
+        session_id: str,
+        after_compaction: bool,
+        session_manager: SessionManager[AsyncSession],
+    ) -> bool:
+        """Record explicit lifecycle refreshes independently of prompt reads."""
+        del session_manager
+        self.refresh_session_ids.append(session_id)
+        self.compaction_refreshes.append(after_compaction)
+        return self.refresh_available
 
     async def prompt_for_turn(
         self,
@@ -2437,11 +2453,141 @@ class TestBuiltinToolkitMemoryPrompt:
             )
         )
 
+        run_start = toolkit.hooks().get("on_run_start")
+        compact = toolkit.hooks().get("on_session_compact")
+        assert run_start is not None
+        assert compact is not None
+        await run_start(
+            RunStartHookContext(
+                workspace_id="workspace-1",
+                agent_id="agent-1",
+                session_id="subagent-session",
+                run_id="child-run",
+            )
+        )
+        await compact(
+            SessionCompactHookContext(
+                workspace_id="workspace-1",
+                agent_id="agent-1",
+                session_id="subagent-session",
+                run_id="child-run",
+            )
+        )
         prompt = await toolkit.get_dynamic_prompt(_make_context())
 
         assert "root snapshot" in prompt
         assert "azents://memory/README.md" in prompt
         assert snapshot_service.session_ids == ["root-session"]
+        assert snapshot_service.refresh_session_ids == []
+
+    @pytest.mark.asyncio
+    async def test_root_run_preparation_refreshes_once_before_model_loop(self) -> None:
+        """Run-start preparation owns selection; repeated model calls only read."""
+        service = _make_memory_snapshot_service("first snapshot")
+        toolkit = MemoryContextToolkit(
+            config=ShellToolkitConfig(memory_enabled=True),
+            agent_id="agent-1",
+            session_manager=_make_mock_session_manager(),
+            memory_context_snapshot_service=service,
+        )
+        toolkit.set_session_id("root-session")
+        hook = toolkit.hooks().get("on_run_start")
+        assert hook is not None
+        await hook(
+            RunStartHookContext(
+                workspace_id="workspace-1",
+                agent_id="agent-1",
+                session_id="root-session",
+                run_id="first-run",
+            )
+        )
+        assert service.session_ids == []
+        assert service.refresh_session_ids == ["root-session"]
+        assert service.compaction_refreshes == [False]
+        for _ in range(3):
+            assert "first snapshot" in await toolkit.get_dynamic_prompt(_make_context())
+        assert service.compaction_refreshes == [False]
+
+        service.prompt = "next snapshot"
+        await hook(
+            RunStartHookContext(
+                workspace_id="workspace-1",
+                agent_id="agent-1",
+                session_id="root-session",
+                run_id="second-run",
+            )
+        )
+        assert "next snapshot" in await toolkit.get_dynamic_prompt(_make_context())
+        assert service.compaction_refreshes == [False, False]
+
+    @pytest.mark.asyncio
+    async def test_compaction_hook_refreshes_on_same_run_context_reconstruction(
+        self,
+    ) -> None:
+        """Compaction is an independent boundary, not the start of a later Run."""
+        service = _make_memory_snapshot_service("before compaction")
+        toolkit = MemoryContextToolkit(
+            config=ShellToolkitConfig(memory_enabled=True),
+            agent_id="agent-1",
+            session_manager=_make_mock_session_manager(),
+            memory_context_snapshot_service=service,
+        )
+        toolkit.set_session_id("root-session")
+        start = toolkit.hooks().get("on_run_start")
+        compact = toolkit.hooks().get("on_session_compact")
+        assert start is not None
+        assert compact is not None
+        await start(
+            RunStartHookContext(
+                workspace_id="workspace-1",
+                agent_id="agent-1",
+                session_id="root-session",
+                run_id="same-run",
+            )
+        )
+        context = _make_context()
+        assert "before compaction" in await toolkit.get_dynamic_prompt(context)
+        await compact(
+            SessionCompactHookContext(
+                workspace_id="workspace-1",
+                agent_id="agent-1",
+                session_id="root-session",
+                run_id="same-run",
+            )
+        )
+        assert service.compaction_refreshes == [False]
+        service.prompt = "after committed compaction"
+        assert "after committed compaction" in await toolkit.get_dynamic_prompt(context)
+        assert service.compaction_refreshes == [False, True]
+        await toolkit.get_dynamic_prompt(context)
+        assert service.compaction_refreshes == [False, True]
+
+    @pytest.mark.asyncio
+    async def test_failed_run_preparation_does_not_render_prior_snapshot(self) -> None:
+        """A failed refresh must not quietly reuse previously selected memory."""
+        service = _make_memory_snapshot_service("must not render")
+        service.refresh_available = False
+        toolkit = MemoryContextToolkit(
+            config=ShellToolkitConfig(memory_enabled=True),
+            agent_id="agent-1",
+            session_manager=_make_mock_session_manager(),
+            memory_context_snapshot_service=service,
+        )
+        toolkit.set_session_id("root-session")
+        hook = toolkit.hooks().get("on_run_start")
+        assert hook is not None
+        await hook(
+            RunStartHookContext(
+                workspace_id="workspace-1",
+                agent_id="agent-1",
+                session_id="root-session",
+                run_id="run",
+            )
+        )
+        assert "must not render" not in await toolkit.get_dynamic_prompt(
+            _make_context()
+        )
+        assert service.session_ids == []
 
     @pytest.mark.asyncio
     async def test_memory_context_disabled_has_no_prompt_or_tools(self) -> None:
@@ -2459,6 +2605,7 @@ class TestBuiltinToolkitMemoryPrompt:
 
         assert (await toolkit.update_context(context)).tools == []
         assert await toolkit.get_dynamic_prompt(context) == ""
+        assert toolkit.hooks() == {}
 
 
 # ---------------------------------------------------------------------------

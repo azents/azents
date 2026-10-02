@@ -129,7 +129,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
   - typescript/apps/azents-web/messages/*/chat.json
 last_verified_at: 2026-10-02
-spec_version: 199
+spec_version: 200
 ---
 
 # Agent Execution Loop
@@ -959,12 +959,16 @@ target agent's current run after rejecting the root and the caller itself.
 ## 5. Tool Loop
 
 Memory-enabled root and subagent executions receive a prompt-only Memory
-Context binding. At initial context and a newly committed compaction-summary
-head, it persists a deterministic `memory/context_snapshot` containing the Saved
-index and bounded whole Historical source blocks. Ordinary turns reauthorize
-and filter the existing selection without refreshing text or selecting
-replacement entries. Saved mutation or newly prepared history therefore does
-not silently replace a turn's automatic context.
+Context binding. Root `on_run_start` preparation reselects a deterministic
+`memory/context_snapshot` containing the Saved index and bounded whole Historical
+source blocks before the Run loop starts, reusing unchanged selection without a
+state write. Independently, `on_session_compact` invalidates Memory for the next
+model-context reconstruction, which refreshes after the new compaction-summary
+head commits even inside the same Run. Child lifecycle hooks inherit rather
+than reselect the root snapshot. Other model/tool turns reauthorize and filter
+the existing selection without refreshing text or selecting replacement entries.
+Saved mutation or newly prepared history is admitted at the next root preparation
+or successful compaction boundary, not silently during a tool loop.
 
 Explicit inspection uses generic `read`, `grep`, and `glob` over the live
 read-only `azents://memory` mount. Each operation independently checks Memory
@@ -1675,6 +1679,9 @@ icon.
 
 ## Changelog
 
+- **2026-10-02** (spec_version 200) — Prepared Memory selection before each root
+  Run loop and refreshed independently on post-compaction context reconstruction,
+  preserving unchanged content, child inheritance, and per-turn access filtering.
 - **2026-10-02** (spec_version 199) — Moved Mailbox admission and terminal
   database composition into canonical repositories and completed the historical
   terminal-result repair boundaries, preserving parent delivery atomicity,

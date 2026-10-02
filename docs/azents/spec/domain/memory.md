@@ -42,7 +42,7 @@ api_routes:
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/historical-memories
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/historical-memories/{source_session_id}
 last_verified_at: 2026-10-02
-spec_version: 10
+spec_version: 11
 ---
 
 # Memory
@@ -161,14 +161,26 @@ atomically and clears retry progress.
 
 ## Automatic Boundary Snapshot
 
-Before first model context, and when context reconstruction observes a new
-successful compaction-summary head, Memory selects and persists a fresh snapshot.
-Ordinary turns reuse the boundary: they filter currently unavailable Saved IDs
-and Historical source IDs but do not replace entries, update snapshot text, or
-admit newly prepared summaries. Failed/stale compaction does not move the head
-or trigger a new boundary. Missing/corrupt state is selected only at an explicit
-boundary, not silently repaired by ordinary-turn reselection. Snapshot CAS
-conflict contributes no automatic Memory.
+Before each root Run loop, the existing `on_run_start` preparation hook reselects
+currently available Saved index entries and prepared Historical summaries.
+Selection compares entries with the persisted snapshot and retains unchanged
+content and its creation time; identical selection/head requires no state write.
+No Run ID is added to the snapshot or compared to detect this boundary.
+
+Independently, the existing `on_session_compact` hook marks a pending refresh.
+Because this hook announces compaction start, the following model-context
+reconstruction reselects only after a new successful compaction-summary head has
+committed. This can occur inside the same Run and does not wait for another Run.
+Unchanged content is rebound to the new head without replacing its text or
+creation time. Failed/stale compaction leaves the head unchanged and admits no
+new Memory. Child Run/compaction hooks inherit the root selection rather than
+reselecting it.
+
+Other model/tool turns only reauthorize and filter currently unavailable Saved
+IDs and Historical source IDs; they do not replace entries, update snapshot
+text, or admit newly prepared summaries. Missing/corrupt state is initialized
+only by explicit lifecycle refresh, not ordinary prompt reads. A failed refresh
+or snapshot CAS conflict contributes no automatic Memory to that execution.
 
 Saved index entries are type/name/ID sorted. Historical candidates are bounded to
 200 and ranked deterministically. New Sessions rank by source activity,
@@ -291,6 +303,7 @@ per-answer usage claim. The inventory is not the exact set used by a response.
 
 | Date | Version | Change |
 |---|---:|---|
+| 2026-10-02 | 11 | Refresh Memory during root Run preparation and hook-driven post-compaction context reconstruction, reuse unchanged content, and preserve read-only per-turn filtering and child inheritance |
 | 2026-10-02 | 10 | Promoted Historical preparation, boundary snapshots, live Memory VFS, generic-read cutover, Saved-only mutation, and retained read-only Historical settings |
 | 2026-10-01 | 9 | Moved runtime Memory, prompt-scope, and Session-history transactions into completed repository operations |
 | 2026-09-26 | 8 | Added Memory-gated authorized Session discovery, visible paging, and selected tool-result text lookup |
