@@ -104,6 +104,7 @@ def render_memory_context_snapshot(snapshot: MemoryContextSnapshotState) -> str:
                 [
                     f"- **{entry.name}** [{entry.scope}] — "
                     f"{entry.description_snapshot}",
+                    f"  Path: `{entry.vfs_path}`",
                 ]
             )
     if snapshot.historical_entries:
@@ -259,6 +260,8 @@ def _render_historical_group(entries: Sequence[HistoricalMemorySnapshotEntry]) -
                 f"Title: {title}",
                 f"  Activity through: {entry.source_activity_through.isoformat()}; "
                 f"Prepared: {entry.prepared_at.isoformat()}",
+                f"  Summary: `{entry.summary_vfs_path}`",
+                f"  Source: `{entry.source_vfs_path}`",
             ]
         )
     lines.extend(["Summary:", entries[0].summary_snapshot, "HISTORICAL MEMORY ENDS"])

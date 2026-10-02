@@ -59,7 +59,7 @@ from azents.engine.run.types import (
 )
 from azents.engine.tools.builtin import (
     BuiltinToolkitProvider,
-    MemoryReadToolkit,
+    MemoryContextToolkit,
     MemoryWriteToolkit,
     ReadableStorageToolkit,
     RuntimeToolkit,
@@ -1591,11 +1591,11 @@ async def resolve_agent_tools(
         )
         readable_storage_resolved: ReadableStorageToolkit | None = None
         if memory_enabled:
-            memory_read_modes = _ROOT_AND_SUBAGENT_EXECUTION_MODES
-            if _allows_execution_mode(memory_read_modes, execution_mode):
-                memory_read_context = ResolveContext(
+            memory_context_modes = _ROOT_AND_SUBAGENT_EXECUTION_MODES
+            if _allows_execution_mode(memory_context_modes, execution_mode):
+                memory_context = ResolveContext(
                     toolkit_id="",
-                    toolkit_name="memory_read",
+                    toolkit_name="memory_context",
                     credentials_json=None,
                     agent_id=context.agent_id,
                     session_id=context.session_id,
@@ -1605,31 +1605,31 @@ async def resolve_agent_tools(
                     workspace_id=context.workspace_id,
                     workspace_handle=workspace_handle,
                 )
-                memory_read_resolved = await _resolve_toolkit_with_logging(
+                memory_context_resolved = await _resolve_toolkit_with_logging(
                     agent_id=agent_id,
                     context=context,
                     source="auto",
-                    slug="memory_read",
+                    slug="memory_context",
                     provider=builtin_toolkit_provider,
-                    toolkit_name="memory_read",
-                    resolve=builtin_toolkit_provider.resolve_memory_read(
+                    toolkit_name="memory_context",
+                    resolve=builtin_toolkit_provider.resolve_memory_context(
                         builtin_config,
-                        memory_read_context,
+                        memory_context,
                     ),
                 )
-                if isinstance(memory_read_resolved, MemoryReadToolkit):
-                    memory_read_resolved.set_agent_id(agent_id)
-                    memory_read_resolved.set_session_id(context.session_id)
+                if isinstance(memory_context_resolved, MemoryContextToolkit):
+                    memory_context_resolved.set_agent_id(agent_id)
+                    memory_context_resolved.set_session_id(context.session_id)
                 pending.append(
                     (
                         builtin_toolkit_provider,
-                        memory_read_resolved,
+                        memory_context_resolved,
                         builtin_config,
-                        "memory_read",
+                        "memory_context",
                         None,
                         False,
                         None,
-                        memory_read_modes,
+                        memory_context_modes,
                     )
                 )
 

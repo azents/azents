@@ -135,6 +135,9 @@ async def test_initial_boundary_selects_persists_and_renders_snapshot() -> None:
 
     assert "project-state" in prompt
     assert "boundary snapshot design" in prompt
+    assert f"azents://memory/saved/agent/{'m' * 32}.md" in prompt
+    assert f"azents://memory/historical/team/{'h' * 32}/summary.md" in prompt
+    assert f"azents://memory/sources/team/{'h' * 32}/session.md" in prompt
     toolkit_state.save.assert_awaited_once()
     session.commit.assert_not_awaited()
 

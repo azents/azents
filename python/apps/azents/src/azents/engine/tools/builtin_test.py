@@ -55,7 +55,7 @@ from azents.engine.tools import builtin as builtin_module
 from azents.engine.tools.builtin import (
     BuiltinToolkit,
     BuiltinToolkitProvider,
-    MemoryReadToolkit,
+    MemoryContextToolkit,
     MemoryWriteToolkit,
     ReadableStorageToolkit,
     RuntimeRunnerFileStorage,
@@ -96,7 +96,6 @@ from azents.rdb.session import SessionManager
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.memory import MemoryRepository
-from azents.repos.memory.data import MemorySummary
 from azents.repos.runtime_profile.data import (
     RuntimeConfigurationAppliedSlot,
     RuntimeConfigurationSlot,
@@ -279,24 +278,9 @@ def _make_mock_session_manager() -> SessionManager[AsyncMock]:
     return _session_manager
 
 
-def _make_mock_memory_repo(
-    agent_summaries: list[MemorySummary] | None = None,
-) -> MemoryRepository:
+def _make_mock_memory_repo() -> MemoryRepository:
     """Create MemoryRepository mock for tests."""
-    repo = AsyncMock(spec=MemoryRepository)
-
-    async def _list_summaries(
-        session: object,  # noqa: ARG001
-        *,
-        agent_id: str,  # noqa: ARG001
-        user_id: str | None,
-        type: str | None = None,  # noqa: ARG001
-    ) -> list[MemorySummary]:
-        assert user_id is None
-        return agent_summaries or []
-
-    repo.list_summaries = _list_summaries
-    return repo
+    return AsyncMock(spec=MemoryRepository)
 
 
 class _MemoryContextSnapshotServiceDouble(MemoryContextSnapshotService):
@@ -2358,89 +2342,86 @@ async def test_runtime_text_storage_maps_unsupported_encoding() -> None:
 
 
 class TestBuiltinToolkitMemoryPrompt:
-    """Test whether memory information is included in prompt from update_context()."""
+    """Memory cutover prompt and mutation-surface tests."""
 
     @pytest.mark.asyncio
-    async def test_memory_enabled_includes_memory_rules(self) -> None:
-        """When memory_enabled=True, memory rules are included in prompt."""
-        config = ShellToolkitConfig(memory_enabled=True)
+    async def test_memory_enabled_includes_vfs_and_write_rules(self) -> None:
+        """Legacy builtin binding exposes generic VFS guidance and Saved writes."""
         toolkit = _make_builtin_toolkit(
-            config=config,
+            config=ShellToolkitConfig(memory_enabled=True),
             session_manager=_make_mock_session_manager(),
             memory_repo=_make_mock_memory_repo(),
         )
-        ctx = _make_context()
-        await toolkit.update_context(ctx)
-        assert (await toolkit.get_static_prompt(_make_context())) == ""
-        assert "Memories" in (await toolkit.get_dynamic_prompt(ctx))
-        dynamic_prompt = await toolkit.get_dynamic_prompt(ctx)
-        assert "Memory Rules" in dynamic_prompt
-        assert "loaded Agent Memory summaries as the primary index" in dynamic_prompt
-        assert "shared Agent Memory only" in dynamic_prompt
-        assert "User-scope Memory is unavailable" in dynamic_prompt
-        assert "ranked partial matches" in dynamic_prompt
+        context = _make_context()
+
+        state = await toolkit.update_context(context)
+        prompt = await toolkit.get_dynamic_prompt(context)
+
+        assert {tool.spec.name for tool in state.tools} == {
+            "save_memory",
+            "delete_memory",
+        }
+        assert "azents://memory/README.md" in prompt
+        assert "narrow `glob`" in prompt
+        assert "`grep` roots" in prompt
+        assert "with `agent` scope" in prompt
+        assert "What NOT to save" in prompt
 
     @pytest.mark.asyncio
     async def test_memory_disabled_excludes_memory(self) -> None:
-        """When memory_enabled=False, there is no memory-related prompt."""
-        config = ShellToolkitConfig(memory_enabled=False)
-        toolkit = _make_builtin_toolkit(config=config)
-        ctx = _make_context()
-        await toolkit.update_context(ctx)
-        assert "Memories" not in (await toolkit.get_static_prompt(_make_context()))
-        assert (await toolkit.get_dynamic_prompt(ctx)) == ""
+        """Memory disablement removes mutation tools and dynamic guidance."""
+        toolkit = _make_builtin_toolkit(config=ShellToolkitConfig(memory_enabled=False))
+        context = _make_context()
+
+        assert (await toolkit.update_context(context)).tools == []
+        assert await toolkit.get_dynamic_prompt(context) == ""
 
     @pytest.mark.asyncio
-    async def test_memory_write_prompt_reuses_read_shared_rules(self) -> None:
-        """Read prompt owns shared memory rules because write is never bound alone."""
-        config = ShellToolkitConfig(memory_enabled=True)
-        session_manager = _make_mock_session_manager()
-        memory_repo = _make_mock_memory_repo()
-        snapshot_service = _make_memory_snapshot_service(
-            "## Memories\n\n"
-            "### Memory Rules\n\n"
-            "Team Session execution exposes shared Agent Memory only. "
-            "User-scope Memory is unavailable.\n\n"
-            "#### Types of memory\n\n"
-            "Use search candidates with ranked partial matches."
-        )
-        read_toolkit = MemoryReadToolkit(
-            config=config,
+    async def test_context_and_write_bindings_keep_separate_prompts(self) -> None:
+        """Boundary context owns VFS guidance and mutation owns write policy."""
+        context_toolkit = MemoryContextToolkit(
+            config=ShellToolkitConfig(memory_enabled=True),
             agent_id="agent-1",
-            session_manager=session_manager,
-            memory_repo=memory_repo,
-            memory_context_snapshot_service=snapshot_service,
+            session_manager=_make_mock_session_manager(),
+            memory_context_snapshot_service=_make_memory_snapshot_service(
+                "## Memories\n\nSelected boundary snapshot"
+            ),
         )
+        context_toolkit.set_session_id("session-1")
         write_toolkit = MemoryWriteToolkit(
-            config=config,
+            config=ShellToolkitConfig(memory_enabled=True),
             agent_id="agent-1",
-            session_manager=session_manager,
-            memory_repo=memory_repo,
+            session_manager=_make_mock_session_manager(),
+            memory_repo=_make_mock_memory_repo(),
         )
-        ctx = _make_context()
+        context = _make_context()
 
-        read_prompt = await read_toolkit.get_dynamic_prompt(ctx)
-        write_prompt = await write_toolkit.get_dynamic_prompt(ctx)
+        context_prompt = await context_toolkit.get_dynamic_prompt(context)
+        write_prompt = await write_toolkit.get_dynamic_prompt(context)
 
-        assert "Types of memory" in read_prompt
-        assert "shared Agent Memory only" in read_prompt
-        assert "User-scope Memory is unavailable" in read_prompt
-        assert "Types of memory" not in write_prompt
-        assert "with `agent` scope" in write_prompt
-        assert "private personal preferences" in write_prompt
+        assert "Selected boundary snapshot" in context_prompt
+        assert "azents://memory/README.md" in context_prompt
+        assert "never mutates Saved Memory automatically" in context_prompt
+        assert "What NOT to save" not in context_prompt
         assert "What NOT to save" in write_prompt
-        assert "Duplicate prevention" in write_prompt
-        assert "empty search result alone" in write_prompt
+        assert "azents://memory/README.md" in write_prompt
+        assert (await context_toolkit.update_context(context)).tools == []
+        assert {
+            tool.spec.name
+            for tool in (await write_toolkit.update_context(context)).tools
+        } == {
+            "save_memory",
+            "delete_memory",
+        }
 
     @pytest.mark.asyncio
     async def test_subagent_memory_prompt_uses_canonical_root_session(self) -> None:
         """Subagents inherit the root snapshot without widening its authority."""
         snapshot_service = _make_memory_snapshot_service("root snapshot")
-        toolkit = MemoryReadToolkit(
+        toolkit = MemoryContextToolkit(
             config=ShellToolkitConfig(memory_enabled=True),
             agent_id="agent-1",
             session_manager=_make_mock_session_manager(),
-            memory_repo=_make_mock_memory_repo(),
             memory_context_snapshot_service=snapshot_service,
         )
         toolkit.set_session_id("subagent-session")
@@ -2456,102 +2437,28 @@ class TestBuiltinToolkitMemoryPrompt:
             )
         )
 
-        assert await toolkit.get_dynamic_prompt(_make_context()) == "root snapshot"
+        prompt = await toolkit.get_dynamic_prompt(_make_context())
+
+        assert "root snapshot" in prompt
+        assert "azents://memory/README.md" in prompt
         assert snapshot_service.session_ids == ["root-session"]
 
     @pytest.mark.asyncio
-    async def test_memory_index_included(self) -> None:
-        """When agent memory exists, index content is included in prompt."""
-        config = ShellToolkitConfig(memory_enabled=True)
-        toolkit = _make_builtin_toolkit(
-            config=config,
-            session_manager=_make_mock_session_manager(),
-            memory_repo=_make_mock_memory_repo(
-                agent_summaries=[
-                    MemorySummary(
-                        name="my-project",
-                        type="project",
-                        description="my project description",
-                    ),
-                ],
-            ),
-        )
-        ctx = _make_context()
-        await toolkit.update_context(ctx)
-        assert "my-project" in (await toolkit.get_dynamic_prompt(ctx))
-        assert "my project description" in (await toolkit.get_dynamic_prompt(ctx))
-
-    @pytest.mark.asyncio
-    async def test_builtin_toolkit_excludes_runtime_tools(self) -> None:
-        """BuiltinToolkit does not expose shell/file tools."""
-        toolkit = BuiltinToolkit(
-            config=ShellToolkitConfig(memory_enabled=True),
-            agent_id="agent-1",
-            session_manager=_make_mock_session_manager(),
-            memory_repo=_make_mock_memory_repo(),
-        )
-        ctx = _make_context()
-
-        state = await toolkit.update_context(ctx)
-
-        tool_names = {tool.spec.name for tool in state.tools}
-        assert "save_memory" in tool_names
-        assert "search_memories" in tool_names
-        assert {
-            "search_sessions",
-            "read_session_history",
-            "read_session_tool_result",
-        } <= tool_names
-        assert "bash" not in tool_names
-        assert "exec_command" not in tool_names
-        assert "Runtime Files" not in (await toolkit.get_static_prompt(_make_context()))
-        assert "Memories" in (await toolkit.get_dynamic_prompt(ctx))
-
-    @pytest.mark.asyncio
-    async def test_history_tools_are_memory_gated_in_read_binding(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """The root/subagent Memory read binding owns the three history tools."""
-        monkeypatch.setattr(
-            builtin_module,
-            "_resolve_associated_user_id",
-            AsyncMock(return_value=None),
-        )
-        context = _make_context()
-        enabled = MemoryReadToolkit(
-            config=ShellToolkitConfig(memory_enabled=True),
-            agent_id="agent-1",
-            session_manager=_make_mock_session_manager(),
-            memory_repo=_make_mock_memory_repo(),
-            memory_context_snapshot_service=_make_memory_snapshot_service(),
-        )
-        enabled.set_session_id("session-1")
-        exposed = (await enabled.update_context(context)).tools
-        names = [tool.spec.name for tool in exposed]
-        for name in (
-            "search_sessions",
-            "read_session_history",
-            "read_session_tool_result",
-        ):
-            assert names.count(name) == 1
-            spec = next(tool.spec for tool in exposed if tool.spec.name == name)
-            assert spec.input_schema["type"] == "object"
-            assert "oneOf" not in spec.input_schema
-            assert "anyOf" not in spec.input_schema
-
-        disabled = MemoryReadToolkit(
+    async def test_memory_context_disabled_has_no_prompt_or_tools(self) -> None:
+        """Disabled Memory context does not expose guidance or domain tools."""
+        toolkit = MemoryContextToolkit(
             config=ShellToolkitConfig(memory_enabled=False),
             agent_id="agent-1",
             session_manager=_make_mock_session_manager(),
-            memory_repo=_make_mock_memory_repo(),
-            memory_context_snapshot_service=_make_memory_snapshot_service(),
+            memory_context_snapshot_service=_make_memory_snapshot_service(
+                "must not render"
+            ),
         )
-        disabled.set_session_id("session-1")
-        assert (await disabled.update_context(context)).tools == []
-        builtin_disabled = _make_builtin_toolkit(
-            config=ShellToolkitConfig(memory_enabled=False)
-        )
-        assert (await builtin_disabled.update_context(context)).tools == []
+        toolkit.set_session_id("session-1")
+        context = _make_context()
+
+        assert (await toolkit.update_context(context)).tools == []
+        assert await toolkit.get_dynamic_prompt(context) == ""
 
 
 # ---------------------------------------------------------------------------

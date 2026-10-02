@@ -1409,28 +1409,20 @@ class TestResolveAgentTools:
         )
 
         assert [binding.slug for binding in bindings] == [
-            "memory_read",
+            "memory_context",
             "memory_write",
             "readable_storage",
             "runtime",
             "claude_rules",
         ]
-        memory_read_state = await bindings[0].toolkit.update_context(
+        memory_context_state = await bindings[0].toolkit.update_context(
             _make_turn_context()
         )
         memory_write_state = await bindings[1].toolkit.update_context(
             _make_turn_context()
         )
-        memory_read_tools = {tool.spec.name for tool in memory_read_state.tools}
         memory_write_tools = {tool.spec.name for tool in memory_write_state.tools}
-        assert memory_read_tools == {
-            "list_memories",
-            "get_memory",
-            "search_memories",
-            "search_sessions",
-            "read_session_history",
-            "read_session_tool_result",
-        }
+        assert memory_context_state.tools == []
         assert memory_write_tools == {"save_memory", "delete_memory"}
 
     async def test_does_not_auto_bind_claude_rules_when_capability_denies(
@@ -1463,7 +1455,7 @@ class TestResolveAgentTools:
         )
 
         assert [binding.slug for binding in bindings] == [
-            "memory_read",
+            "memory_context",
             "memory_write",
             "readable_storage",
         ]
@@ -1538,7 +1530,7 @@ class TestResolveAgentTools:
         )
 
         assert [binding.slug for binding in bindings] == [
-            "memory_read",
+            "memory_context",
             "readable_storage",
             "runtime",
             "claude_rules",

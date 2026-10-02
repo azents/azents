@@ -72,6 +72,10 @@ def test_initial_snapshot_selects_recency_then_presents_chronologically() -> Non
     rendered = render_memory_context_snapshot(snapshot)
     assert rendered.index("old context") < rendered.index("new context")
     assert "incomplete, stale, or wrong" in rendered
+    assert f"azents://memory/saved/agent/{1:032d}.md" in rendered
+    assert f"azents://memory/saved/user/{2:032d}.md" in rendered
+    assert f"azents://memory/historical/team/{1:032d}/summary.md" in rendered
+    assert f"azents://memory/sources/team/{1:032d}/session.md" in rendered
 
 
 def test_known_topic_ranks_all_term_match_before_newer_partial_match() -> None:

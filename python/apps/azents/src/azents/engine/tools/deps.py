@@ -34,6 +34,7 @@ from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.goal.store import GoalStateStore
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.mcp_oauth_connection import MCPOAuthConnectionRepository
+from azents.repos.memory_vfs.repository import MemoryVfsRepository
 from azents.repos.scheduled_task.repository import ScheduledTaskRepository
 from azents.repos.scheduled_task.tool_operations import (
     ScheduledTaskToolOperationRepository,
@@ -51,6 +52,7 @@ from azents.services.external_channel.file_transfer import (
 from azents.services.github_platform_system_setting.runtime import (
     PlatformGitHubAppRuntimeService,
 )
+from azents.services.memory_vfs import MemoryVfsReadBackend
 from azents.services.runtime_web.service import (
     RuntimeWebService,
     get_runtime_web_service,
@@ -218,11 +220,18 @@ def get_vfs_read_router(
         VfsProjectionService[AsyncSession],
         Depends(get_vfs_projection_service),
     ],
+    memory_repository: Annotated[
+        MemoryVfsRepository,
+        Depends(MemoryVfsRepository),
+    ],
 ) -> VfsReadRouter:
-    """Create the registered Skills VFS read router."""
+    """Create the registered Skills and Memory VFS read router."""
     return VfsReadRouter(
         registry=VfsReadBackendRegistry(
-            [SkillsVfsReadBackend(projection_service=projection_service)]
+            [
+                SkillsVfsReadBackend(projection_service=projection_service),
+                MemoryVfsReadBackend(repository=memory_repository),
+            ]
         ),
         authority_validator=OwnerBoundVfsReadAuthorityValidator(
             session_manager=session_manager
