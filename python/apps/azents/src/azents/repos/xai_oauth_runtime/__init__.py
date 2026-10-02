@@ -49,7 +49,7 @@ class XaiOAuthRuntimeRepository:
     ) -> LLMProviderIntegrationWithSecrets | None:
         """Atomically store successful refresh credentials and return their row."""
         async with self.session_manager() as session:
-            update = await self.integration_repository.update_by_id(
+            update = await self.integration_repository.update_runtime_state_by_id(
                 session,
                 integration_id,
                 {"secrets": secrets, "config": config},
@@ -86,7 +86,7 @@ class XaiOAuthRuntimeRepository:
                 or latest.config.last_refreshed_at != original_config.last_refreshed_at
             ):
                 return latest
-            await self.integration_repository.update_by_id(
+            await self.integration_repository.update_runtime_state_by_id(
                 session, integration_id, {"config": config}
             )
             return None

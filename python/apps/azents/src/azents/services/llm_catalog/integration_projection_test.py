@@ -10,7 +10,13 @@ from cryptography.fernet import Fernet
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import azents.services.llm_catalog as llm_catalog_service
-from azents.core.credentials import ApiKeySecrets, XaiOAuthConfig, XaiOAuthSecrets
+from azents.core.credentials import (
+    ApiKeySecrets,
+    ChatGPTOAuthConfig,
+    ChatGPTOAuthSecrets,
+    XaiOAuthConfig,
+    XaiOAuthSecrets,
+)
 from azents.core.crypto import CredentialCipher
 from azents.core.enums import (
     LLMCatalogPurpose,
@@ -119,24 +125,35 @@ async def test_deterministic_integration_sync_does_not_require_source_authority(
     assert result.value.visible_count == 2
 
 
-async def test_xai_oauth_sync_refreshes_before_listing(
+@pytest.mark.parametrize("provider", [LLMProvider.XAI_OAUTH, LLMProvider.CHATGPT_OAUTH])
+@pytest.mark.parametrize("user_change_during_listing", [False, True])
+async def test_oauth_sync_refresh_preserves_generation_and_user_update_fence(
     rdb_session_manager: SessionManager[AsyncSession],
     monkeypatch: pytest.MonkeyPatch,
+    provider: LLMProvider,
+    user_change_during_listing: bool,
 ) -> None:
-    """Use the persisted OAuth refresh lifecycle before provider discovery."""
+    """Real token persistence permits publication but genuine user edits do not."""
     now = datetime.datetime.now(datetime.UTC)
+    secrets_type = (
+        XaiOAuthSecrets if provider is LLMProvider.XAI_OAUTH else ChatGPTOAuthSecrets
+    )
+    config_type = (
+        XaiOAuthConfig if provider is LLMProvider.XAI_OAUTH else ChatGPTOAuthConfig
+    )
+    handle = f"oauth-catalog-{provider.value}-{user_change_during_listing}".lower()
     async with rdb_session_manager() as session:
         workspace_result = await WorkspaceRepository().create(
             session,
             WorkspaceCreate(
-                name="xAI OAuth catalog workspace",
-                handle="xai-oauth-catalog-workspace",
+                name="OAuth catalog workspace",
+                handle=handle,
             ),
         )
         assert isinstance(workspace_result, Success)
         workspace_id = await WorkspaceRepository().resolve_id(
             session,
-            "xai-oauth-catalog-workspace",
+            handle,
         )
         assert workspace_id is not None
         integration_repository = LLMProviderIntegrationRepository(
@@ -146,14 +163,14 @@ async def test_xai_oauth_sync_refreshes_before_listing(
             session,
             LLMProviderIntegrationCreate(
                 workspace_id=workspace_id,
-                provider=LLMProvider.XAI_OAUTH,
-                name="xAI Grok OAuth",
-                secrets=XaiOAuthSecrets(
+                provider=provider,
+                name="OAuth catalog",
+                secrets=secrets_type(
                     access_token="expired-token",
                     refresh_token="refresh-token",
                     expires_at=now - datetime.timedelta(minutes=1),
                 ),
-                config=XaiOAuthConfig(
+                config=config_type(
                     account_id="account-id",
                     email=None,
                     connection_method="device",
@@ -173,34 +190,83 @@ async def test_xai_oauth_sync_refreshes_before_listing(
     call_order: list[str] = []
 
     async def ensure_tokens(**kwargs: object) -> Success:
-        del kwargs
         call_order.append("refresh")
-        return Success(
-            integration.model_copy(
-                update={
-                    "secrets": XaiOAuthSecrets(
-                        access_token="fresh-token",
-                        refresh_token="rotated-refresh-token",
-                        expires_at=now + datetime.timedelta(hours=1),
-                    )
-                }
-            )
+        persistence = kwargs["persistence_repository"]
+        fresh_secrets = secrets_type(
+            access_token="fresh-token",
+            refresh_token="rotated-refresh-token",
+            expires_at=now + datetime.timedelta(hours=1),
         )
+        fresh_config = config_type(
+            account_id="account-id",
+            email=None,
+            connection_method="device",
+            status="connected",
+            connected_at=now,
+            last_refreshed_at=now + datetime.timedelta(seconds=1),
+        )
+        if isinstance(persistence, XaiOAuthRuntimeRepository):
+            assert isinstance(fresh_secrets, XaiOAuthSecrets)
+            assert isinstance(fresh_config, XaiOAuthConfig)
+            refreshed = await persistence.update_and_reload(
+                integration_id=integration.id,
+                secrets=fresh_secrets,
+                config=fresh_config,
+            )
+        else:
+            assert isinstance(persistence, ChatGPTOAuthRuntimeRepository)
+            assert isinstance(fresh_secrets, ChatGPTOAuthSecrets)
+            assert isinstance(fresh_config, ChatGPTOAuthConfig)
+            refreshed = await persistence.update_and_reload(
+                integration_id=integration.id,
+                secrets=fresh_secrets,
+                config=fresh_config,
+            )
+        assert refreshed is not None
+        assert (
+            refreshed.catalog_configuration_version
+            == integration.catalog_configuration_version
+        )
+        return Success(refreshed)
 
     async def list_models(
         listed_integration: LLMProviderIntegrationWithSecrets,
     ) -> ModelListingOutput:
         call_order.append("list")
-        assert isinstance(listed_integration.secrets, XaiOAuthSecrets)
+        assert isinstance(
+            listed_integration.secrets, (XaiOAuthSecrets, ChatGPTOAuthSecrets)
+        )
         assert listed_integration.secrets.access_token == "fresh-token"
+        if user_change_during_listing:
+            async with rdb_session_manager() as session:
+                update = await integration_repository.update_by_id(
+                    session,
+                    integration.id,
+                    {
+                        "secrets": secrets_type(
+                            access_token="user-replaced-token",
+                            refresh_token="user-replaced-refresh",
+                            expires_at=now + datetime.timedelta(hours=2),
+                        )
+                    },
+                )
+                assert isinstance(update, Success)
+                assert (
+                    update.value.catalog_configuration_version
+                    == integration.catalog_configuration_version + 1
+                )
         return ModelListingOutput(
             models=[
                 NormalizedModelCandidate(
-                    provider=LLMProvider.XAI_OAUTH,
-                    model_identifier="grok-4.6",
-                    model_display_name="Grok 4.6",
-                    model_developer=LLMModelDeveloper.XAI,
-                    model_family="grok-4",
+                    provider=provider,
+                    model_identifier="grok-4.6"
+                    if provider is LLMProvider.XAI_OAUTH
+                    else "gpt-5.4",
+                    model_display_name="OAuth model",
+                    model_developer=LLMModelDeveloper.XAI
+                    if provider is LLMProvider.XAI_OAUTH
+                    else LLMModelDeveloper.OPENAI,
+                    model_family=None,
                     normalized_capabilities=ModelCapabilities(
                         modalities=ModelModalities(
                             input=[ModelModality.TEXT],
@@ -223,6 +289,7 @@ async def test_xai_oauth_sync_refreshes_before_listing(
         )
 
     monkeypatch.setattr(llm_catalog_service, "ensure_xai_runtime_tokens", ensure_tokens)
+    monkeypatch.setattr(llm_catalog_service, "ensure_runtime_tokens", ensure_tokens)
     monkeypatch.setattr(
         llm_catalog_service,
         "_list_provider_visible_models",
@@ -230,7 +297,7 @@ async def test_xai_oauth_sync_refreshes_before_listing(
     )
 
     async with httpx.AsyncClient() as _client:
-        result = await IntegrationCatalogProjectionService(
+        service = IntegrationCatalogProjectionService(
             provider_listing=llm_catalog_service.get_integration_model_listing(),
             session_manager=rdb_session_manager,
             catalog_repository=LLMCatalogRepository(),
@@ -248,14 +315,43 @@ async def test_xai_oauth_sync_refreshes_before_listing(
                 repository=ModelMetadataSourceRepository(),
                 source_adapter=AsyncMock(spec=GenAIPricesSourceAdapter),
             ),
-        ).sync_integration_catalog(
-            integration_id=integration.id,
-            workspace_id=workspace_id,
-            trigger=IntegrationCatalogSyncTrigger.CREATE,
         )
+        if user_change_during_listing:
+            with pytest.raises(
+                RuntimeError,
+                match="The integration catalog configuration generation changed",
+            ):
+                await service.sync_integration_catalog(
+                    integration_id=integration.id,
+                    workspace_id=workspace_id,
+                    trigger=IntegrationCatalogSyncTrigger.CREATE,
+                )
+        else:
+            result = await service.sync_integration_catalog(
+                integration_id=integration.id,
+                workspace_id=workspace_id,
+                trigger=IntegrationCatalogSyncTrigger.CREATE,
+            )
+            assert isinstance(result, Success)
+            assert result.value.visible_count == 1
 
-    assert isinstance(result, Success)
-    assert result.value.visible_count == 1
+    if user_change_during_listing:
+        async with rdb_session_manager() as session:
+            catalog = await LLMCatalogRepository().get_by_integration(
+                session,
+                integration_id=integration.id,
+                workspace_id=workspace_id,
+                purpose=LLMCatalogPurpose.CONVERSATION,
+            )
+            assert catalog is not None
+            assert catalog.current_snapshot_id is None
+            attempt = await LLMCatalogRepository().get_latest_attempt(
+                session, catalog=catalog
+            )
+            assert attempt is not None
+            assert attempt.failure_message == (
+                "The integration catalog configuration generation changed."
+            )
     assert call_order == ["refresh", "list"]
 
 

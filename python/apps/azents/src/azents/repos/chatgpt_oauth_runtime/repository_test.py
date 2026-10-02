@@ -222,6 +222,10 @@ async def test_refresh_failure_and_success_are_atomically_ordered(
         assert stored.config.email == "new@example.invalid"
         assert stored.config.plan_type == "new-plan"
         assert stored.config == success.value.config
+        assert (
+            stored.catalog_configuration_version
+            == original.catalog_configuration_version
+        )
         usable = await ensure_runtime_tokens(
             integration=stored, persistence_repository=success_persistence
         )
