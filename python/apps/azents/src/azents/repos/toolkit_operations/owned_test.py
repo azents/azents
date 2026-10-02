@@ -15,6 +15,7 @@ from azents.repos.github_user_installation import GithubUserInstallationReposito
 from azents.repos.mcp_oauth_connection import MCPOAuthConnectionRepository
 from azents.repos.toolkit import ToolkitRepository
 from azents.repos.toolkit.data import NotFound, ToolkitUpdate
+from azents.repos.toolkit_namespace import ToolkitNamespaceRepository
 from azents.repos.toolkit_operations import ToolkitOperationsRepository
 from azents.repos.toolkit_operations.data import EffectiveSlugConflict
 from azents.repos.toolkit_operations.owned import AgentToolkitOperationsRepository
@@ -61,10 +62,12 @@ async def test_owned_update_preserves_lock_order_and_rejects_namespace_conflict(
     toolkit_repo.get_by_id_for_update.side_effect = load_toolkit
     agent_repo.lock_by_id.side_effect = load_agent
     toolkit_repo.has_effective_slug_conflict.return_value = True
+    toolkit_repo.has_ownership_slug_conflict.return_value = False
     repository = AgentToolkitOperationsRepository(
         toolkit_repo=toolkit_repo,
         mcp_oauth_connection_repo=AsyncMock(spec=MCPOAuthConnectionRepository),
         agent_repo=agent_repo,
+        namespace_repo=AsyncMock(spec=ToolkitNamespaceRepository),
         agent_admin_repo=AsyncMock(spec=AgentAdminRepository),
         github_user_installation_repo=AsyncMock(spec=GithubUserInstallationRepository),
         session_manager=session_manager,

@@ -23,6 +23,7 @@ from azents.repos.toolkit.data import (
     ToolkitCreate,
     ToolkitUpdate,
 )
+from azents.repos.toolkit_namespace import ToolkitNamespaceRepository
 from azents.repos.toolkit_operations import (
     ToolkitOperationsRepository,
     get_encrypted_toolkit_repository,
@@ -53,6 +54,7 @@ class AgentToolkitOperationsRepository:
         MCPOAuthConnectionRepository, Depends(get_mcp_oauth_connection_repository)
     ]
     agent_repo: Annotated[AgentRepository, Depends()]
+    namespace_repo: Annotated[ToolkitNamespaceRepository, Depends()]
     agent_admin_repo: Annotated[AgentAdminRepository, Depends()]
     github_user_installation_repo: Annotated[
         GithubUserInstallationRepository, Depends()
@@ -197,9 +199,29 @@ class AgentToolkitOperationsRepository:
                 enabled=create.enabled,
             ):
                 return Failure(EffectiveSlugConflict(slug=create.slug))
+            if await self.toolkit_repo.has_ownership_slug_conflict(
+                session,
+                workspace_id=workspace_id,
+                owner_agent_id=agent_id,
+                toolkit_id="",
+                slug=create.slug,
+            ):
+                return Failure(
+                    DuplicateSlug(
+                        workspace_id=workspace_id,
+                        owner_agent_id=agent_id,
+                        slug=create.slug,
+                    )
+                )
             result = await self.toolkit_repo.create(session, create)
             if isinstance(result, Failure):
                 return Failure(result.error)
+            await self.namespace_repo.ensure_active(
+                session,
+                agent_id=agent_id,
+                toolkit_id=result.value.id,
+                base_slug=create.slug,
+            )
             return Success(result.value)
 
     async def update_agent_owned(
@@ -258,9 +280,33 @@ class AgentToolkitOperationsRepository:
                 enabled=enabled,
             ):
                 return Failure(EffectiveSlugConflict(slug=slug))
+            if (
+                slug != toolkit.slug
+                and await self.toolkit_repo.has_ownership_slug_conflict(
+                    session,
+                    workspace_id=workspace_id,
+                    owner_agent_id=agent_id,
+                    toolkit_id=toolkit_id,
+                    slug=slug,
+                )
+            ):
+                return Failure(
+                    DuplicateSlug(
+                        workspace_id=workspace_id,
+                        owner_agent_id=agent_id,
+                        slug=slug,
+                    )
+                )
             result = await self.toolkit_repo.update_by_id(session, toolkit_id, update)
             if isinstance(result, Failure):
                 return Failure(result.error)
+            if slug != toolkit.slug:
+                await self.namespace_repo.ensure_active(
+                    session,
+                    agent_id=agent_id,
+                    toolkit_id=toolkit_id,
+                    base_slug=slug,
+                )
             return Success(result.value)
 
     async def authorize_agent_management(

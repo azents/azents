@@ -124,6 +124,31 @@ class ToolkitRepository:
                 )
             raise
 
+    async def has_ownership_slug_conflict(
+        self,
+        session: AsyncSession,
+        *,
+        workspace_id: str,
+        owner_agent_id: str | None,
+        toolkit_id: str,
+        slug: str,
+    ) -> bool:
+        """Return whether another Toolkit in the ownership scope uses the Slug."""
+        owner_condition = (
+            RDBToolkitConfig.owner_agent_id.is_(None)
+            if owner_agent_id is None
+            else RDBToolkitConfig.owner_agent_id == owner_agent_id
+        )
+        conflict = await session.scalar(
+            sa.select(RDBToolkitConfig.id).where(
+                RDBToolkitConfig.workspace_id == workspace_id,
+                owner_condition,
+                RDBToolkitConfig.id != toolkit_id,
+                RDBToolkitConfig.slug == slug,
+            )
+        )
+        return conflict is not None
+
     async def get_by_id(
         self, session: AsyncSession, toolkit_id: str
     ) -> ToolkitConfig | None:

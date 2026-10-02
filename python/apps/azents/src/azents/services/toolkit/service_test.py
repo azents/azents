@@ -26,9 +26,11 @@ from azents.repos.toolkit import (
     ToolkitRepository,
     ToolkitScopeRepository,
 )
-from azents.repos.toolkit.data import NotFound, ToolkitConfig
+from azents.repos.toolkit.data import AgentToolkit, NotFound, ToolkitConfig
+from azents.repos.toolkit_namespace import ToolkitNamespaceRepository
 from azents.repos.toolkit_operations import ToolkitOperationsRepository
 from azents.repos.toolkit_operations.owned import AgentToolkitOperationsRepository
+from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.services.agent.data import NotAdmin
 from azents.services.github_platform_system_setting.runtime import (
@@ -359,6 +361,8 @@ async def test_agent_owned_create_sets_owner_without_scope_or_attachment() -> No
         toolkit_registry={"mcp": provider},
     )
     service.operations_repository.scope_repository = scope_repo
+    namespace_repo = AsyncMock(spec=ToolkitNamespaceRepository)
+    service.owned_operations.namespace_repo = namespace_repo
 
     result = await service.create_agent_owned(
         "agent-1",
@@ -387,6 +391,15 @@ async def test_agent_owned_create_sets_owner_without_scope_or_attachment() -> No
     assert create.owner_agent_id == "agent-1"
     scope_repo.create.assert_not_awaited()
     agent_toolkit_repo.create.assert_not_awaited()
+    namespace_repo.ensure_active.assert_awaited_once()
+    namespace_call = namespace_repo.ensure_active.await_args
+    assert namespace_call is not None
+    assert len(namespace_call.args) == 1
+    assert namespace_call.kwargs == {
+        "agent_id": "agent-1",
+        "toolkit_id": "toolkit-owned",
+        "base_slug": "private",
+    }
 
 
 async def test_agent_owned_item_lookup_hides_another_agents_toolkit() -> None:
@@ -562,6 +575,52 @@ async def test_attach_rejects_effective_slug_conflict_before_projection_create()
     assert result.error == EffectiveSlugConflict(slug="github")
     agent_repo.lock_by_id.assert_awaited_once()
     agent_toolkit_repo.create.assert_not_awaited()
+
+
+async def test_attach_allocates_namespace_after_projection_create() -> None:
+    """Persist the Agent attachment and its reusable namespace in one transaction."""
+    toolkit = _toolkit_config(slug="github")
+    toolkit_repo = MagicMock()
+    toolkit_repo.get_shared_by_id_for_update = AsyncMock(return_value=toolkit)
+    toolkit_repo.list_available_for_workspace_user = AsyncMock(return_value=[toolkit])
+    toolkit_repo.has_effective_slug_conflict = AsyncMock(return_value=False)
+    agent_repo = MagicMock()
+    agent_repo.lock_by_id = AsyncMock(
+        return_value=SimpleNamespace(workspace_id="workspace-1")
+    )
+    attachment = AgentToolkit(
+        id="attachment-1",
+        agent_id="agent-1",
+        toolkit_id=toolkit.id,
+        toolkit_type=toolkit.toolkit_type,
+        created_at=datetime.datetime.now(datetime.UTC),
+    )
+    agent_toolkit_repo = MagicMock()
+    agent_toolkit_repo.create = AsyncMock(return_value=Success(attachment))
+    service = _service(
+        toolkit_repo=toolkit_repo,
+        agent_toolkit_repo=agent_toolkit_repo,
+        agent_repo=agent_repo,
+    )
+    namespace_repo = AsyncMock(spec=ToolkitNamespaceRepository)
+    service.operations_repository.namespace_repository = namespace_repo
+
+    result = await service.attach_to_agent(
+        "agent-1",
+        toolkit.id,
+        workspace_id="workspace-1",
+        user_id="user-1",
+    )
+
+    assert isinstance(result, Success)
+    namespace_repo.ensure_active.assert_awaited_once()
+    call = namespace_repo.ensure_active.await_args
+    assert call is not None
+    assert call.kwargs == {
+        "agent_id": "agent-1",
+        "toolkit_id": toolkit.id,
+        "base_slug": "github",
+    }
 
 
 async def test_shared_slug_update_locks_attached_agents_before_conflict_check() -> None:
@@ -829,11 +888,17 @@ def _build_service(
     github_runtime: PlatformGitHubAppRuntimeService,
 ) -> ToolkitService:
     """Compose test-owned repositories while preserving narrow collaborator probes."""
+    if isinstance(toolkit_repo, MagicMock):
+        toolkit_repo.has_ownership_slug_conflict = AsyncMock(return_value=False)
+    workspace_repository = AsyncMock(spec=WorkspaceRepository)
+    workspace_repository.get_by_id_for_update.return_value = SimpleNamespace()
     operations = ToolkitOperationsRepository(
         toolkit_repository=toolkit_repo,
         scope_repository=scope_repo,
         agent_toolkit_repository=agent_toolkit_repo,
         agent_repository=agent_repo,
+        namespace_repository=AsyncMock(spec=ToolkitNamespaceRepository),
+        workspace_repository=workspace_repository,
         workspace_user_repository=AsyncMock(spec=WorkspaceUserRepository),
         github_installation_repository=github_user_installation_repo,
         oauth_connection_repository=mcp_oauth_connection_repo,
@@ -844,6 +909,7 @@ def _build_service(
         toolkit_repo=toolkit_repo,
         mcp_oauth_connection_repo=mcp_oauth_connection_repo,
         agent_repo=agent_repo,
+        namespace_repo=AsyncMock(spec=ToolkitNamespaceRepository),
         agent_admin_repo=agent_admin_repo,
         github_user_installation_repo=github_user_installation_repo,
         session_manager=session_manager,

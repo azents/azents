@@ -28,6 +28,8 @@ from azents.repos.toolkit.data import (
     ToolkitScope,
     ToolkitUpdate,
 )
+from azents.repos.toolkit_namespace import ToolkitNamespaceRepository
+from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace_user import WorkspaceUserRepository
 
 from . import ToolkitOperationsRepository
@@ -124,11 +126,16 @@ def _repository(
     github_repository = AsyncMock(spec=GithubUserInstallationRepository)
     system_setting_repository = AsyncMock(spec=SystemSettingRepository)
     agent_toolkit_repository = AsyncMock(spec=AgentToolkitRepository)
+    workspace_repository = AsyncMock(spec=WorkspaceRepository)
+    workspace_repository.get_by_id_for_update.return_value = SimpleNamespace()
+    toolkit_repository.has_ownership_slug_conflict.return_value = False
     repository = ToolkitOperationsRepository(
         toolkit_repository=toolkit_repository,
         scope_repository=scope_repository,
         agent_toolkit_repository=agent_toolkit_repository,
         agent_repository=AsyncMock(spec=AgentRepository),
+        namespace_repository=AsyncMock(spec=ToolkitNamespaceRepository),
+        workspace_repository=workspace_repository,
         workspace_user_repository=AsyncMock(spec=WorkspaceUserRepository),
         github_installation_repository=github_repository,
         oauth_connection_repository=oauth_repository,
