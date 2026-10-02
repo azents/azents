@@ -11,6 +11,8 @@ code_paths:
   - python/apps/azents/src/azents/core/builtin_tools.py
   - python/apps/azents/src/azents/core/credentials.py
   - python/apps/azents/src/azents/core/llm_catalog.py
+  - python/apps/azents/src/azents/core/model_capability_contract.py
+  - python/apps/azents/src/azents/core/builtin_tools.py
   - python/apps/azents/src/azents/core/llm_mapping.py
   - python/apps/azents/src/azents/services/model_metadata.py
   - python/apps/azents/src/azents/core/inference_profile.py
@@ -118,8 +120,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/default-response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack
-last_verified_at: 2026-10-02
-spec_version: 87
+last_verified_at: 2026-10-03
+spec_version: 88
 ---
 
 # Agent Domain Spec
@@ -279,6 +281,16 @@ Required snapshot fields:
 - `last_refreshed_at`
 
 Snapshot is created by resolving submitted model identifiers through stored model catalog projection at submit time. Runtime does not query latest listing again and uses snapshot in Agent row as source of truth.
+
+New explicit selections copy the complete `semantic_contract` version `2`.
+Unknown/conditional facts and default-effort evidence remain distinct from the
+conservative boolean/list views. Normal reads, non-selection saves and catalog
+refresh do not enrich or rewrite existing Agent/Workspace snapshots; absent/null
+descriptors retain historical behavior without a retired-source fallback.
+Conditional built-ins can be configured as potential choices, but actual request
+effort and published function declarations govern dispatch. Strict functions and
+structured responses are separate. Existing optional controls use saved conditions
+conservatively and preserve exact xhigh/max values without nearest-level remapping.
 
 ### 1.2 WorkspaceModelSettings
 
@@ -735,6 +747,9 @@ Following contracts do not exist in current system.
 
 ## 8. Change History
 
+- **2026-10-03** (spec_version 88) — Preserved complete saved v2 support,
+  conditional configuration/dispatch separation and historical descriptor absence
+  across explicit reselection, ordinary saves and catalog refresh.
 - **2026-10-02** (spec_version 87) — Added read-only Historical settings
   routes and Saved/Historical kind selection under the existing Memory toggle,
   including retained disabled-state human inspection.

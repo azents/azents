@@ -18,7 +18,16 @@ class RDBModelMetadataSource(RDBModel):
 
     source_key: Mapped[str] = mapped_column(sa.String(120), primary_key=True)
     current_snapshot_id: Mapped[str | None] = mapped_column(
-        sa.String(32), nullable=True
+        sa.String(32),
+        sa.ForeignKey(
+            "model_metadata_source_snapshots.id",
+            name="fk_model_metadata_sources_current_snapshot",
+            ondelete="NO ACTION",
+            deferrable=True,
+            initially="DEFERRED",
+            use_alter=True,
+        ),
+        nullable=True,
     )
     latest_attempt_id: Mapped[str | None] = mapped_column(sa.String(32), nullable=True)
     created_at: Mapped[datetime.datetime] = mapped_column(

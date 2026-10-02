@@ -1,6 +1,7 @@
 ---
 title: "Evidence-Backed Model Support Design"
 created: 2026-10-02
+implemented: 2026-10-03
 tags: [model-catalog, backend, engine, metadata, architecture, migration]
 document_role: primary
 document_type: design

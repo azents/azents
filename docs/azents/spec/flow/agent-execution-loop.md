@@ -58,6 +58,10 @@ code_paths:
   - python/apps/azents/src/azents/core/inference_profile.py
   - python/apps/azents/src/azents/core/model_availability.py
   - python/apps/azents/src/azents/core/model_operation.py
+  - python/apps/azents/src/azents/core/model_capability_contract.py
+  - python/apps/azents/src/azents/core/model_capability_projection.py
+  - python/apps/azents/src/azents/core/model_catalog_source.py
+  - python/apps/azents/src/azents/core/catalog_price_rules.py
   - python/apps/azents/src/azents/core/image_generation_catalog.py
   - python/apps/azents/src/azents/core/image_generation_config.py
   - python/apps/azents/src/azents/services/agent_session_input.py
@@ -134,8 +138,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/toolCallActionPresentation.ts
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
   - typescript/apps/azents-web/messages/*/chat.json
-last_verified_at: 2026-10-02
-spec_version: 201
+last_verified_at: 2026-10-03
+spec_version: 202
 ---
 
 # Agent Execution Loop
@@ -747,14 +751,16 @@ is forwarded as a provider-hosted image tool or placed in model-visible argument
 
 OpenAI SDK completion usage maps directly into the existing turn-marker token fields. Its raw usage is
 the SDK usage object serialized to plain JSON and does not synthesize adapter-private hidden parameters.
-Azents captures the selected generic `genai_prices` DB snapshot before each physical model call and
-normalizes immutable pricing using the exact semantic provider/model and source key. The output
-stream freezes this view and the requested tier at start; a source refresh or later call cannot
-change an in-flight operation's price provenance. Local `cost_usd` estimation uses normalized usage
-and the captured generic source's conditional token, cache, context-threshold, tool, and media rules
-without model output content. The current generic contract has no provider service-tier price
-dimension, so actual Priority, Ultrafast, and other premium tiers remain unpriced rather than using
-Standard prices. A missing, empty, or `auto` actual tier on an explicitly Fast or Ultrafast request
+Azents captures only the selected `litellm_catalog` DB source before each physical
+model call. Exact hosting/API scope and literal model identity resolve an immutable
+record of typed price rules, source snapshot/hash/key, estimator revision and aware
+request time. The output stream freezes this view and requested tier; it never
+rematches after refresh. Decimal evaluation uses per-token/named-unit amounts and
+explicit usage inclusion flags, TTL writes, whole-request context brackets,
+applicable service tiers, media/tool quantities and bounded off-peak windows without
+model content. Every used specialized dimension needs its price; unknown required
+rules make the whole total unavailable. Missing premium tariffs do not fall back to
+Standard. A missing, empty, or `auto` actual tier on an explicitly Fast or Ultrafast request
 also leaves local cost unavailable. The `fast` response alias still normalizes to Priority for
 nullable provenance. An explicitly mapped provider-reported charge remains authoritative.
 Missing, unmapped, invalid or unsupported required prices/quantities leave cost unset without
@@ -767,6 +773,20 @@ semantic provider/model, applicable tier, and snapshot/hash/key/estimator versio
 Explicit native OpenRouter `usage.cost` remains a separately reported charge even without source
 prices. It is not added to an estimate for the same usage. Historical amounts without provenance
 stay unlabeled; this metadata does not introduce a new cost UI or retroactive history rewrite.
+
+Saved v2 capability descriptors authorize requests independently from pricing.
+Explicit effort then a known saved default resolves conditions; omission is not
+none. Function-tool presence comes from the final published JSON declarations,
+not Toolkit existence. Configuration/ownership admits conditional potential,
+then actual client/hosted dispatch validates predicates. Known denial or unmet
+conditions fail without dropping an explicit strict/parameter/effort request.
+Unknown scalar requests preserve the provider error boundary, while unknown
+built-in authorization is rejected. SDK representability flags cannot reapply
+conservative display views and disable a satisfied condition. Native OpenAI and
+ChatGPT use saved semantics directly without Pydantic capability lookup; other
+routes keep actual protocol codecs. Historical descriptor absence preserves
+prior behavior, and no operation reads the retired genai source as fallback.
+Stock Pydantic usage-counter extraction remains transitive, not cost authority.
 
 Both `xai` and `xai_oauth` use the xAI transport target in this lowerer. For either identity, system instructions become the first `system` input item instead of top-level `instructions`, hosted `web_search` uses the xAI Responses tool target, and Anthropic cache-control hints are omitted. Credential refresh is resolved before the adapter pipeline and remains exclusive to `xai_oauth`; the lowerer does not own OAuth lifecycle state.
 
@@ -1711,6 +1731,9 @@ icon.
 
 ## Changelog
 
+- **2026-10-03** (spec_version 202) — Promoted exact data-only source captures,
+  complete typed estimates, saved v2 request predicates and lossless codec/tool
+  admission while retaining descriptor-absent behavior and transitive counters.
 - **2026-10-02** (spec_version 201) — Completed the assigned Event Engine
   output and terminal repository operations, replaced prepared-output and
   model-operation live-session callbacks with typed data, and moved the Worker

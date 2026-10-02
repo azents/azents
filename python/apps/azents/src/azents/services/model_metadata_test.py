@@ -5,10 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.core.enums import LLMProvider
 from azents.core.model_catalog_source import CATALOG_SOURCE_KEY, CATALOG_SOURCE_KIND
 from azents.engine.context.window import resolve_model_input_tokens
-from azents.rdb.models.model_metadata_source import (
-    RDBModelMetadataSource,
-    RDBModelMetadataSourceSnapshot,
-)
+from azents.rdb.models.model_metadata_source import RDBModelMetadataSourceSnapshot
 from azents.rdb.session import SessionManager
 from azents.repos.model_metadata_source import ModelMetadataSourceRepository
 from azents.repos.model_metadata_source_data import ModelMetadataSourceSnapshot
@@ -48,13 +45,12 @@ async def test_capture_uses_only_local_validated_remote_authority(
     )
     source_id = "s" * 32
     async with rdb_session_manager() as session:
-        session.add(
-            RDBModelMetadataSource(
-                source_key=CATALOG_SOURCE_KEY,
-                current_snapshot_id=source_id,
-                latest_attempt_id=None,
-            )
+        # The cutover migration seeds an inactive authority. Publish only after
+        # its referenced validated snapshot exists, as the writer guard requires.
+        authority = await repository.lock_authority(
+            session, source_key=CATALOG_SOURCE_KEY
         )
+        assert authority.current_snapshot_id is None
         session.add(
             RDBModelMetadataSourceSnapshot(
                 id=source_id,
@@ -70,6 +66,9 @@ async def test_capture_uses_only_local_validated_remote_authority(
                 payload=payload.model_dump(mode="json"),
             )
         )
+        await session.flush()
+        authority.current_snapshot_id = source_id
+        await session.flush()
     service = ModelMetadataService(
         session_manager=rdb_session_manager,
         source_snapshot_repository=repository,

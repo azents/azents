@@ -18,7 +18,7 @@ from azents.core.enums import (
     LLMModelLifecycleStatus,
     LLMProvider,
 )
-from azents.core.llm_catalog import ModelCapabilities
+from azents.core.model_capability_projection import project_capabilities
 from azents.core.workspace import WorkspaceCreate
 from azents.rdb.session import SessionManager
 from azents.repos.llm_catalog import LLMCatalogRepository
@@ -74,8 +74,15 @@ async def test_new_selection_diagnostics_preserve_raw_identifier_without_descrip
     integration_repository = LLMProviderIntegrationRepository(
         CredentialCipher(Fernet.generate_key().decode())
     )
-    capabilities = ModelCapabilities()
     model_identifier = "publisher/subnamespace/model-with-slashes"
+    capabilities = project_capabilities(
+        provider=LLMProvider.OPENROUTER,
+        exact_model=model_identifier,
+        source_model=None,
+        evidence=None,
+        model_developer=None,
+    )
+    assert capabilities.semantic_contract is not None
     async with rdb_session_manager() as session:
         workspace_repository = WorkspaceRepository()
         workspace = await workspace_repository.create(
@@ -118,17 +125,20 @@ async def test_new_selection_diagnostics_preserve_raw_identifier_without_descrip
                     publisher="other",
                     family=None,
                     source_metadata={"provider_listing_source": "fixture"},
-                    projection_metadata={"target_metadata_match_required": False},
+                    projection_metadata={
+                        "projection_schema_version": "2",
+                        "fixture": True,
+                    },
                     hidden_reason=None,
                 )
             ],
             diagnostics={"fixture": True},
             provenance=CatalogProjectionProvenance(
                 source_snapshot_id=None,
-                projection_schema_version="fixture",
+                projection_schema_version="2",
                 runtime_profile_resolver_revision="fixture",
                 pydantic_ai_version="fixture",
-                genai_prices_version="fixture",
+                genai_prices_version=None,
                 projection_fingerprint="f" * 64,
             ),
             catalog_configuration_version=1,

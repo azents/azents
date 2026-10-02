@@ -1,6 +1,7 @@
 ---
 title: "Evidence-Backed Model Support Requirements"
 created: 2026-10-02
+implemented: 2026-10-03
 tags: [model-catalog, backend, engine, metadata]
 document_role: primary
 document_type: requirements
