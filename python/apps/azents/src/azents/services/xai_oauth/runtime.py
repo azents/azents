@@ -114,7 +114,7 @@ async def _persist_refresh_success(
         return Failure(ProviderRejected(reason="xAI OAuth integration is invalid"))
     config = integration.config
     refreshed = await persistence_repository.update_and_reload(
-        integration_id=integration.id,
+        original_integration=integration,
         secrets=XaiOAuthSecrets(
             access_token=tokens.access_token,
             refresh_token=tokens.refresh_token,
@@ -149,9 +149,7 @@ async def _persist_refresh_failure(
     config = integration.config
     status = _failure_status(error)
     return await persistence_repository.persist_refresh_failure(
-        integration_id=integration.id,
-        original_secrets=integration.secrets,
-        original_config=config,
+        original_integration=integration,
         config=XaiOAuthConfig(
             account_id=config.account_id,
             email=config.email,

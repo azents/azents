@@ -57,7 +57,7 @@ code_paths:
   - typescript/apps/azents-web/src/trpc/routers/workspace-model-settings.ts
   - typescript/apps/azents-admin-web/src/features/model-catalog/containers/useModelCatalogPageContainer.ts
 last_verified_at: 2026-10-02
-spec_version: 35
+spec_version: 36
 ---
 
 # Model Catalog Domain Spec
@@ -253,7 +253,17 @@ that version. Runtime OAuth token rotation and connection-status persistence use
 the separate runtime-state update path and preserve the generation, so a refresh
 initiated by catalog synchronization does not invalidate its own publication.
 This applies to ChatGPT, xAI, and Kimi OAuth. Genuine concurrent user changes
-continue to fence stale conversation and image publications. An image sync
+continue to fence stale conversation and image publications.
+
+ChatGPT and xAI refresh success and failure persistence lock the integration row
+and compare the original catalog generation, complete typed credentials, and
+`last_refreshed_at` before writing. A reconnect, user configuration change, or
+newer refresh makes the result stale; persistence returns the current integration
+without replacing its credentials or configuration. State-only failure
+diagnostics within the same identity do not prevent a fresh success from
+restoring the connected state.
+
+An image sync
 publishes only when its claimed attempt is still latest and
 its version still matches the integration. The last successful snapshot remains
 diagnostic after a generation change or failed sync, but `generation_current =
@@ -400,6 +410,7 @@ Only Workspace Owners receive the explicit image sync action.
 
 | Date | Version | Change |
 |---|---:|---|
+| 2026-10-02 | 36 | Fenced ChatGPT and xAI refresh success and failure against original generation and credential identity under one row lock. |
 | 2026-10-02 | 35 | Kept ChatGPT and xAI OAuth runtime refresh persistence on the generation-preserving path while retaining user-update and publication fences. |
 | 2026-10-02 | 34 | Restored effective Grok client-image, native-search, and function-tool support despite omitted listing facts or missing tool prices. |
 | 2026-10-01 | 33 | Removed the former metadata source schema, rollback pins, temporary reprojection task, and compatibility code after validating generic provenance on every current conversation catalog. |

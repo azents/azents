@@ -105,7 +105,7 @@ async def _persist_refresh_success(
     config = integration.config
     assert isinstance(config, ChatGPTOAuthConfig)
     refreshed = await persistence_repository.update_and_reload(
-        integration_id=integration.id,
+        original_integration=integration,
         secrets=ChatGPTOAuthSecrets(
             access_token=tokens.access_token,
             refresh_token=tokens.refresh_token,
@@ -146,9 +146,7 @@ async def _persist_refresh_failure(
         else ChatGPTOAuthConnectionStatus.TEMPORARILY_UNAVAILABLE
     )
     return await persistence_repository.persist_refresh_failure(
-        integration_id=integration.id,
-        original_secrets=original_secrets,
-        original_config=config,
+        original_integration=integration,
         config=ChatGPTOAuthConfig(
             account_id=config.account_id,
             email=config.email,

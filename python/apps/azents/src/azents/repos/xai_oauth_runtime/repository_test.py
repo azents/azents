@@ -144,6 +144,91 @@ def _tokens(*, rotate_refresh_token: bool) -> TokenSet:
 
 
 @pytest.mark.parametrize(
+    "change_kind",
+    ["user_reconnect", "user_config", "runtime_credentials", "runtime_refreshed_at"],
+)
+@pytest.mark.parametrize(
+    "error",
+    [
+        None,
+        ProviderRejected(reason="stale-rejection"),
+        ProviderUnavailable(reason="stale-unavailable"),
+        ProviderEntitlementDenied(reason="stale-entitlement"),
+    ],
+)
+async def test_superseded_refresh_preserves_complete_current_integration(
+    harness: _Harness,
+    change_kind: str,
+    error: ProviderRejected | ProviderUnavailable | ProviderEntitlementDenied | None,
+) -> None:
+    """A stale refresh cannot replace reconnects or a newer runtime identity."""
+    original = harness.integration
+    assert isinstance(original.secrets, XaiOAuthSecrets)
+    assert isinstance(original.config, XaiOAuthConfig)
+    secrets = original.secrets.model_copy(
+        update={
+            "access_token": "current-access",
+            "id_token": "current-id-token",
+            "expires_at": original.secrets.expires_at + datetime.timedelta(hours=2),
+        }
+    )
+    config = original.config.model_copy(
+        update={"account_id": "current-account", "email": "current@example.invalid"}
+    )
+    async with harness.sessions() as session:
+        if change_kind == "user_reconnect":
+            update = await harness.integration_repository.update_by_id(
+                session, original.id, {"secrets": secrets, "config": config}
+            )
+        elif change_kind == "user_config":
+            update = await harness.integration_repository.update_by_id(
+                session, original.id, {"config": config}
+            )
+        elif change_kind == "runtime_credentials":
+            update = await harness.integration_repository.update_runtime_state_by_id(
+                session, original.id, {"secrets": secrets}
+            )
+        else:
+            assert original.config.last_refreshed_at is not None
+            update = await harness.integration_repository.update_runtime_state_by_id(
+                session,
+                original.id,
+                {
+                    "config": original.config.model_copy(
+                        update={
+                            "last_refreshed_at": original.config.last_refreshed_at
+                            + datetime.timedelta(seconds=1)
+                        }
+                    )
+                },
+            )
+        assert isinstance(update, Success)
+    latest = await harness.persistence.load_integration(integration_id=original.id)
+    assert latest is not None
+    assert latest.catalog_configuration_version == (
+        original.catalog_configuration_version
+        + (1 if change_kind.startswith("user_") else 0)
+    )
+    if error is None:
+        result = await _persist_refresh_success(
+            integration=original,
+            persistence_repository=harness.persistence,
+            tokens=_tokens(rotate_refresh_token=False),
+        )
+        assert isinstance(result, Success)
+        recovered = result.value
+    else:
+        recovered = await _persist_refresh_failure(
+            integration=original,
+            persistence_repository=harness.persistence,
+            error=error,
+        )
+    assert recovered == latest
+    stored = await harness.persistence.load_integration(integration_id=original.id)
+    assert stored == latest
+
+
+@pytest.mark.parametrize(
     ("error", "status"),
     [
         (None, "connected"),
@@ -231,6 +316,75 @@ class _PausedIntegrationRepository(LLMProviderIntegrationRepository):
         self.read_complete.set()
         await self.resume.wait()
         return await super().get_by_id_with_secrets_for_update(session, integration_id)
+
+
+@pytest.mark.parametrize("lock_before_pause", [False, True])
+async def test_concurrent_success_cannot_replace_first_committed_refresh(
+    harness: _Harness, lock_before_pause: bool
+) -> None:
+    """Lock serialization preserves the first successful full credential identity."""
+    paused = _PausedIntegrationRepository(
+        harness.cipher, lock_before_pause=lock_before_pause
+    )
+    persistence = XaiOAuthRuntimeRepository(paused, harness.sessions)
+    paused_task = asyncio.create_task(
+        _persist_refresh_success(
+            integration=harness.integration,
+            persistence_repository=persistence,
+            tokens=_tokens(rotate_refresh_token=False).model_copy(
+                update={"access_token": "paused-access", "id_token": "paused-id"}
+            ),
+        )
+    )
+    other_task: (
+        asyncio.Task[Result[LLMProviderIntegrationWithSecrets, ProviderRejected]] | None
+    ) = None
+    try:
+        await asyncio.wait_for(paused.read_complete.wait(), timeout=10)
+        other_task = asyncio.create_task(
+            _persist_refresh_success(
+                integration=harness.integration,
+                persistence_repository=harness.persistence,
+                tokens=_tokens(rotate_refresh_token=False).model_copy(
+                    update={"access_token": "other-access", "id_token": "other-id"}
+                ),
+            )
+        )
+        if lock_before_pause:
+            async with asyncio.timeout(10):
+                async with AsyncSession(harness.sessions.engine) as observer:
+                    while not await observer.scalar(
+                        sa.text(
+                            "SELECT EXISTS (SELECT 1 FROM pg_locks "
+                            "WHERE NOT granted AND :pid = ANY(pg_blocking_pids(pid)))"
+                        ),
+                        {"pid": paused.backend_pid},
+                    ):
+                        pass
+            assert not other_task.done()
+            paused.resume.set()
+            first = await asyncio.wait_for(paused_task, timeout=10)
+            second = await asyncio.wait_for(other_task, timeout=10)
+        else:
+            first = await asyncio.wait_for(other_task, timeout=10)
+            paused.resume.set()
+            second = await asyncio.wait_for(paused_task, timeout=10)
+        assert isinstance(first, Success) and isinstance(second, Success)
+        assert second.value == first.value
+        stored = await harness.persistence.load_integration(
+            integration_id=harness.integration.id
+        )
+        assert stored == first.value
+        assert stored.catalog_configuration_version == (
+            harness.integration.catalog_configuration_version
+        )
+    finally:
+        paused.resume.set()
+        for task in (paused_task, other_task):
+            if task is not None:
+                if not task.done():
+                    task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
 
 
 @pytest.mark.parametrize("lock_before_pause", [False, True])

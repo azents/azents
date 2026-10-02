@@ -80,23 +80,172 @@ class _PausedIntegrationRepository(LLMProviderIntegrationRepository):
         return latest
 
 
+@pytest.mark.parametrize(
+    "change_kind",
+    ["user_reconnect", "user_config", "runtime_credentials", "runtime_refreshed_at"],
+)
+@pytest.mark.parametrize(
+    "error",
+    [
+        None,
+        ProviderRejected(reason="stale-rejection"),
+        ProviderUnavailable(reason="stale-unavailable"),
+    ],
+)
+async def test_superseded_refresh_preserves_complete_current_integration(
+    rdb_engine: AsyncEngine,
+    latest_db_schema: None,
+    change_kind: str,
+    error: ProviderRejected | ProviderUnavailable | None,
+) -> None:
+    """Committed reconnect or runtime updates fence both stale persistence paths."""
+
+    @asynccontextmanager
+    async def sessions() -> AsyncIterator[AsyncSession]:
+        async with AsyncSession(rdb_engine, expire_on_commit=False) as session:
+            async with session.begin():
+                yield session
+
+    repository = LLMProviderIntegrationRepository(
+        CredentialCipher(Fernet.generate_key().decode())
+    )
+    persistence = ChatGPTOAuthRuntimeRepository(repository, sessions)
+    now = datetime.datetime.now(datetime.UTC)
+    workspace_id: str | None = None
+    try:
+        async with sessions() as session:
+            workspace = await WorkspaceRepository().create(
+                session,
+                WorkspaceCreate(
+                    name="OAuth identity fence",
+                    handle=f"oauth-fence-{uuid.uuid4().hex}",
+                ),
+            )
+            assert isinstance(workspace, Success)
+            workspace_id = await WorkspaceRepository().resolve_id(
+                session, workspace.value.handle
+            )
+            assert workspace_id is not None
+            created = await repository.create(
+                session,
+                LLMProviderIntegrationCreate(
+                    workspace_id=workspace_id,
+                    provider=LLMProvider.CHATGPT_OAUTH,
+                    name="OAuth identity fence",
+                    secrets=ChatGPTOAuthSecrets(
+                        access_token="original-access",
+                        refresh_token="shared-refresh",
+                        expires_at=now + datetime.timedelta(minutes=1),
+                    ),
+                    config=ChatGPTOAuthConfig(
+                        account_id="original-account",
+                        connection_method=ChatGPTOAuthConnectionMethod.CALLBACK.value,
+                        status="connected",
+                        connected_at=now,
+                        last_refreshed_at=now,
+                    ),
+                ),
+            )
+        original = await persistence.load_integration(integration_id=created.id)
+        assert original is not None
+        assert isinstance(original.secrets, ChatGPTOAuthSecrets)
+        assert isinstance(original.config, ChatGPTOAuthConfig)
+        secrets = original.secrets.model_copy(
+            update={
+                "access_token": "current-access",
+                "id_token": "current-id-token",
+                "expires_at": original.secrets.expires_at + datetime.timedelta(hours=2),
+            }
+        )
+        config = original.config.model_copy(
+            update={"account_id": "current-account", "email": "current@example.invalid"}
+        )
+        async with sessions() as session:
+            if change_kind == "user_reconnect":
+                update = await repository.update_by_id(
+                    session, original.id, {"secrets": secrets, "config": config}
+                )
+            elif change_kind == "user_config":
+                update = await repository.update_by_id(
+                    session, original.id, {"config": config}
+                )
+            elif change_kind == "runtime_credentials":
+                update = await repository.update_runtime_state_by_id(
+                    session, original.id, {"secrets": secrets}
+                )
+            else:
+                update = await repository.update_runtime_state_by_id(
+                    session,
+                    original.id,
+                    {
+                        "config": original.config.model_copy(
+                            update={
+                                "last_refreshed_at": now + datetime.timedelta(seconds=1)
+                            }
+                        )
+                    },
+                )
+            assert isinstance(update, Success)
+        latest = await persistence.load_integration(integration_id=original.id)
+        assert latest is not None
+        assert latest.catalog_configuration_version == (
+            original.catalog_configuration_version
+            + (1 if change_kind.startswith("user_") else 0)
+        )
+        if error is None:
+            result = await _persist_refresh_success(
+                integration=original,
+                persistence_repository=persistence,
+                tokens=TokenSet(
+                    access_token="stale-refreshed-access",
+                    refresh_token="shared-refresh",
+                    id_token="stale-refreshed-id",
+                    expires_at=now + datetime.timedelta(hours=1),
+                    connection_method=ChatGPTOAuthConnectionMethod.CALLBACK,
+                ),
+            )
+            assert isinstance(result, Success)
+            recovered = result.value
+        else:
+            recovered = await _persist_refresh_failure(
+                integration=original,
+                persistence_repository=persistence,
+                error=error,
+            )
+        assert recovered == latest
+        stored = await persistence.load_integration(integration_id=original.id)
+        assert stored == latest
+    finally:
+        if workspace_id is not None:
+            async with sessions() as session:
+                await session.execute(
+                    sa.delete(RDBLLMProviderIntegration).where(
+                        RDBLLMProviderIntegration.workspace_id == workspace_id
+                    )
+                )
+                await session.execute(
+                    sa.delete(RDBWorkspace).where(RDBWorkspace.id == workspace_id)
+                )
+
+
 @pytest.mark.parametrize("lock_before_pause", [False, True])
 @pytest.mark.parametrize("rotate_refresh_token", [False, True])
 @pytest.mark.parametrize(
     "error",
     [
+        None,
         ProviderRejected(reason="invalid_grant"),
         ProviderUnavailable(reason="unavailable"),
     ],
 )
-async def test_refresh_failure_and_success_are_atomically_ordered(
+async def test_refresh_completions_are_atomically_ordered(
     rdb_engine: AsyncEngine,
     latest_db_schema: None,
     lock_before_pause: bool,
     rotate_refresh_token: bool,
-    error: ProviderRejected | ProviderUnavailable,
+    error: ProviderRejected | ProviderUnavailable | None,
 ) -> None:
-    """A successful separate connection always wins over an old refresh failure."""
+    """The first successful identity wins; state-only failure can be repaired."""
 
     @asynccontextmanager
     async def sessions() -> AsyncIterator[AsyncSession]:
@@ -165,13 +314,30 @@ async def test_refresh_failure_and_success_are_atomically_ordered(
             plan_type="new-plan",
             connection_method=ChatGPTOAuthConnectionMethod.CALLBACK,
         )
-        failure_task = asyncio.create_task(
-            _persist_refresh_failure(
+        success_tokens = (
+            tokens.model_copy(
+                update={"access_token": "competing-access", "id_token": "competing-id"}
+            )
+            if error is None
+            else tokens
+        )
+
+        async def persist_paused() -> LLMProviderIntegrationWithSecrets | None:
+            if error is None:
+                paused_success = await _persist_refresh_success(
+                    integration=original,
+                    persistence_repository=failure_persistence,
+                    tokens=tokens,
+                )
+                assert isinstance(paused_success, Success)
+                return paused_success.value
+            return await _persist_refresh_failure(
                 integration=original,
                 persistence_repository=failure_persistence,
                 error=error,
             )
-        )
+
+        failure_task = asyncio.create_task(persist_paused())
         await asyncio.wait_for(paused.read_complete.wait(), timeout=5)
 
         async def persist_success() -> Result[
@@ -180,7 +346,7 @@ async def test_refresh_failure_and_success_are_atomically_ordered(
             return await _persist_refresh_success(
                 integration=original,
                 persistence_repository=success_persistence,
-                tokens=tokens,
+                tokens=success_tokens,
             )
 
         success_task = asyncio.create_task(persist_success())
@@ -198,8 +364,15 @@ async def test_refresh_failure_and_success_are_atomically_ordered(
                         pass
             assert not success_task.done()
             paused.resume.set()
-            assert await asyncio.wait_for(failure_task, timeout=5) is None
+            paused_result = await asyncio.wait_for(failure_task, timeout=5)
+            if error is None:
+                assert paused_result is not None
+            else:
+                assert paused_result is None
             success = await asyncio.wait_for(success_task, timeout=5)
+            if paused_result is not None:
+                assert isinstance(success, Success)
+                assert success.value == paused_result
         else:
             success = await asyncio.wait_for(success_task, timeout=5)
             paused.resume.set()
@@ -213,8 +386,13 @@ async def test_refresh_failure_and_success_are_atomically_ordered(
         assert stored is not None
         assert isinstance(stored.secrets, ChatGPTOAuthSecrets)
         assert isinstance(stored.config, ChatGPTOAuthConfig)
-        assert stored.secrets.access_token == tokens.access_token
-        assert stored.secrets.refresh_token == tokens.refresh_token
+        expected_tokens = (
+            tokens if error is None and lock_before_pause else success_tokens
+        )
+        assert stored.secrets.access_token == expected_tokens.access_token
+        assert stored.secrets.refresh_token == expected_tokens.refresh_token
+        assert stored.secrets.id_token == expected_tokens.id_token
+        assert stored.secrets.expires_at == expected_tokens.expires_at
         assert stored.config.status == ChatGPTOAuthConnectionStatus.CONNECTED.value
         assert stored.config.last_refreshed_at != now - datetime.timedelta(hours=1)
         assert stored.config.last_failure_reason is None
@@ -222,6 +400,7 @@ async def test_refresh_failure_and_success_are_atomically_ordered(
         assert stored.config.email == "new@example.invalid"
         assert stored.config.plan_type == "new-plan"
         assert stored.config == success.value.config
+        assert stored.secrets == success.value.secrets
         assert (
             stored.catalog_configuration_version
             == original.catalog_configuration_version
