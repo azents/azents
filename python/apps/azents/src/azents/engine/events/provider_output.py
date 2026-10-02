@@ -13,7 +13,6 @@ from typing import Literal, NamedTuple
 from azcommon.result import Failure
 from azcommon.types import JSONValue
 from PIL import Image, UnidentifiedImageError
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import ExchangeFileOrigin, ExchangeFileProvenanceKind
 from azents.engine.events.generated_files import (
@@ -37,6 +36,7 @@ from azents.repos.model_file import model_file_storage_key
 from azents.repos.model_file.data import ModelFileCreate
 from azents.repos.provider_output_operation import (
     ProviderOutputFileMetadata,
+    ProviderOutputMetadataAdmission,
     ProviderOutputOperationError,
     ProviderOutputOperationRepository,
 )
@@ -118,11 +118,12 @@ class PreparedProviderOutput:
     uploaded_keys: set[str] = dataclasses.field(default_factory=set)
     admitted: bool = False
 
-    async def persist(self, session: AsyncSession) -> None:
-        """Persist file metadata in the caller's model-output transaction."""
-        await self.materializer.persist(
-            session,
-            self.generated_images,
+    @property
+    def metadata_admission(self) -> ProviderOutputMetadataAdmission:
+        """Return typed database metadata without exposing transient uploads."""
+        return ProviderOutputMetadataAdmission(
+            authority=self.materializer._repository_authority(),
+            generated_images=_metadata(self.generated_images),
         )
 
     async def cleanup(self) -> None:
@@ -146,11 +147,12 @@ class PreparedClientToolOutput:
     uploaded_keys: set[str] = dataclasses.field(default_factory=set)
     admitted: bool = False
 
-    async def persist(self, session: AsyncSession) -> None:
-        """Persist file metadata in the caller's tool-result transaction."""
-        await self.materializer.persist(
-            session,
-            self.generated_images,
+    @property
+    def metadata_admission(self) -> ProviderOutputMetadataAdmission:
+        """Return typed database metadata for atomic Tool-result admission."""
+        return ProviderOutputMetadataAdmission(
+            authority=self.materializer._repository_authority(),
+            generated_images=_metadata(self.generated_images),
         )
 
     async def cleanup(self) -> None:
@@ -306,21 +308,6 @@ class ProviderOutputMaterializer:
             skip_keys=existing_keys,
             uploaded_keys=uploaded_keys,
         )
-
-    async def persist(
-        self,
-        session: AsyncSession,
-        generated_images: tuple[_PreparedGeneratedImage, ...],
-    ) -> None:
-        """Revalidate authority and admit file metadata with database work only."""
-        try:
-            await self.operation_repository.persist_in_session(
-                session,
-                authority=self._repository_authority(),
-                generated_images=_metadata(generated_images),
-            )
-        except ProviderOutputOperationError as exc:
-            raise ModelCallError(str(exc)) from None
 
     async def cleanup(
         self,

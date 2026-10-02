@@ -606,26 +606,6 @@ async def test_complete_bridge_predecessor_suppresses_parent_result_atomically(
 
 
 @pytest.mark.asyncio
-async def test_failed_run_finalization_yields_to_locked_stop_request() -> None:
-    """Failure cannot claim a Session after durable Stop intent is present."""
-    service = _service(
-        agent_run_repository=_AgentRunRepository(None),
-        agent_session_repository=_AgentSessionRepository(
-            stop_requested_at=datetime(2026, 7, 27, tzinfo=UTC)
-        ),
-        pending_scheduling_modes=set(),
-    )
-
-    claimed = await service.claim_failed_run_finalization(
-        _Session(),
-        session_id="session-001",
-        owner_generation=0,
-    )
-
-    assert claimed is False
-
-
-@pytest.mark.asyncio
 async def test_terminal_update_rejects_superseded_owner_generation() -> None:
     """A stale Worker cannot terminate the current owner's running Run."""
     run = _running_run()

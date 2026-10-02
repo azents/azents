@@ -86,6 +86,7 @@ from azents.engine.events.tool_invocation import (
     UnboundedClientToolResult,
 )
 from azents.engine.events.types import (
+    ActiveToolCall,
     AgentRunState,
     ClientToolCallPayload,
     CompactionSummaryPayload,
@@ -133,7 +134,7 @@ from azents.engine.tools.run_tool_to_file import (
 )
 from azents.engine.tools.xai_image_generation import XaiImagineClientFactory
 from azents.rdb.session import SessionManager
-from azents.repos.agent_execution import EventTranscriptRepository
+from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import AgentRunCreate, EventCreate
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession, SessionAgent
@@ -142,9 +143,15 @@ from azents.repos.agent_session_system_prompt_snapshot import (
 )
 from azents.repos.compaction_operation import CompactionCommitContext
 from azents.repos.engine_input_projection import EngineInputProjectionRepository
+from azents.repos.engine_model_input_operation import (
+    EngineModelInputOperationRepository,
+)
+from azents.repos.engine_output_operation import EngineOutputOperationRepository
 from azents.repos.exchange_file import ExchangeFileRepository
+from azents.repos.model_candidate_health import ModelCandidateHealthRepository
 from azents.repos.model_file import ModelFileRepository
 from azents.repos.model_file_pin import ModelFilePinRepository
+from azents.repos.model_operation_completion import ModelOperationCompletionRepository
 from azents.repos.provider_output_operation import ProviderOutputOperationRepository
 from azents.repos.session_execution import (
     CanonicalExecutionOwnerGenerationStaleError,
@@ -365,6 +372,46 @@ class _RunRepo:
         """Return existing run state when retry reuses a run id."""
         del session, run_id
         return self._state
+
+    async def lock_by_id(
+        self, session: AsyncSession, run_id: str
+    ) -> AgentRunState | None:
+        """Return the current Run for repository composition wiring."""
+        return await self.get_by_id(session, run_id)
+
+    async def update_phase(
+        self,
+        session: AsyncSession,
+        run_id: str,
+        phase: AgentRunPhase,
+        *,
+        active_tool_calls: list[ActiveToolCall] | None = None,
+    ) -> AgentRunState:
+        """Apply typed phase changes when an adapter test uses actual execution."""
+        current = await self.get_by_id(session, run_id)
+        if current is None:
+            raise ValueError("Agent run not found")
+        self._state = current.model_copy(
+            update={
+                "phase": phase,
+                "active_tool_calls": (
+                    current.active_tool_calls
+                    if active_tool_calls is None
+                    else active_tool_calls
+                ),
+            }
+        )
+        return self._state
+
+    async def mark_parent_result_suppressed(
+        self, session: AsyncSession, *, run_id: str, finalized_at: datetime.datetime
+    ) -> AgentRunState:
+        """Keep the detached Run contract for completed repository wiring."""
+        del finalized_at
+        current = await self.get_by_id(session, run_id)
+        if current is None:
+            raise ValueError("Agent run not found")
+        return current
 
     async def create(
         self,
@@ -1247,6 +1294,7 @@ async def test_event_engine_adapter_runs_execution() -> None:
                 compaction_provider_integration_id=None,
             ),
             RunContext(
+                model_operation_completion=None,
                 owner_generation=1,
                 tool_admission_barrier=_OpenToolAdmissionBarrier(),
                 turn_action_bridge_boundary=TurnActionBridgeBoundary(),
@@ -1511,6 +1559,7 @@ async def test_tool_search_activation_updates_the_next_prepared_call() -> None:
         async for emit in adapter.run(
             request,
             RunContext(
+                model_operation_completion=None,
                 owner_generation=1,
                 tool_admission_barrier=_OpenToolAdmissionBarrier(),
                 turn_action_bridge_boundary=TurnActionBridgeBoundary(),
@@ -1817,6 +1866,7 @@ async def test_openai_image_generation_is_bound_as_client_function_tool(
                 ],
             ),
             RunContext(
+                model_operation_completion=None,
                 owner_generation=1,
                 tool_admission_barrier=_OpenToolAdmissionBarrier(),
                 turn_action_bridge_boundary=TurnActionBridgeBoundary(),
@@ -1895,6 +1945,7 @@ async def test_xai_image_generation_is_bound_as_client_function_tool(
                 ],
             ),
             RunContext(
+                model_operation_completion=None,
                 owner_generation=1,
                 tool_admission_barrier=_OpenToolAdmissionBarrier(),
                 turn_action_bridge_boundary=TurnActionBridgeBoundary(),
@@ -2123,6 +2174,7 @@ async def test_adapter_yields_model_output_before_run_completion() -> None:
             compaction_provider_integration_id=None,
         ),
         RunContext(
+            model_operation_completion=None,
             owner_generation=1,
             tool_admission_barrier=_OpenToolAdmissionBarrier(),
             turn_action_bridge_boundary=TurnActionBridgeBoundary(),
@@ -2176,6 +2228,7 @@ async def test_adapter_forwards_user_stop_cancellation_to_execution() -> None:
                 compaction_provider_integration_id=None,
             ),
             RunContext(
+                model_operation_completion=None,
                 owner_generation=1,
                 tool_admission_barrier=_OpenToolAdmissionBarrier(),
                 turn_action_bridge_boundary=TurnActionBridgeBoundary(),
@@ -2231,6 +2284,7 @@ async def test_adapter_drains_run_task_on_stream_close() -> None:
             compaction_provider_integration_id=None,
         ),
         RunContext(
+            model_operation_completion=None,
             owner_generation=1,
             tool_admission_barrier=_OpenToolAdmissionBarrier(),
             turn_action_bridge_boundary=TurnActionBridgeBoundary(),
@@ -2281,6 +2335,7 @@ async def test_event_engine_adapter_includes_turn_start_injected_prompts() -> No
                 compaction_provider_integration_id=None,
             ),
             RunContext(
+                model_operation_completion=None,
                 owner_generation=1,
                 tool_admission_barrier=_OpenToolAdmissionBarrier(),
                 turn_action_bridge_boundary=TurnActionBridgeBoundary(),
@@ -2338,6 +2393,7 @@ async def test_adapter_propagates_user_visible_model_call_error() -> None:
                 compaction_provider_integration_id=None,
             ),
             RunContext(
+                model_operation_completion=None,
                 owner_generation=1,
                 tool_admission_barrier=_OpenToolAdmissionBarrier(),
                 turn_action_bridge_boundary=TurnActionBridgeBoundary(),
@@ -2445,6 +2501,7 @@ async def test_model_kwargs_routes_chatgpt_oauth_to_backend_api() -> None:
                 compaction_provider_integration_id=None,
             ),
             RunContext(
+                model_operation_completion=None,
                 owner_generation=1,
                 tool_admission_barrier=_OpenToolAdmissionBarrier(),
                 turn_action_bridge_boundary=TurnActionBridgeBoundary(),
@@ -2521,6 +2578,7 @@ async def test_openrouter_model_binding_keeps_responses_and_exact_model_id() -> 
                 compaction_provider_integration_id=None,
             ),
             RunContext(
+                model_operation_completion=None,
                 owner_generation=1,
                 tool_admission_barrier=_OpenToolAdmissionBarrier(),
                 turn_action_bridge_boundary=TurnActionBridgeBoundary(),
@@ -2597,6 +2655,7 @@ async def test_adapter_wires_event_filters_and_session_head_repo() -> None:
                 compaction_max_input_tokens=32_000,
             ),
             RunContext(
+                model_operation_completion=None,
                 owner_generation=1,
                 tool_admission_barrier=_OpenToolAdmissionBarrier(),
                 turn_action_bridge_boundary=TurnActionBridgeBoundary(),
@@ -2609,7 +2668,9 @@ async def test_adapter_wires_event_filters_and_session_head_repo() -> None:
         )
     ]
 
-    input_projection_repository = captured["input_projection_repository"]
+    input_operation_repository = captured["model_input_operation_repository"]
+    assert isinstance(input_operation_repository, EngineModelInputOperationRepository)
+    input_projection_repository = input_operation_repository.input_projection_repository
     auto_compaction_filter = captured["auto_compaction_filter"]
     post_lower_filter = captured["post_lower_filter"]
     assert isinstance(input_projection_repository, EngineInputProjectionRepository)
@@ -2630,9 +2691,11 @@ async def test_adapter_wires_event_filters_and_session_head_repo() -> None:
     assert [item.__class__.__name__ for item in post_lower_filter.filters] == [
         "NativeRequestSizeGuard",
     ]
-    assert captured["session_repo"] is session_head_repo
+    assert input_operation_repository.session_head_repository is session_head_repo
+    output_operation_repository = captured["output_operation_repository"]
+    assert isinstance(output_operation_repository, EngineOutputOperationRepository)
     assert isinstance(
-        captured["system_prompt_snapshot_repo"],
+        output_operation_repository.system_prompt_repository,
         AgentSessionSystemPromptSnapshotRepository,
     )
     model_adapter = captured["model_adapter"]
@@ -3178,6 +3241,7 @@ async def _noop_publish(_event: object) -> None:
 def _run_context() -> RunContext:
     """Return manual compaction run context for tests."""
     return RunContext(
+        model_operation_completion=None,
         owner_generation=1,
         tool_admission_barrier=_OpenToolAdmissionBarrier(),
         turn_action_bridge_boundary=TurnActionBridgeBoundary(),
@@ -3236,6 +3300,13 @@ def _agent_engine_adapter(
         transcript_repo=transcript_repo or _TranscriptRepo([]),
         system_prompt_snapshot_repo=AgentSessionSystemPromptSnapshotRepository(),
         model_file_pin_repo=_ModelFilePinRepo(),
+        model_operation_completion_repository=ModelOperationCompletionRepository(
+            agent_session_repository=AgentSessionRepository(),
+            agent_run_repository=AgentRunRepository(),
+            model_candidate_health_repository=ModelCandidateHealthRepository(
+                session_manager=session_manager
+            ),
+        ),
         terminal_finalization_repository=require_instance(
             AsyncMock(spec=TerminalRunFinalizationRepository),
             TerminalRunFinalizationRepository,

@@ -50,7 +50,11 @@ from azents.repos.exchange_file.operations import ExchangeFileOperationRepositor
 from azents.repos.model_file import ModelFileRepository
 from azents.repos.model_file.data import ModelFile, ModelFileCreate
 from azents.repos.model_file.operations import ModelFileOperationRepository
-from azents.repos.provider_output_operation import ProviderOutputOperationRepository
+from azents.repos.provider_output_operation import (
+    ProviderOutputMetadataAdmission,
+    ProviderOutputOperationError,
+    ProviderOutputOperationRepository,
+)
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.repos.workspace_user.data import WorkspaceUser
 from azents.services.exchange_file import ExchangeFileService
@@ -498,6 +502,22 @@ def _materializer(
     )
 
 
+async def _admit_metadata(
+    session: AsyncSession,
+    admission: ProviderOutputMetadataAdmission,
+    repository: ProviderOutputOperationRepository,
+) -> None:
+    """Compose detached metadata in an infrastructure-only test transaction."""
+    try:
+        await repository.persist_in_session(
+            session,
+            authority=admission.authority,
+            generated_images=admission.generated_images,
+        )
+    except ProviderOutputOperationError as exc:
+        raise ModelCallError(str(exc)) from None
+
+
 def test_decodes_valid_data_url_and_excludes_bytes_from_serialization() -> None:
     """Keep validated image bytes transient and serialization-excluded."""
     pending = pending_image_generation_output(
@@ -612,7 +632,11 @@ async def test_materializes_exchange_and_model_file_in_one_admission() -> None:
     assert "generated-image:" not in serialized
 
     async with s3_service.session_manager() as session:
-        await prepared.persist(session)
+        await _admit_metadata(
+            session,
+            prepared.metadata_admission,
+            fixture.materializer.operation_repository,
+        )
     prepared.admitted = True
     await prepared.cleanup()
 
@@ -665,7 +689,11 @@ async def test_materializes_client_tool_image_with_shared_storage_contract() -> 
     assert _PNG_BASE64 not in serialized
 
     async with s3_service.session_manager() as session:
-        await prepared.persist(session)
+        await _admit_metadata(
+            session,
+            prepared.metadata_admission,
+            fixture.materializer.operation_repository,
+        )
     prepared.admitted = True
     await prepared.cleanup()
 
@@ -751,7 +779,11 @@ async def test_materializes_ordered_client_images_in_one_result() -> None:
     assert output[0].model_file_id != output[3].model_file_id
 
     async with fixture.s3_service.session_manager() as session:
-        await prepared.persist(session)
+        await _admit_metadata(
+            session,
+            prepared.metadata_admission,
+            fixture.materializer.operation_repository,
+        )
     prepared.admitted = True
     assert len(fixture.model_repository.created) == 2
     assert len(fixture.exchange_repository.created) == 4
@@ -804,7 +836,11 @@ async def test_failed_multi_image_admission_compensates_every_object() -> None:
         wire_dialect="json_function",
     )
     prepared = await fixture.materializer.prepare_client_result(result)
-    await prepared.persist(_Session())
+    await _admit_metadata(
+        _Session(),
+        prepared.metadata_admission,
+        fixture.materializer.operation_repository,
+    )
     fixture.exchange_repository.created.clear()
     fixture.exchange_repository.preview_links.clear()
     fixture.model_repository.created.clear()
@@ -823,7 +859,9 @@ async def test_retry_reuses_metadata_and_preserves_admitted_objects() -> None:
     model_repository = fixture.model_repository
     s3_service = fixture.s3_service
     first = await materializer.prepare(_normalized_output())
-    await first.persist(_Session())
+    await _admit_metadata(
+        _Session(), first.metadata_admission, fixture.materializer.operation_repository
+    )
     first.admitted = True
     original_upload_calls = list(s3_service.upload_calls)
 
@@ -832,7 +870,11 @@ async def test_retry_reuses_metadata_and_preserves_admitted_objects() -> None:
     assert s3_service.deleted == []
 
     admitted_retry = await materializer.prepare(_normalized_output())
-    await admitted_retry.persist(_Session())
+    await _admit_metadata(
+        _Session(),
+        admitted_retry.metadata_admission,
+        fixture.materializer.operation_repository,
+    )
     admitted_retry.admitted = True
 
     assert s3_service.upload_calls == original_upload_calls
@@ -848,7 +890,9 @@ async def test_retry_rejects_changed_bytes_before_overwriting_objects() -> None:
     materializer = fixture.materializer
     s3_service = fixture.s3_service
     first = await materializer.prepare(_normalized_output())
-    await first.persist(_Session())
+    await _admit_metadata(
+        _Session(), first.metadata_admission, fixture.materializer.operation_repository
+    )
     first.admitted = True
     original_objects = dict(s3_service.uploaded)
     original_upload_calls = list(s3_service.upload_calls)
@@ -865,7 +909,11 @@ async def test_cleanup_preserves_metadata_after_lost_commit_acknowledgement() ->
     fixture = _materializer()
     prepared = await fixture.materializer.prepare(_normalized_output())
     async with fixture.s3_service.session_manager() as session:
-        await prepared.persist(session)
+        await _admit_metadata(
+            session,
+            prepared.metadata_admission,
+            fixture.materializer.operation_repository,
+        )
 
     assert not prepared.admitted
     assert len(prepared.uploaded_keys) == 3
@@ -891,7 +939,11 @@ async def test_failed_admission_compensates_every_uploaded_object() -> None:
         _AgentRunRepository,
     )
     prepared = await materializer.prepare(_normalized_output())
-    await prepared.persist(_Session())
+    await _admit_metadata(
+        _Session(),
+        prepared.metadata_admission,
+        fixture.materializer.operation_repository,
+    )
     exchange_repository.created.clear()
     exchange_repository.preview_links.clear()
     model_repository.created.clear()
@@ -958,7 +1010,11 @@ async def test_rejects_provider_output_after_owner_generation_changes() -> None:
         ModelCallError,
         match="Generated image output scope is unavailable",
     ):
-        await prepared.persist(_Session())
+        await _admit_metadata(
+            _Session(),
+            prepared.metadata_admission,
+            fixture.materializer.operation_repository,
+        )
 
     assert exchange_repository.created == []
     assert model_repository.created == []
@@ -988,12 +1044,20 @@ async def test_stale_cleanup_preserves_new_generation_output() -> None:
     new_keys = set(fixture.s3_service.uploaded) - stale_keys
     assert len(new_keys) == 3
     async with fixture.s3_service.session_manager() as session:
-        await new_output.persist(session)
+        await _admit_metadata(
+            session,
+            new_output.metadata_admission,
+            fixture.materializer.operation_repository,
+        )
     new_output.admitted = True
 
     with pytest.raises(ModelCallError, match="scope is unavailable"):
         async with fixture.s3_service.session_manager() as session:
-            await stale_output.persist(session)
+            await _admit_metadata(
+                session,
+                stale_output.metadata_admission,
+                fixture.materializer.operation_repository,
+            )
     await stale_output.cleanup()
 
     assert set(fixture.s3_service.deleted) == stale_keys

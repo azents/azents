@@ -36,7 +36,7 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/agent_run.py
   - python/apps/azents/src/azents/rdb/models/agent.py
 last_verified_at: 2026-10-02
-spec_version: 46
+spec_version: 47
 ---
 
 # Context Compaction
@@ -83,6 +83,12 @@ When compaction is required:
 8. For a current plan, append adjacent `compaction_marker(status=started)` and `compaction_summary` events with the same `compaction_id` and reason at the physical transcript tail. The summary payload contains the enriched checkpoint followed by bounded `Recent User Messages` and `Recent Transcript` sections.
 9. Move `agent_sessions.model_input_head_event_id` to the summary event, replace the Session's `tool_search/working_set.tool_names` with an empty list, and commit the same transaction. The Tool Search reset applies even when the Agent currently has Tool Search disabled; other Toolkit State identities are unchanged.
 10. Remove the live operation after success, Stop, cancellation, or terminal failure. A skipped, failed, cancelled, or stale attempt appends no compaction marker or summary, does not move the model-input head, and does not reset the Tool Search working set.
+
+Run-owned compaction settlement is enabled by typed model-operation completion
+authority on the execution context, not a live-session Worker callback. The
+existing compaction repository directly composes the COMPACTION success mutation
+with summary/head and Tool Search writes; foreground terminal settlement remains
+in its separate output-completion operation.
 
 Old events remain queryable. The head pointer changes which ascending event-ID range is used for
 future model input. Input appended while summary generation is running invalidates the fixed plan;
@@ -345,6 +351,9 @@ terminalizes.
 
 ## Changelog
 
+- **2026-10-02** (spec_version 47) — Replaced the execution context's
+  live-session completion callback with typed authority while retaining direct
+  repository-composed compaction settlement and its existing atomic group.
 - **2026-10-02** (spec_version 46) — Added root Run-start Memory preparation and
   existing-hook invalidation followed by same-Run committed-compaction refresh,
   preserving unchanged selected content and failed-compaction isolation.

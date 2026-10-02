@@ -136,6 +136,10 @@ from azents.repos.model_candidate_health.data import (
     ModelCandidateHealthObservation,
     ModelCandidateHealthStatus,
 )
+from azents.repos.model_operation_completion import (
+    ModelOperationCompletion,
+    ModelOperationCompletionRepository,
+)
 from azents.services.chat.data import ChatLiveRunState
 from azents.services.mailbox import (
     ExternalChannelMessageMailboxProcessor,
@@ -3751,13 +3755,19 @@ async def test_prepare_compaction_recreates_slot_after_prior_success(
     agent_repository.agent = original_agent
 
     async with executor.session_manager() as session:
-        await executor._complete_model_operation_success_in_session(
+        await ModelOperationCompletionRepository(
+            agent_session_repository=executor.agent_session_repository,
+            agent_run_repository=executor.session_lifecycle.agent_run_repository,
+            model_candidate_health_repository=executor.model_candidate_health_repository,
+        ).complete_success_in_session(
             session,
-            session_id="session-001",
-            run_id="run-001",
-            owner_generation=1,
-            workspace_id="workspace-001",
-            operation_kind=ModelOperationKind.COMPACTION,
+            ModelOperationCompletion(
+                session_id="session-001",
+                run_id="run-001",
+                owner_generation=1,
+                workspace_id="workspace-001",
+                operation_kind=ModelOperationKind.COMPACTION,
+            ),
         )
     completed_state = lifecycle.agent_run_repository.run.model_operation_state
     assert completed_state is not None

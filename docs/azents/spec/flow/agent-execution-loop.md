@@ -99,6 +99,12 @@ code_paths:
   - python/apps/azents/src/azents/repos/engine_event_operation.py
   - python/apps/azents/src/azents/repos/engine_execution_operation.py
   - python/apps/azents/src/azents/repos/engine_tool_result_operation.py
+  - python/apps/azents/src/azents/repos/engine_event_mutation.py
+  - python/apps/azents/src/azents/repos/engine_output_operation.py
+  - python/apps/azents/src/azents/repos/engine_run_finalization_operation.py
+  - python/apps/azents/src/azents/repos/failed_run_finalization_operation.py
+  - python/apps/azents/src/azents/repos/provider_output_operation.py
+  - python/apps/azents/src/azents/engine/events/terminal_projection.py
   - python/apps/azents/src/azents/repos/engine_model_input_operation.py
   - python/apps/azents/src/azents/repos/engine_input_projection.py
   - python/apps/azents/src/azents/engine/events/input_projection.py
@@ -129,7 +135,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
   - typescript/apps/azents-web/messages/*/chat.json
 last_verified_at: 2026-10-02
-spec_version: 200
+spec_version: 201
 ---
 
 # Agent Execution Loop
@@ -1479,7 +1485,8 @@ non-blocking acquisition rolls back its savepoint, and only clean admission scop
 retry, so a caller holding other locks cannot retry indefinitely inside the same
 transaction.
 
-Run execution uses short database sessions around one durable read or state transition. Model
+Run execution sequences completed repository operations for durable reads and
+state transitions; execution itself owns no live database session. Model
 preparation callbacks, model streaming, runtime hooks, foreground tools, Toolkit provider resolution,
 OAuth token HTTP requests, broker calls, and live event publication run only after the preceding
 database session has closed. Boundary input polling also completes its external queue read before it
@@ -1498,8 +1505,9 @@ Ordinary client tool results and generated-file admission failures use one
 completed repository operation that appends the deterministic result Event,
 locks the Run, removes only the matching active call, and selects
 `executing_tools` or `appending_events` before returning. Successful
-generated-file metadata admission retains the same in-session primitive so file
-metadata and the result Event remain one atomic transaction.
+generated-file metadata admission composes the same result primitive inside a
+completed output operation, so file metadata and the result Event remain one
+atomic transaction.
 
 Model-input preparation completes in one repository-owned transaction: capture
 the input head, load its transcript, reconcile unresolved durable tool calls,
@@ -1510,6 +1518,23 @@ than replaying the tool. Repaired-result publication, phase publication, and
 automatic compaction follow transaction completion. Availability projection is
 an explicit database-only repository composition, not an Engine callback that
 receives a live session.
+
+Model output admission atomically persists generated metadata, normalized Events,
+usage provenance, the prompt snapshot replacement or deletion, retry-state
+clearing, and active-tool ownership/phase. Prepared output supplies detached
+metadata authority and create records, not a persistence callback or materializer.
+Normal terminal completion remains a separate later transaction. Its marker,
+foreground model-operation success, terminal parent delivery, and ModelFile pin
+release commit together. Foreground settlement is not added to early stop,
+bridge transfer, turn-limit interruption, or partial-stream interruption.
+
+RunContext carries typed model-operation completion authority instead of a
+live-session callback. Owner-bound repository operations retain the same
+generation fences and lock order. Tool admission still spans completed output
+admission and post-commit phase publication before prepared-output acknowledgement;
+publication failure uses the existing protected compensation cleanup. Generated
+metadata authority failures retain their existing Engine error classification
+after the repository transaction has closed.
 
 ExchangeFile, ModelFile, and Artifact creation preallocates the entity ID and object key, closes its
 authorization snapshot, uploads the blob without an open database session, and then revalidates
@@ -1560,6 +1585,13 @@ publishing the matching terminal control event. A delayed Run A event cannot ter
 newer Run B. Generic SessionRunner error reporting does not synthesize `RunComplete`: failures that
 escape an active Run use durable failed-run finalization, while failures before Run activation remain
 error observations without a terminal Run event.
+
+Failed-run finalization uses one completed repository operation for the owned
+Session lock and Stop predicate, failure metadata/Events, conditional failed Run
+transition, and direct-parent terminal delivery. Durable Stop wins before any
+failure output is appended. Missing Session and stale-owner errors remain distinct.
+Worker publication follows commit in error Event, marker, and RunComplete order;
+the Worker facade neither owns a session nor calls a lifecycle DB claim helper.
 
 The required run-completion order is:
 
@@ -1679,6 +1711,10 @@ icon.
 
 ## Changelog
 
+- **2026-10-02** (spec_version 201) — Completed the assigned Event Engine
+  output and terminal repository operations, replaced prepared-output and
+  model-operation live-session callbacks with typed data, and moved the Worker
+  Stop-fenced failed-run atomic group into a completed repository operation.
 - **2026-10-02** (spec_version 200) — Prepared Memory selection before each root
   Run loop and refreshed independently on post-compaction context reconstruction,
   preserving unchanged content, child inheritance, and per-turn access filtering.
