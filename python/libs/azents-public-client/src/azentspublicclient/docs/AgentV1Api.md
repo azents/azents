@@ -11,9 +11,11 @@ Method | HTTP request | Description
 [**agent_v1_delete_agent_memory**](AgentV1Api.md#agent_v1_delete_agent_memory) | **DELETE** /agent/v1/workspaces/{handle}/agents/{agent_id}/memories/{memory_id} | Delete Agent Memory
 [**agent_v1_finalize_avatar**](AgentV1Api.md#agent_v1_finalize_avatar) | **POST** /agent/v1/workspaces/{handle}/agents/{agent_id}/avatar/finalize | Finalize Avatar
 [**agent_v1_get_agent**](AgentV1Api.md#agent_v1_get_agent) | **GET** /agent/v1/workspaces/{handle}/agents/{agent_id} | Get Agent
+[**agent_v1_get_agent_historical_memory**](AgentV1Api.md#agent_v1_get_agent_historical_memory) | **GET** /agent/v1/workspaces/{handle}/agents/{agent_id}/historical-memories/{source_session_id} | Get Agent Historical Memory
 [**agent_v1_get_agent_memory**](AgentV1Api.md#agent_v1_get_agent_memory) | **GET** /agent/v1/workspaces/{handle}/agents/{agent_id}/memories/{memory_id} | Get Agent Memory
 [**agent_v1_get_automatic_session_projects**](AgentV1Api.md#agent_v1_get_automatic_session_projects) | **GET** /agent/v1/workspaces/{handle}/agents/{agent_id}/automatic-session-projects | Get Automatic Session Projects
 [**agent_v1_list_agent_admins**](AgentV1Api.md#agent_v1_list_agent_admins) | **GET** /agent/v1/workspaces/{handle}/agents/{agent_id}/admins | List Agent Admins
+[**agent_v1_list_agent_historical_memories**](AgentV1Api.md#agent_v1_list_agent_historical_memories) | **GET** /agent/v1/workspaces/{handle}/agents/{agent_id}/historical-memories | List Agent Historical Memories
 [**agent_v1_list_agent_memories**](AgentV1Api.md#agent_v1_list_agent_memories) | **GET** /agent/v1/workspaces/{handle}/agents/{agent_id}/memories | List Agent Memories
 [**agent_v1_list_agents**](AgentV1Api.md#agent_v1_list_agents) | **GET** /agent/v1/workspaces/{handle}/agents | List Agents
 [**agent_v1_remove_agent_admin**](AgentV1Api.md#agent_v1_remove_agent_admin) | **DELETE** /agent/v1/workspaces/{handle}/agents/{agent_id}/admins/{admin_workspace_user_id} | Remove Agent Admin
@@ -614,6 +616,89 @@ Name | Type | Description  | Notes
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
+# **agent_v1_get_agent_historical_memory**
+> HistoricalMemoryResponse agent_v1_get_agent_historical_memory(handle, agent_id, source_session_id)
+
+Get Agent Historical Memory
+
+Return one currently visible Historical Memory source.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentspublicclient
+from azentspublicclient.models.historical_memory_response import HistoricalMemoryResponse
+from azentspublicclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentspublicclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentspublicclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentspublicclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentspublicclient.AgentV1Api(api_client)
+    handle = 'handle_example' # str | 
+    agent_id = 'agent_id_example' # str | 
+    source_session_id = 'source_session_id_example' # str | 
+
+    try:
+        # Get Agent Historical Memory
+        api_response = api_instance.agent_v1_get_agent_historical_memory(handle, agent_id, source_session_id)
+        print("The response of AgentV1Api->agent_v1_get_agent_historical_memory:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling AgentV1Api->agent_v1_get_agent_historical_memory: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **handle** | **str**|  | 
+ **agent_id** | **str**|  | 
+ **source_session_id** | **str**|  | 
+
+### Return type
+
+[**HistoricalMemoryResponse**](HistoricalMemoryResponse.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
 # **agent_v1_get_agent_memory**
 > MemoryResponse agent_v1_get_agent_memory(agent_id, memory_id, handle)
 
@@ -844,6 +929,96 @@ Name | Type | Description  | Notes
 ### Return type
 
 [**AgentAdminListResponse**](AgentAdminListResponse.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **agent_v1_list_agent_historical_memories**
+> HistoricalMemoryListResponse agent_v1_list_agent_historical_memories(handle, agent_id, scope, query=query, cursor=cursor, limit=limit)
+
+List Agent Historical Memories
+
+List currently visible Historical Memory for settings inspection.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentspublicclient
+from azentspublicclient.models.historical_memory_list_response import HistoricalMemoryListResponse
+from azentspublicclient.models.historical_memory_settings_scope import HistoricalMemorySettingsScope
+from azentspublicclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentspublicclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentspublicclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentspublicclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentspublicclient.AgentV1Api(api_client)
+    handle = 'handle_example' # str | 
+    agent_id = 'agent_id_example' # str | 
+    scope = azentspublicclient.HistoricalMemorySettingsScope() # HistoricalMemorySettingsScope | Exact Historical Memory source scope
+    query = 'query_example' # str | Optional source title or summary search (optional)
+    cursor = 'cursor_example' # str | Opaque continuation cursor (optional)
+    limit = 20 # int | Maximum records to return (optional) (default to 20)
+
+    try:
+        # List Agent Historical Memories
+        api_response = api_instance.agent_v1_list_agent_historical_memories(handle, agent_id, scope, query=query, cursor=cursor, limit=limit)
+        print("The response of AgentV1Api->agent_v1_list_agent_historical_memories:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling AgentV1Api->agent_v1_list_agent_historical_memories: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **handle** | **str**|  | 
+ **agent_id** | **str**|  | 
+ **scope** | [**HistoricalMemorySettingsScope**](.md)| Exact Historical Memory source scope | 
+ **query** | **str**| Optional source title or summary search | [optional] 
+ **cursor** | **str**| Opaque continuation cursor | [optional] 
+ **limit** | **int**| Maximum records to return | [optional] [default to 20]
+
+### Return type
+
+[**HistoricalMemoryListResponse**](HistoricalMemoryListResponse.md)
 
 ### Authorization
 

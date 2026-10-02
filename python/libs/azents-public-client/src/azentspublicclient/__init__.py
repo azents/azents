@@ -267,6 +267,9 @@ __all__ = [
     "GoalUpdateRequest",
     "HTTPValidationError",
     "HealthStatus",
+    "HistoricalMemoryListResponse",
+    "HistoricalMemoryResponse",
+    "HistoricalMemorySettingsScope",
     "ImageFile",
     "ImageGenerationCatalogAttemptResponse",
     "ImageGenerationCatalogEntryResponse",
@@ -841,6 +844,9 @@ from azentspublicclient.models.goal_status_update_request import GoalStatusUpdat
 from azentspublicclient.models.goal_update_request import GoalUpdateRequest as GoalUpdateRequest
 from azentspublicclient.models.http_validation_error import HTTPValidationError as HTTPValidationError
 from azentspublicclient.models.health_status import HealthStatus as HealthStatus
+from azentspublicclient.models.historical_memory_list_response import HistoricalMemoryListResponse as HistoricalMemoryListResponse
+from azentspublicclient.models.historical_memory_response import HistoricalMemoryResponse as HistoricalMemoryResponse
+from azentspublicclient.models.historical_memory_settings_scope import HistoricalMemorySettingsScope as HistoricalMemorySettingsScope
 from azentspublicclient.models.image_file import ImageFile as ImageFile
 from azentspublicclient.models.image_generation_catalog_attempt_response import ImageGenerationCatalogAttemptResponse as ImageGenerationCatalogAttemptResponse
 from azentspublicclient.models.image_generation_catalog_entry_response import ImageGenerationCatalogEntryResponse as ImageGenerationCatalogEntryResponse

@@ -1,7 +1,12 @@
 import { rem } from "@mantine/core";
+import { expect, within } from "storybook/test";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import { AgentMemorySettings } from "./AgentMemorySettings";
-import type { AgentResponse, MemoryResponse } from "@azents/public-client";
+import type {
+  AgentResponse,
+  HistoricalMemoryResponse,
+  MemoryResponse,
+} from "@azents/public-client";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
 const agent: AgentResponse = {
@@ -73,6 +78,29 @@ const memories: MemoryResponse[] = [
   },
 ];
 
+const historicalMemories: HistoricalMemoryResponse[] = [
+  {
+    source_session_id: "session_01",
+    scope: "team",
+    source_title: "October release readiness",
+    source_activity_through: "2026-10-01T08:30:00Z",
+    prepared_at: "2026-10-01T15:00:00Z",
+    summary:
+      "The team completed migration verification and kept the deployment blocked until the required CI matrix passed. The next step is to confirm the rollback note before publishing the release.",
+    source_path: "/w/engineering/agents/agent_01/sessions/session_01",
+  },
+  {
+    source_session_id: "session_02",
+    scope: "team",
+    source_title: "Dependency security follow-up",
+    source_activity_through: "2026-09-30T06:00:00Z",
+    prepared_at: "2026-09-30T13:00:00Z",
+    summary:
+      "A transitive dependency remained blocked by its parent constraint. The agreed follow-up was to update the parent dependency instead of adding an override.",
+    source_path: "/w/engineering/agents/agent_01/sessions/session_02",
+  },
+];
+
 const meta = {
   component: AgentMemorySettings,
   decorators: [
@@ -86,16 +114,29 @@ const meta = {
     handle: "engineering",
     agent,
     memoryEnabled: true,
-    scope: "agent",
-    query: "",
-    listState: { type: "LOADED", memories },
+    kind: "saved",
+    savedScope: "agent",
+    historicalScope: "team",
+    savedQuery: "",
+    historicalQuery: "",
+    savedListState: { type: "LOADED", memories },
+    historicalListState: {
+      type: "LOADED",
+      memories: historicalMemories,
+      hasMore: false,
+    },
     draftState: null,
     actionError: null,
     saving: false,
     deletingId: null,
     togglingMemory: false,
-    onScopeChange: noop,
-    onQueryChange: noop,
+    loadingMoreHistorical: false,
+    onKindChange: noop,
+    onSavedScopeChange: noop,
+    onHistoricalScopeChange: noop,
+    onSavedQueryChange: noop,
+    onHistoricalQueryChange: noop,
+    onLoadMoreHistorical: noop,
     onMemoryEnabledChange: noop,
     onStartCreate: noop,
     onStartEdit: noop,
@@ -110,15 +151,15 @@ export default meta;
 
 type Story = StoryObj<typeof meta>;
 
-export const Loaded = {} satisfies Story;
+export const SavedLoaded = {} satisfies Story;
 
-export const Empty = {
+export const SavedEmpty = {
   args: {
-    listState: { type: "LOADED", memories: [] },
+    savedListState: { type: "LOADED", memories: [] },
   },
 } satisfies Story;
 
-export const Editing = {
+export const SavedEditing = {
   args: {
     draftState: {
       type: "edit",
@@ -130,6 +171,59 @@ export const Editing = {
         content:
           "Always verify CI, migrations, and rollback notes before announcing a release.",
       },
+    },
+  },
+} satisfies Story;
+
+export const HistoricalLoaded = {
+  args: {
+    kind: "historical",
+    memoryEnabled: false,
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      canvas.getByRole("link", {
+        name: "Open conversation: October release readiness",
+      }),
+    ).toBeVisible();
+    await expect(
+      canvas.queryByRole("button", { name: "Add memory" }),
+    ).not.toBeInTheDocument();
+    await expect(
+      canvas.queryByRole("button", { name: "Edit" }),
+    ).not.toBeInTheDocument();
+    await expect(
+      canvas.queryByRole("button", { name: "Delete" }),
+    ).not.toBeInTheDocument();
+  },
+} satisfies Story;
+
+export const HistoricalEmpty = {
+  args: {
+    kind: "historical",
+    historicalScope: "user",
+    historicalListState: {
+      type: "LOADED",
+      memories: [],
+      hasMore: false,
+    },
+  },
+} satisfies Story;
+
+export const HistoricalLoading = {
+  args: {
+    kind: "historical",
+    historicalListState: { type: "LOADING" },
+  },
+} satisfies Story;
+
+export const HistoricalError = {
+  args: {
+    kind: "historical",
+    historicalListState: {
+      type: "ERROR",
+      message: "Historical Memory is temporarily unavailable.",
     },
   },
 } satisfies Story;
