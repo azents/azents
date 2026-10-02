@@ -1,195 +1,253 @@
-"""Deterministic coverage for public External Channel input observations."""
+"""Pure regressions for bounded complete External Channel input evidence.
+
+HTTP responses are injected into the actual scenario helpers. These tests do not
+open listeners, run containers, or read or mutate product databases.
+"""
 
 import json
 from collections.abc import Callable
+from typing import NamedTuple
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 import requests
 
 from tests.required.public import external_channel_scenarios as scenarios
 
-_PUBLIC_URL = "http://public.invalid"
-_SESSION_ID = "session-evidence"
-_INPUT: dict[str, object] = {
-    "type": "external_channel_message",
-    "provider": "slack",
-    "external_message_id": "1710000000.000200",
-    "prompt_role": "invocation",
-    "body": "socket request",
-    "original_url": None,
-}
+_SERVER = "http://injected-evidence.invalid"
+_SESSION_ID = "s" * 32
+_TOKEN = "injected-token"
 
 
-def _response(payload: dict[str, object]) -> requests.Response:
+class _Call(NamedTuple):
+    """One observed request with decoded public API query parameters."""
+
+    path: str
+    query: dict[str, list[str]]
+
+
+def _response(payload: dict[str, object], *, url: str) -> requests.Response:
+    """Construct a real response without acquiring a network connection."""
     response = requests.Response()
     response.status_code = 200
+    response.url = url
+    response.encoding = "utf-8"
+    response.headers["Content-Type"] = "application/json"
     response._content = json.dumps(payload).encode()
     return response
 
 
-def _history(items: list[dict[str, object]]) -> dict[str, object]:
+def _install_get(
+    monkeypatch: pytest.MonkeyPatch,
+    payload_for: Callable[[_Call], dict[str, object]],
+) -> list[_Call]:
+    calls: list[_Call] = []
+
+    def get(url: str, **kwargs: object) -> requests.Response:
+        parsed = urlsplit(url)
+        query = parse_qs(parsed.query)
+        params = kwargs.get("params")
+        if params is not None:
+            assert isinstance(params, dict)
+            for key, value in params.items():
+                assert isinstance(key, str)
+                if value is not None:
+                    query[key] = [str(value)]
+        assert kwargs.get("headers") == {"Authorization": f"Bearer {_TOKEN}"}
+        assert kwargs.get("timeout") == 10
+        call = _Call(path=parsed.path, query=query)
+        calls.append(call)
+        return _response(payload_for(call), url=url)
+
+    monkeypatch.setattr(scenarios.requests, "get", get)
+    return calls
+
+
+def _input_event(index: int) -> dict[str, object]:
+    """Create one public-projection input with stable provider identity."""
     return {
-        "items": [
-            {"kind": "external_channel_message", "payload": item} for item in items
-        ]
+        "id": f"{index:032x}",
+        "kind": "external_channel_message",
+        "payload": {
+            "provider": "discord",
+            "external_message_id": f"discord:guild:{index}",
+            "prompt_role": "invocation",
+            "body": f"participant input {index}",
+            "original_url": f"https://discord.com/channels/guild/channel/{index}",
+        },
     }
 
 
-def _live(items: list[dict[str, object]]) -> dict[str, object]:
+def _held_event(index: int) -> dict[str, object]:
     return {
-        "mailbox_items": [
-            {
-                "kind": "external_channel_message",
-                "items": [{"presentation": item} for item in items],
-            }
-        ]
+        "id": f"{index:032x}",
+        "kind": "client_tool_result",
+        "payload": {"call_id": f"held-progress-{index}", "output": "Work is held"},
     }
 
 
-def _read_evidence() -> list[dict[str, object]]:
+def _page(events: list[dict[str, object]], *, has_more: bool) -> dict[str, object]:
+    return {
+        "items": events,
+        "has_more": has_more,
+        "next_cursor": events[0]["id"] if events else None,
+    }
+
+
+def _read_inputs(*, include_pending: bool) -> list[dict[str, object]]:
     return scenarios._external_channel_input_evidence(
-        public_server_url=_PUBLIC_URL,
-        token="synthetic-token",
+        public_server_url=_SERVER,
+        token=_TOKEN,
         session_id=_SESSION_ID,
+        include_pending=include_pending,
     )
 
 
-def test_promotion_between_public_reads_does_not_lose_input(
+@pytest.mark.parametrize("input_count", [3, 4])
+def test_old_inputs_survive_more_than_one_page_of_held_events(
     monkeypatch: pytest.MonkeyPatch,
+    input_count: int,
 ) -> None:
-    """Move input from mailbox to history after exactly the first API read."""
-    promoted = False
+    """Recent Tool churn must not become a false negative for promoted inputs."""
+    events = [
+        *[_input_event(index) for index in range(1, input_count + 1)],
+        *[_held_event(index) for index in range(100, 340)],
+    ]
 
-    def get(url: str, *, headers: dict[str, str], timeout: int) -> requests.Response:
-        nonlocal promoted
-        del headers, timeout
-        if url.endswith("/live"):
-            payload = _live([] if promoted else [_INPUT])
-        else:
-            assert url.endswith("/history?limit=100")
-            payload = _history([_INPUT] if promoted else [])
-        promoted = True
-        return _response(payload)
+    def payload_for(call: _Call) -> dict[str, object]:
+        assert call.path == f"/chat/v1/sessions/{_SESSION_ID}/history"
+        assert call.query["limit"] == ["100"]
+        assert "after" not in call.query
+        before = call.query.get("before")
+        candidates = events
+        if before is not None:
+            candidates = [event for event in events if str(event["id"]) < before[0]]
+        return _page(candidates[-100:], has_more=len(candidates) > 100)
 
-    monkeypatch.setattr(scenarios.requests, "get", get)
+    calls = _install_get(monkeypatch, payload_for)
+    evidence = _read_inputs(include_pending=False)
 
-    evidence = _read_evidence()
+    assert len(evidence) == input_count
+    assert {item["external_message_id"] for item in evidence} == {
+        f"discord:guild:{index}" for index in range(1, input_count + 1)
+    }
+    assert {item["body"] for item in evidence} == {
+        f"participant input {index}" for index in range(1, input_count + 1)
+    }
+    assert len(calls) == 3
+    assert "before" not in calls[0].query
+    assert calls[1].query["before"] == [str(events[-100]["id"])]
+    assert calls[2].query["before"] == [str(events[-200]["id"])]
+    assert all(call.path.endswith("/history") for call in calls)
 
-    assert len(evidence) == 1
-    assert evidence[0]["external_message_id"] == _INPUT["external_message_id"]
 
-
-def test_live_and_history_overlap_counts_one_logical_input(
+@pytest.mark.parametrize("conflicting_live", [False, True])
+def test_live_and_paged_history_retain_consistency_check(
     monkeypatch: pytest.MonkeyPatch,
+    conflicting_live: bool,
 ) -> None:
-    """The ordered reads can overlap while an input is promoted."""
+    """Paging must preserve live/history agreement and logical-ID deduplication."""
+    event = _input_event(1)
+    payload = event["payload"]
+    assert isinstance(payload, dict)
+    presentation = {str(key): value for key, value in payload.items()}
+    presentation["type"] = "external_channel_message"
+    if conflicting_live:
+        presentation["body"] = "conflicting body"
 
-    def get(url: str, *, headers: dict[str, str], timeout: int) -> requests.Response:
-        del headers, timeout
-        return _response(
-            _live([_INPUT]) if url.endswith("/live") else _history([_INPUT])
+    def payload_for(call: _Call) -> dict[str, object]:
+        if call.path.endswith("/history"):
+            return _page([event], has_more=False)
+        assert call.path == f"/chat/v1/sessions/{_SESSION_ID}/live"
+        return {
+            "mailbox_items": [
+                {
+                    "kind": "external_channel_message",
+                    "items": [{"presentation": presentation}],
+                },
+            ],
+        }
+
+    calls = _install_get(monkeypatch, payload_for)
+    if conflicting_live:
+        with pytest.raises(AssertionError, match="disagree"):
+            _read_inputs(include_pending=True)
+    else:
+        evidence = _read_inputs(include_pending=True)
+        assert len(evidence) == 1
+        assert evidence[0]["external_message_id"] == "discord:guild:1"
+    assert sum(call.path.endswith("/live") for call in calls) == 1
+
+
+@pytest.mark.parametrize("has_more", [None, "false", 0])
+def test_invalid_has_more_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+    has_more: object,
+) -> None:
+    """Malformed pagination must not produce a silently partial input count."""
+    payload = _page([_input_event(1)], has_more=False)
+    payload["has_more"] = has_more
+    calls = _install_get(monkeypatch, lambda _: payload)
+    with pytest.raises(AssertionError):
+        _read_inputs(include_pending=False)
+    assert len(calls) == 1
+
+
+def test_missing_cursor_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A nonterminal page without a cursor is not complete history evidence."""
+    payload = _page([_input_event(1)], has_more=True)
+    payload["next_cursor"] = None
+    calls = _install_get(monkeypatch, lambda _: payload)
+    with pytest.raises(AssertionError):
+        _read_inputs(include_pending=False)
+    assert len(calls) == 1
+
+
+def test_repeated_cursor_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Cursor cycles cannot fabricate exhaustion or loop until a test timeout."""
+    pages: list[dict[str, object]] = [
+        _page([_held_event(3)], has_more=True),
+        {
+            "items": [_input_event(2)],
+            "has_more": True,
+            "next_cursor": f"{3:032x}",
+        },
+    ]
+    calls = _install_get(monkeypatch, lambda _: pages.pop(0))
+    with pytest.raises(AssertionError):
+        _read_inputs(include_pending=False)
+    assert len(calls) == 2
+
+
+def test_page_overlap_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Overlapping public pages cannot silently deduplicate a broken cursor."""
+    pages = [
+        _page([_held_event(3)], has_more=True),
+        _page([_input_event(2), _held_event(3)], has_more=False),
+    ]
+    calls = _install_get(monkeypatch, lambda _: pages.pop(0))
+    with pytest.raises(AssertionError):
+        _read_inputs(include_pending=False)
+    assert len(calls) == 2
+
+
+def test_twenty_page_cap_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The bounded sampler must reject unexhausted 2,000-event evidence."""
+    page_number = 0
+
+    def payload_for(call: _Call) -> dict[str, object]:
+        nonlocal page_number
+        assert call.path.endswith("/history")
+        assert call.query["limit"] == ["100"]
+        start = 2_000 - 100 * (page_number + 1)
+        page_number += 1
+        return _page(
+            [_held_event(index) for index in range(start, start + 100)],
+            has_more=True,
         )
 
-    monkeypatch.setattr(scenarios.requests, "get", get)
-
-    assert len(_read_evidence()) == 1
-
-
-@pytest.mark.parametrize("promoted", [False, True])
-def test_stable_input_is_visible_before_and_after_promotion(
-    monkeypatch: pytest.MonkeyPatch,
-    promoted: bool,
-) -> None:
-    """Read one input when it remains wholly in either public projection."""
-
-    def get(url: str, *, headers: dict[str, str], timeout: int) -> requests.Response:
-        del headers, timeout
-        return _response(
-            _live([] if promoted else [_INPUT])
-            if url.endswith("/live")
-            else _history([_INPUT] if promoted else [])
-        )
-
-    monkeypatch.setattr(scenarios.requests, "get", get)
-
-    assert len(_read_evidence()) == 1
-
-
-def test_live_and_history_disagreement_remains_a_failure(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Ordering must preserve conflicting-projection detection."""
-
-    def get(url: str, *, headers: dict[str, str], timeout: int) -> requests.Response:
-        del headers, timeout
-        return _response(
-            _live([_INPUT])
-            if url.endswith("/live")
-            else _history([{**_INPUT, "body": "different input"}])
-        )
-
-    monkeypatch.setattr(scenarios.requests, "get", get)
-
-    with pytest.raises(AssertionError, match="projections disagree"):
-        _read_evidence()
-
-
-def test_single_history_input_waits_for_durable_admission(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Binding existence must not substitute for history promotion."""
-    reads = 0
-
-    def get(url: str, *, headers: dict[str, str], timeout: int) -> requests.Response:
-        nonlocal reads
-        del headers, timeout
-        assert url.endswith("/history?limit=100")
-        reads += 1
-        return _response(_history([] if reads == 1 else [_INPUT]))
-
-    def wait(
-        condition: Callable[[], list[dict[str, object]]],
-        *,
-        timeout: float,
-        interval: float,
-        message: str,
-    ) -> list[dict[str, object]]:
-        del timeout, interval, message
-        assert condition() == []
-        result = condition()
-        assert len(result) == 1
-        return result
-
-    monkeypatch.setattr(scenarios.requests, "get", get)
-    monkeypatch.setattr(scenarios, "wait_until", wait)
-
-    evidence = scenarios._wait_for_single_external_channel_history_input(
-        public_server_url=_PUBLIC_URL,
-        token="synthetic-token",
-        session_id=_SESSION_ID,
-    )
-
-    assert reads == 2
-    assert evidence["external_message_id"] == _INPUT["external_message_id"]
-
-
-def test_single_history_input_rejects_extra_logical_messages(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The readiness wait cannot filter out a real cardinality regression."""
-
-    def get(url: str, *, headers: dict[str, str], timeout: int) -> requests.Response:
-        del headers, timeout
-        assert url.endswith("/history?limit=100")
-        return _response(
-            _history([_INPUT, {**_INPUT, "external_message_id": "different-message"}])
-        )
-
-    monkeypatch.setattr(scenarios.requests, "get", get)
-
-    with pytest.raises(AssertionError, match="observed 2"):
-        scenarios._wait_for_single_external_channel_history_input(
-            public_server_url=_PUBLIC_URL,
-            token="synthetic-token",
-            session_id=_SESSION_ID,
-        )
+    calls = _install_get(monkeypatch, payload_for)
+    with pytest.raises(AssertionError):
+        _read_inputs(include_pending=False)
+    assert len(calls) == 20
+    assert all(call.path.endswith("/history") for call in calls)

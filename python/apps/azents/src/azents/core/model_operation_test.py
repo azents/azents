@@ -322,3 +322,18 @@ def test_title_operation_is_standalone_not_a_run_slot() -> None:
     assert title.kind is ModelOperationKind.TITLE
     with pytest.raises(ValidationError, match="Foreground slot"):
         ModelOperationState(foreground=title, compaction=None)
+
+
+def test_historical_memory_operation_is_standalone_not_a_run_slot() -> None:
+    """Historical Memory owns source state instead of an AgentRun operation slot."""
+    memory = build_model_operation(
+        option=_option(candidate_count=1),
+        profile=_profile(),
+        kind=ModelOperationKind.HISTORICAL_MEMORY,
+        operation_id="1" * 32,
+        recorded_at=_RECORDED_AT,
+    )
+
+    assert memory.kind is ModelOperationKind.HISTORICAL_MEMORY
+    with pytest.raises(ValidationError, match="Foreground slot"):
+        ModelOperationState(foreground=memory, compaction=None)

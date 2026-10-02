@@ -823,6 +823,58 @@ def _successful_session_presence_states(
     return states
 
 
+def _bounded_session_history_events(
+    *,
+    public_server_url: str,
+    token: str,
+    session_id: str,
+) -> list[dict[str, object]]:
+    """Read one fixed-tail history sample without partial-count evidence."""
+    pages: list[list[dict[str, object]]] = []
+    seen_ids: set[str] = set()
+    seen_cursors: set[str] = set()
+    before: str | None = None
+    for _ in range(20):
+        params: dict[str, str | int] = {"limit": 100}
+        if before is not None:
+            params["before"] = before
+        response = requests.get(
+            f"{public_server_url}/chat/v1/sessions/{session_id}/history",
+            headers={"Authorization": f"Bearer {token}"},
+            params=params,
+            timeout=10,
+        )
+        response.raise_for_status()
+        page = _object(response.json())
+        items = _objects(page.get("items"))
+        ids = [_string(item.get("id")) for item in items]
+        if (
+            len(items) > 100
+            or len(set(ids)) != len(ids)
+            or not seen_ids.isdisjoint(ids)
+        ):
+            raise AssertionError("History pages overlap or exceed the page bound")
+        seen_ids.update(ids)
+        pages.append(items)
+        has_more = page.get("has_more")
+        if not isinstance(has_more, bool):
+            raise AssertionError("History page has invalid has_more")
+        if not has_more:
+            return [event for chunk in reversed(pages) for event in chunk]
+        cursor = page.get("next_cursor")
+        if (
+            not isinstance(cursor, str)
+            or not cursor
+            or not ids
+            or cursor != ids[0]
+            or cursor in seen_cursors
+        ):
+            raise AssertionError("History page has invalid backward cursor")
+        seen_cursors.add(cursor)
+        before = cursor
+    raise AssertionError("History evidence exceeded its 20-page bound")
+
+
 def _external_channel_input_evidence(
     *,
     public_server_url: str,
@@ -864,25 +916,17 @@ def _external_channel_input_evidence(
 
     # Promotion moves input from the mailbox to history. Read the source first
     # so a move between requests can overlap, but cannot hide the input in both.
-    history_response = requests.get(
-        f"{public_server_url}/chat/v1/sessions/{session_id}/history?limit=100",
-        headers={"Authorization": f"Bearer {token}"},
-        timeout=10,
+    history_events = _bounded_session_history_events(
+        public_server_url=public_server_url,
+        token=token,
+        session_id=session_id,
     )
-    history_response.raise_for_status()
-    history_payload = history_response.json()
-    if isinstance(history_payload, dict):
-        events = _object(history_payload).get("items")
-        if isinstance(events, list):
-            for raw_event in _list(events):
-                if not isinstance(raw_event, dict):
-                    continue
-                event = _object(raw_event)
-                event_payload = event.get("payload")
-                if event.get("kind") == "external_channel_message" and isinstance(
-                    event_payload, dict
-                ):
-                    candidates.append(_object(event_payload))
+    for event in history_events:
+        event_payload = event.get("payload")
+        if event.get("kind") == "external_channel_message" and isinstance(
+            event_payload, dict
+        ):
+            candidates.append(_object(event_payload))
 
     logical_items: dict[tuple[str, str], dict[str, object]] = {}
     for candidate in candidates:
@@ -1161,23 +1205,13 @@ def _channel_action_tool_evidence(
     call_ids: frozenset[str],
 ) -> list[dict[str, object]]:
     """Return sanitized Channel Action call and result evidence."""
-    response = requests.get(
-        f"{public_server_url}/chat/v1/sessions/{session_id}/history?limit=100",
-        headers={"Authorization": f"Bearer {token}"},
-        timeout=10,
+    items = _bounded_session_history_events(
+        public_server_url=public_server_url,
+        token=token,
+        session_id=session_id,
     )
-    response.raise_for_status()
-    payload = response.json()
-    if not isinstance(payload, dict):
-        return []
-    items = _object(payload).get("items")
-    if not isinstance(items, list):
-        return []
     evidence: list[dict[str, object]] = []
-    for raw_event in _list(items):
-        if not isinstance(raw_event, dict):
-            continue
-        event = _object(raw_event)
+    for event in items:
         kind = event.get("kind")
         if kind not in {"client_tool_call", "client_tool_result"}:
             continue
@@ -1356,19 +1390,11 @@ def _session_history(
     session_id: str,
 ) -> list[dict[str, object]]:
     """Return durable Session history in canonical order."""
-    response = requests.get(
-        f"{public_server_url}/chat/v1/sessions/{session_id}/history?limit=100",
-        headers={"Authorization": f"Bearer {token}"},
-        timeout=10,
+    return _bounded_session_history_events(
+        public_server_url=public_server_url,
+        token=token,
+        session_id=session_id,
     )
-    response.raise_for_status()
-    payload = response.json()
-    if not isinstance(payload, dict):
-        return []
-    items = _object(payload).get("items")
-    if not isinstance(items, list):
-        return []
-    return [_object(item) for item in _list(items) if isinstance(item, dict)]
 
 
 def _turn_run_ids(history: list[dict[str, object]]) -> list[str]:

@@ -37,10 +37,20 @@ def make_test_model_stream_watchdog(
 
 def make_test_model_stream_context(
     *,
-    call_kind: Literal["sampling", "compaction", "session_title"] = "sampling",
+    call_kind: Literal[
+        "sampling",
+        "compaction",
+        "session_title",
+        "historical_memory",
+    ] = "sampling",
 ) -> ModelStreamCallContext:
     """Create safe context for adapter and shared Responses tests."""
-    if call_kind not in {"sampling", "compaction", "session_title"}:
+    if call_kind not in {
+        "sampling",
+        "compaction",
+        "session_title",
+        "historical_memory",
+    }:
         raise ValueError("unsupported test model stream call kind")
     return ModelStreamCallContext(
         call_kind=call_kind,
