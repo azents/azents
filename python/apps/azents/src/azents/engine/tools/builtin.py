@@ -140,6 +140,9 @@ from azents.services.file_storage import (
     GrepResult,
     TextReadResult,
 )
+from azents.services.historical_memory.context_snapshot import (
+    MemoryContextSnapshotService,
+)
 from azents.services.model_file import ModelFileService
 from azents.services.runtime_storage_error import (
     RuntimeStorageError,
@@ -427,12 +430,15 @@ class MemoryReadToolkit(Toolkit[ShellToolkitConfig]):
         agent_id: str,
         session_manager: SessionManager[AsyncSession],
         memory_repo: MemoryRepository,
+        memory_context_snapshot_service: MemoryContextSnapshotService,
     ) -> None:
         self._config = config
         self._agent_id = agent_id
         self._session_id = ""
+        self._root_session_id = ""
         self.session_manager = session_manager
         self.memory_repo = memory_repo
+        self.memory_context_snapshot_service = memory_context_snapshot_service
         self._execution_owner: SessionExecutionOwner | None = None
 
     def bind_execution_owner(self, owner: SessionExecutionOwner) -> None:
@@ -456,6 +462,7 @@ class MemoryReadToolkit(Toolkit[ShellToolkitConfig]):
         """Validate full resource identity and bind its durable owner."""
         if authority.agent_id != self._agent_id:
             raise ValueError("Execution authority Agent does not match Toolkit")
+        self._root_session_id = authority.root_session_id
         self.bind_execution_owner(authority.execution_owner)
 
     def set_agent_id(self, agent_id: str) -> None:
@@ -471,6 +478,7 @@ class MemoryReadToolkit(Toolkit[ShellToolkitConfig]):
         :param session_id: Current session ID
         """
         self._session_id = session_id
+        self._root_session_id = session_id
 
     async def update_context(self, context: TurnContext) -> ToolkitState:
         """Return memory read tools."""
@@ -514,22 +522,13 @@ class MemoryReadToolkit(Toolkit[ShellToolkitConfig]):
         return ToolkitState(status=ToolkitStatus.ENABLED, tools=tools)
 
     async def get_dynamic_prompt(self, context: TurnContext) -> str:
-        """Return dynamic memory read prompt for the current turn."""
+        """Return the persisted boundary Memory snapshot for the current turn."""
+        del context
         if not self._config.memory_enabled:
             return ""
-        operations = _memory_operations(
+        return await self.memory_context_snapshot_service.prompt_for_turn(
+            session_id=self._root_session_id,
             session_manager=self.session_manager,
-            memory_repository=self.memory_repo,
-        )
-        associated_user_id = await _resolve_associated_user_id(
-            operations=operations,
-            session_id=self._session_id,
-        )
-        return await collect_memory_prompt(
-            operations,
-            self._agent_id,
-            _MEMORY_READ_RULES_PROMPT,
-            user_id=associated_user_id,
         )
 
 
@@ -1587,6 +1586,7 @@ class BuiltinToolkitProvider(ToolkitProvider[ShellToolkitConfig]):
         agents_store: AgentsAppendixDedupeStateStore,
         session_manager: SessionManager[AsyncSession],
         memory_repo: MemoryRepository,
+        memory_context_snapshot_service: MemoryContextSnapshotService,
         agent_runtime_repo: AgentRuntimeRepository,
         agent_runtime_service: AgentRuntimeService,
         runner_operations: RuntimeRunnerOperationClient,
@@ -1605,6 +1605,7 @@ class BuiltinToolkitProvider(ToolkitProvider[ShellToolkitConfig]):
         self.vfs_projection_service = vfs_projection_service
         self.session_manager = session_manager
         self.memory_repo = memory_repo
+        self.memory_context_snapshot_service = memory_context_snapshot_service
         self.agent_runtime_repo = agent_runtime_repo
         self.agent_runtime_service = agent_runtime_service
         self.runner_operations = runner_operations
@@ -1694,6 +1695,7 @@ class BuiltinToolkitProvider(ToolkitProvider[ShellToolkitConfig]):
             agent_id=context.agent_id,
             session_manager=self.session_manager,
             memory_repo=self.memory_repo,
+            memory_context_snapshot_service=self.memory_context_snapshot_service,
         )
 
     async def resolve_memory_write(

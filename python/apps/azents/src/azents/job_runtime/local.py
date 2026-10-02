@@ -67,6 +67,11 @@ class LocalJobRuntime:
         self.container_factory = container_factory
         self.cancellation_grace_seconds = cancellation_grace_seconds
         self._semaphore = asyncio.Semaphore(max_concurrency)
+        self._handler_semaphores = {
+            definition.key: asyncio.Semaphore(definition.max_concurrency)
+            for definition in handlers.definitions()
+            if definition.max_concurrency is not None
+        }
         self._lock = asyncio.Lock()
         self._tasks: dict[str, asyncio.Task[JobOutcome]] = {}
         self._rerun_requests: dict[str, JobRequest] = {}
@@ -186,9 +191,21 @@ class LocalJobRuntime:
         remaining = self._remaining_seconds(request)
         if remaining <= 0:
             return JobOutcome.timed_out()
+        handler_semaphore = self._handler_semaphores.get(request.handler_key)
+        if handler_semaphore is not None:
+            try:
+                await asyncio.wait_for(handler_semaphore.acquire(), timeout=remaining)
+            except TimeoutError:
+                return JobOutcome.timed_out()
+            remaining = self._remaining_seconds(request)
+            if remaining <= 0:
+                handler_semaphore.release()
+                return JobOutcome.timed_out()
         try:
             await asyncio.wait_for(self._semaphore.acquire(), timeout=remaining)
         except TimeoutError:
+            if handler_semaphore is not None:
+                handler_semaphore.release()
             return JobOutcome.timed_out()
 
         container_stack: AsyncExitStack | None = AsyncExitStack()
@@ -223,6 +240,7 @@ class LocalJobRuntime:
                         handler_task,
                         container_stack,
                         request=request,
+                        handler_semaphore=handler_semaphore,
                     )
                     container_stack = None
                     release_semaphore = False
@@ -234,6 +252,7 @@ class LocalJobRuntime:
                         handler_task,
                         container_stack,
                         request=request,
+                        handler_semaphore=handler_semaphore,
                     )
                     container_stack = None
                     release_semaphore = False
@@ -252,6 +271,8 @@ class LocalJobRuntime:
                 await container_stack.aclose()
             if release_semaphore:
                 self._semaphore.release()
+                if handler_semaphore is not None:
+                    handler_semaphore.release()
 
     async def _cancel_handler(
         self,
@@ -300,6 +321,7 @@ class LocalJobRuntime:
         container_stack: AsyncExitStack,
         *,
         request: JobRequest,
+        handler_semaphore: asyncio.Semaphore | None,
     ) -> None:
         """Quarantine a cancellation-violating handler with its owned capacity."""
         async with self._lock:
@@ -309,6 +331,7 @@ class LocalJobRuntime:
                     handler_task,
                     container_stack,
                     request=request,
+                    handler_semaphore=handler_semaphore,
                 ),
                 name=f"job-cleanup:{request.handler_key}:{request.execution_key}",
             )
@@ -321,6 +344,7 @@ class LocalJobRuntime:
         container_stack: AsyncExitStack,
         *,
         request: JobRequest,
+        handler_semaphore: asyncio.Semaphore | None,
     ) -> None:
         """Close task-local resources when a non-cooperative handler settles."""
         try:
@@ -344,6 +368,8 @@ class LocalJobRuntime:
         finally:
             await container_stack.aclose()
             self._semaphore.release()
+            if handler_semaphore is not None:
+                handler_semaphore.release()
             current = asyncio.current_task()
             async with self._lock:
                 self._detached_execution_keys.discard(request.execution_key)

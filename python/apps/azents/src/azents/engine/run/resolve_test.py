@@ -491,6 +491,7 @@ def _make_builtin_provider() -> BuiltinToolkitProvider:
         agents_store=_FakeAgentsAppendixDedupeStateStore(),
         session_manager=_session_manager_for(session),
         memory_repo=AsyncMock(),
+        memory_context_snapshot_service=AsyncMock(),
         agent_runtime_repo=AsyncMock(),
         agent_runtime_service=AsyncMock(),
         runner_operations=AsyncMock(),

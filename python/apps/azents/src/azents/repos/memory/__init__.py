@@ -1,5 +1,6 @@
 """Memory repository."""
 
+from collections.abc import Sequence
 from typing import List
 
 import sqlalchemy as sa
@@ -201,6 +202,26 @@ class MemoryRepository:
         if rdb is None:
             return None
         return self._build(rdb)
+
+    async def list_by_ids(
+        self,
+        session: AsyncSession,
+        *,
+        agent_id: str,
+        memory_ids: Sequence[str],
+    ) -> List[Memory]:
+        """Fetch current rows for a bounded set of snapshot Memory IDs."""
+        if not memory_ids:
+            return []
+        result = await session.execute(
+            sa.select(RDBAgentMemory)
+            .where(
+                RDBAgentMemory.agent_id == agent_id,
+                RDBAgentMemory.id.in_(memory_ids),
+            )
+            .order_by(RDBAgentMemory.id)
+        )
+        return [self._build(row) for row in result.scalars()]
 
     async def list(
         self,

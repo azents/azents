@@ -1,6 +1,8 @@
 """Message repository based on Event transcript."""
 
+import dataclasses
 import json
+import time
 from typing import NamedTuple
 
 import sqlalchemy as sa
@@ -9,6 +11,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.core.enums import EventKind, MessageRole
 from azents.core.type_guards import is_object_list
 from azents.engine.events.action_messages import ActionMessagePayload
+from azents.engine.events.conversational_tool_projection import (
+    CONVERSATIONAL_TOOL_PROJECTIONS,
+)
+from azents.engine.events.historical_memory_projection import (
+    HistoricalMemoryEvidenceTier,
+    project_historical_memory_event,
+)
 from azents.engine.events.output_parts import iter_output_parts
 from azents.engine.events.provider_tool_rendering import render_provider_tool_semantic
 from azents.engine.events.types import (
@@ -58,6 +67,78 @@ _INVISIBLE_RETRY_ELIGIBILITY_ROLES = {
     MessageRole.COMPACTION_STARTED,
     MessageRole.COMPACTION,
 }
+_HISTORICAL_MEMORY_SCAN_PAGE_SIZE = 50
+_HISTORICAL_MEMORY_SCAN_ROW_MULTIPLIER = 8
+_HISTORICAL_MEMORY_SCAN_MAX_ROWS = 1_600
+_HISTORICAL_MEMORY_SCAN_MAX_PAGES = 32
+_HISTORICAL_MEMORY_SCAN_MAX_BYTES = 8 * 1024 * 1024
+_HISTORICAL_MEMORY_SCAN_MAX_SECONDS = 2.0
+
+
+@dataclasses.dataclass
+class _HistoricalMemoryScanBudget:
+    """Hard per-lane database scan bounds before semantic projection."""
+
+    max_rows: int
+    deadline: float
+    visited_rows: int = 0
+    visited_pages: int = 0
+    visited_bytes: int = 0
+
+    @classmethod
+    def for_limit(cls, limit: int) -> "_HistoricalMemoryScanBudget":
+        return cls(
+            max_rows=min(
+                max(
+                    _HISTORICAL_MEMORY_SCAN_PAGE_SIZE,
+                    limit * _HISTORICAL_MEMORY_SCAN_ROW_MULTIPLIER,
+                ),
+                _HISTORICAL_MEMORY_SCAN_MAX_ROWS,
+            ),
+            deadline=time.monotonic() + _HISTORICAL_MEMORY_SCAN_MAX_SECONDS,
+        )
+
+    @property
+    def exhausted(self) -> bool:
+        return (
+            self.visited_rows >= self.max_rows
+            or self.visited_pages >= _HISTORICAL_MEMORY_SCAN_MAX_PAGES
+            or self.visited_bytes >= _HISTORICAL_MEMORY_SCAN_MAX_BYTES
+            or time.monotonic() >= self.deadline
+        )
+
+    @property
+    def next_page_limit(self) -> int:
+        return min(
+            _HISTORICAL_MEMORY_SCAN_PAGE_SIZE,
+            self.max_rows - self.visited_rows,
+        )
+
+    def admit_page(self, rows: list[RDBEvent]) -> list[RDBEvent]:
+        """Count one query page and retain rows inside row/byte/time bounds."""
+        self.visited_pages += 1
+        admitted: list[RDBEvent] = []
+        for row in rows:
+            if (
+                self.visited_rows >= self.max_rows
+                or self.visited_bytes >= _HISTORICAL_MEMORY_SCAN_MAX_BYTES
+                or time.monotonic() >= self.deadline
+            ):
+                break
+            payload_bytes = len(
+                json.dumps(
+                    row.payload,
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                ).encode()
+            )
+            if self.visited_bytes + payload_bytes > _HISTORICAL_MEMORY_SCAN_MAX_BYTES:
+                self.visited_bytes = _HISTORICAL_MEMORY_SCAN_MAX_BYTES
+                break
+            self.visited_rows += 1
+            self.visited_bytes += payload_bytes
+            admitted.append(row)
+        return admitted
 
 
 class ChatMessagePage(NamedTuple):
@@ -566,6 +647,318 @@ class MessageRepository:
     ) -> RDBEvent | None:
         """Fetch message by ID."""
         return await session.get(RDBEvent, message_id)
+
+    async def get_event_by_id(
+        self,
+        session: AsyncSession,
+        event_id: str,
+    ) -> Event | None:
+        """Fetch and decode one transcript Event by ID."""
+        row = await session.get(RDBEvent, event_id)
+        return None if row is None else _to_event(row)
+
+    async def has_non_reverted_kind(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        kind: EventKind,
+    ) -> bool:
+        """Return whether one Session contains a non-reverted event kind."""
+        return bool(
+            await session.scalar(
+                sa.select(
+                    sa.exists().where(
+                        RDBEvent.session_id == session_id,
+                        RDBEvent.kind == kind,
+                        RDBEvent.reverted.is_(False),
+                    )
+                )
+            )
+        )
+
+    async def list_historical_memory_events_by_tier(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        tail_event_id: str,
+        per_tier_limit: int,
+    ) -> list[Event]:
+        """Load newest projector-eligible source evidence per semantic lane."""
+        if per_tier_limit < 1:
+            raise ValueError("Historical Memory tier limit must be positive.")
+        human_clause = sa.or_(
+            RDBEvent.kind.in_(
+                (
+                    EventKind.USER_MESSAGE,
+                    EventKind.ACTION_MESSAGE,
+                )
+            ),
+            sa.and_(
+                RDBEvent.kind == EventKind.EXTERNAL_CHANNEL_MESSAGE,
+                RDBEvent.payload["prompt_role"].astext == "invocation",
+            ),
+        )
+        semantic_lanes = (
+            (
+                human_clause,
+                HistoricalMemoryEvidenceTier.HUMAN,
+            ),
+            (
+                RDBEvent.kind == EventKind.ASSISTANT_MESSAGE,
+                HistoricalMemoryEvidenceTier.ASSISTANT,
+            ),
+            (
+                RDBEvent.kind == EventKind.AGENT_MESSAGE,
+                HistoricalMemoryEvidenceTier.OTHER_AGENT,
+            ),
+            (
+                RDBEvent.kind == EventKind.SYSTEM_ERROR,
+                HistoricalMemoryEvidenceTier.CONTEXT,
+            ),
+        )
+        rows_by_id: dict[str, RDBEvent] = {}
+        for clause, expected_tier in semantic_lanes:
+            rows = await self._list_historical_memory_eligible_lane(
+                session,
+                session_id=session_id,
+                tail_event_id=tail_event_id,
+                clause=clause,
+                expected_tier=expected_tier,
+                limit=per_tier_limit,
+            )
+            for row in rows:
+                rows_by_id[row.id] = row
+        conversational_tool_names = tuple(CONVERSATIONAL_TOOL_PROJECTIONS)
+        if conversational_tool_names:
+            registered_rows = await self._list_historical_memory_registered_tools(
+                session,
+                session_id=session_id,
+                tail_event_id=tail_event_id,
+                tool_names=conversational_tool_names,
+                limit=per_tier_limit,
+            )
+            for row in registered_rows:
+                rows_by_id[row.id] = row
+        generic_tool_clause = self._historical_memory_generic_tool_clause(
+            conversational_tool_names
+        )
+        generic_tool_rows = await self._list_historical_memory_eligible_lane(
+            session,
+            session_id=session_id,
+            tail_event_id=tail_event_id,
+            clause=generic_tool_clause,
+            expected_tier=HistoricalMemoryEvidenceTier.TOOL,
+            limit=per_tier_limit,
+        )
+        for row in generic_tool_rows:
+            rows_by_id[row.id] = row
+        return [_to_event(rows_by_id[event_id]) for event_id in sorted(rows_by_id)]
+
+    async def _list_historical_memory_eligible_lane(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        tail_event_id: str,
+        clause: sa.ColumnElement[bool],
+        expected_tier: HistoricalMemoryEvidenceTier,
+        limit: int,
+    ) -> list[RDBEvent]:
+        """Page one lane until its projector-eligible bound is filled."""
+        selected: list[RDBEvent] = []
+        before_id: str | None = None
+        budget = _HistoricalMemoryScanBudget.for_limit(limit)
+        while len(selected) < limit and not budget.exhausted:
+            statement = sa.select(RDBEvent).where(
+                RDBEvent.session_id == session_id,
+                RDBEvent.id <= tail_event_id,
+                RDBEvent.reverted.is_(False),
+                clause,
+            )
+            if before_id is not None:
+                statement = statement.where(RDBEvent.id < before_id)
+            page_limit = budget.next_page_limit
+            rows = list(
+                (
+                    await session.execute(
+                        statement.order_by(RDBEvent.id.desc()).limit(page_limit)
+                    )
+                ).scalars()
+            )
+            if not rows:
+                break
+            before_id = rows[-1].id
+            admitted_rows = budget.admit_page(rows)
+            for row in admitted_rows:
+                evidence = project_historical_memory_event(_to_event(row))
+                if evidence is None or evidence.tier is not expected_tier:
+                    continue
+                selected.append(row)
+                if len(selected) == limit:
+                    break
+            if len(rows) < page_limit or not admitted_rows:
+                break
+        return selected
+
+    async def _list_historical_memory_registered_tools(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        tail_event_id: str,
+        tool_names: tuple[str, ...],
+        limit: int,
+    ) -> list[RDBEvent]:
+        """Collect valid conversation calls and malformed-call Tool fallback."""
+        valid_rows: list[RDBEvent] = []
+        fallback_rows: list[RDBEvent] = []
+        linked_results: dict[str, RDBEvent] = {}
+        before_id: str | None = None
+        budget = _HistoricalMemoryScanBudget.for_limit(limit)
+        result_budget = _HistoricalMemoryScanBudget.for_limit(limit)
+        result_budget.deadline = budget.deadline
+        while (
+            len(valid_rows) < limit or len(fallback_rows) < limit
+        ) and not budget.exhausted:
+            statement = sa.select(RDBEvent).where(
+                RDBEvent.session_id == session_id,
+                RDBEvent.id <= tail_event_id,
+                RDBEvent.reverted.is_(False),
+                RDBEvent.kind == EventKind.CLIENT_TOOL_CALL,
+                RDBEvent.payload["name"].astext.in_(tool_names),
+            )
+            if before_id is not None:
+                statement = statement.where(RDBEvent.id < before_id)
+            page_limit = budget.next_page_limit
+            call_rows = list(
+                (
+                    await session.execute(
+                        statement.order_by(RDBEvent.id.desc()).limit(page_limit)
+                    )
+                ).scalars()
+            )
+            if not call_rows:
+                break
+            before_id = call_rows[-1].id
+            admitted_calls = budget.admit_page(call_rows)
+            if not admitted_calls:
+                break
+            call_ids = tuple(
+                call_id
+                for row in admitted_calls
+                if isinstance((call_id := row.payload.get("call_id")), str)
+            )
+            result_rows = await self._historical_memory_tool_results(
+                session,
+                session_id=session_id,
+                tail_event_id=tail_event_id,
+                call_ids=call_ids,
+                budget=result_budget,
+            )
+            linked_results.update(
+                (
+                    call_id,
+                    row,
+                )
+                for row in result_rows
+                if isinstance((call_id := row.payload.get("call_id")), str)
+            )
+            result_payloads = {
+                call_id: payload
+                for call_id, row in linked_results.items()
+                if isinstance(
+                    (payload := _to_event(row).payload),
+                    ClientToolResultPayload,
+                )
+            }
+            for row in admitted_calls:
+                evidence = project_historical_memory_event(
+                    _to_event(row),
+                    client_results=result_payloads,
+                )
+                if evidence is None:
+                    continue
+                target = (
+                    valid_rows
+                    if evidence.tier is HistoricalMemoryEvidenceTier.ASSISTANT
+                    else fallback_rows
+                )
+                if len(target) < limit:
+                    target.append(row)
+            if len(call_rows) < page_limit:
+                break
+        valid_call_ids = {
+            call_id
+            for row in valid_rows
+            if isinstance((call_id := row.payload.get("call_id")), str)
+        }
+        return [
+            *valid_rows,
+            *fallback_rows,
+            *(
+                row
+                for call_id, row in linked_results.items()
+                if call_id in valid_call_ids
+            ),
+        ]
+
+    async def _historical_memory_tool_results(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        tail_event_id: str,
+        call_ids: tuple[str, ...],
+        budget: _HistoricalMemoryScanBudget,
+    ) -> list[RDBEvent]:
+        """Load correlated registered-tool results for one call page."""
+        if not call_ids or budget.exhausted:
+            return []
+        result = await session.execute(
+            sa.select(RDBEvent)
+            .where(
+                RDBEvent.session_id == session_id,
+                RDBEvent.id <= tail_event_id,
+                RDBEvent.reverted.is_(False),
+                RDBEvent.kind == EventKind.CLIENT_TOOL_RESULT,
+                RDBEvent.payload["call_id"].astext.in_(call_ids),
+            )
+            .order_by(RDBEvent.id.desc())
+            .limit(budget.next_page_limit)
+        )
+        return budget.admit_page(list(result.scalars()))
+
+    @staticmethod
+    def _historical_memory_generic_tool_clause(
+        registered_tool_names: tuple[str, ...],
+    ) -> sa.ColumnElement[bool]:
+        """Exclude registered tool rows owned by the dedicated semantic lanes."""
+        if not registered_tool_names:
+            return RDBEvent.kind.in_(
+                (
+                    EventKind.CLIENT_TOOL_CALL,
+                    EventKind.CLIENT_TOOL_RESULT,
+                    EventKind.PROVIDER_TOOL_CALL,
+                )
+            )
+        unregistered_name = sa.or_(
+            RDBEvent.payload["name"].astext.is_(None),
+            RDBEvent.payload["name"].astext.not_in(registered_tool_names),
+        )
+        return sa.or_(
+            RDBEvent.kind == EventKind.PROVIDER_TOOL_CALL,
+            sa.and_(
+                RDBEvent.kind.in_(
+                    (
+                        EventKind.CLIENT_TOOL_CALL,
+                        EventKind.CLIENT_TOOL_RESULT,
+                    )
+                ),
+                unregistered_name,
+            ),
+        )
 
     async def list_by_session_id_paginated(
         self,

@@ -5,6 +5,9 @@ from azents.scheduler.executor import SCHEDULER_JOB_HANDLER_KEY
 from azents.services.external_channel.ingress_queue import (
     EXTERNAL_CHANNEL_INGRESS_JOB_HANDLER_KEY,
 )
+from azents.services.historical_memory.constants import (
+    HISTORICAL_MEMORY_PREPARE_HANDLER_KEY,
+)
 
 
 def test_only_external_channel_ingress_reruns_on_coalesced_submission() -> None:
@@ -13,3 +16,5 @@ def test_only_external_channel_ingress_reruns_on_coalesced_submission() -> None:
 
     assert registry.reruns_on_coalesce(EXTERNAL_CHANNEL_INGRESS_JOB_HANDLER_KEY)
     assert not registry.reruns_on_coalesce(SCHEDULER_JOB_HANDLER_KEY)
+    assert registry.get(HISTORICAL_MEMORY_PREPARE_HANDLER_KEY) is not None
+    assert not registry.reruns_on_coalesce(HISTORICAL_MEMORY_PREPARE_HANDLER_KEY)

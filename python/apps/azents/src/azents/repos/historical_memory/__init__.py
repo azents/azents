@@ -1,6 +1,8 @@
 """Historical Memory source persistence operations."""
 
+import dataclasses
 import datetime
+from collections.abc import Sequence
 from typing import Annotated
 
 import sqlalchemy as sa
@@ -21,6 +23,10 @@ from azents.core.historical_memory import (
     HistoricalMemoryFailure,
     HistoricalMemorySource,
 )
+from azents.core.historical_memory_snapshot import (
+    HistoricalMemorySnapshotCandidate,
+    MemorySnapshotConsumer,
+)
 from azents.core.model_operation import ModelOperationSnapshot
 from azents.rdb.deps import get_session_manager
 from azents.rdb.models.agent import RDBAgent
@@ -29,6 +35,15 @@ from azents.rdb.models.event import RDBEvent
 from azents.rdb.models.historical_memory import RDBHistoricalMemorySource
 from azents.rdb.models.workspace_user import RDBWorkspaceUser
 from azents.rdb.session import SessionManager
+
+
+@dataclasses.dataclass(frozen=True)
+class HistoricalMemoryPreparationAdmission:
+    """Historical and Session rows locked for one preparation attempt."""
+
+    source: HistoricalMemoryDueSource
+    product_mode: AgentSessionProductMode
+    associated_user_id: str | None
 
 
 class HistoricalMemoryRepository:
@@ -43,6 +58,43 @@ class HistoricalMemoryRepository:
     ) -> None:
         """Create the repository."""
         self.session_manager = session_manager
+
+    async def get_snapshot_consumer_in_session(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+    ) -> MemorySnapshotConsumer | None:
+        """Return one currently authorized Memory-enabled root consumer."""
+        locked = (
+            await session.execute(
+                sa.select(RDBAgentSession, RDBAgent)
+                .join(RDBAgent, RDBAgent.id == RDBAgentSession.agent_id)
+                .where(
+                    RDBAgentSession.id == session_id,
+                    RDBAgentSession.session_kind == AgentSessionKind.ROOT,
+                    RDBAgentSession.status == AgentSessionStatus.ACTIVE,
+                    RDBAgent.memory_enabled.is_(True),
+                    self._authorized_source(),
+                )
+                .with_for_update(of=(RDBAgentSession, RDBAgent))
+            )
+        ).one_or_none()
+        if locked is None:
+            return None
+        row, _agent = locked
+        if row.product_mode is None or not await self._lock_associated_user_membership(
+            session, row
+        ):
+            return None
+        return MemorySnapshotConsumer(
+            session_id=row.id,
+            agent_id=row.agent_id,
+            workspace_id=row.workspace_id,
+            product_mode=row.product_mode,
+            associated_user_id=row.associated_user_id,
+            model_input_head_event_id=row.model_input_head_event_id,
+        )
 
     async def admit_eligible_sources(
         self,
@@ -171,6 +223,78 @@ class HistoricalMemoryRepository:
                 limit=limit,
             )
 
+    async def list_due_agent_ids(
+        self,
+        *,
+        now: datetime.datetime,
+        inactive_before: datetime.datetime,
+        limit: int,
+    ) -> list[str]:
+        """Return a bounded set of Agents with currently due source work."""
+        async with self.session_manager() as session:
+            return await self.list_due_agent_ids_in_session(
+                session,
+                now=now,
+                inactive_before=inactive_before,
+                limit=limit,
+            )
+
+    async def list_due_agent_ids_in_session(
+        self,
+        session: AsyncSession,
+        *,
+        now: datetime.datetime,
+        inactive_before: datetime.datetime,
+        limit: int,
+    ) -> list[str]:
+        """Return due Agent IDs inside one caller-owned transaction."""
+        if limit < 1:
+            raise ValueError("Historical Memory due-Agent limit must be positive.")
+        visible_event_exists = sa.exists(
+            sa.select(RDBEvent.id).where(
+                RDBEvent.session_id == RDBHistoricalMemorySource.source_session_id,
+                RDBEvent.reverted.is_(False),
+            )
+        )
+        due_at = sa.func.min(
+            sa.func.coalesce(
+                RDBHistoricalMemorySource.next_retry_at,
+                RDBHistoricalMemorySource.admitted_at,
+            )
+        )
+        statement = (
+            sa.select(RDBAgentSession.agent_id)
+            .select_from(RDBHistoricalMemorySource)
+            .join(
+                RDBAgentSession,
+                RDBAgentSession.id == RDBHistoricalMemorySource.source_session_id,
+            )
+            .join(RDBAgent, RDBAgent.id == RDBAgentSession.agent_id)
+            .where(
+                RDBAgentSession.session_kind == AgentSessionKind.ROOT,
+                RDBAgentSession.status == AgentSessionStatus.ACTIVE,
+                RDBAgentSession.run_state == AgentSessionRunState.IDLE,
+                RDBAgentSession.last_activity_at <= inactive_before,
+                RDBAgent.memory_enabled.is_(True),
+                self._authorized_source(),
+                sa.or_(
+                    RDBHistoricalMemorySource.next_retry_at.is_(None),
+                    RDBHistoricalMemorySource.next_retry_at <= now,
+                ),
+                sa.or_(
+                    RDBHistoricalMemorySource.prepared_at.is_(None),
+                    RDBHistoricalMemorySource.completed_source_activity_at.is_(None),
+                    RDBAgentSession.last_activity_at
+                    > RDBHistoricalMemorySource.completed_source_activity_at,
+                ),
+                visible_event_exists,
+            )
+            .group_by(RDBAgentSession.agent_id)
+            .order_by(due_at, RDBAgentSession.agent_id)
+            .limit(limit)
+        )
+        return list((await session.execute(statement)).scalars())
+
     async def list_due_for_agent_in_session(
         self,
         session: AsyncSession,
@@ -263,111 +387,208 @@ class HistoricalMemoryRepository:
             ) in rows
         ]
 
-    async def begin_preparation(
+    async def list_available_snapshot_candidates_in_session(
         self,
+        session: AsyncSession,
         *,
-        source_session_id: str,
-        attempted_at: datetime.datetime,
-        inactive_before: datetime.datetime,
-        operation: ModelOperationSnapshot | None,
-    ) -> HistoricalMemoryDueSource | None:
-        """Reauthorize and capture one source boundary before evidence loading."""
-        async with self.session_manager() as session:
-            source = await self.begin_preparation_in_session(
-                session,
-                source_session_id=source_session_id,
-                attempted_at=attempted_at,
-                inactive_before=inactive_before,
-                operation=operation,
+        agent_id: str,
+        workspace_id: str,
+        consumer_product_mode: AgentSessionProductMode,
+        associated_user_id: str | None,
+        source_session_ids: Sequence[str] | None,
+        limit: int,
+    ) -> list[HistoricalMemorySnapshotCandidate]:
+        """Return currently authorized prepared summaries for one root consumer."""
+        if limit < 1:
+            raise ValueError("Historical Memory snapshot limit must be positive.")
+        if source_session_ids is not None and not source_session_ids:
+            return []
+        personal_scope = sa.false()
+        if (
+            consumer_product_mode is AgentSessionProductMode.USER
+            and associated_user_id is not None
+        ):
+            personal_scope = sa.and_(
+                RDBAgentSession.product_mode == AgentSessionProductMode.USER,
+                RDBAgentSession.associated_user_id == associated_user_id,
             )
-            await session.commit()
-            return source
+        statement = (
+            sa.select(
+                RDBHistoricalMemorySource.source_session_id,
+                RDBAgentSession.product_mode,
+                RDBAgentSession.title,
+                RDBHistoricalMemorySource.completed_source_activity_at,
+                RDBHistoricalMemorySource.prepared_at,
+                RDBHistoricalMemorySource.summary,
+            )
+            .join(
+                RDBAgentSession,
+                RDBAgentSession.id == RDBHistoricalMemorySource.source_session_id,
+            )
+            .join(RDBAgent, RDBAgent.id == RDBAgentSession.agent_id)
+            .where(
+                RDBAgentSession.agent_id == agent_id,
+                RDBAgentSession.workspace_id == workspace_id,
+                RDBAgentSession.session_kind == AgentSessionKind.ROOT,
+                RDBAgentSession.status == AgentSessionStatus.ACTIVE,
+                RDBAgent.memory_enabled.is_(True),
+                self._authorized_source(),
+                sa.or_(
+                    RDBAgentSession.product_mode == AgentSessionProductMode.TEAM,
+                    personal_scope,
+                ),
+                RDBHistoricalMemorySource.prepared_at.is_not(None),
+                RDBHistoricalMemorySource.completed_source_activity_at.is_not(None),
+                RDBHistoricalMemorySource.summary.is_not(None),
+                RDBHistoricalMemorySource.summary != "",
+            )
+            .order_by(
+                RDBHistoricalMemorySource.completed_source_activity_at.desc(),
+                RDBHistoricalMemorySource.prepared_at.desc(),
+                RDBHistoricalMemorySource.source_session_id,
+            )
+            .limit(limit)
+        )
+        if source_session_ids is not None:
+            statement = statement.where(
+                RDBHistoricalMemorySource.source_session_id.in_(source_session_ids)
+            )
+        rows = (await session.execute(statement)).all()
+        return [
+            HistoricalMemorySnapshotCandidate(
+                source_session_id=source_session_id,
+                source_scope=(
+                    "team" if product_mode is AgentSessionProductMode.TEAM else "user"
+                ),
+                source_title=source_title,
+                source_activity_through=source_activity_through,
+                prepared_at=prepared_at,
+                summary=summary,
+            )
+            for (
+                source_session_id,
+                product_mode,
+                source_title,
+                source_activity_through,
+                prepared_at,
+                summary,
+            ) in rows
+        ]
 
-    async def begin_preparation_in_session(
+    async def lock_preparation_admission_in_session(
         self,
         session: AsyncSession,
         *,
         source_session_id: str,
         attempted_at: datetime.datetime,
         inactive_before: datetime.datetime,
-        operation: ModelOperationSnapshot | None,
-    ) -> HistoricalMemoryDueSource | None:
-        """Lock current authority and capture one preparation boundary."""
-        tail_event_id = (
-            sa.select(sa.func.max(RDBEvent.id))
-            .where(
-                RDBEvent.session_id == RDBHistoricalMemorySource.source_session_id,
-                RDBEvent.reverted.is_(False),
-            )
-            .correlate(RDBHistoricalMemorySource)
-            .scalar_subquery()
-        )
-        locked = (
+    ) -> HistoricalMemoryPreparationAdmission | None:
+        """Lock Historical then Session authority and capture the source boundary."""
+        row = (
             await session.execute(
-                sa.select(
-                    RDBHistoricalMemorySource,
-                    RDBAgentSession,
-                    RDBAgent,
-                    tail_event_id.label("source_tail_event_id"),
-                )
-                .join(
-                    RDBAgentSession,
-                    RDBAgentSession.id == RDBHistoricalMemorySource.source_session_id,
-                )
-                .join(RDBAgent, RDBAgent.id == RDBAgentSession.agent_id)
+                sa.select(RDBHistoricalMemorySource)
                 .where(
                     RDBHistoricalMemorySource.source_session_id == source_session_id,
-                    RDBAgentSession.session_kind == AgentSessionKind.ROOT,
-                    RDBAgentSession.status == AgentSessionStatus.ACTIVE,
-                    RDBAgentSession.run_state == AgentSessionRunState.IDLE,
-                    RDBAgentSession.last_activity_at <= inactive_before,
-                    RDBAgent.memory_enabled.is_(True),
-                    self._authorized_source(),
                     sa.or_(
                         RDBHistoricalMemorySource.next_retry_at.is_(None),
                         RDBHistoricalMemorySource.next_retry_at <= attempted_at,
                     ),
-                    sa.or_(
-                        RDBHistoricalMemorySource.prepared_at.is_(None),
-                        RDBHistoricalMemorySource.completed_source_activity_at.is_(
-                            None
-                        ),
-                        RDBAgentSession.last_activity_at
-                        > RDBHistoricalMemorySource.completed_source_activity_at,
-                    ),
-                    tail_event_id.is_not(None),
                 )
-                .with_for_update(
-                    of=(
-                        RDBHistoricalMemorySource,
-                        RDBAgentSession,
-                        RDBAgent,
-                    )
-                )
+                .with_for_update()
             )
-        ).one_or_none()
-        if locked is None:
+        ).scalar_one_or_none()
+        if row is None:
             return None
-        row, source, _agent, source_tail_event_id = locked
-        if not await self._lock_associated_user_membership(session, source):
+        source = (
+            await session.execute(
+                sa.select(RDBAgentSession)
+                .where(
+                    RDBAgentSession.id == source_session_id,
+                    RDBAgentSession.session_kind == AgentSessionKind.ROOT,
+                    RDBAgentSession.status == AgentSessionStatus.ACTIVE,
+                    RDBAgentSession.run_state == AgentSessionRunState.IDLE,
+                    RDBAgentSession.last_activity_at <= inactive_before,
+                )
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        if source is None:
             return None
+        if (
+            row.prepared_at is not None
+            and row.completed_source_activity_at is not None
+            and source.last_activity_at <= row.completed_source_activity_at
+        ):
+            return None
+        source_tail_event_id = await session.scalar(
+            sa.select(sa.func.max(RDBEvent.id)).where(
+                RDBEvent.session_id == source_session_id,
+                RDBEvent.reverted.is_(False),
+            )
+        )
+        if source_tail_event_id is None or source.product_mode is None:
+            return None
+        return HistoricalMemoryPreparationAdmission(
+            source=HistoricalMemoryDueSource(
+                source_session_id=row.source_session_id,
+                agent_id=source.agent_id,
+                workspace_id=source.workspace_id,
+                source_activity_at=source.last_activity_at,
+                source_tail_event_id=source_tail_event_id,
+                source_title=source.title,
+                admitted_at=row.admitted_at,
+                prepared_at=row.prepared_at,
+                completed_source_activity_at=row.completed_source_activity_at,
+                next_retry_at=row.next_retry_at,
+                failure_count=row.failure_count,
+                model_operation_state=self._operation(row.model_operation_state),
+            ),
+            product_mode=source.product_mode,
+            associated_user_id=source.associated_user_id,
+        )
+
+    async def lock_preparation_membership_in_session(
+        self,
+        session: AsyncSession,
+        admission: HistoricalMemoryPreparationAdmission,
+    ) -> bool:
+        """Lock current User membership after the Agent lock is held."""
+        if admission.product_mode is AgentSessionProductMode.TEAM:
+            return True
+        if (
+            admission.product_mode is not AgentSessionProductMode.USER
+            or admission.associated_user_id is None
+        ):
+            return False
+        membership_id = await session.scalar(
+            sa.select(RDBWorkspaceUser.id)
+            .where(
+                RDBWorkspaceUser.workspace_id == admission.source.workspace_id,
+                RDBWorkspaceUser.user_id == admission.associated_user_id,
+            )
+            .with_for_update()
+        )
+        return membership_id is not None
+
+    async def persist_preparation_operation_in_session(
+        self,
+        session: AsyncSession,
+        admission: HistoricalMemoryPreparationAdmission,
+        *,
+        attempted_at: datetime.datetime,
+        operation: ModelOperationSnapshot,
+    ) -> HistoricalMemoryDueSource:
+        """Persist the selected operation while all admission locks remain held."""
+        row = await session.get(
+            RDBHistoricalMemorySource,
+            admission.source.source_session_id,
+        )
+        if row is None:
+            raise RuntimeError("Locked Historical Memory source disappeared.")
         row.last_attempt_at = attempted_at
         row.model_operation_state = self._operation_json(operation)
         await session.flush()
-        return HistoricalMemoryDueSource(
-            source_session_id=row.source_session_id,
-            agent_id=source.agent_id,
-            workspace_id=source.workspace_id,
-            source_activity_at=source.last_activity_at,
-            source_tail_event_id=source_tail_event_id,
-            source_title=source.title,
-            admitted_at=row.admitted_at,
-            prepared_at=row.prepared_at,
-            completed_source_activity_at=row.completed_source_activity_at,
-            next_retry_at=row.next_retry_at,
-            failure_count=row.failure_count,
-            model_operation_state=operation,
-        )
+        return admission.source.model_copy(update={"model_operation_state": operation})
 
     async def record_failure(
         self,
@@ -553,5 +774,5 @@ class HistoricalMemoryRepository:
     @staticmethod
     def _operation_json(
         value: ModelOperationSnapshot | None,
-    ) -> dict[str, object] | None:
+    ) -> dict[str, JSONValue] | None:
         return None if value is None else value.model_dump(mode="json")

@@ -112,6 +112,20 @@ def project_historical_memory_input(
     )
 
 
+def project_historical_memory_event(
+    event: Event,
+    *,
+    client_results: dict[str, ClientToolResultPayload] | None = None,
+) -> HistoricalMemoryEvidence | None:
+    """Project one event with the same semantic eligibility used for input."""
+    return _project_event(
+        event,
+        source_index=0,
+        client_results=client_results or {},
+        registered_result_call_ids=set(),
+    )
+
+
 def _project_event(
     event: Event,
     *,
