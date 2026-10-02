@@ -26,6 +26,12 @@ from azents.core.llm_catalog_sync import (
     IntegrationCatalogSyncPolicyDecision,
     IntegrationCatalogSyncTrigger,
 )
+from azents.core.model_catalog_source import (
+    CATALOG_SOURCE_KEY,
+    CATALOG_SOURCE_KIND,
+    CATALOG_SOURCE_SCHEMA_VERSION,
+    decode_catalog_source,
+)
 from azents.core.workspace import WorkspaceCreate
 from azents.rdb.models.llm_catalog import (
     RDBLLMCatalog,
@@ -112,7 +118,7 @@ async def test_system_attempt_reclaims_an_abandoned_running_lease(
     first = await repository.begin_attempt(
         rdb_session,
         catalog_id=catalog.id,
-        source_key="genai_prices",
+        source_key=CATALOG_SOURCE_KEY,
         started_at=started_at,
     )
     assert isinstance(first, str)
@@ -120,7 +126,7 @@ async def test_system_attempt_reclaims_an_abandoned_running_lease(
     still_running = await repository.begin_attempt(
         rdb_session,
         catalog_id=catalog.id,
-        source_key="genai_prices",
+        source_key=CATALOG_SOURCE_KEY,
         started_at=started_at + datetime.timedelta(minutes=4, seconds=59),
     )
     assert isinstance(still_running, CatalogSyncAlreadyRunning)
@@ -129,7 +135,7 @@ async def test_system_attempt_reclaims_an_abandoned_running_lease(
     reclaimed = await repository.begin_attempt(
         rdb_session,
         catalog_id=catalog.id,
-        source_key="genai_prices",
+        source_key=CATALOG_SOURCE_KEY,
         started_at=started_at + datetime.timedelta(minutes=5),
     )
     assert isinstance(reclaimed, str)
@@ -160,40 +166,40 @@ async def test_candidate_snapshot_is_complete_and_does_not_publish(
         provider_integration_id=None,
         publisher="openai",
         family="gpt",
-        source_metadata={"source_kind": "genai_prices"},
+        source_metadata={"source_kind": CATALOG_SOURCE_KIND},
         projection_metadata={"resolver_revision": "1"},
         hidden_reason=None,
     )
     source_id = "s" * 32
-    rdb_session.add(
-        RDBModelMetadataSource(
-            source_key="genai_prices",
-            current_snapshot_id=source_id,
-            latest_attempt_id=None,
-        )
+    source_payload = decode_catalog_source(
+        b'{"gpt-shadow":{"litellm_provider":"openai","mode":"chat"}}'
     )
+    source_authority = await rdb_session.get(RDBModelMetadataSource, CATALOG_SOURCE_KEY)
+    assert source_authority is not None
     rdb_session.add(
         RDBModelMetadataSourceSnapshot(
             id=source_id,
-            source_key="genai_prices",
-            source_kind="genai_prices",
-            source_schema_version="1",
+            source_key=CATALOG_SOURCE_KEY,
+            source_kind=CATALOG_SOURCE_KIND,
+            source_schema_version=CATALOG_SOURCE_SCHEMA_VERSION,
             source_url="https://metadata.example/data.json",
-            source_hash="b" * 64,
-            producer_name="genai-prices",
-            producer_version="0.1.9",
-            provider_count=0,
-            model_count=0,
-            payload={"schema_version": "1", "providers": []},
+            source_hash=source_payload.content_hash,
+            producer_name="azents-catalog-source",
+            producer_version="1",
+            provider_count=source_payload.provider_count,
+            model_count=source_payload.model_count,
+            payload=source_payload.model_dump(mode="json"),
         )
     )
     await rdb_session.flush()
+    source_authority.current_snapshot_id = source_id
+    await rdb_session.flush()
     provenance = CatalogProjectionProvenance(
         source_snapshot_id=source_id,
-        projection_schema_version="1",
+        projection_schema_version="2",
         runtime_profile_resolver_revision="1",
         pydantic_ai_version="2.52.0",
-        genai_prices_version="0.1.9",
+        genai_prices_version=None,
         projection_fingerprint="a" * 64,
     )
 
@@ -224,22 +230,26 @@ async def test_candidate_snapshot_is_complete_and_does_not_publish(
     assert snapshot.projection_fingerprint == "a" * 64
 
     newer_source_id = "t" * 32
+    newer_payload = decode_catalog_source(
+        b'{"gpt-newer":{"litellm_provider":"openai","mode":"chat"}}'
+    )
     rdb_session.add(
         RDBModelMetadataSourceSnapshot(
             id=newer_source_id,
-            source_key="genai_prices",
-            source_kind="genai_prices",
-            source_schema_version="1",
+            source_key=CATALOG_SOURCE_KEY,
+            source_kind=CATALOG_SOURCE_KIND,
+            source_schema_version=CATALOG_SOURCE_SCHEMA_VERSION,
             source_url="https://metadata.example/newer.json",
-            source_hash="c" * 64,
-            producer_name="genai-prices",
-            producer_version="0.1.9",
-            provider_count=0,
-            model_count=0,
-            payload={"schema_version": "1", "providers": []},
+            source_hash=newer_payload.content_hash,
+            producer_name="azents-catalog-source",
+            producer_version="1",
+            provider_count=newer_payload.provider_count,
+            model_count=newer_payload.model_count,
+            payload=newer_payload.model_dump(mode="json"),
         )
     )
-    source_row = await rdb_session.get(RDBModelMetadataSource, "genai_prices")
+    await rdb_session.flush()
+    source_row = await rdb_session.get(RDBModelMetadataSource, CATALOG_SOURCE_KEY)
     assert source_row is not None
     source_row.current_snapshot_id = newer_source_id
     await rdb_session.flush()
@@ -252,7 +262,7 @@ async def test_candidate_snapshot_is_complete_and_does_not_publish(
             expected_current_snapshot_id=None,
             expected_catalog_configuration_version=None,
             expected_projection_fingerprint="a" * 64,
-            expected_source_key="genai_prices",
+            expected_source_key=CATALOG_SOURCE_KEY,
             expected_source_snapshot_id=source_id,
         )
     await rdb_session.refresh(catalog_row)
@@ -373,7 +383,7 @@ async def test_integration_attempt_claim_enforces_running_and_cooldown(
         rdb_session,
         catalog_id=catalog.id,
         workspace_id=workspace_id,
-        source_key="genai_prices",
+        source_key=CATALOG_SOURCE_KEY,
         started_at=now,
         trigger=IntegrationCatalogSyncTrigger.CREATE,
     )
@@ -383,7 +393,7 @@ async def test_integration_attempt_claim_enforces_running_and_cooldown(
         rdb_session,
         catalog_id=catalog.id,
         workspace_id=workspace_id,
-        source_key="genai_prices",
+        source_key=CATALOG_SOURCE_KEY,
         started_at=now + datetime.timedelta(seconds=1),
         trigger=IntegrationCatalogSyncTrigger.CONFIG_UPDATE,
     )
@@ -406,7 +416,7 @@ async def test_integration_attempt_claim_enforces_running_and_cooldown(
         rdb_session,
         catalog_id=catalog.id,
         workspace_id=workspace_id,
-        source_key="genai_prices",
+        source_key=CATALOG_SOURCE_KEY,
         started_at=now + datetime.timedelta(seconds=10),
         trigger=IntegrationCatalogSyncTrigger.EXPLICIT,
     )
@@ -417,7 +427,7 @@ async def test_integration_attempt_claim_enforces_running_and_cooldown(
         rdb_session,
         catalog_id=catalog.id,
         workspace_id=workspace_id,
-        source_key="genai_prices",
+        source_key=CATALOG_SOURCE_KEY,
         started_at=now + datetime.timedelta(seconds=31),
         trigger=IntegrationCatalogSyncTrigger.EXPLICIT,
     )

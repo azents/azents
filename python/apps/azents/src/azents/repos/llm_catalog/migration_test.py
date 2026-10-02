@@ -22,6 +22,7 @@ _NAMESPACE_REVISION = "af654664e6b6"
 _RECONCILIATION_REVISION = "a0dac2fe3ca2"
 _TOOLKIT_REVISION = "cda14157c46c"
 _HISTORICAL_MEMORY_REVISION = "459a4285993c"
+_DATA_SOURCE_CUTOVER_REVISION = "c8bc0a5dcab0"
 
 
 @dataclass(frozen=True)
@@ -192,12 +193,15 @@ def _seed_ready_cutover(engine: Engine) -> None:
 def test_fresh_upgrade_has_only_generic_source_schema(
     migration_database: _MigrationDatabase,
 ) -> None:
-    """A fresh database reaches the Historical head without legacy objects."""
+    """A fresh database reaches the fenced source head without legacy objects."""
     scripts = ScriptDirectory.from_config(migration_database.config)
-    assert scripts.get_heads() == [_HISTORICAL_MEMORY_REVISION]
-    head = scripts.get_revision(_HISTORICAL_MEMORY_REVISION)
+    assert scripts.get_heads() == [_DATA_SOURCE_CUTOVER_REVISION]
+    head = scripts.get_revision(_DATA_SOURCE_CUTOVER_REVISION)
     assert head is not None
-    assert head.down_revision == _TOOLKIT_REVISION
+    assert head.down_revision == _HISTORICAL_MEMORY_REVISION
+    historical_memory = scripts.get_revision(_HISTORICAL_MEMORY_REVISION)
+    assert historical_memory is not None
+    assert historical_memory.down_revision == _TOOLKIT_REVISION
     toolkit = scripts.get_revision(_TOOLKIT_REVISION)
     assert toolkit is not None
     assert toolkit.down_revision == _RECONCILIATION_REVISION
@@ -208,7 +212,7 @@ def test_fresh_upgrade_has_only_generic_source_schema(
     assert namespace is not None
     assert namespace.down_revision == _CLEANUP_REVISION
     command.upgrade(migration_database.config, "head")
-    _assert_revision(migration_database.engine, _HISTORICAL_MEMORY_REVISION)
+    _assert_revision(migration_database.engine, _DATA_SOURCE_CUTOVER_REVISION)
     _assert_cleanup_schema(migration_database.engine)
 
 
@@ -217,7 +221,10 @@ def test_historical_memory_revision_extends_toolkit_head(
 ) -> None:
     """Historical Memory preserves the complete canonical Toolkit chain."""
     scripts = ScriptDirectory.from_config(migration_database.config)
-    assert scripts.get_heads() == [_HISTORICAL_MEMORY_REVISION]
+    assert scripts.get_heads() == [_DATA_SOURCE_CUTOVER_REVISION]
+    cutover = scripts.get_revision(_DATA_SOURCE_CUTOVER_REVISION)
+    assert cutover is not None
+    assert cutover.down_revision == _HISTORICAL_MEMORY_REVISION
     historical_memory = scripts.get_revision(_HISTORICAL_MEMORY_REVISION)
     assert historical_memory is not None
     assert historical_memory.down_revision == _TOOLKIT_REVISION

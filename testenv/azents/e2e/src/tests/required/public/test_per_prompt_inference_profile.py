@@ -23,6 +23,7 @@ from azentspublicclient.models.llm_provider_integration_create_request import (
 from azentspublicclient.models.secrets import Secrets
 from pydantic import TypeAdapter, ValidationError
 
+from support.image_generation_openai_proxy import is_inference_profile_title_request
 from support.runtime_profiles import (
     create_workspace_runtime_profile,
     start_and_wait_for_agent_runtime,
@@ -1658,3 +1659,380 @@ class TestPerPromptInferenceProfile:
             session_id=session_id,
         )
         assert rejected_name not in _tree_names(tree)
+
+
+class TestModelSupportContract:
+    """Exercise the source-backed saved contract through ordinary product APIs."""
+
+    def test_saved_support_and_dispatch_pricing_survive_catalog_refresh(
+        self,
+        public_api_client: azentspublicclient.ApiClient,
+        admin_api_client: azentsadminclient.ApiClient,
+        azents_public_server_url: str,
+        openai_proxy_url: str,
+    ) -> None:
+        """Keep saved support until reselection while refreshing source prices."""
+        catalog_api = ModelCatalogV1Api(admin_api_client)
+
+        def refresh_source(variant: str) -> None:
+            control = requests.post(
+                f"{openai_proxy_url}/inference-profile/catalog-source",
+                json={"variant": variant},
+                timeout=10,
+            )
+            control.raise_for_status()
+            assert _response_object(control) == {"variant": variant}
+            refreshed = catalog_api.model_catalog_v1_refresh_system_model_catalog(
+                provider=SystemCatalogProvider.OPENAI,
+                _request_timeout=20,
+            )
+            assert refreshed.snapshot_id is not None
+
+        def primary_selection(
+            response: dict[str, object], *, field: str
+        ) -> dict[str, object]:
+            options = _objects(response.get(field), label=field)
+            quality = next(
+                option for option in options if option.get("label") == "Quality"
+            )
+            candidates = _objects(quality.get("candidates"), label="Quality candidates")
+            return _object(
+                candidates[0].get("model_selection"), label="saved selection"
+            )
+
+        def contract(capabilities: object) -> dict[str, object]:
+            normalized = _object(capabilities, label="normalized capabilities")
+            descriptor = _object(
+                normalized.get("semantic_contract"), label="saved semantic contract"
+            )
+            assert descriptor.get("version") == 2
+            return descriptor
+
+        def effort_state(descriptor: dict[str, object], level: str) -> object:
+            reasoning = _object(descriptor.get("reasoning"), label="reasoning evidence")
+            assert reasoning.get("completeness") == "complete"
+            efforts = _objects(reasoning.get("efforts"), label="effort declarations")
+            return next(item["state"] for item in efforts if item.get("level") == level)
+
+        try:
+            refresh_source("baseline")
+            uniq = unique()
+            token, _, _ = authenticate_user(
+                public_api_client,
+                admin_api_client,
+                email=f"model-support-contract-{uniq}@example.com",
+            )
+            handle = f"model-support-contract-{uniq}"
+            WorkspaceV1Api(public_api_client).workspace_v1_create_workspace(
+                CreateWorkspaceRequest(
+                    workspace_name=f"Model Support Contract {uniq}",
+                    workspace_handle=handle,
+                    owner_name=f"Owner {uniq}",
+                ),
+                _headers=_headers(token),
+            )
+            integration = LLMProviderIntegrationV1Api(
+                public_api_client
+            ).llm_provider_integration_v1_create_integration(
+                handle=handle,
+                llm_provider_integration_create_request=LLMProviderIntegrationCreateRequest(
+                    provider=LLMProvider.OPENAI,
+                    # An ordinary integration exercises the real system projection,
+                    # not the historical deterministic-listing snapshot shortcut.
+                    name=f"Model support source contract {uniq}",
+                    secrets=Secrets(ApiKeySecrets(api_key="sk-model-support-contract")),
+                ),
+                _headers=_headers(token),
+            )
+            catalog_url = (
+                f"{azents_public_server_url}/llm-provider-integration/v1/workspaces/"
+                f"{handle}/llm-provider-integrations/{integration.id}/catalog-entries"
+            )
+
+            def entries() -> dict[str, dict[str, object]]:
+                payload = _response_object(
+                    requests.get(catalog_url, headers=_headers(token), timeout=10)
+                )
+                assert payload.get("catalog_scope") == "system"
+                return {
+                    _string(
+                        entry.get("provider_model_identifier"), label="model ID"
+                    ): entry
+                    for entry in _objects(
+                        payload.get("entries"), label="catalog entries"
+                    )
+                }
+
+            baseline_entry = entries()["gpt-5.5"]
+            baseline_contract = contract(baseline_entry.get("normalized_capabilities"))
+            assert effort_state(baseline_contract, "max") == "supported"
+            assert effort_state(baseline_contract, "xhigh") == "supported"
+            selection_input = {
+                "llm_provider_integration_id": integration.id,
+                "model_identifier": "gpt-5.5",
+            }
+            option_inputs = [
+                {
+                    "label": "Quality",
+                    "candidates": [
+                        {
+                            "model_selection": selection_input,
+                            "settings": {
+                                "context_window_tokens": 32_000,
+                                "max_output_tokens": 4_000,
+                                "builtin_tools": [],
+                            },
+                        }
+                    ],
+                    "subagent_enabled": True,
+                    "subagent_guidance": None,
+                }
+            ]
+            workspace_url = (
+                f"{azents_public_server_url}/workspace-model-settings/v1/"
+                f"workspaces/{handle}"
+            )
+            workspace_settings = _response_object(
+                requests.put(
+                    workspace_url,
+                    headers=_headers(token),
+                    json={
+                        "default_selectable_model_options": option_inputs,
+                        "default_main_model_label": "Quality",
+                        "default_lightweight_model_label": "Quality",
+                    },
+                    timeout=10,
+                )
+            )
+            workspace_selection = primary_selection(
+                workspace_settings, field="default_selectable_model_options"
+            )
+            assert contract(workspace_selection.get("normalized_capabilities")) == (
+                baseline_contract
+            )
+            runtime_profile_id = create_workspace_runtime_profile(
+                public_api_client,
+                token=token,
+                workspace_handle=handle,
+                provider_id="system-docker",
+            )
+            created = _response_object(
+                requests.post(
+                    f"{azents_public_server_url}/agent/v1/workspaces/{handle}/agents",
+                    headers=_headers(token),
+                    # Omitting model options copies the saved Workspace contract.
+                    json={
+                        "name": "Source-backed support Agent",
+                        "type": "public",
+                        "runtime_profile_id": runtime_profile_id,
+                    },
+                    timeout=10,
+                )
+            )
+            agent_id = _string(created.get("id"), label="Agent ID")
+            agent_url = (
+                f"{azents_public_server_url}/agent/v1/workspaces/"
+                f"{handle}/agents/{agent_id}"
+            )
+            agent_selection = primary_selection(
+                created, field="selectable_model_options"
+            )
+            assert contract(agent_selection.get("normalized_capabilities")) == (
+                baseline_contract
+            )
+            display_name = _string(
+                agent_selection.get("model_display_name"),
+                label="saved model display name",
+            )
+            start_and_wait_for_agent_runtime(
+                public_api_client,
+                token=token,
+                workspace_handle=handle,
+                agent_id=agent_id,
+            )
+
+            def saved_selections_unchanged() -> None:
+                saved_agent = _response_object(
+                    requests.get(agent_url, headers=_headers(token), timeout=10)
+                )
+                saved_workspace = _response_object(
+                    requests.get(workspace_url, headers=_headers(token), timeout=10)
+                )
+                assert (
+                    primary_selection(saved_agent, field="selectable_model_options")
+                    == agent_selection
+                )
+                assert (
+                    primary_selection(
+                        saved_workspace, field="default_selectable_model_options"
+                    )
+                    == workspace_selection
+                )
+
+            def dispatch(effort: str, expected_cost: float | None) -> None:
+                # Independent Sessions keep provenance polling specific to this turn.
+                session_id = _create_profile_session(
+                    server_url=azents_public_server_url, token=token, agent_id=agent_id
+                )
+                message = f"Ultrafast E2E served-default saved-support {unique()}"
+                _write_profile(
+                    server_url=azents_public_server_url,
+                    token=token,
+                    agent_id=agent_id,
+                    session_id=session_id,
+                    message=message,
+                    target="Quality",
+                    effort=effort,
+                    enabled_execution_options=[],
+                )
+
+                def matching_main_requests() -> list[dict[str, object]] | None:
+                    response = requests.get(
+                        f"{openai_proxy_url}/v1/_image_generation_requests",
+                        timeout=10,
+                    )
+                    response.raise_for_status()
+                    matches = [
+                        body
+                        for body in _objects(
+                            response.json(), label="proxy request journal"
+                        )
+                        if body.get("model") == "gpt-5.5"
+                        and message in json.dumps(body, ensure_ascii=False)
+                        and not is_inference_profile_title_request(body)
+                    ]
+                    # Count only main calls inside the poll: title may arrive first.
+                    return matches if matches else None
+
+                raw_requests = wait_until(
+                    matching_main_requests,
+                    timeout=120,
+                    interval=0.5,
+                    message="Saved-contract main provider request was not observed",
+                )
+                assert raw_requests is not None
+                assert (
+                    _object(
+                        raw_requests[0].get("reasoning"), label="wire reasoning"
+                    ).get("effort")
+                    == effort
+                )
+                assert raw_requests[0].get("max_output_tokens") == 4_000
+                marker = _wait_for_turn_provenance(
+                    server_url=azents_public_server_url,
+                    token=token,
+                    session_id=session_id,
+                    target="Quality",
+                    effort=effort,
+                    enabled_execution_options=[],
+                    display_name=display_name,
+                    effective_context_window_tokens=32_000,
+                )
+                usage = _object(
+                    marker.get("usage"), label="captured-source token usage"
+                )
+                assert usage.get("prompt_tokens") == 1
+                assert usage.get("completion_tokens") == 1
+                if expected_cost is None:
+                    # Unknown exact-model cost remains unavailable.
+                    assert usage.get("cost_usd") is None
+                else:
+                    assert usage.get("cost_usd") == pytest.approx(
+                        expected_cost, rel=1e-12, abs=1e-12
+                    )
+                _wait_for_session_idle(
+                    server_url=azents_public_server_url,
+                    token=token,
+                    agent_id=agent_id,
+                    session_id=session_id,
+                )
+                assert "INFERENCE_PROFILE_COMPLETED served-default" in json.dumps(
+                    _history(azents_public_server_url, token, session_id)
+                )
+
+            dispatch("max", 0.000003)
+            refresh_source("refreshed")
+            refreshed_contract = contract(
+                entries()["gpt-5.5"].get("normalized_capabilities")
+            )
+            assert effort_state(refreshed_contract, "max") == "unsupported"
+            assert effort_state(refreshed_contract, "xhigh") == "supported"
+            saved_selections_unchanged()
+            # Normal saves without model selections do not enrich existing snapshots.
+            _response_object(
+                requests.patch(
+                    agent_url,
+                    headers=_headers(token),
+                    json={"description": "Keep the saved model support contract"},
+                    timeout=10,
+                )
+            )
+            _response_object(
+                requests.put(
+                    workspace_url,
+                    headers=_headers(token),
+                    json={"default_main_model_label": "Quality"},
+                    timeout=10,
+                )
+            )
+            saved_selections_unchanged()
+            dispatch("max", 0.000007)
+
+            refresh_source("missing-model")
+            assert "gpt-5.5" not in entries()
+            saved_selections_unchanged()
+            # This is absent exact model evidence, not an absent current source.
+            dispatch("max", None)
+
+            refresh_source("refreshed")
+            reselected_workspace = _response_object(
+                requests.put(
+                    workspace_url,
+                    headers=_headers(token),
+                    json={"default_selectable_model_options": option_inputs},
+                    timeout=10,
+                )
+            )
+            reselected_agent = _response_object(
+                requests.patch(
+                    agent_url,
+                    headers=_headers(token),
+                    json={"selectable_model_options": option_inputs},
+                    timeout=10,
+                )
+            )
+            for response, field in (
+                (reselected_workspace, "default_selectable_model_options"),
+                (reselected_agent, "selectable_model_options"),
+            ):
+                selected = primary_selection(response, field=field)
+                assert (
+                    contract(selected.get("normalized_capabilities"))
+                    == refreshed_contract
+                )
+            rejected_session = _create_profile_session(
+                server_url=azents_public_server_url, token=token, agent_id=agent_id
+            )
+            rejected_message = f"Reselected unsupported max {unique()}"
+            _write_invalid_profile(
+                server_url=azents_public_server_url,
+                token=token,
+                agent_id=agent_id,
+                session_id=rejected_session,
+                message=rejected_message,
+                target="Quality",
+                effort="max",
+                enabled_execution_options=[],
+                expected_detail="Reasoning effort is not supported by model target",
+            )
+            assert (
+                _input_event(
+                    _history(azents_public_server_url, token, rejected_session),
+                    rejected_message,
+                )
+                is None
+            )
+            dispatch("xhigh", 0.000007)
+        finally:
+            # This local source fixture is global to the serial required-suite lane.
+            refresh_source("baseline")

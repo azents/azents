@@ -103,7 +103,17 @@ class RDBLLMCatalog(RDBModel):
         default=None,
     )
     current_snapshot_id: Mapped[str | None] = mapped_column(
-        sa.String(32), nullable=True, default=None
+        sa.String(32),
+        sa.ForeignKey(
+            "llm_catalog_snapshots.id",
+            name="fk_llm_catalogs_current_snapshot",
+            ondelete="NO ACTION",
+            deferrable=True,
+            initially="DEFERRED",
+            use_alter=True,
+        ),
+        nullable=True,
+        default=None,
     )
     latest_attempt_id: Mapped[str | None] = mapped_column(
         sa.String(32), nullable=True, default=None
@@ -149,7 +159,10 @@ class RDBLLMCatalogSnapshot(RDBModel):
         sa.String(32),
         sa.ForeignKey(
             "model_metadata_source_snapshots.id",
-            ondelete="SET NULL",
+            name="llm_catalog_snapshots_source_snapshot_id_fkey",
+            ondelete="NO ACTION",
+            deferrable=True,
+            initially="DEFERRED",
         ),
         nullable=True,
         default=None,

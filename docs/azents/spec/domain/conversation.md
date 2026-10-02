@@ -144,8 +144,8 @@ api_routes:
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ticket
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ws
-last_verified_at: 2026-10-02
-spec_version: 177
+last_verified_at: 2026-10-03
+spec_version: 178
 ---
 
 # Conversation & Events
@@ -445,7 +445,11 @@ names and media types without reading attachment contents. The worker then immed
 best-effort lightweight model title generation from that exact initial prompt without waiting for the
 first run to complete. The title operation freezes the Agent's saved Lightweight label candidates and
 owns an independent cursor and candidate-local retry counter. Each candidate's saved
-`strict_json_schema` snapshot selects its response envelope: `true` uses only a strict one-field
+structured-response snapshot selects its response envelope. For v2 descriptors this
+is the separate `structured_response` fact evaluated with omitted effort/known saved
+default and no function declarations; descriptor-absent candidates retain their
+historical `strict_json_schema` interpretation. Strict function support is not a new
+response-schema fact. `true` uses only a strict one-field
 Structured Output contract, `false` uses only title-only plain text, and `null` starts with Structured
 Output. The unknown branch changes once to plain text only when a typed provider parameter or code
 identifies that output contract as unsupported or unroutable, or when a successful response cannot be
@@ -1441,6 +1445,9 @@ presentations.
 
 ## 13. Changelog
 
+- **2026-10-03** — v178. Made new title decisions consume separate saved
+  structured-response support and conditions while retaining historical strict
+  interpretation and existing typed fallback/retry behavior.
 - **2026-10-02** — v177. Canonicalized Mailbox admission and terminal database
   compositions in repositories and completed best-effort terminal-result repair
   operations without changing wake, parent-result, or rollback semantics.

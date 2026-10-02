@@ -23,6 +23,8 @@ code_paths:
   - python/apps/azents/src/azents/core/llm_mapping.py
   - python/apps/azents/src/azents/core/model_execution_options.py
   - python/apps/azents/src/azents/core/model_pricing.py
+  - python/apps/azents/src/azents/core/model_catalog_identity.py
+  - python/apps/azents/src/azents/core/model_capability_contract.py
   - python/apps/azents/src/azents/services/model_metadata.py
   - python/apps/azents/src/azents/engine/events/model_usage_pricing.py
   - python/apps/azents/src/azents/engine/events/**
@@ -32,8 +34,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/llm-settings/**
   - typescript/apps/azents-web/src/shared/subscription-usage/**
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
-last_verified_at: 2026-10-01
-spec_version: 29
+last_verified_at: 2026-10-03
+spec_version: 30
 ---
 
 # ChatGPT OAuth Flow
@@ -225,10 +227,15 @@ Rules:
 - Sampling always uses the standard Responses contract regardless of model name or backend request-dialect hints. Tools remain in the top-level `tools` field and instructions remain in the top-level `instructions` field.
 - Compaction and title generation use the same standard Responses dialect. They send ordinary user input plus top-level instructions, no sampling tools, and omit `max_output_tokens` while retaining `store=false`, encrypted reasoning inclusion, and common client identity headers.
 - Completed SDK usage maps directly into the existing turn marker. Azents captures a validated
-  retained-source DB pricing view for the physical operation and computes `cost_usd` from
+  exact ChatGPT-scoped data-only DB pricing view for the physical operation and computes `cost_usd` from
   content-free usage and billing metadata. Optional typed provenance distinguishes an estimate
-  from a provider-reported charge. These estimates represent public API pricing rather than
-  ChatGPT subscription billing; missing, invalid or unsupported tier pricing remains unset.
+  from a provider-reported charge. These descriptive source-price estimates do not
+  represent ChatGPT subscription billing; missing, invalid or unsupported tier pricing remains unset.
+  Native OpenAI source records are not borrowed by model name or alias. No exact
+  ChatGPT price match means an unavailable estimate. Saved v2 account support
+  preserves complete efforts/conditions independently from source pricing; native
+  ChatGPT does not consult Pydantic profiles for capability authority. Historical
+  descriptor absence keeps the previously saved behavior.
 
 ## Processing-speed execution options
 
@@ -363,6 +370,7 @@ error boundary.
 
 | Date | Version | Change | Rationale |
 |---|---|---|---|
+| 2026-10-03 | 30 | Adopted exact ChatGPT-scoped data-only pricing and saved v2 account support independently from native OpenAI/profile facts | Preserve host identity, subscription separation and historical selections |
 | 2026-10-01 | 29 | Removed the former metadata-source compatibility path while retaining account catalog visibility authority | Keep generic metadata optional for ChatGPT model visibility |
 | 2026-09-30 | 27 | Retained the native OpenAI runtime while replacing executable price-map access with captured DB pricing provenance | Keep OAuth/subscription authority separate from API cost estimates |
 | 2026-09-25 | 26 | Routed new subscription image requests through the client Images tool while retaining historical hosted-image replay | Make client image generation independent of conversation-model hosted-tool support |
