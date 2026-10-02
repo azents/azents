@@ -3,19 +3,23 @@ name: E2E duration reevaluation
 on:
   pull_request_target:
     types: [edited]
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
   schedule:
     - cron: "*/15 * * * *"
 
 permissions:
   contents: read
   actions: read
-  pull-requests: read
+  pull-requests: write
   statuses: write
 
 jobs:
   recheck:
     if: >-
       github.event_name == 'schedule'
+      || github.event_name == 'workflow_run'
       || github.event.changes.base != null
     runs-on: ubuntu-latest
     steps:
@@ -41,9 +45,25 @@ jobs:
         if: steps.helper.outputs.ready == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          WORKFLOW_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          WORKFLOW_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
         run: |
           if [ "$GITHUB_EVENT_NAME" = 'pull_request_target' ]; then
             numbers='${{ github.event.pull_request.number }}'
+          elif [ "$GITHUB_EVENT_NAME" = 'workflow_run' ]; then
+            if [ "$WORKFLOW_HEAD_BRANCH" = 'main' ]; then
+              base_sha="$WORKFLOW_HEAD_SHA"
+              numbers="$(
+                gh api "repos/${GITHUB_REPOSITORY}/pulls?state=open&base=main&per_page=100" \
+                  --jq ".[] | select(.base.sha == \"${base_sha}\") | .number"
+              )"
+            else
+              numbers="$(
+                gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${WORKFLOW_RUN_ID}/pull_requests" \
+                  --jq '.[].number'
+              )"
+            fi
           else
             numbers="$(gh api "repos/${GITHUB_REPOSITORY}/pulls?state=open&per_page=100" --jq '.[].number')"
           fi
