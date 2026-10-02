@@ -99,12 +99,14 @@ def test_duration_gate_compares_base_once_without_retry() -> None:
     assert "support.ci_duration_gate gate" in gate
     assert "GH_TOKEN: ${{ github.token }}" in gate
     assert "github.event.pull_request.base.sha" in gate
+    assert "--publish-status" in gate
+    assert "statuses: write" in aggregate.split("    steps:\n", 1)[0]
     assert gate.count("ci_duration_gate gate") == 1
     assert "gh run rerun" not in aggregate
     assert "DURATION_RESULT: ${{ steps.duration.outcome }}" in aggregate
 
 
-def test_comment_is_compact_and_base_changes_are_rechecked() -> None:
+def test_comment_and_status_are_rechecked_when_base_ci_completes() -> None:
     workflow = _WORKFLOW_PATH.read_text(encoding="utf-8")
     comment = workflow.split("  ci_e2e_observability_comment:\n", 1)[1].split(
         "\n  ci_typescript_run:\n", 1
@@ -118,7 +120,29 @@ def test_comment_is_compact_and_base_changes_are_rechecked() -> None:
     assert "Workflow run and full artifacts" in comment
     assert "e2e-duration-gate/summary.md" in comment
     assert "pull_request_target:" in recheck
+    assert "workflow_run:" in recheck
+    assert 'workflows: ["CI"]' in recheck
+    assert "types: [completed]" in recheck
+    assert "github.event_name == 'workflow_run'" in recheck
+    assert "github.event.workflow_run.head_branch" in recheck
+    assert "github.event.workflow_run.head_sha" in recheck
+    assert "select(.base.sha" in recheck
+    assert recheck.count(".head.repo.full_name") == 1
+    assert ".pull_requests[] | select(.head.repo.id" in recheck
+    assert recheck.count("gh api --paginate") == 2
+    assert "WORKFLOW_HEAD_BRANCH:" in recheck
+    assert "WORKFLOW_HEAD_SHA:" in recheck
+    assert "WORKFLOW_RUN_ID:" in recheck
+    assert "REPOSITORY_ID: ${{ github.repository_id }}" in recheck
+    assert (
+        'gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${WORKFLOW_RUN_ID}"' in recheck
+    )
+    assert "actions/runs/${WORKFLOW_RUN_ID}/pull_requests" not in recheck
     assert "github.event.changes.base != null" in recheck
     assert 'cron: "*/15 * * * *"' in recheck
+    assert "pull-requests: write" in recheck
+    assert "group: e2e-duration-reevaluation" in recheck
+    assert "cancel-in-progress: false" in recheck
+    assert "queue: max" in recheck
     assert "support.ci_duration_gate recheck" in recheck
     assert "gh workflow run" not in recheck

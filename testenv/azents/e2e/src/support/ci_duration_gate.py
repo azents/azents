@@ -6,6 +6,7 @@ import argparse
 import html
 import json
 import re
+import shutil
 import subprocess
 import sys
 import xml.etree.ElementTree as element_tree
@@ -15,6 +16,14 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 METRIC = "pytest-call-total-v1"
+STATUS_CONTEXT = "ci-python-e2e"
+_DURATION_START = "<!-- e2e-duration:start -->"
+_DURATION_END = "<!-- e2e-duration:end -->"
+_STICKY_MARKER = "<!-- Sticky Pull Request Commente2e-observability -->"
+_STICKY_MARKERS = (
+    _STICKY_MARKER,
+    "<!-- Sticky Pull Request Comment:e2e-observability -->",
+)
 _LANE = re.compile(r"[a-z][a-z0-9-]*-[1-9][0-9]*")
 _SUMMARY_LANE = re.compile(
     r"^### (?P<lane>[a-z][a-z0-9-]*-[1-9][0-9]*) — ",
@@ -22,10 +31,22 @@ _SUMMARY_LANE = re.compile(
 )
 _SHA = re.compile(r"[0-9a-f]{40}")
 Runner = Callable[[Sequence[str]], str]
+_ACTIVE_RUN_STATUSES = frozenset(
+    {"queued", "in_progress", "waiting", "requested", "pending"}
+)
 
 
 class EvidenceError(ValueError):
     """Required comparison evidence is unavailable or invalid."""
+
+
+class BaseComparisonUnavailable(EvidenceError):
+    """The exact base does not yet have complete comparison evidence."""
+
+    def __init__(self, reason: str, run: WorkflowRun | None = None) -> None:
+        super().__init__(reason)
+        self.reason = reason
+        self.run = run
 
 
 @dataclass(frozen=True)
@@ -35,6 +56,16 @@ class Sample:
     run_id: int
     lanes: Mapping[str, Decimal]
     diagnostics: Mapping[str, Mapping[str, Decimal]] = field(default_factory=dict)
+    run_url: str | None = None
+
+
+@dataclass(frozen=True)
+class WorkflowRun:
+    """One exact-SHA CI workflow that may provide base evidence."""
+
+    run_id: int
+    status: str
+    url: str
 
 
 @dataclass(frozen=True)
@@ -59,6 +90,24 @@ def _object(text: str) -> dict[str, object]:
     if not isinstance(value, dict) or any(not isinstance(key, str) for key in value):
         raise EvidenceError("invalid_json")
     return value
+
+
+def _objects(text: str) -> list[dict[str, object]]:
+    value: object = json.loads(text)
+    if not isinstance(value, list):
+        raise EvidenceError("invalid_json")
+    items: list[object] = []
+    for item in value:
+        if isinstance(item, list):
+            items.extend(item)
+        else:
+            items.append(item)
+    objects: list[dict[str, object]] = []
+    for item in items:
+        if not isinstance(item, dict) or any(not isinstance(key, str) for key in item):
+            raise EvidenceError("invalid_json")
+        objects.append(item)
+    return objects
 
 
 def _seconds(text: str) -> Decimal:
@@ -133,7 +182,7 @@ def load_lanes(root: Path) -> LaneEvidence:
     return LaneEvidence(lanes, diagnostics)
 
 
-def _runs(repository: str, sha: str, command: Runner) -> list[int]:
+def _runs(repository: str, sha: str, command: Runner) -> list[WorkflowRun]:
     payload = _object(
         command(
             [
@@ -142,18 +191,64 @@ def _runs(repository: str, sha: str, command: Runner) -> list[int]:
                 "--method",
                 "GET",
                 f"repos/{repository}/actions/workflows/ci.yaml/runs"
-                f"?head_sha={sha}&status=completed&per_page=10",
+                f"?head_sha={sha}&per_page=10",
             ]
         )
     )
     rows = payload.get("workflow_runs")
     if not isinstance(rows, list):
         raise EvidenceError("invalid_run_list")
-    return [
-        row["id"]
-        for row in rows
-        if isinstance(row, dict) and isinstance(row.get("id"), int)
-    ]
+    runs: list[WorkflowRun] = []
+    for row in rows:
+        if not isinstance(row, dict) or not isinstance(row.get("id"), int):
+            continue
+        run_id = row["id"]
+        status = row.get("status")
+        url = row.get("html_url")
+        if not isinstance(status, str):
+            status = "completed"
+        if not isinstance(url, str) or not url:
+            url = f"https://github.com/{repository}/actions/runs/{run_id}"
+        runs.append(WorkflowRun(run_id, status, url))
+    return runs
+
+
+def _download_sample(
+    repository: str,
+    run: WorkflowRun,
+    expected_lanes: set[str],
+    work_dir: Path,
+    command: Runner,
+) -> Sample | None:
+    destination = work_dir / f"run-{run.run_id}"
+    try:
+        if destination.exists():
+            shutil.rmtree(destination)
+        command(
+            [
+                "gh",
+                "run",
+                "download",
+                str(run.run_id),
+                "--repo",
+                repository,
+                "--pattern",
+                "e2e-observability-*",
+                "--dir",
+                str(destination),
+            ]
+        )
+        evidence = load_lanes(destination)
+    except (EvidenceError, OSError):
+        return None
+    if not expected_lanes <= set(evidence.lanes):
+        return None
+    return Sample(
+        run.run_id,
+        {lane: evidence.lanes[lane] for lane in expected_lanes},
+        {lane: evidence.diagnostics[lane] for lane in expected_lanes},
+        run.url,
+    )
 
 
 def find_sample(
@@ -164,38 +259,31 @@ def find_sample(
     work_dir: Path,
     command: Runner,
 ) -> Sample:
-    """Use the newest existing run with the same complete lane set."""
+    """Use complete exact-SHA evidence or describe the active base workflow."""
     if not _SHA.fullmatch(sha):
         raise EvidenceError("base_sha_unavailable")
-    for run_id in _runs(repository, sha, command):
-        if run_id == exclude_run_id:
+    runs = [
+        run for run in _runs(repository, sha, command) if run.run_id != exclude_run_id
+    ]
+    for run in runs:
+        if run.status != "completed":
             continue
-        destination = work_dir / f"run-{run_id}"
-        try:
-            command(
-                [
-                    "gh",
-                    "run",
-                    "download",
-                    str(run_id),
-                    "--repo",
-                    repository,
-                    "--pattern",
-                    "e2e-observability-*",
-                    "--dir",
-                    str(destination),
-                ]
-            )
-            evidence = load_lanes(destination)
-        except (EvidenceError, OSError):
-            continue
-        if expected_lanes <= set(evidence.lanes):
-            return Sample(
-                run_id,
-                {lane: evidence.lanes[lane] for lane in expected_lanes},
-                {lane: evidence.diagnostics[lane] for lane in expected_lanes},
-            )
-    raise EvidenceError("compatible_base_run_unavailable")
+        sample = _download_sample(repository, run, expected_lanes, work_dir, command)
+        if sample is not None:
+            return sample
+    active_run = next(
+        (run for run in runs if run.status in _ACTIVE_RUN_STATUSES),
+        None,
+    )
+    if active_run is not None:
+        sample = _download_sample(
+            repository, active_run, expected_lanes, work_dir, command
+        )
+        if sample is not None:
+            return sample
+        raise BaseComparisonUnavailable("base_workflow_running", active_run)
+    completed_run = next((run for run in runs if run.status == "completed"), None)
+    raise BaseComparisonUnavailable("compatible_base_run_unavailable", completed_run)
 
 
 def _number(value: Decimal | None) -> str | None:
@@ -239,6 +327,8 @@ def compare(
         "head_sha": head_sha,
         "base_sha": base_sha,
         "base_run_id": base.run_id,
+        "base_run_status": "completed",
+        "base_run_url": base.run_url,
         "lanes": {lane: _number(value) for lane, value in sorted(lanes.items())},
         "base_lanes": {
             lane: _number(value) for lane, value in sorted(base.lanes.items())
@@ -262,8 +352,9 @@ def unavailable(
     head: str,
     base: str,
     diagnostics: Mapping[str, Mapping[str, Decimal]] | None = None,
+    run: WorkflowRun | None = None,
 ) -> dict[str, object]:
-    """Keep current measurements visible while failing closed."""
+    """Keep current measurements visible while the base comparison is pending."""
     return {
         "schema_version": 1,
         "metric": METRIC,
@@ -271,7 +362,9 @@ def unavailable(
         "reason": reason,
         "head_sha": head,
         "base_sha": base,
-        "base_run_id": None,
+        "base_run_id": run.run_id if run is not None else None,
+        "base_run_status": run.status if run is not None else None,
+        "base_run_url": run.url if run is not None else None,
         "lanes": {lane: _number(value) for lane, value in sorted(lanes.items())},
         "base_lanes": {},
         "lane_diagnostics": _diagnostics_wire(diagnostics or {}),
@@ -284,6 +377,14 @@ def unavailable(
         "reference_seconds": None,
         "threshold_seconds": None,
         "increase_percent": None,
+    }
+
+
+def invalid_evidence(reason: str, head: str, base: str) -> dict[str, object]:
+    """Fail closed when the candidate measurement itself is invalid."""
+    return {
+        **unavailable({}, reason, head, base),
+        "outcome": "evidence_invalid",
     }
 
 
@@ -300,10 +401,16 @@ def render(report: Mapping[str, object]) -> str:
         if increase is not None
         else None
     )
+    reason_code = str(report.get("reason"))
     status = {
         "pass": "✅ Within limit",
         "regression": "❌ Over 20% limit",
-        "comparison_unavailable": "⚠️ Comparison unavailable",
+        "comparison_unavailable": (
+            "⏳ Base CI running"
+            if reason_code == "base_workflow_running"
+            else "⚠️ Comparison unavailable"
+        ),
+        "evidence_invalid": "❌ Candidate timing invalid",
     }.get(outcome, "⚠️ Unknown result")
     observed_display = _display_seconds(observed)
     reference_display = _display_seconds(reference)
@@ -320,16 +427,35 @@ def render(report: Mapping[str, object]) -> str:
         values.append(f"Change `{change}%`")
     if threshold is not None:
         values.append(f"Limit `{threshold_display}s`")
-    lines = ["## E2E duration", "", f"**{status}**", "", " · ".join(values)]
+    lines = [
+        _DURATION_START,
+        "## E2E duration",
+        "",
+        f"**{status}**",
+        "",
+        " · ".join(values),
+    ]
     if outcome == "comparison_unavailable":
         reason = {
+            "base_workflow_running": "Base CI is still running",
             "compatible_base_run_unavailable": "Base timing artifact unavailable",
             "github_evidence_unavailable": "GitHub timing evidence unavailable",
-            "lane_evidence_unavailable": "Current lane timing unavailable",
+        }.get(str(report.get("reason")), "Required base timing evidence unavailable")
+        run_url = report.get("base_run_url")
+        run_id = report.get("base_run_id")
+        if isinstance(run_url, str) and run_url:
+            reason += (
+                f": [workflow run {html.escape(str(run_id))}]({html.escape(run_url)})"
+            )
+        lines.extend(["", reason])
+    elif outcome == "evidence_invalid":
+        reason = {
             "call_timing_unavailable": "Current test timing unavailable",
-            "incomplete_call_timing": "Test timing evidence incomplete",
-        }.get(str(report.get("reason")), "Required timing evidence unavailable")
-        lines.extend(["", f"`{reason}`"])
+            "incomplete_call_timing": "Current test timing evidence incomplete",
+            "invalid_test_phase_timing": "Current test timing evidence invalid",
+            "junit_evidence_unavailable": "Current JUnit evidence unavailable",
+        }.get(str(report.get("reason")), "Current timing evidence invalid")
+        lines.extend(["", reason])
     lines.extend(
         [
             "",
@@ -359,6 +485,8 @@ def render(report: Mapping[str, object]) -> str:
             "</details>",
             "",
             "</details>",
+            "",
+            _DURATION_END,
             "",
         ]
     )
@@ -396,18 +524,22 @@ def evaluate(
     command: Runner,
 ) -> dict[str, object]:
     """Evaluate current local artifacts against an existing base run."""
-    evidence = LaneEvidence({}, {})
     try:
         evidence = load_lanes(artifacts_root)
+    except (EvidenceError, OSError, ValueError) as error:
+        return invalid_evidence(str(error), head_sha, base_sha)
+    try:
         base = find_sample(
             repository, base_sha, set(evidence.lanes), run_id, work_dir, command
         )
-        return compare(
+    except BaseComparisonUnavailable as error:
+        return unavailable(
             evidence.lanes,
-            base,
+            error.reason,
             head_sha,
             base_sha,
             diagnostics=evidence.diagnostics,
+            run=error.run,
         )
     except (EvidenceError, OSError, ValueError) as error:
         return unavailable(
@@ -417,20 +549,31 @@ def evaluate(
             base_sha,
             diagnostics=evidence.diagnostics,
         )
+    return compare(
+        evidence.lanes,
+        base,
+        head_sha,
+        base_sha,
+        diagnostics=evidence.diagnostics,
+    )
 
 
 def _candidate_report(
     repository: str, head_sha: str, work_dir: Path, command: Runner
 ) -> tuple[int, dict[str, object]]:
-    for run_id in _runs(repository, head_sha, command):
-        destination = work_dir / f"candidate-{run_id}"
+    for run in _runs(repository, head_sha, command):
+        if run.status != "completed":
+            continue
+        destination = work_dir / f"candidate-{run.run_id}"
         try:
+            if destination.exists():
+                shutil.rmtree(destination)
             command(
                 [
                     "gh",
                     "run",
                     "download",
-                    str(run_id),
+                    str(run.run_id),
                     "--repo",
                     repository,
                     "--name",
@@ -443,40 +586,50 @@ def _candidate_report(
         except (EvidenceError, OSError):
             continue
         if report.get("head_sha") == head_sha and isinstance(report.get("lanes"), dict):
-            return run_id, report
+            return run.run_id, report
     raise EvidenceError("candidate_evidence_unavailable")
 
 
-def recheck(repository: str, pull_number: int, work_dir: Path, command: Runner) -> str:
-    """Recompare the last candidate measurement when its PR base changes."""
-    pull = _object(command(["gh", "api", f"repos/{repository}/pulls/{pull_number}"]))
-    head = pull.get("head")
-    base = pull.get("base")
-    if not isinstance(head, dict) or not isinstance(base, dict):
-        raise EvidenceError("invalid_pull_request")
-    head_sha, base_sha = head.get("sha"), base.get("sha")
-    if not isinstance(head_sha, str) or not isinstance(base_sha, str):
-        raise EvidenceError("invalid_pull_request")
-    try:
-        run_id, report = _candidate_report(repository, head_sha, work_dir, command)
-    except (EvidenceError, OSError):
-        return f"PR #{pull_number}: no duration evidence"
-    outcome = "comparison_unavailable"
-    reason = "evidence_unavailable"
-    target = f"https://github.com/{repository}/actions/runs/{run_id}"
-    try:
-        raw = report["lanes"]
-        if not isinstance(raw, dict):
-            raise EvidenceError("invalid_candidate_lanes")
-        lanes = {str(lane): _seconds(str(value)) for lane, value in raw.items()}
-        sample = find_sample(
-            repository, base_sha, set(lanes), run_id, work_dir / "base", command
-        )
-        result = compare(lanes, sample, head_sha, base_sha)
-        outcome, reason = str(result["outcome"]), str(result["reason"])
-    except (EvidenceError, OSError, ValueError) as error:
-        reason = str(error)
-    state = "success" if outcome == "pass" else "failure"
+def _report_diagnostics(
+    report: Mapping[str, object],
+) -> dict[str, dict[str, Decimal]]:
+    raw = report.get("lane_diagnostics")
+    if not isinstance(raw, dict):
+        return {}
+    diagnostics: dict[str, dict[str, Decimal]] = {}
+    for lane, values in raw.items():
+        if not isinstance(lane, str) or not isinstance(values, dict):
+            continue
+        parsed: dict[str, Decimal] = {}
+        for name in ("setup", "call", "teardown", "wall"):
+            value = values.get(name)
+            if value is not None:
+                parsed[name] = _seconds(str(value))
+        diagnostics[lane] = parsed
+    return diagnostics
+
+
+def _publish_status(
+    repository: str,
+    head_sha: str,
+    base_sha: str,
+    result: Mapping[str, object],
+    fallback_target: str,
+    command: Runner,
+) -> None:
+    outcome = str(result["outcome"])
+    reason = str(result.get("reason"))
+    state = {
+        "pass": "success",
+        "comparison_unavailable": (
+            "pending" if reason == "base_workflow_running" else "success"
+        ),
+        "regression": "failure",
+        "evidence_invalid": "failure",
+    }.get(outcome, "failure")
+    target = result.get("base_run_url")
+    if not isinstance(target, str) or not target:
+        target = fallback_target
     command(
         [
             "gh",
@@ -484,17 +637,201 @@ def recheck(repository: str, pull_number: int, work_dir: Path, command: Runner) 
             "--method",
             "POST",
             f"repos/{repository}/statuses/{head_sha}",
-            "-f",
-            "context=ci-python-e2e",
-            "-f",
+            "--raw-field",
+            f"context={STATUS_CONTEXT}",
+            "--raw-field",
             f"state={state}",
-            "-f",
+            "--raw-field",
             f"description=base={base_sha[:7]} {outcome}",
-            "-f",
+            "--raw-field",
             f"target_url={target}",
         ]
     )
-    return f"PR #{pull_number}: {outcome} ({reason})"
+
+
+def _sticky_marker(body: str) -> str | None:
+    return next((marker for marker in _STICKY_MARKERS if marker in body), None)
+
+
+def _replace_duration(body: str, duration: str) -> str:
+    replacement = duration.strip()
+    marker = _sticky_marker(body)
+    marker_position = body.find(marker) if marker is not None else -1
+    start = body.find(_DURATION_START)
+    end = body.find(_DURATION_END)
+    if start >= 0 and end >= start:
+        end += len(_DURATION_END)
+        return body[:start] + replacement + body[end:]
+    start = body.find("## E2E duration")
+    if start < 0:
+        insertion = marker_position if marker_position >= 0 else len(body)
+        return (
+            body[:insertion].rstrip() + "\n\n" + replacement + "\n\n" + body[insertion:]
+        )
+    end_candidates = [
+        position
+        for position in (
+            body.find("\n### ", start),
+            body.find("\nThis comment is updated in place", start),
+            marker_position,
+        )
+        if position >= 0
+    ]
+    end = min(end_candidates, default=len(body))
+    return body[:start] + replacement + "\n\n" + body[end:].lstrip("\n")
+
+
+def _update_sticky_comment(
+    repository: str,
+    pull_number: int,
+    head_sha: str,
+    candidate_target: str,
+    result: Mapping[str, object],
+    command: Runner,
+) -> None:
+    comments = _objects(
+        command(
+            [
+                "gh",
+                "api",
+                "--paginate",
+                "--slurp",
+                f"repos/{repository}/issues/{pull_number}/comments?per_page=100",
+            ]
+        )
+    )
+    duration = render(result)
+    for comment in comments:
+        comment_id = comment.get("id")
+        body = comment.get("body")
+        if not isinstance(comment_id, int) or not isinstance(body, str):
+            continue
+        if _sticky_marker(body) is None:
+            continue
+        updated = _replace_duration(body, duration)
+        command(
+            [
+                "gh",
+                "api",
+                "--method",
+                "PATCH",
+                f"repos/{repository}/issues/comments/{comment_id}",
+                "--raw-field",
+                f"body={updated}",
+            ]
+        )
+        return
+    body = "\n".join(
+        [
+            "## E2E CI observability",
+            "",
+            f"Commit: `{head_sha}`",
+            "",
+            f"[Candidate workflow run]({candidate_target})",
+            "",
+            duration.rstrip(),
+            "",
+            "This comment is updated in place for each CI run.",
+            "",
+            _STICKY_MARKER,
+        ]
+    )
+    command(
+        [
+            "gh",
+            "api",
+            "--method",
+            "POST",
+            f"repos/{repository}/issues/{pull_number}/comments",
+            "--raw-field",
+            f"body={body}",
+        ]
+    )
+
+
+def _pull_matches(
+    repository: str,
+    pull_number: int,
+    head_sha: str,
+    base_sha: str,
+    command: Runner,
+) -> bool:
+    """Reject evidence publication after the PR identity changes."""
+    pull = _object(command(["gh", "api", f"repos/{repository}/pulls/{pull_number}"]))
+    head, base = pull.get("head"), pull.get("base")
+    if not isinstance(head, dict) or not isinstance(base, dict):
+        raise EvidenceError("invalid_pull_request")
+    return head.get("sha") == head_sha and base.get("sha") == base_sha
+
+
+def recheck(repository: str, pull_number: int, work_dir: Path, command: Runner) -> str:
+    """Recompare recorded candidate evidence and synchronize status plus comment."""
+    pull = _object(command(["gh", "api", f"repos/{repository}/pulls/{pull_number}"]))
+    head = pull.get("head")
+    base = pull.get("base")
+    if not isinstance(head, dict) or not isinstance(base, dict):
+        raise EvidenceError("invalid_pull_request")
+    head_repository = head.get("repo")
+    if (
+        not isinstance(head_repository, dict)
+        or head_repository.get("full_name") != repository
+    ):
+        return f"PR #{pull_number}: fork pull request skipped"
+    head_sha, base_sha = head.get("sha"), base.get("sha")
+    if not isinstance(head_sha, str) or not isinstance(base_sha, str):
+        raise EvidenceError("invalid_pull_request")
+    try:
+        run_id, report = _candidate_report(repository, head_sha, work_dir, command)
+    except (EvidenceError, OSError):
+        return f"PR #{pull_number}: no duration evidence"
+    candidate_target = f"https://github.com/{repository}/actions/runs/{run_id}"
+    try:
+        raw = report["lanes"]
+        if not isinstance(raw, dict) or not raw:
+            raise EvidenceError("invalid_candidate_lanes")
+        lanes = {str(lane): _seconds(str(value)) for lane, value in raw.items()}
+        diagnostics = _report_diagnostics(report)
+    except (EvidenceError, ValueError) as error:
+        result = invalid_evidence(str(error), head_sha, base_sha)
+    else:
+        try:
+            sample = find_sample(
+                repository, base_sha, set(lanes), run_id, work_dir / "base", command
+            )
+        except BaseComparisonUnavailable as error:
+            result = unavailable(
+                lanes,
+                error.reason,
+                head_sha,
+                base_sha,
+                diagnostics=diagnostics,
+                run=error.run,
+            )
+        except (EvidenceError, OSError, ValueError) as error:
+            result = unavailable(
+                lanes,
+                str(error),
+                head_sha,
+                base_sha,
+                diagnostics=diagnostics,
+            )
+        else:
+            result = compare(
+                lanes,
+                sample,
+                head_sha,
+                base_sha,
+                diagnostics=diagnostics,
+            )
+    if not _pull_matches(repository, pull_number, head_sha, base_sha, command):
+        return f"PR #{pull_number}: changed head/base; stale publication skipped"
+    _publish_status(repository, head_sha, base_sha, result, candidate_target, command)
+    if not _pull_matches(repository, pull_number, head_sha, base_sha, command):
+        return f"PR #{pull_number}: changed head/base; stale comment skipped"
+    _update_sticky_comment(
+        repository, pull_number, head_sha, candidate_target, result, command
+    )
+    return f"PR #{pull_number}: {result['outcome']} ({result['reason']})"
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -506,6 +843,7 @@ def _parser() -> argparse.ArgumentParser:
     for name in ("repository", "base-sha", "head-sha"):
         gate.add_argument(f"--{name}", required=True)
     gate.add_argument("--run-id", type=int, required=True)
+    gate.add_argument("--publish-status", action="store_true")
     check = commands.add_parser("recheck")
     check.add_argument("--repository", required=True)
     check.add_argument("--pull-number", type=int, required=True)
@@ -538,7 +876,16 @@ def main(
         json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
     args.report_markdown.write_text(render(report), encoding="utf-8")
-    return 0 if report["outcome"] == "pass" else 1
+    if args.publish_status:
+        _publish_status(
+            args.repository,
+            args.head_sha,
+            args.base_sha,
+            report,
+            f"https://github.com/{args.repository}/actions/runs/{args.run_id}",
+            command,
+        )
+    return 0 if report["outcome"] in {"pass", "comparison_unavailable"} else 1
 
 
 if __name__ == "__main__":
