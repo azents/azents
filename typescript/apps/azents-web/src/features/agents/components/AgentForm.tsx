@@ -331,6 +331,7 @@ export function AgentForm({
                 options={form.values.selectable_model_options}
                 mainModelLabel={form.values.main_model_label}
                 lightweightModelLabel={form.values.lightweight_model_label}
+                reasoningEffort={form.values.reasoning_effort ?? null}
                 defaultReasoningEffortControl={
                   selectedModelSupportsReasoning ? (
                     <Select

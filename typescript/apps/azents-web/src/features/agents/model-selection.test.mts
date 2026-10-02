@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-
+import { partialReasoningCapabilities } from "../../shared/storybook/model-capability-fixtures.ts";
 import {
   copyCompatiblePrimarySettings,
   createSelectableModelCandidateFormValue,
@@ -15,12 +15,16 @@ import {
   resolveModelContextRange,
   type SelectableModelCandidateFormValue,
   type SelectableModelOptionFormValue,
+  selectableModelOptionFormValuesFromStoredOptions,
   selectableModelOptionInputsFromFormValues,
   selectCandidateIntegration,
   selectCandidateModel,
   withImageGenerationModelIdentifier,
 } from "./model-selection.ts";
-import type { ModelCapabilities } from "@azents/public-client";
+import type {
+  ModelCapabilities,
+  SelectableModelOption,
+} from "@azents/public-client";
 
 function candidate(id: string): SelectableModelCandidateFormValue {
   return createSelectableModelCandidateFormValue(id);
@@ -54,6 +58,79 @@ function capabilities(
     compatibility: {},
   };
 }
+
+void test("stored v2 capability evidence and omitted settings survive form loading unchanged", () => {
+  const stored: SelectableModelOption[] = [
+    {
+      label: "default",
+      candidates: [
+        {
+          model_selection: {
+            llm_provider_integration_id: "integration-evidence",
+            provider: "openai",
+            model_identifier: "evidence-fixture",
+            model_display_name: "Evidence fixture",
+            model_developer: "openai",
+            normalized_capabilities: partialReasoningCapabilities,
+            model_snapshot: {},
+          },
+          settings: {
+            context_window_tokens: null,
+            max_output_tokens: null,
+            builtin_tools: [{ name: "web_search", config: {} }],
+          },
+        },
+      ],
+      subagent_enabled: true,
+      subagent_guidance: null,
+    },
+  ];
+  const before = JSON.stringify(stored);
+  const form = selectableModelOptionFormValuesFromStoredOptions(stored);
+  assert.deepEqual(
+    form[0]?.candidates[0]?.normalized_capabilities,
+    partialReasoningCapabilities,
+  );
+  assert.equal(JSON.stringify(stored), before);
+  assert.deepEqual(selectableModelOptionInputsFromFormValues(form), [
+    {
+      label: "default",
+      candidates: [
+        {
+          model_selection: {
+            llm_provider_integration_id: "integration-evidence",
+            model_identifier: "evidence-fixture",
+          },
+          settings: {
+            context_window_tokens: null,
+            max_output_tokens: null,
+            builtin_tools: [{ name: "web_search", config: {} }],
+          },
+        },
+      ],
+      subagent_enabled: true,
+      subagent_guidance: null,
+    },
+  ]);
+});
+
+void test("v2 explicit model reselection respects conditional tool evidence", () => {
+  const pending = selectCandidateIntegration(candidate("new"), "integration-a");
+  const model = {
+    provider: "openai",
+    model_identifier: "evidence-fixture",
+    model_display_name: "Evidence fixture",
+    normalized_capabilities: partialReasoningCapabilities,
+  };
+  assert.deepEqual(selectCandidateModel(pending, model).builtin_tools, [
+    "web_search",
+  ]);
+  assert.deepEqual(
+    selectCandidateModel(pending, model, { reasoningEffort: "max" })
+      .builtin_tools,
+    ["web_search", "image_generation"],
+  );
+});
 
 void test("model replacement preserves every shared capability preference", () => {
   const configured = {

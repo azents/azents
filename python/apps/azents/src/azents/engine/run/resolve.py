@@ -25,6 +25,7 @@ from azents.core.agent import (
 )
 from azents.core.builtin_tools import (
     BuiltinToolValidationContext,
+    builtin_tool_configurable,
     validate_builtin_tools,
 )
 from azents.core.enums import ExchangeFileStatus, LLMProvider
@@ -48,6 +49,10 @@ from azents.core.tools import (
 )
 from azents.engine.context.window import resolve_model_input_tokens
 from azents.engine.events.model_file_parts import file_output_part_from_model_file
+from azents.engine.events.model_support_contract import (
+    ModelSupportRequest,
+    validate_saved_model_request,
+)
 from azents.engine.events.types import FileOutputPart
 from azents.engine.events.user_messages import make_run_user_message
 from azents.engine.io.attachments import RuntimeAttachment
@@ -451,6 +456,8 @@ def _resolve_reasoning_effort(
     """Return reasoning effort based on model selection capability contract."""
     if params is None or params.reasoning_effort is None:
         return None
+    if selection.normalized_capabilities.semantic_contract is not None:
+        return params.reasoning_effort
     reasoning = selection.normalized_capabilities.reasoning
     if not reasoning.supported:
         return None
@@ -720,9 +727,8 @@ async def resolve_invoke_input_with_model_source(
         workspace_id=integration.workspace_id,
         provider=integration.provider,
         integration_enabled=integration.enabled,
-        image_generation_supported=(
-            "image_generation"
-            in main_selection.normalized_capabilities.built_in_tools.supported
+        image_generation_supported=builtin_tool_configurable(
+            main_selection.normalized_capabilities, tool="image_generation"
         ),
         settings=main_settings,
     )
@@ -796,6 +802,47 @@ async def resolve_invoke_input_with_model_source(
         case _:
             assert_never(settings_result)
 
+    reasoning_effort = (
+        requested_profile.reasoning_effort
+        if requested_profile is not None
+        else _resolve_reasoning_effort(main_selection, params)
+    )
+    if (
+        requested_profile is None
+        and params is not None
+        and params.reasoning_effort is not None
+        and main_selection.normalized_capabilities.semantic_contract is not None
+        and params.reasoning_effort
+        not in main_selection.normalized_capabilities.reasoning.effort_levels
+    ):
+        return Failure(
+            ReasoningEffortUnsupported(
+                model_target_label=main_model_target_label,
+                reasoning_effort=params.reasoning_effort,
+            )
+        )
+    try:
+        validate_saved_model_request(
+            main_selection.normalized_capabilities,
+            request=ModelSupportRequest(
+                reasoning_effort=reasoning_effort,
+                function_tools=None,
+                temperature=params is not None and params.temperature is not None,
+                max_output_tokens=main_settings.max_output_tokens is not None,
+                top_p=params is not None and params.top_p is not None,
+                top_k=params is not None and params.top_k is not None,
+                stop_sequences=params is not None and params.stop_sequences is not None,
+                parallel_function_calls=False,
+                strict_function_schema=False,
+                structured_response=False,
+                reasoning_summary=False,
+            ),
+        )
+    except ValueError as exc:
+        return Failure(
+            InvalidModelParameters(agent_id=invoke_input.agent_id, errors=[str(exc)])
+        )
+
     requested_enabled_execution_options = (
         requested_profile.enabled_execution_options
         if requested_profile is not None
@@ -845,11 +892,6 @@ async def resolve_invoke_input_with_model_source(
                 lightweight_selection.normalized_capabilities.context_window.max_input_tokens,
             ]
         )
-    )
-    reasoning_effort = (
-        requested_profile.reasoning_effort
-        if requested_profile is not None
-        else _resolve_reasoning_effort(main_selection, params)
     )
     main_input_tokens = resolve_model_input_tokens(
         main_selection.normalized_capabilities.context_window.default_input_tokens,

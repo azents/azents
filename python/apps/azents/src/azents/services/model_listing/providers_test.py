@@ -1,12 +1,14 @@
 """Provider-visible model listing adapter tests."""
 
 import datetime
+import json
 from types import SimpleNamespace
 
 import httpx
 import pytest
 from botocore.exceptions import ClientError, EndpointConnectionError, InvalidRegionError
 from google.auth.exceptions import TransportError as GoogleTransportError
+from openai.types import Model as OpenAIModel
 from pydantic import TypeAdapter, ValidationError
 
 from azents.core.chatgpt_oauth import (
@@ -23,7 +25,13 @@ from azents.core.credentials import (
     XaiOAuthSecrets,
 )
 from azents.core.enums import LLMModelDeveloper, LLMProvider
-from azents.core.llm_catalog import ModelModality, ModelReasoningEffort
+from azents.core.llm_catalog import (
+    ModelCapabilities,
+    ModelModality,
+    ModelReasoningEffort,
+)
+from azents.core.model_capability_evidence import ProviderCapabilityEvidence
+from azents.core.model_catalog_source import CatalogFact
 from azents.core.model_execution_options import (
     ModelExecutionOptionId,
     list_model_execution_option_definitions,
@@ -33,6 +41,14 @@ from azents.repos.llm_provider_integration.data import (
     LLMProviderIntegrationWithSecrets,
 )
 from azents.services.model_listing import providers
+from azents.services.model_listing.data import NormalizedModelCandidate
+from azents.services.model_metadata_projection import (
+    project_integration_replacement_entries,
+)
+from azents.testing.model_metadata import (
+    make_test_source_payload,
+    make_test_source_snapshot,
+)
 
 
 def _openrouter_integration() -> LLMProviderIntegrationWithSecrets:
@@ -238,10 +254,11 @@ class _FakeXaiModels:
         """Return one API-key-visible model."""
         return SimpleNamespace(
             data=[
-                SimpleNamespace(
+                OpenAIModel(
                     id="grok-4.7-api",
                     created=1_787_000_000,
                     owned_by="xai",
+                    object="model",
                 )
             ]
         )
@@ -884,11 +901,7 @@ async def test_list_openrouter_models_projects_account_metadata_without_allowlis
     assert known.normalized_capabilities.tool_calling.supported is True
     assert known.normalized_capabilities.tool_calling.parallel_tool_calls is True
     assert known.normalized_capabilities.tool_calling.strict_json_schema is None
-    assert known.normalized_capabilities.reasoning.effort_levels == [
-        ModelReasoningEffort.LOW,
-        ModelReasoningEffort.MEDIUM,
-        ModelReasoningEffort.HIGH,
-    ]
+    assert known.normalized_capabilities.reasoning.effort_levels == []
     assert known.normalized_capabilities.built_in_tools.supported == ["web_search"]
     assert known.normalized_capabilities.parameters.temperature is True
     assert known.normalized_capabilities.parameters.max_output_tokens is True
@@ -1076,3 +1089,433 @@ async def test_chatgpt_listing_support_is_not_enabled_preference(
                 supported=candidate.supported_execution_options,
                 enabled=expected,
             )
+
+
+def _replayed_evidence(
+    candidate: NormalizedModelCandidate | None,
+) -> ProviderCapabilityEvidence:
+    assert candidate is not None
+    restored = NormalizedModelCandidate.model_validate_json(candidate.model_dump_json())
+    assert restored == candidate
+    assert restored.capability_evidence is not None
+    return restored.capability_evidence
+
+
+@pytest.mark.parametrize(
+    "provider",
+    [
+        LLMProvider.CHATGPT_OAUTH,
+        LLMProvider.KIMI_OAUTH,
+        LLMProvider.XAI,
+        LLMProvider.XAI_OAUTH,
+        LLMProvider.OPENROUTER,
+        LLMProvider.AWS_BEDROCK,
+        LLMProvider.GOOGLE_VERTEX_AI,
+    ],
+)
+def test_sparse_listing_replay_does_not_promote_constructor_defaults(
+    provider: LLMProvider,
+) -> None:
+    now = datetime.datetime.now(datetime.UTC)
+    if provider == LLMProvider.CHATGPT_OAUTH:
+        candidate = providers._candidate_from_chatgpt_model(
+            {"slug": "new-model", "supported_in_api": True, "visibility": "list"},
+            fetched_at=now,
+        )
+    elif provider == LLMProvider.KIMI_OAUTH:
+        candidate = providers._candidate_from_kimi_model(
+            {"id": "new-model"}, fetched_at=now
+        )
+    elif provider == LLMProvider.XAI:
+        candidate = providers._candidate_from_xai_api_key_model(
+            model_id="new-model", created=1, extra=None, fetched_at=now
+        )
+    elif provider == LLMProvider.XAI_OAUTH:
+        candidate = providers._candidate_from_xai_oauth_model(
+            providers._XaiOAuthModelPayload(id="new-model"), fetched_at=now
+        )
+    elif provider == LLMProvider.OPENROUTER:
+        candidate = providers._candidate_from_openrouter_model(
+            {"id": "new-publisher/new-model"}, fetched_at=now
+        )
+    elif provider == LLMProvider.AWS_BEDROCK:
+        candidate = providers._candidate_from_bedrock_summary(
+            {"modelId": "new-model", "providerName": "Anthropic"}, fetched_at=now
+        )
+    elif provider == LLMProvider.GOOGLE_VERTEX_AI:
+        candidate = providers._candidate_from_vertex_model(
+            {"name": "publishers/google/models/new-model"},
+            publisher="google",
+            developer=LLMModelDeveloper.GOOGLE,
+            fetched_at=now,
+        )
+    else:
+        raise AssertionError("Unhandled provider test case.")
+
+    assert _replayed_evidence(candidate) == ProviderCapabilityEvidence()
+    assert candidate is not None
+    historic_json = json.loads(candidate.model_dump_json())
+    del historic_json["capability_evidence"]
+    restored_historic = NormalizedModelCandidate.model_validate_json(
+        json.dumps(historic_json)
+    )
+    assert restored_historic.capability_evidence is None
+    assert (
+        restored_historic.normalized_capabilities == candidate.normalized_capabilities
+    )
+
+
+@pytest.mark.parametrize("flag", [True, False, None])
+def test_kimi_media_flags_remain_independent_after_replay(flag: bool | None) -> None:
+    candidate = providers._candidate_from_kimi_model(
+        {"id": "kimi-new", "supports_image_in": flag},
+        fetched_at=datetime.datetime.now(datetime.UTC),
+    )
+    evidence = _replayed_evidence(candidate)
+    assert evidence.image_input == CatalogFact(
+        state="null" if flag is None else "value", value=flag
+    )
+    assert evidence.video_input.state == "absent"
+    assert evidence.input_modalities.state == "absent"
+    assert evidence.function_calling.state == "absent"
+
+
+def test_kimi_video_reasoning_evidence_does_not_invent_effort_controls() -> None:
+    evidence = _replayed_evidence(
+        providers._candidate_from_kimi_model(
+            {
+                "id": "kimi-new",
+                "supports_image_in": False,
+                "supports_video_in": True,
+                "supports_reasoning": True,
+            },
+            fetched_at=datetime.datetime.now(datetime.UTC),
+        )
+    )
+    assert evidence.image_input == CatalogFact(state="value", value=False)
+    assert evidence.video_input == CatalogFact(state="value", value=True)
+    assert evidence.reasoning == CatalogFact(state="value", value=True)
+    assert evidence.reasoning_efforts.state == "absent"
+    assert evidence.responses_api.state == "absent"
+
+
+@pytest.mark.parametrize(
+    ("parameters", "reasoning", "effort_state", "temperature"),
+    [
+        (None, None, "null", None),
+        ([], False, "value", False),
+        (["include_reasoning"], True, "value", False),
+        (["reasoning"], True, "absent", False),
+        (["reasoning_effort", "temperature"], True, "absent", True),
+    ],
+)
+def test_openrouter_parameter_declarations_are_not_generic_effort_arrays(
+    parameters: list[str] | None,
+    reasoning: bool | None,
+    effort_state: str,
+    temperature: bool | None,
+) -> None:
+    evidence = _replayed_evidence(
+        providers._candidate_from_openrouter_model(
+            {
+                "id": "publisher/new-model",
+                "supported_parameters": parameters,
+            },
+            fetched_at=datetime.datetime.now(datetime.UTC),
+        )
+    )
+    assert evidence.reasoning.value == reasoning
+    assert evidence.reasoning_efforts.state == effort_state
+    assert evidence.reasoning_efforts.value == (() if effort_state == "value" else None)
+    assert evidence.temperature.value == temperature
+    assert evidence.strict_function_schema.state == "absent"
+    assert evidence.structured_response.state == (
+        "null" if parameters is None else "value"
+    )
+    assert evidence.structured_response.value == (None if parameters is None else False)
+
+
+@pytest.mark.parametrize(
+    ("declaration", "state", "value"),
+    [
+        ({}, "absent", None),
+        ({"supported_parameters": None}, "null", None),
+        ({"supported_parameters": []}, "value", False),
+        ({"supported_parameters": ["temperature"]}, "value", False),
+        ({"supported_parameters": ["response_format"]}, "value", False),
+        ({"supported_parameters": ["structured_outputs"]}, "value", True),
+        (
+            {"supported_parameters": ["response_format", "structured_outputs"]},
+            "value",
+            True,
+        ),
+    ],
+)
+def test_openrouter_structured_response_preserves_complete_parameter_presence(
+    declaration: dict[str, object], state: str, value: bool | None
+) -> None:
+    evidence = _replayed_evidence(
+        providers._candidate_from_openrouter_model(
+            {"id": "publisher/new-model", **declaration},
+            fetched_at=datetime.datetime.now(datetime.UTC),
+        )
+    )
+    assert evidence.structured_response.state == state
+    assert evidence.structured_response.value == value
+    assert evidence.strict_function_schema.state == "absent"
+
+
+@pytest.mark.parametrize("source_support", [True, False])
+@pytest.mark.parametrize(
+    ("declaration", "provider_state"),
+    [
+        ({}, "absent"),
+        ({"supported_parameters": None}, "unknown"),
+        ({"supported_parameters": []}, "unsupported"),
+        ({"supported_parameters": ["temperature"]}, "unsupported"),
+        ({"supported_parameters": ["response_format"]}, "unsupported"),
+        ({"supported_parameters": ["structured_outputs"]}, "supported"),
+        (
+            {"supported_parameters": ["response_format", "structured_outputs"]},
+            "supported",
+        ),
+    ],
+)
+def test_openrouter_structured_response_source_enriches_only_absent_declaration(
+    declaration: dict[str, object], provider_state: str, source_support: bool
+) -> None:
+    candidate = providers._candidate_from_openrouter_model(
+        {"id": "publisher/new-model", **declaration},
+        fetched_at=datetime.datetime.now(datetime.UTC),
+    )
+    assert candidate is not None
+    replayed = NormalizedModelCandidate.model_validate_json(candidate.model_dump_json())
+    source = make_test_source_snapshot(
+        make_test_source_payload(
+            {
+                "openrouter/publisher/new-model": {
+                    "litellm_provider": "openrouter",
+                    "mode": "chat",
+                    "supports_response_schema": source_support,
+                }
+            }
+        )
+    )
+    [entry] = project_integration_replacement_entries(
+        integration_id="integration-id",
+        provider=LLMProvider.OPENROUTER,
+        candidates=[replayed],
+        source=source,
+        provider_listing_source="openrouter:account_models",
+    )
+    capabilities = ModelCapabilities.model_validate(entry.normalized_capabilities)
+    assert entry.projection_metadata is not None
+    assert entry.projection_metadata["matched"] is True
+    assert capabilities.semantic_contract is not None
+    expected_state = (
+        ("supported" if source_support else "unsupported")
+        if provider_state == "absent"
+        else provider_state
+    )
+    assert capabilities.semantic_contract.structured_response.state == expected_state
+    assert not capabilities.semantic_contract.strict_function_schema.enabled
+
+
+def test_openrouter_explicit_empty_modalities_and_nested_null_survive_replay() -> None:
+    evidence = _replayed_evidence(
+        providers._candidate_from_openrouter_model(
+            {
+                "id": "publisher/new-model",
+                "architecture": {"input_modalities": [], "output_modalities": None},
+                "top_provider": None,
+                "supported_parameters": ["structured_outputs", "tools"],
+            },
+            fetched_at=datetime.datetime.now(datetime.UTC),
+        )
+    )
+    assert evidence.input_modalities == CatalogFact(state="value", value=())
+    assert evidence.output_modalities.state == "null"
+    assert evidence.max_output_tokens.state == "null"
+    assert evidence.function_calling == CatalogFact(state="value", value=True)
+    assert evidence.structured_response == CatalogFact(state="value", value=True)
+    assert evidence.strict_function_schema.state == "absent"
+
+
+def test_bedrock_media_declarations_preserve_unsupported_lowering_evidence() -> None:
+    evidence = _replayed_evidence(
+        providers._candidate_from_bedrock_summary(
+            {
+                "modelId": "provider-new",
+                "providerName": "Anthropic",
+                "inputModalities": ["TEXT", "AUDIO", "FUTURE-MEDIA"],
+                "outputModalities": [],
+            },
+            fetched_at=datetime.datetime.now(datetime.UTC),
+        )
+    )
+    assert evidence.input_modalities.value == ("text", "audio", "future-media")
+    assert evidence.output_modalities == CatalogFact(state="value", value=())
+    assert evidence.function_calling.state == "absent"
+    assert evidence.strict_function_schema.state == "absent"
+
+
+def test_vertex_explicit_null_and_limits_survive_replay() -> None:
+    evidence = _replayed_evidence(
+        providers._candidate_from_vertex_model(
+            {
+                "modelId": "provider-new",
+                "inputTokenLimit": None,
+                "outputTokenLimit": 12345,
+            },
+            publisher="google",
+            developer=LLMModelDeveloper.GOOGLE,
+            fetched_at=datetime.datetime.now(datetime.UTC),
+        )
+    )
+    assert evidence.max_input_tokens.state == "null"
+    assert evidence.max_output_tokens.value == 12345
+    assert evidence.function_calling.state == "absent"
+
+
+@pytest.mark.parametrize("efforts", [[], ["xhigh", "max"], ["ultra"]])
+def test_chatgpt_explicit_effort_arrays_are_not_profile_intersections(
+    efforts: list[str],
+) -> None:
+    candidate = providers._candidate_from_chatgpt_model(
+        {
+            "slug": "new-model",
+            "visibility": "list",
+            "supported_in_api": True,
+            "supported_reasoning_levels": [{"effort": effort} for effort in efforts],
+            "default_reasoning_level": "ultra",
+            "supports_parallel_tool_calls": False,
+            "supports_reasoning_summaries": None,
+            "input_modalities": [],
+        },
+        fetched_at=datetime.datetime.now(datetime.UTC),
+    )
+    evidence = _replayed_evidence(candidate)
+    assert evidence.reasoning_efforts == CatalogFact(
+        state="value",
+        value=tuple(
+            ModelReasoningEffort(value) for value in efforts if value != "ultra"
+        ),
+    )
+    assert evidence.default_reasoning_effort.state == "null"
+    assert evidence.parallel_function_calling.value is False
+    assert evidence.reasoning_summaries.state == "null"
+    assert evidence.input_modalities.value == ()
+    assert evidence.function_calling.state == "absent"
+    if efforts == ["ultra"]:
+        assert evidence.reasoning.state == "absent"
+        assert candidate is not None and candidate.source_metadata is not None
+        assert candidate.source_metadata["supported_reasoning_levels"] == [
+            {"effort": "ultra"}
+        ]
+        assert candidate.source_metadata["capability_evidence_diagnostics"] == {
+            "unsupported_reasoning_effort_labels": ["ultra"]
+        }
+
+
+@pytest.mark.parametrize(
+    "capabilities",
+    [
+        None,
+        {"reasoning": False, "reasoning_effort": []},
+        {"reasoning": True, "reasoning_effort": ["xhigh", "max", "ultra"]},
+    ],
+)
+async def test_xai_sdk_extensions_are_consumed_but_request_hints_are_not_persisted(
+    monkeypatch: pytest.MonkeyPatch,
+    capabilities: dict[str, object] | None,
+) -> None:
+    class FakeModels:
+        async def list(self) -> SimpleNamespace:
+            model = OpenAIModel.model_validate(
+                {
+                    "id": "grok-new",
+                    "created": 1,
+                    "owned_by": "xai",
+                    "object": "model",
+                    "context_length": None,
+                    "capabilities": capabilities,
+                    "provider_instructions": "do not persist",
+                    "credential": "do not persist",
+                }
+            )
+            return SimpleNamespace(data=[model])
+
+    class FakeClient(_FakeXaiSdkClient):
+        def __init__(self, *, api_key: str, base_url: str, timeout: float) -> None:
+            assert api_key == "xai-test-key"
+            assert base_url == providers.resolve_xai_api_base_url()
+            assert timeout == 20.0
+            self.models = FakeModels()
+
+    monkeypatch.setattr(providers, "AsyncOpenAI", FakeClient)
+    [candidate] = (
+        await providers.list_xai_models_for_integration(_xai_api_key_integration())
+    ).models
+    evidence = _replayed_evidence(candidate)
+    assert evidence.max_input_tokens.state == "null"
+    assert "do not persist" not in candidate.model_dump_json()
+    if capabilities is None:
+        assert evidence.reasoning.state == "null"
+        assert evidence.reasoning_efforts.state == "null"
+    elif capabilities["reasoning"] is False:
+        assert evidence.reasoning.value is False
+        assert evidence.reasoning_efforts.value == ()
+    else:
+        assert evidence.reasoning.value is True
+        assert evidence.reasoning_efforts.value == (
+            ModelReasoningEffort.XHIGH,
+            ModelReasoningEffort.MAX,
+        )
+        assert candidate.source_metadata is not None
+        assert candidate.source_metadata["capability_evidence_diagnostics"] == {
+            "unsupported_reasoning_effort_labels": ["ultra"]
+        }
+
+
+def test_xai_oauth_empty_controls_preserve_unknown_reasoning() -> None:
+    evidence = _replayed_evidence(
+        providers._candidate_from_xai_oauth_model(
+            providers._XaiOAuthModelPayload.model_validate(
+                {
+                    "id": "grok-new",
+                    "supports_reasoning_effort": False,
+                    "supports_backend_search": False,
+                    "api_backend": None,
+                    "provider_instructions": "do not persist",
+                }
+            ),
+            fetched_at=datetime.datetime.now(datetime.UTC),
+        )
+    )
+    assert evidence.reasoning_efforts == CatalogFact(state="value", value=())
+    assert evidence.reasoning.state == "absent"
+    assert evidence.web_search.value is False
+    assert evidence.responses_api.state == "null"
+
+
+def test_xai_oauth_ambiguous_default_is_unknown_not_arbitrarily_selected() -> None:
+    candidate = providers._candidate_from_xai_oauth_model(
+        providers._XaiOAuthModelPayload.model_validate(
+            {
+                "id": "grok-new",
+                "reasoning_efforts": [
+                    {"id": "xhigh", "default": True, "provider_instructions": "unsafe"},
+                    {"id": "max", "default": True},
+                ],
+                "provider_instructions": "unsafe",
+            }
+        ),
+        fetched_at=datetime.datetime.now(datetime.UTC),
+    )
+    evidence = _replayed_evidence(candidate)
+    assert evidence.reasoning_efforts.value == (
+        ModelReasoningEffort.XHIGH,
+        ModelReasoningEffort.MAX,
+    )
+    assert evidence.default_reasoning_effort.state == "null"
+    assert "unsafe" not in candidate.model_dump_json()

@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 from azents.core.enums import LLMModelDeveloper, LLMProvider
 from azents.core.llm_catalog import ModelCapabilities
+from azents.core.model_capability_evidence import ProviderCapabilityEvidence
 from azents.core.model_execution_options import ModelExecutionOptionId
 
 
@@ -20,6 +21,11 @@ class NormalizedModelCandidate(BaseModel):
     model_family: str | None = Field(default=None, description="Model family")
     normalized_capabilities: ModelCapabilities = Field(
         description="Normalized capability contract"
+    )
+    # Historical persisted candidates have no evidence envelope. Their normalized
+    # constructor defaults must not become provider declarations during replay.
+    capability_evidence: ProviderCapabilityEvidence | None = Field(
+        default=None, description="Presence-aware provider capability declarations"
     )
     supported_execution_options: list[ModelExecutionOptionId] = Field(
         description="Directly selectable execution options supported by this model"

@@ -1,4 +1,5 @@
 import { rem } from "@mantine/core";
+import { partialReasoningCapabilities } from "@/shared/storybook/model-capability-fixtures";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import { ModelCatalogPicker } from "./ModelCatalogPicker";
 import type {
@@ -151,6 +152,22 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const ReadyWithContextRange = {} satisfies Story;
+
+export const VersionedPartialReasoning = {
+  args: {
+    state: {
+      ...readyState,
+      models: [
+        {
+          provider: "openai",
+          model_identifier: "evidence-fixture",
+          model_display_name: "Evidence fixture",
+          normalized_capabilities: partialReasoningCapabilities,
+        },
+      ],
+    },
+  },
+} satisfies Story;
 
 export const NoIntegrationSelected = {
   args: {

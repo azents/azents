@@ -1,165 +1,121 @@
-"""Pydantic ecosystem model metadata source adapter tests."""
+"""Bounded inert collection and durable source lifecycle tests."""
 
 import datetime
 from unittest.mock import AsyncMock
 
+import httpx2
 import pytest
-from genai_prices import UpdatePrices
-from genai_prices.data_snapshot import DataSnapshot
-from pytest import MonkeyPatch
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.model_metadata_source import (
-    ModelMetadataSourcePayload,
-    SourceEqualsClause,
-    SourceModelRecord,
-    SourceProviderRecord,
+from azents.core.model_catalog_source import (
+    CATALOG_SOURCE_KEY,
+    CATALOG_SOURCE_KIND,
+    CatalogSourcePayload,
 )
 from azents.rdb.session import SessionManager
 from azents.repos.model_metadata_source import ModelMetadataSourceRepository
+from azents.services.catalog_source_collection import (
+    DEFAULT_CATALOG_SOURCE_URL,
+    CatalogCollectionPolicy,
+)
 from azents.services.model_metadata_source import (
+    CatalogSourceAdapter,
     FetchedModelMetadataSource,
-    GenAIPricesSourceAdapter,
     ModelMetadataSourceSyncError,
     ModelMetadataSourceSyncService,
-    get_genai_prices_source_url,
-    validate_genai_prices_source_url,
+    get_catalog_collection_policy,
 )
+from azents.testing.model_metadata import make_test_source_payload
 
 
-def _payload(count: int) -> ModelMetadataSourcePayload:
-    return ModelMetadataSourcePayload(
-        providers=[
-            SourceProviderRecord(
-                id="openai",
-                name="OpenAI",
-                api_pattern=r"https://api\.openai\.com/.*",
-                model_match=None,
-                provider_match=None,
-                fallback_model_providers=None,
-                models=[
-                    SourceModelRecord(
-                        id=f"gpt-test-{index}",
-                        name=None,
-                        match=SourceEqualsClause(value=f"gpt-test-{index}"),
-                        context_window=128_000,
-                        deprecated=False,
-                        prices=[],
-                    )
-                    for index in range(count)
-                ],
-            )
-        ]
+def _payload(count: int) -> CatalogSourcePayload:
+    return make_test_source_payload(
+        {
+            f"gpt-test-{index}": {
+                "litellm_provider": "openai",
+                "max_input_tokens": 128_000,
+                "mode": "chat",
+            }
+            for index in range(count)
+        }
     )
 
 
-def _fetched(payload: ModelMetadataSourcePayload) -> FetchedModelMetadataSource:
+def _fetched(payload: CatalogSourcePayload) -> FetchedModelMetadataSource:
     return FetchedModelMetadataSource(
-        source_kind="genai_prices",
-        source_schema_version="1",
+        source_kind=CATALOG_SOURCE_KIND,
+        source_schema_version=payload.schema_version,
         source_url="https://metadata.example/data.json",
-        source_hash=payload.content_hash(),
-        producer_name="genai-prices",
-        producer_version="0.1.9",
+        source_hash=payload.content_hash,
+        producer_name="LiteLLM public catalog",
+        producer_version="fixture-data-1",
         provider_count=payload.provider_count,
         model_count=payload.model_count,
         payload=payload,
+        raw_document_hash="a" * 64,
+        etag=None,
     )
 
 
-def test_default_source_url_comes_from_public_library(
-    monkeypatch: MonkeyPatch,
-) -> None:
-    """The adapter delegates source URL ownership to the pinned library default."""
-    monkeypatch.delenv("GENAI_PRICES_SOURCE_URL", raising=False)
-
-    assert get_genai_prices_source_url().startswith(
-        "https://raw.githubusercontent.com/pydantic/genai-prices/"
-    )
-
-
-async def test_fetch_uses_public_operation_without_global_update(
-    monkeypatch: MonkeyPatch,
-) -> None:
-    """One explicit fetch returns canonical durable evidence."""
-    captured: list[str] = []
-
-    def fake_fetch(updater: UpdatePrices) -> DataSnapshot:
-        captured.append(updater.url)
-        return DataSnapshot(providers=[], from_auto_update=True)
-
-    monkeypatch.setattr(UpdatePrices, "fetch", fake_fetch)
-    adapter = GenAIPricesSourceAdapter(source_url="https://metadata.example/data.json")
-
-    result = await adapter.fetch()
-
-    assert captured == ["https://metadata.example/data.json"]
-    assert result.source_kind == "genai_prices"
-    assert result.source_schema_version == "1"
-    assert result.provider_count == 0
-    assert result.model_count == 0
-    assert len(result.source_hash) == 64
-    assert result.payload.providers == []
-
-
-@pytest.mark.parametrize(
-    "source_url",
-    [
-        "http://metadata.example/data.json",
-        "file:///tmp/source.json",
-        "https://user:password@metadata.example/data.json",
-        "https://metadata.example/data.json?token=secret",
-        "https://metadata.example/data.json#fragment",
-    ],
-)
-def test_source_url_rejects_untrusted_or_credential_bearing_values(
-    source_url: str,
-) -> None:
-    """Persisted source provenance cannot contain credentials or ambiguous URLs."""
-    with pytest.raises(ValueError):
-        validate_genai_prices_source_url(source_url)
-
-
-@pytest.mark.parametrize(
-    "source_url",
-    [
-        "https://metadata.example/data.json",
-        "http://127.0.0.1:8080/data.json",
-        "http://[::1]:8080/data.json",
-        "http://localhost:8080/data.json",
-    ],
-)
-def test_source_url_accepts_https_and_loopback(source_url: str) -> None:
-    """Production HTTPS and deterministic loopback endpoints remain valid."""
-    validate_genai_prices_source_url(source_url)
-
-
-def test_source_url_accepts_fixed_testenv_proxy(
+def test_source_configuration_is_owned_by_collection_boundary(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The deterministic container fixture uses one explicit internal host."""
-    monkeypatch.setenv("AZ_TESTENV_API_ENABLED", "true")
-    validate_genai_prices_source_url(
-        "http://openai-proxy:8081/inference-profile/catalog-source"
+    monkeypatch.delenv("MODEL_CATALOG_SOURCE_URL", raising=False)
+    policy = get_catalog_collection_policy()
+    assert policy.source_url == DEFAULT_CATALOG_SOURCE_URL
+    monkeypatch.setenv("MODEL_CATALOG_SOURCE_URL", "https://metadata.example/data.json")
+    assert (
+        get_catalog_collection_policy().source_url
+        == "https://metadata.example/data.json"
     )
+
+
+async def test_fetch_returns_typed_canonical_and_raw_provenance() -> None:
+    requests: list[httpx2.Request] = []
+
+    def respond(request: httpx2.Request) -> httpx2.Response:
+        requests.append(request)
+        return httpx2.Response(
+            200,
+            content=b'{"literal":{"litellm_provider":"openai","mode":"chat"}}',
+            headers={"etag": '"revision-1"'},
+        )
+
+    async with httpx2.AsyncClient(transport=httpx2.MockTransport(respond)) as client:
+        adapter = CatalogSourceAdapter(
+            http_client=client,
+            policy=CatalogCollectionPolicy(
+                source_url="https://metadata.example/data.json",
+                max_bytes=10_000,
+                timeout_seconds=2,
+                allow_testenv_endpoint=False,
+            ),
+        )
+        result = await adapter.fetch()
+    assert len(requests) == 1
+    assert result.source_kind == CATALOG_SOURCE_KIND
+    assert result.model_count == 1
+    assert result.provider_count == 1
+    assert result.payload.models[0].source_key == "literal"
+    assert result.source_hash == result.payload.content_hash
+    assert len(result.raw_document_hash) == 64
+    assert result.producer_version == f"sha256:{result.raw_document_hash}"
+    assert result.etag == '"revision-1"'
 
 
 async def test_sync_publishes_and_selects_current_source(
     rdb_session_manager: SessionManager[AsyncSession],
 ) -> None:
-    """The Azents lifecycle owns durable publication and attempt state."""
-    adapter = AsyncMock(spec=GenAIPricesSourceAdapter)
+    adapter = AsyncMock(spec=CatalogSourceAdapter)
     adapter.fetch.return_value = _fetched(_payload(12))
     service = ModelMetadataSourceSyncService(
         session_manager=rdb_session_manager,
         repository=ModelMetadataSourceRepository(),
         source_adapter=adapter,
     )
-
     snapshot = await service.sync_current_source()
-
     assert snapshot.model_count == 12
-    assert snapshot.source_kind == "genai_prices"
+    assert snapshot.source_kind == CATALOG_SOURCE_KIND
     assert await service.get_current_source() == snapshot
     adapter.fetch.assert_awaited_once_with()
 
@@ -167,8 +123,7 @@ async def test_sync_publishes_and_selects_current_source(
 async def test_sync_rejects_material_provider_reduction(
     rdb_session_manager: SessionManager[AsyncSession],
 ) -> None:
-    """A materially smaller supported provider cannot replace last success."""
-    adapter = AsyncMock(spec=GenAIPricesSourceAdapter)
+    adapter = AsyncMock(spec=CatalogSourceAdapter)
     adapter.fetch.side_effect = [_fetched(_payload(30)), _fetched(_payload(3))]
     repository = ModelMetadataSourceRepository()
     service = ModelMetadataSourceSyncService(
@@ -177,54 +132,36 @@ async def test_sync_rejects_material_provider_reduction(
         source_adapter=adapter,
     )
     original = await service.sync_current_source()
-
     with pytest.raises(ModelMetadataSourceSyncError, match="operator review"):
         await service.sync_current_source()
-
     assert await service.get_current_source() == original
     async with rdb_session_manager() as session:
         attempt = await repository.get_latest_attempt(
-            session,
-            source_key="genai_prices",
+            session, source_key=CATALOG_SOURCE_KEY
         )
     assert attempt is not None
     assert attempt.finished_at is not None
     assert attempt.finished_at <= datetime.datetime.now(datetime.UTC)
     assert attempt.failure_code == "ModelMetadataSourceModelCountReduction"
+    assert attempt.diagnostics is not None
+    assert attempt.diagnostics["reduction_scope"] == "provider:openai"
 
 
-async def test_adapter_converts_future_typed_variant_to_validation_failure(
-    monkeypatch: MonkeyPatch,
-) -> None:
-    """Unsupported upstream variants fail through the caught adapter boundary."""
-
-    def fake_fetch(updater: UpdatePrices) -> DataSnapshot:
-        return DataSnapshot(providers=[], from_auto_update=True)
-
-    def unsupported_encoder(snapshot: DataSnapshot) -> ModelMetadataSourcePayload:
-        raise AssertionError("future source variant")
-
-    monkeypatch.setattr(UpdatePrices, "fetch", fake_fetch)
-    monkeypatch.setattr(
-        "azents.services.model_metadata_source.encode_data_snapshot",
-        unsupported_encoder,
-    )
-    adapter = GenAIPricesSourceAdapter(source_url="https://metadata.example/data.json")
-
-    with pytest.raises(ValueError, match="unsupported typed variant"):
-        await adapter.fetch()
-
-
-async def test_fetch_failure_immediately_fails_attempt_and_preserves_source(
+@pytest.mark.parametrize(
+    "failure", [ValueError("invalid data"), TimeoutError("deadline")]
+)
+async def test_fetch_failure_terminalizes_attempt_and_preserves_source(
     rdb_session_manager: SessionManager[AsyncSession],
+    failure: ValueError | TimeoutError,
 ) -> None:
-    """A validation failure terminalizes the attempt and retains last success."""
-    adapter = AsyncMock(spec=GenAIPricesSourceAdapter)
-    adapter.source_url = "https://metadata.example/data.json"
-    adapter.fetch.side_effect = [
-        _fetched(_payload(12)),
-        ValueError("unsupported typed variant"),
-    ]
+    adapter = AsyncMock(spec=CatalogSourceAdapter)
+    adapter.policy = CatalogCollectionPolicy(
+        source_url="https://metadata.example/data.json",
+        max_bytes=10_000,
+        timeout_seconds=2,
+        allow_testenv_endpoint=False,
+    )
+    adapter.fetch.side_effect = [_fetched(_payload(12)), failure]
     repository = ModelMetadataSourceRepository()
     service = ModelMetadataSourceSyncService(
         session_manager=rdb_session_manager,
@@ -232,16 +169,15 @@ async def test_fetch_failure_immediately_fails_attempt_and_preserves_source(
         source_adapter=adapter,
     )
     original = await service.sync_current_source()
-
     with pytest.raises(ModelMetadataSourceSyncError):
         await service.sync_current_source()
-
     assert await service.get_current_source() == original
     async with rdb_session_manager() as session:
         attempt = await repository.get_latest_attempt(
-            session,
-            source_key="genai_prices",
+            session, source_key=CATALOG_SOURCE_KEY
         )
     assert attempt is not None
     assert attempt.finished_at is not None
-    assert attempt.failure_code == "ValueError"
+    assert attempt.failure_code == type(failure).__name__
+    assert attempt.diagnostics is not None
+    assert "invalid data" not in str(attempt.diagnostics)

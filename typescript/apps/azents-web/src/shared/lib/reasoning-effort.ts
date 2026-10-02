@@ -1,3 +1,4 @@
+import { capabilitySupportEnabled } from "./model-capability-support.ts";
 import type {
   ModelCapabilities,
   ModelReasoningEffort,
@@ -16,11 +17,33 @@ export const REASONING_EFFORT_ORDER: readonly ModelReasoningEffort[] = [
 export function reasoningEffortLevels(
   capabilities?: ModelCapabilities | null,
 ): ModelReasoningEffort[] {
+  const contract = capabilities?.semantic_contract;
+  if (contract != null) {
+    return contract.reasoning.efforts
+      .filter(
+        (declaration) =>
+          declaration.state === "supported" &&
+          capabilitySupportEnabled(contract.reasoning.support, capabilities, {
+            reasoningEffort: declaration.level,
+          }),
+      )
+      .map((declaration) => declaration.level);
+  }
   const reasoning = capabilities?.reasoning;
   if (!reasoning?.supported) {
     return [];
   }
   return reasoning.effort_levels ?? [];
+}
+
+/** New contracts preserve explicit intent and omission for saved-contract validation. */
+export function normalizeReasoningEffortForCapabilities(
+  effort: ModelReasoningEffort | null,
+  capabilities?: ModelCapabilities | null,
+): ModelReasoningEffort | null {
+  return capabilities?.semantic_contract == null
+    ? normalizeReasoningEffort(effort, reasoningEffortLevels(capabilities))
+    : effort;
 }
 
 export function normalizeReasoningEffort(

@@ -1,6 +1,7 @@
 """Built-in tool validation rule tests."""
 
 import dataclasses
+from typing import Literal
 
 import pytest
 
@@ -9,11 +10,20 @@ from azents.core.builtin_tools import (
     BuiltinToolValidationContext,
     ImageGenerationRule,
     WebSearchRule,
+    builtin_tool_configurable,
     supported_builtin_capabilities,
     validate_builtin_tools,
 )
 from azents.core.enums import LLMProvider
 from azents.core.llm_catalog import ModelCapabilities
+from azents.core.model_capability_contract import (
+    BuiltinToolSupport,
+    CapabilitySupport,
+    SupportPredicate,
+)
+from azents.core.model_capability_evidence import ProviderCapabilityEvidence
+from azents.core.model_capability_projection import project_capabilities
+from azents.core.model_catalog_source import CatalogFact
 
 
 @pytest.mark.parametrize("provider", [LLMProvider.XAI, LLMProvider.XAI_OAUTH])
@@ -166,3 +176,113 @@ class TestWebSearchRule:
         )
 
         assert errors == ["Model 'gpt-5' does not support Web Search."]
+
+
+@pytest.mark.parametrize("tool", ["web_search", "image_generation"])
+@pytest.mark.parametrize(
+    ("support", "configurable"),
+    [
+        (CapabilitySupport(state="supported", origin="explicit", predicate=None), True),
+        (
+            CapabilitySupport(
+                state="conditional",
+                origin="explicit",
+                predicate=SupportPredicate(
+                    reasoning_efforts=("none",), function_tools=True
+                ),
+            ),
+            True,
+        ),
+        (
+            CapabilitySupport(state="unsupported", origin="explicit", predicate=None),
+            False,
+        ),
+        (CapabilitySupport(state="unknown", origin=None, predicate=None), False),
+    ],
+)
+def test_v2_configuration_potential_is_separate_from_dispatch_authorization(
+    tool: Literal["web_search", "image_generation"],
+    support: CapabilitySupport,
+    configurable: bool,
+) -> None:
+    capabilities = project_capabilities(
+        provider=LLMProvider.OPENAI,
+        exact_model="exact-selected-model",
+        source_model=None,
+        evidence=None,
+        model_developer=None,
+    )
+    assert capabilities.semantic_contract is not None
+    capabilities.semantic_contract = capabilities.semantic_contract.model_copy(
+        update={"built_in_tools": (BuiltinToolSupport(tool=tool, support=support),)}
+    )
+    # Configuration potential comes from the versioned fact, independent of its
+    # conservative effective view; dispatch still evaluates the actual predicate.
+    capabilities.built_in_tools.supported = [] if configurable else [tool]
+    context = BuiltinToolValidationContext(
+        provider_model=_ProviderModel(
+            provider=LLMProvider.OPENAI,
+            model_identifier="exact-selected-model",
+            capabilities=capabilities,
+        )
+    )
+    assert builtin_tool_configurable(capabilities, tool=tool) is configurable
+    errors = validate_builtin_tools([BuiltinToolConfig(name=tool)], context)
+    assert (not errors) is configurable
+
+
+def test_missing_v2_hosted_declaration_does_not_use_legacy_list_as_authority() -> None:
+    capabilities = project_capabilities(
+        provider=LLMProvider.OPENAI,
+        exact_model="exact-selected-model",
+        source_model=None,
+        evidence=None,
+        model_developer=None,
+    )
+    assert capabilities.semantic_contract is not None
+    capabilities.semantic_contract = capabilities.semantic_contract.model_copy(
+        update={"built_in_tools": ()}
+    )
+    capabilities.built_in_tools.supported = ["web_search"]
+    assert not builtin_tool_configurable(capabilities, tool="web_search")
+
+
+@pytest.mark.parametrize(
+    "provider",
+    [
+        LLMProvider.OPENAI,
+        LLMProvider.CHATGPT_OAUTH,
+        LLMProvider.XAI,
+        LLMProvider.XAI_OAUTH,
+    ],
+)
+def test_route_projected_client_image_is_configurable_despite_hosted_denial(
+    provider: LLMProvider,
+) -> None:
+    capabilities = project_capabilities(
+        provider=provider,
+        exact_model="exact-client-image-model",
+        source_model=None,
+        evidence=ProviderCapabilityEvidence(
+            function_calling=CatalogFact(state="value", value=True),
+            client_image_generation=CatalogFact(state="value", value=True),
+            hosted_image_generation=CatalogFact(state="value", value=False),
+        ),
+        model_developer=None,
+    )
+    assert capabilities.semantic_contract is not None
+    image = next(
+        fact
+        for fact in capabilities.semantic_contract.built_in_tools
+        if fact.tool == "image_generation"
+    )
+    assert image.support.state == "supported"
+    assert builtin_tool_configurable(capabilities, tool="image_generation")
+    context = BuiltinToolValidationContext(
+        provider_model=_ProviderModel(
+            provider=provider,
+            model_identifier="exact-client-image-model",
+            capabilities=capabilities,
+        )
+    )
+    assert ImageGenerationRule().validate(context) == []

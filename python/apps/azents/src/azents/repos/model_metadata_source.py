@@ -1,6 +1,7 @@
 """Persistence for durable model metadata source authority."""
 
 import datetime
+import json
 from typing import Any
 
 import sqlalchemy as sa
@@ -9,7 +10,12 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import LLMCatalogAttemptStatus
-from azents.core.model_metadata_source import ModelMetadataSourcePayload
+from azents.core.model_catalog_source import (
+    CATALOG_SOURCE_KEY,
+    CATALOG_SOURCE_KIND,
+    CATALOG_SOURCE_SCHEMA_VERSION,
+    CatalogSourcePayload,
+)
 from azents.rdb.models.llm_catalog import RDBLLMCatalogSyncAttempt
 from azents.rdb.models.model_metadata_source import (
     RDBModelMetadataSource,
@@ -127,7 +133,7 @@ class ModelMetadataSourceRepository:
         producer_version: str,
         provider_count: int,
         model_count: int,
-        payload: ModelMetadataSourcePayload,
+        payload: CatalogSourcePayload,
         finished_at: datetime.datetime,
         diagnostics: dict[str, Any],
     ) -> ModelMetadataSourceSnapshot | None:
@@ -259,6 +265,21 @@ class ModelMetadataSourceRepository:
     def _build_snapshot(
         snapshot: RDBModelMetadataSourceSnapshot,
     ) -> ModelMetadataSourceSnapshot:
+        if (
+            snapshot.source_key != CATALOG_SOURCE_KEY
+            or snapshot.source_kind != CATALOG_SOURCE_KIND
+            or snapshot.source_schema_version != CATALOG_SOURCE_SCHEMA_VERSION
+        ):
+            raise ValueError("The selected model source uses an unsupported contract.")
+        payload = CatalogSourcePayload.model_validate_json(
+            json.dumps(snapshot.payload, allow_nan=False)
+        )
+        if (
+            payload.content_hash != snapshot.source_hash
+            or payload.model_count != snapshot.model_count
+            or payload.provider_count != snapshot.provider_count
+        ):
+            raise ValueError("Stored model source content and provenance disagree.")
         return ModelMetadataSourceSnapshot(
             id=snapshot.id,
             source_key=snapshot.source_key,
@@ -270,7 +291,7 @@ class ModelMetadataSourceRepository:
             producer_version=snapshot.producer_version,
             provider_count=snapshot.provider_count,
             model_count=snapshot.model_count,
-            payload=ModelMetadataSourcePayload.model_validate(snapshot.payload),
+            payload=payload,
             created_at=snapshot.created_at,
         )
 

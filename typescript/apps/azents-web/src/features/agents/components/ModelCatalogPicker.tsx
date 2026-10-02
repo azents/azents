@@ -14,6 +14,11 @@ import {
 } from "@mantine/core";
 import { useTranslations } from "next-intl";
 import { formatLocalizedDate } from "@/shared/lib/date-format";
+import {
+  modelSupportsFunctionCalling,
+  modelSupportsReasoning,
+  supportedBuiltinTools,
+} from "@/shared/lib/model-capability-support";
 import { useLocale } from "@/shared/providers/locale";
 import { modelContextBadgeValue } from "../model-selection";
 import type {
@@ -104,13 +109,13 @@ function formatCapabilityBadges(
   } else if (contextBadge?.type === "SINGLE") {
     badges.push(labels.context(contextBadge.tokens));
   }
-  if (capabilities.reasoning?.supported) {
+  if (modelSupportsReasoning(capabilities)) {
     badges.push(labels.reasoning);
   }
-  if ((capabilities.built_in_tools?.supported ?? []).length > 0) {
+  if (supportedBuiltinTools(capabilities).length > 0) {
     badges.push(labels.hostedTools);
   }
-  if (capabilities.tool_calling?.supported) {
+  if (modelSupportsFunctionCalling(capabilities)) {
     badges.push(labels.toolCalling);
   }
   return badges;

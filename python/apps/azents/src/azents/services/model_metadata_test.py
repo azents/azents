@@ -1,16 +1,9 @@
-"""Validated generic source capture stays local across model budgets."""
-
-import datetime
+"""Validated exact-scoped source capture stays local across model budgets."""
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import LLMProvider
-from azents.core.model_metadata_source import (
-    ModelMetadataSourcePayload,
-    SourceEqualsClause,
-    SourceModelRecord,
-    SourceProviderRecord,
-)
+from azents.core.model_catalog_source import CATALOG_SOURCE_KEY, CATALOG_SOURCE_KIND
 from azents.engine.context.window import resolve_model_input_tokens
 from azents.rdb.models.model_metadata_source import (
     RDBModelMetadataSource,
@@ -20,41 +13,11 @@ from azents.rdb.session import SessionManager
 from azents.repos.model_metadata_source import ModelMetadataSourceRepository
 from azents.repos.model_metadata_source_data import ModelMetadataSourceSnapshot
 from azents.services.model_metadata import ModelMetadataService
-from azents.testing.model_metadata import make_test_model_metadata_service
-
-
-def _provider(
-    provider_id: str,
-    model_id: str,
-    context_window: int,
-) -> SourceProviderRecord:
-    return SourceProviderRecord(
-        id=provider_id,
-        name=provider_id,
-        api_pattern=f"https://{provider_id}.example/.*",
-        model_match=None,
-        provider_match=None,
-        fallback_model_providers=None,
-        models=[
-            SourceModelRecord(
-                id=model_id,
-                name=model_id,
-                match=SourceEqualsClause(value=model_id),
-                context_window=context_window,
-                deprecated=False,
-                prices=[],
-            )
-        ],
-    )
-
-
-def _payload() -> ModelMetadataSourcePayload:
-    return ModelMetadataSourcePayload(
-        providers=[
-            _provider("openai", "main", 1_000_000),
-            _provider("anthropic", "compaction", 300_000),
-        ]
-    )
+from azents.testing.model_metadata import (
+    make_test_model_metadata_service,
+    make_test_source_payload,
+    make_test_source_snapshot,
+)
 
 
 class _CountingSourceRepository(ModelMetadataSourceRepository):
@@ -73,14 +36,21 @@ class _CountingSourceRepository(ModelMetadataSourceRepository):
 async def test_capture_uses_only_local_validated_remote_authority(
     rdb_session_manager: SessionManager[AsyncSession],
 ) -> None:
-    """Only the explicitly selected generic source becomes context authority."""
     repository = _CountingSourceRepository()
-    payload = _payload()
+    payload = make_test_source_payload(
+        {
+            "main": {"litellm_provider": "openai", "max_input_tokens": 1_000_000},
+            "compaction": {
+                "litellm_provider": "anthropic",
+                "max_input_tokens": 300_000,
+            },
+        }
+    )
     source_id = "s" * 32
     async with rdb_session_manager() as session:
         session.add(
             RDBModelMetadataSource(
-                source_key="genai_prices",
+                source_key=CATALOG_SOURCE_KEY,
                 current_snapshot_id=source_id,
                 latest_attempt_id=None,
             )
@@ -88,13 +58,13 @@ async def test_capture_uses_only_local_validated_remote_authority(
         session.add(
             RDBModelMetadataSourceSnapshot(
                 id=source_id,
-                source_key="genai_prices",
-                source_kind="genai_prices",
-                source_schema_version="1",
+                source_key=CATALOG_SOURCE_KEY,
+                source_kind=CATALOG_SOURCE_KIND,
+                source_schema_version=payload.schema_version,
                 source_url="https://source.example.test/models.json",
-                source_hash=payload.content_hash(),
-                producer_name="genai-prices",
-                producer_version="0.1.9",
+                source_hash=payload.content_hash,
+                producer_name="LiteLLM public catalog",
+                producer_version="fixture-data-1",
                 provider_count=payload.provider_count,
                 model_count=payload.model_count,
                 payload=payload.model_dump(mode="json"),
@@ -116,9 +86,7 @@ async def test_capture_uses_only_local_validated_remote_authority(
         128_000,
         None,
         service.maximum_input_tokens(
-            captured,
-            provider=LLMProvider.OPENAI,
-            model_identifier="main",
+            captured, provider=LLMProvider.OPENAI, model_identifier="main"
         ),
         700_000,
     )
@@ -126,9 +94,7 @@ async def test_capture_uses_only_local_validated_remote_authority(
         None,
         None,
         service.maximum_input_tokens(
-            captured,
-            provider=LLMProvider.ANTHROPIC,
-            model_identifier="compaction",
+            captured, provider=LLMProvider.ANTHROPIC, model_identifier="compaction"
         ),
         None,
     )
@@ -138,7 +104,6 @@ async def test_capture_uses_only_local_validated_remote_authority(
 
 
 async def test_absent_local_source_has_no_remote_or_package_fallback() -> None:
-    """Missing evidence remains unknown before stable context math resolves it."""
     service = make_test_model_metadata_service(snapshot=None)
     assert await service.capture() is None
     maximum = service.maximum_input_tokens(
@@ -150,31 +115,30 @@ async def test_absent_local_source_has_no_remote_or_package_fallback() -> None:
 
 
 async def test_captured_identity_stays_stable_for_all_local_lookups() -> None:
-    """Source identity accompanies a model match without another read."""
-    payload = ModelMetadataSourcePayload(
-        providers=[_provider("openai", "alias", 256_000)]
+    payload = make_test_source_payload(
+        {"literal": {"litellm_provider": "openai", "max_input_tokens": 256_000}}
     )
-    snapshot = ModelMetadataSourceSnapshot(
-        id="source-id",
-        source_key="genai_prices",
-        source_kind="genai_prices",
-        source_schema_version="1",
-        source_url="https://source.example.test/models.json",
-        source_hash=payload.content_hash(),
-        producer_name="genai-prices",
-        producer_version="0.1.9",
-        provider_count=payload.provider_count,
-        model_count=payload.model_count,
-        payload=payload,
-        created_at=datetime.datetime.now(datetime.UTC),
-    )
+    snapshot = make_test_source_snapshot(payload)
     service = make_test_model_metadata_service(snapshot=snapshot)
     captured = await service.capture()
-    match = service.lookup(
-        captured, provider=LLMProvider.OPENAI, model_identifier="alias"
+    model = service.lookup(
+        captured, provider=LLMProvider.OPENAI, model_identifier="literal"
     )
     assert captured is snapshot
-    assert match is not None
-    assert match.provider.id == "openai"
-    assert match.model.id == "alias"
-    assert match.model.context_window == 256_000
+    assert model is payload.models[0]
+    assert model is not None
+    assert model.provider == "openai"
+    assert model.source_key == "literal"
+    assert model.facts.max_input_tokens.value == 256_000
+    assert (
+        service.lookup(
+            captured, provider=LLMProvider.CHATGPT_OAUTH, model_identifier="literal"
+        )
+        is None
+    )
+    assert (
+        service.lookup(
+            captured, provider=LLMProvider.OPENAI, model_identifier="openai/literal"
+        )
+        is None
+    )

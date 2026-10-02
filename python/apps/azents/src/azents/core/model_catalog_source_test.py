@@ -30,6 +30,28 @@ def _model(**fields: object) -> CatalogSourceModel:
     return decode_catalog_source(json.dumps(raw).encode()).models[0]
 
 
+@pytest.mark.parametrize(
+    "value", ["2026-02-30", "20261002", "2026-W40-5", "", "tomorrow", 20261002]
+)
+def test_consumed_lifecycle_date_is_validated_before_source_publication(
+    value: object,
+) -> None:
+    with pytest.raises(CatalogSourceDecodeError):
+        _model(deprecation_date=value)
+
+
+def test_lifecycle_date_is_validated_on_strict_snapshot_restore() -> None:
+    payload = decode_catalog_source(
+        b'{"m":{"litellm_provider":"openai","deprecation_date":"2026-10-02"}}'
+    )
+    assert payload.models[0].facts.deprecation_date.value == "2026-10-02"
+    stored = payload.model_dump_json()
+    with pytest.raises(ValidationError):
+        CatalogSourcePayload.model_validate_json(
+            stored.replace("2026-10-02", "2026-02-30")
+        )
+
+
 def test_counts_exclude_nonmodels_and_lookup_is_literal_and_scoped() -> None:
     payload = decode_catalog_source(
         b"""{

@@ -5,6 +5,7 @@ import base64
 import dataclasses
 import datetime
 import functools
+import json
 from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import asynccontextmanager
 from io import BytesIO
@@ -12,10 +13,12 @@ from types import SimpleNamespace
 from typing import Annotated, Literal
 from unittest.mock import AsyncMock
 
+import httpx2
 import pytest
 from azcommon.result import Failure, Success
 from fastapi import Depends
 from fastapi.dependencies.utils import get_dependant
+from openai import AsyncOpenAI
 from PIL import Image
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -40,8 +43,21 @@ from azents.core.enums import (
     SessionAgentKind,
 )
 from azents.core.inference_profile import SessionInferenceState
-from azents.core.llm_catalog import ModelBuiltInToolCapabilities, ModelCapabilities
+from azents.core.llm_catalog import (
+    ModelBuiltInToolCapabilities,
+    ModelCapabilities,
+    ModelReasoningEffort,
+)
+from azents.core.model_capability_contract import (
+    BuiltinToolSupport,
+    CapabilitySupport,
+    SupportPredicate,
+)
+from azents.core.model_capability_evidence import ProviderCapabilityEvidence
+from azents.core.model_capability_projection import project_capabilities
+from azents.core.model_catalog_source import CatalogFact
 from azents.core.model_execution_options import ModelExecutionOptionId
+from azents.core.openai_client_config import OpenAIResponsesClientConfig
 from azents.core.openrouter import OPENROUTER_API_BASE_URL, OPENROUTER_APP_TITLE
 from azents.core.tools import Toolkit, ToolkitState, ToolkitStatus, TurnContext
 from azents.engine.context.compaction import (
@@ -70,6 +86,7 @@ from azents.engine.events.filters import (
 from azents.engine.events.openai_responses import (
     OpenAIResponsesModelAdapter,
     OpenAIResponsesRequest,
+    OpenAISDKResponsesClient,
 )
 from azents.engine.events.protocols import (
     NativeRequestInspection,
@@ -113,6 +130,7 @@ from azents.engine.hooks.types import (
 )
 from azents.engine.model_assembly import ModelAssemblyMetadata
 from azents.engine.model_factories import get_model_sdk_factories
+from azents.engine.model_stream import ModelStreamCallContext, ModelStreamWatchdog
 from azents.engine.run.client_tool_compatibility import ClientToolModelProfile
 from azents.engine.run.contracts import RunContext, RunRequest, ToolkitBinding
 from azents.engine.run.emit import Emit
@@ -175,7 +193,11 @@ from azents.services.xai_oauth.data import (
     ProviderRejected,
     ProviderUnavailable,
 )
-from azents.testing.model_metadata import make_test_model_metadata_service
+from azents.testing.model_metadata import (
+    make_test_model_metadata_service,
+    make_test_source_payload,
+    make_test_source_snapshot,
+)
 from azents.testing.model_selection import (
     make_test_model_selection,
     make_test_model_settings,
@@ -1892,6 +1914,245 @@ async def test_openai_image_generation_is_bound_as_client_function_tool(
     )
 
 
+class _SDKWireBuiltinExecution(_Execution):
+    """Exercise EngineAdapter's actual preparer and its official SDK transport."""
+
+    def __init__(
+        self,
+        *,
+        adapter: OpenAIResponsesModelAdapter,
+        watchdog: ModelStreamWatchdog,
+    ) -> None:
+        super().__init__()
+        self.adapter = adapter
+        self.watchdog = watchdog
+
+    async def run(
+        self,
+        request: AgentRunExecutionRequest,
+        *,
+        check_stop: CheckStop | None = None,
+        poll_input_events: object = None,
+    ) -> AgentRunStatus:
+        await super().run(
+            request,
+            check_stop=check_stop,
+            poll_input_events=poll_input_events,
+        )
+        assert self.prepared_model_call is not None
+        native = self.prepared_model_call.native_request
+        assert isinstance(native, OpenAIResponsesRequest)
+        events = [
+            event
+            async for event in self.adapter.stream(
+                native,
+                watchdog=self.watchdog,
+                timeout_policy=self.watchdog.resolve_policy(
+                    provider="openai",
+                    model=native.model,
+                    inference_profile=None,
+                ),
+                call_context=ModelStreamCallContext(
+                    call_kind="sampling",
+                    provider="openai",
+                    provider_integration_id=None,
+                    model=native.model,
+                    session_id="session-1",
+                    run_id=request.run_id,
+                    attempt_number=None,
+                    check_stop=check_stop,
+                ),
+            )
+        ]
+        assert len(events) == 1
+        return AgentRunStatus.COMPLETED
+
+
+@pytest.mark.parametrize(
+    ("tool", "state", "effort", "default_none", "allowed"),
+    [
+        ("web_search", "conditional", "none", False, True),
+        ("web_search", "conditional", "high", False, False),
+        ("web_search", "conditional", None, False, False),
+        ("web_search", "conditional", None, True, True),
+        ("web_search", "unknown", "none", False, False),
+        ("image_generation", "supported", None, False, True),
+        ("image_generation", "conditional", "none", False, True),
+        ("image_generation", "conditional", "high", False, False),
+        ("image_generation", "unknown", "none", False, False),
+    ],
+)
+async def test_actual_engine_builtin_admission_and_condition_gate_before_sdk_wire(
+    tool: Literal["web_search", "image_generation"],
+    state: Literal["supported", "conditional", "unknown"],
+    effort: Literal["none", "high"] | None,
+    default_none: bool,
+    allowed: bool,
+) -> None:
+    """Configuration potential reaches ownership, then actual dispatch is gated."""
+    bodies: list[dict[str, object]] = []
+
+    async def respond(wire_request: httpx2.Request) -> httpx2.Response:
+        body = json.loads((await wire_request.aread()).decode())
+        assert isinstance(body, dict)
+        bodies.append(body)
+        response = {
+            "id": "resp_synthetic",
+            "object": "response",
+            "created_at": 1.0,
+            "status": "completed",
+            "model": "exact-client-image-model",
+            "output": [],
+            "tools": [],
+            "tool_choice": "auto",
+            "parallel_tool_calls": True,
+            "error": None,
+            "incomplete_details": None,
+        }
+        event = {
+            "type": "response.completed",
+            "sequence_number": 1,
+            "response": response,
+        }
+        return httpx2.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            content=f"data: {json.dumps(event)}\n\ndata: [DONE]\n\n",
+            request=wire_request,
+        )
+
+    def client_factory(
+        *, config: OpenAIResponsesClientConfig
+    ) -> OpenAISDKResponsesClient:
+        del config
+        return OpenAISDKResponsesClient(
+            AsyncOpenAI(
+                api_key="synthetic-test-key",
+                base_url="https://provider.example/v1",
+                http_client=httpx2.AsyncClient(transport=httpx2.MockTransport(respond)),
+            ),
+            websocket_headers=None,
+        )
+
+    def execution_factory(
+        *,
+        model_call_preparer: ModelCallPreparer[NativeRequestInspection],
+        model_adapter: object,
+        model_stream_watchdog: ModelStreamWatchdog,
+        **kwargs: object,
+    ) -> _SDKWireBuiltinExecution:
+        del kwargs
+        assert isinstance(model_adapter, OpenAIResponsesModelAdapter)
+        execution = _SDKWireBuiltinExecution(
+            adapter=model_adapter,
+            watchdog=model_stream_watchdog,
+        )
+        execution.model_call_preparer = model_call_preparer
+        return execution
+
+    caps = project_capabilities(
+        provider=LLMProvider.OPENAI,
+        exact_model="exact-client-image-model",
+        source_model=None,
+        model_developer=None,
+        evidence=ProviderCapabilityEvidence(
+            function_calling=CatalogFact(state="value", value=True),
+            reasoning=CatalogFact(state="value", value=True),
+            reasoning_efforts=CatalogFact(
+                state="value",
+                value=(ModelReasoningEffort.NONE, ModelReasoningEffort.HIGH),
+            ),
+            default_reasoning_effort=CatalogFact(
+                state="value" if default_none else "absent",
+                value=ModelReasoningEffort.NONE if default_none else None,
+            ),
+            client_image_generation=CatalogFact(state="value", value=True),
+            hosted_image_generation=CatalogFact(state="value", value=False),
+        ),
+    )
+    assert caps.semantic_contract is not None
+    if tool == "image_generation":
+        image = next(
+            f
+            for f in caps.semantic_contract.built_in_tools
+            if f.tool == "image_generation"
+        )
+        assert image.support.state == "supported"
+    support = CapabilitySupport(
+        state=state,
+        origin=None if state == "unknown" else "explicit",
+        predicate=SupportPredicate(
+            reasoning_efforts=("none",),
+            function_tools=tool == "image_generation",
+        )
+        if state == "conditional"
+        else None,
+    )
+    caps.semantic_contract = caps.semantic_contract.model_copy(
+        update={"built_in_tools": (BuiltinToolSupport(tool=tool, support=support),)}
+    )
+    caps.built_in_tools.supported = [tool] if state == "supported" else []
+    adapter = _agent_engine_adapter(execution_factory=execution_factory)
+    adapter.sdk_factories = dataclasses.replace(
+        adapter.sdk_factories,
+        openai_responses=client_factory,
+    )
+    request = RunRequest(
+        model_assembly_metadata=None,
+        compaction_assembly_metadata=None,
+        enabled_execution_options=[],
+        session_id="session-1",
+        user_messages=[],
+        agent_prompt=None,
+        toolkits=[
+            ToolkitBinding(
+                toolkit=_PromptHookToolkit(),
+                slug="prompt",
+                base_slug="prompt",
+                use_prefix=False,
+                toolkit_type=None,
+            )
+        ]
+        if tool == "web_search"
+        else [],
+        provider=LLMProvider.OPENAI,
+        model="exact-client-image-model",
+        model_capabilities=caps,
+        reasoning_effort=effort,
+        credential_kwargs={"api_key": "synthetic-test-key"},
+        workspace_id="workspace-1",
+        agent_id="agent-1",
+        tool_search_enabled=False,
+        auto_compaction_threshold_tokens=None,
+        inference_state=None,
+        compaction_provider_integration_id=None,
+        builtin_tools=[BuiltinToolSpec(name=tool, config={})],
+    )
+    if not allowed:
+        with pytest.raises(ValueError, match="Required builtin tool is not supported"):
+            _ = [emit async for emit in adapter.run(request, _run_context())]
+        assert bodies == []
+        return
+    _ = [emit async for emit in adapter.run(request, _run_context())]
+    assert len(bodies) == 1
+    tools = bodies[0]["tools"]
+    assert isinstance(tools, list)
+    if tool == "image_generation":
+        assert any(
+            isinstance(t, dict)
+            and t.get("type") == "function"
+            and t.get("name") == tool
+            for t in tools
+        )
+        assert not any(
+            isinstance(t, dict) and t.get("type") == "image_generation" for t in tools
+        )
+    else:
+        assert any(isinstance(t, dict) and t.get("type") == "web_search" for t in tools)
+    if effort is None:
+        assert "reasoning" not in bodies[0]
+
+
 async def test_xai_image_generation_is_bound_as_client_function_tool(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -1902,6 +2163,18 @@ async def test_xai_image_generation_is_bound_as_client_function_tool(
         session_manager=_session_context,
         execution_factory=_capture_execution_factory(execution),
     )
+    source = make_test_source_snapshot(
+        make_test_source_payload(
+            {
+                "xai/grok-4": {
+                    "litellm_provider": "xai",
+                    "supports_web_search": True,
+                    "supports_function_calling": True,
+                    "mode": "chat",
+                }
+            }
+        )
+    )
     [entry] = project_integration_replacement_entries(
         integration_id="integration",
         provider=LLMProvider.XAI,
@@ -1909,10 +2182,11 @@ async def test_xai_image_generation_is_bound_as_client_function_tool(
             _candidate_from_xai_api_key_model(
                 model_id="grok-4",
                 created=0,
+                extra=None,
                 fetched_at=datetime.datetime(2026, 10, 2, tzinfo=datetime.UTC),
             )
         ],
-        source=None,
+        source=source,
         provider_listing_source="xai:developer_models",
     )
 

@@ -1,6 +1,7 @@
 import { rem } from "@mantine/core";
 import { useState } from "react";
 import { expect, userEvent, within } from "storybook/test";
+import { partialReasoningCapabilities } from "@/shared/storybook/model-capability-fixtures";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import { SelectableModelOptionsEditor } from "./SelectableModelOptionsEditor";
 import type {
@@ -558,5 +559,55 @@ export const MissingModel = {
       },
     ],
     lightweightModelLabel: "default",
+  },
+} satisfies Story;
+
+export const ConditionalHostedToolAllowed = {
+  args: {
+    reasoningEffort: "max",
+    options: [
+      {
+        ...defaultOption,
+        candidates: [
+          {
+            ...defaultCandidate,
+            normalized_capabilities: partialReasoningCapabilities,
+          },
+        ],
+      },
+    ],
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(
+      canvas.getByRole("button", { name: "Model settings" }),
+    );
+    const body = within(document.body);
+    await expect(
+      body.getByRole("checkbox", { name: "Image generation" }),
+    ).toBeVisible();
+    await expect(
+      body.getByRole("checkbox", { name: "Web search" }),
+    ).toBeVisible();
+  },
+} satisfies Story;
+
+export const ConditionalHostedToolOmittedEffort = {
+  args: {
+    ...ConditionalHostedToolAllowed.args,
+    reasoningEffort: null,
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(
+      canvas.getByRole("button", { name: "Model settings" }),
+    );
+    const body = within(document.body);
+    await expect(
+      body.queryByRole("checkbox", { name: "Image generation" }),
+    ).not.toBeInTheDocument();
+    await expect(
+      body.getByRole("checkbox", { name: "Web search" }),
+    ).toBeVisible();
   },
 } satisfies Story;

@@ -17,6 +17,7 @@ from azents.core.enums import (
     SessionAgentKind,
 )
 from azents.core.inference_profile import SessionInferenceState
+from azents.core.model_catalog_source import CATALOG_SOURCE_KEY
 from azents.engine.events.types import AgentRunState, Event
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
@@ -33,7 +34,6 @@ from azents.repos.subagent_coordination.data import SubagentCoordinationSnapshot
 from azents.repos.subagent_coordination.repository import (
     SubagentCoordinationRepository,
 )
-from azents.services.model_metadata_source import GENAI_PRICES_SOURCE_KEY
 
 
 class SubagentToolOperationError(ValueError):
@@ -110,7 +110,7 @@ class SubagentToolOperationRepository:
         async with self.session_manager() as session:
             return await self.source_snapshot_repository.get_current(
                 session,
-                source_key=GENAI_PRICES_SOURCE_KEY,
+                source_key=CATALOG_SOURCE_KEY,
             )
 
     async def prepare_spawn(

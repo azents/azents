@@ -8,10 +8,13 @@ from urllib.parse import urlsplit
 import anyio
 import httpx2
 
-from azents.core.model_catalog_source import CatalogSourcePayload, decode_catalog_source
+from azents.core.model_catalog_source import (
+    CATALOG_SOURCE_KEY,
+    CATALOG_SOURCE_KIND,
+    CatalogSourcePayload,
+    decode_catalog_source,
+)
 
-CATALOG_SOURCE_KEY = "litellm_catalog"
-CATALOG_SOURCE_KIND = "litellm_json"
 DEFAULT_CATALOG_SOURCE_URL = (
     "https://raw.githubusercontent.com/BerriAI/litellm/main/"
     "model_prices_and_context_window.json"

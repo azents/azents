@@ -10,6 +10,7 @@ from collections.abc import Mapping, Sequence
 from typing import ClassVar, Protocol
 
 from azents.core.enums import LLMProvider
+from azents.core.model_capability_contract import ModelCapabilityContract
 
 
 class BuiltinToolConfigLike(Protocol):
@@ -32,6 +33,11 @@ class BuiltinToolCapabilities(Protocol):
 
 class BuiltinToolModelCapabilities(Protocol):
     """Capability fields required for built-in tool validation."""
+
+    @property
+    def semantic_contract(self) -> ModelCapabilityContract | None:
+        """Versioned saved support, absent for historical snapshots."""
+        ...
 
     @property
     def built_in_tools(self) -> BuiltinToolCapabilities:
@@ -75,6 +81,30 @@ class BuiltinToolRule(ABC):
         ...
 
 
+def builtin_tool_configurable(
+    capabilities: BuiltinToolModelCapabilities, *, tool: str
+) -> bool:
+    """Check configuration potential without inventing a request context.
+
+    Save and preparation have no effective effort or actual function declarations.
+    A known conditional fact permits configuration, not dispatch authorization.
+    Runtime lowerers evaluate its saved predicate before sending the request.
+    Historical snapshots retain their unconditional-list compatibility.
+
+    :param capabilities: the selected model's saved capability snapshot
+    :param tool: the route-projected built-in capability name
+    :returns: whether the saved facts allow this tool to be configured
+    """
+    contract = capabilities.semantic_contract
+    if contract is None:
+        return tool in capabilities.built_in_tools.supported
+    return any(
+        declaration.tool == tool
+        and declaration.support.state in {"supported", "conditional"}
+        for declaration in contract.built_in_tools
+    )
+
+
 class WebSearchRule(BuiltinToolRule):
     """Web Search: unified web search tool routed automatically by provider format.
 
@@ -86,8 +116,7 @@ class WebSearchRule(BuiltinToolRule):
 
     def validate(self, ctx: BuiltinToolValidationContext) -> list[str]:
         """Validate Web Search compatibility."""
-        supported = ctx.provider_model.capabilities.built_in_tools.supported
-        if self.name in supported:
+        if builtin_tool_configurable(ctx.provider_model.capabilities, tool=self.name):
             return []
         return [
             f"Model '{ctx.provider_model.model_identifier}'"
@@ -96,14 +125,13 @@ class WebSearchRule(BuiltinToolRule):
 
 
 class ImageGenerationRule(BuiltinToolRule):
-    """Image Generation: provider-hosted image creation capability."""
+    """Image Generation: route-projected image creation capability."""
 
     name = "image_generation"
 
     def validate(self, ctx: BuiltinToolValidationContext) -> list[str]:
         """Validate Image Generation compatibility."""
-        supported = ctx.provider_model.capabilities.built_in_tools.supported
-        if self.name in supported:
+        if builtin_tool_configurable(ctx.provider_model.capabilities, tool=self.name):
             return []
         return [
             f"Model '{ctx.provider_model.model_identifier}'"

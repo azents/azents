@@ -27,7 +27,7 @@ from pydantic_ai.messages import (
 from pydantic_ai.usage import RequestUsage
 
 from azents.core.enums import LLMProvider
-from azents.core.model_pricing import GenAIModelPricing
+from azents.core.model_pricing import CapturedModelPricing
 from azents.engine.events.protocols import (
     ContentDeltaProjection,
     FunctionCallDeltaProjection,
@@ -99,7 +99,7 @@ def _normalizer(
     *,
     provider: str = "anthropic",
     model: str = "selected-model",
-    pricing: GenAIModelPricing | None = None,
+    pricing: CapturedModelPricing | None = None,
 ) -> PydanticAIOutputNormalizer:
     return PydanticAIOutputNormalizer(
         provider=provider,
@@ -110,7 +110,7 @@ def _normalizer(
     )
 
 
-def _pricing() -> GenAIModelPricing:
+def _pricing() -> CapturedModelPricing:
     return make_test_model_pricing(
         provider=LLMProvider.ANTHROPIC,
         model_identifier="selected-model",

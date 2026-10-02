@@ -1,11 +1,13 @@
 "use client";
 
 import { useCallback, useMemo } from "react";
+import { supportedBuiltinTools } from "@/shared/lib/model-capability-support";
 import { trpc } from "@/trpc/client";
 import type {
   ImageGenerationCatalogState,
   SelectableModelOptionFormValue,
 } from "../model-selection";
+import type { ModelReasoningEffort } from "@azents/public-client";
 
 export interface ImageGenerationCatalogsOutput {
   states: ReadonlyMap<string, ImageGenerationCatalogState>;
@@ -14,13 +16,16 @@ export interface ImageGenerationCatalogsOutput {
 
 function imageCatalogIntegrationIds(
   options: SelectableModelOptionFormValue[],
+  reasoningEffort: ModelReasoningEffort | null,
 ): string[] {
   return [
     ...new Set(
       options.flatMap((option) => {
         return option.candidates.flatMap((candidate) => {
-          const supported =
-            candidate.normalized_capabilities?.built_in_tools?.supported ?? [];
+          const supported = supportedBuiltinTools(
+            candidate.normalized_capabilities,
+            { reasoningEffort },
+          );
           if (
             candidate.model_provider_integration_id == null ||
             !supported.includes("image_generation")
@@ -37,10 +42,11 @@ function imageCatalogIntegrationIds(
 export function useImageGenerationCatalogs(
   handle: string,
   options: SelectableModelOptionFormValue[],
+  reasoningEffort: ModelReasoningEffort | null = null,
 ): ImageGenerationCatalogsOutput {
   const integrationIds = useMemo(
-    () => imageCatalogIntegrationIds(options),
-    [options],
+    () => imageCatalogIntegrationIds(options, reasoningEffort),
+    [options, reasoningEffort],
   );
   const utils = trpc.useUtils();
   const query = trpc.llmProviderIntegration.imageCatalogs.useQuery(

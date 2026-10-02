@@ -1,3 +1,5 @@
+import { supportedBuiltinTools } from "../../shared/lib/model-capability-support.ts";
+import type { CapabilityRequestContext } from "../../shared/lib/model-capability-support.ts";
 import type {
   AgentModelSelection,
   AgentModelSelectionInput,
@@ -104,6 +106,7 @@ export interface PrimarySettingsCopyResult {
 export function copyCompatiblePrimarySettings(
   primary: SelectableModelCandidateFormValue,
   target: SelectableModelCandidateFormValue,
+  request: CapabilityRequestContext = {},
 ): PrimarySettingsCopyResult {
   const omitted: PrimarySettingsCopyResult["omitted"] = [];
   const targetContext = target.normalized_capabilities?.context_window;
@@ -131,8 +134,10 @@ export function copyCompatiblePrimarySettings(
   ) {
     omitted.push("max_output");
   }
-  const supportedTools =
-    target.normalized_capabilities?.built_in_tools?.supported ?? [];
+  const supportedTools = supportedBuiltinTools(
+    target.normalized_capabilities,
+    request,
+  );
   const builtinTools = primary.builtin_tools.filter((tool) =>
     supportedTools.includes(tool),
   );
@@ -204,11 +209,16 @@ export function selectCandidateIntegration(
 export function selectCandidateModel(
   candidate: SelectableModelCandidateFormValue,
   model: SelectableModelCandidate,
+  request: CapabilityRequestContext = {},
 ): SelectableModelCandidateFormValue {
-  const previousTools =
-    candidate.normalized_capabilities?.built_in_tools?.supported ?? [];
-  const supportedTools =
-    model.normalized_capabilities.built_in_tools?.supported ?? [];
+  const previousTools = supportedBuiltinTools(
+    candidate.normalized_capabilities,
+    request,
+  );
+  const supportedTools = supportedBuiltinTools(
+    model.normalized_capabilities,
+    request,
+  );
   const enabledTools = supportedTools.filter(
     (tool) =>
       !previousTools.includes(tool) || candidate.builtin_tools.includes(tool),

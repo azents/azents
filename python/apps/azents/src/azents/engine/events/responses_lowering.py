@@ -9,6 +9,7 @@ from collections.abc import Mapping, Sequence
 from typing import ClassVar
 
 from openai.types.responses.response_includable import ResponseIncludable
+from pydantic import BaseModel, ConfigDict
 
 from azents.core.enums import EventKind, LLMModelDeveloper, LLMProvider
 from azents.core.llm_catalog import ModelCapabilities
@@ -25,6 +26,15 @@ from azents.engine.events.file_parts import (
     FilePartLoweringCapabilities,
     ModelFileResolver,
     lower_file_output_part,
+)
+from azents.engine.events.model_support_contract import (
+    ModelSupportContext,
+    decode_model_support_options,
+    model_support_allowed,
+    model_support_request_from_options,
+    resolve_model_support_context,
+    saved_builtin_tool_allowed,
+    validate_saved_model_request,
 )
 from azents.engine.events.output_parts import (
     iter_output_parts,
@@ -85,6 +95,22 @@ _OPENAI_PROMPT_CACHE_KEY_MAX_CHARS = 64
 _REASONING_ENCRYPTED_CONTENT_INCLUDE: ResponseIncludable = "reasoning.encrypted_content"
 _HISTORICAL_CUSTOM_TOOL_OUTPUT_MAX_CHARS = 2_000
 logger = logging.getLogger(__name__)
+
+
+class _FunctionSupportOptions(BaseModel):
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    strict: bool | None = None
+
+
+class _ToolSupportOptions(BaseModel):
+    """Decode function presence before evaluating saved request predicates."""
+
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    type: str = "function"
+    strict: bool | None = None
+    function: _FunctionSupportOptions | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -278,6 +304,11 @@ class ResponsesRequestLowerer:
         system_prompt: str | None = None,
     ) -> NativeModelRequest:
         """Convert Event transcript to a provider-native Responses request."""
+        if (
+            self._model_capabilities.semantic_contract is not None
+            and model != self.model
+        ):
+            raise ValueError("Lowerer model identity differs from the selected model")
         input_items: list[dict[str, object]] = []
         kwargs = self._lower_model_kwargs()
         default_instructions = kwargs.get("instructions") or _DEFAULT_INSTRUCTIONS
@@ -356,12 +387,44 @@ class ResponsesRequestLowerer:
             # remain stable across turns.
             input_items = _omit_response_item_ids_for_unstored_request(input_items)
         input_items = _drop_orphan_tool_outputs(input_items)
+        contract = self._model_capabilities.semantic_contract
+        if contract is not None:
+            decoded_tools = [
+                _ToolSupportOptions.model_validate(tool) for tool in self._tools
+            ]
+            function_tools = any(tool.type == "function" for tool in decoded_tools)
+            options = decode_model_support_options(kwargs)
+            request = model_support_request_from_options(
+                options,
+                selected_effort=self._reasoning_effort,
+                function_tools=function_tools,
+                strict_function_schema=any(
+                    tool.type == "function"
+                    and (
+                        tool.strict is True
+                        or tool.function is not None
+                        and tool.function.strict is True
+                    )
+                    for tool in decoded_tools
+                ),
+            )
+            validate_saved_model_request(self._model_capabilities, request=request)
+            context = resolve_model_support_context(
+                self._model_capabilities,
+                requested_effort=request.reasoning_effort,
+                function_tools=function_tools,
+            )
+        else:
+            context = ModelSupportContext(
+                reasoning_effort=self._reasoning_effort, function_tools=None
+            )
         hosted = _lower_hosted_tools(
             self._hosted_tools,
             provider=self.provider,
             provider_id=self._provider_id,
             model_developer=self._model_developer,
             model_capabilities=self._model_capabilities,
+            request_context=context,
         )
         tools = [*self._tools, *hosted.tools]
         prompt_cache_inputs = _apply_provider_prompt_cache_hints(
@@ -416,7 +479,25 @@ class ResponsesRequestLowerer:
         if self._stop is not None:
             kwargs["stop"] = self._stop
         if self._reasoning_effort is not None:
-            kwargs["reasoning"] = {"effort": self._reasoning_effort, "summary": "auto"}
+            reasoning: dict[str, object] = {"effort": self._reasoning_effort}
+            contract = self._model_capabilities.semantic_contract
+            if (
+                contract is None
+                or model_support_allowed(
+                    contract.reasoning_summaries,
+                    context=resolve_model_support_context(
+                        self._model_capabilities,
+                        requested_effort=self._reasoning_effort,
+                        function_tools=any(
+                            _ToolSupportOptions.model_validate(tool).type == "function"
+                            for tool in self._tools
+                        ),
+                    ),
+                )
+                is not False
+            ):
+                reasoning["summary"] = "auto"
+            kwargs["reasoning"] = reasoning
         kwargs.update(self._extra_kwargs)
         service_tier = resolve_openai_service_tier(
             provider=self._provider_id,
@@ -918,11 +999,11 @@ def _lower_hosted_tools(
     provider_id: LLMProvider | None,
     model_developer: LLMModelDeveloper | None,
     model_capabilities: ModelCapabilities,
+    request_context: ModelSupportContext,
 ) -> _HostedToolLowering:
     """Lower semantic hosted tool settings to the native Responses surface."""
     native_tools: list[dict[str, object]] = []
     kwargs: dict[str, object] = {}
-    supported = set(model_capabilities.built_in_tools.supported)
     target = _hosted_tool_target(
         provider=provider,
         provider_id=provider_id,
@@ -937,7 +1018,9 @@ def _lower_hosted_tools(
             json.dumps(item.config, sort_keys=True, separators=(",", ":")),
         ),
     ):
-        if tool.name not in supported:
+        if not saved_builtin_tool_allowed(
+            model_capabilities, tool=tool.name, context=request_context
+        ):
             msg = f"Required builtin tool is not supported: {tool.name}"
             raise UnsupportedRequiredBuiltinToolError(msg)
         config = dict(tool.config)

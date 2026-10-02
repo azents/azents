@@ -11,7 +11,7 @@ import {
   useState,
 } from "react";
 import {
-  normalizeReasoningEffort,
+  normalizeReasoningEffortForCapabilities,
   reasoningEffortLevels,
 } from "@/shared/lib/reasoning-effort";
 import { isRecord, isString } from "@/shared/lib/unknown-value";
@@ -1023,19 +1023,16 @@ function useChatInputContainerImplementation({
       if (modelTargetLabel === null) {
         return;
       }
-      const nextEfforts = effortLevelsForTarget(
-        selectableModelOptions,
-        modelTargetLabel,
-      );
       const nextModelOption = modelOptionForTarget(
         selectableModelOptions,
         modelTargetLabel,
       );
       updateInferenceProfile({
         model_target_label: modelTargetLabel,
-        reasoning_effort: normalizeReasoningEffort(
+        reasoning_effort: normalizeReasoningEffortForCapabilities(
           knownReasoningEffort(inferenceProfile.reasoning_effort),
-          nextEfforts,
+          nextModelOption?.candidates[0]?.model_selection
+            .normalized_capabilities,
         ),
         enabled_execution_options: normalizeEnabledExecutionOptions(
           inferenceProfile,

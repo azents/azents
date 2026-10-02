@@ -38,6 +38,7 @@ from pydantic_ai.tools import ToolDefinition
 
 from azents.core.enums import EventKind, LLMModelDeveloper, LLMProvider
 from azents.core.llm_catalog import ModelCapabilities
+from azents.core.model_capability_projection import google_lossless_efforts
 from azents.core.model_execution_options import ModelExecutionOptionId
 from azents.core.type_guards import is_string_object_dict
 from azents.engine.events.external_channel_rendering import render_external_channel_turn
@@ -46,6 +47,14 @@ from azents.engine.events.file_parts import (
     ModelFileResolver,
     file_output_part_placeholder_text,
     lower_file_output_part,
+)
+from azents.engine.events.model_support_contract import (
+    decode_model_support_options,
+    model_support_allowed,
+    model_support_request_from_options,
+    resolve_model_support_context,
+    saved_builtin_tool_allowed,
+    validate_saved_model_request,
 )
 from azents.engine.events.output_parts import (
     enforce_tool_output_text_hard_cap,
@@ -613,14 +622,53 @@ class PydanticAILowerer:
             )
         )
 
-    def _parameters(self) -> ModelRequestParameters:
-        definitions: list[ToolDefinition] = []
+    def _declared_tools(self) -> list[_DeclaredTool]:
+        """Decode actual client declarations separately from hosted settings."""
+        declarations: list[_DeclaredTool] = []
         for raw in self.tools:
             nested = raw.get("function")
             selected = (
                 {**nested, "type": "function"} if is_string_object_dict(nested) else raw
             )
-            tool = _DeclaredTool.model_validate(selected)
+            declarations.append(_DeclaredTool.model_validate(selected))
+        return declarations
+
+    def _parameters(self) -> ModelRequestParameters:
+        definitions: list[ToolDefinition] = []
+        declarations = self._declared_tools()
+        function_tools = any(tool.type == "function" for tool in declarations)
+        context = resolve_model_support_context(
+            self.model_capabilities,
+            requested_effort=self.reasoning_effort,
+            function_tools=function_tools,
+        )
+        strict_supported = self.model_capabilities.tool_calling.strict_json_schema
+        contract = self.model_capabilities.semantic_contract
+        if contract is not None:
+            request = model_support_request_from_options(
+                decode_model_support_options(self.options),
+                selected_effort=self.reasoning_effort,
+                function_tools=function_tools,
+                strict_function_schema=any(
+                    tool.type == "function" and tool.strict is True
+                    for tool in declarations
+                ),
+            )
+            validate_saved_model_request(self.model_capabilities, request=request)
+            context = resolve_model_support_context(
+                self.model_capabilities,
+                requested_effort=request.reasoning_effort,
+                function_tools=function_tools,
+            )
+            strict_supported = model_support_allowed(
+                contract.strict_function_schema,
+                context=context,
+            )
+        for raw, tool in zip(self.tools, declarations, strict=True):
+            nested = raw.get("function")
+            selected = (
+                {**nested, "type": "function"} if is_string_object_dict(nested) else raw
+            )
             if tool.type not in {"function", "custom"}:
                 raise ValueError("Unsupported client tool declaration dialect")
             schema = (
@@ -651,9 +699,11 @@ class PydanticAILowerer:
                         "description": tool.description,
                         "parameters_json_schema": schema,
                         "strict": (
-                            tool.strict is True
-                            and self.model_capabilities.tool_calling.strict_json_schema
-                            is True
+                            tool.strict
+                            if contract is not None and tool.strict is not None
+                            else None
+                            if contract is not None and strict_supported is True
+                            else tool.strict is True and strict_supported is True
                         ),
                         "metadata": {
                             "azents_wire_dialect": "plaintext_custom"
@@ -676,7 +726,9 @@ class PydanticAILowerer:
             raise ValueError("Provider client tool declaration limit exceeded")
         native_tools: list[AbstractNativeTool] = []
         for selected in self.hosted_tools:
-            if selected.name not in self.model_capabilities.built_in_tools.supported:
+            if not saved_builtin_tool_allowed(
+                self.model_capabilities, tool=selected.name, context=context
+            ):
                 raise ValueError(
                     "Hosted tool is not authorized by the saved capability snapshot"
                 )
@@ -754,8 +806,35 @@ class PydanticAILowerer:
             values["top_p"] = self.top_p
         if self.stop is not None:
             values["stop_sequences"] = self.stop
-        if self.model_capabilities.tool_calling.parallel_tool_calls is not True:
-            values["parallel_tool_calls"] = False
+        contract = self.model_capabilities.semantic_contract
+        if contract is None:
+            if self.model_capabilities.tool_calling.parallel_tool_calls is not True:
+                values["parallel_tool_calls"] = False
+        else:
+            declarations = self._declared_tools()
+            request = model_support_request_from_options(
+                decode_model_support_options(values),
+                selected_effort=self.reasoning_effort,
+                function_tools=any(tool.type == "function" for tool in declarations),
+                strict_function_schema=any(
+                    tool.type == "function" and tool.strict is True
+                    for tool in declarations
+                ),
+            )
+            validate_saved_model_request(self.model_capabilities, request=request)
+            if (
+                "parallel_tool_calls" not in values
+                and model_support_allowed(
+                    contract.parallel_function_calls,
+                    context=resolve_model_support_context(
+                        self.model_capabilities,
+                        requested_effort=request.reasoning_effort,
+                        function_tools=request.function_tools,
+                    ),
+                )
+                is False
+            ):
+                values["parallel_tool_calls"] = False
         service_tier = resolve_openai_service_tier(
             provider=self.provider_id,
             supported=self.supported_execution_options,
@@ -770,9 +849,15 @@ class PydanticAILowerer:
             }
         elif service_tier is not None:
             values["openai_service_tier"] = service_tier
-        if self.reasoning_effort is not None and self.reasoning_effort not in [
-            effort.value for effort in self.model_capabilities.reasoning.effort_levels
-        ]:
+        if (
+            contract is None
+            and self.reasoning_effort is not None
+            and self.reasoning_effort
+            not in [
+                effort.value
+                for effort in self.model_capabilities.reasoning.effort_levels
+            ]
+        ):
             raise ValueError(
                 "Reasoning effort is not authorized by the saved capability snapshot"
             )
@@ -807,17 +892,58 @@ class PydanticAILowerer:
             LLMProvider.GOOGLE_VERTEX_AI,
         }:
             if self.reasoning_effort is not None:
-                values["google_thinking_config"] = _google_thinking_config(
-                    model=self.model, effort=self.reasoning_effort
-                )
+                if contract is None:
+                    values["google_thinking_config"] = _google_thinking_config(
+                        model=self.model, effort=self.reasoning_effort
+                    )
+                else:
+                    if self.reasoning_effort not in google_lossless_efforts(
+                        provider=self.provider_id, model=self.model
+                    ):
+                        raise ValueError(
+                            "Selected Google reasoning effort has no lossless mapping"
+                        )
+                    values["google_thinking_config"] = ThinkingConfigDict(
+                        thinking_level=GoogleThinkingLevel(
+                            self.reasoning_effort.upper()
+                        ),
+                        include_thoughts=True,
+                    )
             return _GoogleSettings.model_validate({"value": values}).value
         if self.reasoning_effort is not None:
             extra_body = values.get("extra_body")
             if extra_body is not None and not is_string_object_dict(extra_body):
                 raise ValueError("Model extra_body must be an object")
+            explicit_reasoning = (
+                extra_body.get("reasoning") if extra_body is not None else None
+            )
+            if explicit_reasoning is not None and not is_string_object_dict(
+                explicit_reasoning
+            ):
+                raise ValueError("Model reasoning options must be an object")
+            reasoning_options: dict[str, object] = {
+                "effort": self.reasoning_effort,
+            }
+            if contract is not None and explicit_reasoning is not None:
+                reasoning_options.update(explicit_reasoning)
+            elif (
+                contract is None
+                or model_support_allowed(
+                    contract.reasoning_summaries,
+                    context=resolve_model_support_context(
+                        self.model_capabilities,
+                        requested_effort=self.reasoning_effort,
+                        function_tools=any(
+                            tool.type == "function" for tool in self._declared_tools()
+                        ),
+                    ),
+                )
+                is not False
+            ):
+                reasoning_options["summary"] = "auto"
             values["extra_body"] = {
                 **(extra_body if extra_body is not None else {}),
-                "reasoning": {"effort": self.reasoning_effort, "summary": "auto"},
+                "reasoning": reasoning_options,
             }
         if self.provider_id == LLMProvider.OPENROUTER:
             values["openai_include_raw_annotations"] = True

@@ -15,6 +15,9 @@ from openai.types.responses.response_text_config_param import ResponseTextConfig
 from pydantic import TypeAdapter
 
 from azents.core.enums import EventKind, ExternalChannelPrincipalAuthorType, LLMProvider
+from azents.engine.events.model_support_contract import (
+    saved_structured_response_support,
+)
 from azents.engine.events.openai_responses import call_openai_responses_text
 from azents.engine.events.types import (
     AssistantMessagePayload,
@@ -358,8 +361,10 @@ class SessionTitleService:
                 return None
             runtime = resolved_runtime.value
             model = runtime.model
-            structured_capability = (
-                selection.normalized_capabilities.tool_calling.strict_json_schema
+            structured_capability = saved_structured_response_support(
+                selection.normalized_capabilities,
+                requested_effort=None,
+                function_tools=False,
             )
             active_mode = (
                 TitleOutputMode.PLAIN_TEXT

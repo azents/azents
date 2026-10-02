@@ -20,6 +20,7 @@ from azents.repos.llm_catalog.data import (
     LLMCatalogEntryList,
     LLMCatalogSyncAttempt,
 )
+from azents.services.catalog_source_collection import CATALOG_SOURCE_KEY
 from azents.services.llm_catalog import ModelCatalogReadService
 
 
@@ -86,7 +87,7 @@ async def test_read_service_returns_latest_failed_attempt_without_snapshot() -> 
         latest_attempt=LLMCatalogSyncAttempt(
             id="attempt-id",
             catalog_id="catalog-id",
-            source_key="genai_prices",
+            source_key=CATALOG_SOURCE_KEY,
             status=LLMCatalogAttemptStatus.FAILED,
             started_at=now,
             finished_at=now,

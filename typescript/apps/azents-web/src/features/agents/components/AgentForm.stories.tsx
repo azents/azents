@@ -2,6 +2,7 @@ import { rem } from "@mantine/core";
 import { useForm } from "@mantine/form";
 import { expect, userEvent, within } from "storybook/test";
 import { reasoningEffortLevels } from "@/shared/lib/reasoning-effort";
+import { partialReasoningCapabilities } from "@/shared/storybook/model-capability-fixtures";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import { useAgentFormTranslations } from "../containers/useAgentFormTranslations";
 import {
@@ -433,5 +434,43 @@ export const UnsupportedCapabilities = {
         model_parameters: null,
       },
     },
+  },
+} satisfies Story;
+
+export const VersionedPartialEffortsWithOmittedDefault = {
+  args: {
+    formState: {
+      type: "EDIT",
+      agent: {
+        ...baseAgent,
+        model_parameters: null,
+        selectable_model_options: baseAgent.selectable_model_options.map(
+          (option) => ({
+            ...option,
+            candidates: option.candidates.map((candidate) => ({
+              ...candidate,
+              model_selection: {
+                ...candidate.model_selection,
+                normalized_capabilities: partialReasoningCapabilities,
+              },
+            })),
+          }),
+        ),
+      },
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const select = canvas.getByRole("combobox", {
+      name: "Default reasoning effort",
+    });
+    await expect(select).toHaveValue("");
+    await userEvent.click(select);
+    const body = within(document.body);
+    await expect(body.getByRole("option", { name: "xhigh" })).toBeVisible();
+    await expect(body.getByRole("option", { name: "max" })).toBeVisible();
+    await expect(
+      body.queryByRole("option", { name: "medium" }),
+    ).not.toBeInTheDocument();
   },
 } satisfies Story;
