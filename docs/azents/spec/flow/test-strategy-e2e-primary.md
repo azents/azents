@@ -30,7 +30,7 @@ code_paths:
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
 last_verified_at: 2026-10-02
-spec_version: 78
+spec_version: 79
 ---
 
 # E2E Primary Test Strategy
@@ -534,9 +534,11 @@ Always-on required CI does not depend on external credentials.
   exact-base CI workflow publishes a pending status and linked run, while an absent or
   completed base without compatible artifacts publishes a neutral successful status
   with an unavailable comparison. Candidate CI never waits for base completion.
-  Exact-base CI completion triggers evidence-only reevaluation of affected open pull
-  requests. Candidate CI completion performs the same reevaluation so ordering between
-  base completion and initial sticky-comment publication cannot leave stale state.
+  Every CI completion selects all open same-repository pull requests whose current
+  head or base SHA matches the completed workflow head SHA. This includes dependent
+  stacked pull requests with non-main bases and does not depend on run-associated PR
+  metadata. Candidate completion and exact-base completion use the same evidence-only
+  reevaluation path so ordering with initial sticky-comment publication converges.
   Reevaluation workflows are serialized before evidence is read and publication
   begins. The helper checks current PR head/base identity before publishing status
   and again before replacing the duration block in the sticky observability comment.
@@ -610,6 +612,8 @@ Local/PR environment without live substrate does not fake live PASS. Instead, se
 
 ## Changelog
 
+- **2026-10-02** (spec_version 79) — Selected all same-repository PRs whose head
+  or base matches a completed CI SHA, including dependents of non-main stacked bases.
 - **2026-10-02** (spec_version 78) — Made missing base duration evidence
   non-failing, reserved pending for active exact-base CI, and synchronized guarded
   status plus sticky-comment reevaluation when either base or candidate CI completes.
