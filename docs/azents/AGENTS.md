@@ -1,7 +1,7 @@
 ---
 title: "azents documentation structure"
 created: 2026-02-25
-updated: 2026-08-02
+updated: 2026-10-01
 tags: [documentation, process]
 ---
 # azents Documentation Structure
@@ -16,8 +16,6 @@ Azents is an AI agent platform, so much of the system behavior lives outside the
 - **ADR** (`adr/`) — why a material architecture or product-contract decision was made. Append-only decision log.
 - **Design** (`design/`) — how the system was designed to satisfy the Requirements and ADR decisions at development time.
 - **SPEC.md** (`spec/domain/`, `spec/flow/`) — how the current system actually behaves. These are living documents linked to code through `code_paths`.
-
-Always read `spec/domain/` and `spec/flow/` first for current behavior. Read Requirements, ADRs, and design documents only when you need product intent, decision rationale, historical context, rejected options, or implementation-time background behind the current spec.
 
 SPEC documents use the `code_paths` frontmatter field to link the spec to source files. When code changes, update the related spec's `last_verified_at` so drift can be detected.
 
@@ -43,7 +41,36 @@ Requirements, ADR, and design documents use their location and content as their 
 | `notes/` | Pre-design product/architecture blueprints, unresolved model exploration, or discussion summaries. | `agent-thread-session-blueprint.md` | `title`, `created`, `tags` |
 | `issues/` | Bug or operational issue tracking. | `2026-05-01-agent-stuck.md` | `title`, `created`, `tags` |
 
-`INDEX.md` is generated from frontmatter by `scripts/gen_docs_index.py --docs-root docs/azents --project-name azents` through the pre-commit hook.
+## Document Discovery
+
+Document frontmatter is the source of truth for catalog and discovery. Do not
+rely on a tracked generated index or read the entire documentation tree.
+
+Use `scripts/docs_catalog.py` to narrow the search before opening documents:
+
+- Find current behavior from related domain and flow Specs first.
+- Use `related --code-path` when starting from implementation files.
+- Use `snapshot <snapshot_id>` to find matching Requirements, ADR, and Design.
+- Read Requirements for confirmed intent, ADR for decision rationale, and Design
+  only for implementation-time context.
+- Expand to title or tag search only when code-path and snapshot lookup do not
+  find the document.
+
+Common commands:
+
+```console
+python scripts/docs_catalog.py search external-channel
+python scripts/docs_catalog.py related --code-path <repository-path>
+python scripts/docs_catalog.py snapshot <snapshot-id>
+python scripts/docs_catalog.py list --type spec --spec-type domain
+python scripts/docs_catalog.py list --tag external-channel
+python scripts/docs_catalog.py stale --before <YYYY-MM-DD>
+python scripts/docs_catalog.py validate
+```
+
+Use `--format paths` for shell pipelines and `--format json` for automation.
+Catalog output is derived from frontmatter. Do not commit generated catalog
+listings in ordinary feature branches.
 
 ### Shared Development Snapshot Naming and References
 
@@ -201,7 +228,8 @@ tags: [backend, engine]
   - New primary snapshot Design: `{word}-{YYMMDD}-{slug}.md`, matching Requirements and ADR
   - Existing legacy Design: keep its current descriptive filename unchanged
   - Audit/verification report: `{feature}-audit-report-YYYY-MM-DD.md`, `{feature}-spec-sync-YYYY-MM-DD.md`, `{feature}-testenv-report-YYYY-MM-DD.md`
-- When searching for a document, prefer filename prefix/slug and `tags` frontmatter over directory indexes.
+- When searching for a document, prefer catalog queries by filename prefix, slug,
+  or `tags` frontmatter over browsing directory-wide indexes.
 
 ### Additional Rules for `plans/`
 
@@ -241,7 +269,9 @@ spec_version: 1
 
 ### CI Validation
 
-The pre-commit hooks run snapshot validator tests and `scripts/gen_docs_index.py --docs-root docs/azents --project-name azents`, validate frontmatter for `docs/azents/**/*.md`, and regenerate indexes.
+The pre-commit hooks run catalog tests and `python scripts/docs_catalog.py
+validate`. Validation reads `docs/azents/**/*.md` frontmatter without generating
+or modifying tracked indexes.
 
 For new-format snapshot documents, validation enforces the Requirements filename/date relationship, valid ADR/Design `created` dates, per-type short-ID uniqueness, same-basename siblings, and the progressive Requirements → ADR → Design lifecycle. Requirements-only and Requirements-plus-ADR states are valid while design work is in progress. An implemented snapshot must contain the full trio, and Requirements and Design must use the same implementation date. Legacy ADR and Design filenames continue through the existing common-frontmatter validation.
 
@@ -271,7 +301,7 @@ Writing order:
 5. Audit Design authority and feasibility, then record complete Design approval.
 6. For phased implementation, create `plans/` when absent, then store both the
    multi-phase implementation plan and each phase execution plan there.
-7. Validate locally with `scripts/gen_docs_index.py --docs-root docs/azents --project-name azents --check`.
+7. Validate locally with `python scripts/docs_catalog.py validate`.
 
 ## Deletion and Move Rules
 
