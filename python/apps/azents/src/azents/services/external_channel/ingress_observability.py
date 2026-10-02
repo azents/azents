@@ -6,14 +6,11 @@ from typing import Annotated
 
 from fastapi import Depends
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.job_runtime.deps import get_job_runtime
 from azents.job_runtime.types import JobRuntime
-from azents.rdb.deps import get_session_manager
-from azents.rdb.session import SessionManager
-from azents.repos.external_channel.ingress_queue import (
-    ExternalChannelIngressQueueRepository,
+from azents.repos.external_channel.ingress_control_read import (
+    ExternalChannelIngressControlReadRepository,
 )
 from azents.repos.external_channel.ingress_queue_data import (
     ExternalChannelIngressDiagnosticSnapshot,
@@ -38,13 +35,9 @@ class ExternalChannelIngressObservation(BaseModel):
 class ExternalChannelIngressObservabilityService:
     """Read active queue state and current process metrics."""
 
-    session_manager: Annotated[
-        SessionManager[AsyncSession],
-        Depends(get_session_manager),
-    ]
-    queue_repository: Annotated[
-        ExternalChannelIngressQueueRepository,
-        Depends(ExternalChannelIngressQueueRepository),
+    repository: Annotated[
+        ExternalChannelIngressControlReadRepository,
+        Depends(ExternalChannelIngressControlReadRepository),
     ]
     metrics: Annotated[
         ExternalChannelIngressMetrics,
@@ -55,13 +48,7 @@ class ExternalChannelIngressObservabilityService:
     async def observe(self, *, limit: int = 200) -> ExternalChannelIngressObservation:
         """Return bounded queue and process observations."""
         now = datetime.datetime.now(datetime.UTC)
-        async with self.session_manager() as session:
-            queue = await self.queue_repository.inspect_active(
-                session,
-                now=now,
-                limit=limit,
-            )
-            await session.commit()
+        queue = await self.repository.inspect_active(now=now, limit=limit)
         return ExternalChannelIngressObservation(
             queue=queue,
             metrics=self.metrics.snapshot(

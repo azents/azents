@@ -1,25 +1,16 @@
 """Credential-free active External Channel ingress controls."""
 
-import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.job_runtime.deps import get_job_runtime
-from azents.job_runtime.types import JobRuntime
-from azents.rdb.deps import get_session_manager
-from azents.rdb.session import SessionManager
-from azents.repos.external_channel.ingress_queue import (
-    ExternalChannelIngressQueueRepository,
-)
 from azents.services.external_channel.ingress_observability import (
     ExternalChannelIngressObservabilityService,
     ExternalChannelIngressObservation,
 )
-from azents.services.external_channel.ingress_queue import (
-    build_external_channel_ingress_job_request,
+from azents.services.external_channel.ingress_release import (
+    ExternalChannelIngressReleaseService,
 )
 from azents.services.external_channel.ingress_test_control import (
     ExternalChannelIngressTestControl,
@@ -67,32 +58,14 @@ async def inspect_active_ingress(
 @router.post("/release")
 async def release_active_ingress(
     body: IngressOwnerRequest,
-    runtime: Annotated[JobRuntime, Depends(get_job_runtime)],
-    session_manager: Annotated[
-        SessionManager[AsyncSession],
-        Depends(get_session_manager),
-    ],
-    repository: Annotated[
-        ExternalChannelIngressQueueRepository,
-        Depends(ExternalChannelIngressQueueRepository),
+    service: Annotated[
+        ExternalChannelIngressReleaseService,
+        Depends(ExternalChannelIngressReleaseService),
     ],
 ) -> IngressReleaseResponse:
     """Submit one exact active owner drain through the real Job Runtime."""
-    async with session_manager() as session:
-        owner = await repository.get_active_owner(
-            session,
-            owner_id=body.owner_id,
-        )
-        await session.commit()
-    if owner is None:
+    if not await service.release(owner_id=body.owner_id):
         raise HTTPException(status_code=404, detail="Active ingress owner not found.")
-    await runtime.submit(
-        build_external_channel_ingress_job_request(
-            owner_id=body.owner_id,
-            drain_created_at=owner.created_at,
-            now=datetime.datetime.now(datetime.UTC),
-        )
-    )
     return IngressReleaseResponse(accepted=True)
 
 
