@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.14"
 
 [options]
@@ -430,7 +430,7 @@ requires-dist = [
     { name = "fastapi", extras = ["standard"], specifier = "==0.141.1" },
     { name = "genai-prices", specifier = "==0.1.9" },
     { name = "google-analytics-admin", specifier = "==0.30.1" },
-    { name = "google-analytics-data", specifier = "==0.23.0" },
+    { name = "google-analytics-data", specifier = "==0.23.2" },
     { name = "google-auth", specifier = "==2.57.1" },
     { name = "google-genai", specifier = "==2.25.0" },
     { name = "grpcio", specifier = "==1.83.1" },
@@ -1141,7 +1141,7 @@ wheels = [
 
 [[package]]
 name = "google-analytics-data"
-version = "0.23.0"
+version = "0.23.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "google-api-core", extra = ["grpc"] },
@@ -1150,9 +1150,9 @@ dependencies = [
     { name = "proto-plus" },
     { name = "protobuf" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/f8/09/76553c6ec3e277d38486f7619d8bad631745fb6bdd486027e956dea8a8c7/google_analytics_data-0.23.0.tar.gz", hash = "sha256:8799b8829ca175e11385008aedb9f2f0aaf5c78c2b69f7570712ee46b190b08a", size = 232484, upload-time = "2026-06-03T14:52:16.145Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/d0/64/f9e597917bcc798a223bedc82bebf4f4610d07eed7861274310490a0946c/google_analytics_data-0.23.2.tar.gz", hash = "sha256:9b34dea480e4ebe1eae3e6dee44c09e7ca84e99c008ab0546ae9be7a67aee999", size = 240564, upload-time = "2026-09-24T23:20:01.302Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/df/28/56dda8a3ba26c09a26592c1ae701f0092d9c0f8e620df073783dad733ddc/google_analytics_data-0.23.0-py3-none-any.whl", hash = "sha256:ba21edbe7f2aa61424651b11b06f81fa4ceed5db5581ef2ca2af0d189b77c0bd", size = 199547, upload-time = "2026-06-03T14:51:25.009Z" },
+    { url = "https://files.pythonhosted.org/packages/11/e0/8688834a897071c2f9bdc823c710e5dbe001d6d04f83a2fdee56202ce49f/google_analytics_data-0.23.2-py3-none-any.whl", hash = "sha256:94db2dd419859a2a51cf039ec53a3414ee9cb63c541ada3fe6fa7481ff47a4d9", size = 205168, upload-time = "2026-09-24T23:19:34.92Z" },
 ]
 
 [[package]]
