@@ -1239,6 +1239,7 @@ async def test_assembled_tool_chain_rechecks_owner_after_before_hook() -> None:
         execution_factory=_capture_execution_factory(execution),
     )
     request = RunRequest(
+        top_k=None,
         model_assembly_metadata=None,
         compaction_assembly_metadata=None,
         enabled_execution_options=[],
@@ -1299,6 +1300,7 @@ async def test_event_engine_adapter_runs_execution() -> None:
         emit
         async for emit in adapter.run(
             RunRequest(
+                top_k=None,
                 model_assembly_metadata=None,
                 compaction_assembly_metadata=None,
                 enabled_execution_options=[],
@@ -1352,6 +1354,7 @@ async def test_disabled_tool_search_exposes_complete_catalog() -> None:
         execution_factory=_capture_execution_factory(execution),
     )
     request = RunRequest(
+        top_k=None,
         model_assembly_metadata=None,
         compaction_assembly_metadata=None,
         enabled_execution_options=[],
@@ -1552,6 +1555,7 @@ async def test_tool_search_activation_updates_the_next_prepared_call() -> None:
         execution_factory=_capture_execution_factory(execution),
     )
     request = RunRequest(
+        top_k=None,
         model_assembly_metadata=None,
         compaction_assembly_metadata=None,
         enabled_execution_options=[],
@@ -1670,6 +1674,7 @@ async def test_runtime_provider_adds_run_tool_to_file_as_direct_tool() -> None:
         execution_factory=_capture_execution_factory(execution),
     )
     request = RunRequest(
+        top_k=None,
         model_assembly_metadata=None,
         compaction_assembly_metadata=None,
         enabled_execution_options=[],
@@ -1742,6 +1747,7 @@ async def _prepare_profiled_model_call(
         resolved_at=datetime.datetime.now(datetime.UTC),
     )
     request = RunRequest(
+        top_k=None,
         model_assembly_metadata=None,
         compaction_assembly_metadata=None,
         enabled_execution_options=enabled_execution_options or [],
@@ -1861,6 +1867,7 @@ async def test_openai_image_generation_is_bound_as_client_function_tool(
         emit
         async for emit in adapter.run(
             RunRequest(
+                top_k=None,
                 model_assembly_metadata=None,
                 compaction_assembly_metadata=None,
                 enabled_execution_options=[],
@@ -2098,6 +2105,7 @@ async def test_actual_engine_builtin_admission_and_condition_gate_before_sdk_wir
         openai_responses=client_factory,
     )
     request = RunRequest(
+        top_k=None,
         model_assembly_metadata=None,
         compaction_assembly_metadata=None,
         enabled_execution_options=[],
@@ -2194,6 +2202,7 @@ async def test_xai_image_generation_is_bound_as_client_function_tool(
         emit
         async for emit in adapter.run(
             RunRequest(
+                top_k=None,
                 model_assembly_metadata=None,
                 compaction_assembly_metadata=None,
                 enabled_execution_options=[],
@@ -2289,6 +2298,7 @@ async def test_xai_oauth_refresh_updates_later_model_turn_credentials(
         xai_imagine_client_factory=_refreshing_imagine_client_factory(tokens),
     )
     request = RunRequest(
+        top_k=None,
         model_assembly_metadata=None,
         compaction_assembly_metadata=None,
         enabled_execution_options=[],
@@ -2391,6 +2401,7 @@ async def test_xai_oauth_refresh_preserves_failure_classification(
         xai_imagine_client_factory=_refreshing_imagine_client_factory([]),
     )
     request = RunRequest(
+        top_k=None,
         model_assembly_metadata=None,
         compaction_assembly_metadata=None,
         enabled_execution_options=[],
@@ -2432,6 +2443,7 @@ async def test_adapter_yields_model_output_before_run_completion() -> None:
 
     stream = adapter.run(
         RunRequest(
+            top_k=None,
             model_assembly_metadata=None,
             compaction_assembly_metadata=None,
             enabled_execution_options=[],
@@ -2486,6 +2498,7 @@ async def test_adapter_forwards_user_stop_cancellation_to_execution() -> None:
         """Receive external cancellation while consuming adapter stream."""
         async for _emit in adapter.run(
             RunRequest(
+                top_k=None,
                 model_assembly_metadata=None,
                 compaction_assembly_metadata=None,
                 enabled_execution_options=[],
@@ -2542,6 +2555,7 @@ async def test_adapter_drains_run_task_on_stream_close() -> None:
 
     stream = adapter.run(
         RunRequest(
+            top_k=None,
             model_assembly_metadata=None,
             compaction_assembly_metadata=None,
             enabled_execution_options=[],
@@ -2593,6 +2607,7 @@ async def test_event_engine_adapter_includes_turn_start_injected_prompts() -> No
         emit
         async for emit in adapter.run(
             RunRequest(
+                top_k=None,
                 model_assembly_metadata=None,
                 compaction_assembly_metadata=None,
                 enabled_execution_options=[],
@@ -2651,6 +2666,7 @@ async def test_adapter_propagates_user_visible_model_call_error() -> None:
     with pytest.raises(ModelCallError, match="Missing scopes"):
         async for emit in adapter.run(
             RunRequest(
+                top_k=None,
                 model_assembly_metadata=None,
                 compaction_assembly_metadata=None,
                 enabled_execution_options=[],
@@ -2755,6 +2771,7 @@ async def test_model_kwargs_routes_chatgpt_oauth_to_backend_api() -> None:
         emit
         async for emit in adapter.run(
             RunRequest(
+                top_k=None,
                 model_assembly_metadata=None,
                 compaction_assembly_metadata=None,
                 enabled_execution_options=[],
@@ -2828,6 +2845,7 @@ async def test_openrouter_model_binding_keeps_responses_and_exact_model_id() -> 
         emit
         async for emit in adapter.run(
             RunRequest(
+                top_k=None,
                 model_assembly_metadata=None,
                 compaction_assembly_metadata=None,
                 enabled_execution_options=[],
@@ -2910,6 +2928,7 @@ async def test_adapter_wires_event_filters_and_session_head_repo() -> None:
         emit
         async for emit in adapter.run(
             RunRequest(
+                top_k=None,
                 model_assembly_metadata=None,
                 compaction_assembly_metadata=None,
                 enabled_execution_options=[],
@@ -3060,6 +3079,7 @@ async def test_manual_compact_runs_append_only_event_compactor() -> None:
         emit
         async for emit in adapter.compact(
             RunRequest(
+                top_k=None,
                 model_assembly_metadata=None,
                 compaction_assembly_metadata=None,
                 enabled_execution_options=[],
@@ -3166,6 +3186,7 @@ async def test_manual_compact_runs_compaction_summary_hook() -> None:
         emit
         async for emit in adapter.compact(
             RunRequest(
+                top_k=None,
                 model_assembly_metadata=None,
                 compaction_assembly_metadata=None,
                 enabled_execution_options=[],
@@ -3295,6 +3316,7 @@ async def test_manual_compact_trims_summary_input_to_checkpoint_and_tail() -> No
         emit
         async for emit in adapter.compact(
             RunRequest(
+                top_k=None,
                 model_assembly_metadata=None,
                 compaction_assembly_metadata=None,
                 enabled_execution_options=[],
@@ -3359,6 +3381,7 @@ async def test_manual_compact_propagates_compaction_failure() -> None:
 
     iterator = adapter.compact(
         RunRequest(
+            top_k=None,
             model_assembly_metadata=None,
             compaction_assembly_metadata=None,
             enabled_execution_options=[],
@@ -3599,3 +3622,47 @@ def _agent_engine_adapter(
 def _events(emits: list[Emit]) -> list[object]:
     """Return emit event list."""
     return [emit.event for emit in emits]
+
+
+async def test_engine_adapter_forwards_top_k_to_native_codec_denial() -> None:
+    execution = _Execution()
+    adapter = _agent_engine_adapter(
+        execution_factory=_capture_execution_factory(execution),
+    )
+    request = RunRequest(
+        top_k=37,
+        model_assembly_metadata=None,
+        compaction_assembly_metadata=None,
+        enabled_execution_options=[],
+        session_id="session-1",
+        user_messages=[],
+        agent_prompt=None,
+        toolkits=[],
+        model="gpt-5.1",
+        credential_kwargs={"api_key": "synthetic-key"},
+        workspace_id="workspace-1",
+        agent_id="agent-1",
+        tool_search_enabled=False,
+        auto_compaction_threshold_tokens=None,
+        inference_state=None,
+        compaction_provider_integration_id=None,
+    )
+    with pytest.raises(ValueError, match="top-k has no mapping"):
+        _ = [
+            emit
+            async for emit in adapter.run(
+                request,
+                RunContext(
+                    model_operation_completion=None,
+                    owner_generation=1,
+                    tool_admission_barrier=_OpenToolAdmissionBarrier(),
+                    turn_action_bridge_boundary=TurnActionBridgeBoundary(),
+                    model_transport_state=InMemoryModelTransportState(
+                        websocket_enabled=False
+                    ),
+                    run_id="0" * 32,
+                    publish_event=_noop_publish,
+                ),
+            )
+        ]
+    assert execution.prepared_model_call is None

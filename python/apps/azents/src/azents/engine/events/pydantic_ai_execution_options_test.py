@@ -41,6 +41,7 @@ def _lowerer(
     kwargs: dict[str, object] | None,
 ) -> PydanticAILowerer:
     return PydanticAILowerer(
+        top_k=None,
         provider=provider.value,
         provider_id=provider,
         model=_MODEL,

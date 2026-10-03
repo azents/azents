@@ -192,6 +192,16 @@ class PydanticAIModelAdapter:
                 assembly_metadata=request.assembly_metadata,
                 state=state,
             )
+            if request.settings.get("top_k") is not None:
+                protocol = self.factory.protocol(model=request.model)
+                if protocol in {"responses", "chat_completions"} or (
+                    protocol == "bedrock"
+                    and binding.model.profile.get("bedrock_top_k_variant")
+                    not in {"anthropic", "nova"}
+                ):
+                    raise ValueError(
+                        "Selected top-k has no mapping in this model codec."
+                    )
             manager = binding.model.request_stream(
                 request.messages, request.settings, request.parameters
             )

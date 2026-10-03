@@ -150,7 +150,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
   - typescript/apps/azents-web/messages/*/chat.json
 last_verified_at: 2026-10-03
-spec_version: 206
+spec_version: 207
 ---
 
 # Agent Execution Loop
@@ -817,6 +817,19 @@ support-relevant scalar/format body envelope; explicit effort conflicts still fa
 Native Responses supplies `parallel_tool_calls=false` when the caller omits it
 and the actual saved condition denies parallel calls. Supported/unknown omissions,
 historical behavior and explicit accepted options retain their existing meaning.
+
+The Agent-local `top_k` value is carried explicitly through `RunRequest`,
+EngineAdapter and every lowerer. Google maps it to `generationConfig.topK`;
+Anthropic uses the official SDK body extension for `top_k`; Bedrock uses the
+actual resolved Anthropic or Nova additional-model-field encoding. A missing
+Bedrock variant fails before the SDK request, including wrapped models. Native
+OpenAI/ChatGPT and compatible OpenAI Chat/Responses codecs reject canonical top-k
+instead of silently omitting it. A null selection adds no canonical control.
+Actual saved predicates/denials still apply. Anthropic and Bedrock codec profiles
+preserve accepted temperature, top-p and top-k, including historical unknown
+requests, instead of library model-name policy silently removing them. Explicit
+SDK body/additional-model fields retain their existing override precedence;
+representability alone does not advertise model support.
 
 Both `xai` and `xai_oauth` use the xAI transport target in this lowerer. For either identity, system instructions become the first `system` input item instead of top-level `instructions`, hosted `web_search` uses the xAI Responses tool target, and Anthropic cache-control hints are omitted. Credential refresh is resolved before the adapter pipeline and remains exclusive to `xai_oauth`; the lowerer does not own OAuth lifecycle state.
 
@@ -1804,6 +1817,8 @@ icon.
 
 ## Changelog
 
+- **2026-10-03** (spec_version 207) — Completed top-k request carriers,
+  actual family codec encoding and sampling no-loss guards.
 - **2026-10-03** (spec_version 206) — Preserved saved-authorized compatible
   sampling through SDK encoding, validated effective body controls and carried
   native parallel denial without changing saved predicates or historical defaults.

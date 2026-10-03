@@ -100,6 +100,8 @@ class RunRequest:
     """Provider integration used by the compaction model, when configured."""
     model_assembly_metadata: ModelAssemblyMetadata | None
     compaction_assembly_metadata: ModelAssemblyMetadata | None
+    top_k: int | None
+    """Exact Agent-local top-k intent, without an inferred provider default."""
     model_capabilities: ModelCapabilities = dataclasses.field(
         default_factory=ModelCapabilities,
     )

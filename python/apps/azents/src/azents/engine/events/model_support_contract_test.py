@@ -416,6 +416,7 @@ def _lowerer(
 ) -> OpenAIResponsesLowerer | PydanticAILowerer:
     if native:
         return OpenAIResponsesLowerer(
+            top_k=None,
             provider=LLMProvider.OPENAI,
             model="exact-saved-model",
             credential_kwargs={},
@@ -427,6 +428,7 @@ def _lowerer(
             tools=tools,
         )
     return PydanticAILowerer(
+        top_k=None,
         provider=LLMProvider.OPENROUTER.value,
         provider_id=LLMProvider.OPENROUTER,
         model="exact-saved-model",
@@ -793,6 +795,7 @@ def test_google_v2_level_mapping_preserves_exact_choice(
         }
     )
     lowered = PydanticAILowerer(
+        top_k=None,
         provider="google_gemini",
         provider_id=LLMProvider.GOOGLE_GEMINI,
         model="exact-wire-model",
@@ -822,6 +825,7 @@ def test_google_v2_does_not_invent_budget_or_change_none_to_low(
     )
     with pytest.raises(ValueError, match="no lossless mapping"):
         PydanticAILowerer(
+            top_k=None,
             provider="google_gemini",
             provider_id=LLMProvider.GOOGLE_GEMINI,
             model="exact-wire-model",
@@ -915,6 +919,7 @@ def _hosted_lowerer(
     hosted = [BuiltinToolSpec(name="web_search", config={})]
     if native:
         return OpenAIResponsesLowerer(
+            top_k=None,
             provider=LLMProvider.OPENAI,
             model="exact-saved-model",
             credential_kwargs={},
@@ -926,6 +931,7 @@ def _hosted_lowerer(
             hosted_tools=hosted,
         )
     return PydanticAILowerer(
+        top_k=None,
         provider=LLMProvider.OPENROUTER.value,
         provider_id=LLMProvider.OPENROUTER,
         model="exact-saved-model",
