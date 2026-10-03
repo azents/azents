@@ -1,6 +1,5 @@
 """Stored catalogs preserve source identity, provider facts and publication inputs."""
 
-import dataclasses
 import datetime
 import importlib.metadata
 import json
@@ -18,42 +17,28 @@ from azents.core.enums import (
 from azents.core.llm_catalog import ModelCapabilities, ModelReasoningEffort
 from azents.core.model_capability_evidence import ProviderCapabilityEvidence
 from azents.core.model_catalog_source import (
-    CATALOG_SOURCE_KEY,
-    CATALOG_SOURCE_KIND,
     CatalogFact,
     CatalogSourceDecodeError,
     decode_catalog_source,
 )
-from azents.repos.model_metadata_source_data import ModelMetadataSourceSnapshot
+from azents.repos.model_metadata_source_data import ModelMetadataSource
 from azents.services.model_listing.data import NormalizedModelCandidate
 from azents.services.model_metadata_projection import (
     MODEL_METADATA_PROJECTION_SCHEMA_VERSION,
     ModelMetadataProjectionError,
-    integration_projection_fingerprint,
     project_integration_replacement_entries,
     project_system_entries,
-    projection_fingerprint,
+    projection_runtime_versions,
+    projection_source_expectations,
 )
+from azents.testing.model_metadata import make_test_source
 
 _DATE = datetime.date(2026, 10, 2)
 
 
-def _source(rows: dict[str, object]) -> ModelMetadataSourceSnapshot:
+def _source(rows: dict[str, object]) -> ModelMetadataSource:
     payload = decode_catalog_source(json.dumps(rows).encode())
-    return ModelMetadataSourceSnapshot(
-        id="s" * 32,
-        source_key=CATALOG_SOURCE_KEY,
-        source_kind=CATALOG_SOURCE_KIND,
-        source_schema_version=payload.schema_version,
-        source_url="https://metadata.example/catalog.json",
-        source_hash=payload.content_hash,
-        producer_name="litellm-catalog-json",
-        producer_version=payload.interpreter_version,
-        provider_count=payload.provider_count,
-        model_count=payload.model_count,
-        payload=payload,
-        created_at=datetime.datetime(2026, 10, 2, tzinfo=datetime.UTC),
-    )
+    return make_test_source(payload)
 
 
 def _candidate(
@@ -143,7 +128,7 @@ def test_system_gemini_excludes_noncanonical_twins_and_other_hosts() -> None:
     assert [entry.provider_model_identifier for entry in entries] == ["opaque"]
 
 
-def test_deprecation_and_fingerprint_use_the_same_explicit_operation_date() -> None:
+def test_deprecation_uses_the_explicit_operation_date() -> None:
     source = _source(
         {
             "opaque": {
@@ -163,11 +148,7 @@ def test_deprecation_and_fingerprint_use_the_same_explicit_operation_date() -> N
     assert active.lifecycle_status == LLMModelLifecycleStatus.ACTIVE
     assert deprecated.lifecycle_status == LLMModelLifecycleStatus.DEPRECATED
     assert deprecated.visibility_status == LLMCatalogEntryVisibility.HIDDEN
-    assert projection_fingerprint(
-        provider=LLMProvider.OPENAI, source=source, effective_date=_DATE
-    ) != projection_fingerprint(
-        provider=LLMProvider.OPENAI, source=source, effective_date=tomorrow
-    )
+    assert active != deprecated
 
 
 def test_invalid_lifecycle_fact_is_rejected_before_source_publication() -> None:
@@ -277,79 +258,44 @@ def test_provider_false_and_complete_empty_override_source_controls() -> None:
     assert caps.reasoning.effort_levels == []
 
 
-def test_integration_fingerprint_covers_facts_display_and_stable_order() -> None:
-    first = _candidate(LLMProvider.XAI, "a", ProviderCapabilityEvidence())
-    second = _candidate(LLMProvider.XAI, "b", ProviderCapabilityEvidence())
-    entries = project_integration_replacement_entries(
-        integration_id="i" * 32,
-        provider=LLMProvider.XAI,
-        candidates=[first, second],
-        source=None,
-        provider_listing_source="xai:developer_models",
+def test_preparation_captures_exact_values_and_absent_adopted_keys() -> None:
+    candidates = [
+        _candidate(LLMProvider.XAI, "a", ProviderCapabilityEvidence()),
+        _candidate(LLMProvider.XAI, "b", ProviderCapabilityEvidence()),
+    ]
+    source = _source({"xai/a": {"litellm_provider": "xai", "max_input_tokens": 10}})
+    before = projection_source_expectations(
+        provider=LLMProvider.XAI, candidates=candidates, source=source
+    )
+    assert [item.source_model_key for item in before] == ["xai/a", "xai/b"]
+    assert before[0].current is not None
+    assert before[1].current is None
+    assert before == projection_source_expectations(
+        provider=LLMProvider.XAI, candidates=list(reversed(candidates)), source=source
+    )
+    changed = _source({"xai/a": {"litellm_provider": "xai", "max_input_tokens": 20}})
+    assert before != projection_source_expectations(
+        provider=LLMProvider.XAI, candidates=candidates, source=changed
     )
 
-    def fingerprint(items: list) -> str:
-        return integration_projection_fingerprint(
-            provider=LLMProvider.XAI,
-            source=None,
-            entries=items,
-            catalog_configuration_version=1,
-        )
 
-    before = fingerprint(entries)
-    assert fingerprint(list(reversed(entries))) == before
-    changed = [dataclasses.replace(entries[0], display_name="renamed"), entries[1]]
-    assert fingerprint(changed) != before
-    first.capability_evidence = ProviderCapabilityEvidence(
-        reasoning=CatalogFact(state="null", value=None)
-    )
-    changed = project_integration_replacement_entries(
-        integration_id="i" * 32,
-        provider=LLMProvider.XAI,
-        candidates=[first, second],
-        source=None,
-        provider_listing_source="xai:developer_models",
-    )
-    assert fingerprint(changed) != before
-
-
-def test_projection_fingerprint_has_no_native_pydantic_dependency(
+def test_projection_describes_only_relevant_runtime_dependencies(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    source = _source({"opaque": {"litellm_provider": "openai", "mode": "chat"}})
-    before = projection_fingerprint(
-        provider=LLMProvider.OPENAI, source=source, effective_date=_DATE
-    )
-    anthropic_before = projection_fingerprint(
-        provider=LLMProvider.ANTHROPIC, source=source, effective_date=_DATE
-    )
+    before = projection_runtime_versions(LLMProvider.OPENAI)
+    anthropic_before = projection_runtime_versions(LLMProvider.ANTHROPIC)
     installed = importlib.metadata.version
     monkeypatch.setattr(
         "azents.services.model_metadata_projection.importlib.metadata.version",
         lambda name: "changed" if name == "pydantic-ai-slim" else installed(name),
     )
-    assert (
-        projection_fingerprint(
-            provider=LLMProvider.OPENAI, source=source, effective_date=_DATE
-        )
-        == before
-    )
-    assert (
-        projection_fingerprint(
-            provider=LLMProvider.ANTHROPIC, source=source, effective_date=_DATE
-        )
-        != anthropic_before
-    )
+    assert projection_runtime_versions(LLMProvider.OPENAI) == before
+    assert projection_runtime_versions(LLMProvider.ANTHROPIC) != anthropic_before
     monkeypatch.setattr(
         "azents.services.model_metadata_projection.importlib.metadata.version",
         lambda name: "changed-sdk" if name == "openai" else installed(name),
     )
-    assert (
-        projection_fingerprint(
-            provider=LLMProvider.OPENAI, source=source, effective_date=_DATE
-        )
-        != before
-    )
+    assert projection_runtime_versions(LLMProvider.OPENAI) != before
 
 
 def test_projection_rejects_missing_system_namespace() -> None:

@@ -25,7 +25,7 @@ from typing_extensions import Self
 
 class SystemModelCatalogListResponse(BaseModel):
     """
-    System model catalog list response.
+    SystemModelCatalogListResponse
     """ # noqa: E501
     items: List[SystemModelCatalogResponse]
     additional_properties: Dict[str, Any] = {}

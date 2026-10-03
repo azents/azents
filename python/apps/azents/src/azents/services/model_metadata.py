@@ -1,4 +1,4 @@
-"""Operation-local reads of the selected descriptive model source."""
+"""Exact, operation-local reads for missing saved context maximums."""
 
 import dataclasses
 from collections.abc import Sequence
@@ -6,59 +6,60 @@ from typing import Annotated
 
 from fastapi import Depends
 
+from azents.core.agent import AgentModelSelection
 from azents.core.enums import LLMProvider
-from azents.core.model_catalog_identity import lookup_catalog_model
-from azents.core.model_catalog_source import CatalogSourceModel
 from azents.repos.model_metadata_read import ModelMetadataReadRepository
-from azents.repos.model_metadata_source_data import ModelMetadataSourceSnapshot
+from azents.repos.model_metadata_source_data import (
+    CapturedContextSource,
+    ContextModelRequest,
+)
 
 
 @dataclasses.dataclass(frozen=True)
 class ModelMetadataService:
-    """Read stored new-source evidence, never a remote or retired source."""
+    """Read only exact current maxima without restoring a source dataset."""
 
     repository: Annotated[
         ModelMetadataReadRepository, Depends(ModelMetadataReadRepository)
     ]
 
-    async def capture(self) -> ModelMetadataSourceSnapshot | None:
-        """Capture only the explicitly selected new source family."""
-        return await self.repository.capture()
-
     async def capture_for_context(
-        self, *, capability_maximums: Sequence[int | None]
-    ) -> ModelMetadataSourceSnapshot | None:
-        """Skip optional source work when every saved maximum is already known."""
-        if all(maximum is not None for maximum in capability_maximums):
-            return None
-        return await self.capture()
+        self, *, requests: Sequence[ContextModelRequest]
+    ) -> CapturedContextSource:
+        """Capture the requested exact models, sharing one completed read."""
+        if not requests:
+            return CapturedContextSource(models=())
+        return await self.repository.capture_for_context(requests=requests)
 
     @staticmethod
-    def lookup(
-        snapshot: ModelMetadataSourceSnapshot | None,
-        *,
-        provider: LLMProvider,
-        model_identifier: str,
-    ) -> CatalogSourceModel | None:
-        """Resolve exact adopted source addressing without provider/name inference."""
-        if snapshot is None:
-            return None
-        return lookup_catalog_model(
-            snapshot.payload, provider=provider, model_identifier=model_identifier
+    def context_requests(
+        selections: Sequence[AgentModelSelection],
+    ) -> tuple[ContextModelRequest, ...]:
+        """Request only models whose saved hard maximum is missing."""
+        return tuple(
+            ContextModelRequest(
+                provider=selection.provider,
+                model_identifier=selection.model_identifier,
+            )
+            for selection in selections
+            if selection.normalized_capabilities.context_window.max_input_tokens is None
         )
 
     @staticmethod
     def maximum_input_tokens(
-        snapshot: ModelMetadataSourceSnapshot | None,
+        source: CapturedContextSource | None,
         *,
         provider: LLMProvider,
         model_identifier: str,
     ) -> int | None:
-        """Read an explicit positive input maximum from one immutable capture."""
-        model = ModelMetadataService.lookup(
-            snapshot, provider=provider, model_identifier=model_identifier
-        )
-        if model is None:
+        """Read a requested positive maximum from one narrow immutable capture."""
+        if source is None:
             return None
-        maximum = model.facts.max_input_tokens.value
-        return maximum if maximum is not None and maximum > 0 else None
+        for model in source.models:
+            if (
+                model.provider == provider
+                and model.model_identifier == model_identifier
+            ):
+                maximum = model.max_input_tokens
+                return maximum if maximum is not None and maximum > 0 else None
+        return None

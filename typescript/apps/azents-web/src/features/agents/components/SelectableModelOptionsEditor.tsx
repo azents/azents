@@ -453,7 +453,7 @@ function SelectableModelSettingsModal({
   const loadedCatalog =
     imageCatalogState?.type === "LOADED" ? imageCatalogState.data : null;
   const selectableImageEntries =
-    loadedCatalog?.generation_current === true ? loadedCatalog.entries : [];
+    loadedCatalog?.usable === true ? loadedCatalog.entries : [];
   const selectedImageModelAvailability =
     selectedImageModelIdentifier == null
       ? "AVAILABLE"
@@ -537,16 +537,7 @@ function SelectableModelSettingsModal({
           {t("imageDefaultUnavailableDescription")}
         </Alert>
       );
-    } else if (!catalog.generation_current) {
-      imageCatalogNotice = (
-        <Alert color="orange" title={t("imageCatalogChangedTitle")}>
-          <Stack gap="xs">
-            <Text size="sm">{t("imageCatalogChangedDescription")}</Text>
-            {syncImageCatalogButton}
-          </Stack>
-        </Alert>
-      );
-    } else if (catalog.snapshot_id == null) {
+    } else if (catalog.last_success_at == null) {
       imageCatalogNotice = (
         <Alert color="blue" title={t("imageCatalogNeverSyncedTitle")}>
           <Stack gap="xs">
@@ -555,7 +546,16 @@ function SelectableModelSettingsModal({
           </Stack>
         </Alert>
       );
-    } else if (catalog.latest_attempt?.status === "failed") {
+    } else if (!catalog.usable) {
+      imageCatalogNotice = (
+        <Alert color="orange" title={t("imageCatalogChangedTitle")}>
+          <Stack gap="xs">
+            <Text size="sm">{t("imageCatalogChangedDescription")}</Text>
+            {syncImageCatalogButton}
+          </Stack>
+        </Alert>
+      );
+    } else if (catalog.latest_sync?.status === "failed") {
       imageCatalogNotice = (
         <Alert color="yellow" title={t("imageCatalogLastSyncFailedTitle")}>
           <Stack gap="xs">

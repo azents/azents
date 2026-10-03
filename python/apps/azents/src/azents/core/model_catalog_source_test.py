@@ -40,7 +40,7 @@ def test_consumed_lifecycle_date_is_validated_before_source_publication(
         _model(deprecation_date=value)
 
 
-def test_lifecycle_date_is_validated_on_strict_snapshot_restore() -> None:
+def test_lifecycle_date_is_validated_on_current_row_decode() -> None:
     payload = decode_catalog_source(
         b'{"m":{"litellm_provider":"openai","deprecation_date":"2026-10-02"}}'
     )
@@ -86,7 +86,7 @@ def test_undeclared_alias_contract_does_not_create_lookup_identity() -> None:
     assert payload.models[0].extensions_json == '{"aliases":["other"]}'
 
 
-def test_canonical_roundtrip_preserves_presence_and_hash() -> None:
+def test_canonical_roundtrip_preserves_exact_values_and_presence() -> None:
     first = decode_catalog_source(
         b"""{
           "z": {"supports_reasoning": null, "litellm_provider": "xai"},
@@ -100,7 +100,7 @@ def test_canonical_roundtrip_preserves_presence_and_hash() -> None:
         b'"z":{"litellm_provider":"xai","supports_reasoning":null}}'
     )
     restored = CatalogSourcePayload.model_validate_json(first.model_dump_json())
-    assert first.content_hash == reordered.content_hash == restored.content_hash
+    assert first == reordered == restored
     assert restored.models[0].facts.reasoning.state == "absent"
     assert restored.models[0].facts.web_search.value is False
     assert restored.models[0].facts.input_modalities.value == ()
@@ -376,7 +376,7 @@ def test_price_lexemes_units_and_unknown_dimensions_survive_roundtrip() -> None:
     assert "0.01230" in evidence["unknown_future_cost_rule"].encoded_value
     assert evidence["off_peak_pricing"].kind == "structured"
     assert evidence["currency"].encoded_value == '"USD"'
-    assert restored.content_hash == payload.content_hash
+    assert restored == payload
 
 
 def test_capabilities_never_derive_from_price_or_unknown_extensions() -> None:

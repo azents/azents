@@ -12,7 +12,7 @@ Name | Type | Description | Notes
 **socket_mode_enabled** | **bool** |  | 
 **app_token_scope** | **str** |  | 
 **callback_url** | **str** |  | 
-**manifest** | **Dict[str, object]** |  | 
+**manifest** | **object** |  | 
 **manifest_json** | **str** |  | 
 
 ## Example

@@ -2,6 +2,7 @@
 
 import dataclasses
 import datetime
+from collections.abc import Sequence
 from types import SimpleNamespace
 from typing import Annotated
 from unittest.mock import AsyncMock
@@ -33,7 +34,11 @@ from azents.repos.agent_operations import (
     AgentOperationsRepository,
 )
 from azents.repos.model_metadata_read import ModelMetadataReadRepository
-from azents.repos.model_metadata_source_data import ModelMetadataSourceSnapshot
+from azents.repos.model_metadata_source_data import (
+    CapturedContextSource,
+    ContextModelRequest,
+    ModelMetadataSource,
+)
 from azents.services.model_metadata import ModelMetadataService
 from azents.services.terminal_policy.invalidation import (
     NoopTerminalPolicyInvalidationPublisher,
@@ -49,8 +54,8 @@ from azents.services.uploads.schema import (
 )
 from azents.testing.model_metadata import (
     make_test_model_metadata_service,
+    make_test_source,
     make_test_source_payload,
-    make_test_source_snapshot,
 )
 from azents.testing.model_selection import (
     make_test_model_selection,
@@ -81,20 +86,22 @@ def test_agent_service_dependency_graph_is_valid() -> None:
 class _CountingMetadataRepository(ModelMetadataReadRepository):
     """Supply one local source fixture and count reads."""
 
-    def __init__(self, snapshot: ModelMetadataSourceSnapshot) -> None:
-        self.snapshot = snapshot
+    def __init__(self, source: ModelMetadataSource) -> None:
+        self.reader = make_test_model_metadata_service(source=source).repository
         self.capture_count = 0
 
-    async def capture(self) -> ModelMetadataSourceSnapshot:
+    async def capture_for_context(
+        self, *, requests: Sequence[ContextModelRequest]
+    ) -> CapturedContextSource:
         self.capture_count += 1
-        return self.snapshot
+        return await self.reader.capture_for_context(requests=requests)
 
 
 def _metadata_snapshot(
     *,
     model_id: str | None,
     context_window: int | None,
-) -> ModelMetadataSourceSnapshot:
+) -> ModelMetadataSource:
     payload = make_test_source_payload(
         {
             model_id if model_id is not None else "unmatched-fixture": {
@@ -104,9 +111,8 @@ def _metadata_snapshot(
         }
     )
     return dataclasses.replace(
-        make_test_source_snapshot(payload),
-        id="source-id",
-        created_at=_NOW,
+        make_test_source(payload),
+        collected_at=_NOW,
     )
 
 
@@ -253,7 +259,7 @@ def _make_service() -> AgentService:
     s3_service = AsyncMock()
 
     return AgentService(
-        model_metadata_service=make_test_model_metadata_service(snapshot=None),
+        model_metadata_service=make_test_model_metadata_service(source=None),
         repository=repository,
         model_catalog_read_service=model_catalog_read_service,
         image_generation_catalog_service=image_generation_catalog_service,
@@ -444,7 +450,8 @@ class TestAgentServiceSourceContext:
         repository = _CountingMetadataRepository(snapshot)
         service.model_metadata_service = ModelMetadataService(repository=repository)
         source = await service._capture_context_source([agent])
-        assert source is None
+        assert source is not None
+        assert source.models == ()
         assert repository.capture_count == 0
 
 

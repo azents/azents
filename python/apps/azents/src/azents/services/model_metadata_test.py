@@ -1,88 +1,98 @@
-"""Validated exact-scoped source capture stays local across model budgets."""
+"""Exact current context requests never restore an entire source dataset."""
 
-from sqlalchemy.ext.asyncio import AsyncSession
+from collections.abc import Sequence
+
+import pytest
 
 from azents.core.enums import LLMProvider
-from azents.core.model_catalog_source import CATALOG_SOURCE_KEY, CATALOG_SOURCE_KIND
+from azents.core.llm_catalog import ModelCapabilities, ModelContextWindow
 from azents.engine.context.window import resolve_model_input_tokens
-from azents.rdb.models.model_metadata_source import RDBModelMetadataSourceSnapshot
-from azents.rdb.session import SessionManager
 from azents.repos.model_metadata_read import ModelMetadataReadRepository
-from azents.repos.model_metadata_source import ModelMetadataSourceRepository
-from azents.repos.model_metadata_source_data import ModelMetadataSourceSnapshot
+from azents.repos.model_metadata_source_data import (
+    CapturedContextSource,
+    ContextModelRequest,
+    ModelMetadataSource,
+)
 from azents.services.model_metadata import ModelMetadataService
 from azents.testing.model_metadata import (
     make_test_model_metadata_service,
+    make_test_source,
     make_test_source_payload,
-    make_test_source_snapshot,
 )
+from azents.testing.model_selection import make_test_model_selection
 
 
-class _CountingSourceRepository(ModelMetadataSourceRepository):
-    """Count only the authoritative source DB read."""
+class _CountingContextRepository(ModelMetadataReadRepository):
+    def __init__(self, source: ModelMetadataSource | None) -> None:
+        self.reader = make_test_model_metadata_service(source=source).repository
+        self.requests: list[tuple[ContextModelRequest, ...]] = []
 
-    def __init__(self) -> None:
-        self.capture_count = 0
+    async def capture_for_context(
+        self, *, requests: Sequence[ContextModelRequest]
+    ) -> CapturedContextSource:
+        self.requests.append(tuple(requests))
+        return await self.reader.capture_for_context(requests=requests)
 
-    async def get_current(
-        self, session: AsyncSession, *, source_key: str
-    ) -> ModelMetadataSourceSnapshot | None:
-        self.capture_count += 1
-        return await super().get_current(session, source_key=source_key)
+    async def capture_current(self) -> ModelMetadataSource | None:
+        raise AssertionError("Context resolution cannot read the full source.")
 
 
-async def test_capture_uses_only_local_validated_remote_authority(
-    rdb_session_manager: SessionManager[AsyncSession],
-) -> None:
-    repository = _CountingSourceRepository()
-    payload = make_test_source_payload(
-        {
-            "main": {"litellm_provider": "openai", "max_input_tokens": 1_000_000},
-            "compaction": {
-                "litellm_provider": "anthropic",
-                "max_input_tokens": 300_000,
-            },
+async def test_known_saved_maximum_skips_optional_database_read() -> None:
+    selection = make_test_model_selection().model_copy(
+        update={
+            "normalized_capabilities": ModelCapabilities(
+                context_window=ModelContextWindow(
+                    default_input_tokens=128_000,
+                    max_input_tokens=256_000,
+                    max_output_tokens=None,
+                ),
+            )
         }
     )
-    source_id = "s" * 32
-    async with rdb_session_manager() as session:
-        # The cutover migration seeds an inactive authority. Publish only after
-        # its referenced validated snapshot exists, as the writer guard requires.
-        authority = await repository.lock_authority(
-            session, source_key=CATALOG_SOURCE_KEY
-        )
-        assert authority.current_snapshot_id is None
-        session.add(
-            RDBModelMetadataSourceSnapshot(
-                id=source_id,
-                source_key=CATALOG_SOURCE_KEY,
-                source_kind=CATALOG_SOURCE_KIND,
-                source_schema_version=payload.schema_version,
-                source_url="https://source.example.test/models.json",
-                source_hash=payload.content_hash,
-                producer_name="LiteLLM public catalog",
-                producer_version="fixture-data-1",
-                provider_count=payload.provider_count,
-                model_count=payload.model_count,
-                payload=payload.model_dump(mode="json"),
+    repository = _CountingContextRepository(None)
+    service = ModelMetadataService(repository=repository)
+    captured = await service.capture_for_context(
+        requests=service.context_requests([selection])
+    )
+    assert captured.models == ()
+    assert repository.requests == []
+
+
+async def test_missing_pair_shares_one_exact_requested_read() -> None:
+    repository = _CountingContextRepository(
+        make_test_source(
+            make_test_source_payload(
+                {
+                    "main": {
+                        "litellm_provider": "openai",
+                        "max_input_tokens": 1_000_000,
+                    },
+                    "compaction": {
+                        "litellm_provider": "anthropic",
+                        "max_input_tokens": 300_000,
+                    },
+                    "unrelated": {
+                        "litellm_provider": "openai",
+                        "max_input_tokens": 999_999,
+                    },
+                }
             )
         )
-        await session.flush()
-        authority.current_snapshot_id = source_id
-        await session.flush()
-    service = ModelMetadataService(
-        repository=ModelMetadataReadRepository(
-            session_manager=rdb_session_manager, source_snapshot_repository=repository
-        )
     )
-    assert (
-        await service.capture_for_context(capability_maximums=[128_000, 272_000])
-        is None
+    service = ModelMetadataService(repository=repository)
+    requests = (
+        ContextModelRequest(provider=LLMProvider.OPENAI, model_identifier="main"),
+        ContextModelRequest(
+            provider=LLMProvider.ANTHROPIC, model_identifier="compaction"
+        ),
     )
-    assert repository.capture_count == 0
-    captured = await service.capture_for_context(capability_maximums=[None, None])
-    assert captured is not None
-    assert captured.id == source_id
+    captured = await service.capture_for_context(requests=requests)
+    assert repository.requests == [requests]
+    assert len(captured.models) == 2
+    assert {model.model_identifier for model in captured.models} == {
+        "main",
+        "compaction",
+    }
     main = resolve_model_input_tokens(
         128_000,
         None,
@@ -101,45 +111,78 @@ async def test_capture_uses_only_local_validated_remote_authority(
     )
     assert main.effective_input_tokens == 700_000
     assert compaction.effective_input_tokens == 300_000
-    assert repository.capture_count == 1
 
 
-async def test_absent_local_source_has_no_remote_or_package_fallback() -> None:
-    service = make_test_model_metadata_service(snapshot=None)
-    assert await service.capture() is None
+@pytest.mark.parametrize("identifier", ["absent", "openai/literal"])
+async def test_exact_namespace_absence_has_no_model_name_fallback(
+    identifier: str,
+) -> None:
+    source = make_test_source(
+        make_test_source_payload(
+            {
+                "literal": {"litellm_provider": "openai", "max_input_tokens": 256_000},
+            }
+        )
+    )
+    service = make_test_model_metadata_service(source=source)
+    captured = await service.capture_for_context(
+        requests=[
+            ContextModelRequest(
+                provider=LLMProvider.OPENAI, model_identifier=identifier
+            ),
+            ContextModelRequest(
+                provider=LLMProvider.CHATGPT_OAUTH, model_identifier="literal"
+            ),
+        ]
+    )
+    for model in captured.models:
+        assert model.max_input_tokens is None
+    assert (
+        service.maximum_input_tokens(
+            captured, provider=LLMProvider.OPENAI, model_identifier="literal"
+        )
+        is None
+    )
+
+
+@pytest.mark.parametrize(
+    ("default", "saved_max", "source_max", "expected"),
+    [
+        (None, None, None, 128_000),
+        (272_000, None, None, 272_000),
+        (272_000, None, 128_000, 272_000),
+        (128_000, None, 256_000, 256_000),
+        (128_000, 200_000, 400_000, 200_000),
+        (None, 256_000, None, 256_000),
+    ],
+)
+def test_narrow_context_preserves_existing_floor_and_saved_authority(
+    default: int | None, saved_max: int | None, source_max: int | None, expected: int
+) -> None:
+    limits = resolve_model_input_tokens(default, saved_max, source_max, None)
+    assert limits.max_input_tokens == expected
+    assert limits.effective_input_tokens == (
+        default if default is not None else expected
+    )
+
+
+async def test_absent_current_source_remains_unavailable_without_other_authority() -> (
+    None
+):
+    service = make_test_model_metadata_service(source=None)
+    captured = await service.capture_for_context(
+        requests=[
+            ContextModelRequest(
+                provider=LLMProvider.XAI_OAUTH, model_identifier="visible-model"
+            ),
+        ]
+    )
+    assert len(captured.models) == 1
     maximum = service.maximum_input_tokens(
-        None, provider=LLMProvider.XAI_OAUTH, model_identifier="visible-model"
+        captured, provider=LLMProvider.XAI_OAUTH, model_identifier="visible-model"
     )
     assert maximum is None
-    limits = resolve_model_input_tokens(272_000, None, maximum, None)
-    assert limits.max_input_tokens == 272_000
-
-
-async def test_captured_identity_stays_stable_for_all_local_lookups() -> None:
-    payload = make_test_source_payload(
-        {"literal": {"litellm_provider": "openai", "max_input_tokens": 256_000}}
-    )
-    snapshot = make_test_source_snapshot(payload)
-    service = make_test_model_metadata_service(snapshot=snapshot)
-    captured = await service.capture()
-    model = service.lookup(
-        captured, provider=LLMProvider.OPENAI, model_identifier="literal"
-    )
-    assert captured is snapshot
-    assert model is payload.models[0]
-    assert model is not None
-    assert model.provider == "openai"
-    assert model.source_key == "literal"
-    assert model.facts.max_input_tokens.value == 256_000
     assert (
-        service.lookup(
-            captured, provider=LLMProvider.CHATGPT_OAUTH, model_identifier="literal"
-        )
-        is None
-    )
-    assert (
-        service.lookup(
-            captured, provider=LLMProvider.OPENAI, model_identifier="openai/literal"
-        )
-        is None
+        resolve_model_input_tokens(272_000, None, maximum, None).max_input_tokens
+        == 272_000
     )

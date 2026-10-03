@@ -33,8 +33,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/llm-settings/**
   - typescript/apps/azents-web/src/shared/subscription-usage/**
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
-last_verified_at: 2026-10-01
-spec_version: 10
+last_verified_at: 2026-10-03
+spec_version: 11
 ---
 
 # xAI OAuth Flow
@@ -268,9 +268,12 @@ Each `xai_oauth` integration owns a stored account-specific catalog. Before sync
 
 The returned account-visible models are authoritative and may differ from API-key integrations.
 Provider context-window, reasoning-effort, backend-search, and API-backend fields override optional
-retained-source enrichment. An exact or expanded-alias `xai/<model>` entry may fill missing metadata,
-but a miss does not hide a model. Picker reads use the stored snapshot. Runtime uses exact raw
-provider IDs; `xai/` remains only in source lookup keys.
+current exact source-model enrichment within the OAuth-specific source namespace.
+An exact match may fill missing metadata, but a miss does not hide a model. Picker reads
+use current stored entries and latest sync state, without catalog snapshot history.
+Runtime uses exact raw provider IDs. Selection saves its own normalized available or
+unavailable pricing definition; dispatch does not borrow a native API-key twin or
+read a newer source to estimate usage.
 
 ## Frontend UX Rules
 
@@ -293,6 +296,7 @@ provider IDs; `xai/` remains only in source lookup keys.
 
 | Date | Version | Change | Rationale |
 |---|---|---|---|
+| 2026-10-03 | 11 | Adopted current catalog/latest sync and saved exact-scope prices | Preserve OAuth host identity independently of API-key source twins |
 | 2026-09-30 | 10 | Documented public Pydantic AI/SDK HTTP inference and raw model identity | Preserve OAuth-specific credentials, endpoints and account semantics during executable package removal |
 | 2026-09-23 | 9 | Documented integration-targeted device reauthentication, shared management UI, and the target migration | Match the implemented in-place subscription credential replacement |
 | 2026-09-04 | 8 | Mapped the shared subscription-usage state and container modules | Keep provider usage eligibility, retained-success refresh state, summary, and threshold presentation linked after the frontend boundary relocation |

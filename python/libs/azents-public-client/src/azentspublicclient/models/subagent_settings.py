@@ -18,7 +18,7 @@ import re  # noqa: F401
 import json
 
 from pydantic import BaseModel, ConfigDict, Field
-from typing import Any, ClassVar, Dict, List, Optional
+from typing import Any, ClassVar, Dict, Optional
 from typing_extensions import Annotated
 from typing import Optional, Set
 from typing_extensions import Self
@@ -29,7 +29,6 @@ class SubagentSettings(BaseModel):
     """ # noqa: E501
     max_subagents: Optional[Annotated[int, Field(strict=True, ge=0)]] = Field(default=3, description="Maximum active subagents per root session")
     max_depth: Optional[Annotated[int, Field(strict=True, ge=0)]] = Field(default=1, description="Maximum subagent tree depth below the root agent")
-    additional_properties: Dict[str, Any] = {}
     __properties: ClassVar[List[str]] = ["max_subagents", "max_depth"]
 
     model_config = ConfigDict(
@@ -62,10 +61,8 @@ class SubagentSettings(BaseModel):
         * `None` is only added to the output dict for nullable fields that
           were set at model initialization. Other fields with value `None`
           are ignored.
-        * Fields in `self.additional_properties` are added to the output dict.
         """
         excluded_fields: Set[str] = set([
-            "additional_properties",
         ])
 
         _dict = self.model_dump(
@@ -73,11 +70,6 @@ class SubagentSettings(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
-        # puts key-value pairs in additional_properties in the top level
-        if self.additional_properties is not None:
-            for _key, _value in self.additional_properties.items():
-                _dict[_key] = _value
-
         return _dict
 
     @classmethod
@@ -93,11 +85,6 @@ class SubagentSettings(BaseModel):
             "max_subagents": obj.get("max_subagents") if obj.get("max_subagents") is not None else 3,
             "max_depth": obj.get("max_depth") if obj.get("max_depth") is not None else 1
         })
-        # store additional fields in additional_properties
-        for _key in obj.keys():
-            if _key not in cls.__properties:
-                _obj.additional_properties[_key] = obj.get(_key)
-
         return _obj
 
 

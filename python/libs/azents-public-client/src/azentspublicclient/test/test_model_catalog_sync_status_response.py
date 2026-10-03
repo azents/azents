@@ -14,10 +14,10 @@
 
 import unittest
 
-from azentspublicclient.models.image_generation_catalog_attempt_response import ImageGenerationCatalogAttemptResponse
+from azentspublicclient.models.model_catalog_sync_status_response import ModelCatalogSyncStatusResponse
 
-class TestImageGenerationCatalogAttemptResponse(unittest.TestCase):
-    """ImageGenerationCatalogAttemptResponse unit test stubs"""
+class TestModelCatalogSyncStatusResponse(unittest.TestCase):
+    """ModelCatalogSyncStatusResponse unit test stubs"""
 
     def setUp(self):
         pass
@@ -25,17 +25,16 @@ class TestImageGenerationCatalogAttemptResponse(unittest.TestCase):
     def tearDown(self):
         pass
 
-    def make_instance(self, include_optional) -> ImageGenerationCatalogAttemptResponse:
-        """Test ImageGenerationCatalogAttemptResponse
+    def make_instance(self, include_optional) -> ModelCatalogSyncStatusResponse:
+        """Test ModelCatalogSyncStatusResponse
             include_optional is a boolean, when False only required
             params are included, when True both required and
             optional params are included """
-        # uncomment below to create an instance of `ImageGenerationCatalogAttemptResponse`
+        # uncomment below to create an instance of `ModelCatalogSyncStatusResponse`
         """
-        model = ImageGenerationCatalogAttemptResponse()
+        model = ModelCatalogSyncStatusResponse()
         if include_optional:
-            return ImageGenerationCatalogAttemptResponse(
-                id = '',
+            return ModelCatalogSyncStatusResponse(
                 status = '',
                 started_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
                 finished_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
@@ -48,8 +47,7 @@ class TestImageGenerationCatalogAttemptResponse(unittest.TestCase):
                 hidden_count = 56
             )
         else:
-            return ImageGenerationCatalogAttemptResponse(
-                id = '',
+            return ModelCatalogSyncStatusResponse(
                 status = '',
                 started_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
                 finished_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
@@ -63,8 +61,8 @@ class TestImageGenerationCatalogAttemptResponse(unittest.TestCase):
         )
         """
 
-    def testImageGenerationCatalogAttemptResponse(self):
-        """Test ImageGenerationCatalogAttemptResponse"""
+    def testModelCatalogSyncStatusResponse(self):
+        """Test ModelCatalogSyncStatusResponse"""
         # inst_req_only = self.make_instance(include_optional=False)
         # inst_req_and_optional = self.make_instance(include_optional=True)
 

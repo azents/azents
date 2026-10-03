@@ -1,12 +1,11 @@
-# ModelCatalogSyncAttemptResponse
+# ModelCatalogSyncStatusResponse
 
-Latest model catalog sync attempt response.
+Current model catalog synchronization response.
 
 ## Properties
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**id** | **str** |  | 
 **status** | **str** |  | 
 **started_at** | **datetime** |  | 
 **finished_at** | **datetime** |  | 
@@ -21,19 +20,19 @@ Name | Type | Description | Notes
 ## Example
 
 ```python
-from azentspublicclient.models.model_catalog_sync_attempt_response import ModelCatalogSyncAttemptResponse
+from azentspublicclient.models.model_catalog_sync_status_response import ModelCatalogSyncStatusResponse
 
 # TODO update the JSON string below
 json = "{}"
-# create an instance of ModelCatalogSyncAttemptResponse from a JSON string
-model_catalog_sync_attempt_response_instance = ModelCatalogSyncAttemptResponse.from_json(json)
+# create an instance of ModelCatalogSyncStatusResponse from a JSON string
+model_catalog_sync_status_response_instance = ModelCatalogSyncStatusResponse.from_json(json)
 # print the JSON string representation of the object
-print(ModelCatalogSyncAttemptResponse.to_json())
+print(ModelCatalogSyncStatusResponse.to_json())
 
 # convert the object into a dict
-model_catalog_sync_attempt_response_dict = model_catalog_sync_attempt_response_instance.to_dict()
-# create an instance of ModelCatalogSyncAttemptResponse from a dict
-model_catalog_sync_attempt_response_from_dict = ModelCatalogSyncAttemptResponse.from_dict(model_catalog_sync_attempt_response_dict)
+model_catalog_sync_status_response_dict = model_catalog_sync_status_response_instance.to_dict()
+# create an instance of ModelCatalogSyncStatusResponse from a dict
+model_catalog_sync_status_response_from_dict = ModelCatalogSyncStatusResponse.from_dict(model_catalog_sync_status_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
 

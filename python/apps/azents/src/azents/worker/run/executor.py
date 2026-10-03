@@ -6,7 +6,7 @@ import dataclasses
 import datetime
 import logging
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from typing import Annotated, Any
+from typing import Annotated, Any, assert_never
 
 from azcommon.datetime import tznow
 from azcommon.logging import bind_extra
@@ -182,7 +182,10 @@ from azents.repos.engine_resolve import (
     EngineResolveRepositories,
     get_engine_resolve_repositories,
 )
-from azents.repos.model_metadata_source_data import CapturedContextSource
+from azents.repos.model_metadata_source_data import (
+    CapturedContextSource,
+    ContextModelRequest,
+)
 from azents.repos.model_operation_completion import (
     ModelOperationCompletion,
 )
@@ -2615,14 +2618,24 @@ class RunExecutor:
         selection: AgentModelSelection,
     ) -> CapturedContextSource:
         """Capture one source after selecting the actual compaction candidate."""
-        return CapturedContextSource(
-            snapshot=await self.model_metadata_service.capture_for_context(
-                capability_maximums=[
-                    current_request.model_capabilities.context_window.max_input_tokens,
-                    selection.normalized_capabilities.context_window.max_input_tokens,
-                ]
-            ),
+        main_selection = (
+            current_request.inference_state.model_selection
+            if current_request.inference_state is not None
+            else None
         )
+        requests = list(self.model_metadata_service.context_requests([selection]))
+        if main_selection is not None:
+            requests.extend(
+                self.model_metadata_service.context_requests([main_selection])
+            )
+        elif current_request.model_capabilities.context_window.max_input_tokens is None:
+            requests.append(
+                ContextModelRequest(
+                    provider=current_request.provider,
+                    model_identifier=current_request.model,
+                )
+            )
+        return await self.model_metadata_service.capture_for_context(requests=requests)
 
     def _with_shared_compaction_context(
         self,
@@ -2645,7 +2658,7 @@ class RunExecutor:
             foreground_window.default_input_tokens,
             foreground_window.max_input_tokens,
             self.model_metadata_service.maximum_input_tokens(
-                context_source.snapshot,
+                context_source,
                 provider=(
                     foreground_selection.provider
                     if foreground_selection is not None
@@ -2757,13 +2770,13 @@ class RunExecutor:
                 selected.profile, candidate.model_selection
             )
             compaction_candidate = compaction_selection.candidate
-            context_source = CapturedContextSource(
-                snapshot=await self.model_metadata_service.capture_for_context(
-                    capability_maximums=[
-                        candidate.model_selection.normalized_capabilities.context_window.max_input_tokens,
-                        compaction_candidate.model_selection.normalized_capabilities.context_window.max_input_tokens,
+            context_source = await self.model_metadata_service.capture_for_context(
+                requests=self.model_metadata_service.context_requests(
+                    [
+                        candidate.model_selection,
+                        compaction_candidate.model_selection,
                     ]
-                ),
+                )
             )
             resolved = await resolve_invoke_input_with_resolved_profile(
                 invoke_input,
@@ -2795,7 +2808,7 @@ class RunExecutor:
                 compaction_context_window.default_input_tokens,
                 compaction_context_window.max_input_tokens,
                 self.model_metadata_service.maximum_input_tokens(
-                    context_source.snapshot,
+                    context_source,
                     provider=compaction_candidate.model_selection.provider,
                     model_identifier=(
                         compaction_candidate.model_selection.model_identifier
@@ -3524,12 +3537,14 @@ def _profile_resolution_failure(error: object) -> ProfileResolutionFailure:
                 code = InferenceProfileFailureCode.IMAGE_EXPLICIT_SELECTION_UNSUPPORTED
             case "catalog_unavailable":
                 code = InferenceProfileFailureCode.IMAGE_CATALOG_UNAVAILABLE
-            case "catalog_generation_mismatch":
-                code = InferenceProfileFailureCode.IMAGE_CATALOG_GENERATION_MISMATCH
+            case "catalog_unusable":
+                code = InferenceProfileFailureCode.IMAGE_CATALOG_UNUSABLE
             case "model_unavailable":
                 code = InferenceProfileFailureCode.IMAGE_MODEL_UNAVAILABLE
             case "provider_model_mismatch":
                 code = InferenceProfileFailureCode.IMAGE_PROVIDER_MODEL_MISMATCH
+            case _:
+                assert_never(error.reason)
         return ProfileResolutionFailure(
             code=code,
             message=(

@@ -11,7 +11,6 @@ code_paths:
   - typescript/apps/azents-web/src/features/agents/image-generation-config.ts
   - python/apps/azents/src/azents/core/agent_errors.py
   - python/apps/azents/src/azents/core/model_metadata_collection_data.py
-  - python/apps/azents/src/azents/core/model_metadata_projection_data.py
   - python/apps/azents/src/azents/core/session_resource_authority.py
   - python/apps/azents/src/azents/repos/engine_event_repositories.py
   - python/apps/azents/src/azents/repos/engine_resolve.py
@@ -53,6 +52,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/model_metadata_read.py
   - python/apps/azents/src/azents/repos/model_metadata_source.py
   - python/apps/azents/src/azents/repos/model_metadata_source_data.py
+  - python/apps/azents/src/azents/repos/model_catalog_sync_state.py
   - python/apps/azents/src/azents/rdb/models/llm_catalog.py
   - python/apps/azents/src/azents/rdb/models/model_metadata_source.py
   - python/apps/azents/src/azents/engine/providers/model_profiles.py
@@ -62,6 +62,7 @@ code_paths:
   - python/apps/azents/db-schemas/rdb/migrations/versions/91dd4bb71ef6_add_model_metadata_source_shadow_schema.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/d29225579621_remove_legacy_litellm_metadata_authority.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/c8bc0a5dcab0_fence_data_only_catalog_source_writers.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/d9bff320245f_replace_catalog_revisions_with_current_.py
   - python/apps/azents/src/azents/api/public/llm_provider_integration/v1/__init__.py
   - python/apps/azents/src/azents/api/public/llm_provider_integration/v1/data.py
   - python/apps/azents/src/azents/api/admin/model_catalog/v1/__init__.py
@@ -75,6 +76,8 @@ code_paths:
   - python/apps/azents/src/azents/engine/run/tool_budget.py
   - python/apps/azents/src/azents/engine/events/engine_adapter.py
   - typescript/apps/azents-web/src/features/agents/components/ModelCatalogPicker.tsx
+  - typescript/apps/azents-web/src/features/agents/containers/ModelCatalogPickerContainer.tsx
+  - typescript/apps/azents-web/src/features/agents/model-selection.ts
   - typescript/apps/azents-web/src/features/agents/components/SelectableModelOptionsEditor.tsx
   - typescript/apps/azents-web/src/features/agents/containers/useAgentFormContainer.ts
   - typescript/apps/azents-web/src/features/agents/containers/useImageGenerationCatalogs.ts
@@ -85,7 +88,7 @@ code_paths:
   - typescript/apps/azents-web/src/trpc/routers/workspace-model-settings.ts
   - typescript/apps/azents-admin-web/src/features/model-catalog/containers/useModelCatalogPageContainer.ts
 last_verified_at: 2026-10-03
-spec_version: 41
+spec_version: 42
 ---
 
 # Model Catalog Domain Spec
@@ -98,10 +101,10 @@ The model catalog stores projected model choices for Agent and Workspace model s
 
 Catalogs have two ownership scopes and an explicit purpose. The catalog identity
 includes `purpose = conversation | image_generation`, so one integration can own
-independent conversation and image-generation snapshots without sharing entries,
-attempts, or publication state.
+independent current conversation and image-generation rows without sharing entries,
+synchronization state, or publication authority.
 
-- System catalog: managed by Azents for providers whose selectable models are not scoped to a customer integration. Current system catalogs cover OpenAI, Anthropic, and Google Gemini using the selected data-only `litellm_catalog` source snapshot.
+- System catalog: managed by Azents for providers whose selectable models are not scoped to a customer integration. Current system catalogs cover OpenAI, Anthropic, and Google Gemini using the current data-only `litellm_catalog` source models.
 - Integration catalog: scoped to a provider integration for providers whose visible models depend on customer credential, account, region, or project. Current user-scoped integration catalogs cover AWS Bedrock, ChatGPT OAuth, xAI API key, xAI OAuth, Kimi OAuth, Google Vertex AI, and OpenRouter.
 
 An integration-scoped catalog is created in the same transaction as its provider integration. Public reads for integration-scoped providers use only that catalog and never fall back to a system catalog. For providers with system-owned model visibility, the picker resolves the provider system catalog through the enabled integration.
@@ -112,23 +115,22 @@ respective ownership scopes. Catalogs, conversation entries, public responses, a
 metadata, and newly created selection diagnostics do not carry `lowerer_target` or a stored
 `runtime_model_identifier`. Dispatch uses the saved provider and exact provider model ID.
 
-Migration `4550a9c9083a` checks target-free identity collisions before removing the old dimensions;
-it does not merge catalogs or recreate IDs. Existing catalog/source/snapshot/attempt links and
-image-generation purpose separation remain intact. Historical Agent diagnostic snapshots and
-native conversation artifacts remain historical evidence, not execution inputs.
-
-The data-only writer cutover is revision `c8bc0a5dcab0`, directly following
-`459a4285993c`. Executed historical migrations remain unchanged.
+Stable catalog IDs retain their semantic ownership through replacement. Catalog data has
+no snapshot pointer, data generation, content hash, fingerprint, candidate-publication
+identity, or retained revision history. Historical Agent diagnostic JSON and native
+conversation artifacts remain readable evidence, not current catalog lookup inputs.
 
 ## Stored projection entries
 
-A catalog snapshot contains entries projected into Azents' canonical model contract. Each entry records:
+A catalog owns one current row per exact provider model identifier, projected into
+Azents' canonical model contract. Each conversation entry records:
 
 - provider
 - optional provider integration id
 - provider model identifier
 - display name
 - normalized capabilities
+- a server-owned normalized available or unavailable pricing definition
 - lifecycle status
 - visibility status
 - publisher and family when known
@@ -146,12 +148,13 @@ capability, including historical catalog and Agent snapshots, resolves that maxi
 as its default. The capability remains additive JSON and requires no relational
 migration.
 
-Runtime and Agent context displays supplement only a missing maximum from an exact model match in
-the locally captured validated source. A known provider default is a floor for this fallback;
+Runtime and Agent context displays supplement only a missing maximum through an indexed exact
+current source-model read. A known provider default is a floor for this fallback;
 when default, maximum and source maximum are all missing, the resolved limit is 128,000 tokens.
 Saved maximums win over source data and no SDK profile changes a saved capability. A paired
-foreground/lightweight budget shares one source capture; an Agent list shares a capture across
-all displayed Agents needing fallback instead of fetching one payload per candidate.
+foreground/lightweight budget shares one coherent exact-key capture; an Agent list groups only
+the displayed selections needing fallback. These operations do not restore a complete source
+dataset or fetch one dataset per candidate.
 
 ### ChatGPT web-search support
 
@@ -191,7 +194,7 @@ use individually justified effort potential without rewriting conservative
 flat views, while actual dispatch enforces the saved predicate. Descriptor-absent
 selections retain their prior decoding and consumer-specific validation.
 
-Catalog fingerprints and diagnostics include applicable installed codec
+Catalog diagnostics include applicable installed codec
 dependencies. Native OpenAI/ChatGPT record the OpenAI SDK dependency and do not
 stamp Pydantic as their native codec. These versions are reproducibility inputs,
 not model-capability facts.
@@ -258,21 +261,23 @@ tool settings. API-key hints describe additional API cost; OAuth hints describe
 additional ChatGPT usage/credits. Ultrafast hints disclose unavailable cost
 estimation without promising entitlement, billing multipliers, or latency.
 
-## Source snapshots and sync attempts
+## Current source storage and synchronization
 
-Snapshot `source_kind` uses the closed PostgreSQL `model_metadata_source_kind`
-ENUM with `genai_prices` and `litellm_json`. The former remains valid only as
-retained historical provenance; the latter is the active source contract.
-The schema alignment preserves existing values, snapshots, and writer fences.
+The stable source row stores collection provenance, last-success time, counts, and
+one current synchronization state. Exact source models use the composite identity
+`(source_key, provider, source_model_key)` and store validated descriptive model data,
+normalized pricing, and collection time. The PostgreSQL source-kind ENUM retains
+its historical labels, but current writes require `litellm_catalog`, `litellm_json`,
+and schema `1`. Retired source owners and source revision tables are removed.
 
 The active source is `litellm_catalog`, kind `litellm_json`, schema/interpreter
 version `1`. The controlled `MODEL_CATALOG_SOURCE_URL` defaults to the public
 LiteLLM JSON document. Azents downloads inert JSON through an injected bounded
 HTTP collector; it does not import LiteLLM execution code or use its helpers,
-regex matching, SDK profiles, aliases, or price calculator. Collection records
-independent raw/canonical hashes and bounded ETag diagnostics. Strict decoding
-and strict JSON snapshot restoration validate exact identities, presence,
-numeric evidence, lifecycle dates, derived reasoning consistency and counts.
+regex matching, SDK profiles, aliases, or price calculator. The bounded response
+is decoded transiently; raw/canonical dataset blobs, hashes, ETags, and fingerprints
+are not persisted or used as authority. Strict decoding validates exact identities,
+presence, numeric evidence, lifecycle dates, derived reasoning consistency and counts.
 
 Absence, null, false and an explicit empty set are distinct. Exact provider/account
 declarations own their scope and only absent fields may be enriched by an exact
@@ -287,9 +292,14 @@ The six-hour `model_catalog_system_projection` task uses this collector and
 stored source contract. Transport, validation, supersession and material-reduction
 failures record bounded diagnostics and retain last-good source/catalog state.
 Normal reads, model dispatch and integration enrichment do not fetch remote
-metadata. System candidates retain source/policy/interpreter/adapter provenance
-and one captured lifecycle date. Publication remains atomic; integration attempts
-retain account visibility and configuration-generation fencing.
+metadata. Preparation normalizes prices and capabilities outside database transactions.
+Source replacement and all affected system catalog entries commit together after
+stable-owner locking and comparison of the prepared typed source values. Integration
+publication compares consumed exact source-model values and absence states plus
+descriptive source presence/provenance, then rechecks enabled integration ownership,
+credential/configuration generation, and the active work token. Changed inputs
+repeat local preparation; stale workers cannot publish. No hash, data revision, or
+work token substitutes for source-value comparison.
 
 New conversation projections carry `semantic_contract` version `2`, separating
 unknown, conditional, explicit and contract-derived support from the conservative
@@ -335,40 +345,18 @@ codec. Explicit unsupported strict requests fail rather than becoming false.
 Unknown scalar requests retain the existing provider error boundary without being
 advertised as supported. Historical descriptor absence retains prior semantics.
 
-Revision `c8bc0a5dcab0` installs the writer contract with static SQL under fixed
-table locks, without fetching/decoding source data or recalculating history. It
-preserves catalogs/current entries/selections/costs, clears only retired genai
-current source authority, terminalizes its running attempts and creates inactive
-replacement authority. Inconsistent pointers or an unexpectedly active replacement
-source fail preflight atomically rather than erase data. Retired authority and
-snapshot writes/deletion are frozen; historical genai provenance stays inert.
+Each source or catalog owner retains only its current synchronization status, counts,
+failure metadata, action hint, and diagnostics. An opaque work token exists only while
+work is running and is cleared at terminal completion; it is not a model-data ID.
+Failures preserve current source models, catalog entries, normalized prices, and
+last-success time. Conversation synchronization/freshness does not add a selection gate.
 
-New conversation snapshots require projection schema `2`, null active genai
-provenance and a new-family source when supplied; system source is required,
-integration source optional, and image-purpose snapshots are exempt. Pointer
-changes validate owner/type/source and reject old candidate reuse or clearing a
-successful catalog pointer; unchanged historical pointers admit operational
-updates. Ownership is immutable. Deferred `NO ACTION` current-pointer/provenance
-FKs block referenced deletion while permitting replacement then superseded
-deletion and parent cascades.
-
-First collection success is not a release prerequisite. Until it succeeds, missing
-context enrichment uses existing no-source policy and optional estimates are
-unavailable; old catalogs remain readable. Old save/dispatch/source producers must
-be drained before exposing v2. DB guards cannot revoke in-memory captures or make
-arbitrary mixed-version readers safe. Default downgrade rejects authority reversal
-before changing guards; emergency rollback requires a separately authorized,
-stopped-writer matching schema/data restoration, not automatic genai reactivation.
-
-Each catalog sync records an attempt with status, counts, failure metadata, action hint, and diagnostics. Failed syncs keep the last successful snapshot available when one exists.
-
-Integration catalogs and their attempts carry the integration's positive
-`catalog_configuration_version`. User credential/configuration changes advance
-that version. Runtime OAuth token rotation and connection-status persistence use
-the separate runtime-state update path and preserve the generation, so a refresh
-initiated by catalog synchronization does not invalidate its own publication.
-This applies to ChatGPT, xAI, and Kimi OAuth. Genuine concurrent user changes
-continue to fence stale conversation and image publications.
+The integration's positive `catalog_configuration_version` is credential/configuration
+authority, not a catalog data revision. User credential/configuration changes advance
+it. Runtime OAuth token rotation and connection-status persistence use the separate
+runtime-state update path and preserve it, so a refresh initiated by synchronization
+does not invalidate its own publication. This applies to ChatGPT, xAI, and Kimi OAuth.
+Genuine concurrent user changes continue to fence stale conversation and image work.
 
 ChatGPT and xAI refresh success and failure persistence lock the integration row
 and compare the original catalog generation, complete typed credentials, and
@@ -378,26 +366,49 @@ without replacing its credentials or configuration. State-only failure
 diagnostics within the same identity do not prevent a fresh success from
 restoring the connected state.
 
-An image sync
-publishes only when its claimed attempt is still latest and
-its version still matches the integration. The last successful snapshot remains
-diagnostic after a generation change or failed sync, but `generation_current =
-false` prevents it from authorizing new saves or runtime dispatch.
+Only image-purpose catalogs store a non-null usability boolean. Integration
+configuration changes invalidate it transactionally. A matching successful image
+publication sets it true; a failed refresh does not invalidate an otherwise usable
+listing. Retained rows after invalidation remain diagnostic, but cannot authorize
+new explicit image saves or runtime dispatch.
+
+### Coordinated data transition
+
+Migration `d9bff320245f` follows `1c42cc5ce89f` in one linear chain. Old readers,
+writers, and queued dispatch work must be quiescent; running catalog synchronization
+fails preflight. The migration keeps stable owners and only current entries, expands
+the current source into exact rows, and normalizes current prices. It initializes only
+missing pricing in saved Agent/Workspace selections, current Session selections, and
+future nonterminal operation candidates using exact existing scope. Unmatched or
+unsupported evidence becomes explicitly unavailable; identities, capabilities, labels,
+settings, and already present validated prices are preserved.
+
+Already-started candidates and terminal operation/event/cost history are not rewritten.
+Removed snapshot/history tables, pointers, hashes, fingerprints, and retired source rows
+are not a compatibility fallback. Current-owner, purpose, source identity, and image
+invalidation guards replace old pointer guards. Downgrade is irreversible; recovery
+requires stopped writers and matching schema/data restoration.
 
 ## Local operation metadata and pricing
 
-Context fallback and cost estimation read a locally captured validated source snapshot
-through `ModelMetadataService`, never an installed model map, library profile or
-request-time remote source fetch. Exact provider/source namespaces and adopted literal
+Context fallback reads only requested exact current source-model maxima through
+`ModelMetadataService`, never an installed model map, library profile, complete source
+restore, or request-time remote source fetch. Exact provider/source namespaces and adopted literal
 producer address formats are distinct from execution encoding; aliases, publisher paths
 and cloud resource identifiers are
 not stripped. Saved normalized capabilities retain their existing precedence and default
-floor. Paired context calculations share one snapshot, and known maxima skip source reads.
+floor. Paired context calculations share one coherent exact-key view, and known maxima skip
+source reads.
 
-Pricing normalization is independent of capability projection. Each operation
-freezes exact provider/model/source identity, snapshot/hash, interpreted rules,
-estimator revision and aware request time once; responses never rematch a newer
-source. Typed rates are USD per named unit, including per-token source amounts.
+Pricing normalization is independent of capability projection and occurs at source/catalog
+publication. Explicit model selection copies that entry's compact typed pricing definition
+into `AgentModelSelection`. Reselection adopts current prices; refreshes do not mutate
+saved selections. Each actual physical call freezes its candidate's saved definition,
+exact provider/model identity, descriptive source/model key, collection time, code estimator
+version, and aware call time. Fallback candidates use their own definitions. Capture does
+no pricing DB read, raw-price interpretation, source restore, hashing, or caching, and usage
+completion never rematches a newer catalog. Typed rates are USD per named unit, including
+per-token source amounts.
 Decimal evaluation partitions cache/reasoning/media quantities using explicit
 usage inclusion flags, honors TTL/context thresholds, trustworthy service tiers
 and bounded off-peak windows, and requires every used specialized dimension.
@@ -408,7 +419,11 @@ or a token-only subtotal. Finite nonnegative provider charges, including zero,
 take precedence. No direct genai fetch/matching/cost API supplies an estimate;
 the retained transitive Pydantic counter extractor is not pricing authority.
 Provider-returned charges and estimates retain distinct provenance. Optional
-metadata/pricing misses do not change model visibility or saved selections.
+metadata/pricing misses do not change model visibility or saved selections. Historical
+selected-model JSON without `pricing` decodes read-only as absent; dispatch without a
+definition leaves local estimates unavailable. Ordinary reads do not enrich or save it.
+New estimate provenance excludes snapshot IDs, hashes, catalog foreign keys, and archived
+price payloads. Immutable old event/cost provenance remains readable without history lookup.
 
 Google native modality receipts preserve directed input/output IMAGE and AUDIO
 quantities. Prompt receipts partition native prompt counts; output receipts
@@ -424,22 +439,25 @@ recorded historical cost is recalculated.
 The public catalog entry list endpoint returns the stored catalog entries for one integration. It supports search, limit, and offset. The response includes:
 
 - catalog id and ownership scope
-- nullable current snapshot id
-- nullable current snapshot creation time
-- latest sync attempt, including failure metadata when no successful snapshot exists
+- nullable last-success time
+- current latest sync status, including failure metadata before the first success
 - stale state, earliest explicit sync time, and automatic-retry-blocked state
 - paged entries
 - total count
 - limit and offset
 
-A catalog with no current snapshot still returns a successful status-aware response when the catalog exists. In that case entries are empty and latest attempt state distinguishes never synced, running, and failed-without-snapshot states.
+A catalog before its first successful publication still returns a successful status-aware
+response when the catalog exists. Entries are empty and latest sync state distinguishes
+never synced, running, and failed-before-success states. Public/admin status and generated
+clients expose no snapshot IDs, hashes, fingerprints, cutover/candidate commands, or catalog
+data generations. Active work tokens are not public model-data identifiers.
 
 Selectable entries are ordered by a stored or derived freshness rank before display name and model identifier tie breakers so newer model generations appear first.
 
 The read path must not call provider listing APIs, models.dev, or the remote metadata source. It returns the stored response first. When an integration-scoped projection is stale, the route queues a best-effort background refresh whose synchronization policy rechecks eligibility before provider work begins.
 
 The image-generation catalog read endpoint returns `default_available`,
-`explicit_selection_supported`, generation/version state, the latest attempt, and
+`explicit_selection_supported`, `usable`, last-success time, latest sync status, and
 the ordered complete entry list for one integration. Standard Agent and Workspace
 reads never perform image-model discovery. Default-only providers receive a
 successful synthetic response without creating a discovery catalog.
@@ -455,7 +473,7 @@ superseded-completion policy as the conversation catalog. Enabled integration
 creation and catalog-affecting updates trigger initial image sync in addition to
 conversation sync; name-only updates and disable operations do not.
 
-For AWS Bedrock and Google Vertex AI, sync fetches the provider-visible model list and projects it against the stored generic metadata source snapshot. For ChatGPT OAuth, sync refreshes the OAuth token when necessary, calls the account-scoped Codex model endpoint with the fixed compatibility client version, and projects backend-visible models directly. For xAI API key, sync calls the developer model endpoint with that integration's key. For xAI OAuth, sync refreshes the token when necessary and calls the Grok account model endpoint. Both xAI paths project provider visibility directly and use generic metadata only as optional fill-only enrichment. For Kimi OAuth, sync refreshes the token when necessary, calls the authenticated Kimi Code model endpoint with the encrypted device identity, and directly projects valid account-visible models. For OpenRouter, sync calls the fixed authenticated account-model endpoint and projects every valid text-output model directly without requiring a generic metadata match.
+For AWS Bedrock and Google Vertex AI, sync fetches the provider-visible model list and projects it against current exact generic metadata source rows. For ChatGPT OAuth, sync refreshes the OAuth token when necessary, calls the account-scoped Codex model endpoint with the fixed compatibility client version, and projects backend-visible models directly. For xAI API key, sync calls the developer model endpoint with that integration's key. For xAI OAuth, sync refreshes the token when necessary and calls the Grok account model endpoint. Both xAI paths project provider visibility directly and use generic metadata only as optional fill-only enrichment. For Kimi OAuth, sync refreshes the token when necessary, calls the authenticated Kimi Code model endpoint with the encrypted device identity, and directly projects valid account-visible models. For OpenRouter, sync calls the fixed authenticated account-model endpoint and projects every valid text-output model directly without requiring a generic metadata match.
 
 Integration catalog synchronization has four triggers:
 
@@ -466,9 +484,9 @@ Integration catalog synchronization has four triggers:
 
 Name-only updates and disable operations do not trigger synchronization. Create/configuration-change triggers bypass cooldown and failure backoff because they represent new provider state, but they do not replace an active attempt. Explicit sync bypasses the credential-failure automatic block while respecting cooldown and transient backoff. Stale refresh respects all policy guards.
 
-Explicit and stale requests use a 30-second integration cooldown and a 5-second workspace cooldown. Retryable provider failures use a 5-minute backoff. A snapshot becomes stale after 15 minutes. A running attempt older than 15 minutes is marked failed and recovered by the next eligible request.
+Explicit and stale requests use a 30-second integration cooldown and a 5-second workspace cooldown. Retryable provider failures use a 5-minute backoff. Current catalog data becomes stale 15 minutes after its last success. Running synchronization older than 15 minutes is marked failed and recovered by the next eligible request.
 
-Attempt claim locks the workspace and catalog rows before it evaluates policy and creates the running attempt. This makes duplicate-running and workspace/integration throttle decisions atomic. Attempt completion locks the catalog again and publishes only when the completing attempt is still the catalog's latest attempt, fencing work that was superseded after running-lease recovery. A current running attempt or superseded completion returns conflict; a cooldown or backoff denial returns HTTP 429 with `Retry-After` for explicit requests.
+Synchronization claim locks the workspace and stable catalog rows before evaluating policy and recording running work. This makes duplicate-running and workspace/integration throttle decisions atomic. Completion locks the catalog again and publishes only when the active work token still matches, fencing workers superseded after running-lease recovery. Running work or superseded completion returns conflict; cooldown or backoff denial returns HTTP 429 with `Retry-After` for explicit requests.
 
 Provider credential, configuration, and permission failures are recorded with `automatic_retry_blocked=true` instead of surfacing as unhandled server errors. Transport, rate-limit, provider 5xx, and invalid-provider-response failures remain eligible for automatic retry after backoff. Unexpected service failures mark the attempt failed before propagating.
 
@@ -494,7 +512,7 @@ An enabled `image_generation` setting additionally validates its complete config
 against the selected conversation snapshot and the selected integration. An
 omitted image model accepts the maintained default only for supported enabled
 providers. An explicit model requires an OpenAI API-key integration, an executable
-reviewed registry entry, a current-generation catalog snapshot, and a matching
+reviewed registry entry, a usable current image catalog, and a matching
 selectable entry. Agent and Workspace save paths share this validation, and
 Workspace defaults copy the complete built-in configuration into newly created
 Agents.
@@ -520,11 +538,12 @@ compatibility field. Submit normalization must not refetch a dynamic provider li
 
 Agent and Workspace model selections remain snapshots. Catalog changes do not automatically mutate existing selections. UI can surface drift diagnostics between the stored selection snapshot and the current catalog, but runtime selection remains the saved snapshot unless the user changes it.
 
-New explicit selection/save copies the complete stored v2 descriptor. Reads and
+New explicit selection/save copies the complete stored v2 descriptor and normalized
+pricing definition. Reads and
 ordinary non-selection saves do not enrich old selections or mark additive
 descriptor decoding as a user change. Descriptor absence/null preserves historical
-behavior without consulting retired metadata. Current source captures for optional
-context/cost do not rewrite saved authorization or previously recorded prices.
+behavior without consulting retired metadata. Exact current-source reads for optional
+context do not rewrite saved authorization or prices; cost capture uses saved pricing.
 Omitted effort is not literal `none`; conditions use explicit effort then a known
 saved default. Unsupported requested settings are not dropped or remapped.
 
@@ -543,7 +562,7 @@ conservatively. Unknown conditions do not become affirmative controls, independe
 justified subsets remain available, and exact xhigh/max values are retained. There
 is no new source or unknown-state configuration mode.
 
-The picker shows catalog status and supports search plus infinite-scroll paged loading. It renders provider-independent catalog UI states for no integration selected, loading, never synced, syncing without snapshot, failed without snapshot, ready, ready with latest failed attempt, ready empty result, and loading next page. Failure state renders before empty result state.
+The picker shows catalog status and supports search plus infinite-scroll paged loading. It renders provider-independent catalog UI states for no integration selected, loading, never synced, syncing before first success, failed before first success, ready, ready with latest failed sync, ready empty result, and loading next page. Failure state renders before empty result state. Pages are current-data offset reads, not revision-pinned views.
 
 Each model card displays the resolved default context value
 `default_input_tokens ?? max_input_tokens`. When a distinct default and maximum
@@ -561,13 +580,14 @@ first and then current stored entries in recommendation order. Default-only
 providers retain the image-generation capability toggle but expose no image-model
 selection controls. The UI preserves an unavailable saved explicit identifier,
 blocks submission until it is recovered, and distinguishes loading, initial or
-refresh failure, generation-changed, never-synced, stale, and empty catalog states.
+refresh failure, unusable-after-configuration-change, never-synced, stale, and empty catalog states.
 Only Workspace Owners receive the explicit image sync action.
 
 ## Change History
 
 | Date | Version | Change |
 |---|---:|---|
+| 2026-10-03 | 42 | Replaced catalog/source revisions with current exact rows and sync state, embedded normalized saved prices, exact context reads, image usability, and destructive history-free transition. |
 | 2026-10-03 | 41 | Completed existing top-k request transport and sampling codec preservation without changing model support authority. |
 | 2026-10-03 | 40 | Preserved route-bounded image/effort/refinement support, complete Google directed billing and truthful codec dependency provenance through audited correction paths. |
 | 2026-10-03 | 39 | Restored contract-derived ChatGPT web-search support through final v2 catalog entries and saved native requests without generic source or price dependence. |

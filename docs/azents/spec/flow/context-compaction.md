@@ -41,8 +41,8 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/agent_session.py
   - python/apps/azents/src/azents/rdb/models/agent_run.py
   - python/apps/azents/src/azents/rdb/models/agent.py
-last_verified_at: 2026-10-02
-spec_version: 47
+last_verified_at: 2026-10-03
+spec_version: 48
 ---
 
 # Context Compaction
@@ -53,9 +53,17 @@ history. The event runtime uses append-only compaction.
 Automatic compaction effective context window is computed by
 `engine/context/window.py`. Each option first resolves a default input window and
 maximum input window from its normalized capability, using the maximum as the
-default when the distinct default is absent. Locally captured validated-source metadata and the 128,000-token
-fallback fill missing limits. An unset option cap uses that resolved default; an
+default when the distinct default is absent. Only missing saved maxima request indexed exact
+current source-model reads; paired foreground/lightweight calculations share one coherent
+exact-key view without restoring the full source. Saved maxima take precedence, known defaults
+remain a floor, and the 128,000-token fallback applies only when all limits are absent.
+An unset option cap uses that resolved default; an
 explicit option cap is clamped to the resolved maximum.
+
+Each physical compaction candidate carries its saved normalized pricing definition.
+Call-local capture adds aware dispatch time without price DB/source lookup and keeps
+candidate-specific estimates stable across catalog refresh. Historical missing prices
+remain unavailable, with no per-read enrichment or change to text-only title behavior.
 
 For each prepared inference-bearing input, runtime then takes the prompt-selected
 foreground candidate's resolved effective window and the Agent lightweight Primary's
@@ -357,6 +365,8 @@ terminalizes.
 
 ## Changelog
 
+- **2026-10-03** (spec_version 48) — Replaced complete-source context capture
+  with grouped exact current maxima and retained saved candidate pricing for compaction.
 - **2026-10-02** (spec_version 47) — Replaced the execution context's
   live-session completion callback with typed authority while retaining direct
   repository-composed compaction settlement and its existing atomic group.

@@ -817,7 +817,7 @@
       "reasoningBadge": "Raisonnement",
       "hostedToolsBadge": "Outils hébergés",
       "toolCallingBadge": "Appel d’outils",
-      "syncingWithoutSnapshot": "La synchronisation du catalogue est en cours. Les modèles apparaîtront après le premier snapshot réussi."
+      "syncingWithoutData": "La synchronisation du catalogue est en cours. Les modèles apparaîtront après la première synchronisation réussie."
     },
     "memorySettings": {
       "title": "Mémoire de l’agent",

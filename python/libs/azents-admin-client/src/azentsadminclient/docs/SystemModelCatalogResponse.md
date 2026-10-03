@@ -1,6 +1,5 @@
 # SystemModelCatalogResponse
 
-System model catalog response.
 
 ## Properties
 
@@ -8,10 +7,10 @@ Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **provider** | [**SystemCatalogProvider**](SystemCatalogProvider.md) |  | 
 **catalog_id** | **str** |  | 
-**snapshot_id** | **str** |  | 
+**last_success_at** | **datetime** |  | 
 **visible_count** | **int** |  | 
 **hidden_count** | **int** |  | 
-**latest_attempt** | [**SystemModelCatalogSyncAttemptResponse**](SystemModelCatalogSyncAttemptResponse.md) |  | 
+**latest_sync** | [**SystemModelCatalogSyncStatusResponse**](SystemModelCatalogSyncStatusResponse.md) |  | 
 
 ## Example
 

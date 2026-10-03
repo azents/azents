@@ -18,7 +18,7 @@ import re  # noqa: F401
 import json
 
 from pydantic import BaseModel, ConfigDict, StrictStr, field_validator
-from typing import Any, ClassVar, Dict, List, Optional
+from typing import Any, ClassVar, Dict, Optional
 from typing import Optional, Set
 from typing_extensions import Self
 
@@ -28,7 +28,6 @@ class RuntimeWebActionErrorDetail(BaseModel):
     """ # noqa: E501
     code: StrictStr
     scope: Optional[StrictStr]
-    additional_properties: Dict[str, Any] = {}
     __properties: ClassVar[List[str]] = ["code", "scope"]
 
     @field_validator('code')
@@ -68,10 +67,8 @@ class RuntimeWebActionErrorDetail(BaseModel):
         * `None` is only added to the output dict for nullable fields that
           were set at model initialization. Other fields with value `None`
           are ignored.
-        * Fields in `self.additional_properties` are added to the output dict.
         """
         excluded_fields: Set[str] = set([
-            "additional_properties",
         ])
 
         _dict = self.model_dump(
@@ -79,11 +76,6 @@ class RuntimeWebActionErrorDetail(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
-        # puts key-value pairs in additional_properties in the top level
-        if self.additional_properties is not None:
-            for _key, _value in self.additional_properties.items():
-                _dict[_key] = _value
-
         # set to None if scope (nullable) is None
         # and model_fields_set contains the field
         if self.scope is None and "scope" in self.model_fields_set:
@@ -104,11 +96,6 @@ class RuntimeWebActionErrorDetail(BaseModel):
             "code": obj.get("code"),
             "scope": obj.get("scope")
         })
-        # store additional fields in additional_properties
-        for _key in obj.keys():
-            if _key not in cls.__properties:
-                _obj.additional_properties[_key] = obj.get(_key)
-
         return _obj
 
 

@@ -39,7 +39,7 @@ code_paths:
   - typescript/apps/azents-web/src/shared/subscription-usage/**
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
 last_verified_at: 2026-10-03
-spec_version: 30
+spec_version: 31
 ---
 
 # ChatGPT OAuth Flow
@@ -164,7 +164,11 @@ GET https://chatgpt.com/backend-api/codex/models?client_version=99.99.99
 
 The model listing uses the provider's full-catalog discovery client version rather than tracking each Codex release version. This sentinel is scoped only to catalog discovery and does not declare a ChatGPT runtime protocol version. The request includes the connected account id and Azents client identity. Models are selectable only when backend metadata marks them API-supported and picker-visible. The backend model payload supplies reasoning, modality, context-window, and tool metadata. Request-dialect hints are not projected into normalized capabilities. A backend model remains selectable without a matching generic metadata source record.
 
-Picker reads use only the stored integration catalog and do not call ChatGPT. Before the first snapshot exists, the catalog returns an empty status-aware result; ChatGPT OAuth has no system-catalog fallback. Failed sync attempts preserve the last successful snapshot.
+Picker reads use only current stored integration entries and do not call ChatGPT.
+Before the first successful publication, the catalog returns an empty status-aware
+result; ChatGPT OAuth has no system-catalog fallback. Failed synchronization preserves
+last-success time, current entries, and their prices. Responses expose latest sync state
+without a catalog snapshot/data generation or current work identifier.
 
 Catalog refresh does not mutate Agent or Workspace model selection snapshots. ChatGPT OAuth execution uses the standard Responses contract independently of catalog metadata copied into a saved model selection.
 
@@ -230,13 +234,16 @@ Rules:
 - Runtime requests use `originator: azents`, an `azents/<version>` User-Agent, and the connected `ChatGPT-Account-Id` rather than impersonating Codex CLI identity.
 - Sampling always uses the standard Responses contract regardless of model name or backend request-dialect hints. Tools remain in the top-level `tools` field and instructions remain in the top-level `instructions` field.
 - Compaction and title generation use the same standard Responses dialect. They send ordinary user input plus top-level instructions, no sampling tools, and omit `max_output_tokens` while retaining `store=false`, encrypted reasoning inclusion, and common client identity headers.
-- Completed SDK usage maps directly into the existing turn marker. Azents captures a validated
-  exact ChatGPT-scoped data-only DB pricing view for the physical operation and computes `cost_usd` from
+- Completed SDK usage maps directly into the existing turn marker. Azents captures the physical
+  candidate's saved normalized ChatGPT-scoped pricing definition and aware call time without a
+  price DB lookup, source restore, or hashing, then computes `cost_usd` from
   content-free usage and billing metadata. Optional typed provenance distinguishes an estimate
   from a provider-reported charge. These descriptive source-price estimates do not
   represent ChatGPT subscription billing; missing, invalid or unsupported tier pricing remains unset.
   Native OpenAI source records are not borrowed by model name or alias. No exact
-  ChatGPT price match means an unavailable estimate. Saved v2 account support
+  ChatGPT price match at selection means an unavailable definition. Historical selections
+  without embedded prices remain read-only and produce unavailable local estimates;
+  neither reads nor execution fill them from a newer catalog. Saved v2 account support
   preserves complete efforts/conditions independently from source pricing; native
   ChatGPT does not consult Pydantic profiles for capability authority. Historical
   descriptor absence keeps the previously saved behavior.
@@ -374,6 +381,7 @@ error boundary.
 
 | Date | Version | Change | Rationale |
 |---|---|---|---|
+| 2026-10-03 | 31 | Replaced catalog snapshot state with current rows/latest sync and froze saved ChatGPT candidate prices at physical call time | Preserve account identity, visibility and subscription separation without dispatch source lookup |
 | 2026-10-03 | 30 | Adopted exact ChatGPT-scoped data-only pricing and saved v2 account support independently from native OpenAI/profile facts | Preserve host identity, subscription separation and historical selections |
 | 2026-10-01 | 29 | Removed the former metadata-source compatibility path while retaining account catalog visibility authority | Keep generic metadata optional for ChatGPT model visibility |
 | 2026-09-30 | 27 | Retained the native OpenAI runtime while replacing executable price-map access with captured DB pricing provenance | Keep OAuth/subscription authority separate from API cost estimates |

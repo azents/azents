@@ -17,29 +17,22 @@ import pprint
 import re  # noqa: F401
 import json
 
-from datetime import datetime
-from pydantic import BaseModel, ConfigDict, StrictInt, StrictStr
-from typing import Any, ClassVar, Dict, List, Optional
+from pydantic import BaseModel, ConfigDict, StrictStr
+from typing import Any, ClassVar, Dict, List
+from azentspublicclient.models.catalog_price_rate import CatalogPriceRate
+from azentspublicclient.models.catalog_time_window import CatalogTimeWindow
 from typing import Optional, Set
 from typing_extensions import Self
 
-class ImageGenerationCatalogAttemptResponse(BaseModel):
+class CatalogOffPeakRule(BaseModel):
     """
-    Latest image-generation catalog synchronization attempt response.
+    CatalogOffPeakRule
     """ # noqa: E501
-    id: StrictStr
-    status: StrictStr
-    started_at: datetime
-    finished_at: Optional[datetime]
-    failure_code: Optional[StrictStr]
-    failure_message: Optional[StrictStr]
-    action_hint: Optional[StrictStr]
-    fetched_count: StrictInt
-    matched_count: StrictInt
-    skipped_count: StrictInt
-    hidden_count: StrictInt
+    windows: List[CatalogTimeWindow]
+    weekday_timezone: StrictStr
+    overrides: List[CatalogPriceRate]
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["id", "status", "started_at", "finished_at", "failure_code", "failure_message", "action_hint", "fetched_count", "matched_count", "skipped_count", "hidden_count"]
+    __properties: ClassVar[List[str]] = ["windows", "weekday_timezone", "overrides"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -59,7 +52,7 @@ class ImageGenerationCatalogAttemptResponse(BaseModel):
 
     @classmethod
     def from_json(cls, json_str: str) -> Optional[Self]:
-        """Create an instance of ImageGenerationCatalogAttemptResponse from a JSON string"""
+        """Create an instance of CatalogOffPeakRule from a JSON string"""
         return cls.from_dict(json.loads(json_str))
 
     def to_dict(self) -> Dict[str, Any]:
@@ -82,36 +75,30 @@ class ImageGenerationCatalogAttemptResponse(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
+        # override the default output from pydantic by calling `to_dict()` of each item in windows (list)
+        _items = []
+        if self.windows:
+            for _item_windows in self.windows:
+                if _item_windows:
+                    _items.append(_item_windows.to_dict())
+            _dict['windows'] = _items
+        # override the default output from pydantic by calling `to_dict()` of each item in overrides (list)
+        _items = []
+        if self.overrides:
+            for _item_overrides in self.overrides:
+                if _item_overrides:
+                    _items.append(_item_overrides.to_dict())
+            _dict['overrides'] = _items
         # puts key-value pairs in additional_properties in the top level
         if self.additional_properties is not None:
             for _key, _value in self.additional_properties.items():
                 _dict[_key] = _value
 
-        # set to None if finished_at (nullable) is None
-        # and model_fields_set contains the field
-        if self.finished_at is None and "finished_at" in self.model_fields_set:
-            _dict['finished_at'] = None
-
-        # set to None if failure_code (nullable) is None
-        # and model_fields_set contains the field
-        if self.failure_code is None and "failure_code" in self.model_fields_set:
-            _dict['failure_code'] = None
-
-        # set to None if failure_message (nullable) is None
-        # and model_fields_set contains the field
-        if self.failure_message is None and "failure_message" in self.model_fields_set:
-            _dict['failure_message'] = None
-
-        # set to None if action_hint (nullable) is None
-        # and model_fields_set contains the field
-        if self.action_hint is None and "action_hint" in self.model_fields_set:
-            _dict['action_hint'] = None
-
         return _dict
 
     @classmethod
     def from_dict(cls, obj: Optional[Dict[str, Any]]) -> Optional[Self]:
-        """Create an instance of ImageGenerationCatalogAttemptResponse from a dict"""
+        """Create an instance of CatalogOffPeakRule from a dict"""
         if obj is None:
             return None
 
@@ -119,17 +106,9 @@ class ImageGenerationCatalogAttemptResponse(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "id": obj.get("id"),
-            "status": obj.get("status"),
-            "started_at": obj.get("started_at"),
-            "finished_at": obj.get("finished_at"),
-            "failure_code": obj.get("failure_code"),
-            "failure_message": obj.get("failure_message"),
-            "action_hint": obj.get("action_hint"),
-            "fetched_count": obj.get("fetched_count"),
-            "matched_count": obj.get("matched_count"),
-            "skipped_count": obj.get("skipped_count"),
-            "hidden_count": obj.get("hidden_count")
+            "windows": [CatalogTimeWindow.from_dict(_item) for _item in obj["windows"]] if obj.get("windows") is not None else None,
+            "weekday_timezone": obj.get("weekday_timezone"),
+            "overrides": [CatalogPriceRate.from_dict(_item) for _item in obj["overrides"]] if obj.get("overrides") is not None else None
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

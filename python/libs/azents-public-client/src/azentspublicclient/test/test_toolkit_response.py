@@ -38,7 +38,7 @@ class TestToolkitResponse(unittest.TestCase):
                 slug = '',
                 name = '',
                 description = '',
-                config_schema = { },
+                config_schema = azentspublicclient.models.config_schema.Config Schema(),
                 system_prompt = ''
             )
         else:
@@ -46,7 +46,7 @@ class TestToolkitResponse(unittest.TestCase):
                 slug = '',
                 name = '',
                 description = '',
-                config_schema = { },
+                config_schema = azentspublicclient.models.config_schema.Config Schema(),
                 system_prompt = '',
         )
         """

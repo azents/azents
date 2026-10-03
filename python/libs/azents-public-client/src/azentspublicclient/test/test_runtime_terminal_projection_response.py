@@ -40,7 +40,16 @@ class TestRuntimeTerminalProjectionResponse(unittest.TestCase):
                 denied_scope = 'provider_profile',
                 can_start_runtime = True,
                 can_open_or_attach = True,
-                terminal = { }
+                terminal = azentspublicclient.models.runtime_terminal_summary_response.RuntimeTerminalSummaryResponse(
+                    terminal_id = '', 
+                    lifecycle = 'opening', 
+                    attached = True, 
+                    started_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                    ended_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                    final_reason = '', 
+                    input_bytes = 0.0, 
+                    output_bytes = 0.0, 
+                    replay_truncated = True, )
             )
         else:
             return RuntimeTerminalProjectionResponse(
@@ -49,7 +58,16 @@ class TestRuntimeTerminalProjectionResponse(unittest.TestCase):
                 denied_scope = 'provider_profile',
                 can_start_runtime = True,
                 can_open_or_attach = True,
-                terminal = { },
+                terminal = azentspublicclient.models.runtime_terminal_summary_response.RuntimeTerminalSummaryResponse(
+                    terminal_id = '', 
+                    lifecycle = 'opening', 
+                    attached = True, 
+                    started_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                    ended_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                    final_reason = '', 
+                    input_bytes = 0.0, 
+                    output_bytes = 0.0, 
+                    replay_truncated = True, ),
         )
         """
 

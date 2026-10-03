@@ -1,189 +1,77 @@
-"""Completed database-only model-source authority operations."""
+"""Atomic current source and affected system-catalog replacement operations."""
 
 import dataclasses
 import datetime
 from collections import Counter
-from typing import Annotated
+from typing import Annotated, Any
 
+import sqlalchemy as sa
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.enums import LLMCatalogEntryVisibility, LLMCatalogPurpose, LLMProvider
+from azents.core.enums import (
+    LLMCatalogAttemptStatus,
+    LLMCatalogPurpose,
+    LLMCatalogScope,
+    LLMProvider,
+)
 from azents.core.model_catalog_source import CATALOG_SOURCE_KEY, CatalogSourcePayload
 from azents.core.model_metadata_collection_data import FetchedModelMetadataSource
-from azents.core.model_metadata_projection_data import SystemCatalogCandidateSummary
 from azents.rdb.deps import get_session_manager
+from azents.rdb.models.llm_catalog import RDBLLMCatalog
 from azents.rdb.session import SessionManager
 from azents.repos.llm_catalog import LLMCatalogRepository
 from azents.repos.llm_catalog.data import (
-    CatalogProjectionProvenance,
-    CatalogSyncAlreadyRunning,
+    LLMCatalog,
     LLMCatalogEntryCreate,
+    LLMCatalogSyncStatus,
 )
+from azents.repos.model_catalog_sync_state import fail_sync, start_sync, succeed_sync
 from azents.repos.model_metadata_source import ModelMetadataSourceRepository
-from azents.repos.model_metadata_source_data import ModelMetadataSourceSnapshot
+from azents.repos.model_metadata_source_data import ModelMetadataSource
 
 _SOURCE_MIN_REMOVAL_COUNT = 50
 _SOURCE_MIN_REMOVAL_RATIO = 0.02
 _PROVIDER_MIN_REMOVAL_COUNT = 5
 _PROVIDER_MIN_REMOVAL_RATIO = 0.20
-
-
-class _SystemCatalogPublicationBusy(RuntimeError):
-    """Abort all attempt claims when any catalog is already running."""
+_SYSTEM_PROVIDERS = (
+    LLMProvider.OPENAI,
+    LLMProvider.ANTHROPIC,
+    LLMProvider.GOOGLE_GEMINI,
+)
+_SYSTEM_SYNC_LEASE = datetime.timedelta(minutes=5)
 
 
 @dataclasses.dataclass(frozen=True)
-class ModelMetadataProjectionOperations:
-    """Own atomic catalog claims, candidate writes and multi-provider publication."""
+class SourceSyncAlreadyRunning:
+    """Atomic source/system claim denial under the current publication owners."""
 
-    session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
-    ]
-    repository: Annotated[LLMCatalogRepository, Depends(LLMCatalogRepository)]
+    catalog_id: str
+    work_token: str
 
-    async def create_candidate(
-        self,
-        *,
-        provider: LLMProvider,
-        entries: list[LLMCatalogEntryCreate],
-        provenance: CatalogProjectionProvenance,
-        diagnostics: dict[str, object],
-    ) -> SystemCatalogCandidateSummary:
-        async with self.session_manager() as session:
-            catalog = await self.repository.ensure_system_catalog(
-                session, provider=provider, purpose=LLMCatalogPurpose.CONVERSATION
-            )
-            candidate_id = await self.repository.create_candidate_snapshot(
-                session,
-                catalog=catalog,
-                entries=entries,
-                diagnostics=diagnostics,
-                provenance=provenance,
-                catalog_configuration_version=None,
-            )
-            visible = sum(
-                entry.visibility_status == LLMCatalogEntryVisibility.SELECTABLE
-                for entry in entries
-            )
-            return SystemCatalogCandidateSummary(
-                provider=provider,
-                catalog_id=catalog.id,
-                candidate_snapshot_id=candidate_id,
-                expected_current_snapshot_id=catalog.current_snapshot_id,
-                visible_count=visible,
-                hidden_count=len(entries) - visible,
-                projection_fingerprint=provenance.projection_fingerprint,
-            )
 
-    async def begin_publication(
-        self,
-        *,
-        candidates: list[SystemCatalogCandidateSummary],
-        source_key: str,
-    ) -> dict[str, str] | None:
-        attempt_ids: dict[str, str] = {}
-        try:
-            async with self.session_manager() as session:
-                for candidate in candidates:
-                    attempt = await self.repository.begin_attempt(
-                        session,
-                        catalog_id=candidate.catalog_id,
-                        source_key=source_key,
-                        started_at=datetime.datetime.now(datetime.UTC),
-                    )
-                    if isinstance(attempt, CatalogSyncAlreadyRunning):
-                        raise _SystemCatalogPublicationBusy
-                    attempt_ids[candidate.catalog_id] = attempt
-        except _SystemCatalogPublicationBusy:
-            # Raising inside the context rolls back every partial claim.
-            return None
-        return attempt_ids
+@dataclasses.dataclass(frozen=True)
+class SystemCatalogReplacement:
+    """Transient prepared current entries for one affected system provider."""
 
-    async def publish(
-        self,
-        *,
-        candidates: list[SystemCatalogCandidateSummary],
-        source: ModelMetadataSourceSnapshot,
-        attempt_ids: dict[str, str],
-    ) -> dict[str, str]:
-        snapshot_ids: dict[str, str] = {}
-        async with self.session_manager() as session:
-            for candidate in candidates:
-                latest = await self.repository.lock_catalog_for_attempt_completion(
-                    session, catalog_id=candidate.catalog_id
-                )
-                if latest != attempt_ids[candidate.catalog_id]:
-                    raise RuntimeError("The system catalog refresh was superseded.")
-                snapshot_ids[
-                    candidate.catalog_id
-                ] = await self.repository.publish_candidate_snapshot(
-                    session,
-                    catalog_id=candidate.catalog_id,
-                    candidate_snapshot_id=candidate.candidate_snapshot_id,
-                    expected_current_snapshot_id=candidate.expected_current_snapshot_id,
-                    expected_catalog_configuration_version=None,
-                    expected_projection_fingerprint=candidate.projection_fingerprint,
-                    expected_source_key=source.source_key,
-                    expected_source_snapshot_id=source.id,
-                    fence_latest_attempt=True,
-                    expected_latest_attempt_id=attempt_ids[candidate.catalog_id],
-                )
-            for candidate in candidates:
-                await self.repository.mark_attempt_succeeded(
-                    session,
-                    attempt_id=attempt_ids[candidate.catalog_id],
-                    finished_at=datetime.datetime.now(datetime.UTC),
-                    produced_snapshot_id=snapshot_ids[candidate.catalog_id],
-                    fetched_count=source.model_count,
-                    matched_count=candidate.visible_count + candidate.hidden_count,
-                    skipped_count=0,
-                    hidden_count=candidate.hidden_count,
-                    diagnostics={
-                        "provider": candidate.provider.value,
-                        "source_snapshot_id": source.id,
-                        "projection_fingerprint": candidate.projection_fingerprint,
-                    },
-                )
-        return snapshot_ids
-
-    async def fail_publication(
-        self,
-        *,
-        candidates: list[SystemCatalogCandidateSummary],
-        source_snapshot_id: str,
-        attempt_ids: dict[str, str],
-        failure_code: str,
-        failure_message: str,
-    ) -> None:
-        async with self.session_manager() as session:
-            for candidate in candidates:
-                await self.repository.mark_attempt_failed(
-                    session,
-                    attempt_id=attempt_ids[candidate.catalog_id],
-                    finished_at=datetime.datetime.now(datetime.UTC),
-                    failure_code=failure_code,
-                    failure_message=failure_message,
-                    action_hint="Check replacement source and projection readiness.",
-                    diagnostics={
-                        "provider": candidate.provider.value,
-                        "source_snapshot_id": source_snapshot_id,
-                        "projection_fingerprint": candidate.projection_fingerprint,
-                    },
-                )
+    provider: LLMProvider
+    entries: list[LLMCatalogEntryCreate]
+    diagnostics: dict[str, Any] | None
 
 
 @dataclasses.dataclass(frozen=True)
 class SourcePublicationResult:
-    """A committed source result or an explicitly persisted rejection."""
+    """Atomic success, current diagnostic rejection, or value-change retry."""
 
-    snapshot: ModelMetadataSourceSnapshot | None
+    source: ModelMetadataSource | None
+    catalogs: list[LLMCatalog]
     failure_message: str | None
+    source_changed: bool
 
 
 @dataclasses.dataclass(frozen=True)
 class ModelMetadataSourceOperations:
-    """Own source attempts and fenced publication transactions."""
+    """Keep source and all affected system entries in one DB-only commit."""
 
     session_manager: Annotated[
         SessionManager[AsyncSession], Depends(get_session_manager)
@@ -191,125 +79,242 @@ class ModelMetadataSourceOperations:
     repository: Annotated[
         ModelMetadataSourceRepository, Depends(ModelMetadataSourceRepository)
     ]
+    catalog_repository: Annotated[LLMCatalogRepository, Depends(LLMCatalogRepository)]
 
-    async def begin_attempt(self, *, started_at: datetime.datetime) -> str:
+    async def _system_owners(self, session: AsyncSession) -> list[RDBLLMCatalog]:
+        """Find/create stable identities, then acquire every owner lock in ID order."""
+        result = await session.execute(
+            sa.select(RDBLLMCatalog.id, RDBLLMCatalog.provider).where(
+                RDBLLMCatalog.scope == LLMCatalogScope.SYSTEM,
+                RDBLLMCatalog.purpose == LLMCatalogPurpose.CONVERSATION,
+                RDBLLMCatalog.provider.in_(_SYSTEM_PROVIDERS),
+            )
+        )
+        identities = {row.provider: row.id for row in result}
+        for provider in _SYSTEM_PROVIDERS:
+            if provider not in identities:
+                catalog = await self.catalog_repository.ensure_system_catalog(
+                    session, provider=provider, purpose=LLMCatalogPurpose.CONVERSATION
+                )
+                identities[provider] = catalog.id
+        owners: list[RDBLLMCatalog] = []
+        for identity in sorted(identities.values()):
+            owners.append(
+                await self.catalog_repository.lock_catalog(session, catalog_id=identity)
+            )
+        return owners
+
+    async def begin_sync(
+        self, *, started_at: datetime.datetime
+    ) -> str | SourceSyncAlreadyRunning:
         async with self.session_manager() as session:
-            return await self.repository.begin_attempt(
+            await self.repository.ensure_authority(
+                session, source_key=CATALOG_SOURCE_KEY
+            )
+            await self.repository.lock_authority(session, source_key=CATALOG_SOURCE_KEY)
+            owners = await self._system_owners(session)
+            for owner in owners:
+                if (
+                    owner.sync_status == LLMCatalogAttemptStatus.RUNNING
+                    and owner.sync_started_at is not None
+                    and started_at < owner.sync_started_at + _SYSTEM_SYNC_LEASE
+                ):
+                    if owner.sync_work_token is None:
+                        raise ValueError(
+                            "Running synchronization is missing its work token."
+                        )
+                    return SourceSyncAlreadyRunning(
+                        catalog_id=owner.id, work_token=owner.sync_work_token
+                    )
+            token = await self.repository.begin_sync(
                 session, source_key=CATALOG_SOURCE_KEY, started_at=started_at
+            )
+            for owner in owners:
+                start_sync(
+                    owner,
+                    work_token=token,
+                    started_at=started_at,
+                    diagnostics={"source_key": CATALOG_SOURCE_KEY},
+                )
+            await session.flush()
+            return token
+
+    async def read_current(self) -> ModelMetadataSource | None:
+        async with self.session_manager() as session:
+            return await self.repository.get_current(
+                session, source_key=CATALOG_SOURCE_KEY
+            )
+
+    async def read_sync_status(self) -> LLMCatalogSyncStatus | None:
+        async with self.session_manager() as session:
+            return await self.repository.get_sync_status(
+                session, source_key=CATALOG_SOURCE_KEY
             )
 
     async def publish(
         self,
         *,
-        attempt_id: str,
+        work_token: str,
         fetched: FetchedModelMetadataSource,
+        expected_source: ModelMetadataSource | None,
+        replacements: list[SystemCatalogReplacement],
         finished_at: datetime.datetime,
     ) -> SourcePublicationResult:
-        """Compare and publish under the same source-authority lock."""
+        """Compare prepared source inputs and replace source/system rows atomically."""
+        if {item.provider for item in replacements} != set(_SYSTEM_PROVIDERS) or len(
+            replacements
+        ) != len(_SYSTEM_PROVIDERS):
+            raise ValueError(
+                "Source publication must replace every affected system provider."
+            )
+        by_provider = {item.provider: item for item in replacements}
         async with self.session_manager() as session:
-            authority = await self.repository.lock_authority(
+            source_owner = await self.repository.lock_authority(
                 session, source_key=CATALOG_SOURCE_KEY
             )
+            if (
+                source_owner is None
+                or source_owner.sync_work_token != work_token
+                or source_owner.sync_status != LLMCatalogAttemptStatus.RUNNING
+            ):
+                return SourcePublicationResult(
+                    source=None,
+                    catalogs=[],
+                    failure_message="The source synchronization was superseded.",
+                    source_changed=False,
+                )
             previous = await self.repository.get_current(
                 session, source_key=CATALOG_SOURCE_KEY
             )
-            diagnostics = _source_diagnostics(previous=previous, fetched=fetched)
-            if authority.latest_attempt_id != attempt_id:
-                await self.repository.fail_attempt(
-                    session,
-                    attempt_id=attempt_id,
-                    finished_at=finished_at,
-                    failure_code="ModelMetadataSourceSyncSuperseded",
-                    failure_message="A newer synchronization superseded this result.",
-                    action_hint="Use the newer source synchronization result.",
-                    fetched_count=fetched.model_count,
-                    diagnostics=diagnostics,
-                )
+            if previous != expected_source:
                 return SourcePublicationResult(
-                    snapshot=None,
-                    failure_message="The source synchronization was superseded.",
+                    source=None,
+                    catalogs=[],
+                    failure_message="Current source preparation inputs changed.",
+                    source_changed=True,
                 )
+            owners = await self._system_owners(session)
+            if any(
+                owner.sync_work_token != work_token
+                or owner.sync_status != LLMCatalogAttemptStatus.RUNNING
+                for owner in owners
+            ):
+                return SourcePublicationResult(
+                    source=None,
+                    catalogs=[],
+                    failure_message="System catalog synchronization was superseded.",
+                    source_changed=False,
+                )
+            diagnostics = _source_diagnostics(previous=previous, fetched=fetched)
             if (
                 reduction := _material_reduction(previous=previous, fetched=fetched)
             ) is not None:
-                await self.repository.fail_attempt(
-                    session,
-                    attempt_id=attempt_id,
-                    finished_at=finished_at,
-                    failure_code="ModelMetadataSourceModelCountReduction",
-                    failure_message=(
-                        "The source is materially smaller than the snapshot."
-                    ),
-                    action_hint="Verify upstream removals before replacing the source.",
-                    fetched_count=fetched.model_count,
-                    diagnostics={**diagnostics, "reduction_scope": reduction},
-                )
+                failure = "The source reduction requires operator review."
+                for owner in [source_owner, *owners]:
+                    fail_sync(
+                        owner,
+                        work_token=work_token,
+                        finished_at=finished_at,
+                        failure_code="ModelMetadataSourceModelCountReduction",
+                        failure_message="The source has a material model reduction.",
+                        action_hint="Verify removals before replacing the source.",
+                        diagnostics={**diagnostics, "reduction_scope": reduction},
+                    )
+                await session.flush()
                 return SourcePublicationResult(
-                    snapshot=None,
-                    failure_message="The source reduction requires operator review.",
+                    source=None,
+                    catalogs=[],
+                    failure_message=failure,
+                    source_changed=False,
                 )
-            snapshot = await self.repository.publish_snapshot(
+            await self.repository.replace_current(
                 session,
-                authority=authority,
-                attempt_id=attempt_id,
-                source_kind=fetched.source_kind,
-                source_schema_version=fetched.source_schema_version,
-                source_url=fetched.source_url,
-                source_hash=fetched.source_hash,
-                producer_name=fetched.producer_name,
-                producer_version=fetched.producer_version,
-                provider_count=fetched.provider_count,
-                model_count=fetched.model_count,
-                payload=fetched.payload,
+                owner=source_owner,
+                work_token=work_token,
+                fetched=fetched,
                 finished_at=finished_at,
                 diagnostics=diagnostics,
             )
-            return SourcePublicationResult(snapshot=snapshot, failure_message=None)
+            for owner in owners:
+                replacement = by_provider[owner.provider]
+                await self.catalog_repository.replace_current_entries(
+                    session,
+                    owner=owner,
+                    entries=replacement.entries,
+                    diagnostics=replacement.diagnostics,
+                    finished_at=finished_at,
+                )
+                succeed_sync(
+                    owner,
+                    work_token=work_token,
+                    finished_at=finished_at,
+                    fetched_count=fetched.model_count,
+                    matched_count=owner.entry_count,
+                    skipped_count=0,
+                    hidden_count=owner.hidden_count,
+                    diagnostics={
+                        "provider": owner.provider.value,
+                        "source_key": CATALOG_SOURCE_KEY,
+                    },
+                )
+            await session.flush()
+            source = await self.repository.get_current(
+                session, source_key=CATALOG_SOURCE_KEY
+            )
+            return SourcePublicationResult(
+                source=source,
+                catalogs=[
+                    self.catalog_repository.build_catalog(owner) for owner in owners
+                ],
+                failure_message=None,
+                source_changed=False,
+            )
 
-    async def fail_collection(
+    async def fail_sync(
         self,
         *,
-        attempt_id: str,
+        work_token: str,
         finished_at: datetime.datetime,
         failure_code: str,
         diagnostics: dict[str, object],
     ) -> None:
+        """Only still-owned state can change; successful data stays untouched."""
         async with self.session_manager() as session:
-            await self.repository.fail_attempt(
-                session,
-                attempt_id=attempt_id,
-                finished_at=finished_at,
-                failure_code=failure_code,
-                failure_message=(
-                    "The remote model metadata source could not be ingested."
-                ),
-                action_hint="Retry after the configured source becomes available.",
-                fetched_count=0,
-                diagnostics=diagnostics,
+            owner = await self.repository.lock_authority(
+                session, source_key=CATALOG_SOURCE_KEY
             )
+            if owner is None or owner.sync_work_token != work_token:
+                return
+            owners = await self._system_owners(session)
+            for current in [owner, *owners]:
+                fail_sync(
+                    current,
+                    work_token=work_token,
+                    finished_at=finished_at,
+                    failure_code=failure_code,
+                    failure_message="Current model source publication failed.",
+                    action_hint="Retry after the configured source becomes available.",
+                    diagnostics=diagnostics,
+                )
+            await session.flush()
 
 
 def _source_diagnostics(
-    *, previous: ModelMetadataSourceSnapshot | None, fetched: FetchedModelMetadataSource
+    *, previous: ModelMetadataSource | None, fetched: FetchedModelMetadataSource
 ) -> dict[str, object]:
-    """Describe provenance without retaining raw exception or payload text."""
     return {
-        "source_kind": fetched.source_kind,
+        "source_kind": fetched.source_kind.value,
         "source_url": fetched.source_url,
-        "source_hash": fetched.source_hash,
-        "raw_document_hash": fetched.raw_document_hash,
-        "etag": fetched.etag,
         "source_schema_version": fetched.source_schema_version,
-        "interpreter_version": fetched.payload.interpreter_version,
         "producer_name": fetched.producer_name,
         "producer_version": fetched.producer_version,
         "provider_count": fetched.provider_count,
         "model_count": fetched.model_count,
         "previous_model_count": previous.model_count if previous is not None else None,
         "supported_provider_counts": _provider_counts(fetched.payload),
-        "previous_supported_provider_counts": (
-            _provider_counts(previous.payload) if previous is not None else {}
-        ),
+        "previous_supported_provider_counts": _provider_counts(previous.payload)
+        if previous is not None
+        else {},
     }
 
 
@@ -318,7 +323,7 @@ def _provider_counts(payload: CatalogSourcePayload) -> dict[str, int]:
 
 
 def _material_reduction(
-    *, previous: ModelMetadataSourceSnapshot | None, fetched: FetchedModelMetadataSource
+    *, previous: ModelMetadataSource | None, fetched: FetchedModelMetadataSource
 ) -> str | None:
     if previous is None:
         return None
@@ -328,9 +333,8 @@ def _material_reduction(
         and removed / previous.model_count >= _SOURCE_MIN_REMOVAL_RATIO
     ):
         return "global"
-    previous_counts = _provider_counts(previous.payload)
     current_counts = _provider_counts(fetched.payload)
-    for provider, count in previous_counts.items():
+    for provider, count in _provider_counts(previous.payload).items():
         removed = count - current_counts.get(provider, 0)
         if (
             removed >= _PROVIDER_MIN_REMOVAL_COUNT

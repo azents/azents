@@ -1,50 +1,89 @@
-"""Durable model metadata source authority and snapshots."""
+"""Current model metadata source authority and exact per-model facts."""
 
 import datetime
-import enum
 from typing import Any
 
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import ENUM, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
+from azents.core.enums import LLMCatalogAttemptStatus
 from azents.core.model_catalog_source import ModelMetadataSourceKind
 from azents.rdb.models.base import RDBModel
 from azents.rdb.types.datetime import TimeZoneDateTime
-
-
-def _enum_values(enum_cls: type[enum.StrEnum]) -> list[str]:
-    """Return the stable string values stored by the source-kind ENUM."""
-    return [value.value for value in enum_cls]
-
 
 source_kind_enum = ENUM(
     ModelMetadataSourceKind,
     name="model_metadata_source_kind",
     create_type=False,
-    values_callable=_enum_values,
+    values_callable=lambda cls: [value.value for value in cls],
+)
+sync_status_enum = ENUM(
+    LLMCatalogAttemptStatus,
+    name="llm_catalog_attempt_status",
+    create_type=False,
+    values_callable=lambda cls: [value.value for value in cls],
 )
 
 
 class RDBModelMetadataSource(RDBModel):
-    """Logical current model metadata source authority."""
+    """Stable current source owner, collection provenance and synchronization state."""
 
     __tablename__ = "model_metadata_sources"
 
     source_key: Mapped[str] = mapped_column(sa.String(120), primary_key=True)
-    current_snapshot_id: Mapped[str | None] = mapped_column(
-        sa.String(32),
-        sa.ForeignKey(
-            "model_metadata_source_snapshots.id",
-            name="fk_model_metadata_sources_current_snapshot",
-            ondelete="NO ACTION",
-            deferrable=True,
-            initially="DEFERRED",
-            use_alter=True,
-        ),
-        nullable=True,
+    source_kind: Mapped[ModelMetadataSourceKind] = mapped_column(source_kind_enum)
+    source_schema_version: Mapped[str] = mapped_column(sa.String(20))
+    source_url: Mapped[str | None] = mapped_column(sa.Text, init=False, nullable=True)
+    producer_name: Mapped[str | None] = mapped_column(
+        sa.String(80), init=False, nullable=True
     )
-    latest_attempt_id: Mapped[str | None] = mapped_column(sa.String(32), nullable=True)
+    producer_version: Mapped[str | None] = mapped_column(
+        sa.String(80), init=False, nullable=True
+    )
+    provider_count: Mapped[int] = mapped_column(
+        sa.Integer, init=False, server_default="0"
+    )
+    model_count: Mapped[int] = mapped_column(sa.Integer, init=False, server_default="0")
+    last_success_at: Mapped[datetime.datetime | None] = mapped_column(
+        TimeZoneDateTime, init=False, nullable=True
+    )
+    sync_work_token: Mapped[str | None] = mapped_column(
+        sa.String(32), init=False, nullable=True
+    )
+    sync_status: Mapped[LLMCatalogAttemptStatus | None] = mapped_column(
+        sync_status_enum, init=False, nullable=True
+    )
+    sync_started_at: Mapped[datetime.datetime | None] = mapped_column(
+        TimeZoneDateTime, init=False, nullable=True
+    )
+    sync_finished_at: Mapped[datetime.datetime | None] = mapped_column(
+        TimeZoneDateTime, init=False, nullable=True
+    )
+    sync_failure_code: Mapped[str | None] = mapped_column(
+        sa.String(120), init=False, nullable=True
+    )
+    sync_failure_message: Mapped[str | None] = mapped_column(
+        sa.Text, init=False, nullable=True
+    )
+    sync_action_hint: Mapped[str | None] = mapped_column(
+        sa.Text, init=False, nullable=True
+    )
+    sync_fetched_count: Mapped[int] = mapped_column(
+        sa.Integer, init=False, server_default="0"
+    )
+    sync_matched_count: Mapped[int] = mapped_column(
+        sa.Integer, init=False, server_default="0"
+    )
+    sync_skipped_count: Mapped[int] = mapped_column(
+        sa.Integer, init=False, server_default="0"
+    )
+    sync_hidden_count: Mapped[int] = mapped_column(
+        sa.Integer, init=False, server_default="0"
+    )
+    sync_diagnostics: Mapped[dict[str, Any] | None] = mapped_column(
+        JSONB, init=False, nullable=True
+    )
     created_at: Mapped[datetime.datetime] = mapped_column(
         TimeZoneDateTime, init=False, server_default=sa.func.now()
     )
@@ -56,42 +95,18 @@ class RDBModelMetadataSource(RDBModel):
     )
 
 
-class RDBModelMetadataSourceSnapshot(RDBModel):
-    """One immutable content-addressed model metadata source snapshot."""
+class RDBModelMetadataSourceModel(RDBModel):
+    """One current exact source identity; no raw or canonical dataset blob."""
 
-    __tablename__ = "model_metadata_source_snapshots"
+    __tablename__ = "model_metadata_source_models"
 
-    UQ_SOURCE_CONTENT = sa.UniqueConstraint(
-        "source_key",
-        "source_schema_version",
-        "source_hash",
-        name="uq_model_metadata_source_snapshots_content",
-    )
-    IX_SOURCE_CREATED = sa.Index(
-        "ix_model_metadata_source_snapshots_source_key_created_at",
-        "source_key",
-        "created_at",
-    )
-
-    id: Mapped[str] = mapped_column(sa.String(32), primary_key=True)
     source_key: Mapped[str] = mapped_column(
         sa.String(120),
         sa.ForeignKey("model_metadata_sources.source_key", ondelete="CASCADE"),
-        nullable=False,
+        primary_key=True,
     )
-    source_kind: Mapped[ModelMetadataSourceKind] = mapped_column(
-        source_kind_enum, nullable=False
-    )
-    source_schema_version: Mapped[str] = mapped_column(sa.String(20), nullable=False)
-    source_url: Mapped[str] = mapped_column(sa.Text, nullable=False)
-    source_hash: Mapped[str] = mapped_column(sa.String(64), nullable=False)
-    producer_name: Mapped[str] = mapped_column(sa.String(80), nullable=False)
-    producer_version: Mapped[str] = mapped_column(sa.String(80), nullable=False)
-    provider_count: Mapped[int] = mapped_column(sa.Integer, nullable=False)
-    model_count: Mapped[int] = mapped_column(sa.Integer, nullable=False)
-    payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
-    created_at: Mapped[datetime.datetime] = mapped_column(
-        TimeZoneDateTime, init=False, server_default=sa.func.now()
-    )
-
-    __table_args__ = (UQ_SOURCE_CONTENT, IX_SOURCE_CREATED)
+    provider: Mapped[str] = mapped_column(sa.Text, primary_key=True)
+    source_model_key: Mapped[str] = mapped_column(sa.Text, primary_key=True)
+    model_data: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    pricing: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    collected_at: Mapped[datetime.datetime] = mapped_column(TimeZoneDateTime)

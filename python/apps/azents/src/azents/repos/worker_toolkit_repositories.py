@@ -41,7 +41,7 @@ def get_worker_subagent_operations(
         EventTranscriptRepository, Depends(EventTranscriptRepository)
     ],
     mailbox_repository: Annotated[MailboxRepository, Depends(MailboxRepository)],
-    source_snapshot_repository: Annotated[
+    source_repository: Annotated[
         ModelMetadataSourceRepository, Depends(ModelMetadataSourceRepository)
     ],
     coordination_repository: Annotated[
@@ -56,6 +56,6 @@ def get_worker_subagent_operations(
         agent_run_repository=agent_run_repository,
         event_transcript_repository=event_transcript_repository,
         mailbox_repository=mailbox_repository,
-        source_snapshot_repository=source_snapshot_repository,
+        source_repository=source_repository,
         coordination_repository=coordination_repository,
     )

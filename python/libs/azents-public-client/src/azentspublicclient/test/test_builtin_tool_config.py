@@ -36,7 +36,7 @@ class TestBuiltinToolConfig(unittest.TestCase):
         if include_optional:
             return BuiltinToolConfig(
                 name = '',
-                config = { }
+                config = azentspublicclient.models.config.Config()
             )
         else:
             return BuiltinToolConfig(

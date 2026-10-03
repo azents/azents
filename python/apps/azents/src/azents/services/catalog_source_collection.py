@@ -1,7 +1,6 @@
 """Bounded collection of descriptive catalog data without a producer library."""
 
 import dataclasses
-import hashlib
 import ipaddress
 from urllib.parse import urlsplit
 
@@ -49,14 +48,11 @@ class CatalogCollectionPolicy:
 
 @dataclasses.dataclass(frozen=True)
 class CollectedCatalogSource:
-    """Typed source with independent raw and canonical content identities."""
+    """Validated transient source with descriptive collection provenance."""
 
     source_key: str
     source_kind: ModelMetadataSourceKind
     source_url: str
-    source_hash: str
-    raw_document_hash: str
-    etag: str | None
     payload: CatalogSourcePayload
 
 
@@ -103,9 +99,6 @@ class CatalogSourceCollector:
                         raise ValueError(
                             "The catalog source response exceeds its limit."
                         )
-                etag = response.headers.get("etag")
-                if etag is not None and len(etag) > 512:
-                    raise ValueError("The catalog source returned an invalid ETag.")
                 body = bytearray()
                 async for chunk in response.aiter_bytes(chunk_size=64 * 1024):
                     if len(body) + len(chunk) > self.policy.max_bytes:
@@ -119,9 +112,6 @@ class CatalogSourceCollector:
             source_key=CATALOG_SOURCE_KEY,
             source_kind=CATALOG_SOURCE_KIND,
             source_url=self.policy.source_url,
-            source_hash=payload.content_hash,
-            raw_document_hash=hashlib.sha256(raw).hexdigest(),
-            etag=etag,
             payload=payload,
         )
 

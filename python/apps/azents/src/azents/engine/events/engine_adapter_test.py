@@ -203,9 +203,8 @@ from azents.services.xai_oauth.data import (
     ProviderUnavailable,
 )
 from azents.testing.model_metadata import (
-    make_test_model_metadata_service,
+    make_test_source,
     make_test_source_payload,
-    make_test_source_snapshot,
 )
 from azents.testing.model_selection import (
     make_test_model_selection,
@@ -2180,7 +2179,7 @@ async def test_xai_image_generation_is_bound_as_client_function_tool(
         session_manager=_session_context,
         execution_factory=_capture_execution_factory(execution),
     )
-    source = make_test_source_snapshot(
+    source = make_test_source(
         make_test_source_payload(
             {
                 "xai/grok-4": {
@@ -3643,7 +3642,6 @@ def _agent_engine_adapter(
         exchange_file_service=exchange_file_service or _ExchangeFileService(),
         model_file_service=model_file_service or _ModelFileService(),
         provider_output_operation_repository=output_metadata,
-        metadata_service=make_test_model_metadata_service(snapshot=None),
         xai_imagine_client_factory=xai_imagine_client_factory
         or _xai_imagine_client_factory(),
         config=config or EventEngineAdapterConfig(),

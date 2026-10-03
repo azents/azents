@@ -131,11 +131,12 @@ class TestAgentModelSelection(unittest.TestCase):
                                 tool = 'web_search', 
                                 support = , )
                             ], ), ),
+                pricing = ERROR_TO_EXAMPLE_VALUE,
                 model_snapshot = azentspublicclient.models.model_snapshot.Model Snapshot(),
                 supported_execution_options = [
                     'fast'
                     ],
-                source_metadata = azentspublicclient.models.source_metadata.source_metadata(),
+                source_metadata = None,
                 last_refreshed_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f')
             )
         else:
@@ -235,6 +236,7 @@ class TestAgentModelSelection(unittest.TestCase):
                                 tool = 'web_search', 
                                 support = , )
                             ], ), ),
+                pricing = ERROR_TO_EXAMPLE_VALUE,
                 model_snapshot = azentspublicclient.models.model_snapshot.Model Snapshot(),
         )
         """

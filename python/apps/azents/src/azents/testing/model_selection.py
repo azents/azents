@@ -28,6 +28,7 @@ def make_test_model_selection(
         model_developer=model_developer,
         model_family=None,
         normalized_capabilities=ModelCapabilities(),
+        pricing=None,
         model_snapshot={"id": model_identifier},
         source_metadata=None,
         last_refreshed_at=None,

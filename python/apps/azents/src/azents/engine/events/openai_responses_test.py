@@ -2977,7 +2977,7 @@ def test_typed_normalizer_builds_openai_artifact_usage_and_cost() -> None:
     assert completed.usage.raw_hidden_params is None
     assert completed.usage.cost_provenance is not None
     assert completed.usage.cost_provenance.method == "estimated"
-    assert completed.usage.cost_provenance.source_snapshot_id == "source-snapshot-1"
+    assert completed.usage.cost_provenance.source_key == "litellm_catalog"
 
 
 def test_typed_normalizer_omits_cost_without_priority_pricing() -> None:
@@ -3022,7 +3022,7 @@ def test_typed_normalizer_freezes_the_dispatch_price_view() -> None:
     assert second_usage is not None
     assert first_usage.cost_usd == pytest.approx(1.97)
     assert first_usage.cost_provenance is not None
-    assert first_usage.cost_provenance.source_snapshot_id == "source-snapshot-1"
+    assert first_usage.cost_provenance.source_key == "litellm_catalog"
     assert second_usage.cost_usd is None
 
 

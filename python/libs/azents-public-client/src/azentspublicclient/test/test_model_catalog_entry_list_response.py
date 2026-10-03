@@ -37,10 +37,8 @@ class TestModelCatalogEntryListResponse(unittest.TestCase):
             return ModelCatalogEntryListResponse(
                 catalog_id = '',
                 catalog_scope = 'system',
-                current_snapshot_id = '',
-                current_snapshot_created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
-                latest_attempt = azentspublicclient.models.model_catalog_sync_attempt_response.ModelCatalogSyncAttemptResponse(
-                    id = '', 
+                last_success_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
+                latest_sync = azentspublicclient.models.model_catalog_sync_status_response.ModelCatalogSyncStatusResponse(
                     status = '', 
                     started_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                     finished_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
@@ -54,112 +52,7 @@ class TestModelCatalogEntryListResponse(unittest.TestCase):
                 stale = True,
                 sync_available_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
                 automatic_retry_blocked = True,
-                entries = [
-                    azentspublicclient.models.model_catalog_entry_response.ModelCatalogEntryResponse(
-                        id = '', 
-                        provider = 'openai', 
-                        provider_model_identifier = '', 
-                        display_name = '', 
-                        normalized_capabilities = azentspublicclient.models.model_capabilities.ModelCapabilities(
-                            context_window = azentspublicclient.models.model_context_window.ModelContextWindow(
-                                default_input_tokens = 1.0, 
-                                max_input_tokens = 1.0, 
-                                max_output_tokens = 1.0, ), 
-                            modalities = azentspublicclient.models.model_modalities.ModelModalities(
-                                input = [
-                                    'text'
-                                    ], 
-                                output = [
-                                    'text'
-                                    ], ), 
-                            tool_calling = azentspublicclient.models.model_tool_calling_capabilities.ModelToolCallingCapabilities(
-                                supported = True, 
-                                parallel_tool_calls = True, 
-                                strict_json_schema = True, ), 
-                            reasoning = azentspublicclient.models.model_reasoning_capabilities.ModelReasoningCapabilities(
-                                supported = True, 
-                                effort_levels = [
-                                    'none'
-                                    ], 
-                                summaries = True, ), 
-                            built_in_tools = azentspublicclient.models.model_built_in_tool_capabilities.ModelBuiltInToolCapabilities(
-                                supported = [
-                                    ''
-                                    ], ), 
-                            parameters = azentspublicclient.models.model_parameter_capabilities.ModelParameterCapabilities(
-                                temperature = True, 
-                                max_output_tokens = True, 
-                                top_p = True, 
-                                top_k = True, 
-                                stop_sequences = True, ), 
-                            compatibility = azentspublicclient.models.model_compatibility_capabilities.ModelCompatibilityCapabilities(
-                                provider_family = '', 
-                                responses_api = True, 
-                                unsupported_media_policy = 'text_substitution', ), 
-                            semantic_contract = azentspublicclient.models.model_capability_contract.ModelCapabilityContract(
-                                version = 2, 
-                                reasoning = azentspublicclient.models.reasoning_support.ReasoningSupport(
-                                    support = azentspublicclient.models.capability_support.CapabilitySupport(
-                                        state = 'supported', 
-                                        origin = 'explicit', 
-                                        predicate = azentspublicclient.models.support_predicate.SupportPredicate(
-                                            reasoning_efforts = [
-                                                'none'
-                                                ], 
-                                            function_tools = True, ), ), 
-                                    completeness = 'complete', 
-                                    efforts = [
-                                        azentspublicclient.models.effort_declaration.EffortDeclaration(
-                                            level = 'none', 
-                                            state = 'supported', 
-                                            origin = 'explicit', )
-                                        ], 
-                                    default_effort = azentspublicclient.models.default_effort_evidence.DefaultEffortEvidence(
-                                        level = 'none', 
-                                        origin = 'explicit', ), ), 
-                                reasoning_summaries = azentspublicclient.models.capability_support.CapabilitySupport(
-                                    state = 'supported', 
-                                    origin = , 
-                                    predicate = azentspublicclient.models.support_predicate.SupportPredicate(
-                                        reasoning_efforts = [
-                                            'none'
-                                            ], 
-                                        function_tools = True, ), ), 
-                                function_calling = , 
-                                parallel_function_calls = , 
-                                strict_function_schema = , 
-                                structured_response = , 
-                                parameters = azentspublicclient.models.parameter_support.ParameterSupport(
-                                    temperature = , 
-                                    max_output_tokens = , 
-                                    top_p = , 
-                                    top_k = , 
-                                    stop_sequences = , ), 
-                                input_modalities = [
-                                    azentspublicclient.models.modality_support.ModalitySupport(
-                                        modality = 'text', 
-                                        support = , )
-                                    ], 
-                                output_modalities = [
-                                    azentspublicclient.models.modality_support.ModalitySupport(
-                                        modality = 'text', 
-                                        support = , )
-                                    ], 
-                                built_in_tools = [
-                                    azentspublicclient.models.builtin_tool_support.BuiltinToolSupport(
-                                        tool = 'web_search', 
-                                        support = , )
-                                    ], ), ), 
-                        supported_execution_options = [
-                            'fast'
-                            ], 
-                        lifecycle_status = '', 
-                        visibility_status = '', 
-                        publisher = '', 
-                        family = '', 
-                        source_metadata = azentspublicclient.models.source_metadata.source_metadata(), 
-                        projection_metadata = azentspublicclient.models.projection_metadata.projection_metadata(), )
-                    ],
+                entries = ERROR_TO_EXAMPLE_VALUE,
                 total = 56,
                 limit = 56,
                 offset = 56
@@ -168,10 +61,8 @@ class TestModelCatalogEntryListResponse(unittest.TestCase):
             return ModelCatalogEntryListResponse(
                 catalog_id = '',
                 catalog_scope = 'system',
-                current_snapshot_id = '',
-                current_snapshot_created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
-                latest_attempt = azentspublicclient.models.model_catalog_sync_attempt_response.ModelCatalogSyncAttemptResponse(
-                    id = '', 
+                last_success_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
+                latest_sync = azentspublicclient.models.model_catalog_sync_status_response.ModelCatalogSyncStatusResponse(
                     status = '', 
                     started_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                     finished_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
@@ -185,112 +76,7 @@ class TestModelCatalogEntryListResponse(unittest.TestCase):
                 stale = True,
                 sync_available_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
                 automatic_retry_blocked = True,
-                entries = [
-                    azentspublicclient.models.model_catalog_entry_response.ModelCatalogEntryResponse(
-                        id = '', 
-                        provider = 'openai', 
-                        provider_model_identifier = '', 
-                        display_name = '', 
-                        normalized_capabilities = azentspublicclient.models.model_capabilities.ModelCapabilities(
-                            context_window = azentspublicclient.models.model_context_window.ModelContextWindow(
-                                default_input_tokens = 1.0, 
-                                max_input_tokens = 1.0, 
-                                max_output_tokens = 1.0, ), 
-                            modalities = azentspublicclient.models.model_modalities.ModelModalities(
-                                input = [
-                                    'text'
-                                    ], 
-                                output = [
-                                    'text'
-                                    ], ), 
-                            tool_calling = azentspublicclient.models.model_tool_calling_capabilities.ModelToolCallingCapabilities(
-                                supported = True, 
-                                parallel_tool_calls = True, 
-                                strict_json_schema = True, ), 
-                            reasoning = azentspublicclient.models.model_reasoning_capabilities.ModelReasoningCapabilities(
-                                supported = True, 
-                                effort_levels = [
-                                    'none'
-                                    ], 
-                                summaries = True, ), 
-                            built_in_tools = azentspublicclient.models.model_built_in_tool_capabilities.ModelBuiltInToolCapabilities(
-                                supported = [
-                                    ''
-                                    ], ), 
-                            parameters = azentspublicclient.models.model_parameter_capabilities.ModelParameterCapabilities(
-                                temperature = True, 
-                                max_output_tokens = True, 
-                                top_p = True, 
-                                top_k = True, 
-                                stop_sequences = True, ), 
-                            compatibility = azentspublicclient.models.model_compatibility_capabilities.ModelCompatibilityCapabilities(
-                                provider_family = '', 
-                                responses_api = True, 
-                                unsupported_media_policy = 'text_substitution', ), 
-                            semantic_contract = azentspublicclient.models.model_capability_contract.ModelCapabilityContract(
-                                version = 2, 
-                                reasoning = azentspublicclient.models.reasoning_support.ReasoningSupport(
-                                    support = azentspublicclient.models.capability_support.CapabilitySupport(
-                                        state = 'supported', 
-                                        origin = 'explicit', 
-                                        predicate = azentspublicclient.models.support_predicate.SupportPredicate(
-                                            reasoning_efforts = [
-                                                'none'
-                                                ], 
-                                            function_tools = True, ), ), 
-                                    completeness = 'complete', 
-                                    efforts = [
-                                        azentspublicclient.models.effort_declaration.EffortDeclaration(
-                                            level = 'none', 
-                                            state = 'supported', 
-                                            origin = 'explicit', )
-                                        ], 
-                                    default_effort = azentspublicclient.models.default_effort_evidence.DefaultEffortEvidence(
-                                        level = 'none', 
-                                        origin = 'explicit', ), ), 
-                                reasoning_summaries = azentspublicclient.models.capability_support.CapabilitySupport(
-                                    state = 'supported', 
-                                    origin = , 
-                                    predicate = azentspublicclient.models.support_predicate.SupportPredicate(
-                                        reasoning_efforts = [
-                                            'none'
-                                            ], 
-                                        function_tools = True, ), ), 
-                                function_calling = , 
-                                parallel_function_calls = , 
-                                strict_function_schema = , 
-                                structured_response = , 
-                                parameters = azentspublicclient.models.parameter_support.ParameterSupport(
-                                    temperature = , 
-                                    max_output_tokens = , 
-                                    top_p = , 
-                                    top_k = , 
-                                    stop_sequences = , ), 
-                                input_modalities = [
-                                    azentspublicclient.models.modality_support.ModalitySupport(
-                                        modality = 'text', 
-                                        support = , )
-                                    ], 
-                                output_modalities = [
-                                    azentspublicclient.models.modality_support.ModalitySupport(
-                                        modality = 'text', 
-                                        support = , )
-                                    ], 
-                                built_in_tools = [
-                                    azentspublicclient.models.builtin_tool_support.BuiltinToolSupport(
-                                        tool = 'web_search', 
-                                        support = , )
-                                    ], ), ), 
-                        supported_execution_options = [
-                            'fast'
-                            ], 
-                        lifecycle_status = '', 
-                        visibility_status = '', 
-                        publisher = '', 
-                        family = '', 
-                        source_metadata = azentspublicclient.models.source_metadata.source_metadata(), 
-                        projection_metadata = azentspublicclient.models.projection_metadata.projection_metadata(), )
-                    ],
+                entries = ERROR_TO_EXAMPLE_VALUE,
                 total = 56,
                 limit = 56,
                 offset = 56,

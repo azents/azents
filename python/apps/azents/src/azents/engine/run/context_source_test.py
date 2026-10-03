@@ -1,6 +1,5 @@
 """An explicitly captured context view is never replaced inside a resolver."""
 
-import dataclasses
 from collections.abc import Sequence
 from typing import Literal
 from unittest.mock import AsyncMock
@@ -9,6 +8,7 @@ import pytest
 from azcommon.result import Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.enums import LLMProvider
 from azents.core.inference_profile import RequestedInferenceProfile
 from azents.engine.run import resolve_test as fixtures
 from azents.engine.run.input import InvokeInput
@@ -23,7 +23,8 @@ from azents.repos.engine_resolve import get_engine_resolve_repositories
 from azents.repos.kimi_oauth_runtime import KimiOAuthRuntimeRepository
 from azents.repos.model_metadata_source_data import (
     CapturedContextSource,
-    ModelMetadataSourceSnapshot,
+    ContextModelMetadata,
+    ContextModelRequest,
 )
 from azents.repos.toolkit import ToolkitRepository
 from azents.repos.xai_oauth_runtime import XaiOAuthRuntimeRepository
@@ -32,24 +33,17 @@ from azents.services.model_metadata import ModelMetadataService
 from azents.services.oauth_runtime_clients import create_runtime_oauth_client_factories
 from azents.testing.model_metadata import (
     make_test_model_metadata_service,
+    make_test_source,
     make_test_source_payload,
-    make_test_source_snapshot,
 )
 
 
 class _ForbidContextRecapture(ModelMetadataService):
     async def capture_for_context(
-        self, *, capability_maximums: Sequence[int | None]
-    ) -> ModelMetadataSourceSnapshot | None:
-        del capability_maximums
+        self, *, requests: Sequence[ContextModelRequest]
+    ) -> CapturedContextSource:
+        del requests
         raise AssertionError("The caller already captured this context authority.")
-
-
-def _snapshot(identifier: str, maximum: int) -> ModelMetadataSourceSnapshot:
-    payload = make_test_source_payload(
-        {"gpt-4o": {"litellm_provider": "openai", "max_input_tokens": maximum}}
-    )
-    return dataclasses.replace(make_test_source_snapshot(payload), id=identifier)
 
 
 @pytest.mark.parametrize("operation", ["profile", "frozen", "runtime"])
@@ -59,7 +53,7 @@ async def test_real_resolver_respects_captured_context_even_when_new_source_exis
     operation: Literal["profile", "frozen", "runtime"],
     absent: bool,
 ) -> None:
-    """Captured None is absence, not an instruction to read the now-new snapshot."""
+    """An empty narrow capture is absence, not an instruction to read again."""
     agent = fixtures._make_agent()
     candidate = agent.selectable_model_options[0].candidates[0]
     integration = fixtures._make_integration()
@@ -68,12 +62,28 @@ async def test_real_resolver_respects_captured_context_even_when_new_source_exis
     integration_repository = AsyncMock()
     integration_repository.get_by_id_with_secrets.return_value = integration
     session_manager = fixtures._session_manager_for(AsyncMock(spec=AsyncSession))
-    latest = make_test_model_metadata_service(snapshot=_snapshot("B", 400_000))
+    latest = make_test_model_metadata_service(
+        source=make_test_source(
+            make_test_source_payload(
+                {"gpt-4o": {"litellm_provider": "openai", "max_input_tokens": 400_000}}
+            )
+        )
+    )
     metadata = _ForbidContextRecapture(
         repository=latest.repository,
     )
     captured = CapturedContextSource(
-        snapshot=None if absent else _snapshot("A", 96_000)
+        models=(
+            ()
+            if absent
+            else (
+                ContextModelMetadata(
+                    provider=LLMProvider.OPENAI,
+                    model_identifier="gpt-4o",
+                    max_input_tokens=96_000,
+                ),
+            )
+        )
     )
     monkeypatch.setattr(
         EngineRuntimeTokenResolver,

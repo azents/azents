@@ -23,11 +23,10 @@ from typing import Any, ClassVar, Dict, List, Optional
 from typing import Optional, Set
 from typing_extensions import Self
 
-class ModelCatalogSyncAttemptResponse(BaseModel):
+class ImageGenerationCatalogSyncStatusResponse(BaseModel):
     """
-    Latest model catalog sync attempt response.
+    Current image-generation synchronization response.
     """ # noqa: E501
-    id: StrictStr
     status: StrictStr
     started_at: datetime
     finished_at: Optional[datetime]
@@ -39,7 +38,7 @@ class ModelCatalogSyncAttemptResponse(BaseModel):
     skipped_count: StrictInt
     hidden_count: StrictInt
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["id", "status", "started_at", "finished_at", "failure_code", "failure_message", "action_hint", "fetched_count", "matched_count", "skipped_count", "hidden_count"]
+    __properties: ClassVar[List[str]] = ["status", "started_at", "finished_at", "failure_code", "failure_message", "action_hint", "fetched_count", "matched_count", "skipped_count", "hidden_count"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -59,7 +58,7 @@ class ModelCatalogSyncAttemptResponse(BaseModel):
 
     @classmethod
     def from_json(cls, json_str: str) -> Optional[Self]:
-        """Create an instance of ModelCatalogSyncAttemptResponse from a JSON string"""
+        """Create an instance of ImageGenerationCatalogSyncStatusResponse from a JSON string"""
         return cls.from_dict(json.loads(json_str))
 
     def to_dict(self) -> Dict[str, Any]:
@@ -111,7 +110,7 @@ class ModelCatalogSyncAttemptResponse(BaseModel):
 
     @classmethod
     def from_dict(cls, obj: Optional[Dict[str, Any]]) -> Optional[Self]:
-        """Create an instance of ModelCatalogSyncAttemptResponse from a dict"""
+        """Create an instance of ImageGenerationCatalogSyncStatusResponse from a dict"""
         if obj is None:
             return None
 
@@ -119,7 +118,6 @@ class ModelCatalogSyncAttemptResponse(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "id": obj.get("id"),
             "status": obj.get("status"),
             "started_at": obj.get("started_at"),
             "finished_at": obj.get("finished_at"),

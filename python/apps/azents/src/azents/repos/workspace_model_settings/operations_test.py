@@ -107,6 +107,7 @@ def selection(model_identifier: str) -> AgentModelSelection:
     capabilities.context_window.max_output_tokens = 8192
     capabilities.reasoning.supported = True
     return AgentModelSelection(
+        pricing=None,
         llm_provider_integration_id="integration-1",
         provider=LLMProvider.OPENAI,
         model_identifier=model_identifier,

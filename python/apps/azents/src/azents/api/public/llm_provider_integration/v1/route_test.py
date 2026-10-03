@@ -253,7 +253,6 @@ async def test_image_catalog_get_returns_stored_default_only_state() -> None:
         default_only_image_generation_catalog(
             provider=LLMProvider.CHATGPT_OAUTH,
             integration_enabled=True,
-            current_configuration_version=4,
         )
     )
     background_tasks = BackgroundTasks()
@@ -267,7 +266,7 @@ async def test_image_catalog_get_returns_stored_default_only_state() -> None:
 
     assert response.default_available is True
     assert response.explicit_selection_supported is False
-    assert response.current_configuration_version == 4
+    assert response.usable is True
     assert response.entries == []
     assert background_tasks.tasks == []
 

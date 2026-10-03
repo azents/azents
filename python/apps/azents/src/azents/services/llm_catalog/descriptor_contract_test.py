@@ -2,6 +2,7 @@
 
 import ast
 import dataclasses
+import datetime
 from unittest.mock import AsyncMock
 
 import pytest
@@ -20,11 +21,11 @@ from azents.core.enums import (
     LLMProvider,
 )
 from azents.core.model_capability_projection import project_capabilities
+from azents.core.model_pricing import normalize_model_pricing
 from azents.core.workspace import WorkspaceCreate
 from azents.rdb.session import SessionManager
 from azents.repos.llm_catalog import LLMCatalogRepository
 from azents.repos.llm_catalog.data import (
-    CatalogProjectionProvenance,
     LLMCatalog,
     LLMCatalogEntry,
     LLMCatalogEntryCreate,
@@ -32,6 +33,7 @@ from azents.repos.llm_catalog.data import (
 from azents.repos.llm_catalog_operations import LLMCatalogOperationsRepository
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.llm_provider_integration.data import LLMProviderIntegrationCreate
+from azents.repos.model_metadata_source import ModelMetadataSourceRepository
 from azents.repos.workspace import WorkspaceRepository
 from azents.services.llm_catalog import ModelCatalogEntryOutput, ModelCatalogReadService
 
@@ -111,9 +113,10 @@ async def test_new_selection_diagnostics_preserve_raw_identifier_without_descrip
             provider=integration.provider,
             purpose=LLMCatalogPurpose.CONVERSATION,
         )
-        snapshot_id = await catalog_repository.create_candidate_snapshot(
+        owner = await catalog_repository.lock_catalog(session, catalog_id=catalog.id)
+        await catalog_repository.replace_current_entries(
             session,
-            catalog=catalog,
+            owner=owner,
             entries=[
                 LLMCatalogEntryCreate(
                     provider=integration.provider,
@@ -126,6 +129,9 @@ async def test_new_selection_diagnostics_preserve_raw_identifier_without_descrip
                     provider_integration_id=integration.id,
                     publisher="other",
                     family=None,
+                    pricing=normalize_model_pricing(
+                        source_key=None, source_model=None, collected_at=None
+                    ),
                     source_metadata={"provider_listing_source": "fixture"},
                     projection_metadata={
                         "projection_schema_version": "2",
@@ -135,29 +141,14 @@ async def test_new_selection_diagnostics_preserve_raw_identifier_without_descrip
                 )
             ],
             diagnostics={"fixture": True},
-            provenance=CatalogProjectionProvenance(
-                source_snapshot_id=None,
-                projection_schema_version="2",
-                runtime_profile_resolver_revision="fixture",
-                pydantic_ai_version="fixture",
-                genai_prices_version=None,
-                projection_fingerprint="f" * 64,
-            ),
-            catalog_configuration_version=1,
-        )
-        await catalog_repository.publish_candidate_snapshot(
-            session,
-            catalog_id=catalog.id,
-            candidate_snapshot_id=snapshot_id,
-            expected_current_snapshot_id=None,
-            expected_catalog_configuration_version=1,
-            expected_projection_fingerprint="f" * 64,
+            finished_at=datetime.datetime.now(datetime.UTC),
         )
     result = await ModelCatalogReadService(
         operations=LLMCatalogOperationsRepository(
             session_manager=rdb_session_manager,
             catalog_repository=catalog_repository,
             integration_repository=AsyncMock(spec=LLMProviderIntegrationRepository),
+            source_repository=ModelMetadataSourceRepository(),
         )
     ).resolve_agent_model_selection(
         workspace_id=workspace_id,
@@ -173,5 +164,5 @@ async def test_new_selection_diagnostics_preserve_raw_identifier_without_descrip
     assert selection.llm_provider_integration_id == integration.id
     assert selection.normalized_capabilities == capabilities
     assert selection.model_snapshot["catalog_id"] == catalog.id
-    assert selection.model_snapshot["snapshot_id"] == snapshot_id
+    assert "snapshot_id" not in selection.model_snapshot
     assert _DESCRIPTORS.isdisjoint(selection.model_snapshot)

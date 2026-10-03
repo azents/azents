@@ -9,7 +9,6 @@ code_paths:
   - python/apps/azents/src/azents/core/chat_projection.py
   - python/apps/azents/src/azents/core/historical_memory_settings.py
   - python/apps/azents/src/azents/core/historical_memory_snapshot_policy.py
-  - python/apps/azents/src/azents/core/model_metadata_projection_data.py
   - python/apps/azents/src/azents/core/session_resource_authority.py
   - python/apps/azents/src/azents/core/session_workspace_paths.py
   - python/apps/azents/src/azents/repos/chat_operations.py
@@ -61,8 +60,8 @@ code_paths:
   - python/apps/azents/bin/scheduler.sh
   - infra/charts/azents/templates/server/scheduler-deployment.yaml.tpl
   - infra/charts/azents/templates/server/scheduler-pdb.yaml.tpl
-last_verified_at: 2026-10-02
-spec_version: 24
+last_verified_at: 2026-10-03
+spec_version: 25
 ---
 
 # Periodic Execution Flow Spec
@@ -112,6 +111,15 @@ Registered tasks include `scheduler_heartbeat`, `model_catalog_system_projection
 Task dispatcher definition.
 `scheduler_heartbeat` is a no-op heartbeat that returns a small execution
 summary and has no external network dependency.
+
+The existing six-hour `model_catalog_system_projection` task collects bounded inert
+source JSON, prepares exact per-model normalized prices and system projections, and
+atomically replaces the current source and all affected system catalogs. It returns
+current publication counts and descriptive source facts, not snapshot IDs, hashes,
+fingerprints, or candidate/cutover identities. A failed collection/publication retains
+the previous current rows and last-success time with one current failure state.
+This task does not backfill saved selections, discover integration models, or change
+existing integration synchronization timing/backoff.
 
 The user Scheduled Task dispatcher definition remains code-owned, but its handler
 does not use `scheduled_task_states` as product state. Each execution asks the
@@ -445,12 +453,14 @@ The periodic execution flow does not provide:
   maintenance registry;
 - attempt history tables;
 - Temporal workflows or activities;
-- external model catalog source sync by itself.
-
-Model catalog source sync is a later consumer of this scheduler.
+- an independently scheduled model-catalog source sync; source collection is part of
+  the existing system projection task.
 
 ## Changelog
 
+- **2026-10-03** (spec_version 25) — Kept source collection in the existing
+  system projection task while replacing revision publication with current rows,
+  normalized prices, and current synchronization facts.
 - **2026-10-02** (spec_version 24) — Completed Scheduler registration/read/trigger/
   claim/settlement transaction ownership while preserving clock, lease, Job Runtime,
   normal stale outcomes, and cancellation/error ordering.

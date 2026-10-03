@@ -33,7 +33,6 @@ class ModelParameters(BaseModel):
     top_k: Optional[Annotated[int, Field(strict=True, ge=1)]] = None
     stop_sequences: Optional[Annotated[List[StrictStr], Field(max_length=4)]] = None
     reasoning_effort: Optional[ModelReasoningEffort] = None
-    additional_properties: Dict[str, Any] = {}
     __properties: ClassVar[List[str]] = ["temperature", "top_p", "top_k", "stop_sequences", "reasoning_effort"]
 
     model_config = ConfigDict(
@@ -66,10 +65,8 @@ class ModelParameters(BaseModel):
         * `None` is only added to the output dict for nullable fields that
           were set at model initialization. Other fields with value `None`
           are ignored.
-        * Fields in `self.additional_properties` are added to the output dict.
         """
         excluded_fields: Set[str] = set([
-            "additional_properties",
         ])
 
         _dict = self.model_dump(
@@ -77,11 +74,6 @@ class ModelParameters(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
-        # puts key-value pairs in additional_properties in the top level
-        if self.additional_properties is not None:
-            for _key, _value in self.additional_properties.items():
-                _dict[_key] = _value
-
         # set to None if temperature (nullable) is None
         # and model_fields_set contains the field
         if self.temperature is None and "temperature" in self.model_fields_set:
@@ -125,11 +117,6 @@ class ModelParameters(BaseModel):
             "stop_sequences": obj.get("stop_sequences"),
             "reasoning_effort": obj.get("reasoning_effort")
         })
-        # store additional fields in additional_properties
-        for _key in obj.keys():
-            if _key not in cls.__properties:
-                _obj.additional_properties[_key] = obj.get(_key)
-
         return _obj
 
 

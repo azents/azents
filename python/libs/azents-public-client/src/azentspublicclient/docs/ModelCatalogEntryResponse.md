@@ -16,8 +16,9 @@ Name | Type | Description | Notes
 **visibility_status** | **str** |  | 
 **publisher** | **str** |  | 
 **family** | **str** |  | 
-**source_metadata** | **Dict[str, object]** |  | 
-**projection_metadata** | **Dict[str, object]** |  | 
+**pricing** | [**ModelPricingDefinition**](ModelPricingDefinition.md) |  | 
+**source_metadata** | **object** |  | 
+**projection_metadata** | **object** |  | 
 
 ## Example
 

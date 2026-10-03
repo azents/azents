@@ -30,6 +30,7 @@ from azents.testing.model_selection import (
 
 def _selection() -> AgentModelSelection:
     return AgentModelSelection(
+        pricing=None,
         llm_provider_integration_id="integration-secret-boundary",
         provider=LLMProvider.OPENAI,
         model_identifier="gpt-5.4",

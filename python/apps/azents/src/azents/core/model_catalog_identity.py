@@ -19,6 +19,44 @@ class ScopedCatalogModel:
     source_model: CatalogSourceModel
 
 
+@dataclasses.dataclass(frozen=True)
+class CatalogSourceIdentity:
+    """Exact adopted source address, including an explicitly absent record."""
+
+    provider: str
+    source_model_key: str
+
+
+def catalog_source_keys(
+    *, provider: LLMProvider, model_identifier: str
+) -> tuple[CatalogSourceIdentity, ...]:
+    """Plan exact source reads using the existing literal namespace contract."""
+    if not model_identifier or not _canonical_bare(provider, model_identifier):
+        return ()
+    namespaces = (
+        "openai",
+        "anthropic",
+        "gemini",
+        "bedrock_converse",
+        "vertex_ai",
+        "vertex_ai-language-models",
+        "vertex_ai-anthropic_models",
+        "chatgpt",
+        "xai",
+        "xai_oauth",
+        "kimi_oauth",
+        "openrouter",
+    )
+    return tuple(
+        CatalogSourceIdentity(
+            provider=namespace,
+            source_model_key=f"{_address_prefix(provider)}{model_identifier}",
+        )
+        for namespace in namespaces
+        if provider_namespace_matches(provider, namespace)
+    )
+
+
 def provider_namespace_matches(provider: LLMProvider, source_provider: str) -> bool:
     """Check host/API scope without equating native, OAuth, or cloud deployments."""
     match provider:

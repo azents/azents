@@ -3,7 +3,7 @@
 import asyncio
 import dataclasses
 import datetime
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Sequence
 from typing import Literal
 from unittest.mock import Mock
 
@@ -43,15 +43,12 @@ from azents.repos.agent.data import Agent
 from azents.repos.model_metadata_read import ModelMetadataReadRepository
 from azents.repos.model_metadata_source_data import (
     CapturedContextSource,
-    ModelMetadataSourceSnapshot,
+    ContextModelMetadata,
+    ContextModelRequest,
 )
 from azents.repos.worker_executor_model import WorkerExecutorModelOperationRepository
 from azents.repos.worker_executor_model_data import FreshModelPreparation
 from azents.services.model_metadata import ModelMetadataService
-from azents.testing.model_metadata import (
-    make_test_source_payload,
-    make_test_source_snapshot,
-)
 from azents.testing.model_selection import (
     make_test_model_selection,
     make_test_selectable_model_options,
@@ -61,28 +58,34 @@ from azents.worker.run.executor import RunExecutor, RunInputPollResult
 from azents.worker.session.supervisor import ToolAdmissionBarrier
 
 
-def _snapshot(
-    identifier: str, *, main: int, compaction: int
-) -> ModelMetadataSourceSnapshot:
-    payload = make_test_source_payload(
-        {
-            model_id: {
-                "litellm_provider": "openai",
-                "max_input_tokens": context_window,
-            }
+def _context(identifier: str, *, main: int, compaction: int) -> CapturedContextSource:
+    del identifier
+    return CapturedContextSource(
+        models=tuple(
+            ContextModelMetadata(
+                provider=LLMProvider.OPENAI,
+                model_identifier=model_id,
+                max_input_tokens=context_window,
+            )
             for model_id, context_window in (
                 ("gpt-main", main),
                 ("gpt-main-fallback", main),
                 ("gpt-compaction", compaction),
                 ("gpt-compaction-fallback", compaction),
             )
-        }
+        )
     )
-    return dataclasses.replace(
-        make_test_source_snapshot(payload),
-        id=identifier,
-        created_at=datetime.datetime.now(datetime.UTC),
-    )
+
+
+def _assert_captured(
+    actual: CapturedContextSource,
+    expected: CapturedContextSource | None,
+) -> None:
+    if expected is None:
+        assert actual.models == ()
+    else:
+        assert actual.models
+        assert all(model in expected.models for model in actual.models)
 
 
 def _pair_agent() -> Agent:
@@ -163,23 +166,37 @@ class _RefreshingSourceRepository(ModelMetadataReadRepository):
 
     def __init__(
         self,
-        snapshots: tuple[ModelMetadataSourceSnapshot | None, ...],
+        snapshots: tuple[CapturedContextSource | None, ...],
         selection_transaction_open: Callable[[], bool],
     ) -> None:
         self.snapshots = snapshots
         self.selection_transaction_open = selection_transaction_open
         self.captures = 0
 
-    async def capture(self) -> ModelMetadataSourceSnapshot | None:
+    async def capture_for_context(
+        self, *, requests: Sequence[ContextModelRequest]
+    ) -> CapturedContextSource:
         assert not self.selection_transaction_open()
         selected = self.snapshots[min(self.captures, len(self.snapshots) - 1)]
         self.captures += 1
-        return selected
+        if selected is None:
+            return CapturedContextSource(models=())
+        return CapturedContextSource(
+            models=tuple(
+                model
+                for model in selected.models
+                if any(
+                    model.provider == request.provider
+                    and model.model_identifier == request.model_identifier
+                    for request in requests
+                )
+            )
+        )
 
 
 def _install_sources(
     executor: RunExecutor,
-    snapshots: tuple[ModelMetadataSourceSnapshot | None, ...],
+    snapshots: tuple[CapturedContextSource | None, ...],
 ) -> _RefreshingSourceRepository:
     assert isinstance(executor, fixtures._TestRunExecutor)
     operations = _TrackedSelectionOperations(
@@ -210,7 +227,7 @@ def _input_limit(
         window.default_input_tokens,
         window.max_input_tokens,
         metadata.maximum_input_tokens(
-            context_source.snapshot,
+            context_source,
             provider=selection.provider,
             model_identifier=selection.model_identifier,
         ),
@@ -338,9 +355,9 @@ async def test_fresh_pair_does_not_recapture_after_source_publication(
             ),
         )
     executor = fixtures._executor(session_lifecycle=lifecycle, agent=agent)
-    initial = None if absent else _snapshot("A", main=100_000, compaction=64_000)
+    initial = None if absent else _context("A", main=100_000, compaction=64_000)
     repository = _install_sources(
-        executor, (initial, _snapshot("B", main=32_000, compaction=200_000))
+        executor, (initial, _context("B", main=32_000, compaction=200_000))
     )
     calls = _install_resolvers(
         monkeypatch, executor, agent, concurrent_primary_edit=branch == "frozen"
@@ -360,7 +377,7 @@ async def test_fresh_pair_does_not_recapture_after_source_publication(
     assert len(calls.runtime) == 1
     received = calls.frozen + calls.runtime
     assert all(source is received[0] for source in received)
-    assert received[0].snapshot is initial
+    _assert_captured(received[0], initial)
     expected_main, expected_compaction = (
         (128_000, 128_000) if absent else (100_000, 64_000)
     )
@@ -405,7 +422,7 @@ async def test_fresh_known_pair_never_reads_fallback_authority(
     compaction_window.max_input_tokens = 64_000
     executor = fixtures._executor(agent=agent)
     repository = _install_sources(
-        executor, (_snapshot("unread", main=32_000, compaction=200_000),)
+        executor, (_context("unread", main=32_000, compaction=200_000),)
     )
     calls = _install_resolvers(
         monkeypatch, executor, agent, concurrent_primary_edit=False
@@ -422,7 +439,7 @@ async def test_fresh_known_pair_never_reads_fallback_authority(
     )
     assert isinstance(prepared, Success)
     assert repository.captures == 0
-    assert calls.frozen[0].snapshot is None
+    assert calls.frozen[0].models == ()
     assert calls.runtime[0] is calls.frozen[0]
     assert prepared.value.run_request.max_input_tokens == 100_000
     assert prepared.value.run_request.compaction_max_input_tokens == 64_000
@@ -440,9 +457,9 @@ async def test_prepare_compaction_refreshes_the_pair_without_a_derived_user_cap(
     """An old resolved window/threshold is not new explicit user intent."""
     agent = _pair_agent()
     executor = fixtures._executor(agent=agent)
-    initial = None if absent else _snapshot("A", main=100_000, compaction=64_000)
+    initial = None if absent else _context("A", main=100_000, compaction=64_000)
     repository = _install_sources(
-        executor, (initial, _snapshot("B", main=32_000, compaction=200_000))
+        executor, (initial, _context("B", main=32_000, compaction=200_000))
     )
     calls = _install_resolvers(
         monkeypatch, executor, agent, concurrent_primary_edit=False
@@ -502,7 +519,8 @@ async def test_prepare_compaction_refreshes_the_pair_without_a_derived_user_cap(
         expected_main = min(expected_main, user_cap)
     expected_effective = min(expected_main, expected_compaction)
     assert repository.captures == 1
-    assert len(calls.runtime) == 1 and calls.runtime[0].snapshot is initial
+    assert len(calls.runtime) == 1
+    _assert_captured(calls.runtime[0], initial)
     assert prepared.max_input_tokens == expected_main
     assert prepared.compaction_max_input_tokens == expected_compaction
     assert prepared.context_window_tokens == user_cap
@@ -542,8 +560,8 @@ async def test_prepare_compaction_preserves_explicit_no_state_cap_and_threshold(
     repository = _install_sources(
         executor,
         (
-            _snapshot("A", main=100_000, compaction=64_000),
-            _snapshot("B", main=32_000, compaction=200_000),
+            _context("A", main=100_000, compaction=64_000),
+            _context("B", main=32_000, compaction=200_000),
         ),
     )
     _install_resolvers(monkeypatch, executor, agent, concurrent_primary_edit=False)
@@ -635,10 +653,10 @@ async def test_compaction_quota_transition_recomputes_both_limits_from_one_view(
         agent=agent,
         failed_run_max_retries=0,
     )
-    old = _snapshot("old", main=64_000, compaction=128_000)
-    new = None if absent else _snapshot("A", main=100_000, compaction=80_000)
+    old = _context("old", main=64_000, compaction=128_000)
+    new = None if absent else _context("A", main=100_000, compaction=80_000)
     repository = _install_sources(
-        executor, (old, new, _snapshot("B", main=32_000, compaction=200_000))
+        executor, (old, new, _context("B", main=32_000, compaction=200_000))
     )
     calls = _install_resolvers(
         monkeypatch, executor, agent, concurrent_primary_edit=False
@@ -676,8 +694,8 @@ async def test_compaction_quota_transition_recomputes_both_limits_from_one_view(
     assert result.terminal_run_status is AgentRunStatus.COMPLETED
     assert repository.captures == 2
     assert len(calls.runtime) == 2
-    assert calls.runtime[0].snapshot is old
-    assert calls.runtime[1].snapshot is new
+    _assert_captured(calls.runtime[0], old)
+    _assert_captured(calls.runtime[1], new)
     assert len(engine.requests) == 2
     refreshed = engine.requests[1]
     expected_main, expected_compaction = (
@@ -703,9 +721,9 @@ async def test_successive_prepare_transitions_keep_threshold_provenance(
     repository = _install_sources(
         executor,
         (
-            _snapshot("A", main=100_000, compaction=80_000),
-            _snapshot("B", main=40_000, compaction=32_000),
-            _snapshot("unread", main=900_000, compaction=900_000),
+            _context("A", main=100_000, compaction=80_000),
+            _context("B", main=40_000, compaction=32_000),
+            _context("unread", main=900_000, compaction=900_000),
         ),
     )
     calls = _install_resolvers(
@@ -782,8 +800,8 @@ async def test_no_state_automatic_threshold_keeps_derive_at_use_marker(
     repository = _install_sources(
         executor,
         (
-            _snapshot("A", main=100_000, compaction=80_000),
-            _snapshot("B", main=40_000, compaction=32_000),
+            _context("A", main=100_000, compaction=80_000),
+            _context("B", main=40_000, compaction=32_000),
         ),
     )
     _install_resolvers(monkeypatch, executor, agent, concurrent_primary_edit=False)
@@ -849,14 +867,14 @@ async def test_two_compaction_quota_transitions_use_current_derived_provenance(
         agent=agent,
         failed_run_max_retries=0,
     )
-    old = _snapshot("old", main=64_000, compaction=128_000)
-    first = _snapshot("A", main=100_000, compaction=80_000)
-    second = _snapshot("B", main=40_000, compaction=32_000)
+    old = _context("old", main=64_000, compaction=128_000)
+    first = _context("A", main=100_000, compaction=80_000)
+    second = _context("B", main=40_000, compaction=32_000)
     sources = (
         (old, first, first, second) if prepare_before_quota else (old, first, second)
     )
     repository = _install_sources(
-        executor, (*sources, _snapshot("unread", main=900_000, compaction=900_000))
+        executor, (*sources, _context("unread", main=900_000, compaction=900_000))
     )
     calls = _install_resolvers(
         monkeypatch, executor, agent, concurrent_primary_edit=False
@@ -900,8 +918,8 @@ async def test_two_compaction_quota_transitions_use_current_derived_provenance(
     assert engine.requests[2].max_input_tokens == 40_000
     assert engine.requests[2].compaction_max_input_tokens == 32_000
     assert engine.requests[2].auto_compaction_threshold_tokens == 28_800
-    assert calls.runtime[-2].snapshot is first
-    assert calls.runtime[-1].snapshot is second
+    _assert_captured(calls.runtime[-2], first)
+    _assert_captured(calls.runtime[-1], second)
     assert engine.requests[0].inference_state is not None
     assert engine.requests[0].inference_state.effective_context_window_tokens == 64_000
     assert lifecycle.retry_states == []
@@ -935,20 +953,14 @@ async def test_compaction_context_uses_saved_semantic_model_not_dispatch_encodin
         effective_auto_compaction_threshold_tokens=18_000,
         resolved_at=datetime.datetime.now(datetime.UTC),
     )
-    payload = make_test_source_payload(
-        {
-            "anthropic.claude-fixture-v1:0": {
-                "litellm_provider": "bedrock_converse",
-                "max_input_tokens": 100_000,
-            }
-        }
-    )
-    source = dataclasses.replace(
-        _snapshot("semantic", main=100_000, compaction=80_000),
-        source_hash=payload.content_hash,
-        provider_count=payload.provider_count,
-        model_count=payload.model_count,
-        payload=payload,
+    source = CapturedContextSource(
+        models=(
+            ContextModelMetadata(
+                provider=LLMProvider.AWS_BEDROCK,
+                model_identifier="anthropic.claude-fixture-v1:0",
+                max_input_tokens=100_000,
+            ),
+        )
     )
     request = dataclasses.replace(
         previous.value,
@@ -961,9 +973,7 @@ async def test_compaction_context_uses_saved_semantic_model_not_dispatch_encodin
         auto_compaction_threshold_tokens=18_000,
         inference_state=state,
     )
-    refreshed = executor._with_shared_compaction_context(
-        request, context_source=CapturedContextSource(snapshot=source)
-    )
+    refreshed = executor._with_shared_compaction_context(request, context_source=source)
     assert refreshed.max_input_tokens == 100_000
     assert refreshed.effective_max_input_tokens == 80_000
     assert refreshed.auto_compaction_threshold_tokens == 72_000

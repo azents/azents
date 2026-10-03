@@ -623,16 +623,16 @@ def test_historical_usage_does_not_acquire_cost_authority() -> None:
     assert usage.cost_provenance is None
 
 
-def test_snapshot_cost_provenance_roundtrips_without_raw_response_data() -> None:
+def test_selected_cost_provenance_roundtrips_without_raw_response_data() -> None:
     """Known estimated authority travels with usage, not output or secrets."""
     provenance = ModelCostProvenance(
         method="estimated",
         provider="openai",
         model_identifier="model",
         service_tier="priority",
-        source_snapshot_id="source-id",
-        source_hash="source-hash",
+        source_key="litellm_catalog",
         source_model_key="openai/model",
+        collected_at=datetime.datetime(2026, 10, 1, tzinfo=datetime.UTC),
         estimator_version="1",
     )
     usage = TokenUsagePayload(

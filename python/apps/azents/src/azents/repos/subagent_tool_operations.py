@@ -1,6 +1,7 @@
 """Completed database operations for Engine Subagent collaboration tools."""
 
 import dataclasses
+from collections.abc import Sequence
 from textwrap import dedent
 from typing import NamedTuple
 
@@ -17,7 +18,6 @@ from azents.core.enums import (
     SessionAgentKind,
 )
 from azents.core.inference_profile import SessionInferenceState
-from azents.core.model_catalog_source import CATALOG_SOURCE_KEY
 from azents.engine.events.types import AgentRunState, Event
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
@@ -29,7 +29,10 @@ from azents.repos.agent_session.data import AgentSession, SessionAgent
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.mailbox.data import MailboxItemCreate
 from azents.repos.model_metadata_source import ModelMetadataSourceRepository
-from azents.repos.model_metadata_source_data import ModelMetadataSourceSnapshot
+from azents.repos.model_metadata_source_data import (
+    CapturedContextSource,
+    ContextModelRequest,
+)
 from azents.repos.subagent_coordination.data import SubagentCoordinationSnapshot
 from azents.repos.subagent_coordination.repository import (
     SubagentCoordinationRepository,
@@ -86,7 +89,7 @@ class SubagentToolOperationRepository:
     agent_run_repository: AgentRunRepository
     event_transcript_repository: EventTranscriptRepository
     mailbox_repository: MailboxRepository
-    source_snapshot_repository: ModelMetadataSourceRepository
+    source_repository: ModelMetadataSourceRepository
     coordination_repository: SubagentCoordinationRepository
 
     async def get_agent(self, agent_id: str) -> Agent | None:
@@ -105,12 +108,14 @@ class SubagentToolOperationRepository:
                 session_id,
             )
 
-    async def load_model_source_snapshot(self) -> ModelMetadataSourceSnapshot | None:
-        """Return the latest validated model metadata source snapshot."""
+    async def load_model_context(
+        self, *, requests: Sequence[ContextModelRequest]
+    ) -> CapturedContextSource:
+        """Return only requested current context maximums."""
         async with self.session_manager() as session:
-            return await self.source_snapshot_repository.get_current(
+            return await self.source_repository.capture_for_context(
                 session,
-                source_key=CATALOG_SOURCE_KEY,
+                requests=requests,
             )
 
     async def prepare_spawn(

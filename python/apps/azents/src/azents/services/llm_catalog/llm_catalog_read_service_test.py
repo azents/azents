@@ -1,100 +1,57 @@
-"""LLM catalog read service tests."""
+"""Coherent latest-state reads and server-owned selected price copying."""
 
-from __future__ import annotations
-
+import dataclasses
 import datetime
 from unittest.mock import AsyncMock
 
-import pytest
 from azcommon.result import Success
-from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.agent import AgentModelSelectionInput
 from azents.core.enums import (
     LLMCatalogAttemptStatus,
+    LLMCatalogEntryVisibility,
     LLMCatalogPurpose,
     LLMCatalogScope,
+    LLMModelLifecycleStatus,
     LLMProvider,
 )
-from azents.core.model_catalog_source import CATALOG_SOURCE_KEY
-from azents.repos.llm_catalog import LLMCatalogRepository
+from azents.core.llm_catalog import ModelCapabilities
+from azents.repos.llm_catalog import CatalogEntryWithCatalog
 from azents.repos.llm_catalog.data import (
     LLMCatalog,
+    LLMCatalogEntry,
     LLMCatalogEntryList,
-    LLMCatalogSyncAttempt,
+    LLMCatalogSyncStatus,
 )
-from azents.repos.llm_catalog_operations import LLMCatalogOperationsRepository
-from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
+from azents.repos.llm_catalog_operations import (
+    CatalogReadPage,
+    LLMCatalogOperationsRepository,
+)
 from azents.services.llm_catalog import ModelCatalogReadService
+from azents.testing.model_metadata import make_test_source, make_test_source_payload
+
+_NOW = datetime.datetime(2026, 10, 3, tzinfo=datetime.UTC)
 
 
-class _SessionManager:
-    """Async session manager used by tests."""
-
-    async def __aenter__(self) -> AsyncSession:
-        return AsyncSession()
-
-    async def __aexit__(self, *args: object) -> bool | None:
-        return None
-
-    def __call__(self) -> "_SessionManager":
-        return self
-
-
-class _CatalogRepository(LLMCatalogRepository):
-    """Catalog repository used by tests."""
-
-    def __init__(self, page: LLMCatalogEntryList) -> None:
-        self.page = page
-
-    async def list_entries_by_integration(
-        self,
-        session: AsyncSession,
-        *,
-        integration_id: str,
-        workspace_id: str,
-        purpose: LLMCatalogPurpose,
-        search: str | None,
-        limit: int,
-        offset: int,
-    ) -> LLMCatalogEntryList | None:
-        del session, integration_id, workspace_id, purpose, search, limit, offset
-        return self.page
-
-    async def get_latest_integration_attempt_for_workspace(
-        self,
-        session: AsyncSession,
-        *,
-        workspace_id: str,
-    ) -> LLMCatalogSyncAttempt | None:
-        del session, workspace_id
-        return None
-
-
-@pytest.mark.asyncio
-async def test_read_service_returns_latest_failed_attempt_without_snapshot() -> None:
-    """Return the latest failed attempt even when no snapshot exists."""
-    now = datetime.datetime.now(datetime.UTC)
-    page = LLMCatalogEntryList(
-        catalog=LLMCatalog(
-            id="catalog-id",
-            scope=LLMCatalogScope.INTEGRATION,
-            provider=LLMProvider.AWS_BEDROCK,
-            purpose=LLMCatalogPurpose.CONVERSATION,
-            provider_integration_id="integration-id",
-            current_snapshot_id=None,
-            latest_attempt_id="attempt-id",
-        ),
-        entries=[],
-        total=0,
-        current_snapshot_created_at=None,
-        latest_attempt=LLMCatalogSyncAttempt(
-            id="attempt-id",
-            catalog_id="catalog-id",
-            source_key=CATALOG_SOURCE_KEY,
+def _catalog() -> LLMCatalog:
+    return LLMCatalog(
+        id="catalog",
+        scope=LLMCatalogScope.INTEGRATION,
+        provider=LLMProvider.AWS_BEDROCK,
+        purpose=LLMCatalogPurpose.CONVERSATION,
+        provider_integration_id="integration",
+        entry_count=0,
+        visible_count=0,
+        hidden_count=0,
+        last_success_at=None,
+        image_usable=None,
+        diagnostics=None,
+        sync_status=LLMCatalogSyncStatus(
+            owner_id="catalog",
+            work_token=None,
             status=LLMCatalogAttemptStatus.FAILED,
-            started_at=now,
-            finished_at=now,
-            produced_snapshot_id=None,
+            started_at=_NOW,
+            finished_at=_NOW,
             failure_code="AccessDeniedException",
             failure_message="Provider listing failed.",
             action_hint="Check integration credentials and provider permissions.",
@@ -103,28 +60,111 @@ async def test_read_service_returns_latest_failed_attempt_without_snapshot() -> 
             skipped_count=0,
             hidden_count=0,
             diagnostics={"failure_category": "user_catalog_credentials_or_permissions"},
-            catalog_configuration_version=1,
-        ),
-    )
-    service = ModelCatalogReadService(
-        operations=LLMCatalogOperationsRepository(
-            session_manager=_SessionManager(),
-            catalog_repository=_CatalogRepository(page),
-            integration_repository=AsyncMock(spec=LLMProviderIntegrationRepository),
         ),
     )
 
-    result = await service.list_entries_by_integration(
-        integration_id="integration-id",
-        workspace_id="workspace-id",
+
+async def test_read_returns_latest_failed_state_without_successful_data() -> None:
+    operations = AsyncMock(spec=LLMCatalogOperationsRepository)
+    operations.read_page.return_value = CatalogReadPage(
+        page=LLMCatalogEntryList(catalog=_catalog(), entries=[], total=0),
+        latest_workspace_sync=None,
+    )
+    result = await ModelCatalogReadService(operations).list_entries_by_integration(
+        integration_id="integration",
+        workspace_id="workspace",
         search=None,
-        limit=50,
+        limit=20,
         offset=0,
     )
-
     assert isinstance(result, Success)
-    assert result.value.current_snapshot_id is None
-    assert result.value.entries == []
-    assert result.value.latest_attempt is not None
-    assert result.value.latest_attempt.status == "failed"
-    assert result.value.latest_attempt.failure_code == "AccessDeniedException"
+    assert result.value.last_success_at is None
+    assert result.value.latest_sync is not None
+    assert result.value.latest_sync.status == "failed"
+    assert result.value.latest_sync.failure_code == "AccessDeniedException"
+    assert "id" not in result.value.latest_sync.model_dump()
+    assert result.value.stale is True
+
+
+async def test_selection_copies_exact_prices_and_latest_update_time() -> None:
+    source = make_test_source(
+        make_test_source_payload(
+            {
+                "gpt-test": {
+                    "litellm_provider": "openai",
+                    "input_cost_per_token": 0.000001,
+                    "output_cost_per_token": 0.000002,
+                }
+            }
+        )
+    )
+    price = source.models[0].pricing
+    entry = LLMCatalogEntry(
+        id="entry",
+        catalog_id="catalog",
+        created_at=_NOW - datetime.timedelta(days=1),
+        updated_at=_NOW,
+        provider=LLMProvider.OPENAI,
+        provider_model_identifier="gpt-test",
+        display_name="GPT Test",
+        normalized_capabilities=ModelCapabilities().model_dump(mode="json"),
+        supported_execution_options=[],
+        lifecycle_status=LLMModelLifecycleStatus.ACTIVE,
+        visibility_status=LLMCatalogEntryVisibility.SELECTABLE,
+        provider_integration_id=None,
+        publisher="openai",
+        family=None,
+        source_metadata=None,
+        projection_metadata=None,
+        hidden_reason=None,
+        pricing=price,
+    )
+    operations = AsyncMock(spec=LLMCatalogOperationsRepository)
+    catalog = dataclasses.replace(
+        _catalog(),
+        scope=LLMCatalogScope.SYSTEM,
+        provider=LLMProvider.OPENAI,
+        provider_integration_id=None,
+        entry_count=1,
+        visible_count=1,
+        last_success_at=_NOW,
+    )
+    operations.selectable_entry.return_value = CatalogEntryWithCatalog(
+        catalog=catalog, entry=entry
+    )
+    selection = AgentModelSelectionInput(
+        llm_provider_integration_id="integration", model_identifier="gpt-test"
+    )
+    result = await ModelCatalogReadService(operations).resolve_agent_model_selection(
+        workspace_id="workspace", selection_input=selection
+    )
+    assert isinstance(result, Success)
+    assert result.value.pricing == price
+    assert result.value.last_refreshed_at == _NOW
+    assert "snapshot_id" not in result.value.model_snapshot
+    assert result.value.model_identifier == "gpt-test"
+    newer = (
+        make_test_source(
+            make_test_source_payload(
+                {
+                    "gpt-test": {
+                        "litellm_provider": "openai",
+                        "input_cost_per_token": 0.000003,
+                        "output_cost_per_token": 0.000004,
+                    }
+                }
+            )
+        )
+        .models[0]
+        .pricing
+    )
+    operations.selectable_entry.return_value = CatalogEntryWithCatalog(
+        catalog=catalog, entry=dataclasses.replace(entry, pricing=newer)
+    )
+    reselected = await ModelCatalogReadService(
+        operations
+    ).resolve_agent_model_selection(workspace_id="workspace", selection_input=selection)
+    assert isinstance(reselected, Success)
+    assert reselected.value.pricing == newer
+    assert result.value.pricing == price
+    assert reselected.value.pricing != result.value.pricing

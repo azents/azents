@@ -18,7 +18,7 @@ import re  # noqa: F401
 import json
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, field_validator
-from typing import Any, ClassVar, Dict, List, Optional
+from typing import Any, ClassVar, Dict, Optional
 from typing_extensions import Annotated
 from typing import Optional, Set
 from typing_extensions import Self
@@ -32,7 +32,6 @@ class RuntimeWebCreateRequest(BaseModel):
     selected_duration_seconds: StrictInt
     turn_on: StrictBool
     operation_key: Annotated[str, Field(min_length=1, strict=True, max_length=128)]
-    additional_properties: Dict[str, Any] = {}
     __properties: ClassVar[List[str]] = ["port", "label", "selected_duration_seconds", "turn_on", "operation_key"]
 
     @field_validator('selected_duration_seconds')
@@ -72,10 +71,8 @@ class RuntimeWebCreateRequest(BaseModel):
         * `None` is only added to the output dict for nullable fields that
           were set at model initialization. Other fields with value `None`
           are ignored.
-        * Fields in `self.additional_properties` are added to the output dict.
         """
         excluded_fields: Set[str] = set([
-            "additional_properties",
         ])
 
         _dict = self.model_dump(
@@ -83,11 +80,6 @@ class RuntimeWebCreateRequest(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
-        # puts key-value pairs in additional_properties in the top level
-        if self.additional_properties is not None:
-            for _key, _value in self.additional_properties.items():
-                _dict[_key] = _value
-
         # set to None if label (nullable) is None
         # and model_fields_set contains the field
         if self.label is None and "label" in self.model_fields_set:
@@ -111,11 +103,6 @@ class RuntimeWebCreateRequest(BaseModel):
             "turn_on": obj.get("turn_on"),
             "operation_key": obj.get("operation_key")
         })
-        # store additional fields in additional_properties
-        for _key in obj.keys():
-            if _key not in cls.__properties:
-                _obj.additional_properties[_key] = obj.get(_key)
-
         return _obj
 
 

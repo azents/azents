@@ -13,9 +13,10 @@ Name | Type | Description | Notes
 **model_developer** | [**LLMModelDeveloper**](LLMModelDeveloper.md) | Model developer | 
 **model_family** | **str** |  | [optional] 
 **normalized_capabilities** | [**ModelCapabilities**](ModelCapabilities.md) | Runtime capability snapshot | 
-**model_snapshot** | **Dict[str, object]** | Normalized model snapshot | 
+**pricing** | [**ModelPricingDefinition**](ModelPricingDefinition.md) |  | 
+**model_snapshot** | **object** | Normalized model snapshot | 
 **supported_execution_options** | [**List[ModelExecutionOptionId]**](ModelExecutionOptionId.md) | Directly selectable execution options supported by this model | [optional] 
-**source_metadata** | **Dict[str, object]** |  | [optional] 
+**source_metadata** | **object** |  | [optional] 
 **last_refreshed_at** | **datetime** |  | [optional] 
 
 ## Example

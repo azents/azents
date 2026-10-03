@@ -6,7 +6,7 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [agent, conversation]
 last_verified_at: 2026-10-03
-spec_version: 26
+spec_version: 27
 code_paths:
   - python/apps/azents/src/azents/core/chat_data.py
   - python/apps/azents/src/azents/services/agent/**
@@ -83,9 +83,12 @@ Latest usage comes from event `TurnMarkerPayload.usage`. Usage is value returned
 
 For OpenAI API-key and ChatGPT OAuth turns, token fields and raw usage come directly from the official
 OpenAI SDK completed `ResponseUsage`; raw usage does not contain synthetic adapter-private hidden parameters.
-Their `cost_usd` is a content-free Azents estimate from the operation's captured
-exact-scoped data-only `litellm_catalog` pricing view, with optional typed
-method/source/tier provenance.
+Their `cost_usd` is a content-free Azents estimate from the physical candidate's
+saved normalized pricing definition captured with its actual call time, with optional
+typed method/source-model/collection-time/tier/estimator provenance. Capture does not
+read the current catalog or source. New estimates carry no snapshot/hash authority;
+old opaque cost provenance remains readable without resolving removed history.
+Historical selections without embedded prices leave local estimation unavailable.
 Actual Ultrafast and unknown premium tiers leave cost unavailable; an Ultrafast request with
 missing, empty, or `auto` actual tier also cannot be priced as Standard. This does not fail
 successful output or remove provider token usage. REST history omits unavailable cost fields,
@@ -171,6 +174,8 @@ cd typescript && corepack pnpm --filter @azents/web typecheck
 
 ## Changelog
 
+- **2026-10-03** — v27. Switched local estimate capture to saved candidate prices
+  and physical call time, preserving historical costs without current-source lookup.
 - **2026-10-03** — v26. Reflected captured data-only pricing authority and
   complete directed Google usage accounting without recalculating historical costs.
 - **2026-10-01** — v25. Made the captured generic `genai_prices` snapshot the

@@ -139,7 +139,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack
 last_verified_at: 2026-10-03
-spec_version: 90
+spec_version: 91
 ---
 
 # Agent Domain Spec
@@ -718,18 +718,25 @@ Each selectable model snapshot can carry a default input window and a maximum
 input window. A missing default resolves to the maximum. For each option, an unset
 `context_window_tokens` cap uses the resolved default; an explicit cap uses the
 requested value up to the resolved maximum. Metadata from the local validated
-retained-source DB snapshot fills only a missing maximum; it cannot lower a
+current source-model exact-key read fills only a missing maximum; it cannot lower a
 provider default. If maximum and source metadata are absent but a default exists,
 that default supplies the maximum. The 128,000-token fallback applies only when
 all three are absent. Library profiles and installed model maps are not fallback
 authorities, and this resolution does not fetch remote source or model listings.
 
-Main and lightweight calculations share one captured local source snapshot when
+Main and lightweight calculations share one coherent capture of requested exact keys when
 either saved maximum is missing. Known saved maxima require no source read for
-context-limit computation; pricing capture remains a separate operation input.
-Agent list responses reuse one captured snapshot across the entire list.
+context-limit computation. Agent list responses group only missing-maximum exact
+keys across the entire list, without restoring a full source dataset.
 Foreground resolution, compaction, subagent scheduling, worker calculations and
 API displays use the same pure limit math and exact semantic model/source lookup.
+
+Explicit selection copies the current catalog entry's normalized available or unavailable
+pricing definition into every saved candidate. Primary, fallback, lightweight, compaction,
+and subagent selection propagation preserves that definition without mutable price lookup.
+Catalog refresh does not change saved prices. Historical selection JSON without pricing
+decodes read-only as absent; actual dispatch leaves local estimation unavailable rather
+than enriching or rewriting the selection.
 
 `effective_context_window_tokens` in Agent response is calculated from the smaller
 of the default main option's resolved effective input window and the default
@@ -778,6 +785,8 @@ Following contracts do not exist in current system.
 
 ## 8. Change History
 
+- **2026-10-03** (spec_version 91) — Embedded normalized catalog prices in saved
+  candidates and replaced whole-source context fallback with grouped exact current reads.
 - **2026-10-03** (spec_version 90) — Carried existing Agent-local top-k to
   model preparation with exact SDK encoding or explicit incompatibility.
 - **2026-10-03** (spec_version 89) — Preserved conditional reasoning-effort

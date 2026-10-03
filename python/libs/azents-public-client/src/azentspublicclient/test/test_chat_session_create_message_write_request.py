@@ -37,7 +37,12 @@ class TestChatSessionCreateMessageWriteRequest(unittest.TestCase):
             return ChatSessionCreateMessageWriteRequest(
                 client_request_id = '0',
                 message = '',
-                inference_profile = { },
+                inference_profile = azentspublicclient.models.requested_inference_profile.RequestedInferenceProfile(
+                    model_target_label = '0', 
+                    reasoning_effort = '', 
+                    enabled_execution_options = [
+                        'fast'
+                        ], ),
                 existing_project_paths = [
                     ''
                     ],
@@ -55,7 +60,12 @@ class TestChatSessionCreateMessageWriteRequest(unittest.TestCase):
             return ChatSessionCreateMessageWriteRequest(
                 client_request_id = '0',
                 message = '',
-                inference_profile = { },
+                inference_profile = azentspublicclient.models.requested_inference_profile.RequestedInferenceProfile(
+                    model_target_label = '0', 
+                    reasoning_effort = '', 
+                    enabled_execution_options = [
+                        'fast'
+                        ], ),
                 existing_project_paths = [
                     ''
                     ],

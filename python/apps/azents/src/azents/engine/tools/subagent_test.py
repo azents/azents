@@ -4,7 +4,7 @@
 
 import datetime
 import json
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Sequence
 from contextlib import asynccontextmanager
 from typing import Any, NamedTuple, TypeVar
 from unittest.mock import MagicMock
@@ -40,7 +40,6 @@ from azents.core.inference_profile import (
     SessionInferenceState,
 )
 from azents.core.llm_catalog import ModelReasoningEffort
-from azents.core.model_catalog_source import CATALOG_SOURCE_KEY
 from azents.core.model_execution_options import ModelExecutionOptionId
 from azents.core.tools import PublishEventFn, ToolkitStatus, TurnContext
 from azents.engine.events.engine_events import SubagentTreeChanged
@@ -56,6 +55,10 @@ from azents.repos.agent_session.data import AgentSession, SessionAgent
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.mailbox.data import MailboxItemCreate
 from azents.repos.model_metadata_source import ModelMetadataSourceRepository
+from azents.repos.model_metadata_source_data import (
+    CapturedContextSource,
+    ContextModelRequest,
+)
 from azents.repos.subagent_coordination.data import (
     SubagentCoordinationSnapshot,
     SubagentCoordinationSnapshotRow,
@@ -775,19 +778,18 @@ class _SubagentCoordinationRepository:
         return self.projection
 
 
-class _SourceSnapshotRepository:
-    """Model source snapshot repository fake for subagent tool tests."""
+class _ContextSourceRepository:
+    """Narrow model maximum repository fake for subagent tool tests."""
 
-    async def get_current(
+    async def capture_for_context(
         self,
         session: AsyncSession,
         *,
-        source_key: str,
-    ) -> None:
+        requests: Sequence[ContextModelRequest],
+    ) -> CapturedContextSource:
         """Return no fallback metadata source."""
-        del session
-        assert source_key == CATALOG_SOURCE_KEY
-        return None
+        del session, requests
+        return CapturedContextSource(models=())
 
 
 class _SubagentToolkitFixture(NamedTuple):
@@ -830,8 +832,8 @@ async def _make_toolkit() -> _SubagentToolkitFixture:
             EventTranscriptRepository,
         ),
         mailbox_repository=_typed_fake(mailbox_item_service, MailboxRepository),
-        source_snapshot_repository=_typed_fake(
-            _SourceSnapshotRepository(),
+        source_repository=_typed_fake(
+            _ContextSourceRepository(),
             ModelMetadataSourceRepository,
         ),
         coordination_repository=_typed_fake(

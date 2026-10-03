@@ -9,8 +9,8 @@ import {
   type PickerCatalogUiState,
 } from "../components/ModelCatalogPicker";
 import type {
-  ModelCatalogAttemptState,
   ModelCatalogState,
+  ModelCatalogSyncStatus,
   ProviderIntegrationOption,
   SelectableModelCandidate,
 } from "../model-selection";
@@ -57,20 +57,17 @@ function catalogUiState(params: {
   if (queryLoading && catalogState == null) {
     return { type: "LOADING_STATUS" };
   }
-  const latestAttempt = catalogState?.latestAttempt ?? null;
-  if (latestAttempt?.status === "failed") {
-    if (catalogState?.currentSnapshotId == null) {
-      return { type: "FAILED_WITHOUT_SNAPSHOT", attempt: latestAttempt };
+  const latestSync = catalogState?.latestSync ?? null;
+  if (latestSync?.status === "failed") {
+    if (catalogState?.lastSuccessAt == null) {
+      return { type: "FAILED_WITHOUT_DATA", sync: latestSync };
     }
-    return { type: "READY_WITH_FAILED_ATTEMPT", attempt: latestAttempt };
+    return { type: "READY_WITH_FAILED_SYNC", sync: latestSync };
   }
-  if (
-    latestAttempt?.status === "running" &&
-    catalogState?.currentSnapshotId == null
-  ) {
-    return { type: "SYNCING_WITHOUT_SNAPSHOT" };
+  if (latestSync?.status === "running" && catalogState?.lastSuccessAt == null) {
+    return { type: "SYNCING_WITHOUT_DATA" };
   }
-  if (catalogState != null && catalogState.currentSnapshotId == null) {
+  if (catalogState != null && catalogState.lastSuccessAt == null) {
     return { type: "NEVER_SYNCED" };
   }
   if (queryFetching && hasNextPage) {
@@ -102,9 +99,8 @@ function catalogStateFromPage(data: {
   catalog: {
     catalog_id: string;
     catalog_scope: "system" | "integration";
-    current_snapshot_id: string | null;
-    current_snapshot_created_at: string | null;
-    latest_attempt: ModelCatalogAttemptState | null;
+    last_success_at: string | null;
+    latest_sync: ModelCatalogSyncStatus | null;
     stale: boolean;
     sync_available_at: string | null;
     automatic_retry_blocked: boolean;
@@ -117,9 +113,8 @@ function catalogStateFromPage(data: {
     catalog: {
       catalogId: data.catalog.catalog_id,
       catalogScope: data.catalog.catalog_scope,
-      currentSnapshotId: data.catalog.current_snapshot_id,
-      currentSnapshotCreatedAt: data.catalog.current_snapshot_created_at,
-      latestAttempt: data.catalog.latest_attempt,
+      lastSuccessAt: data.catalog.last_success_at,
+      latestSync: data.catalog.latest_sync,
       stale: data.catalog.stale,
       syncAvailableAt: data.catalog.sync_available_at,
       automaticRetryBlocked: data.catalog.automatic_retry_blocked,
@@ -149,8 +144,8 @@ export function ModelCatalogPickerContainer({
   const [syncError, setSyncError] = useState<string | null>(null);
   const [clock, setClock] = useState(() => Date.now());
   const sentinelRef = useRef<HTMLDivElement | null>(null);
-  const snapshotIdRef = useRef<string | null>(null);
-  const snapshotObservedRef = useRef(false);
+  const lastSuccessAtRef = useRef<string | null>(null);
+  const refreshObservedRef = useRef(false);
 
   const selectedIntegration =
     integrations.find(
@@ -158,8 +153,8 @@ export function ModelCatalogPickerContainer({
     ) ?? null;
   const syncSupported = syncSupportedForIntegration(selectedIntegration);
   const catalog = pages.at(-1)?.catalog ?? null;
-  const latestAttempt = catalog?.latestAttempt ?? null;
-  const syncRunning = latestAttempt?.status === "running";
+  const latestSync = catalog?.latestSync ?? null;
+  const syncRunning = latestSync?.status === "running";
   const syncAvailableAt = catalog?.syncAvailableAt ?? null;
   const syncAvailableAtMillis =
     syncAvailableAt == null ? null : new Date(syncAvailableAt).getTime();
@@ -202,7 +197,7 @@ export function ModelCatalogPickerContainer({
         ) {
           return false;
         }
-        if (activeCatalog.latest_attempt?.status === "running") {
+        if (activeCatalog.latest_sync?.status === "running") {
           return 1_000;
         }
         if (!activeCatalog.stale || activeCatalog.automatic_retry_blocked) {
@@ -222,8 +217,8 @@ export function ModelCatalogPickerContainer({
   useEffect(() => {
     setOffset(0);
     setPages([]);
-    snapshotIdRef.current = null;
-    snapshotObservedRef.current = false;
+    lastSuccessAtRef.current = null;
+    refreshObservedRef.current = false;
   }, [opened, selectedIntegrationId, search]);
 
   useEffect(() => {
@@ -231,12 +226,13 @@ export function ModelCatalogPickerContainer({
       return;
     }
     const page = catalogStateFromPage(query.data);
-    const snapshotChanged =
-      snapshotObservedRef.current &&
-      snapshotIdRef.current !== page.catalog.currentSnapshotId;
-    snapshotIdRef.current = page.catalog.currentSnapshotId;
-    snapshotObservedRef.current = true;
-    if (query.data.catalog.offset !== 0 && snapshotChanged) {
+    // A refresh restarts browsing; this timestamp never authorizes model selection.
+    const refreshChanged =
+      refreshObservedRef.current &&
+      lastSuccessAtRef.current !== page.catalog.lastSuccessAt;
+    lastSuccessAtRef.current = page.catalog.lastSuccessAt;
+    refreshObservedRef.current = true;
+    if (query.data.catalog.offset !== 0 && refreshChanged) {
       setOffset(0);
       setPages([]);
       return;

@@ -1,4 +1,4 @@
-"""Model catalog v1 Admin API data models."""
+"""Current Model Catalog v1 Admin API response contracts."""
 
 import datetime
 import enum
@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 from azents.core.enums import LLMProvider
 from azents.services.llm_catalog import (
-    ModelCatalogSyncAttemptOutput,
+    ModelCatalogSyncStatusOutput,
     SystemCatalogListItem,
     SystemCatalogProjectionSummary,
 )
@@ -21,14 +21,12 @@ class SystemCatalogProvider(enum.StrEnum):
     GOOGLE_GEMINI = LLMProvider.GOOGLE_GEMINI.value
 
     def to_llm_provider(self) -> LLMProvider:
-        """Convert to the domain provider enum."""
         return LLMProvider(self.value)
 
 
-class SystemModelCatalogSyncAttemptResponse(BaseModel):
-    """Latest model catalog sync attempt response."""
+class SystemModelCatalogSyncStatusResponse(BaseModel):
+    """Latest operational state, excluding opaque active work ownership."""
 
-    id: str
     status: str
     started_at: datetime.datetime
     finished_at: datetime.datetime | None
@@ -42,55 +40,43 @@ class SystemModelCatalogSyncAttemptResponse(BaseModel):
 
     @classmethod
     def convert_from(
-        cls,
-        attempt: ModelCatalogSyncAttemptOutput,
-    ) -> "SystemModelCatalogSyncAttemptResponse":
-        """Convert service output to response model."""
-        return cls.model_validate(attempt.model_dump())
+        cls, status: ModelCatalogSyncStatusOutput
+    ) -> "SystemModelCatalogSyncStatusResponse":
+        return cls.model_validate(status.model_dump())
 
 
 class SystemModelCatalogResponse(BaseModel):
-    """System model catalog response."""
-
     provider: SystemCatalogProvider
     catalog_id: str | None
-    snapshot_id: str | None
+    last_success_at: datetime.datetime | None
     visible_count: int
     hidden_count: int
-    latest_attempt: SystemModelCatalogSyncAttemptResponse | None
+    latest_sync: SystemModelCatalogSyncStatusResponse | None
 
     @classmethod
-    def convert_from(
-        cls,
-        item: SystemCatalogListItem,
-    ) -> "SystemModelCatalogResponse":
-        """Convert service output to response model."""
+    def convert_from(cls, item: SystemCatalogListItem) -> "SystemModelCatalogResponse":
         return cls(
             provider=SystemCatalogProvider(item.provider.value),
             catalog_id=item.catalog_id,
-            snapshot_id=item.snapshot_id,
+            last_success_at=item.last_success_at,
             visible_count=item.visible_count,
             hidden_count=item.hidden_count,
-            latest_attempt=(
-                SystemModelCatalogSyncAttemptResponse.convert_from(item.latest_attempt)
-                if item.latest_attempt is not None
-                else None
-            ),
+            latest_sync=SystemModelCatalogSyncStatusResponse.convert_from(
+                item.latest_sync
+            )
+            if item.latest_sync is not None
+            else None,
         )
 
 
 class SystemModelCatalogListResponse(BaseModel):
-    """System model catalog list response."""
-
     items: list[SystemModelCatalogResponse]
 
 
 class SystemModelCatalogRefreshResponse(BaseModel):
-    """System model catalog refresh response."""
-
     provider: SystemCatalogProvider
     catalog_id: str
-    snapshot_id: str | None
+    last_success_at: datetime.datetime | None
     visible_count: int
     hidden_count: int
     status: str
@@ -100,14 +86,12 @@ class SystemModelCatalogRefreshResponse(BaseModel):
 
     @classmethod
     def convert_from(
-        cls,
-        summary: SystemCatalogProjectionSummary,
+        cls, summary: SystemCatalogProjectionSummary
     ) -> "SystemModelCatalogRefreshResponse":
-        """Convert service output to response model."""
         return cls(
             provider=SystemCatalogProvider(summary.provider.value),
             catalog_id=summary.catalog_id,
-            snapshot_id=summary.snapshot_id,
+            last_success_at=summary.last_success_at,
             visible_count=summary.visible_count,
             hidden_count=summary.hidden_count,
             status=summary.status,
@@ -118,6 +102,4 @@ class SystemModelCatalogRefreshResponse(BaseModel):
 
 
 class SystemModelCatalogRefreshListResponse(BaseModel):
-    """System model catalog refresh list response."""
-
     items: list[SystemModelCatalogRefreshResponse]

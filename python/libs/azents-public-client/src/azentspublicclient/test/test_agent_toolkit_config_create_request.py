@@ -39,16 +39,16 @@ class TestAgentToolkitConfigCreateRequest(unittest.TestCase):
                 slug = '',
                 name = '',
                 description = '',
-                config = { },
+                config = azentspublicclient.models.config.Config(),
                 prompt = '',
-                credentials = { },
+                credentials = None,
                 enabled = True,
                 always_expose_tools = True
             )
         else:
             return AgentToolkitConfigCreateRequest(
                 toolkit_type = '',
-                config = { },
+                config = azentspublicclient.models.config.Config(),
         )
         """
 

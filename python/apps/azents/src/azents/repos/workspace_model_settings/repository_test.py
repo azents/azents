@@ -28,6 +28,7 @@ async def _create_workspace(session: AsyncSession, handle: str) -> str:
 def _model_selection() -> AgentModelSelection:
     """Create model selection snapshot for tests."""
     return AgentModelSelection(
+        pricing=None,
         llm_provider_integration_id="llm-integ-test",
         provider=LLMProvider.OPENAI,
         model_identifier="gpt-5-mini",

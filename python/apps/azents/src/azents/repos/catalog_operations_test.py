@@ -1,318 +1,427 @@
-"""Atomic catalog-operation and detached-boundary regressions without database I/O."""
+"""Current publication atomicity, exact-input races and completed boundaries."""
 
 import datetime
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.enums import (
-    LLMCatalogPurpose,
-    LLMCatalogScope,
-    LLMProvider,
+from azents.core.enums import LLMCatalogPurpose, LLMCatalogScope, LLMProvider
+from azents.core.model_catalog_source import (
+    CATALOG_SOURCE_KEY,
+    CATALOG_SOURCE_KIND,
+    CATALOG_SOURCE_SCHEMA_VERSION,
 )
-from azents.core.llm_catalog_sync import IntegrationCatalogSyncTrigger
-from azents.repos.image_generation_catalog_operations import (
-    ImageGenerationCatalogOperationsRepository,
-)
+from azents.core.model_metadata_collection_data import FetchedModelMetadataSource
+from azents.rdb.models.llm_catalog import RDBLLMCatalog
+from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
+from azents.rdb.models.model_metadata_source import RDBModelMetadataSource
 from azents.repos.llm_catalog import LLMCatalogRepository
-from azents.repos.llm_catalog.data import (
-    CatalogProjectionProvenance,
-    ImageGenerationCatalogPublication,
-    IntegrationCatalogSyncClaim,
-    LLMCatalog,
-)
+from azents.repos.llm_catalog.data import IntegrationCatalogSyncClaim
 from azents.repos.llm_catalog_operations import (
-    CatalogAttemptFailure,
-    CatalogPublicationSucceeded,
+    CatalogPublicationSourceChanged,
     CatalogPublicationSuperseded,
     LLMCatalogOperationsRepository,
 )
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
-from azents.repos.llm_provider_integration.data import LLMProviderIntegration
+from azents.repos.model_catalog_sync_state import (
+    current_sync_status,
+    fail_sync,
+    start_sync,
+    succeed_sync,
+)
+from azents.repos.model_metadata_operations import (
+    ModelMetadataSourceOperations,
+    SourceSyncAlreadyRunning,
+    SystemCatalogReplacement,
+    _material_reduction,
+)
+from azents.repos.model_metadata_source import ModelMetadataSourceRepository
+from azents.repos.model_metadata_source_data import ModelMetadataSource
+from azents.testing.model_metadata import make_test_source, make_test_source_payload
 
-_NOW = datetime.datetime(2026, 10, 2, tzinfo=datetime.UTC)
+_NOW = datetime.datetime(2026, 10, 3, tzinfo=datetime.UTC)
 
 
-class _TransactionProbe:
-    """Expose each transaction lifetime and its completed outcome."""
+class _Transactions:
+    """Explicit transaction outcomes; no sleeping or external I/O."""
 
     def __init__(self) -> None:
-        self.session: AsyncSession = AsyncMock(spec=AsyncSession)
-        self.active = False
-        self.commits = 0
-        self.rollbacks = 0
+        self.session = AsyncMock(spec=AsyncSession)
+        self.events: list[str] = []
 
     @asynccontextmanager
     async def __call__(self) -> AsyncIterator[AsyncSession]:
-        assert not self.active
-        self.active = True
+        self.events.append("begin")
         try:
             yield self.session
-        except BaseException:
-            self.rollbacks += 1
+        except Exception:
+            self.events.append("rollback")
             raise
         else:
-            self.commits += 1
-        finally:
-            self.active = False
+            self.events.append("commit")
 
 
-def _catalog(purpose: LLMCatalogPurpose) -> LLMCatalog:
-    """Build purpose-specific immutable catalog authority."""
-    return LLMCatalog(
+def _catalog(
+    *, purpose: LLMCatalogPurpose = LLMCatalogPurpose.CONVERSATION
+) -> RDBLLMCatalog:
+    owner = RDBLLMCatalog(
         id="catalog",
         scope=LLMCatalogScope.INTEGRATION,
-        provider=LLMProvider.OPENAI,
+        provider=LLMProvider.XAI,
         purpose=purpose,
         provider_integration_id="integration",
-        current_snapshot_id="previous",
-        latest_attempt_id="attempt",
+        image_usable=None if purpose == LLMCatalogPurpose.CONVERSATION else False,
     )
+    owner.entry_count = 0
+    owner.visible_count = 0
+    owner.hidden_count = 0
+    owner.last_success_at = _NOW
+    start_sync(owner, work_token="work", started_at=_NOW, diagnostics=None)
+    return owner
 
 
-def _claim() -> IntegrationCatalogSyncClaim:
-    """Capture the exact snapshot and configuration-generation publication fence."""
-    return IntegrationCatalogSyncClaim(
-        attempt_id="attempt",
-        expected_current_snapshot_id="previous",
-        catalog_configuration_version=4,
+def _source_owner() -> RDBModelMetadataSource:
+    owner = RDBModelMetadataSource(
+        source_key=CATALOG_SOURCE_KEY,
+        source_kind=CATALOG_SOURCE_KIND,
+        source_schema_version=CATALOG_SOURCE_SCHEMA_VERSION,
     )
+    start_sync(owner, work_token="work", started_at=_NOW, diagnostics=None)
+    return owner
 
 
-def _provenance() -> CatalogProjectionProvenance:
-    """Build captured projection evidence without requiring a current system source."""
-    return CatalogProjectionProvenance(
-        source_snapshot_id=None,
-        projection_schema_version="2",
-        runtime_profile_resolver_revision="resolver",
-        pydantic_ai_version="fixture",
-        genai_prices_version=None,
-        projection_fingerprint="fingerprint",
-    )
-
-
-@pytest.mark.parametrize(
-    ("image", "purpose", "source_key"),
-    [
-        (False, LLMCatalogPurpose.CONVERSATION, "litellm_catalog"),
-        (
-            True,
-            LLMCatalogPurpose.IMAGE_GENERATION,
-            "openai_models_list:image_generation",
-        ),
-    ],
-)
-async def test_claim_composes_catalog_creation_and_attempt_in_one_transaction(
-    image: bool,
-    purpose: LLMCatalogPurpose,
-    source_key: str,
-) -> None:
-    """Claim operations preserve purpose/source identity and commit before returning."""
-    manager = _TransactionProbe()
-    catalogs = AsyncMock(spec=LLMCatalogRepository)
-    integrations = AsyncMock(spec=LLMProviderIntegrationRepository)
-    catalogs.ensure_integration_catalog.return_value = _catalog(purpose)
-    catalogs.begin_integration_attempt.return_value = _claim()
-    operations = (
-        ImageGenerationCatalogOperationsRepository(manager, catalogs, integrations)
-        if image
-        else LLMCatalogOperationsRepository(manager, catalogs, integrations)
-    )
-    result = await operations.begin_attempt(
-        integration_id="integration",
-        provider=LLMProvider.OPENAI,
+def _integration() -> RDBLLMProviderIntegration:
+    owner = RDBLLMProviderIntegration(
         workspace_id="workspace",
-        started_at=_NOW,
-        trigger=IntegrationCatalogSyncTrigger.CREATE,
+        provider=LLMProvider.XAI,
+        name="Integration",
+        encrypted_credentials="opaque-test",
+        config=None,
+        enabled=True,
     )
-    assert result.claim == _claim()
-    assert result.catalog.purpose is purpose
-    assert manager.commits == 1
-    assert manager.rollbacks == 0
-    assert manager.active is False
-    creation = catalogs.ensure_integration_catalog.await_args
-    attempt = catalogs.begin_integration_attempt.await_args
-    assert creation is not None and attempt is not None
-    assert creation.args[0] is attempt.args[0] is manager.session
-    assert creation.kwargs["purpose"] is purpose
-    assert attempt.kwargs["source_key"] == source_key
+    owner.id = "integration"
+    return owner
 
 
-async def test_conversation_publication_keeps_all_writes_inside_one_transaction() -> (
-    None
-):
-    """Candidate, fenced pointer CAS and attempt success share one completed commit."""
-    manager = _TransactionProbe()
+def _fetched(source: ModelMetadataSource) -> FetchedModelMetadataSource:
+    return FetchedModelMetadataSource(
+        source_kind=source.source_kind,
+        source_schema_version=source.source_schema_version,
+        source_url=source.source_url,
+        producer_name=source.producer_name,
+        producer_version=source.producer_version,
+        provider_count=source.provider_count,
+        model_count=source.model_count,
+        payload=source.payload,
+        models=source.models,
+        collected_at=source.collected_at,
+    )
+
+
+@pytest.mark.asyncio
+async def test_prepared_source_change_rejects_before_any_catalog_write() -> None:
+    transactions = _Transactions()
+    catalog = _catalog()
     catalogs = AsyncMock(spec=LLMCatalogRepository)
-    catalogs.lock_catalog_for_attempt_completion.return_value = "attempt"
-    catalogs.create_candidate_snapshot.return_value = "candidate"
-    catalogs.publish_candidate_snapshot.return_value = "published"
+    catalogs.lock_integration.return_value = _integration()
+    catalogs.lock_catalog.return_value = catalog
+    sources = AsyncMock(spec=ModelMetadataSourceRepository)
+    sources.projection_inputs_match.return_value = False
     operations = LLMCatalogOperationsRepository(
-        manager, catalogs, AsyncMock(spec=LLMProviderIntegrationRepository)
+        session_manager=transactions,
+        catalog_repository=catalogs,
+        integration_repository=AsyncMock(spec=LLMProviderIntegrationRepository),
+        source_repository=sources,
     )
     result = await operations.publish(
-        catalog=_catalog(LLMCatalogPurpose.CONVERSATION),
-        claim=_claim(),
+        catalog=LLMCatalogRepository.build_catalog(catalog),
+        claim=IntegrationCatalogSyncClaim(
+            work_token="work", catalog_configuration_version=1
+        ),
         entries=[],
-        provenance=_provenance(),
-        candidate_diagnostics={"candidate": "captured"},
-        attempt_diagnostics={"attempt": "captured"},
+        expected_source_metadata=None,
+        expected_source_models=(),
+        diagnostics=None,
+        sync_diagnostics=None,
         fetched_count=0,
         skipped_count=0,
         finished_at=_NOW,
     )
-    assert result == CatalogPublicationSucceeded("published", 0, 0)
-    assert manager.commits == 1
-    assert manager.active is False
-    for method in (
-        catalogs.lock_catalog_for_attempt_completion,
-        catalogs.create_candidate_snapshot,
-        catalogs.publish_candidate_snapshot,
-        catalogs.mark_attempt_succeeded,
-    ):
-        assert method.await_args is not None
-        assert method.await_args.args[0] is manager.session
-    publication = catalogs.publish_candidate_snapshot.await_args
-    assert publication is not None
-    assert publication.kwargs["expected_current_snapshot_id"] == "previous"
-    assert publication.kwargs["expected_catalog_configuration_version"] == 4
-    assert publication.kwargs["expected_projection_fingerprint"] == "fingerprint"
-    assert publication.kwargs["fence_latest_attempt"] is True
-    assert publication.kwargs["expected_latest_attempt_id"] == "attempt"
+    assert isinstance(result, CatalogPublicationSourceChanged)
+    catalogs.replace_current_entries.assert_not_awaited()
+    catalogs.complete_sync.assert_not_awaited()
+    assert transactions.events == ["begin", "commit"]
 
 
-async def test_superseded_conversation_attempt_never_creates_a_candidate() -> None:
-    """A newer attempt leaves prior snapshot authority untouched."""
-    manager = _TransactionProbe()
+@pytest.mark.asyncio
+async def test_credential_change_rejects_old_discovery_even_with_current_work() -> None:
+    transactions = _Transactions()
+    catalog = _catalog()
+    integration = _integration()
+    integration.catalog_configuration_version = 2
     catalogs = AsyncMock(spec=LLMCatalogRepository)
-    catalogs.lock_catalog_for_attempt_completion.return_value = "newer"
+    catalogs.lock_integration.return_value = integration
+    catalogs.lock_catalog.return_value = catalog
+    sources = AsyncMock(spec=ModelMetadataSourceRepository)
+    sources.projection_inputs_match.return_value = True
     operations = LLMCatalogOperationsRepository(
-        manager, catalogs, AsyncMock(spec=LLMProviderIntegrationRepository)
+        session_manager=transactions,
+        catalog_repository=catalogs,
+        integration_repository=AsyncMock(spec=LLMProviderIntegrationRepository),
+        source_repository=sources,
     )
     result = await operations.publish(
-        catalog=_catalog(LLMCatalogPurpose.CONVERSATION),
-        claim=_claim(),
+        catalog=LLMCatalogRepository.build_catalog(catalog),
+        claim=IntegrationCatalogSyncClaim(
+            work_token="work", catalog_configuration_version=1
+        ),
         entries=[],
-        provenance=_provenance(),
-        candidate_diagnostics=None,
-        attempt_diagnostics=None,
+        expected_source_metadata=None,
+        expected_source_models=(),
+        diagnostics=None,
+        sync_diagnostics=None,
         fetched_count=0,
         skipped_count=0,
         finished_at=_NOW,
     )
-    assert result == CatalogPublicationSuperseded("newer")
-    catalogs.create_candidate_snapshot.assert_not_awaited()
-    catalogs.publish_candidate_snapshot.assert_not_awaited()
-    catalogs.mark_attempt_succeeded.assert_not_awaited()
-    assert manager.active is False
+    assert isinstance(result, CatalogPublicationSuperseded)
+    catalogs.replace_current_entries.assert_not_awaited()
+    assert catalog.sync_work_token is None
+    assert catalog.sync_status is not None
+    assert catalog.sync_status.value == "failed"
+    assert catalog.last_success_at == _NOW
+    assert transactions.events == ["begin", "commit"]
 
 
-async def test_publication_failure_rolls_back_before_separate_failure_record() -> None:
-    """Unexpected publication failure cannot turn into a successful partial commit."""
-    manager = _TransactionProbe()
+@pytest.mark.asyncio
+async def test_failed_current_write_exits_through_rollback() -> None:
+    transactions = _Transactions()
+    catalog = _catalog()
     catalogs = AsyncMock(spec=LLMCatalogRepository)
-    catalogs.lock_catalog_for_attempt_completion.return_value = "attempt"
-    catalogs.create_candidate_snapshot.return_value = "candidate"
-    catalogs.publish_candidate_snapshot.return_value = "published"
-    catalogs.mark_attempt_succeeded.side_effect = RuntimeError("success write failed")
-    operations = LLMCatalogOperationsRepository(
-        manager, catalogs, AsyncMock(spec=LLMProviderIntegrationRepository)
+    catalogs.lock_integration.return_value = _integration()
+    catalogs.lock_catalog.return_value = catalog
+    catalogs.replace_current_entries.side_effect = ValueError(
+        "Invalid current entries."
     )
-    with pytest.raises(RuntimeError, match="success write failed"):
+    sources = AsyncMock(spec=ModelMetadataSourceRepository)
+    sources.projection_inputs_match.return_value = True
+    operations = LLMCatalogOperationsRepository(
+        session_manager=transactions,
+        catalog_repository=catalogs,
+        integration_repository=AsyncMock(spec=LLMProviderIntegrationRepository),
+        source_repository=sources,
+    )
+    with pytest.raises(ValueError, match="Invalid current entries"):
         await operations.publish(
-            catalog=_catalog(LLMCatalogPurpose.CONVERSATION),
-            claim=_claim(),
+            catalog=LLMCatalogRepository.build_catalog(catalog),
+            claim=IntegrationCatalogSyncClaim(
+                work_token="work", catalog_configuration_version=1
+            ),
             entries=[],
-            provenance=_provenance(),
-            candidate_diagnostics=None,
-            attempt_diagnostics=None,
+            expected_source_metadata=None,
+            expected_source_models=(),
+            diagnostics=None,
+            sync_diagnostics=None,
             fetched_count=0,
             skipped_count=0,
             finished_at=_NOW,
         )
-    assert manager.active is False
-    assert manager.rollbacks == 1
-    assert manager.commits == 0
-    catalogs.mark_attempt_failed.assert_not_awaited()
-    await operations.fail_attempt(
-        CatalogAttemptFailure(
-            attempt_id="attempt",
-            finished_at=_NOW,
-            failure_code="RuntimeError",
-            failure_message="success write failed",
-            action_hint="Retry",
-            diagnostics={"failure_category": "catalog_service_failure"},
-        )
-    )
-    assert manager.commits == 1
-    assert manager.active is False
-    catalogs.mark_attempt_failed.assert_awaited_once()
+    catalogs.complete_sync.assert_not_awaited()
+    assert transactions.events == ["begin", "rollback"]
 
 
-async def test_superseded_image_publication_finalizes_failure_atomically() -> None:
-    """Image generation fencing and its failure metadata use the same transaction."""
-    manager = _TransactionProbe()
-    catalogs = AsyncMock(spec=LLMCatalogRepository)
-    catalogs.replace_current_image_generation_snapshot.return_value = (
-        ImageGenerationCatalogPublication(
-            snapshot_id=None,
-            superseding_attempt_id="newer",
-            current_catalog_configuration_version=5,
+@pytest.mark.asyncio
+async def test_source_work_token_is_not_source_freshness_authority() -> None:
+    transactions = _Transactions()
+    sources = AsyncMock(spec=ModelMetadataSourceRepository)
+    owner = _source_owner()
+    sources.lock_authority.return_value = owner
+    previous = make_test_source(
+        make_test_source_payload(
+            {"literal": {"litellm_provider": "openai", "max_input_tokens": 4096}}
         )
     )
-    operations = ImageGenerationCatalogOperationsRepository(
-        manager, catalogs, AsyncMock(spec=LLMProviderIntegrationRepository)
+    changed = make_test_source(
+        make_test_source_payload(
+            {"literal": {"litellm_provider": "openai", "max_input_tokens": 8192}}
+        )
     )
+    sources.get_current.return_value = changed
+    operations = ModelMetadataSourceOperations(
+        session_manager=transactions,
+        repository=sources,
+        catalog_repository=AsyncMock(spec=LLMCatalogRepository),
+    )
+    replacements = [
+        SystemCatalogReplacement(provider=provider, entries=[], diagnostics=None)
+        for provider in (
+            LLMProvider.OPENAI,
+            LLMProvider.ANTHROPIC,
+            LLMProvider.GOOGLE_GEMINI,
+        )
+    ]
     result = await operations.publish(
-        catalog=_catalog(LLMCatalogPurpose.IMAGE_GENERATION),
-        attempt_id="attempt",
-        entries=[],
-        candidate_diagnostics=None,
-        attempt_diagnostics=None,
-        fetched_count=0,
+        work_token="work",
+        fetched=_fetched(previous),
+        expected_source=previous,
+        replacements=replacements,
         finished_at=_NOW,
-        trigger=IntegrationCatalogSyncTrigger.EXPLICIT,
     )
-    assert result.snapshot_id is None
-    replacement = catalogs.replace_current_image_generation_snapshot.await_args
-    failure = catalogs.mark_attempt_failed.await_args
-    assert replacement is not None and failure is not None
-    assert replacement.args[0] is failure.args[0] is manager.session
-    assert failure.kwargs["failure_code"] == "CatalogSyncSuperseded"
-    assert failure.kwargs["diagnostics"]["automatic_retry_blocked"] is False
-    catalogs.mark_attempt_succeeded.assert_not_awaited()
-    assert manager.commits == 1
-    assert manager.active is False
+    assert result.source_changed
+    assert owner.sync_work_token == "work"
+    sources.replace_current.assert_not_awaited()
+    assert transactions.events == ["begin", "commit"]
 
 
-async def test_default_only_image_read_never_creates_discovery_catalog() -> None:
-    """OAuth default-only availability needs local integration state, not discovery."""
-    manager = _TransactionProbe()
+@pytest.mark.asyncio
+async def test_atomic_system_lease_check_does_not_reclaim_unexpired_work() -> None:
+    transactions = _Transactions()
+    source_owner = _source_owner()
+    catalog = _catalog()
+    catalog.scope = LLMCatalogScope.SYSTEM
+    catalog.provider_integration_id = None
+    sources = AsyncMock(spec=ModelMetadataSourceRepository)
+    sources.lock_authority.return_value = source_owner
     catalogs = AsyncMock(spec=LLMCatalogRepository)
-    integrations = AsyncMock(spec=LLMProviderIntegrationRepository)
-    integrations.get_by_id.return_value = LLMProviderIntegration(
-        id="integration",
-        workspace_id="workspace",
-        provider=LLMProvider.CHATGPT_OAUTH,
-        name="Default-only",
-        config=None,
-        enabled=True,
-        created_at=_NOW,
-        updated_at=_NOW,
-        catalog_configuration_version=1,
+    catalogs.lock_catalog.return_value = catalog
+    records = [
+        Mock(id=f"owner-{provider.value}", provider=provider)
+        for provider in (
+            LLMProvider.OPENAI,
+            LLMProvider.ANTHROPIC,
+            LLMProvider.GOOGLE_GEMINI,
+        )
+    ]
+    transactions.session.execute.return_value = records
+    operations = ModelMetadataSourceOperations(
+        session_manager=transactions, repository=sources, catalog_repository=catalogs
     )
-    operations = ImageGenerationCatalogOperationsRepository(
-        manager, catalogs, integrations
+    outcome = await operations.begin_sync(
+        started_at=_NOW + datetime.timedelta(minutes=1)
     )
-    result = await operations.read(
-        integration_id="integration", workspace_id="workspace"
+    assert isinstance(outcome, SourceSyncAlreadyRunning)
+    assert outcome.work_token == "work"
+    sources.begin_sync.assert_not_awaited()
+    assert transactions.events == ["begin", "commit"]
+
+
+def test_completed_work_clears_token_but_preserves_success_for_failure() -> None:
+    owner = _catalog()
+    succeed_sync(
+        owner,
+        work_token="work",
+        finished_at=_NOW,
+        fetched_count=1,
+        matched_count=1,
+        skipped_count=0,
+        hidden_count=0,
+        diagnostics=None,
     )
-    assert result is not None
-    assert result.page is None
-    catalogs.ensure_integration_catalog.assert_not_awaited()
-    catalogs.list_image_generation_entries_by_integration.assert_not_awaited()
-    assert manager.commits == 1
-    assert manager.active is False
+    start_sync(
+        owner,
+        work_token="next",
+        started_at=_NOW + datetime.timedelta(seconds=1),
+        diagnostics=None,
+    )
+    assert fail_sync(
+        owner,
+        work_token="next",
+        finished_at=_NOW + datetime.timedelta(seconds=2),
+        failure_code="Failed",
+        failure_message="Refresh failed.",
+        action_hint=None,
+        diagnostics={"automatic_retry_blocked": True},
+    )
+    status = current_sync_status(owner)
+    assert status is not None
+    assert status.work_token is None
+    assert status.status.value == "failed"
+    assert owner.last_success_at == _NOW
+    assert owner.image_usable is None
+
+
+def test_superseded_failure_cannot_mutate_one_current_state() -> None:
+    owner = _source_owner()
+    start_sync(owner, work_token="new", started_at=_NOW, diagnostics=None)
+    assert not fail_sync(
+        owner,
+        work_token="work",
+        finished_at=_NOW,
+        failure_code="Late",
+        failure_message="Late failure.",
+        action_hint=None,
+        diagnostics=None,
+    )
+    assert owner.sync_work_token == "new"
+    assert owner.sync_status is not None
+    assert owner.sync_status.value == "running"
+
+
+@pytest.mark.asyncio
+async def test_only_expired_system_lease_is_reclaimed_by_combined_work() -> None:
+    transactions = _Transactions()
+    sources = AsyncMock(spec=ModelMetadataSourceRepository)
+    sources.lock_authority.return_value = _source_owner()
+    sources.begin_sync.return_value = "new-work"
+    catalogs = AsyncMock(spec=LLMCatalogRepository)
+    owners: dict[str, RDBLLMCatalog] = {}
+    for provider in (
+        LLMProvider.OPENAI,
+        LLMProvider.ANTHROPIC,
+        LLMProvider.GOOGLE_GEMINI,
+    ):
+        owner = _catalog()
+        owner.id = provider.value
+        owner.provider = provider
+        owner.scope = LLMCatalogScope.SYSTEM
+        owner.provider_integration_id = None
+        owners[owner.id] = owner
+    records = [Mock(id=owner.id, provider=owner.provider) for owner in owners.values()]
+    transactions.session.execute.return_value = records
+
+    async def lock_owner(
+        session: AsyncSession, *, catalog_id: str, shared: bool = False
+    ) -> RDBLLMCatalog:
+        return owners[catalog_id]
+
+    catalogs.lock_catalog.side_effect = lock_owner
+    operations = ModelMetadataSourceOperations(
+        session_manager=transactions,
+        repository=sources,
+        catalog_repository=catalogs,
+    )
+    outcome = await operations.begin_sync(
+        started_at=_NOW + datetime.timedelta(minutes=6)
+    )
+    assert outcome == "new-work"
+    sources.begin_sync.assert_awaited_once()
+    assert [
+        call.kwargs["catalog_id"] for call in catalogs.lock_catalog.await_args_list
+    ] == sorted(owners)
+    assert all(owner.sync_work_token == "new-work" for owner in owners.values())
+    assert all(owner.last_success_at == _NOW for owner in owners.values())
+    assert transactions.events == ["begin", "commit"]
+
+
+@pytest.mark.parametrize(
+    ("provider", "removed_count", "expected"),
+    [
+        ("openai", 50, "global"),
+        ("anthropic", 5, "provider:anthropic"),
+        ("anthropic", 4, None),
+    ],
+)
+def test_existing_source_shrink_thresholds(
+    provider: str, removed_count: int, expected: str | None
+) -> None:
+    original: dict[str, object] = {
+        f"model-{index}": {"litellm_provider": provider}
+        for index in range(250 if provider == "openai" else 25)
+    }
+    before = make_test_source(make_test_source_payload(original))
+    retained = dict(list(original.items())[removed_count:])
+    fetched = _fetched(make_test_source(make_test_source_payload(retained)))
+    assert _material_reduction(previous=before, fetched=fetched) == expected

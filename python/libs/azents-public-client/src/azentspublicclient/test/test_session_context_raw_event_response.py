@@ -37,7 +37,7 @@ class TestSessionContextRawEventResponse(unittest.TestCase):
             return SessionContextRawEventResponse(
                 id = '',
                 kind = '',
-                payload = { },
+                payload = azentspublicclient.models.payload.Payload(),
                 external_id = '',
                 adapter = '',
                 provider = '',
@@ -50,7 +50,7 @@ class TestSessionContextRawEventResponse(unittest.TestCase):
             return SessionContextRawEventResponse(
                 id = '',
                 kind = '',
-                payload = { },
+                payload = azentspublicclient.models.payload.Payload(),
                 schema_version = '',
                 created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
         )

@@ -136,8 +136,9 @@ class TestModelCatalogEntryResponse(unittest.TestCase):
                 visibility_status = '',
                 publisher = '',
                 family = '',
-                source_metadata = azentspublicclient.models.source_metadata.source_metadata(),
-                projection_metadata = azentspublicclient.models.projection_metadata.projection_metadata()
+                pricing = ERROR_TO_EXAMPLE_VALUE,
+                source_metadata = None,
+                projection_metadata = None
             )
         else:
             return ModelCatalogEntryResponse(
@@ -242,8 +243,9 @@ class TestModelCatalogEntryResponse(unittest.TestCase):
                 visibility_status = '',
                 publisher = '',
                 family = '',
-                source_metadata = azentspublicclient.models.source_metadata.source_metadata(),
-                projection_metadata = azentspublicclient.models.projection_metadata.projection_metadata(),
+                pricing = ERROR_TO_EXAMPLE_VALUE,
+                source_metadata = None,
+                projection_metadata = None,
         )
         """
 

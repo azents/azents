@@ -38,12 +38,8 @@ class TestImageGenerationModelCatalogResponse(unittest.TestCase):
                 default_available = True,
                 explicit_selection_supported = True,
                 catalog_id = '',
-                snapshot_id = '',
-                snapshot_configuration_version = 56,
-                current_configuration_version = 56,
-                snapshot_created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
-                latest_attempt = azentspublicclient.models.image_generation_catalog_attempt_response.ImageGenerationCatalogAttemptResponse(
-                    id = '', 
+                last_success_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
+                latest_sync = azentspublicclient.models.image_generation_catalog_sync_status_response.ImageGenerationCatalogSyncStatusResponse(
                     status = '', 
                     started_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                     finished_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
@@ -55,7 +51,7 @@ class TestImageGenerationModelCatalogResponse(unittest.TestCase):
                     skipped_count = 56, 
                     hidden_count = 56, ),
                 stale = True,
-                generation_current = True,
+                usable = True,
                 sync_available_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
                 automatic_retry_blocked = True,
                 entries = [
@@ -68,8 +64,8 @@ class TestImageGenerationModelCatalogResponse(unittest.TestCase):
                         recommendation_rank = 56, 
                         lifecycle_status = '', 
                         visibility_status = '', 
-                        source_metadata = { }, 
-                        projection_metadata = { }, )
+                        source_metadata = azentspublicclient.models.git.git(), 
+                        projection_metadata = azentspublicclient.models.git.git(), )
                     ],
                 total = 56
             )
@@ -78,12 +74,8 @@ class TestImageGenerationModelCatalogResponse(unittest.TestCase):
                 default_available = True,
                 explicit_selection_supported = True,
                 catalog_id = '',
-                snapshot_id = '',
-                snapshot_configuration_version = 56,
-                current_configuration_version = 56,
-                snapshot_created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
-                latest_attempt = azentspublicclient.models.image_generation_catalog_attempt_response.ImageGenerationCatalogAttemptResponse(
-                    id = '', 
+                last_success_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
+                latest_sync = azentspublicclient.models.image_generation_catalog_sync_status_response.ImageGenerationCatalogSyncStatusResponse(
                     status = '', 
                     started_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                     finished_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
@@ -95,7 +87,7 @@ class TestImageGenerationModelCatalogResponse(unittest.TestCase):
                     skipped_count = 56, 
                     hidden_count = 56, ),
                 stale = True,
-                generation_current = True,
+                usable = True,
                 sync_available_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
                 automatic_retry_blocked = True,
                 entries = [
@@ -108,8 +100,8 @@ class TestImageGenerationModelCatalogResponse(unittest.TestCase):
                         recommendation_rank = 56, 
                         lifecycle_status = '', 
                         visibility_status = '', 
-                        source_metadata = { }, 
-                        projection_metadata = { }, )
+                        source_metadata = azentspublicclient.models.git.git(), 
+                        projection_metadata = azentspublicclient.models.git.git(), )
                     ],
                 total = 56,
         )

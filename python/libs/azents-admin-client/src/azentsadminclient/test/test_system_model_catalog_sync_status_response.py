@@ -14,10 +14,10 @@
 
 import unittest
 
-from azentsadminclient.models.system_model_catalog_sync_attempt_response import SystemModelCatalogSyncAttemptResponse
+from azentsadminclient.models.system_model_catalog_sync_status_response import SystemModelCatalogSyncStatusResponse
 
-class TestSystemModelCatalogSyncAttemptResponse(unittest.TestCase):
-    """SystemModelCatalogSyncAttemptResponse unit test stubs"""
+class TestSystemModelCatalogSyncStatusResponse(unittest.TestCase):
+    """SystemModelCatalogSyncStatusResponse unit test stubs"""
 
     def setUp(self):
         pass
@@ -25,17 +25,16 @@ class TestSystemModelCatalogSyncAttemptResponse(unittest.TestCase):
     def tearDown(self):
         pass
 
-    def make_instance(self, include_optional) -> SystemModelCatalogSyncAttemptResponse:
-        """Test SystemModelCatalogSyncAttemptResponse
+    def make_instance(self, include_optional) -> SystemModelCatalogSyncStatusResponse:
+        """Test SystemModelCatalogSyncStatusResponse
             include_optional is a boolean, when False only required
             params are included, when True both required and
             optional params are included """
-        # uncomment below to create an instance of `SystemModelCatalogSyncAttemptResponse`
+        # uncomment below to create an instance of `SystemModelCatalogSyncStatusResponse`
         """
-        model = SystemModelCatalogSyncAttemptResponse()
+        model = SystemModelCatalogSyncStatusResponse()
         if include_optional:
-            return SystemModelCatalogSyncAttemptResponse(
-                id = '',
+            return SystemModelCatalogSyncStatusResponse(
                 status = '',
                 started_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
                 finished_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
@@ -48,8 +47,7 @@ class TestSystemModelCatalogSyncAttemptResponse(unittest.TestCase):
                 hidden_count = 56
             )
         else:
-            return SystemModelCatalogSyncAttemptResponse(
-                id = '',
+            return SystemModelCatalogSyncStatusResponse(
                 status = '',
                 started_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
                 finished_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
@@ -63,8 +61,8 @@ class TestSystemModelCatalogSyncAttemptResponse(unittest.TestCase):
         )
         """
 
-    def testSystemModelCatalogSyncAttemptResponse(self):
-        """Test SystemModelCatalogSyncAttemptResponse"""
+    def testSystemModelCatalogSyncStatusResponse(self):
+        """Test SystemModelCatalogSyncStatusResponse"""
         # inst_req_only = self.make_instance(include_optional=False)
         # inst_req_and_optional = self.make_instance(include_optional=True)
 
