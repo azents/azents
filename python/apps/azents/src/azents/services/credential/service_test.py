@@ -9,10 +9,12 @@ from types_aiobotocore_ses.client import SESClient
 from azents.core.config import EmailConfig
 from azents.core.email.service import EmailService
 from azents.rdb.session import SessionManager
+from azents.repos.credential_read_operations import CredentialReadOperationRepository
 from azents.repos.password_login import PasswordLoginRepository
 from azents.repos.password_login.data import PasswordLoginCreate
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
+from azents.repos.user_email import UserEmailRepository
 from azents.services.credential.data import (
     CredentialType,
     CredentialUnavailableReason,
@@ -49,12 +51,16 @@ def _make_service(
     """Create CredentialService for tests."""
     email_service = _make_email_service(configured=email_configured)
     return CredentialService(
-        session_manager=rdb_session_manager,
+        repository=CredentialReadOperationRepository(
+            session_manager=rdb_session_manager,
+            user_repository=UserRepository(),
+            user_email_repository=UserEmailRepository(),
+            password_login_repository=PasswordLoginRepository(),
+        ),
         providers=[
             PasswordCredentialProvider(),
             EmailCredentialProvider(email_service=email_service),
         ],
-        user_repo=UserRepository(),
     )
 
 

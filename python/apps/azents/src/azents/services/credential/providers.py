@@ -4,12 +4,9 @@ import dataclasses
 from typing import Annotated, Protocol
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.credential_read import CredentialReadFact, CredentialReadKind
 from azents.core.email.service import EmailService
-from azents.repos.password_login import PasswordLoginRepository
-from azents.repos.user import UserRepository
-from azents.repos.user_email import UserEmailRepository
 from azents.services.credential.data import (
     CredentialSummary,
     CredentialType,
@@ -22,22 +19,25 @@ class CredentialProvider(Protocol):
 
     credential_type: CredentialType
 
+    @property
+    def read_kind(self) -> CredentialReadKind:
+        """Return the fixed database query behavior for this provider."""
+        ...
+
     async def get_user_summary(
         self,
-        session: AsyncSession,
         *,
-        user_id: str,
+        fact: CredentialReadFact,
     ) -> CredentialSummary:
-        """Return credential summary by User."""
+        """Project one completed User configuration fact."""
         ...
 
     async def get_login_summary(
         self,
-        session: AsyncSession,
         *,
-        email: str,
+        fact: CredentialReadFact,
     ) -> CredentialSummary:
-        """Return credential summary by login input email."""
+        """Project one completed login configuration fact."""
         ...
 
 
@@ -45,35 +45,28 @@ class CredentialProvider(Protocol):
 class PasswordCredentialProvider:
     """Password credential provider."""
 
-    password_login_repo: PasswordLoginRepository = dataclasses.field(
-        default_factory=PasswordLoginRepository
-    )
-    user_repo: UserRepository = dataclasses.field(default_factory=UserRepository)
-
     credential_type: CredentialType = CredentialType.PASSWORD
+
+    @property
+    def read_kind(self) -> CredentialReadKind:
+        """Keep Password query identity independent of projection attributes."""
+        return CredentialReadKind.PASSWORD
 
     async def get_user_summary(
         self,
-        session: AsyncSession,
         *,
-        user_id: str,
+        fact: CredentialReadFact,
     ) -> CredentialSummary:
-        """Return password credential summary by User."""
-        configured = await self.password_login_repo.exists_for_user(session, user_id)
-        return self._build(configured=configured)
+        """Project a completed User password fact."""
+        return self._build(configured=fact.configured)
 
     async def get_login_summary(
         self,
-        session: AsyncSession,
         *,
-        email: str,
+        fact: CredentialReadFact,
     ) -> CredentialSummary:
-        """Return password credential summary by login input email."""
-        user = await self.user_repo.get_by_email(session, email)
-        if user is None:
-            return self._build(configured=False)
-        configured = await self.password_login_repo.exists_for_user(session, user.id)
-        return self._build(configured=configured)
+        """Project a completed login password fact."""
+        return self._build(configured=fact.configured)
 
     def _build(self, *, configured: bool) -> CredentialSummary:
         """Create Password credential summary."""
@@ -95,37 +88,29 @@ class EmailCredentialProvider:
     """Email credential provider."""
 
     email_service: EmailService
-    user_email_repo: UserEmailRepository = dataclasses.field(
-        default_factory=UserEmailRepository
-    )
-    user_repo: UserRepository = dataclasses.field(default_factory=UserRepository)
 
     credential_type: CredentialType = CredentialType.EMAIL
 
+    @property
+    def read_kind(self) -> CredentialReadKind:
+        """Keep Email query identity independent of projection attributes."""
+        return CredentialReadKind.EMAIL
+
     async def get_user_summary(
         self,
-        session: AsyncSession,
         *,
-        user_id: str,
+        fact: CredentialReadFact,
     ) -> CredentialSummary:
-        """Return email credential summary by User."""
-        user = await self.user_repo.get(session, user_id)
-        if user is None:
-            return self._build(configured=False)
-        emails = await self.user_email_repo.list_by_user(session, user_id)
-        configured = any(email.verified_at is not None for email in emails)
-        return self._build(configured=configured)
+        """Project a completed User email fact using local delivery availability."""
+        return self._build(configured=fact.configured)
 
     async def get_login_summary(
         self,
-        session: AsyncSession,
         *,
-        email: str,
+        fact: CredentialReadFact,
     ) -> CredentialSummary:
-        """Return email credential summary by login input email."""
-        user_email = await self.user_email_repo.get_by_email(session, email)
-        configured = user_email is not None and user_email.verified_at is not None
-        return self._build(configured=configured)
+        """Project a completed login email fact using local delivery availability."""
+        return self._build(configured=fact.configured)
 
     def _build(self, *, configured: bool) -> CredentialSummary:
         """Create Email credential summary."""
