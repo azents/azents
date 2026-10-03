@@ -1708,6 +1708,8 @@ def azents_core_service_containers(
             "ro",
         )
     )
+    for key, value in ordinary_model_stream_environment().items():
+        admin_container.with_env(key, value)
     engine_container = _create_engine_worker_container(
         image=azents_server_image,
         network=container_network,
