@@ -132,7 +132,10 @@ def test_common_provider_semantics_round_trip_through_ram_transcript(
         supported_execution_options=(),
         enabled_execution_options=(),
     ).lower(
-        transcript, model="selected-model", system_prompt="Independent internal task"
+        transcript,
+        native_replay_context=None,
+        model="selected-model",
+        system_prompt="Independent internal task",
     )
     assert request.messages and request.native_request_input_chars() > 0
     assert "Scoped source metadata" in str(request.messages)
@@ -189,7 +192,12 @@ def test_native_openai_completed_stream_and_lowerer_have_no_session_fiction() ->
         model="selected-model",
         supported_execution_options=(),
         enabled_execution_options=(),
-    ).lower(output.events, model="selected-model", system_prompt="Independent task")
+    ).lower(
+        output.events,
+        native_replay_context=None,
+        model="selected-model",
+        system_prompt="Independent task",
+    )
     assert request.native_request_input_chars() > 0
     assert "Completed" in str(request)
     assert "session_id" not in str(request)

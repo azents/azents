@@ -154,7 +154,10 @@ class _ScriptedModel:
             enabled_execution_options=(),
             max_output_tokens=output_tokens,
         ).lower(
-            messages, model=self.selection.model_identifier, system_prompt=system_prompt
+            messages,
+            native_replay_context=None,
+            model=self.selection.model_identifier,
+            system_prompt=system_prompt,
         )
         self.requests.append(str(request))
         estimate = (

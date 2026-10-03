@@ -1,6 +1,9 @@
 """Whole-document Memory boundary assembly without ranking or truncation."""
 
+import dataclasses
 import datetime
+import hashlib
+import json
 from collections.abc import Collection, Sequence
 from textwrap import dedent
 
@@ -9,6 +12,35 @@ from azents.core.historical_memory_snapshot import (
     MemoryContextSnapshotState,
     SavedMemorySnapshotEntry,
 )
+
+
+@dataclasses.dataclass(frozen=True)
+class MemoryContextPrompt:
+    """Atomic visible text and exact admitted Historical replay compatibility."""
+
+    text: str
+    native_replay_context: str
+
+
+def prepare_memory_context_prompt(
+    snapshot: MemoryContextSnapshotState | None,
+) -> MemoryContextPrompt:
+    """Use already authorized identities; this digest grants no source access."""
+    identities = (
+        sorted(
+            (entry.unit_id, entry.revision_id) for entry in snapshot.historical_entries
+        )
+        if snapshot is not None
+        else []
+    )
+    digest = hashlib.sha256(
+        json.dumps(identities, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return MemoryContextPrompt(
+        text=render_memory_context_snapshot(snapshot) if snapshot is not None else "",
+        native_replay_context=f"memory-selection-{digest}",
+    )
+
 
 _READ_GUIDANCE = dedent("""\
     ### Saved Memory Use Rules

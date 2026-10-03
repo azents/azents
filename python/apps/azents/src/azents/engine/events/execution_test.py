@@ -5,7 +5,7 @@ import datetime
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import asynccontextmanager
-from typing import AsyncContextManager
+from typing import AsyncContextManager, Self
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -445,7 +445,9 @@ class _Lowerer:
     ) -> NativeModelRequest:
         """Return native request."""
         del transcript, system_prompt
-        return self._native_request or NativeModelRequest(model=model, input=[])
+        return self._native_request or NativeModelRequest(
+            native_replay_context=None, model=model, input=[]
+        )
 
 
 class _RecordingLowerer:
@@ -466,7 +468,7 @@ class _RecordingLowerer:
         """Record transcript snapshot and return native request."""
         del system_prompt
         self.transcripts.append(list(transcript))
-        return NativeModelRequest(model=model, input=[])
+        return NativeModelRequest(native_replay_context=None, model=model, input=[])
 
 
 class _PreModelLowerHook:
@@ -699,7 +701,16 @@ def _test_needs_follow_up(events: Sequence[Event]) -> bool:
     return any(isinstance(event.payload, ClientToolCallPayload) for event in events)
 
 
-class _ProjectingNormalizer:
+class _CanonicalNormalizerDouble:
+    """Predefined canonical test output has no provider-owned opaque replay."""
+
+    def for_native_replay(self, schema_version: str) -> Self:
+        """Accept request binding while preserving predefined output sequencing."""
+        del schema_version
+        return self
+
+
+class _ProjectingNormalizer(_CanonicalNormalizerDouble):
     """Create projecting streams with predefined durable output."""
 
     def __init__(self, events: list[Event]) -> None:
@@ -717,7 +728,7 @@ class _ProjectingNormalizer:
         )
 
 
-class _CompletionFailingNormalizer:
+class _CompletionFailingNormalizer(_CanonicalNormalizerDouble):
     """Create streams that reject normal completion."""
 
     def start(self, session_id: str) -> _CompletionFailingOutputStream:
@@ -728,7 +739,7 @@ class _CompletionFailingNormalizer:
         )
 
 
-class _Normalizer:
+class _Normalizer(_CanonicalNormalizerDouble):
     """Normalizer for tests."""
 
     def __init__(
@@ -751,7 +762,7 @@ class _Normalizer:
         )
 
 
-class _NoUsageNormalizer:
+class _NoUsageNormalizer(_CanonicalNormalizerDouble):
     """Return successful durable output without provider usage."""
 
     def __init__(self, events: list[Event]) -> None:
@@ -964,7 +975,7 @@ def _execution(
     )
 
 
-class _SequenceNormalizer:
+class _SequenceNormalizer(_CanonicalNormalizerDouble):
     """Return normalized output by stream call order."""
 
     def __init__(self, event_batches: Sequence[Sequence[Event]]) -> None:
@@ -988,7 +999,7 @@ class _SequenceNormalizer:
         )
 
 
-class _OutputSequenceNormalizer:
+class _OutputSequenceNormalizer(_CanonicalNormalizerDouble):
     """Return complete normalized outputs by stream call order."""
 
     def __init__(self, outputs: Sequence[NormalizedAdapterOutput]) -> None:
@@ -1498,7 +1509,9 @@ async def test_external_run_callbacks_observe_no_open_db_session() -> None:
             assert open_sessions == 0
 
         return PreparedModelCall(
-            native_request=NativeModelRequest(model=model, input=[]),
+            native_request=NativeModelRequest(
+                native_replay_context=None, model=model, input=[]
+            ),
             inference_state=None,
             system_prompt_analysis=None,
             tool_executor=tool_executor,
@@ -3116,7 +3129,9 @@ async def test_model_call_preparer_runs_for_each_model_turn() -> None:
             turn_end_reasons.append(reason)
 
         return PreparedModelCall(
-            native_request=NativeModelRequest(model=model, input=[]),
+            native_request=NativeModelRequest(
+                native_replay_context=None, model=model, input=[]
+            ),
             inference_state=None,
             system_prompt_analysis=None,
             tool_executor=_ToolExecutor(),
@@ -3187,7 +3202,9 @@ async def test_model_call_preparer_turn_end_receives_error_reason() -> None:
             turn_end_reasons.append(reason)
 
         return PreparedModelCall(
-            native_request=NativeModelRequest(model=model, input=[]),
+            native_request=NativeModelRequest(
+                native_replay_context=None, model=model, input=[]
+            ),
             inference_state=None,
             system_prompt_analysis=None,
             tool_executor=_ToolExecutor(),

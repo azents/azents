@@ -58,6 +58,7 @@ from azents.engine.events.model_support_contract import (
     saved_builtin_tool_allowed,
     validate_saved_model_request,
 )
+from azents.engine.events.native_replay import native_replay_schema_version
 from azents.engine.events.output_parts import (
     enforce_tool_output_text_hard_cap,
     lower_output_to_text,
@@ -221,6 +222,7 @@ class PydanticAILowerer:
         transcript: Sequence[ModelTranscriptMessage],
         *,
         model: str,
+        native_replay_context: str | None,
         system_prompt: str | None = None,
     ) -> PydanticAIRequest:
         """Build explicit model messages without another execution graph."""
@@ -228,10 +230,19 @@ class PydanticAILowerer:
             raise ValueError("Lowerer model identity differs from the selected model")
         settings = self._settings()
         parameters = self._parameters(settings)
+        instructions = system_prompt or _DEFAULT_INSTRUCTIONS
+        self.schema_version = native_replay_schema_version(
+            instructions, native_replay_context=native_replay_context
+        )
+        self.compat_key = build_native_compat_key(
+            adapter=self.adapter,
+            native_format=self.native_format,
+            provider=self.provider,
+            model=model,
+            schema_version=self.schema_version,
+        )
         messages: list[ModelMessage] = [
-            ModelRequest(
-                parts=[SystemPromptPart(system_prompt or _DEFAULT_INSTRUCTIONS)]
-            )
+            ModelRequest(parts=[SystemPromptPart(instructions)])
         ]
         calls: dict[str, tuple[str, str]] = {}
         unrepresentable_calls: set[str] = set()
@@ -390,6 +401,7 @@ class PydanticAILowerer:
             settings=settings,
             parameters=parameters,
             assembly_metadata=None,
+            native_replay_context=native_replay_context,
         )
 
     @staticmethod

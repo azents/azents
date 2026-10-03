@@ -12,13 +12,9 @@ from azents.scheduler.deps import get_scheduler_service
 from azents.scheduler.user_scheduled_task_dispatch import (
     get_user_scheduled_task_dispatcher,
 )
-from azents.services.historical_memory.discovery import (
-    HistoricalMemoryAdmissionSample,
-    HistoricalMemoryDiscoveryService,
-)
-from azents.services.historical_memory.preparation import (
-    HistoricalMemoryPreparationService,
-    HistoricalMemoryPreparationSummary,
+from azents.services.historical_memory.sampling import (
+    HistoricalMemorySamplingReport,
+    HistoricalMemorySamplingService,
 )
 from azents.services.scheduled_task.service import ScheduledTaskDispatchSummary
 from azents.utils.fastapi.route import as_route_mounter
@@ -119,33 +115,21 @@ def test_dispatch_scheduled_tasks_rejects_naive_instant() -> None:
 
 
 def test_historical_sample_shares_aware_instant_and_preserves_real_deadline() -> None:
-    """One isolated sample uses ordinary services and a wallclock deadline."""
-    discovery = SimpleNamespace(
-        admit_and_list_due_agents=AsyncMock(
-            return_value=HistoricalMemoryAdmissionSample(
-                admitted=1,
-                due_agent_ids=("a" * 32,),
-            )
-        ),
-    )
-    preparation = SimpleNamespace(
-        prepare_agent=AsyncMock(
-            return_value=HistoricalMemoryPreparationSummary(
-                attempted=1,
-                prepared=1,
-                empty=0,
-                failed=0,
-                quota_advanced=0,
-            ),
-        ),
+    """The route passes a normalized instant and explicit consolidation choice."""
+    sampled_at = datetime.datetime(2099, 1, 1, tzinfo=datetime.UTC)
+    service = AsyncMock(spec=HistoricalMemorySamplingService)
+    service.sample_agent.return_value = HistoricalMemorySamplingReport(
+        sampled_at, 1, 1, 1, 1, 0, 0, 0, 2, 2, 0, 0
     )
     app = _app(SimpleNamespace())
-    app.dependency_overrides[HistoricalMemoryDiscoveryService] = lambda: discovery
-    app.dependency_overrides[HistoricalMemoryPreparationService] = lambda: preparation
-    real_before = datetime.datetime.now(datetime.UTC)
+    app.dependency_overrides[HistoricalMemorySamplingService] = lambda: service
     response = TestClient(app).post(
         "/scheduler/v1/historical-memory/sample",
-        json={"agent_id": "a" * 32, "now": "2099-01-01T09:00:00+09:00"},
+        json={
+            "agent_id": "a" * 32,
+            "now": "2099-01-01T09:00:00+09:00",
+            "consolidate": True,
+        },
     )
     assert response.status_code == 200
     assert response.json() == {
@@ -157,43 +141,58 @@ def test_historical_sample_shares_aware_instant_and_preserves_real_deadline() ->
         "empty": 0,
         "failed": 0,
         "quota_advanced": 0,
+        "consolidation_due": 2,
+        "consolidation_published": 2,
+        "consolidation_unclaimed": 0,
+        "consolidation_failed": 0,
     }
-    sampled_at = datetime.datetime(2099, 1, 1, tzinfo=datetime.UTC)
-    discovery.admit_and_list_due_agents.assert_awaited_once_with(
+    service.sample_agent.assert_awaited_once_with(
         now=sampled_at,
         agent_id="a" * 32,
+        consolidate=True,
     )
-    kwargs = preparation.prepare_agent.await_args.kwargs
-    assert kwargs["now"] == sampled_at
-    assert kwargs["agent_id"] == "a" * 32
-    assert real_before < kwargs["deadline"]
-    assert kwargs["deadline"] < real_before + datetime.timedelta(seconds=120)
 
 
 def test_historical_sample_rejects_naive_time_and_never_prepares_non_due_agent() -> (
     None
 ):
-    """Invalid timestamps and unrelated work cannot reach model preparation."""
-    discovery = SimpleNamespace(
-        admit_and_list_due_agents=AsyncMock(
-            return_value=HistoricalMemoryAdmissionSample(admitted=0, due_agent_ids=()),
-        ),
+    """Ingress rejects naive time and requires an explicit sampling choice."""
+    service = AsyncMock(spec=HistoricalMemorySamplingService)
+    service.sample_agent.return_value = HistoricalMemorySamplingReport(
+        datetime.datetime(2099, 1, 1, tzinfo=datetime.UTC),
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
     )
-    preparation = SimpleNamespace(prepare_agent=AsyncMock())
     app = _app(SimpleNamespace())
-    app.dependency_overrides[HistoricalMemoryDiscoveryService] = lambda: discovery
-    app.dependency_overrides[HistoricalMemoryPreparationService] = lambda: preparation
+    app.dependency_overrides[HistoricalMemorySamplingService] = lambda: service
     client = TestClient(app)
     invalid = client.post(
         "/scheduler/v1/historical-memory/sample",
-        json={"agent_id": "a" * 32, "now": "2099-01-01T00:00:00"},
+        json={
+            "agent_id": "a" * 32,
+            "now": "2099-01-01T00:00:00",
+            "consolidate": False,
+        },
     )
     assert invalid.status_code == 422
-    discovery.admit_and_list_due_agents.assert_not_awaited()
+    service.sample_agent.assert_not_awaited()
     response = client.post(
         "/scheduler/v1/historical-memory/sample",
-        json={"agent_id": "a" * 32, "now": "2099-01-01T00:00:00Z"},
+        json={
+            "agent_id": "a" * 32,
+            "now": "2099-01-01T00:00:00Z",
+            "consolidate": False,
+        },
     )
     assert response.status_code == 200
     assert response.json()["attempted"] == 0
-    preparation.prepare_agent.assert_not_awaited()
+    service.sample_agent.assert_awaited_once()

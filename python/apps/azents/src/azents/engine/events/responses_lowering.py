@@ -37,6 +37,7 @@ from azents.engine.events.model_support_contract import (
     saved_builtin_tool_allowed,
     validate_saved_model_request,
 )
+from azents.engine.events.native_replay import native_replay_schema_version
 from azents.engine.events.output_parts import (
     iter_output_parts,
     lower_output_to_text,
@@ -308,6 +309,7 @@ class ResponsesRequestLowerer:
         transcript: Sequence[ModelTranscriptMessage],
         *,
         model: str,
+        native_replay_context: str | None,
         system_prompt: str | None = None,
     ) -> NativeModelRequest:
         """Convert Event transcript to a provider-native Responses request."""
@@ -326,6 +328,16 @@ class ResponsesRequestLowerer:
         )
         default_instructions = kwargs.get("instructions") or _DEFAULT_INSTRUCTIONS
         instructions = system_prompt or str(default_instructions)
+        self.schema_version = native_replay_schema_version(
+            instructions, native_replay_context=native_replay_context
+        )
+        self.compat_key = build_native_compat_key(
+            adapter=self.adapter,
+            native_format=self.native_format,
+            provider=self.provider,
+            model=model,
+            schema_version=self.schema_version,
+        )
         if _uses_input_message_instructions(
             provider=self.provider,
             provider_id=self._provider_id,
@@ -423,6 +435,7 @@ class ResponsesRequestLowerer:
             input=input_items,
             tools=tools,
             kwargs=kwargs,
+            native_replay_context=native_replay_context,
         )
 
     def _resolve_support_context(

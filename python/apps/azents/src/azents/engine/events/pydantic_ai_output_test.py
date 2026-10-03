@@ -348,7 +348,22 @@ def test_partial_stop_preserves_text_without_tool_execution_claim() -> None:
 
 
 def test_opaque_signatures_never_become_visible_reasoning_delta() -> None:
-    stream = _normalizer().start("session-1")
+    lowerer = PydanticAILowerer(
+        top_k=None,
+        provider="anthropic",
+        provider_id=LLMProvider.ANTHROPIC,
+        model="selected-model",
+        tools=None,
+        model_capabilities=None,
+        supported_execution_options=[],
+        enabled_execution_options=[],
+    )
+    origin = lowerer.lower([], native_replay_context=None, model="selected-model")
+    stream = (
+        _normalizer()
+        .for_native_replay(origin.native_replay_schema_version())
+        .start("session-1")
+    )
     initial = ThinkingPart(
         "",
         id="redacted_thinking",
@@ -384,17 +399,9 @@ def test_opaque_signatures_never_become_visible_reasoning_delta() -> None:
     assert isinstance(payload, ReasoningPayload)
     assert payload.text is None
     assert "opaque-new" in json.dumps(payload.native_artifact.item)
-    lowerer = PydanticAILowerer(
-        top_k=None,
-        provider="anthropic",
-        provider_id=LLMProvider.ANTHROPIC,
-        model="selected-model",
-        tools=None,
-        model_capabilities=None,
-        supported_execution_options=[],
-        enabled_execution_options=[],
+    request = lowerer.lower(
+        result.events, native_replay_context=None, model="selected-model"
     )
-    request = lowerer.lower(result.events, model="selected-model")
     replayed = request.messages[1]
     assert isinstance(replayed, ModelResponse)
     assert isinstance(replayed.parts[0], ThinkingPart)

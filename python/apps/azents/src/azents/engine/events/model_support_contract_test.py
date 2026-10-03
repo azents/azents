@@ -483,7 +483,7 @@ def test_saved_parallel_denial_reaches_both_request_dialects(
         effort=effort,
         options=None if requested is None else {"parallel_tool_calls": requested},
         tools=None,
-    ).lower([], model="exact-saved-model")
+    ).lower([], native_replay_context=None, model="exact-saved-model")
     if isinstance(lowered, OpenAIResponsesRequest):
         options = lowered.options
     else:
@@ -510,7 +510,7 @@ def test_sampling_extra_body_presence_preserves_effective_wire_precedence(
             effort=None,
             options={"extra_body": {"temperature": 0.0}},
             tools=None,
-        ).lower([], model="exact-saved-model")
+        ).lower([], native_replay_context=None, model="exact-saved-model")
     decoded = decode_model_support_options(
         {"temperature": 0.2, "extra_body": {"temperature": None}}
     )
@@ -549,7 +549,7 @@ def test_support_validation_reads_effective_sdk_body_controls(
             effort=None,
             options={"extra_body": {field: body[field]}},
             tools=None,
-        ).lower([], model="exact-saved-model")
+        ).lower([], native_replay_context=None, model="exact-saved-model")
 
 
 @pytest.mark.parametrize("native", [True, False])
@@ -586,9 +586,9 @@ def test_configurable_effort_potential_still_enforces_actual_dispatch_condition(
     lowerer = _lowerer(native, caps, effort="high", options=None, tools=tools)
     if not has_function:
         with pytest.raises(ValueError, match="reasoning effort conditions"):
-            lowerer.lower([], model="exact-saved-model")
+            lowerer.lower([], native_replay_context=None, model="exact-saved-model")
     else:
-        lowerer.lower([], model="exact-saved-model")
+        lowerer.lower([], native_replay_context=None, model="exact-saved-model")
 
 
 @pytest.mark.parametrize(
@@ -626,7 +626,7 @@ def test_native_lowerer_preserves_individually_authorized_effort(effort: str) ->
     )
     lowered = _lowerer(
         True, capabilities, effort=effort, options=None, tools=None
-    ).lower([], model="exact-saved-model")
+    ).lower([], native_replay_context=None, model="exact-saved-model")
     assert isinstance(lowered, OpenAIResponsesRequest)
     assert lowered.options["reasoning"] == {"effort": effort, "summary": "auto"}
 
@@ -637,7 +637,7 @@ def test_native_default_checks_sampling_without_adding_wire_effort() -> None:
     )
     lowered = _lowerer(
         True, capabilities, effort=None, options={"temperature": 0}, tools=None
-    ).lower([], model="exact-saved-model")
+    ).lower([], native_replay_context=None, model="exact-saved-model")
     assert isinstance(lowered, OpenAIResponsesRequest)
     assert lowered.options["temperature"] == 0
     assert "reasoning" not in lowered.options
@@ -649,7 +649,7 @@ def test_native_saved_v2_support_cannot_authorize_another_model() -> None:
     )
     with pytest.raises(ValueError, match="model identity"):
         _lowerer(True, capabilities, effort=None, options=None, tools=None).lower(
-            [], model="another-model"
+            [], native_replay_context=None, model="another-model"
         )
 
 
@@ -662,7 +662,7 @@ def test_lowerers_reject_unmet_condition_without_mutating_options(native: bool) 
     with pytest.raises(ValueError, match="temperature conditions"):
         _lowerer(
             native, capabilities, effort="high", options=options, tools=None
-        ).lower([], model="exact-saved-model")
+        ).lower([], native_replay_context=None, model="exact-saved-model")
     assert options == {"temperature": 0.3}
 
 
@@ -687,7 +687,7 @@ def test_explicit_strict_is_rejected_instead_of_silently_disabled(native: bool) 
     }
     with pytest.raises(ValueError, match="strict function schemas"):
         _lowerer(native, capabilities, effort=None, options=None, tools=[tool]).lower(
-            [], model="exact-saved-model"
+            [], native_replay_context=None, model="exact-saved-model"
         )
     assert tool["strict"] is True
 
@@ -711,7 +711,7 @@ def test_pydantic_explicit_parallel_true_is_not_silently_overwritten() -> None:
             effort=None,
             options={"parallel_tool_calls": True},
             tools=None,
-        ).lower([], model="exact-saved-model")
+        ).lower([], native_replay_context=None, model="exact-saved-model")
 
 
 def test_function_condition_is_deferred_until_actual_declarations_are_known() -> None:
@@ -753,7 +753,7 @@ def test_pydantic_preserves_explicit_summary_none() -> None:
         effort="high",
         options={"extra_body": {"reasoning": {"effort": "high", "summary": "none"}}},
         tools=None,
-    ).lower([], model="exact-saved-model")
+    ).lower([], native_replay_context=None, model="exact-saved-model")
     assert not isinstance(lowered, OpenAIResponsesRequest)
     assert lowered.settings["extra_body"] == {
         "reasoning": {"effort": "high", "summary": "none"}
@@ -804,7 +804,7 @@ def test_google_v2_level_mapping_preserves_exact_choice(
         supported_execution_options=[],
         enabled_execution_options=[],
         reasoning_effort=effort,
-    ).lower([], model="exact-wire-model")
+    ).lower([], native_replay_context=None, model="exact-wire-model")
     assert dict(lowered.settings)["google_thinking_config"] == {
         "thinking_level": ThinkingLevel(effort.upper()),
         "include_thoughts": True,
@@ -834,7 +834,7 @@ def test_google_v2_does_not_invent_budget_or_change_none_to_low(
             supported_execution_options=[],
             enabled_execution_options=[],
             reasoning_effort=effort,
-        ).lower([], model="exact-wire-model")
+        ).lower([], native_replay_context=None, model="exact-wire-model")
 
 
 @pytest.mark.parametrize("native", [False, True])
@@ -859,9 +859,11 @@ def test_strict_function_conditions_are_evaluated_without_rewriting_declarations
     lowerer = _lowerer(native, capabilities, effort=effort, options=None, tools=[tool])
     if effort != "none":
         with pytest.raises(ValueError, match="strict function schemas conditions"):
-            lowerer.lower([], model="exact-saved-model")
+            lowerer.lower([], native_replay_context=None, model="exact-saved-model")
     else:
-        lowered = lowerer.lower([], model="exact-saved-model")
+        lowered = lowerer.lower(
+            [], native_replay_context=None, model="exact-saved-model"
+        )
         if isinstance(lowered, OpenAIResponsesRequest):
             assert lowered.tools[0]["strict"] is True
         else:
@@ -890,7 +892,7 @@ def test_unknown_strict_keeps_explicit_true_or_false_at_provider_boundary(
     }
     lowered = _lowerer(
         native, capabilities, effort=None, options=None, tools=[tool]
-    ).lower([], model="exact-saved-model")
+    ).lower([], native_replay_context=None, model="exact-saved-model")
     if isinstance(lowered, OpenAIResponsesRequest):
         assert lowered.tools[0]["strict"] is strict
     else:
@@ -986,9 +988,11 @@ def test_hosted_tool_conditions_use_actual_effort_and_function_presence(
     lowerer = _hosted_lowerer(native, capabilities, effort=effort, functions=functions)
     if not allowed:
         with pytest.raises(ValueError, match="builtin tool|Hosted tool"):
-            lowerer.lower([], model="exact-saved-model")
+            lowerer.lower([], native_replay_context=None, model="exact-saved-model")
     else:
-        lowered = lowerer.lower([], model="exact-saved-model")
+        lowered = lowerer.lower(
+            [], native_replay_context=None, model="exact-saved-model"
+        )
         if isinstance(lowered, OpenAIResponsesRequest):
             assert lowered.tools[-1]["type"] == "web_search"
             if effort is None:
@@ -1023,7 +1027,7 @@ def test_historical_hosted_tool_authorization_keeps_existing_list(native: bool) 
     capabilities = ModelCapabilities()
     capabilities.built_in_tools.supported = ["web_search"]
     lowered = _hosted_lowerer(native, capabilities, effort=None, functions=False).lower(
-        [], model="exact-saved-model"
+        [], native_replay_context=None, model="exact-saved-model"
     )
     if isinstance(lowered, OpenAIResponsesRequest):
         assert lowered.tools[-1]["type"] == "web_search"
@@ -1051,9 +1055,11 @@ def test_explicit_summary_condition_is_checked_without_dropping_summary(
     lowerer = _lowerer(native, capabilities, effort=effort, options=options, tools=None)
     if effort == "high":
         with pytest.raises(ValueError, match="reasoning summary conditions"):
-            lowerer.lower([], model="exact-saved-model")
+            lowerer.lower([], native_replay_context=None, model="exact-saved-model")
     else:
-        lowered = lowerer.lower([], model="exact-saved-model")
+        lowered = lowerer.lower(
+            [], native_replay_context=None, model="exact-saved-model"
+        )
         if isinstance(lowered, OpenAIResponsesRequest):
             assert lowered.options["reasoning"] == reasoning
         else:
@@ -1085,9 +1091,11 @@ def test_native_structured_condition_is_checked_without_dropping_format(
     )
     if effort == "high":
         with pytest.raises(ValueError, match="structured output conditions"):
-            lowerer.lower([], model="exact-saved-model")
+            lowerer.lower([], native_replay_context=None, model="exact-saved-model")
     else:
-        lowered = lowerer.lower([], model="exact-saved-model")
+        lowered = lowerer.lower(
+            [], native_replay_context=None, model="exact-saved-model"
+        )
         assert isinstance(lowered, OpenAIResponsesRequest)
         assert lowered.options["text"] == text
     assert text["format"] == {

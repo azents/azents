@@ -12,9 +12,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.core.enums import AgentSessionProductMode, EventKind
 from azents.core.historical_memory_consolidation import ConsolidationScope
 from azents.core.historical_memory_context import (
+    MemoryContextPrompt,
     build_memory_context_snapshot,
     filter_memory_context_snapshot,
-    render_memory_context_snapshot,
+    prepare_memory_context_prompt,
 )
 from azents.core.historical_memory_snapshot import (
     MemoryContextSnapshotState,
@@ -69,7 +70,7 @@ class MemoryContextSnapshotRepository:
             ),
         )
 
-    async def prompt_for_turn(self, *, session_id: str) -> str:
+    async def prompt_for_turn(self, *, session_id: str) -> MemoryContextPrompt:
         async with consolidation_session(self.session_manager) as session:
             await session.execute(
                 sa.select(sa.func.set_config("statement_timeout", "2000", True))
@@ -80,7 +81,7 @@ class MemoryContextSnapshotRepository:
                 )
             )
             if consumer is None:
-                return ""
+                return prepare_memory_context_prompt(None)
             record = await self.toolkit_state_repository.get(
                 session,
                 agent_id=consumer.agent_id,
@@ -93,7 +94,7 @@ class MemoryContextSnapshotRepository:
                 snapshot is None
                 or snapshot.boundary_head_event_id != consumer.model_input_head_event_id
             ):
-                return ""
+                return prepare_memory_context_prompt(None)
             current_saved = await self.memory_repository.list_by_ids(
                 session,
                 agent_id=consumer.agent_id,
@@ -118,7 +119,7 @@ class MemoryContextSnapshotRepository:
                 )
                 if entry is not None:
                     available.append(entry.revision_id)
-            result = render_memory_context_snapshot(
+            result = prepare_memory_context_prompt(
                 filter_memory_context_snapshot(
                     snapshot,
                     available_saved_ids=saved_ids,

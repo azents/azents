@@ -689,7 +689,7 @@ class TestResolveInvokeInput:
             hosted_tools=[BuiltinToolSpec(name="web_search", config={})],
         )
         with pytest.raises(ValueError, match="Required builtin tool is not supported"):
-            lowerer.lower([], model=result.value.model)
+            lowerer.lower([], native_replay_context=None, model=result.value.model)
 
     async def test_v2_agent_effort_is_rejected_instead_of_silently_omitted(
         self,

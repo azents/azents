@@ -83,7 +83,12 @@ async def test_saved_speed_survives_public_settings_and_real_sdk_serialization(
         enabled=enabled,
         reasoning=reasoning,
         kwargs=None,
-    ).lower([], model=_MODEL, system_prompt="Synthetic speed contract")
+    ).lower(
+        [],
+        native_replay_context=None,
+        model=_MODEL,
+        system_prompt="Synthetic speed contract",
+    )
     envelope = core_native_response(
         protocol="responses", model=_MODEL, text="Synthetic speed output"
     )
@@ -149,7 +154,7 @@ def test_conflicting_speed_preferences_fail_before_model_dispatch(
         kwargs=None,
     )
     with pytest.raises(ValueError, match="exclusive"):
-        lowerer.lower([], model=_MODEL)
+        lowerer.lower([], native_replay_context=None, model=_MODEL)
 
 
 @pytest.mark.parametrize("option", _SPEEDS)
@@ -164,7 +169,7 @@ def test_non_openai_provider_rejects_saved_speed_options(
         kwargs=None,
     )
     with pytest.raises(ValueError, match="not supported by this provider"):
-        lowerer.lower([], model=_MODEL)
+        lowerer.lower([], native_replay_context=None, model=_MODEL)
 
 
 @pytest.mark.parametrize("option", _SPEEDS)
@@ -179,7 +184,7 @@ def test_unsupported_speed_does_not_acquire_authority_from_model_name(
         kwargs=None,
     )
     with pytest.raises(ValueError, match="not supported by the model"):
-        lowerer.lower([], model=_MODEL)
+        lowerer.lower([], native_replay_context=None, model=_MODEL)
 
 
 @pytest.mark.parametrize(
@@ -201,4 +206,4 @@ def test_raw_sdk_options_cannot_override_saved_speed_authority(
         kwargs=kwargs,
     )
     with pytest.raises(ValueError, match="authorized execution options"):
-        lowerer.lower([], model=_MODEL)
+        lowerer.lower([], native_replay_context=None, model=_MODEL)

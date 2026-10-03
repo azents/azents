@@ -28,6 +28,8 @@ code_paths:
   - python/apps/azents/src/azents/job_runtime/types.py
   - python/apps/azents/src/azents/services/historical_memory/**
   - python/apps/azents/src/azents/repos/historical_memory/**
+  - python/apps/azents/src/azents/repos/historical_memory_consolidation/**
+  - python/apps/azents/src/azents/rdb/models/historical_memory_consolidation.py
   - python/apps/azents/src/azents/rdb/models/historical_memory.py
   - python/apps/azents/src/azents/services/file_lifecycle_cleanup.py
   - python/apps/azents/src/azents/services/external_account_link.py
@@ -61,7 +63,7 @@ code_paths:
   - infra/charts/azents/templates/server/scheduler-deployment.yaml.tpl
   - infra/charts/azents/templates/server/scheduler-pdb.yaml.tpl
 last_verified_at: 2026-10-04
-spec_version: 25
+spec_version: 26
 ---
 
 # Periodic Execution Flow Spec
@@ -335,8 +337,12 @@ Admission, due work, and submitted-job counts form its bounded result summary.
 
 Preparation runs in application Job Runtime, coalescing same-Agent work within
 one process. A job attempts at most ten source operations; its handler defaults
-to 15 of the application's 16 concurrency slots and leaves capacity for other
-jobs. Process-local coalescing does not promise cross-process exactly-once model
+to 12 of the application's 16 concurrency slots. Registered
+`historical_memory.consolidate` handlers use two more slots, leaving combined
+Memory capacity at 14 and two ordinary slots. Configured preparation capacity
+must obey the combined limit. Every worker replica owns its local capacity;
+these limits are not a deployment-wide spend ceiling.
+Process-local coalescing does not promise cross-process exactly-once preparation model
 calls. Durable source progress plus later discovery recover interrupted or
 unaccepted work without a persistent Runtime queue or Redis dependency.
 
@@ -345,7 +351,19 @@ source lifecycle, and current access before publication. Retry/completion for
 admitted sources and retention of prepared summaries are not bounded by the
 initial ten-day admission window. Unchanged content is not repeatedly prepared
 merely because time passes; later activity can permit a fresh inactive
-preparation. No Saved Memory is created or mutated. See
+preparation.
+
+Consolidation discovery reuses this five-minute cadence for exact Team/personal
+units and due recovery. Obsolete metadata retirement runs inside the claimed
+attempt before model preparation, not in discovery before dispatch. Short
+PostgreSQL leases and owner generations, not local coalescing or Redis, establish
+one active consolidation owner per unit. Jobs use ten-minute absolute attempts,
+renew 120-second leases every 30 seconds, and preserve exact pending work across
+productive finite slices. Productive progress requeues without failure delay;
+failures/no progress use one-minute exponential backoff capped at six hours.
+Fenced periodic cleanup preserves active owners, unfinished passes and snapshot-
+referenced publications while collecting eligible private payloads.
+No Saved Memory is created or mutated. See
 [`memory.md`](../domain/memory.md) for retry, source, and publication contracts.
 
 ## External account OAuth attempt cleanup task
@@ -457,6 +475,10 @@ The periodic execution flow does not provide:
   the existing system projection task.
 
 ## Changelog
+
+- **2026-10-04** (spec_version 26) — Promoted consolidation discovery/recovery/
+  cleanup and PostgreSQL ownership, preparation12/consolidation2 combined14
+  local capacity and per-replica scaling semantics.
 
 - **2026-10-03** (spec_version 25) — Kept source collection in the existing
   system projection task while replacing revision publication with current rows,

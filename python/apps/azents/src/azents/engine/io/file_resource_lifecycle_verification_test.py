@@ -456,6 +456,7 @@ async def test_artifact_output_import_and_expiration_e2e_path() -> None:
                 ),
             ),
         ],
+        native_replay_context=None,
         model="gpt-5.1",
     )
     lowered_output = request.input[-1]["output"]
@@ -545,6 +546,7 @@ async def test_attachment_output_lowers_as_metadata_only() -> None:
                 ),
             ),
         ],
+        native_replay_context=None,
         model="gpt-5.1",
     )
 
@@ -598,7 +600,7 @@ async def test_file_part_capability_branch_e2e_path() -> None:
             modalities=ModelModalities(input=[ModelModality.IMAGE])
         ),
         model_file_resolver=_StaticModelFileResolver(),
-    ).lower(transcript, model="gpt-5.1")
+    ).lower(transcript, native_replay_context=None, model="gpt-5.1")
     assert image_request.input[-1]["output"] == [
         {
             "type": "input_image",
@@ -613,7 +615,7 @@ async def test_file_part_capability_branch_e2e_path() -> None:
         enabled_execution_options=[],
         provider="openai",
         model="text-only",
-    ).lower(transcript, model="text-only")
+    ).lower(transcript, native_replay_context=None, model="text-only")
     output = text_only_request.input[-1]["output"]
     assert isinstance(output, list)
     first_output = output[0]

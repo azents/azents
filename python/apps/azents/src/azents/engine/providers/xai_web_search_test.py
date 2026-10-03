@@ -141,7 +141,7 @@ async def test_search_wire_preserves_function_tools_and_other_settings(
         kwargs={"extra_body": {"metadata": {"source": "synthetic"}}},
     )
     logical = dataclasses.replace(
-        lowerer.lower([], model="grok-test"),
+        lowerer.lower([], native_replay_context=None, model="grok-test"),
         assembly_metadata=ModelAssemblyMetadata(
             model_developer=None, model_family=None, capabilities=capabilities
         ),

@@ -15,6 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from azents.engine.events.generated_files import PendingGeneratedFileOutput
 from azents.engine.events.model_messages import TransientModelMessage
+from azents.engine.events.native_replay import responses_replay_schema_version
 from azents.engine.events.types import (
     ClientToolCallPayload,
     ClientToolResultPayload,
@@ -44,6 +45,10 @@ class NativeRequestInspection(Protocol):
         """Estimate the complete logical request size before dispatch planning."""
         ...
 
+    def native_replay_schema_version(self) -> str:
+        """Return prepared text/selection compatibility, not access authority."""
+        ...
+
 
 class _ContinuationProperties(NamedTuple):
     """Structured result returned by `continuation_properties`."""
@@ -51,6 +56,7 @@ class _ContinuationProperties(NamedTuple):
     model: object
     tools: object
     kwargs: object
+    native_replay_schema_version: str
 
 
 class NativeModelRequest(BaseModel):
@@ -62,6 +68,15 @@ class NativeModelRequest(BaseModel):
     input: list[dict[str, object]] = Field(description="Native input items")
     tools: list[dict[str, object]] = Field(default_factory=list)
     kwargs: dict[str, object] = Field(default_factory=dict)
+    native_replay_context: str | None = Field(exclude=True, repr=False)
+
+    def native_replay_schema_version(self) -> str:
+        """Bind artifact replay to actual prefix and admitted selection identity."""
+        return responses_replay_schema_version(
+            self.input,
+            self.kwargs,
+            native_replay_context=self.native_replay_context,
+        )
 
     def native_request_input_chars(self) -> int:
         """Estimate the complete logical request size."""
@@ -74,7 +89,10 @@ class NativeModelRequest(BaseModel):
     def continuation_properties(self) -> _ContinuationProperties:
         """Return every non-input property used for continuation comparison."""
         return _ContinuationProperties(
-            model=self.model, tools=self.tools, kwargs=self.kwargs
+            model=self.model,
+            tools=self.tools,
+            kwargs=self.kwargs,
+            native_replay_schema_version=self.native_replay_schema_version(),
         )
 
     def continuation_store_enabled(self) -> bool:
@@ -265,6 +283,12 @@ class AdapterOutputStream[TNativeStreamEvent](Protocol):
 
 class AdapterOutputNormalizer[TNativeStreamEvent](Protocol):
     """Create incremental normalizers for adapter-native model streams."""
+
+    def for_native_replay(
+        self, schema_version: str
+    ) -> "AdapterOutputNormalizer[TNativeStreamEvent]":
+        """Create request-local artifact compatibility for this prepared dispatch."""
+        ...
 
     def start(self, session_id: str) -> AdapterOutputStream[TNativeStreamEvent]:
         """Start normalization state for one native model stream."""

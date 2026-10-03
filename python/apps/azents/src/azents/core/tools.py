@@ -37,6 +37,14 @@ class ToolkitStatus(enum.StrEnum):
 
 
 @dataclasses.dataclass(frozen=True)
+class PreparedDynamicPrompt:
+    """Model-visible text with optional server-only native replay compatibility."""
+
+    text: str
+    native_replay_context: str | None
+
+
+@dataclasses.dataclass(frozen=True)
 class ToolkitState:
     """Tool state returned by toolkit each turn.
 
@@ -231,6 +239,15 @@ class Toolkit(ABC, Generic[ConfigT]):
         """
         del context
         return ""
+
+    async def prepare_dynamic_prompt(
+        self, context: TurnContext
+    ) -> PreparedDynamicPrompt:
+        """Capture text and replay identity together when a toolkit owns both."""
+        return PreparedDynamicPrompt(
+            text=await self.get_dynamic_prompt(context),
+            native_replay_context=None,
+        )
 
     async def __aenter__(self) -> Toolkit[ConfigT]:
         """Start background work when session starts, optional."""

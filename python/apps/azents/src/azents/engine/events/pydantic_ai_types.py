@@ -10,12 +10,15 @@ from pydantic import TypeAdapter
 from pydantic_ai.messages import (
     ModelMessage,
     ModelMessagesTypeAdapter,
+    ModelRequest,
     ModelResponse,
     ModelResponseStreamEvent,
+    SystemPromptPart,
 )
 from pydantic_ai.models import ModelRequestParameters
 from pydantic_ai.settings import ModelSettings
 
+from azents.engine.events.native_replay import native_replay_schema_version
 from azents.engine.model_assembly import ModelAssemblyMetadata
 
 if TYPE_CHECKING:
@@ -43,6 +46,22 @@ class PydanticAIRequest:
     settings: ModelSettings
     parameters: ModelRequestParameters
     assembly_metadata: ModelAssemblyMetadata | None
+    native_replay_context: str | None
+
+    def native_replay_schema_version(self) -> str:
+        """Inspect the actual prepared system prefix without changing wire text."""
+        instructions = None
+        if self.messages and isinstance(self.messages[0], ModelRequest):
+            prefixes = [
+                part.content
+                for part in self.messages[0].parts
+                if isinstance(part, SystemPromptPart)
+            ]
+            if len(prefixes) == 1:
+                instructions = prefixes[0]
+        return native_replay_schema_version(
+            instructions, native_replay_context=self.native_replay_context
+        )
 
     def native_request_input_chars(self) -> int:
         """Inspect all logical input before any physical request is planned."""

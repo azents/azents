@@ -178,17 +178,22 @@ The required Historical Memory public journey creates a Runtime-free Agent,
 integration and source Sessions through product APIs. Its
 credential-free provider fixture returns strict `{"summary": ...}` output
 through the ordinary Lightweight summary SDK path, separately from foreground
-model behavior. It verifies preparation, boundary context, live generic VFS
+model behavior. A second representative journey runs independent Team and two
+personal consolidation chains through real inventory/source reads, draft write/
+edit error recovery, exact coverage and host publication. Captured model inputs
+and tool results prove scope isolation and Runtime absence. It verifies preparation, boundary context, live generic VFS
 inspection, retained human settings, and source archive/restore/Memory-disable
 effects without live provider credentials or direct product DB writes.
 
 The isolated testenv `POST /scheduler/v1/historical-memory/sample`
 endpoint accepts an aware sampling instant and exact Agent ID, then invokes
-the real bounded discovery admission/due-source and preparation/publication
-services. It does not rewrite source activity, replace production real-time
+the real bounded discovery admission/due-source, preparation and consolidation
+services. Sampling changes Stage 1 eligibility time only; consolidation retains
+real database leases and absolute deadlines. It does not rewrite source activity, replace production real-time
 semantics, bypass source authorization, or add a production configuration mode.
-An outer 120-second timeout and preparation's 110-second real deadline keep
-the fixture operation bounded.
+An outer bounded timeout, preparation's 110-second real deadline and ordinary
+consolidation attempt limits bound fixture work. Unexpected errors propagate
+instead of becoming successful fixture responses.
 
 This product journey proves service admission, provider summary execution,
 publication, and visible consumption; it does not claim Scheduler dispatch,
@@ -683,6 +688,10 @@ External substrate features such as Agent Runtime Provider are recorded in two l
 Local/PR environment without live substrate does not fake live PASS. Instead, separate prerequisite snapshot state and deterministic evidence in PR body and design QA record. If primary E2E substrate such as Browser runner or Docker/testcontainers is unavailable and product path cannot be executed, do not replace it with PASS. Track scenario, blocker category, observed error, expected verification target, and next action in GitHub Issue, and leave blocked evidence plus issue link in design QA record.
 
 ## Changelog
+
+- **2026-10-04** (spec_version 82) — Added isolated multi-turn consolidation
+  product verification and production-service sampling with ordinary leases and
+  deadlines; retained narrow backend ownership of exhaustive races/capacity.
 
 - **2026-10-02** (spec_version 81) — Excluded cancelled candidate workflow
   artifacts from duration reevaluation without filtering genuine failed runs

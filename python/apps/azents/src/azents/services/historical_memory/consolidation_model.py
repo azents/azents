@@ -137,7 +137,10 @@ class ConsolidationProviderModel:
             model_capabilities=selection.normalized_capabilities,
         )
         request = lowerer.lower(
-            messages, model=selection.model_identifier, system_prompt=system_prompt
+            messages,
+            model=selection.model_identifier,
+            native_replay_context=None,
+            system_prompt=system_prompt,
         )
         # Same conservative character preflight as source preparation, including
         # tools and instructions. Actual provider usage settles this reservation.
@@ -162,14 +165,18 @@ class ConsolidationProviderModel:
         if isinstance(prepared.request, OpenAIResponsesRequest):
             if not isinstance(self.adapter, OpenAIResponsesModelAdapter):
                 raise TypeError("Internal request and transport do not match.")
-            output = OpenAIResponsesOutputNormalizer(
-                provider=context.provider,
-                model=context.model,
-                pricing=pricing,
-                operation="historical_memory",
-                integration=context.provider_integration_id,
-                requested_service_tier=None,
-            ).start_transient()
+            output = (
+                OpenAIResponsesOutputNormalizer(
+                    provider=context.provider,
+                    model=context.model,
+                    pricing=pricing,
+                    operation="historical_memory",
+                    integration=context.provider_integration_id,
+                    requested_service_tier=None,
+                )
+                .for_native_replay(prepared.request.native_replay_schema_version())
+                .start_transient()
+            )
             async for event in self.adapter.stream(
                 prepared.request,
                 watchdog=self.watchdog,
@@ -184,13 +191,17 @@ class ConsolidationProviderModel:
             prepared.request,
             assembly_metadata=ModelAssemblyMetadata.from_selection(self.selection),
         )
-        normalized = PydanticAIOutputNormalizer(
-            provider=context.provider,
-            model=context.model,
-            pricing=pricing,
-            operation="historical_memory",
-            integration=context.provider_integration_id,
-        ).start_transient()
+        normalized = (
+            PydanticAIOutputNormalizer(
+                provider=context.provider,
+                model=context.model,
+                pricing=pricing,
+                operation="historical_memory",
+                integration=context.provider_integration_id,
+            )
+            .for_native_replay(prepared_request.native_replay_schema_version())
+            .start_transient()
+        )
         async for event in self.adapter.stream(
             prepared_request,
             watchdog=self.watchdog,

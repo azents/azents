@@ -181,7 +181,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
   - typescript/apps/azents-web/messages/*/chat.json
 last_verified_at: 2026-10-04
-spec_version: 210
+spec_version: 211
 ---
 
 # Agent Execution Loop
@@ -1092,21 +1092,32 @@ target agent's current run after rejecting the root and the caller itself.
 
 Memory-enabled root and subagent executions receive a prompt-only Memory
 Context binding. Root `on_run_start` preparation reselects a deterministic
-`memory/context_snapshot` containing the Saved index and bounded whole Historical
-source blocks before the Run loop starts, reusing unchanged selection without a
+`memory/context_snapshot` containing the Saved index and independently framed
+whole Team/personal consolidated documents before the Run loop starts, reusing unchanged selection without a
 state write. Independently, `on_session_compact` invalidates Memory for the next
 model-context reconstruction, which refreshes after the new compaction-summary
 head commits even inside the same Run. Child lifecycle hooks inherit rather
 than reselect the root snapshot. Other model/tool turns reauthorize and filter
 the existing selection without refreshing text or selecting replacement entries.
-Saved mutation or newly prepared history is admitted at the next root preparation
+Saved mutation or newly published history is admitted at the next root preparation
 or successful compaction boundary, not silently during a tool loop.
 
 Explicit inspection uses generic `read`, `grep`, and `glob` over the live
 read-only `azents://memory` mount. Each operation independently checks Memory
 enablement, the concrete execution's active root, same Agent/Workspace, and
 current Team/associated-User source access. Paths use authorized database IDs
-and preserve the canonical Session event store as evidence. Broad grep excludes
+or exact `consolidated/{team,user}/summary.md` aliases bound to that root.
+Live aggregate reads may be newer than the boundary selection without replacing
+it. Selected revision filtering uses its own full manifest and omits the whole
+affected unit; the independently authorized peer is unchanged. A changed/denied
+semantic prefix or exact admitted unit/revision selection resets both native
+opaque replay and stored-response continuation. Preparation carries the existing
+authorized identities out-of-band and corresponding normalization stamps
+request-local native compatibility. Same visible bytes on a new clean revision
+do not restore old opaque state. Old/unbound artifacts use canonical visible
+history without encrypted reasoning/assistant/tool signatures; durable Events
+remain unchanged, including after fresh-adapter resume.
+The canonical Session event store remains source evidence. Broad grep excludes
 tool-result bodies; an exact result path yields bounded persisted text only,
 never artifacts, file bytes, or native result payloads. Archive/access loss
 applies to the next operation even after a path was previously observed.
@@ -1116,8 +1127,12 @@ tools. Subagents have context/generic reads but no Saved mutation. Dedicated
 Memory/history read factories are removed without aliases. Snapshot, mutation,
 and VFS read composition return from completed repository transactions before
 model-visible rendering. Background Historical preparation uses the Agent
-Lightweight chain independently of foreground execution; summaries remain
-potentially stale source-linked reference data, not instructions or Saved Memory.
+Lightweight chain independently of foreground execution. Internal consolidation
+hosts the same iteration core with scoped generic VFS tools, RAM-only dialogue,
+PostgreSQL draft/coverage/budget journals and fenced host publication. It has no
+foreground Session/Run, Runtime callbacks, public mutation or peer-scope context.
+Summaries and consolidated documents remain potentially stale source-linked
+reference data, not instructions or Saved Memory.
 See [`memory.md`](../domain/memory.md) for selection, authorization, and bounds.
 
 `AgentRunExecution` executes foreground client tool calls in parallel. Each tool result is normalized
@@ -1882,6 +1897,10 @@ projections retain the dedicated kind, and the UI labels it with a channel/messa
 icon.
 
 ## Changelog
+
+- **2026-10-04** (spec_version 211) — Promoted isolated RAM-only consolidation
+  hosts on the shared core, independent whole-document context and exact revision
+  filtering, latest-live aliases and safe native continuation reset.
 
 - **2026-10-04** (spec_version 210) — Routed foreground execution through one
   execution-neutral model/tool iteration core while retaining foreground

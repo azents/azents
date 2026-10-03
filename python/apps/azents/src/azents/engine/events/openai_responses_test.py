@@ -64,6 +64,7 @@ from azents.core.model_execution_options import ModelExecutionOptionId
 from azents.core.model_pricing import CapturedModelPricing
 from azents.core.openai_client_config import openai_responses_client_config
 from azents.engine.events.file_parts import ModelFileLoweringContent
+from azents.engine.events.native_replay import native_replay_schema_version
 from azents.engine.events.openai_responses import (
     OpenAIResponsesLowerer,
     OpenAIResponsesModelAdapter,
@@ -210,7 +211,7 @@ def test_openai_lowerer_maps_bounded_fast_service_tier(
         credential_kwargs={},
         supported_execution_options=supported,
         enabled_execution_options=enabled,
-    ).lower([_event()], model="gpt-5.1")
+    ).lower([_event()], native_replay_context=None, model="gpt-5.1")
 
     if expected_tier is None:
         assert "service_tier" not in request.options
@@ -250,7 +251,7 @@ def test_responses_lowerers_reject_conflicting_speed_preferences(
         enabled_execution_options=options,
     )
     with pytest.raises(ValueError):
-        lowerer.lower([_event()], model="gpt-6-astra")
+        lowerer.lower([_event()], native_replay_context=None, model="gpt-6-astra")
 
 
 def test_openai_lowerer_rejects_enabled_unsupported_fast() -> None:
@@ -268,7 +269,7 @@ def test_openai_lowerer_rejects_enabled_unsupported_fast() -> None:
         ValueError,
         match="Enabled execution option is not supported by the model",
     ):
-        lowerer.lower([_event()], model="gpt-5.1")
+        lowerer.lower([_event()], native_replay_context=None, model="gpt-5.1")
 
 
 def _external_payload(
@@ -552,7 +553,9 @@ def test_openai_lowerer_omits_endpoint_credentials_and_store() -> None:
         prompt_cache_scope="session-1",
     )
 
-    request = lowerer.lower([_event()], model="gpt-5.1-codex")
+    request = lowerer.lower(
+        [_event()], native_replay_context=None, model="gpt-5.1-codex"
+    )
 
     assert request.input == [{"role": "user", "content": "hello"}]
     assert "store" not in request.options
@@ -585,7 +588,7 @@ def test_openai_lowerer_resumes_from_compaction_handoff() -> None:
         created_at=datetime.datetime.now(datetime.UTC),
     )
 
-    request = lowerer.lower([event], model="gpt-5.1-codex")
+    request = lowerer.lower([event], native_replay_context=None, model="gpt-5.1-codex")
 
     assert request.input == [
         {
@@ -625,7 +628,7 @@ def test_openai_lowerer_renders_agent_result_terminal_envelope() -> None:
         created_at=datetime.datetime.now(datetime.UTC),
     )
 
-    request = lowerer.lower([event], model="gpt-5.1-codex")
+    request = lowerer.lower([event], native_replay_context=None, model="gpt-5.1-codex")
 
     assert request.input == [
         {
@@ -670,6 +673,7 @@ def test_chatgpt_lowerer_uses_standard_full_context_request() -> None:
 
     request = lowerer.lower(
         [_event()],
+        native_replay_context=None,
         model="gpt-5.6-luna",
         system_prompt="Be useful.",
     )
@@ -702,7 +706,7 @@ def test_openai_sdk_lowerer_accepts_plaintext_custom_apply_patch_tool() -> None:
         tools=[tool],
     )
 
-    request = lowerer.lower([_event()], model="gpt-5.1")
+    request = lowerer.lower([_event()], native_replay_context=None, model="gpt-5.1")
 
     assert request.tools == [tool]
 
@@ -742,13 +746,17 @@ def test_openai_sdk_lowerer_projects_incompatible_custom_history() -> None:
                     native_format="responses",
                     provider="openai",
                     model="gpt-5.1",
-                    schema_version="1",
+                    schema_version=native_replay_schema_version(
+                        "You are a helpful assistant.", native_replay_context=None
+                    ),
                 ),
                 adapter="litellm",
                 native_format="responses",
                 provider="openai",
                 model="gpt-5.1",
-                schema_version="1",
+                schema_version=native_replay_schema_version(
+                    "You are a helpful assistant.", native_replay_context=None
+                ),
                 item={
                     "type": "custom_tool_call",
                     "call_id": "call-custom",
@@ -760,7 +768,9 @@ def test_openai_sdk_lowerer_projects_incompatible_custom_history() -> None:
         created_at=datetime.datetime.now(datetime.UTC),
     )
 
-    request = lowerer.lower([historical_call], model="gpt-5.1")
+    request = lowerer.lower(
+        [historical_call], native_replay_context=None, model="gpt-5.1"
+    )
 
     assert request.input == [
         {
@@ -790,7 +800,9 @@ def test_chatgpt_lowerer_uses_standard_hosted_web_search_tool() -> None:
         model_capabilities=capabilities,
     )
 
-    request = lowerer.lower([_event()], model="gpt-5.6-luna")
+    request = lowerer.lower(
+        [_event()], native_replay_context=None, model="gpt-5.6-luna"
+    )
 
     assert request.tools == [{"type": "web_search"}]
     assert request.options.get("instructions") == "You are a helpful assistant."
@@ -828,7 +840,9 @@ def test_openai_sdk_lowerer_uses_standard_image_generation_tool(
         model_capabilities=capabilities,
     )
 
-    request = lowerer.lower([_event()], model="gpt-5.6-luna")
+    request = lowerer.lower(
+        [_event()], native_replay_context=None, model="gpt-5.6-luna"
+    )
 
     assert request.tools == [
         {
@@ -860,13 +874,17 @@ def test_chatgpt_oauth_rehydrates_image_generation_with_store_false() -> None:
             native_format="responses",
             provider="chatgpt_oauth",
             model="gpt-5.1",
-            schema_version="1",
+            schema_version=native_replay_schema_version(
+                "You are a helpful assistant.", native_replay_context=None
+            ),
         ),
         adapter="openai",
         native_format="responses",
         provider="chatgpt_oauth",
         model="gpt-5.1",
-        schema_version="1",
+        schema_version=native_replay_schema_version(
+            "You are a helpful assistant.", native_replay_context=None
+        ),
         item={
             "type": "image_generation_call",
             "id": "image-call-1",
@@ -902,7 +920,7 @@ def test_chatgpt_oauth_rehydrates_image_generation_with_store_false() -> None:
         created_at=datetime.datetime.now(datetime.UTC),
     )
 
-    request = lowerer.lower([event], model="gpt-5.1")
+    request = lowerer.lower([event], native_replay_context=None, model="gpt-5.1")
 
     assert request.options.get("store") is False
     assert request.input == [
@@ -931,13 +949,17 @@ def test_chatgpt_oauth_degrades_failed_image_generation_without_result() -> None
             native_format="responses",
             provider="chatgpt_oauth",
             model="gpt-5.6-luna",
-            schema_version="1",
+            schema_version=native_replay_schema_version(
+                "You are a helpful assistant.", native_replay_context=None
+            ),
         ),
         adapter="openai",
         native_format="responses",
         provider="chatgpt_oauth",
         model="gpt-5.6-luna",
-        schema_version="1",
+        schema_version=native_replay_schema_version(
+            "You are a helpful assistant.", native_replay_context=None
+        ),
         item={
             "type": "image_generation_call",
             "id": "image-call-failed",
@@ -962,7 +984,7 @@ def test_chatgpt_oauth_degrades_failed_image_generation_without_result() -> None
         created_at=datetime.datetime.now(datetime.UTC),
     )
 
-    request = lowerer.lower([event], model="gpt-5.6-luna")
+    request = lowerer.lower([event], native_replay_context=None, model="gpt-5.6-luna")
 
     assert request.options.get("store") is False
     assert request.input == [
@@ -994,13 +1016,17 @@ def test_openai_sdk_replays_failed_image_generation_by_retained_id() -> None:
             native_format="responses",
             provider="openai",
             model="gpt-5.6-luna",
-            schema_version="1",
+            schema_version=native_replay_schema_version(
+                "You are a helpful assistant.", native_replay_context=None
+            ),
         ),
         adapter="openai",
         native_format="responses",
         provider="openai",
         model="gpt-5.6-luna",
-        schema_version="1",
+        schema_version=native_replay_schema_version(
+            "You are a helpful assistant.", native_replay_context=None
+        ),
         item={
             "type": "image_generation_call",
             "id": "image-call-failed",
@@ -1025,7 +1051,7 @@ def test_openai_sdk_replays_failed_image_generation_by_retained_id() -> None:
         created_at=datetime.datetime.now(datetime.UTC),
     )
 
-    request = lowerer.lower([event], model="gpt-5.6-luna")
+    request = lowerer.lower([event], native_replay_context=None, model="gpt-5.6-luna")
 
     assert request.continuation_store_enabled()
     assert request.input == [
@@ -1056,13 +1082,17 @@ def test_openai_sdk_rehydrates_image_generation_call() -> None:
             native_format="responses",
             provider="openai",
             model="gpt-5.1",
-            schema_version="1",
+            schema_version=native_replay_schema_version(
+                "You are a helpful assistant.", native_replay_context=None
+            ),
         ),
         adapter="openai",
         native_format="responses",
         provider="openai",
         model="gpt-5.1",
-        schema_version="1",
+        schema_version=native_replay_schema_version(
+            "You are a helpful assistant.", native_replay_context=None
+        ),
         item={
             "type": "image_generation_call",
             "id": "image-call-1",
@@ -1098,7 +1128,7 @@ def test_openai_sdk_rehydrates_image_generation_call() -> None:
         created_at=datetime.datetime.now(datetime.UTC),
     )
 
-    request = lowerer.lower([event], model="gpt-5.1")
+    request = lowerer.lower([event], native_replay_context=None, model="gpt-5.1")
 
     assert request.continuation_store_enabled()
     assert request.input == [
@@ -1133,7 +1163,7 @@ def test_openai_sdk_lowerer_rejects_invalid_image_generation_config() -> None:
     )
 
     with pytest.raises(ValidationError):
-        lowerer.lower([_event()], model="gpt-5.6-luna")
+        lowerer.lower([_event()], native_replay_context=None, model="gpt-5.6-luna")
 
 
 def test_client_config_keeps_endpoint_identity_outside_request(
@@ -1382,6 +1412,7 @@ async def test_adapter_preserves_omission_null_and_stop_extension(
         inference_profile=None,
     )
     request = OpenAIResponsesRequest(
+        native_replay_context=None,
         model="gpt-5.1-codex",
         input=[{"role": "user", "content": "hello"}],
         tools=[],
@@ -1436,6 +1467,7 @@ async def test_unclassified_sdk_error_is_safely_normalized() -> None:
         websocket_endpoint_eligible=False,
     )
     request = OpenAIResponsesRequest(
+        native_replay_context=None,
         model="gpt-5.1-codex",
         input=[{"role": "user", "content": "hello"}],
         tools=[],
@@ -1491,6 +1523,7 @@ async def test_adapter_logs_safe_typed_terminal_error_context(
         websocket_endpoint_eligible=False,
     )
     request = OpenAIResponsesRequest(
+        native_replay_context=None,
         model="gpt-5.1-codex",
         input=[{"role": "user", "content": "hello"}],
         tools=[],
@@ -1571,6 +1604,7 @@ async def test_adapter_maps_sdk_status_error_without_duplicate_adapter_log(
         websocket_endpoint_eligible=False,
     )
     request = OpenAIResponsesRequest(
+        native_replay_context=None,
         model="gpt-5.1-codex",
         input=[{"role": "user", "content": "hello"}],
         tools=[],
@@ -1637,6 +1671,7 @@ async def test_websocket_reuses_one_connection_for_sequential_responses(
         inference_profile=None,
     )
     first = OpenAIResponsesRequest(
+        native_replay_context=None,
         model="gpt-5.1-codex",
         input=[{"role": "user", "content": "first"}],
         tools=[],
@@ -1704,6 +1739,7 @@ async def test_websocket_reuse_preserves_strict_openai_continuation() -> None:
         inference_profile=None,
     )
     first = OpenAIResponsesRequest(
+        native_replay_context=None,
         model="gpt-5.1-codex",
         input=[{"role": "user", "content": "first"}],
         tools=[],
@@ -1780,6 +1816,7 @@ async def test_http_only_conditions_preserve_existing_streaming_path(
         websocket_endpoint_eligible=endpoint_eligible,
     )
     request = OpenAIResponsesRequest(
+        native_replay_context=None,
         model="gpt-5.1-codex",
         input=[{"role": "user", "content": "hello"}],
         tools=[],
@@ -1852,6 +1889,7 @@ async def test_websocket_transport_failure_stages_activate_http_fallback(
         websocket_endpoint_eligible=True,
     )
     request = OpenAIResponsesRequest(
+        native_replay_context=None,
         model="gpt-5.1-codex",
         input=[{"role": "user", "content": "hello"}],
         tools=[],
@@ -1908,6 +1946,7 @@ async def test_websocket_transport_failure_marks_sticky_http_fallback(
         websocket_endpoint_eligible=True,
     )
     request = OpenAIResponsesRequest(
+        native_replay_context=None,
         model="gpt-5.1-codex",
         input=[{"role": "user", "content": "hello"}],
         tools=[],
@@ -1995,6 +2034,7 @@ async def test_empty_websocket_terminal_error_marks_sticky_http_fallback() -> No
         websocket_endpoint_eligible=True,
     )
     request = OpenAIResponsesRequest(
+        native_replay_context=None,
         model="gpt-5.6-luna",
         input=[{"role": "user", "content": "send the generated image"}],
         tools=[],
@@ -2077,6 +2117,7 @@ async def test_structured_websocket_terminal_error_keeps_websocket_enabled() -> 
         websocket_endpoint_eligible=True,
     )
     request = OpenAIResponsesRequest(
+        native_replay_context=None,
         model="gpt-5.6-luna",
         input=[{"role": "user", "content": "hello"}],
         tools=[],
@@ -2130,6 +2171,7 @@ async def test_abandoned_websocket_response_invalidates_without_sticky_fallback(
         websocket_endpoint_eligible=True,
     )
     request = OpenAIResponsesRequest(
+        native_replay_context=None,
         model="gpt-5.1-codex",
         input=[{"role": "user", "content": "hello"}],
         tools=[],
@@ -2171,6 +2213,7 @@ async def test_websocket_watchdog_timeout_invalidates_without_http_fallback() ->
         websocket_endpoint_eligible=True,
     )
     request = OpenAIResponsesRequest(
+        native_replay_context=None,
         model="gpt-5.1-codex",
         input=[{"role": "user", "content": "hello"}],
         tools=[],
@@ -2226,6 +2269,7 @@ async def test_authentication_handshake_failure_does_not_activate_http_fallback(
         websocket_endpoint_eligible=True,
     )
     request = OpenAIResponsesRequest(
+        native_replay_context=None,
         model="gpt-5.1-codex",
         input=[{"role": "user", "content": "hello"}],
         tools=[],
@@ -2290,6 +2334,7 @@ async def test_official_sdk_wire_request_preserves_presence_and_stop() -> None:
         websocket_endpoint_eligible=False,
     )
     request = OpenAIResponsesRequest(
+        native_replay_context=None,
         model="gpt-5.1-codex",
         input=[{"role": "user", "content": "synthetic input"}],
         tools=[],
@@ -2366,7 +2411,12 @@ async def test_projected_chatgpt_search_reaches_official_sdk_wire(model: str) ->
         enabled_execution_options=[],
         model_capabilities=capabilities,
         hosted_tools=[BuiltinToolSpec(name="web_search", config={})],
-    ).lower([], model=model, system_prompt="Synthetic web-search regression")
+    ).lower(
+        [],
+        native_replay_context=None,
+        model=model,
+        system_prompt="Synthetic web-search regression",
+    )
     bodies: list[dict[str, JsonValue]] = []
     decoder = TypeAdapter(dict[str, JsonValue])
 
@@ -2466,7 +2516,7 @@ async def test_official_sdk_preserves_saved_v2_effort_wire(
         supported_execution_options=[],
         enabled_execution_options=[],
         reasoning_effort=effort.value,
-    ).lower([_event()], model="exact-supported-model")
+    ).lower([_event()], native_replay_context=None, model="exact-supported-model")
     sdk_client = AsyncOpenAI(
         api_key="synthetic-test-key",
         base_url="https://provider.example/v1",
@@ -2530,13 +2580,17 @@ async def test_official_sdk_wire_request_sanitizes_unstored_generated_image() ->
             native_format="responses",
             provider="chatgpt_oauth",
             model="gpt-5.1",
-            schema_version="1",
+            schema_version=native_replay_schema_version(
+                "You are a helpful assistant.", native_replay_context=None
+            ),
         ),
         adapter="openai",
         native_format="responses",
         provider="chatgpt_oauth",
         model="gpt-5.1",
-        schema_version="1",
+        schema_version=native_replay_schema_version(
+            "You are a helpful assistant.", native_replay_context=None
+        ),
         item={
             "type": "image_generation_call",
             "id": "image-call-1",
@@ -2571,7 +2625,7 @@ async def test_official_sdk_wire_request_sanitizes_unstored_generated_image() ->
         ),
         created_at=datetime.datetime.now(datetime.UTC),
     )
-    request = lowerer.lower([event], model="gpt-5.1")
+    request = lowerer.lower([event], native_replay_context=None, model="gpt-5.1")
     sdk_client = AsyncOpenAI(
         api_key="synthetic-test-key",
         base_url="https://provider.example/v1",
@@ -2631,14 +2685,22 @@ def test_typed_normalizer_admits_completed_custom_tool_call() -> None:
         name="apply_patch",
         type="custom_tool_call",
     )
-    output = OpenAIResponsesOutputNormalizer(
-        pricing=None,
-        provider="openai",
-        model="gpt-5.1-codex",
-        operation="sampling",
-        integration=None,
-        requested_service_tier=None,
-    ).start("session-1")
+    output = (
+        OpenAIResponsesOutputNormalizer(
+            pricing=None,
+            provider="openai",
+            model="gpt-5.1-codex",
+            operation="sampling",
+            integration=None,
+            requested_service_tier=None,
+        )
+        .for_native_replay(
+            native_replay_schema_version(
+                "You are a helpful assistant.", native_replay_context=None
+            )
+        )
+        .start("session-1")
+    )
 
     added = output.process_event(
         ResponseOutputItemAddedEvent(
@@ -2714,7 +2776,9 @@ def test_typed_normalizer_admits_completed_custom_tool_call() -> None:
         provider_id=LLMProvider.OPENAI,
         credential_kwargs={},
         historical_plaintext_custom_supported=True,
-    ).lower([*completed.events, result], model="gpt-5.1-codex")
+    ).lower(
+        [*completed.events, result], native_replay_context=None, model="gpt-5.1-codex"
+    )
 
     assert request.input == [
         {
@@ -2901,7 +2965,7 @@ def test_typed_completed_message_does_not_replay_output_index() -> None:
         model="gpt-5.1-codex",
         provider_id=LLMProvider.OPENAI,
         credential_kwargs={},
-    ).lower(completed.events, model="gpt-5.1-codex")
+    ).lower(completed.events, native_replay_context=None, model="gpt-5.1-codex")
     assert "output_index" not in request.input[0]
 
 
@@ -3484,13 +3548,17 @@ def test_cross_adapter_artifacts_use_canonical_fallback() -> None:
             native_format="responses",
             provider="openai",
             model="gpt-5.1-codex",
-            schema_version="1",
+            schema_version=native_replay_schema_version(
+                "You are a helpful assistant.", native_replay_context=None
+            ),
         ),
         adapter="openai",
         native_format="responses",
         provider="openai",
         model="gpt-5.1-codex",
-        schema_version="1",
+        schema_version=native_replay_schema_version(
+            "You are a helpful assistant.", native_replay_context=None
+        ),
         item={"type": "message", "id": "sdk-only", "content": []},
     )
     event = Event(
@@ -3513,7 +3581,7 @@ def test_cross_adapter_artifacts_use_canonical_fallback() -> None:
         provider_id=LLMProvider.OPENAI,
         tools=None,
         model_capabilities=None,
-    ).lower([event], model="gpt-5.1-codex")
+    ).lower([event], native_replay_context=None, model="gpt-5.1-codex")
 
     responses = [
         message
@@ -3635,6 +3703,7 @@ async def test_authentication_error_preserves_typed_provider_message(
         websocket_endpoint_eligible=False,
     )
     logical_request = OpenAIResponsesRequest(
+        native_replay_context=None,
         model="gpt-5.1-codex",
         input=[{"role": "user", "content": "hello"}],
         tools=[],
@@ -3684,6 +3753,7 @@ async def test_missing_previous_response_retries_full_input_once(
     caplog.set_level(logging.INFO)
     planner = ResponsesContinuationPlanner()
     base = OpenAIResponsesRequest(
+        native_replay_context=None,
         model="gpt-5.1-codex",
         input=[{"role": "user", "content": "first"}],
         tools=[],
@@ -3812,7 +3882,7 @@ def test_openai_lowerer_groups_external_invocation_batch() -> None:
         ),
     ]
 
-    request = lowerer.lower(transcript, model="gpt-5.1")
+    request = lowerer.lower(transcript, native_replay_context=None, model="gpt-5.1")
     content = request.input[-1]["content"]
     assert isinstance(content, str)
     assert content.startswith("Message Type: EXTERNAL_CHANNEL_TURN")

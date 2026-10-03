@@ -169,6 +169,7 @@ class STSCall:
             event
             async for event in self.adapter.stream(
                 PydanticAIRequest(
+                    native_replay_context=None,
                     provider="aws_bedrock",
                     model=_MODEL,
                     assembly_metadata=None,

@@ -23,6 +23,7 @@ from azents.core.enums import (
     RuntimeProviderObservedState,
     RuntimeRunnerState,
 )
+from azents.core.historical_memory_context import MemoryContextPrompt
 from azents.core.runtime_capabilities import (
     RuntimeCapabilityResolver,
     RuntimeCapabilitySnapshot,
@@ -401,14 +402,16 @@ class _MemoryContextSnapshotServiceDouble(MemoryContextSnapshotService):
         self.compaction_refreshes.append(after_compaction)
         return self.refresh_available
 
-    async def prompt_for_turn(
+    async def context_for_turn(
         self,
         *,
         session_id: str,
-    ) -> str:
+    ) -> MemoryContextPrompt:
         """Record the canonical root identity and return the configured prompt."""
         self.session_ids.append(session_id)
-        return self.prompt
+        return MemoryContextPrompt(
+            text=self.prompt, native_replay_context="synthetic-memory-selection"
+        )
 
 
 def _make_memory_snapshot_service(

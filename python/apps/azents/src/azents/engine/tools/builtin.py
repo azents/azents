@@ -40,6 +40,7 @@ from azents.core.session_resource_authority import (
     accepts_execution_owner,
 )
 from azents.core.tools import (
+    PreparedDynamicPrompt,
     ResolveContext,
     ShellToolkitConfig,
     Toolkit,
@@ -438,9 +439,15 @@ class MemoryContextToolkit(Toolkit[ShellToolkitConfig]):
 
     async def get_dynamic_prompt(self, context: TurnContext) -> str:
         """Return the persisted boundary Memory snapshot for the current turn."""
+        return (await self.prepare_dynamic_prompt(context)).text
+
+    async def prepare_dynamic_prompt(
+        self, context: TurnContext
+    ) -> PreparedDynamicPrompt:
+        """Atomically retain admitted selection identity outside visible framing."""
         del context
         if not self._config.memory_enabled:
-            return ""
+            return PreparedDynamicPrompt(text="", native_replay_context=None)
         if self._compaction_refresh_pending:
             self._compaction_refresh_pending = False
             self._snapshot_available = False
@@ -450,15 +457,25 @@ class MemoryContextToolkit(Toolkit[ShellToolkitConfig]):
                     after_compaction=True,
                 )
             )
-        snapshot = (
-            await self.memory_context_snapshot_service.prompt_for_turn(
+        prepared = (
+            await self.memory_context_snapshot_service.context_for_turn(
                 session_id=self._root_session_id,
             )
             if self._snapshot_available
-            else ""
+            else None
         )
-        return "\n\n".join(
-            part for part in (snapshot, _MEMORY_CONTEXT_RULES_PROMPT) if part
+        return PreparedDynamicPrompt(
+            text="\n\n".join(
+                part
+                for part in (
+                    prepared.text if prepared is not None else "",
+                    _MEMORY_CONTEXT_RULES_PROMPT,
+                )
+                if part
+            ),
+            native_replay_context=(
+                prepared.native_replay_context if prepared is not None else None
+            ),
         )
 
 

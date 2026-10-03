@@ -133,6 +133,7 @@ def _catalog(
     if len(by_name) != len(tools):
         raise ValueError("Duplicate internal tool name.")
     candidate = ToolCatalog(
+        native_replay_context=None,
         tools=MappingProxyType(by_name),
         wire_dialects=MappingProxyType({}),
         entries=MappingProxyType(

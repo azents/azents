@@ -227,6 +227,7 @@ async def test_model_without_v4a_keeps_all_required_ordinary_mutations(
         use_prefix=False,
     )
     candidate = ToolCatalog(
+        native_replay_context=None,
         tools=tools,
         wire_dialects={},
         entries={

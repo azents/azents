@@ -6,6 +6,10 @@ from typing import Annotated
 
 from fastapi import Depends
 
+from azents.core.historical_memory_context import (
+    MemoryContextPrompt,
+    prepare_memory_context_prompt,
+)
 from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.repos.historical_memory_consolidation.authority import (
     ConsolidationAuthorityBusyError,
@@ -31,6 +35,11 @@ class MemoryContextSnapshotService:
         return dataclasses.replace(self, repository=self.repository.with_owner(owner))
 
     async def prompt_for_turn(self, *, session_id: str) -> str:
+        """Render the same atomic admission used by model preparation."""
+        return (await self.context_for_turn(session_id=session_id)).text
+
+    async def context_for_turn(self, *, session_id: str) -> MemoryContextPrompt:
+        """Return text and exact selected identities from one authority check."""
         try:
             return await self.repository.prompt_for_turn(session_id=session_id)
         except ConsolidationAuthorityBusyError, ConsolidationDeadlineError:
@@ -38,7 +47,7 @@ class MemoryContextSnapshotService:
                 "Memory context authority could not be confirmed.",
                 extra={"session_id": session_id},
             )
-            return ""
+            return prepare_memory_context_prompt(None)
 
     async def refresh_snapshot(
         self,

@@ -1,6 +1,7 @@
 """Official OpenAI SDK Responses HTTP and WebSocket adapter."""
 
 import asyncio
+import copy
 import dataclasses
 import json
 import logging
@@ -17,6 +18,7 @@ from typing import (
     Any,
     Literal,
     Protocol,
+    Self,
     TypedDict,
     TypeGuard,
     TypeIs,
@@ -92,6 +94,7 @@ from azents.engine.events.model_messages import (
     transient_model_message,
 )
 from azents.engine.events.model_usage_pricing import apply_model_usage_pricing
+from azents.engine.events.native_replay import responses_replay_schema_version
 from azents.engine.events.protocols import (
     CompletedAdapterOutput,
     ContentDeltaProjection,
@@ -221,6 +224,7 @@ class _OpenAIResponsesContinuationProperties:
     model: str
     tools: list[dict[str, object]]
     options: OpenAIResponsesOptions
+    native_replay_schema_version: str
 
 
 class OpenAIResponsesRequest(BaseModel):
@@ -232,6 +236,15 @@ class OpenAIResponsesRequest(BaseModel):
     input: list[dict[str, object]]
     tools: list[dict[str, object]]
     options: OpenAIResponsesOptions
+    native_replay_context: str | None = Field(exclude=True, repr=False)
+
+    def native_replay_schema_version(self) -> str:
+        """Inspect actual prefix and out-of-band admitted selection compatibility."""
+        return responses_replay_schema_version(
+            self.input,
+            self.options,
+            native_replay_context=self.native_replay_context,
+        )
 
     def native_request_input_chars(self) -> int:
         """Estimate the complete logical request size before continuation."""
@@ -247,6 +260,7 @@ class OpenAIResponsesRequest(BaseModel):
             model=self.model,
             tools=self.tools,
             options=self.options,
+            native_replay_schema_version=self.native_replay_schema_version(),
         )
 
     def continuation_store_enabled(self) -> bool:
@@ -326,14 +340,18 @@ class OpenAIResponsesLowerer:
         transcript: Sequence[ModelTranscriptMessage],
         *,
         model: str,
+        native_replay_context: str | None,
         system_prompt: str | None = None,
     ) -> OpenAIResponsesRequest:
         """Convert an Event transcript without retaining endpoint credentials."""
         native = self._lowerer.lower(
             transcript,
             model=model,
+            native_replay_context=native_replay_context,
             system_prompt=system_prompt,
         )
+        self.compat_key = self._lowerer.compat_key
+        self.schema_version = self._lowerer.schema_version
         unknown = set(native.kwargs) - (
             _OPENAI_REQUEST_OPTION_KEYS | _OPENAI_ENDPOINT_OPTION_KEYS
         )
@@ -354,6 +372,7 @@ class OpenAIResponsesLowerer:
             input=native.input,
             tools=native.tools,
             options=options,
+            native_replay_context=native_replay_context,
         )
 
 
@@ -1174,6 +1193,13 @@ class OpenAIResponsesOutputNormalizer:
             self, durable_response_message_factory(session_id)
         )
 
+    def for_native_replay(self, schema_version: str) -> Self:
+        """Pair native artifact origin with the exact prepared request binding."""
+        selected = copy.copy(self)
+        selected.schema_version = schema_version
+        selected._canonical = self._canonical.for_native_replay(schema_version)
+        return selected
+
     def start_transient(self) -> "_OpenAIResponsesOutputStream[TransientModelMessage]":
         """Normalize internal messages with no fabricated durable identity."""
         return _OpenAIResponsesOutputStream(self, transient_model_message)
@@ -1894,6 +1920,7 @@ async def call_openai_responses_text_with_usage(
         options["store"] = False
         options["include"] = ["reasoning.encrypted_content"]
     request = OpenAIResponsesRequest(
+        native_replay_context=None,
         model=model,
         input=list(input_items),
         tools=[],
@@ -1914,7 +1941,9 @@ async def call_openai_responses_text_with_usage(
         integration=call_context.provider_integration_id,
         requested_service_tier=None,
     )
-    stream = normalizer.start(call_context.session_id or "bounded-operation")
+    stream = normalizer.for_native_replay(request.native_replay_schema_version()).start(
+        call_context.session_id or "bounded-operation"
+    )
     try:
         async for event in adapter.stream(
             request,

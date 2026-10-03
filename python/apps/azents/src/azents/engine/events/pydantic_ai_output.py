@@ -1,8 +1,10 @@
 """Normalize model assembly with separate native completion and artifact evidence."""
 
+import copy
 import hashlib
 import json
 from collections.abc import Sequence
+from typing import Self
 
 from azcommon.types import JSONValue
 from azcommon.uuid import uuid7
@@ -129,6 +131,20 @@ class PydanticAIOutputNormalizer:
         return PydanticAIOutputStream(
             self, durable_response_message_factory(session_id)
         )
+
+    def for_native_replay(self, schema_version: str) -> Self:
+        """Freeze this request's opaque replay identity without sharing mutation."""
+        selected = copy.copy(self)
+        selected.schema_version = schema_version
+        selected.compat_key = build_native_compat_key(
+            adapter=self.adapter,
+            native_format=self.native_format,
+            provider=self.provider,
+            model=self.model,
+            schema_version=schema_version,
+        )
+        selected.canonical = self.canonical.for_native_replay(schema_version)
+        return selected
 
     def start_transient(self) -> "PydanticAIOutputStream[TransientModelMessage]":
         """Use the same SDK semantic parser with an independent RAM envelope."""

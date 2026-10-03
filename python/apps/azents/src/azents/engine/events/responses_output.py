@@ -1,8 +1,9 @@
 """Shared provider-native Responses output normalization."""
 
+import copy
 import datetime
 from collections.abc import Sequence
-from typing import ClassVar, Literal
+from typing import ClassVar, Literal, Self
 
 from azcommon.uuid import uuid7
 
@@ -93,6 +94,19 @@ class ResponsesOutputNormalizer:
         return _ResponsesOutputStream(
             self, durable_response_message_factory(session_id)
         )
+
+    def for_native_replay(self, schema_version: str) -> Self:
+        """Bind artifacts on an independent request-local normalizer copy."""
+        selected = copy.copy(self)
+        selected.schema_version = schema_version
+        selected.compat_key = build_native_compat_key(
+            adapter=self.adapter,
+            native_format=self.native_format,
+            provider=self.provider,
+            model=self.model,
+            schema_version=schema_version,
+        )
+        return selected
 
     def start_transient(self) -> "_ResponsesOutputStream[TransientModelMessage]":
         """Normalize internal output without public Event/Session identity."""

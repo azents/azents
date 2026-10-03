@@ -89,7 +89,7 @@ async def test_owned_tool_unknown_fields_and_native_schemas(
         tools=[declaration],
         supported_execution_options=(),
         enabled_execution_options=(),
-    ).lower([], model="gpt-test")
+    ).lower([], native_replay_context=None, model="gpt-test")
     assert openai.tools[0]["parameters"] == schema
     pydantic_request = PydanticAILowerer(
         provider="openai",
@@ -100,7 +100,7 @@ async def test_owned_tool_unknown_fields_and_native_schemas(
         tools=[declaration],
         supported_execution_options=(),
         enabled_execution_options=(),
-    ).lower([], model="gpt-test")
+    ).lower([], native_replay_context=None, model="gpt-test")
     assert (
         pydantic_request.parameters.function_tools[0].parameters_json_schema == schema
     )
