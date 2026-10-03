@@ -7,7 +7,7 @@ import httpx2
 import pytest
 from openai import AsyncOpenAI
 from pydantic import BaseModel, JsonValue, TypeAdapter
-from pydantic_ai.models.openai import OpenAIResponsesModel
+from pydantic_ai.models.openai import OpenAIChatModel, OpenAIResponsesModel
 from pydantic_ai.native_tools import WebSearchTool
 from pydantic_ai.profiles import ModelProfile
 from pydantic_ai.profiles.google import GoogleModelProfile
@@ -447,6 +447,7 @@ async def test_saved_conditions_reach_real_sdk_wire_without_codec_clamping(
     """Met conditions preserve exact intent; failed ones never reach HTTP."""
     caps = _codec_snapshot(feature, state)
     lowerer = PydanticAILowerer(
+        top_k=None,
         provider=LLMProvider.OPENROUTER.value,
         provider_id=LLMProvider.OPENROUTER,
         model=_WIRE_MODEL,
@@ -523,5 +524,203 @@ async def test_saved_conditions_reach_real_sdk_wire_without_codec_clamping(
                 tool.get("type") in {"web_search", "web_search_preview"}
                 for tool in tools
             )
+    finally:
+        await sdk.close()
+
+
+def test_sampling_bridge_keeps_existing_typed_settings_normalization() -> None:
+    caps = _codec_snapshot("strict", "unknown")
+    request = PydanticAILowerer(
+        top_k=None,
+        provider=LLMProvider.OPENROUTER.value,
+        provider_id=LLMProvider.OPENROUTER,
+        model=_WIRE_MODEL,
+        tools=[],
+        model_capabilities=caps,
+        supported_execution_options=[],
+        enabled_execution_options=[],
+        kwargs={"temperature": "0.2", "top_p": "0.9"},
+    ).lower([], model=_WIRE_MODEL)
+    assert request.settings is not None
+    body = _WIRE_OBJECT.validate_python(request.settings["extra_body"])
+    assert body["temperature"] == 0.2
+    assert body["top_p"] == 0.9
+
+
+@pytest.mark.parametrize(
+    "provider",
+    [
+        LLMProvider.XAI,
+        LLMProvider.XAI_OAUTH,
+        LLMProvider.OPENROUTER,
+        LLMProvider.KIMI_OAUTH,
+    ],
+)
+@pytest.mark.parametrize(
+    ("state", "effort", "default_none", "override", "allowed"),
+    [
+        ("supported", "high", False, False, True),
+        ("supported", "high", False, True, True),
+        ("supported", None, False, False, True),
+        ("conditional", "none", False, False, True),
+        ("conditional", "high", False, False, False),
+        ("conditional", None, True, False, True),
+        ("conditional", None, False, False, False),
+        ("unsupported", "high", False, True, False),
+    ],
+)
+async def test_saved_sampling_survives_compatible_sdk_reasoning_filter(
+    provider: LLMProvider,
+    state: Literal["supported", "conditional", "unsupported"],
+    effort: str | None,
+    default_none: bool,
+    override: bool,
+    allowed: bool,
+) -> None:
+    """The codec sends authorized sampling with reasoning, including explicit zero."""
+    model_id = "exact-sampling"
+    source = decode_catalog_source(
+        json.dumps(
+            {
+                f"{provider.value}/{model_id}": {
+                    "litellm_provider": provider.value,
+                    "mode": "chat",
+                    "supports_reasoning": True,
+                    "reasoning_effort_levels": ["none", "high"],
+                    "supports_sampling_params": True,
+                }
+            }
+        ).encode()
+    ).models[0]
+    caps = project_capabilities(
+        provider=provider,
+        exact_model=model_id,
+        source_model=source,
+        evidence=ProviderCapabilityEvidence(
+            default_reasoning_effort=CatalogFact(
+                state="value" if default_none else "absent",
+                value=ModelReasoningEffort.NONE if default_none else None,
+            )
+        ),
+        model_developer=None,
+    )
+    payload = caps.model_dump(mode="json")
+    for key in ("temperature", "top_p"):
+        payload["semantic_contract"]["parameters"][key] = {
+            "state": state,
+            "origin": "explicit",
+            "predicate": {"reasoning_efforts": ["none"], "function_tools": None}
+            if state == "conditional"
+            else None,
+        }
+        payload["parameters"][key] = state == "supported"
+    caps = ModelCapabilities.model_validate(payload)
+    saved = caps.model_dump_json()
+    bodies: list[dict[str, JsonValue]] = []
+    chat = provider == LLMProvider.KIMI_OAUTH
+
+    def handle(request: httpx2.Request) -> httpx2.Response:
+        bodies.append(_WIRE_OBJECT.validate_json(request.content))
+        if chat:
+            reply = {
+                "id": "chatcmpl_sampling",
+                "object": "chat.completion",
+                "created": 1,
+                "model": model_id,
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {"role": "assistant", "content": "ok"},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 1,
+                    "completion_tokens": 1,
+                    "total_tokens": 2,
+                },
+            }
+        else:
+            fixture = core_native_response(
+                protocol="responses", model=model_id, text="ok"
+            )
+            frame = next(
+                item
+                for item in fixture.body.split(b"\n\n")
+                if b'"response.completed"' in item
+            )
+            reply = _WireCompletedEnvelope.model_validate_json(
+                frame.split(b"data: ", 1)[1]
+            ).response
+        return httpx2.Response(200, request=request, json=reply)
+
+    sdk = AsyncOpenAI(
+        api_key="synthetic-sampling-key",
+        base_url="https://provider.invalid/v1",
+        max_retries=0,
+        http_client=httpx2.AsyncClient(transport=httpx2.MockTransport(handle)),
+    )
+    profile = resolve_runtime_model_profile(
+        provider=provider,
+        model=model_id,
+        profile_model=None,
+        assembly_metadata=ModelAssemblyMetadata(
+            model_developer=None, model_family=None, capabilities=caps
+        ),
+        context_window=None,
+        context_window_explicit=False,
+        source_model=None,
+    ).profile
+    assert profile.get("openai_supports_reasoning") is True
+    lowerer = PydanticAILowerer(
+        top_k=None,
+        provider=provider.value,
+        provider_id=provider,
+        model=model_id,
+        tools=[],
+        model_capabilities=caps,
+        supported_execution_options=[],
+        enabled_execution_options=[],
+        reasoning_effort=effort,
+        temperature=0.2,
+        top_p=0.9,
+        kwargs={
+            "extra_body": {
+                "vendor_extension": "kept",
+                **({"temperature": 0.0} if override else {}),
+            }
+        },
+    )
+    try:
+        if not allowed:
+            with pytest.raises(ValueError):
+                lowerer.lower([], model=model_id, system_prompt="Sampling test")
+            assert bodies == []
+            return
+        request = lowerer.lower([], model=model_id, system_prompt="Sampling test")
+        assert request.settings is not None
+        assert "temperature" not in request.settings
+        assert "top_p" not in request.settings
+        public_model = (
+            OpenAIChatModel(
+                model_id, provider=OpenAIProvider(openai_client=sdk), profile=profile
+            )
+            if chat
+            else OpenAIResponsesModel(
+                model_id, provider=OpenAIProvider(openai_client=sdk), profile=profile
+            )
+        )
+        await public_model.request(
+            request.messages, request.settings, request.parameters
+        )
+        assert len(bodies) == 1
+        assert bodies[0]["temperature"] == (0.0 if override else 0.2)
+        assert bodies[0]["top_p"] == 0.9
+        assert bodies[0]["vendor_extension"] == "kept"
+        if effort is not None:
+            assert (
+                _WIRE_OBJECT.validate_python(bodies[0]["reasoning"])["effort"] == effort
+            )
+        assert caps.model_dump_json() == saved
     finally:
         await sdk.close()

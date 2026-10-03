@@ -165,6 +165,7 @@ class PydanticAILowerer:
         model_capabilities: ModelCapabilities | None,
         supported_execution_options: Sequence[ModelExecutionOptionId],
         enabled_execution_options: Sequence[ModelExecutionOptionId],
+        top_k: int | None,
         kwargs: Mapping[str, object] | None = None,
         temperature: float | None = None,
         max_output_tokens: int | None = None,
@@ -188,6 +189,7 @@ class PydanticAILowerer:
         self.temperature = temperature
         self.max_output_tokens = max_output_tokens
         self.top_p = top_p
+        self.top_k = top_k
         self.stop = stop
         self.reasoning_effort = reasoning_effort
         self.model_developer = model_developer
@@ -805,6 +807,8 @@ class PydanticAILowerer:
             values["max_tokens"] = self.max_output_tokens
         if self.top_p is not None:
             values["top_p"] = self.top_p
+        if self.top_k is not None:
+            values["top_k"] = self.top_k
         if self.stop is not None:
             values["stop_sequences"] = self.stop
         contract = self.model_capabilities.semantic_contract
@@ -911,6 +915,8 @@ class PydanticAILowerer:
                         include_thoughts=True,
                     )
             return _GoogleSettings.model_validate({"value": values}).value
+        if values.get("top_k") is not None:
+            raise ValueError("Selected top-k has no mapping in this model codec.")
         if self.reasoning_effort is not None:
             extra_body = values.get("extra_body")
             if extra_body is not None and not is_string_object_dict(extra_body):
@@ -949,6 +955,26 @@ class PydanticAILowerer:
         if self.provider_id == LLMProvider.OPENROUTER:
             values["openai_include_raw_annotations"] = True
             values["openai_include_web_search_sources"] = True
+        if contract is not None and self.provider_id in {
+            LLMProvider.XAI,
+            LLMProvider.XAI_OAUTH,
+            LLMProvider.OPENROUTER,
+            LLMProvider.KIMI_OAUTH,
+        }:
+            # Preserve the existing typed settings normalization before moving
+            # scalar fields into the public raw-body extension.
+            values = dict(_OpenAISettings.model_validate({"value": values}).value)
+            extra_body = values.get("extra_body")
+            if extra_body is not None and not is_string_object_dict(extra_body):
+                raise ValueError("Model extra_body must be an object")
+            body = dict(extra_body if extra_body is not None else {})
+            # Saved validation owns compatibility. The SDK's generic reasoning
+            # filter must not remove explicit authorized sampling wire values.
+            for key in ("temperature", "top_p"):
+                if key in values:
+                    body.setdefault(key, values.pop(key))
+            if body:
+                values["extra_body"] = body
         settings = _OpenAISettings.model_validate({"value": values}).value
         if self.provider_id in {LLMProvider.XAI, LLMProvider.XAI_OAUTH}:
             searches = [

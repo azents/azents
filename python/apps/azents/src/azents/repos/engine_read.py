@@ -174,10 +174,12 @@ class EngineInvokeReadRepository:
                 main_settings = selected_option.candidates[0].settings
                 requested_effort = requested_profile.reasoning_effort
                 if requested_effort is not None:
-                    reasoning = main_selection.normalized_capabilities.reasoning
+                    capabilities = main_selection.normalized_capabilities
                     if (
-                        not reasoning.supported
-                        or requested_effort not in reasoning.effort_levels
+                        capabilities.semantic_contract is None
+                        and not capabilities.reasoning.supported
+                        or requested_effort
+                        not in capabilities.configurable_reasoning_efforts()
                     ):
                         return Failure(
                             EngineReasoningEffortUnsupported(
