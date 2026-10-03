@@ -439,6 +439,184 @@ def _lowerer(
     )
 
 
+@pytest.mark.parametrize("native", [True, False])
+@pytest.mark.parametrize(
+    ("state", "effort", "requested", "expected"),
+    [
+        ("unsupported", None, None, False),
+        ("unsupported", None, False, False),
+        ("unknown", None, None, None),
+        ("supported", None, None, None),
+        ("supported", None, True, True),
+        ("conditional", "none", None, None),
+        ("conditional", "high", None, False),
+        ("conditional", None, None, False),
+    ],
+)
+def test_saved_parallel_denial_reaches_both_request_dialects(
+    native: bool,
+    state: Literal["supported", "unsupported", "unknown", "conditional"],
+    effort: str | None,
+    requested: bool | None,
+    expected: bool | None,
+) -> None:
+    caps = semantic_capabilities(
+        default_none=False, temperature=unknown(), structured=supported()
+    )
+    assert caps.semantic_contract is not None
+    support = {
+        "supported": supported(),
+        "unsupported": unsupported(),
+        "unknown": unknown(),
+        "conditional": conditional(),
+    }[state]
+    caps.semantic_contract = caps.semantic_contract.model_copy(
+        update={"parallel_function_calls": support}
+    )
+    caps.tool_calling.parallel_tool_calls = support.nullable_enabled
+    before = caps.model_dump_json()
+    lowered = _lowerer(
+        native,
+        caps,
+        effort=effort,
+        options=None if requested is None else {"parallel_tool_calls": requested},
+        tools=None,
+    ).lower([], model="exact-saved-model")
+    if isinstance(lowered, OpenAIResponsesRequest):
+        options = lowered.options
+    else:
+        assert lowered.settings is not None
+        options = lowered.settings
+    if expected is None:
+        assert "parallel_tool_calls" not in options
+    else:
+        assert options["parallel_tool_calls"] is expected
+    assert caps.model_dump_json() == before
+
+
+@pytest.mark.parametrize("native", [True, False])
+def test_sampling_extra_body_presence_preserves_effective_wire_precedence(
+    native: bool,
+) -> None:
+    caps = semantic_capabilities(
+        default_none=False, temperature=unsupported(), structured=supported()
+    )
+    with pytest.raises(ValueError, match="temperature"):
+        _lowerer(
+            native,
+            caps,
+            effort=None,
+            options={"extra_body": {"temperature": 0.0}},
+            tools=None,
+        ).lower([], model="exact-saved-model")
+    decoded = decode_model_support_options(
+        {"temperature": 0.2, "extra_body": {"temperature": None}}
+    )
+    requested = model_support_request_from_options(
+        decoded,
+        selected_effort=None,
+        function_tools=False,
+        strict_function_schema=False,
+    )
+    assert requested.temperature is False
+
+
+@pytest.mark.parametrize("native", [True, False])
+@pytest.mark.parametrize("field", ["parallel_tool_calls", "text", "response_format"])
+def test_support_validation_reads_effective_sdk_body_controls(
+    native: bool,
+    field: str,
+) -> None:
+    caps = semantic_capabilities(
+        default_none=False, temperature=unknown(), structured=unsupported()
+    )
+    assert caps.semantic_contract is not None
+    caps.semantic_contract = caps.semantic_contract.model_copy(
+        update={"parallel_function_calls": unsupported()}
+    )
+    caps.tool_calling.parallel_tool_calls = False
+    body: dict[str, object] = {
+        "parallel_tool_calls": True,
+        "text": {"format": {"type": "json_schema"}},
+        "response_format": {"type": "json_object"},
+    }
+    with pytest.raises(ValueError):
+        _lowerer(
+            native,
+            caps,
+            effort=None,
+            options={"extra_body": {field: body[field]}},
+            tools=None,
+        ).lower([], model="exact-saved-model")
+
+
+@pytest.mark.parametrize("native", [True, False])
+@pytest.mark.parametrize("has_function", [True, False])
+def test_configurable_effort_potential_still_enforces_actual_dispatch_condition(
+    native: bool,
+    has_function: bool,
+) -> None:
+    caps = semantic_capabilities(
+        default_none=False, temperature=unknown(), structured=supported()
+    )
+    payload = caps.model_dump(mode="json")
+    payload["semantic_contract"]["reasoning"]["support"] = {
+        "state": "conditional",
+        "origin": "explicit",
+        "predicate": {"reasoning_efforts": ["high"], "function_tools": True},
+    }
+    payload["reasoning"]["supported"] = False
+    payload["reasoning"]["effort_levels"] = []
+    caps = ModelCapabilities.model_validate(payload)
+    assert caps.configurable_reasoning_efforts() == [ModelReasoningEffort.HIGH]
+    tools: list[dict[str, object]] | None = (
+        [
+            {
+                "type": "function",
+                "name": "lookup",
+                "description": "Synthetic lookup",
+                "parameters": {"type": "object", "properties": {}},
+            }
+        ]
+        if has_function
+        else None
+    )
+    lowerer = _lowerer(native, caps, effort="high", options=None, tools=tools)
+    if not has_function:
+        with pytest.raises(ValueError, match="reasoning effort conditions"):
+            lowerer.lower([], model="exact-saved-model")
+    else:
+        lowerer.lower([], model="exact-saved-model")
+
+
+@pytest.mark.parametrize(
+    ("body", "requested"),
+    [
+        (None, False),
+        ({}, False),
+        ({"summary": "none"}, False),
+        ({"summary": "auto"}, True),
+    ],
+)
+def test_effective_body_summary_uses_sdk_object_override_precedence(
+    body: dict[str, object] | None,
+    requested: bool,
+) -> None:
+    options = decode_model_support_options(
+        {
+            "openai_reasoning_summary": "auto",
+            "extra_body": {"reasoning": body},
+        }
+    )
+    request = model_support_request_from_options(
+        options,
+        selected_effort=None,
+        function_tools=False,
+        strict_function_schema=False,
+    )
+    assert request.reasoning_summary is requested
+
+
 @pytest.mark.parametrize("effort", ["none", "high", "xhigh", "max"])
 def test_native_lowerer_preserves_individually_authorized_effort(effort: str) -> None:
     capabilities = semantic_capabilities(

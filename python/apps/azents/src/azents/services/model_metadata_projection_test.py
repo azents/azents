@@ -2,6 +2,7 @@
 
 import dataclasses
 import datetime
+import importlib.metadata
 import json
 from typing import Never
 
@@ -319,9 +320,13 @@ def test_projection_fingerprint_has_no_native_pydantic_dependency(
     before = projection_fingerprint(
         provider=LLMProvider.OPENAI, source=source, effective_date=_DATE
     )
+    anthropic_before = projection_fingerprint(
+        provider=LLMProvider.ANTHROPIC, source=source, effective_date=_DATE
+    )
+    installed = importlib.metadata.version
     monkeypatch.setattr(
         "azents.services.model_metadata_projection.importlib.metadata.version",
-        lambda name: "changed",
+        lambda name: "changed" if name == "pydantic-ai-slim" else installed(name),
     )
     assert (
         projection_fingerprint(
@@ -332,6 +337,16 @@ def test_projection_fingerprint_has_no_native_pydantic_dependency(
     assert (
         projection_fingerprint(
             provider=LLMProvider.ANTHROPIC, source=source, effective_date=_DATE
+        )
+        != anthropic_before
+    )
+    monkeypatch.setattr(
+        "azents.services.model_metadata_projection.importlib.metadata.version",
+        lambda name: "changed-sdk" if name == "openai" else installed(name),
+    )
+    assert (
+        projection_fingerprint(
+            provider=LLMProvider.OPENAI, source=source, effective_date=_DATE
         )
         != before
     )

@@ -76,10 +76,11 @@ def agent_fallback_inference_profile(agent: Agent) -> RequestedInferenceProfile:
         for option in agent.selectable_model_options
         if option.label == profile.model_target_label
     )
-    reasoning = option.candidates[0].model_selection.normalized_capabilities.reasoning
+    capabilities = option.candidates[0].model_selection.normalized_capabilities
     if profile.reasoning_effort is not None and (
-        not reasoning.supported
-        or profile.reasoning_effort not in reasoning.effort_levels
+        capabilities.semantic_contract is None
+        and not capabilities.reasoning.supported
+        or profile.reasoning_effort not in capabilities.configurable_reasoning_efforts()
     ):
         return profile.model_copy(update={"reasoning_effort": None})
     return profile

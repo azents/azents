@@ -37,15 +37,19 @@ PRs. Restore justified existing behavior without reintroducing rejected inferenc
 
 ## Delivery phases
 
-1. `Catalog capability repairs [1/2]: restore ChatGPT web search` — minimum hotfix,
+1. `Catalog capability repairs [1/3]: restore ChatGPT web search` — minimum hotfix,
    final-entry and request-path regressions, current Spec clarification.
-2. `Catalog capability repairs [2/2]: close audited capability omissions` — grounded
+2. `Catalog capability repairs [2/3]: close audited capability omissions` — grounded
    additional corrections, full provider/consumer audit evidence, combined validation,
-   Spec promotion and removal of these temporary plans.
+   and current Spec promotion.
+3. `Catalog capability repairs [3/3]: preserve top-k request intent` — separately
+   identified pre-existing API-setting propagation omission, supported SDK mappings,
+   final QA and temporary-plan cleanup. No new UI or capability inference.
 
 The second phase depends on the first PR being open. Read-only audit discovery may
 proceed while phase 1 is implemented, but phase-2 code begins only after phase 1 PR.
-Increase the phase count only if audit findings require a separate reviewable boundary.
+The third phase is separate because it changes existing internal invocation
+interfaces rather than the catalog producer. Its code starts only after phase 2 PR.
 
 ## Ownership and context
 
@@ -79,4 +83,4 @@ data-only source or historical decoding contracts. Later corrections remove faul
 units in their owning phase. No new fallback, alias, automatic reselection or schema
 migration is planned. Existing bad published catalogs require ordinary refresh after
 an authorized release; saved selections change only through explicit reselection.
-Delete this plan and both phase plans after integrated validation and Spec promotion.
+Delete this plan and all phase plans after final integrated validation and Spec promotion.

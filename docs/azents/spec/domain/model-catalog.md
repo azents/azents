@@ -16,6 +16,7 @@ code_paths:
   - python/apps/azents/src/azents/services/catalog_source_collection.py
   - python/apps/azents/src/azents/engine/events/model_support_contract.py
   - python/apps/azents/src/azents/core/model_pricing.py
+  - python/apps/azents/src/azents/engine/events/model_usage_pricing.py
   - python/apps/azents/src/azents/services/model_metadata.py
   - python/apps/azents/src/azents/services/model_metadata_source.py
   - python/apps/azents/src/azents/services/model_metadata_projection.py
@@ -69,7 +70,7 @@ code_paths:
   - typescript/apps/azents-web/src/trpc/routers/workspace-model-settings.ts
   - typescript/apps/azents-admin-web/src/features/model-catalog/containers/useModelCatalogPageContainer.ts
 last_verified_at: 2026-10-03
-spec_version: 39
+spec_version: 40
 ---
 
 # Model Catalog Domain Spec
@@ -152,6 +153,33 @@ supplies the semantic and effective built-in views. Explicit selection copies th
 contract into the saved selection used by configuration validation and native
 request lowering. Corrected catalog publication does not rewrite existing saved
 Agent or Workspace selections; ordinary explicit reselection adopts the correction.
+
+### Route-bounded support propagation
+
+Eligible `chat` and `responses` conversation modes retain the same reviewed
+client-image executor policy. Provider-hosted image permission is separate from
+client execution. Google and Vertex Google use the implemented GenerateContent
+image-output boundary for both the adopted explicit IMAGE output declaration and
+the configurable native image tool. Saved positive/negative/null facts govern
+codec image flags; stock model-name knowledge cannot replenish a denied fact.
+
+Explicit Google efforts are bounded by the installed scalar codec's lossless
+level domain, including its documented sparse-profile floor. An omitted optional
+codec level set is not an empty model effort declaration; absent model evidence
+still advertises no efforts, budget-only or snapped mappings remain excluded.
+Account effort-control denial overrides conflicting xAI OAuth presets/defaults.
+
+Unknown function support does not erase an explicit positive parallel/strict
+declaration. Such refinements are conditional on actual function declarations;
+known function denial remains terminal. Configuration and profile membership
+use individually justified effort potential without rewriting conservative
+flat views, while actual dispatch enforces the saved predicate. Descriptor-absent
+selections retain their prior decoding and consumer-specific validation.
+
+Catalog fingerprints and diagnostics include applicable installed codec
+dependencies. Native OpenAI/ChatGPT record the OpenAI SDK dependency and do not
+stamp Pydantic as their native codec. These versions are reproducibility inputs,
+not model-capability facts.
 
 ### Image-generation entries
 
@@ -362,6 +390,15 @@ the retained transitive Pydantic counter extractor is not pricing authority.
 Provider-returned charges and estimates retain distinct provenance. Optional
 metadata/pricing misses do not change model visibility or saved selections.
 
+Google native modality receipts preserve directed input/output IMAGE and AUDIO
+quantities. Prompt receipts partition native prompt counts; output receipts
+partition candidate counts before inclusive reasoning normalization. Explicit
+TEXT-only cache receipts keep media and cache disjoint. Malformed, duplicate,
+contradictory, unknown positive modalities, uncertain cache/media overlap, cached
+media without an adopted tariff, and unadopted tool-use quantities leave the whole
+estimate unavailable. Valid reported charges still win, including zero; no
+recorded historical cost is recalculated.
+
 ## Public read API
 
 The public catalog entry list endpoint returns the stored catalog entries for one integration. It supports search, limit, and offset. The response includes:
@@ -511,6 +548,7 @@ Only Workspace Owners receive the explicit image sync action.
 
 | Date | Version | Change |
 |---|---:|---|
+| 2026-10-03 | 40 | Preserved route-bounded image/effort/refinement support, complete Google directed billing and truthful codec dependency provenance through audited correction paths. |
 | 2026-10-03 | 39 | Restored contract-derived ChatGPT web-search support through final v2 catalog entries and saved native requests without generic source or price dependence. |
 | 2026-10-03 | 38 | Replaced active genai authority with inert exact-scoped JSON, self-contained v2 support and typed pricing; preserved historical selections and added SQL writer/pointer fences. |
 | 2026-10-02 | 37 | Moved Workspace model default reads/get-or-create/writes into completed repository operations while preserving detached normalization, current policies and atomic downgrade marking. |

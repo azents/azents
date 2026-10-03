@@ -1,6 +1,7 @@
 """Native proof, canonical events, opaque data and billing integration tests."""
 
 import base64
+import datetime
 import json
 from io import BytesIO
 
@@ -27,7 +28,8 @@ from pydantic_ai.messages import (
 from pydantic_ai.usage import RequestUsage
 
 from azents.core.enums import LLMProvider
-from azents.core.model_pricing import CapturedModelPricing
+from azents.core.model_catalog_source import decode_catalog_source
+from azents.core.model_pricing import CapturedModelPricing, normalize_model_pricing
 from azents.engine.events.protocols import (
     ContentDeltaProjection,
     FunctionCallDeltaProjection,
@@ -50,6 +52,7 @@ from azents.engine.events.types import (
     ReasoningPayload,
     UnknownAdapterOutputPayload,
 )
+from azents.engine.providers.native_observation import observe_native_payload
 from azents.engine.run.provider_failure import (
     ModelProviderFailure,
     ModelProviderFailureCategory,
@@ -730,3 +733,62 @@ def test_common_hosted_output_excludes_opaque_content_from_visible_semantics() -
     artifact = json.dumps(payload.native_artifact.item)
     assert "opaque-signature-canary" in artifact
     assert "opaque-encrypted-canary" in artifact
+
+
+def test_google_native_modality_receipt_reaches_captured_directed_pricing() -> None:
+    source = decode_catalog_source(
+        b'{"gemini/selected-model":{"litellm_provider":"gemini",'
+        b'"input_cost_per_token":0.1,"output_cost_per_token":0.2,'
+        b'"input_cost_per_image_token":0.7}}'
+    ).models[0]
+    pricing = normalize_model_pricing(
+        provider=LLMProvider.GOOGLE_GEMINI,
+        model_identifier="selected-model",
+        source_snapshot_id="frozen-google-source",
+        source_hash="frozen-google-hash",
+        source_model=source,
+        request_timestamp=datetime.datetime(2026, 10, 3, tzinfo=datetime.UTC),
+    )
+    raw = {
+        "promptTokenCount": 7,
+        "candidatesTokenCount": 2,
+        "thoughtsTokenCount": 3,
+        "totalTokenCount": 12,
+        "promptTokensDetails": [
+            {"modality": "TEXT", "tokenCount": 3},
+            {"modality": "IMAGE", "tokenCount": 4},
+        ],
+        "candidatesTokensDetails": [{"modality": "TEXT", "tokenCount": 2}],
+    }
+    stream = _normalizer(provider="google_gemini", pricing=pricing).start("synthetic")
+    stream.process_event(
+        _event(
+            response=ModelResponse(
+                parts=[TextPart("answer")],
+                usage=RequestUsage(input_tokens=7, output_tokens=5),
+            ),
+            observation=observe_native_payload(
+                protocol="google",
+                payload={
+                    "candidates": [
+                        {
+                            "content": {"role": "model", "parts": [{"text": "answer"}]},
+                            "finishReason": "STOP",
+                        }
+                    ],
+                    "modelVersion": "selected-model",
+                    "responseId": "receipt-proof",
+                    "usageMetadata": raw,
+                },
+            ),
+        )
+    )
+    usage = stream.complete().usage
+    assert usage is not None
+    assert usage.prompt_tokens == 7
+    assert usage.completion_tokens == 5
+    assert usage.reasoning_tokens == 3
+    assert usage.raw["promptTokensDetails"] == raw["promptTokensDetails"]
+    assert usage.cost_usd == pytest.approx(4.1)
+    assert usage.cost_provenance is not None
+    assert usage.cost_provenance.source_snapshot_id == "frozen-google-source"

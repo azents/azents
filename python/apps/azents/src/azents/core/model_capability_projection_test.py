@@ -452,7 +452,7 @@ def test_source_empty_media_list_is_not_replenished_by_a_flag() -> None:
     assert caps.modalities.input == []
 
 
-def test_google_wire_bounds_require_explicit_unchanged_levels(
+def test_google_wire_bounds_use_scalar_codec_domain_without_snapping(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
@@ -478,7 +478,125 @@ def test_google_wire_bounds_require_explicit_unchanged_levels(
             lambda model: GoogleModelProfile(google_supports_thinking_level=True)
         ),
     )
-    assert (
-        google_lossless_efforts(provider=LLMProvider.GOOGLE_GEMINI, model="opaque")
-        == ()
+    assert google_lossless_efforts(
+        provider=LLMProvider.GOOGLE_GEMINI, model="opaque"
+    ) == (
+        ModelReasoningEffort.MINIMAL,
+        ModelReasoningEffort.LOW,
+        ModelReasoningEffort.MEDIUM,
+        ModelReasoningEffort.HIGH,
     )
+
+
+@pytest.mark.parametrize(
+    ("provider", "namespace"),
+    [
+        (LLMProvider.OPENAI, "openai"),
+        (LLMProvider.CHATGPT_OAUTH, "chatgpt"),
+        (LLMProvider.XAI, "xai"),
+        (LLMProvider.XAI_OAUTH, "xai_oauth"),
+    ],
+)
+@pytest.mark.parametrize("function", [True, False])
+def test_responses_conversation_mode_retains_client_image_policy(
+    provider: LLMProvider, namespace: str, function: bool
+) -> None:
+    identifier = "gpt-6-astra" if namespace in {"openai", "chatgpt"} else "grok"
+    key = identifier if namespace == "openai" else f"{namespace}/{identifier}"
+    source = decode_catalog_source(
+        json.dumps(
+            {
+                key: {
+                    "litellm_provider": namespace,
+                    "mode": "responses",
+                    "supports_function_calling": function,
+                }
+            }
+        ).encode()
+    ).models[0]
+    caps = project_capabilities(
+        provider=provider,
+        exact_model=identifier,
+        source_model=source,
+        evidence=None,
+        model_developer=None,
+    )
+    assert ("image_generation" in caps.built_in_tools.supported) is function
+
+
+@pytest.mark.parametrize(
+    ("provider", "namespace"),
+    [
+        (LLMProvider.GOOGLE_GEMINI, "gemini"),
+        (LLMProvider.GOOGLE_VERTEX_AI, "vertex_ai"),
+    ],
+)
+@pytest.mark.parametrize("minimal", [True, False])
+def test_google_sparse_scalar_codec_preserves_only_explicit_model_efforts(
+    monkeypatch: pytest.MonkeyPatch,
+    provider: LLMProvider,
+    namespace: str,
+    minimal: bool,
+) -> None:
+    monkeypatch.setattr(
+        GoogleProvider,
+        "model_profile",
+        staticmethod(
+            lambda model: GoogleModelProfile(
+                google_supports_thinking_level=True,
+                google_supports_minimal_thinking_level=minimal,
+            )
+        ),
+    )
+    source = _source(
+        namespace,
+        "account-visible",
+        {
+            "supports_reasoning": True,
+            "reasoning_effort_levels": ["minimal", "low", "medium", "high", "max"],
+        },
+    )
+    caps = _project(provider, source, None, LLMModelDeveloper.GOOGLE)
+    expected = [
+        ModelReasoningEffort.LOW,
+        ModelReasoningEffort.MEDIUM,
+        ModelReasoningEffort.HIGH,
+    ]
+    if minimal:
+        expected.insert(0, ModelReasoningEffort.MINIMAL)
+    assert caps.reasoning.effort_levels == expected
+    assert ModelCapabilities.model_validate_json(caps.model_dump_json()) == caps
+    empty = _project(provider, None, None, LLMModelDeveloper.GOOGLE)
+    assert empty.reasoning.effort_levels == []
+
+
+@pytest.mark.parametrize("denied", [False, True])
+def test_unknown_function_fact_does_not_erase_explicit_parallel_and_strict(
+    denied: bool,
+) -> None:
+    caps = _project(
+        LLMProvider.CHATGPT_OAUTH,
+        None,
+        ProviderCapabilityEvidence(
+            function_calling=CatalogFact(
+                state="value" if denied else "absent",
+                value=False if denied else None,
+            ),
+            parallel_function_calling=CatalogFact(state="value", value=True),
+            strict_function_schema=CatalogFact(state="value", value=True),
+        ),
+        LLMModelDeveloper.OPENAI,
+    )
+    assert caps.semantic_contract is not None
+    assert caps.semantic_contract.function_calling.state == (
+        "unsupported" if denied else "unknown"
+    )
+    for support in (
+        caps.semantic_contract.parallel_function_calls,
+        caps.semantic_contract.strict_function_schema,
+    ):
+        assert support.state == ("unsupported" if denied else "conditional")
+        if not denied:
+            assert support.predicate is not None
+            assert support.predicate.function_tools is True
+            assert support.origin == "explicit"

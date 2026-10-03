@@ -195,7 +195,7 @@ def validate_requested_profile_against_options(
         and profile.reasoning_effort
         not in option.candidates[
             0
-        ].model_selection.normalized_capabilities.reasoning.effort_levels
+        ].model_selection.normalized_capabilities.configurable_reasoning_efforts()
     ):
         raise ValueError("Reasoning effort is not supported by model target")
     validate_execution_options(

@@ -162,10 +162,12 @@ def _default_session_reasoning_effort(
     """Keep the Agent default effort only when the fallback model supports it."""
     if model_parameters is None or model_parameters.reasoning_effort is None:
         return None
-    reasoning = model_selection.normalized_capabilities.reasoning
+    capabilities = model_selection.normalized_capabilities
     if (
-        not reasoning.supported
-        or model_parameters.reasoning_effort not in reasoning.effort_levels
+        capabilities.semantic_contract is None
+        and not capabilities.reasoning.supported
+        or model_parameters.reasoning_effort
+        not in capabilities.configurable_reasoning_efforts()
     ):
         return None
     return model_parameters.reasoning_effort
