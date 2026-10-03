@@ -410,7 +410,7 @@ async def test_historical_memory_discovery_handler_returns_dispatch_summary() ->
     service = Mock()
     consolidation = Mock()
     consolidation.discover_once = AsyncMock(
-        return_value=ConsolidationDiscoverySummary(2, 2, 1, 0)
+        return_value=ConsolidationDiscoverySummary(2, 2, 1, 0, 0)
     )
     service.discover_once = AsyncMock(
         return_value=HistoricalMemoryDiscoverySummary(
@@ -442,6 +442,7 @@ async def test_historical_memory_discovery_handler_returns_dispatch_summary() ->
         "consolidation_dispatched": 2,
         "consolidation_cleanup_drafts": 1,
         "consolidation_expired_owners": 0,
+        "consolidation_cleanup_revisions": 0,
     }
     service.discover_once.assert_awaited_once_with()
     consolidation.discover_once.assert_awaited_once_with()

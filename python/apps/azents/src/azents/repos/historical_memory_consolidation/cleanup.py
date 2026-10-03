@@ -20,9 +20,11 @@ from azents.rdb.models.historical_memory_consolidation import (
     RDBConsolidationDraftDependency,
     RDBConsolidationEvidence,
     RDBConsolidationMutationReceipt,
+    RDBConsolidationRevision,
     RDBConsolidationUnit,
     RDBConsolidationWork,
 )
+from azents.rdb.models.toolkit_state import RDBToolkitState
 from azents.rdb.models.workspace_user import RDBWorkspaceUser
 from azents.rdb.session import SessionManager
 from azents.repos.historical_memory_consolidation.authority import (
@@ -94,6 +96,60 @@ class ConsolidationCleanupRepository:
     """System cleanup only deletes private data; it never grants model authority."""
 
     session_manager: SessionManager[AsyncSession]
+
+    async def collect_revisions(self, *, limit: int) -> int:
+        """Delete only non-current bytes with no retained automatic reference."""
+        if not 1 <= limit <= 100:
+            raise ValueError("Consolidation collection batch bounds are invalid.")
+        revision = RDBConsolidationRevision
+        current = (
+            sa.select(RDBConsolidationUnit.id)
+            .where(RDBConsolidationUnit.published_revision_id == revision.id)
+            .correlate(revision)
+            .exists()
+        )
+        referenced = (
+            sa.select(RDBToolkitState.id)
+            .where(
+                RDBToolkitState.toolkit_namespace == "memory",
+                RDBToolkitState.state_name == "context_snapshot",
+                RDBToolkitState.state_json["historical_entries"].contains(
+                    sa.func.jsonb_build_array(
+                        sa.func.jsonb_build_object("revision_id", revision.id)
+                    )
+                ),
+            )
+            .correlate(revision)
+            .exists()
+        )
+        async with consolidation_session(self.session_manager) as session:
+            await session.execute(
+                sa.select(sa.func.set_config("statement_timeout", "2000", True))
+            )
+            candidates = list(
+                await session.scalars(
+                    sa.select(revision)
+                    .where(~current, ~referenced)
+                    .order_by(revision.id)
+                    .limit(limit)
+                    .with_for_update(skip_locked=True)
+                )
+            )
+            # Recheck in a fresh READ COMMITTED statement after locking bytes.
+            # A snapshot reference may have committed just before this lock.
+            removable = set(
+                await session.scalars(
+                    sa.select(revision.id).where(
+                        revision.id.in_([row.id for row in candidates]),
+                        ~current,
+                        ~referenced,
+                    )
+                )
+            )
+            for row in candidates:
+                if row.id in removable:
+                    await session.delete(row)
+        return len(removable)
 
     async def sweep(self, *, limit: int) -> ConsolidationCleanupSummary:
         if not 1 <= limit <= 100:

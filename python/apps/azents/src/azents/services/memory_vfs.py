@@ -8,6 +8,7 @@ import time
 from collections.abc import Sequence
 from typing import Literal, Never
 
+from azents.core.historical_memory_context import render_live_consolidated
 from azents.core.vfs import VFS_FILE_MAX_BYTES, VfsLocation
 from azents.engine.events.action_messages import ActionMessagePayload
 from azents.engine.events.conversational_tool_projection import (
@@ -26,10 +27,12 @@ from azents.engine.events.types import (
     UserMessagePayload,
 )
 from azents.repos.memory_vfs.data import (
+    ConsolidatedMemoryVfsRecord,
     HistoricalMemoryVfsRecord,
     MemoryVfsAuthority,
     MemoryVfsRecord,
     MemoryVfsRecordPage,
+    MemoryVfsUriNamespace,
     MemoryVfsUriQuery,
     SavedMemoryVfsRecord,
     SourceEventVfsRecord,
@@ -70,6 +73,7 @@ Use narrow discovery roots:
 - `azents://memory/saved/agent/*.md`
 - `azents://memory/saved/user/*.md`
 - `azents://memory/historical/{team,user}/*/summary.md`
+- `azents://memory/consolidated/{team,user}/summary.md`
 - `azents://memory/sources/{team,user}/*/session.md`
 - `azents://memory/sources/{team,user}/*/events/*.md`
 
@@ -80,6 +84,11 @@ authorized `tool-results/<event-id>.txt` path when a source event points to it.
 Memory access is live. Disablement, archive, access loss, restore, and purge are
 reflected by the next operation. Current instructions and verified evidence take
 precedence over Historical Memory.
+
+Consolidated aliases return the latest authorized compact document and revision
+provenance, not the automatic boundary snapshot. The personal alias binds only to
+this root's associated User. Missing or denied documents do not trigger generation
+or source-packing fallback. Private drafts and receipts are never exposed.
 """
 
 
@@ -335,6 +344,15 @@ class MemoryVfsReadBackend:
     ) -> MemoryVfsRecord | None:
         if (
             len(parts) == 3
+            and parts[0] == "consolidated"
+            and parts[1] in {"team", "user"}
+            and parts[2] == "summary.md"
+        ):
+            return await self.repository.get_consolidated(
+                authority, scope=parts[1], max_bytes=max_bytes
+            )
+        if (
+            len(parts) == 3
             and parts[0] == "saved"
             and parts[1] in {"agent", "user"}
             and parts[2].endswith(".md")
@@ -438,6 +456,27 @@ class MemoryVfsReadBackend:
                 )
             if not parts and not recursive:
                 return records, False
+        if not parts or parts[0] == "consolidated":
+            budget = query_budgets["consolidated"]
+            page = (
+                await self.repository.list_consolidated(
+                    authority,
+                    scopes=self._source_scopes(parts),
+                    limit=max(1, limit - len(records)),
+                    max_bytes=budget,
+                )
+                if budget > 0
+                else MemoryVfsRecordPage((), True)
+            )
+            records.extend(
+                (
+                    f"azents://memory/consolidated/{record.entry.unit.scope.value}/summary.md",
+                    record,
+                )
+                for record in page.records
+                if isinstance(record, ConsolidatedMemoryVfsRecord)
+            )
+            truncated = truncated or page.has_more
         if not parts or parts[0] == "saved":
             scopes = self._saved_scopes(parts)
             saved_budget = query_budgets["saved"]
@@ -570,6 +609,8 @@ class MemoryVfsReadBackend:
     ) -> dict[str, int]:
         """Split one grep byte budget deterministically across body queries."""
         keys: list[str] = []
+        if not parts or parts[0] == "consolidated":
+            keys.append("consolidated")
         if not parts or parts[0] == "saved":
             keys.append("saved")
         if not parts or parts[0] == "historical":
@@ -598,6 +639,15 @@ class MemoryVfsReadBackend:
         """Resolve exact-file grep locations before any bounded directory list."""
         if parts == ("README.md",):
             return True, _ReadmeRecord()
+        if (
+            len(parts) == 3
+            and parts[0] == "consolidated"
+            and parts[1] in {"team", "user"}
+            and parts[2] == "summary.md"
+        ):
+            return True, await self.repository.get_consolidated(
+                authority, scope=parts[1], max_bytes=max_bytes
+            )
         if (
             len(parts) == 3
             and parts[0] == "saved"
@@ -654,11 +704,11 @@ class MemoryVfsReadBackend:
     def _glob_query(cls, location: VfsLocation) -> MemoryVfsUriQuery:
         """Translate stable glob segments into bounded indexed query authority."""
         parts = cls._parts(location.path)
-        namespace: Literal["all", "readme", "saved", "historical", "sources"] = "all"
+        namespace: MemoryVfsUriNamespace = "all"
         if parts and not cls._glob_segment(parts[0]):
             if parts[0] == "README.md":
                 namespace = "readme"
-            elif parts[0] in {"saved", "historical", "sources"}:
+            elif parts[0] in {"saved", "historical", "sources", "consolidated"}:
                 namespace = parts[0]
         saved_scopes: tuple[Literal["agent", "user"], ...] = ("agent", "user")
         source_scopes: tuple[Literal["team", "user"], ...] = ("team", "user")
@@ -704,6 +754,8 @@ class MemoryVfsReadBackend:
     def _render(record: MemoryVfsRecord | "_ReadmeRecord") -> str:
         if isinstance(record, _ReadmeRecord):
             return _MEMORY_README
+        if isinstance(record, ConsolidatedMemoryVfsRecord):
+            return render_live_consolidated(record.entry)
         if isinstance(record, SavedMemoryVfsRecord):
             return _render_saved(record)
         if isinstance(record, HistoricalMemoryVfsRecord):
