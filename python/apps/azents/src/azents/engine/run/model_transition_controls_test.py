@@ -20,11 +20,9 @@ from azents.engine.run.resolve_test import (
     _make_integration,
     _session_manager_for,
 )
-from azents.repos.chatgpt_oauth_runtime import ChatGPTOAuthRuntimeRepository
-from azents.repos.engine_read import EngineInvokeReadRepository
-from azents.repos.kimi_oauth_runtime import KimiOAuthRuntimeRepository
-from azents.repos.xai_oauth_runtime import XaiOAuthRuntimeRepository
-from azents.services.engine_runtime_tokens import EngineRuntimeTokenResolver
+from azents.repos.engine_resolve import get_engine_resolve_repositories
+from azents.repos.toolkit import ToolkitRepository
+from azents.services.engine_runtime_tokens import create_runtime_oauth_client_factories
 from azents.testing.model_metadata import make_test_model_metadata_service
 from azents.testing.model_selection import (
     make_test_model_selection,
@@ -67,22 +65,13 @@ async def test_frozen_model_validates_effective_not_raw_agent_effort(
         context_source=None,
         resolved_reasoning_effort=applied,
         resolved_enabled_execution_options=[],
-        invoke_read_repository=EngineInvokeReadRepository(
+        repositories=get_engine_resolve_repositories(
             agent_repository=agent_repository,
             integration_repository=integrations,
             session_manager=manager,
+            toolkit_repository=ToolkitRepository(cipher=None),
         ),
-        runtime_token_resolver=EngineRuntimeTokenResolver(
-            chatgpt_repository=ChatGPTOAuthRuntimeRepository(
-                integration_repository=integrations, session_manager=manager
-            ),
-            xai_repository=XaiOAuthRuntimeRepository(
-                integration_repository=integrations, session_manager=manager
-            ),
-            kimi_repository=KimiOAuthRuntimeRepository(
-                integration_repository=integrations, session_manager=manager
-            ),
-        ),
+        oauth_clients=create_runtime_oauth_client_factories(),
         exchange_file_service=AsyncMock(),
         model_file_service=AsyncMock(),
         image_generation_catalog_service=_make_image_generation_catalog_service(),
