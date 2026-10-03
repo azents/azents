@@ -6,6 +6,7 @@ import pytest
 
 from azents.core.enums import LLMCatalogAttemptStatus
 from azents.core.llm_catalog_sync import (
+    CatalogProjectionVersion,
     CatalogSyncState,
     IntegrationCatalogSyncDenialReason,
     IntegrationCatalogSyncPolicyDecision,
@@ -47,6 +48,8 @@ def _evaluate(
             trigger=trigger,
             now=_NOW,
             last_success_at=last_success_at,
+            current_projection_version=None,
+            required_projection_version=None,
             latest_catalog_sync=latest,
             latest_workspace_sync=workspace_latest,
         )
@@ -163,3 +166,98 @@ def test_expired_running_work_can_be_recovered() -> None:
     )
     assert decision.allowed
     assert decision.expired_work_token == running.work_token
+
+
+@pytest.mark.parametrize(
+    ("current", "required", "stale"),
+    [
+        (None, CatalogProjectionVersion("2", "5"), True),
+        (
+            CatalogProjectionVersion(None, None),
+            CatalogProjectionVersion("2", "5"),
+            True,
+        ),
+        (CatalogProjectionVersion("1", "5"), CatalogProjectionVersion("2", "5"), True),
+        (CatalogProjectionVersion("2", "4"), CatalogProjectionVersion("2", "5"), True),
+        (CatalogProjectionVersion("2", "5"), CatalogProjectionVersion("2", "5"), False),
+        (CatalogProjectionVersion("1", "4"), None, False),
+    ],
+)
+def test_current_code_compatibility_and_age_only_image_policy(
+    current: CatalogProjectionVersion | None,
+    required: CatalogProjectionVersion | None,
+    stale: bool,
+) -> None:
+    decision = evaluate_integration_catalog_sync_policy(
+        IntegrationCatalogSyncPolicyInput(
+            trigger=IntegrationCatalogSyncTrigger.STALE_REFRESH,
+            now=_NOW,
+            last_success_at=_NOW,
+            current_projection_version=current,
+            required_projection_version=required,
+            latest_catalog_sync=None,
+            latest_workspace_sync=None,
+        )
+    )
+    assert decision.stale is stale
+    assert decision.allowed is stale
+    if not stale:
+        assert decision.denial_reason is IntegrationCatalogSyncDenialReason.NOT_STALE
+
+
+@pytest.mark.parametrize(
+    ("latest", "workspace_latest", "reason"),
+    [
+        (
+            _sync(status=LLMCatalogAttemptStatus.RUNNING, started_at=_NOW),
+            None,
+            IntegrationCatalogSyncDenialReason.ALREADY_RUNNING,
+        ),
+        (
+            _sync(started_at=_NOW - datetime.timedelta(seconds=1)),
+            None,
+            IntegrationCatalogSyncDenialReason.THROTTLED,
+        ),
+        (
+            None,
+            _sync(started_at=_NOW - datetime.timedelta(seconds=1)),
+            IntegrationCatalogSyncDenialReason.THROTTLED,
+        ),
+        (
+            _sync(
+                status=LLMCatalogAttemptStatus.FAILED,
+                started_at=_NOW - datetime.timedelta(minutes=1),
+                finished_at=_NOW - datetime.timedelta(seconds=30),
+            ),
+            None,
+            IntegrationCatalogSyncDenialReason.THROTTLED,
+        ),
+        (
+            _sync(
+                status=LLMCatalogAttemptStatus.FAILED,
+                automatic_retry_blocked=True,
+            ),
+            None,
+            IntegrationCatalogSyncDenialReason.AUTOMATIC_RETRY_BLOCKED,
+        ),
+    ],
+)
+def test_code_compatibility_refresh_preserves_all_existing_guards(
+    latest: CatalogSyncState | None,
+    workspace_latest: CatalogSyncState | None,
+    reason: IntegrationCatalogSyncDenialReason,
+) -> None:
+    decision = evaluate_integration_catalog_sync_policy(
+        IntegrationCatalogSyncPolicyInput(
+            trigger=IntegrationCatalogSyncTrigger.STALE_REFRESH,
+            now=_NOW,
+            last_success_at=_NOW,
+            current_projection_version=CatalogProjectionVersion("1", "4"),
+            required_projection_version=CatalogProjectionVersion("2", "5"),
+            latest_catalog_sync=latest,
+            latest_workspace_sync=workspace_latest,
+        )
+    )
+    assert decision.stale
+    assert not decision.allowed
+    assert decision.denial_reason is reason

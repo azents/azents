@@ -6,6 +6,7 @@ from typing import Any, NamedTuple
 
 import sqlalchemy as sa
 from azcommon.uuid import uuid7
+from pydantic import TypeAdapter
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,6 +19,7 @@ from azents.core.enums import (
 )
 from azents.core.llm_catalog import INTEGRATION_SCOPED_CATALOG_PROVIDERS
 from azents.core.llm_catalog_sync import (
+    CatalogProjectionVersion,
     CatalogSyncState,
     IntegrationCatalogSyncPolicyDecision,
     IntegrationCatalogSyncPolicyInput,
@@ -154,6 +156,7 @@ class LLMCatalogRepository:
         workspace_id: str,
         started_at: datetime.datetime,
         trigger: IntegrationCatalogSyncTrigger,
+        required_projection_version: CatalogProjectionVersion | None,
     ) -> IntegrationCatalogSyncClaim | IntegrationCatalogSyncPolicyDecision:
         """Serialize workspace policy after locking integration authority."""
         initial = await session.get(RDBLLMCatalog, catalog_id)
@@ -183,6 +186,12 @@ class LLMCatalogRepository:
                 trigger=trigger,
                 now=started_at,
                 last_success_at=owner.last_success_at,
+                current_projection_version=(
+                    self.projection_version(owner)
+                    if required_projection_version is not None
+                    else None
+                ),
+                required_projection_version=required_projection_version,
                 latest_catalog_sync=self.policy_sync(latest),
                 latest_workspace_sync=self.policy_sync(workspace_latest),
             )
@@ -203,6 +212,18 @@ class LLMCatalogRepository:
             work_token=token,
             catalog_configuration_version=integration.catalog_configuration_version,
         )
+
+    @staticmethod
+    def projection_version(
+        catalog: LLMCatalog | RDBLLMCatalog,
+    ) -> CatalogProjectionVersion | None:
+        """Decode compatibility facts from current successful owner metadata."""
+        if catalog.diagnostics is None:
+            return None
+        payload = catalog.diagnostics.get("projection_version")
+        if payload is None:
+            return None
+        return TypeAdapter(CatalogProjectionVersion).validate_python(payload)
 
     async def complete_sync(
         self,

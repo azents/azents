@@ -194,8 +194,12 @@ class _XaiOAuthModelPayload(BaseModel):
     model: str | None = None
     name: str | None = None
     context_window: int | None = None
+    context_windows: list[Annotated[int, Field(ge=0, le=2**63 - 1)]] | None = None
+    input_modalities: list[str] | None = None
+    output_modalities: list[str] | None = None
     api_backend: str | None = None
     supports_reasoning_effort: bool | None = None
+    reasoning_effort: str | None = None
     reasoning_efforts: list[_XaiOAuthReasoningEffortPayload] | None = None
     supports_backend_search: bool | None = None
     auto_compact_threshold_percent: int | None = None
@@ -273,6 +277,8 @@ class _XaiApiCapabilitiesEvidence(_ListingEvidencePayload):
 
 class _XaiApiEvidencePayload(_ListingEvidencePayload):
     context_length: int | None = None
+    input_modalities: list[str] | None = None
+    output_modalities: list[str] | None = None
     capabilities: _XaiApiCapabilitiesEvidence | None = None
 
 
@@ -805,6 +811,12 @@ def _xai_api_capability_evidence(
         max_input_tokens=_listing_fact(
             payload, "context_length", payload.context_length
         ),
+        input_modalities=_listing_fact(
+            payload, "input_modalities", _modality_values(payload.input_modalities)
+        ),
+        output_modalities=_listing_fact(
+            payload, "output_modalities", _modality_values(payload.output_modalities)
+        ),
         reasoning=reasoning,
         reasoning_efforts=effort_fact,
         default_reasoning_effort=_nested_listing_fact(
@@ -825,6 +837,7 @@ def _xai_oauth_capability_evidence(
     """Preserve proxy declarations without treating empty controls as no reasoning."""
     levels = None
     default = None
+    defaults: list[ModelReasoningEffort | None] = []
     if payload.reasoning_efforts is not None:
         values = []
         defaults = []
@@ -839,6 +852,16 @@ def _xai_oauth_capability_evidence(
                 defaults.append(effort)
         levels = tuple(values)
         default = defaults[0] if len(defaults) == 1 else None
+    # The CLI's model_default_reasoning_effort reads this top-level model field.
+    declared_default = _listing_fact(
+        payload, "reasoning_effort", _canonical_effort(payload.reasoning_effort)
+    )
+    if declared_default.state != "absent":
+        default = declared_default.value
+        if defaults and (len(defaults) != 1 or defaults[0] != default):
+            default = None
+        if default is not None and levels is not None and default not in levels:
+            default = None
     control = _listing_fact(
         payload, "supports_reasoning_effort", payload.supports_reasoning_effort
     )
@@ -851,9 +874,32 @@ def _xai_oauth_capability_evidence(
     elif effort_fact.state == "absent" and control.state == "null":
         effort_fact = CatalogFact(state="null", value=None)
     backend = _listing_fact(payload, "api_backend", payload.api_backend)
+    default_context = _listing_fact(payload, "context_window", payload.context_window)
+    maximum_context = (
+        _listing_fact(
+            payload,
+            "context_windows",
+            max(payload.context_windows) if payload.context_windows else None,
+        )
+        if "context_windows" in payload.model_fields_set
+        else default_context
+    )
+    if (
+        default_context.value is not None
+        and maximum_context.value is not None
+        and default_context.value > maximum_context.value
+    ):
+        raise InvalidProviderResponseError(
+            "Default context window exceeds the advertised maximum."
+        )
     return ProviderCapabilityEvidence(
-        max_input_tokens=_listing_fact(
-            payload, "context_window", payload.context_window
+        default_input_tokens=default_context,
+        max_input_tokens=maximum_context,
+        input_modalities=_listing_fact(
+            payload, "input_modalities", _modality_values(payload.input_modalities)
+        ),
+        output_modalities=_listing_fact(
+            payload, "output_modalities", _modality_values(payload.output_modalities)
         ),
         reasoning=(
             CatalogFact(state="value", value=True)
@@ -865,7 +911,8 @@ def _xai_oauth_capability_evidence(
             CatalogFact(state="value", value=default)
             if default is not None
             else CatalogFact(state="null", value=None)
-            if payload.reasoning_efforts is not None
+            if declared_default.state != "absent"
+            or payload.reasoning_efforts is not None
             and any(preset.default is True for preset in payload.reasoning_efforts)
             else CatalogFact(state="absent", value=None)
         ),
@@ -1569,6 +1616,13 @@ def _xai_api_source_metadata(
     metadata: dict[str, object] = {"created": created}
     if "context_length" in payload.model_fields_set:
         metadata["context_length"] = payload.context_length
+    for field in ("input_modalities", "output_modalities"):
+        if field in payload.model_fields_set:
+            metadata[field] = (
+                payload.input_modalities
+                if field == "input_modalities"
+                else payload.output_modalities
+            )
     if "capabilities" in payload.model_fields_set:
         metadata["capabilities"] = (
             payload.capabilities.model_dump(
@@ -1631,6 +1685,7 @@ def _candidate_from_xai_oauth_model(
     fetched_at: datetime,
 ) -> NormalizedModelCandidate:
     """Normalize one account-visible Grok model."""
+    evidence = _xai_oauth_capability_evidence(model)
     efforts = _xai_reasoning_efforts(model.reasoning_efforts)
     built_in_tools = ["web_search"] if model.supports_backend_search is True else []
     responses_api = (
@@ -1638,11 +1693,12 @@ def _candidate_from_xai_oauth_model(
     )
     capabilities = ModelCapabilities(
         context_window=ModelContextWindow(
-            max_input_tokens=_positive_int(model.context_window)
+            default_input_tokens=_positive_int(evidence.default_input_tokens.value),
+            max_input_tokens=_positive_int(evidence.max_input_tokens.value),
         ),
         modalities=ModelModalities(
-            input=[ModelModality.TEXT],
-            output=[ModelModality.TEXT],
+            input=_xai_modality_snapshot(model.input_modalities),
+            output=_xai_modality_snapshot(model.output_modalities),
         ),
         reasoning=ModelReasoningCapabilities(
             supported=model.supports_reasoning_effort is True,
@@ -1658,14 +1714,14 @@ def _candidate_from_xai_oauth_model(
         mode="json",
         exclude_unset=True,
         include={
-            "context_window": True,
-            "api_backend": True,
-            "supports_reasoning_effort": True,
-            "reasoning_efforts": {"__all__": {"id", "value", "default"}},
-            "supports_backend_search": True,
-            "auto_compact_threshold_percent": True,
-            "compaction_at_tokens": True,
-            "show_model_fingerprint": True,
+            **{
+                field: True
+                for field in _XaiOAuthModelPayload.model_fields
+                if field not in {"id", "model", "name", "reasoning_efforts"}
+            },
+            "reasoning_efforts": {
+                "__all__": set(_XaiOAuthReasoningEffortPayload.model_fields)
+            },
         },
     )
     raw_efforts = [
@@ -1673,11 +1729,22 @@ def _candidate_from_xai_oauth_model(
         for preset in model.reasoning_efforts or []
     ]
     source_metadata.update(
-        _effort_diagnostics([value for value in raw_efforts if value is not None])
+        _effort_diagnostics(
+            [value for value in raw_efforts if value is not None]
+            + ([model.reasoning_effort] if model.reasoning_effort is not None else [])
+        )
     )
     if model.supports_reasoning_effort is False and model.reasoning_efforts:
         source_metadata["capability_conflicts"] = [
             "reasoning_effort_controls_disabled_with_presets"
+        ]
+    elif (
+        _canonical_effort(model.reasoning_effort) is not None
+        and model.reasoning_efforts is not None
+        and evidence.default_reasoning_effort.state == "null"
+    ):
+        source_metadata["capability_conflicts"] = [
+            "reasoning_effort_default_conflicts_with_presets"
         ]
     display_name = model.name or model.model or model.id
     return NormalizedModelCandidate(
@@ -1686,7 +1753,7 @@ def _candidate_from_xai_oauth_model(
         model_display_name=display_name,
         model_developer=LLMModelDeveloper.XAI,
         model_family=_xai_family(model.id),
-        capability_evidence=_xai_oauth_capability_evidence(model),
+        capability_evidence=evidence,
         normalized_capabilities=capabilities,
         supported_execution_options=[],
         model_snapshot={
@@ -1699,6 +1766,14 @@ def _candidate_from_xai_oauth_model(
         source_metadata=source_metadata,
         last_refreshed_at=fetched_at,
     )
+
+
+def _xai_modality_snapshot(value: list[str] | None) -> list[ModelModality]:
+    """Keep recognized declarations separate from missing listing metadata."""
+    if value is None:
+        return [ModelModality.TEXT]
+    declared = {item.lower() for item in value}
+    return [modality for modality in ModelModality if modality.value in declared]
 
 
 def _conservative_xai_capabilities() -> ModelCapabilities:

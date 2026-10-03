@@ -667,6 +667,17 @@ def upgrade() -> None:
         sa.Column("collected_at", sa.DateTime(timezone=True), nullable=False),
     )
     _clear_current_receipts(bind)
+    bind.execute(
+        sa.text("""
+        UPDATE llm_catalogs c SET diagnostics =
+          COALESCE(c.diagnostics, '{}'::jsonb) ||
+          jsonb_build_object('projection_version', jsonb_build_object(
+            'schema_version', s.projection_schema_version,
+            'resolver_revision', s.runtime_profile_resolver_revision))
+        FROM llm_catalog_snapshots s
+        WHERE s.id=c.current_snapshot_id AND c.purpose='conversation'
+        """)
+    )
     prices = _price_definitions(bind)
     _initialize_selected_prices(bind, prices)
     bind.execute(sa.text("SET CONSTRAINTS ALL IMMEDIATE"))

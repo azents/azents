@@ -160,6 +160,7 @@ class ImageGenerationCatalogOperationsRepository:
                 workspace_id=workspace_id,
                 started_at=started_at,
                 trigger=trigger,
+                required_projection_version=None,
             )
             owner = await self.catalog_repository.lock_catalog(
                 session, catalog_id=catalog.id

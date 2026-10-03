@@ -38,6 +38,7 @@ from azents.services.catalog_source_collection import (
 )
 from azents.services.model_metadata_projection import (
     ModelMetadataProjectionError,
+    current_catalog_projection_version,
     project_system_entries,
 )
 
@@ -157,6 +158,9 @@ class ModelMetadataSourceSyncService:
                 diagnostics = {
                     "source_kind": source.source_kind,
                     "effective_date": effective_date.isoformat(),
+                    "projection_version": dataclasses.asdict(
+                        current_catalog_projection_version()
+                    ),
                 }
                 try:
                     entries = project_system_entries(

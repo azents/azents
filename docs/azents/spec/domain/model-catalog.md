@@ -88,7 +88,7 @@ code_paths:
   - typescript/apps/azents-web/src/trpc/routers/workspace-model-settings.ts
   - typescript/apps/azents-admin-web/src/features/model-catalog/containers/useModelCatalogPageContainer.ts
 last_verified_at: 2026-10-04
-spec_version: 42
+spec_version: 43
 ---
 
 # Model Catalog Domain Spec
@@ -147,6 +147,18 @@ maximum is the hard ceiling for an explicit Agent option cap. A maximum-only
 capability, including historical catalog and Agent snapshots, resolves that maximum
 as its default. The capability remains additive JSON and requires no relational
 migration.
+
+xAI OAuth consumes its own account-model response. `context_window` supplies the
+default input window; a supplied `context_windows` list supplies its maximum.
+Absent maximum-list metadata retains the single-window declaration, while null
+or empty declarations are preserved instead of inventing a maximum. A default
+above an advertised maximum is an invalid provider response eligible for retry,
+not a credential/configuration failure that permanently blocks automatic retry.
+Supplied xAI input/output modalities and the OAuth top-level `reasoning_effort`
+are captured with omission/null/empty distinctions. A conflicting advertised
+default and preset declaration leaves the effective default unknown and records
+bounded diagnostics. Typed fields are retained in provider provenance; opaque
+provider instructions and unknown preset extensions are not adopted.
 
 Runtime and Agent context displays supplement only a missing maximum through an indexed exact
 current source-model read. A known provider default is a floor for this fallback;
@@ -358,6 +370,16 @@ Source data, successful provider replacements, and failed-provider status change
 commit in the same fenced transaction. Global collection, normalization, shrink,
 or unexpected publication failure does not partially publish new data. Refresh
 summaries report each provider's actual status and failure facts.
+
+Conversation lazy-refresh eligibility compares the current successful owner's
+procedural projection schema/resolver pair with the required code pair, as well
+as age. The locked claim compares the same pair and preserves all existing
+running/cooldown/backoff guards. Successful publication records these facts in
+current owner `diagnostics.projection_version`; the one-time migration carries
+the actual current procedural pair before deleting historical tables. This is a
+code-compatibility hint, not a model-data ID, fingerprint, or execution/selection
+authority. Image-purpose refresh remains age-only and uses its separate usability
+authority.
 
 The integration's positive `catalog_configuration_version` is credential/configuration
 authority, not a catalog data revision. User credential/configuration changes advance

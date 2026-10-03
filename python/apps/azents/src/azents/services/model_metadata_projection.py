@@ -12,6 +12,7 @@ from azents.core.enums import (
     LLMProvider,
 )
 from azents.core.llm_catalog import model_freshness_rank
+from azents.core.llm_catalog_sync import CatalogProjectionVersion
 from azents.core.model_capability_projection import (
     project_capabilities,
 )
@@ -26,6 +27,7 @@ from azents.core.model_pricing import (
     ModelPricingUnavailableReason,
 )
 from azents.engine.providers.model_profiles import (
+    RUNTIME_MODEL_PROFILE_RESOLVER_REVISION,
     protocol_for_provider,
 )
 from azents.repos.llm_catalog.data import LLMCatalogEntryCreate
@@ -37,6 +39,16 @@ from azents.services.model_listing.data import NormalizedModelCandidate
 from azents.services.model_listing.providers import _openai_supported_execution_options
 
 MODEL_METADATA_PROJECTION_SCHEMA_VERSION = "2"
+
+
+def current_catalog_projection_version() -> CatalogProjectionVersion:
+    """Report procedural interpretation versions, never a model-data revision."""
+    return CatalogProjectionVersion(
+        schema_version=MODEL_METADATA_PROJECTION_SCHEMA_VERSION,
+        resolver_revision=RUNTIME_MODEL_PROFILE_RESOLVER_REVISION,
+    )
+
+
 _SYSTEM_PROVIDERS = (
     LLMProvider.OPENAI,
     LLMProvider.ANTHROPIC,

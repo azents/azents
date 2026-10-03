@@ -2050,3 +2050,354 @@ def test_xai_oauth_disabled_controls_win_over_conflicting_presets() -> None:
     assert caps.semantic_contract is not None
     assert caps.semantic_contract.reasoning.completeness == "complete"
     assert caps.semantic_contract.reasoning.default_effort is None
+
+
+def _oauth_candidate_from_declared_payload(
+    payload: dict[str, object],
+) -> NormalizedModelCandidate:
+    """Decode the account's own declarations without another provider's facts."""
+    return providers._candidate_from_xai_oauth_model(
+        providers._XaiOAuthModelPayload.model_validate(payload),
+        fetched_at=datetime.datetime(2026, 10, 4, tzinfo=datetime.UTC),
+    )
+
+
+def test_xai_oauth_context_ranges_and_media_survive_final_projection() -> None:
+    candidate = _oauth_candidate_from_declared_payload(
+        {
+            "id": "account-visible-model",
+            "context_window": 256000,
+            "context_windows": [256000, 500000],
+            "input_modalities": ["text", "image"],
+            "output_modalities": ["text"],
+            "supports_reasoning_effort": True,
+            "reasoning_efforts": [{"id": "high", "default": True}, {"id": "low"}],
+            "supports_backend_search": False,
+            "provider_instructions": "untrusted extension",
+        }
+    )
+    evidence = _replayed_evidence(candidate)
+    assert evidence.default_input_tokens == CatalogFact(state="value", value=256000)
+    assert evidence.max_input_tokens == CatalogFact(state="value", value=500000)
+    assert evidence.input_modalities.value == ("text", "image")
+    assert evidence.output_modalities.value == ("text",)
+    assert evidence.default_reasoning_effort.value is ModelReasoningEffort.HIGH
+    assert evidence.web_search == CatalogFact(state="value", value=False)
+    assert candidate.source_metadata is not None
+    assert candidate.source_metadata["context_windows"] == [256000, 500000]
+    assert candidate.source_metadata["input_modalities"] == ["text", "image"]
+    assert "provider_instructions" not in candidate.source_metadata
+    assert (
+        candidate.normalized_capabilities.context_window.default_input_tokens == 256000
+    )
+    assert candidate.normalized_capabilities.context_window.max_input_tokens == 500000
+    [entry] = project_integration_replacement_entries(
+        integration_id="integration-xai",
+        provider=LLMProvider.XAI_OAUTH,
+        candidates=[candidate],
+        source=None,
+        provider_listing_source="xai_oauth:grok_models",
+    )
+    caps = ModelCapabilities.model_validate(entry.normalized_capabilities)
+    assert caps.context_window.default_input_tokens == 256000
+    assert caps.context_window.max_input_tokens == 500000
+    assert caps.modalities.input == [ModelModality.TEXT, ModelModality.IMAGE]
+    assert caps.reasoning.effort_levels == [
+        ModelReasoningEffort.LOW,
+        ModelReasoningEffort.HIGH,
+    ]
+
+
+@pytest.mark.parametrize(
+    ("payload", "default_fact", "maximum_fact"),
+    [
+        (
+            {},
+            CatalogFact(state="absent", value=None),
+            CatalogFact(state="absent", value=None),
+        ),
+        (
+            {"context_window": 256000},
+            CatalogFact(state="value", value=256000),
+            CatalogFact(state="value", value=256000),
+        ),
+        (
+            {"context_window": None, "context_windows": [256000, 500000]},
+            CatalogFact(state="null", value=None),
+            CatalogFact(state="value", value=500000),
+        ),
+        (
+            {"context_windows": [256000, 500000]},
+            CatalogFact(state="absent", value=None),
+            CatalogFact(state="value", value=500000),
+        ),
+        (
+            {"context_window": 256000, "context_windows": None},
+            CatalogFact(state="value", value=256000),
+            CatalogFact(state="null", value=None),
+        ),
+        (
+            {"context_window": 256000, "context_windows": []},
+            CatalogFact(state="value", value=256000),
+            CatalogFact(state="null", value=None),
+        ),
+        (
+            {"context_window": 0, "context_windows": [0]},
+            CatalogFact(state="value", value=0),
+            CatalogFact(state="value", value=0),
+        ),
+    ],
+)
+def test_xai_oauth_context_presence_and_advertised_maximum(
+    payload: dict[str, object],
+    default_fact: CatalogFact[int],
+    maximum_fact: CatalogFact[int],
+) -> None:
+    candidate = _oauth_candidate_from_declared_payload(
+        {"id": "account-visible-model", **payload}
+    )
+    evidence = _replayed_evidence(candidate)
+    assert evidence.default_input_tokens == default_fact
+    assert evidence.max_input_tokens == maximum_fact
+    assert candidate.source_metadata is not None
+    for field in ("context_window", "context_windows"):
+        if field in payload:
+            assert candidate.source_metadata[field] == payload[field]
+        else:
+            assert field not in candidate.source_metadata
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        (None, CatalogFact(state="null", value=None)),
+        ([], CatalogFact(state="value", value=())),
+        (["text"], CatalogFact(state="value", value=("text",))),
+        (["TEXT", "IMAGE"], CatalogFact(state="value", value=("text", "image"))),
+        (
+            ["text", "image", "future-media"],
+            CatalogFact(state="value", value=("text", "image", "future-media")),
+        ),
+    ],
+)
+def test_xai_oauth_declared_media_preserves_null_empty_and_future_values(
+    raw: list[str] | None,
+    expected: CatalogFact[tuple[str, ...]],
+) -> None:
+    candidate = _oauth_candidate_from_declared_payload(
+        {
+            "id": "account-visible-model",
+            "input_modalities": raw,
+            "output_modalities": raw,
+        }
+    )
+    evidence = _replayed_evidence(candidate)
+    assert evidence.input_modalities == expected
+    assert evidence.output_modalities == expected
+    assert candidate.source_metadata is not None
+    assert candidate.source_metadata["input_modalities"] == raw
+    assert candidate.source_metadata["output_modalities"] == raw
+    if raw == []:
+        assert candidate.normalized_capabilities.modalities.input == []
+        assert candidate.normalized_capabilities.modalities.output == []
+
+
+def test_xai_oauth_missing_media_stays_absent_instead_of_inventing_support() -> None:
+    candidate = _oauth_candidate_from_declared_payload({"id": "grok-4.7"})
+    evidence = _replayed_evidence(candidate)
+    assert evidence.input_modalities == CatalogFact(state="absent", value=None)
+    assert evidence.output_modalities == CatalogFact(state="absent", value=None)
+    assert evidence.function_calling == CatalogFact(state="absent", value=None)
+    assert evidence.structured_response == CatalogFact(state="absent", value=None)
+    assert evidence.temperature == CatalogFact(state="absent", value=None)
+    assert candidate.source_metadata is not None
+    assert "input_modalities" not in candidate.source_metadata
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"context_windows": [True]},
+        {"context_windows": [-1, 500000]},
+        {"context_windows": [2**63]},
+        {"context_windows": "500000"},
+        {"input_modalities": False},
+        {"output_modalities": [None]},
+    ],
+)
+def test_xai_oauth_rejects_malformed_declared_context_or_media(
+    payload: dict[str, object],
+) -> None:
+    with pytest.raises(ValidationError):
+        _oauth_candidate_from_declared_payload(
+            {"id": "account-visible-model", **payload}
+        )
+
+
+def test_xai_oauth_rejects_default_above_advertised_maximum() -> None:
+    with pytest.raises(
+        ValueError, match="Default context window exceeds the advertised maximum"
+    ):
+        _oauth_candidate_from_declared_payload(
+            {
+                "id": "account-visible-model",
+                "context_window": 600000,
+                "context_windows": [256000, 500000],
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        (None, CatalogFact(state="null", value=None)),
+        ([], CatalogFact(state="value", value=())),
+        (["text", "image"], CatalogFact(state="value", value=("text", "image"))),
+    ],
+)
+def test_xai_api_preserves_supplied_language_model_modalities(
+    raw: list[str] | None,
+    expected: CatalogFact[tuple[str, ...]],
+) -> None:
+    candidate = providers._candidate_from_xai_api_key_model(
+        model_id="api-account-model",
+        created=123,
+        extra={
+            "input_modalities": raw,
+            "output_modalities": raw,
+            "provider_instructions": "untrusted extension",
+        },
+        fetched_at=datetime.datetime(2026, 10, 4, tzinfo=datetime.UTC),
+    )
+    evidence = _replayed_evidence(candidate)
+    assert evidence.input_modalities == expected
+    assert evidence.output_modalities == expected
+    assert candidate.source_metadata is not None
+    assert candidate.source_metadata["input_modalities"] == raw
+    assert candidate.source_metadata["output_modalities"] == raw
+    assert "provider_instructions" not in candidate.source_metadata
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected", "conflict"),
+    [
+        (
+            {"reasoning_effort": "high"},
+            CatalogFact(state="value", value=ModelReasoningEffort.HIGH),
+            False,
+        ),
+        (
+            {
+                "reasoning_effort": "high",
+                "reasoning_efforts": [{"id": "high", "default": True}],
+            },
+            CatalogFact(state="value", value=ModelReasoningEffort.HIGH),
+            False,
+        ),
+        (
+            {
+                "reasoning_effort": "high",
+                "reasoning_efforts": [{"id": "low"}, {"id": "high"}],
+            },
+            CatalogFact(state="value", value=ModelReasoningEffort.HIGH),
+            False,
+        ),
+        (
+            {
+                "reasoning_effort": "low",
+                "reasoning_efforts": [
+                    {"id": "high", "default": True},
+                    {"id": "low"},
+                ],
+            },
+            CatalogFact(state="null", value=None),
+            True,
+        ),
+        (
+            {
+                "reasoning_effort": None,
+                "reasoning_efforts": [{"id": "high", "default": True}],
+            },
+            CatalogFact(state="null", value=None),
+            False,
+        ),
+        (
+            {
+                "reasoning_effort": "high",
+                "reasoning_efforts": [
+                    {"id": "high", "default": True},
+                    {"id": "low", "default": True},
+                ],
+            },
+            CatalogFact(state="null", value=None),
+            True,
+        ),
+        (
+            {"reasoning_effort": "future-effort"},
+            CatalogFact(state="null", value=None),
+            False,
+        ),
+        (
+            {"supports_reasoning_effort": False, "reasoning_effort": "high"},
+            CatalogFact(state="null", value=None),
+            False,
+        ),
+        (
+            {
+                "reasoning_effort": "high",
+                "reasoning_efforts": [{"id": "low"}],
+            },
+            CatalogFact(state="null", value=None),
+            True,
+        ),
+    ],
+)
+def test_xai_oauth_top_level_default_and_presets_remain_truthful(
+    payload: dict[str, object],
+    expected: CatalogFact[ModelReasoningEffort],
+    conflict: bool,
+) -> None:
+    candidate = _oauth_candidate_from_declared_payload(
+        {"id": "account-visible-model", **payload}
+    )
+    evidence = _replayed_evidence(candidate)
+    assert evidence.default_reasoning_effort == expected
+    assert candidate.source_metadata is not None
+    assert candidate.source_metadata["reasoning_effort"] == payload["reasoning_effort"]
+    assert (
+        "reasoning_effort_default_conflicts_with_presets"
+        in candidate.source_metadata.get("capability_conflicts", [])
+    ) is conflict
+
+
+async def test_xai_oauth_inconsistent_context_is_retryable_provider_response() -> None:
+    """An invalid upstream range must not block future catalog recovery."""
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            request=request,
+            json={
+                "data": [
+                    {
+                        "id": "account-visible-model",
+                        "context_window": 600000,
+                        "context_windows": [256000, 500000],
+                    }
+                ]
+            },
+        )
+
+    def http_factory(*, timeout: float) -> httpx.AsyncClient:
+        assert timeout == 20.0
+        return httpx.AsyncClient(
+            timeout=timeout, transport=httpx.MockTransport(respond)
+        )
+
+    clients = replace(providers.create_listing_client_factories(), http=http_factory)
+    with pytest.raises(providers.XaiListingProviderError) as caught:
+        await providers.list_xai_models_for_integration(
+            _xai_oauth_integration(), clients=clients
+        )
+    assert caught.value.failure_code == "XaiInvalidProviderResponse"
+    assert caught.value.automatic_retry_blocked is False

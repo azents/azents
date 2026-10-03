@@ -19,10 +19,15 @@ from azents.core.enums import (
     LLMProvider,
 )
 from azents.core.llm_catalog import ModelCapabilities
-from azents.core.llm_catalog_sync import IntegrationCatalogSyncTrigger
+from azents.core.llm_catalog_sync import (
+    CatalogProjectionVersion,
+    IntegrationCatalogSyncDenialReason,
+    IntegrationCatalogSyncPolicyDecision,
+    IntegrationCatalogSyncTrigger,
+)
 from azents.core.model_pricing import normalize_model_pricing
 from azents.core.workspace import WorkspaceCreate
-from azents.rdb.models.llm_catalog import RDBLLMCatalogEntry
+from azents.rdb.models.llm_catalog import RDBLLMCatalog, RDBLLMCatalogEntry
 from azents.repos.llm_catalog import LLMCatalogRepository
 from azents.repos.llm_catalog.data import (
     ImageGenerationCatalogEntryCreate,
@@ -133,6 +138,7 @@ async def _publish(
         workspace_id=fixture.workspace_id,
         started_at=finished_at,
         trigger=IntegrationCatalogSyncTrigger.CONFIG_UPDATE,
+        required_projection_version=None,
     )
     assert isinstance(claim, IntegrationCatalogSyncClaim)
     owner = await repository.lock_catalog(session, catalog_id=catalog.id)
@@ -242,6 +248,7 @@ async def test_failed_refresh_does_not_gate_current_conversation_selection(
         workspace_id=fixture.workspace_id,
         started_at=_NOW + datetime.timedelta(hours=1),
         trigger=IntegrationCatalogSyncTrigger.CONFIG_UPDATE,
+        required_projection_version=None,
     )
     assert isinstance(claim, IntegrationCatalogSyncClaim)
     await repository.fail_sync(
@@ -285,6 +292,7 @@ async def test_superseded_failure_does_not_mutate_new_work(
         workspace_id=fixture.workspace_id,
         started_at=_NOW,
         trigger=IntegrationCatalogSyncTrigger.CONFIG_UPDATE,
+        required_projection_version=None,
     )
     assert isinstance(first, IntegrationCatalogSyncClaim)
     second = await repository.begin_integration_sync(
@@ -293,6 +301,7 @@ async def test_superseded_failure_does_not_mutate_new_work(
         workspace_id=fixture.workspace_id,
         started_at=_NOW + datetime.timedelta(minutes=16),
         trigger=IntegrationCatalogSyncTrigger.CONFIG_UPDATE,
+        required_projection_version=None,
     )
     assert isinstance(second, IntegrationCatalogSyncClaim)
     assert not await repository.fail_sync(
@@ -466,3 +475,65 @@ async def test_image_credential_change_invalidates_only_image_usability(
         )
         is not None
     )
+
+
+@pytest.mark.parametrize(
+    ("version", "stale"),
+    [
+        (CatalogProjectionVersion("2", "4"), True),
+        (CatalogProjectionVersion("2", "5"), False),
+        (CatalogProjectionVersion(None, None), True),
+    ],
+)
+async def test_claim_reads_current_code_metadata_without_replacing_successful_data(
+    rdb_session: AsyncSession, version: CatalogProjectionVersion, stale: bool
+) -> None:
+    fixture = await _integration(
+        rdb_session, handle="projection-version-claim", provider=LLMProvider.OPENAI
+    )
+    repository = LLMCatalogRepository()
+    catalog = await repository.ensure_integration_catalog(
+        rdb_session,
+        integration_id=fixture.integration_id,
+        provider=LLMProvider.OPENAI,
+        purpose=LLMCatalogPurpose.CONVERSATION,
+    )
+    owner = await rdb_session.get(RDBLLMCatalog, catalog.id)
+    assert owner is not None
+    owner.last_success_at = _NOW
+    owner.diagnostics = {
+        "projection_version": {
+            "schema_version": version.schema_version,
+            "resolver_revision": version.resolver_revision,
+        }
+    }
+    await rdb_session.flush()
+    assert repository.projection_version(owner) == version
+    decision = await repository.begin_integration_sync(
+        rdb_session,
+        catalog_id=catalog.id,
+        workspace_id=fixture.workspace_id,
+        started_at=_NOW,
+        trigger=IntegrationCatalogSyncTrigger.STALE_REFRESH,
+        required_projection_version=CatalogProjectionVersion("2", "5"),
+    )
+    if stale:
+        assert isinstance(decision, IntegrationCatalogSyncClaim)
+        duplicate = await repository.begin_integration_sync(
+            rdb_session,
+            catalog_id=catalog.id,
+            workspace_id=fixture.workspace_id,
+            started_at=_NOW + datetime.timedelta(seconds=1),
+            trigger=IntegrationCatalogSyncTrigger.STALE_REFRESH,
+            required_projection_version=CatalogProjectionVersion("2", "5"),
+        )
+        assert isinstance(duplicate, IntegrationCatalogSyncPolicyDecision)
+        assert (
+            duplicate.denial_reason
+            is IntegrationCatalogSyncDenialReason.ALREADY_RUNNING
+        )
+    else:
+        assert isinstance(decision, IntegrationCatalogSyncPolicyDecision)
+        assert decision.denial_reason is IntegrationCatalogSyncDenialReason.NOT_STALE
+    assert owner.last_success_at == _NOW
+    assert repository.projection_version(owner) == version

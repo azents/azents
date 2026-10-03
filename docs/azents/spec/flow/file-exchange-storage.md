@@ -55,6 +55,8 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/exchange_upload_operation.py
   - python/apps/azents/src/azents/engine/run/resolve.py
   - python/apps/azents/src/azents/engine/events/file_parts.py
+  - python/apps/azents/src/azents/engine/events/pydantic_ai_lowering.py
+  - python/apps/azents/src/azents/engine/events/responses_lowering.py
   - python/apps/azents/src/azents/engine/events/fork_context.py
   - python/apps/azents/src/azents/engine/events/model_file_parts.py
   - python/apps/azents/src/azents/engine/events/model_file_materializer.py
@@ -82,8 +84,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ToolActivityGroup.tsx
   - typescript/apps/azents-web/src/features/chat/components/ToolCallCard.tsx
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
-last_verified_at: 2026-10-03
-spec_version: 56
+last_verified_at: 2026-10-04
+spec_version: 57
 ---
 
 # File Exchange Storage
@@ -303,6 +305,19 @@ When Agent or MCP-style tool creates internal file artifact, store it as Artifac
 Event transcript keeps only artifact metadata and `artifact://...` URI. Lowerer renders Artifact as bounded metadata text and does not inline raw file body in prompt.
 
 ### Explicit FilePart for model rich input
+
+Rich-input admission uses the saved semantic contract and effective request
+conditions on both the native Responses and PydanticAI routes. For implemented
+image/PDF forms, unknown model support is not an explicit denial: authorized
+request-local bytes remain rich input, and the provider retains its ordinary
+request-error boundary. This does not advertise unknown support as known or
+rewrite the saved descriptor. Explicit unsupported support and unmet conditional
+predicates still produce bounded placeholders. Conditional checks use the actual
+wire effort and function-tool presence before content lowering. Historical
+descriptor absence retains the saved conservative modality view; unimplemented
+audio/video and native text-file routes are not enabled by this behavior.
+Existing ModelFile authority, deletion/materialization checks, and non-image
+byte budgets are unchanged.
 
 Attachment and Artifact are not generally converted to ModelFile/FilePart. The user-input promotion boundary is the explicit exception for claimed upload attachments: it resolves the Exchange bytes and creates a FilePart before the user event enters model input. Tool implementations that directly have bytes may also create normalized blobs in ModelFileStore and return FilePart. `read_image` first obtains its bytes by claiming a verified Runtime transfer object; Runner Control never carries the image body or Base64 image data. A separate FilePart creation tool exposed to the model is not current contract. FilePart references ModelFile entity by `model_file_id`, not URI. ModelFile itself does not create URI.
 

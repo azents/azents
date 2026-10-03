@@ -15,6 +15,7 @@ from azents.core.enums import (
     LLMProvider,
 )
 from azents.core.llm_catalog_sync import (
+    CatalogProjectionVersion,
     IntegrationCatalogSyncPolicyDecision,
     IntegrationCatalogSyncTrigger,
 )
@@ -50,6 +51,7 @@ class CatalogReadPage:
 
     page: LLMCatalogEntryList
     latest_workspace_sync: LLMCatalogSyncStatus | None
+    current_projection_version: CatalogProjectionVersion | None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -169,7 +171,13 @@ class LLMCatalogOperationsRepository:
                 latest = await catalogs.get_latest_integration_sync_for_workspace(
                     session, workspace_id=workspace_id
                 )
-            return CatalogReadPage(page=page, latest_workspace_sync=latest)
+            return CatalogReadPage(
+                page=page,
+                latest_workspace_sync=latest,
+                current_projection_version=self.catalog_repository.projection_version(
+                    page.catalog
+                ),
+            )
 
     async def read_system_catalogs(
         self, providers: tuple[LLMProvider, ...]
@@ -217,6 +225,7 @@ class LLMCatalogOperationsRepository:
         workspace_id: str,
         started_at: datetime.datetime,
         trigger: IntegrationCatalogSyncTrigger,
+        required_projection_version: CatalogProjectionVersion,
     ) -> CatalogSyncStart:
         async with self.session_manager() as session:
             integration = await self.catalog_repository.lock_integration(
@@ -238,6 +247,7 @@ class LLMCatalogOperationsRepository:
                 workspace_id=workspace_id,
                 started_at=started_at,
                 trigger=trigger,
+                required_projection_version=required_projection_version,
             )
             owner = await self.catalog_repository.lock_catalog(
                 session, catalog_id=catalog.id

@@ -4,6 +4,7 @@ import dataclasses
 import datetime
 from unittest.mock import AsyncMock
 
+import pytest
 from azcommon.result import Success
 
 from azents.core.agent import AgentModelSelectionInput
@@ -16,6 +17,7 @@ from azents.core.enums import (
     LLMProvider,
 )
 from azents.core.llm_catalog import ModelCapabilities
+from azents.core.llm_catalog_sync import CatalogProjectionVersion
 from azents.repos.llm_catalog import CatalogEntryWithCatalog
 from azents.repos.llm_catalog.data import (
     LLMCatalog,
@@ -69,6 +71,7 @@ async def test_read_returns_latest_failed_state_without_successful_data() -> Non
     operations.read_page.return_value = CatalogReadPage(
         page=LLMCatalogEntryList(catalog=_catalog(), entries=[], total=0),
         latest_workspace_sync=None,
+        current_projection_version=None,
     )
     result = await ModelCatalogReadService(operations).list_entries_by_integration(
         integration_id="integration",
@@ -168,3 +171,43 @@ async def test_selection_copies_exact_prices_and_latest_update_time() -> None:
     assert reselected.value.pricing == newer
     assert result.value.pricing == price
     assert reselected.value.pricing != result.value.pricing
+
+
+@pytest.mark.parametrize(
+    ("version", "stale"),
+    [
+        (CatalogProjectionVersion("1", "5"), True),
+        (CatalogProjectionVersion("2", "4"), True),
+        (CatalogProjectionVersion(None, None), True),
+        (CatalogProjectionVersion("2", "5"), False),
+    ],
+)
+async def test_read_reports_current_code_drift_without_mutating_successful_page(
+    version: CatalogProjectionVersion, stale: bool
+) -> None:
+    now = datetime.datetime.now(datetime.UTC)
+    catalog = dataclasses.replace(
+        _catalog(),
+        provider=LLMProvider.OPENROUTER,
+        last_success_at=now,
+        sync_status=None,
+    )
+    operations = AsyncMock(spec=LLMCatalogOperationsRepository)
+    captured = CatalogReadPage(
+        page=LLMCatalogEntryList(catalog=catalog, entries=[], total=0),
+        latest_workspace_sync=None,
+        current_projection_version=version,
+    )
+    operations.read_page.return_value = captured
+    result = await ModelCatalogReadService(operations).list_entries_by_integration(
+        integration_id="integration",
+        workspace_id="workspace",
+        search=None,
+        limit=20,
+        offset=0,
+    )
+    assert isinstance(result, Success)
+    assert result.value.stale is stale
+    assert result.value.last_success_at == now
+    assert captured.page.catalog is catalog
+    assert captured.current_projection_version == version

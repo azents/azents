@@ -78,6 +78,7 @@ from azents.services.model_listing.providers import (
     list_xai_models_for_integration,
 )
 from azents.services.model_metadata_projection import (
+    current_catalog_projection_version,
     project_integration_replacement_entries,
     projection_source_expectations,
 )
@@ -390,6 +391,8 @@ class ModelCatalogReadService:
                 trigger=IntegrationCatalogSyncTrigger.EXPLICIT,
                 now=_utcnow(),
                 last_success_at=page.catalog.last_success_at,
+                current_projection_version=captured.current_projection_version,
+                required_projection_version=current_catalog_projection_version(),
                 latest_catalog_sync=_sync_policy_state(page.catalog.sync_status),
                 latest_workspace_sync=_sync_policy_state(
                     captured.latest_workspace_sync
@@ -573,6 +576,7 @@ class IntegrationCatalogProjectionService:
             workspace_id=workspace_id,
             started_at=_utcnow(),
             trigger=trigger,
+            required_projection_version=current_catalog_projection_version(),
         )
         catalog, claim = preparation.catalog, preparation.claim
         if isinstance(claim, IntegrationCatalogSyncPolicyDecision):
@@ -627,6 +631,9 @@ class IntegrationCatalogProjectionService:
                         "integration_id": integration.id,
                         "trigger": trigger.value,
                     },
+                )
+                diagnostics["projection_version"] = dataclasses.asdict(
+                    current_catalog_projection_version()
                 )
                 publication = await self.operations.publish(
                     catalog=catalog,

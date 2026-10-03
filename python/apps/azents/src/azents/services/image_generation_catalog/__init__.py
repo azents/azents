@@ -271,6 +271,8 @@ class ImageGenerationCatalogService:
                 trigger=IntegrationCatalogSyncTrigger.EXPLICIT,
                 now=_utcnow(),
                 last_success_at=page.catalog.last_success_at,
+                current_projection_version=None,
+                required_projection_version=None,
                 latest_catalog_sync=_sync_policy_state(page.catalog.sync_status),
                 latest_workspace_sync=_sync_policy_state(
                     captured.latest_workspace_sync

@@ -1085,7 +1085,10 @@ def test_cutover_retains_only_current_models_entries_and_latest_status(
     assert source["producer_version"] is None
     assert catalog["entry_count"] == 2 and catalog["hidden_count"] == 1
     assert catalog["last_success_at"] == _SUCCESS_TIME
-    assert catalog["diagnostics"] == _OWNER_DIAGNOSTICS
+    assert catalog["diagnostics"] == {
+        **_OWNER_DIAGNOSTICS,
+        "projection_version": {"schema_version": "2", "resolver_revision": None},
+    }
     for owner in (source, catalog):
         assert owner["sync_status"] == "failed"
         assert owner["sync_failure_code"] == "fixture-failure"

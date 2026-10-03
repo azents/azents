@@ -44,12 +44,22 @@ class CatalogSyncState:
 
 
 @dataclasses.dataclass(frozen=True)
+class CatalogProjectionVersion:
+    """Procedural code/schema compatibility, independent of model data identity."""
+
+    schema_version: str | None
+    resolver_revision: str | None
+
+
+@dataclasses.dataclass(frozen=True)
 class IntegrationCatalogSyncPolicyInput:
     """Current success and sync state required to decide whether work may start."""
 
     trigger: IntegrationCatalogSyncTrigger
     now: datetime.datetime
     last_success_at: datetime.datetime | None
+    current_projection_version: CatalogProjectionVersion | None
+    required_projection_version: CatalogProjectionVersion | None
     latest_catalog_sync: CatalogSyncState | None
     latest_workspace_sync: CatalogSyncState | None
 
@@ -74,6 +84,10 @@ def evaluate_integration_catalog_sync_policy(
         policy_input.last_success_at is None
         or policy_input.last_success_at + INTEGRATION_CATALOG_STALE_AFTER
         <= policy_input.now
+    ) or (
+        policy_input.required_projection_version is not None
+        and policy_input.current_projection_version
+        != policy_input.required_projection_version
     )
     trigger = policy_input.trigger
     latest = policy_input.latest_catalog_sync
