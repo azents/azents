@@ -281,7 +281,7 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
         for option in self._subagent_override_options(self.agent):
             levels = option.candidates[
                 0
-            ].model_selection.normalized_capabilities.reasoning.effort_levels
+            ].model_selection.normalized_capabilities.configurable_reasoning_efforts()
             efforts = ", ".join(level.value for level in levels)
             effort_text = efforts if efforts else "none"
             target_line = f"- `{option.label}` Reasoning efforts: {effort_text}."
@@ -425,7 +425,9 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
             selection = option.candidates[0].model_selection
             settings = option.candidates[0].settings
 
-        supported_efforts = selection.normalized_capabilities.reasoning.effort_levels
+        supported_efforts = (
+            selection.normalized_capabilities.configurable_reasoning_efforts()
+        )
         if reasoning_effort is not None:
             if reasoning_effort not in supported_efforts:
                 raise FunctionToolError(

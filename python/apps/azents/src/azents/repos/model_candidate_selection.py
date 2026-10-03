@@ -228,7 +228,7 @@ def _candidate_incompatibility(
     if (
         requested_effort is not None
         and requested_effort
-        not in selection.normalized_capabilities.reasoning.effort_levels
+        not in selection.normalized_capabilities.configurable_reasoning_efforts()
     ):
         return ModelOperationCandidateOutcomeReason.REASONING_EFFORT_UNSUPPORTED
     try:

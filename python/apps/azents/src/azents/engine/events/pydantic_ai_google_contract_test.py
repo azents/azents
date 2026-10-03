@@ -25,6 +25,9 @@ from azents.core.llm_catalog import (
     ModelReasoningCapabilities,
     ModelReasoningEffort,
 )
+from azents.core.model_capability_evidence import ProviderCapabilityEvidence
+from azents.core.model_capability_projection import project_capabilities
+from azents.core.model_catalog_source import CatalogFact, decode_catalog_source
 from azents.engine.events.protocols import NormalizedAdapterOutput
 from azents.engine.events.pydantic_ai_lowering import PydanticAILowerer
 from azents.engine.events.pydantic_ai_output import PydanticAIOutputNormalizer
@@ -33,6 +36,8 @@ from azents.engine.events.pydantic_ai_types import (
     PydanticAIStreamEvent,
 )
 from azents.engine.events.types import ProviderToolCallPayload
+from azents.engine.model_assembly import ModelAssemblyMetadata
+from azents.engine.providers.model_profiles import resolve_runtime_model_profile
 from azents.engine.providers.native_observation import observe_native_payload
 from azents.engine.run.types import BuiltinToolSpec
 
@@ -63,6 +68,7 @@ def _request(
         ),
     )
     return PydanticAILowerer(
+        top_k=None,
         provider=provider.value,
         provider_id=provider,
         model=model,
@@ -84,6 +90,7 @@ async def _dispatch(
     request: PydanticAIRequest,
     image: bytes | None,
     media_type: str | None,
+    capabilities: ModelCapabilities | None,
 ) -> _Dispatch:
     parts: list[dict[str, object]] = [{"text": "Synthetic SDK output"}]
     if image is not None:
@@ -139,7 +146,24 @@ async def _dispatch(
             retry_options=HttpRetryOptions(attempts=1),
         )
     )
-    model = GoogleModel(request.model, provider=google_provider)
+    profile = (
+        resolve_runtime_model_profile(
+            provider=provider,
+            model=request.model,
+            profile_model=None,
+            assembly_metadata=ModelAssemblyMetadata(
+                model_developer=LLMModelDeveloper.GOOGLE,
+                model_family=None,
+                capabilities=capabilities,
+            ),
+            context_window=None,
+            context_window_explicit=False,
+            source_model=None,
+        ).profile
+        if capabilities is not None
+        else None
+    )
+    model = GoogleModel(request.model, provider=google_provider, profile=profile)
     output = PydanticAIOutputNormalizer(
         provider=provider.value,
         model=request.model,
@@ -214,7 +238,11 @@ async def test_authorized_model_effort_reaches_official_sdk_wire(
         provider=provider, model=selected_model, effort=effort, image_config=None
     )
     result = await _dispatch(
-        provider=provider, request=request, image=None, media_type=None
+        provider=provider,
+        request=request,
+        image=None,
+        media_type=None,
+        capabilities=None,
     )
     assert request.model == selected_model
     config = result.wire["generationConfig"]
@@ -271,7 +299,11 @@ async def test_saved_image_tool_real_sdk_inline_data_becomes_transient_file(
         image_config={"size": "2K", "aspect_ratio": "16:9"},
     )
     result = await _dispatch(
-        provider=provider, request=request, image=image, media_type="image/png"
+        provider=provider,
+        request=request,
+        image=image,
+        media_type="image/png",
+        capabilities=None,
     )
     config = result.wire["generationConfig"]
     assert isinstance(config, dict)
@@ -302,3 +334,195 @@ async def test_saved_image_tool_real_sdk_inline_data_becomes_transient_file(
         [event.model_dump(mode="json") for event in result.output.events]
     )
     assert base64.b64encode(image).decode() not in serialized
+
+
+@pytest.mark.parametrize(
+    "provider", [LLMProvider.GOOGLE_GEMINI, LLMProvider.GOOGLE_VERTEX_AI]
+)
+async def test_exact_source_image_support_reaches_google_sdk_without_name_profile(
+    provider: LLMProvider,
+) -> None:
+    model = "account-visible-visual"
+    namespace = "gemini" if provider == LLMProvider.GOOGLE_GEMINI else "vertex_ai"
+    source = decode_catalog_source(
+        json.dumps(
+            {
+                f"{namespace}/{model}": {
+                    "litellm_provider": namespace,
+                    "mode": "chat",
+                    "supported_output_modalities": ["text", "image"],
+                }
+            }
+        ).encode()
+    ).models[0]
+    caps = project_capabilities(
+        provider=provider,
+        exact_model=model,
+        source_model=source,
+        evidence=None,
+        model_developer=LLMModelDeveloper.GOOGLE,
+    )
+    caps = ModelCapabilities.model_validate_json(caps.model_dump_json())
+    assert "image_generation" in caps.built_in_tools.supported
+    request = PydanticAILowerer(
+        top_k=None,
+        provider=provider.value,
+        provider_id=provider,
+        model=model,
+        model_developer=LLMModelDeveloper.GOOGLE,
+        tools=None,
+        model_capabilities=caps,
+        supported_execution_options=[],
+        enabled_execution_options=[],
+        hosted_tools=[BuiltinToolSpec(name="image_generation", config={"size": "2K"})],
+    ).lower([], model=model, system_prompt="Exact source image test")
+    buffer = BytesIO()
+    Image.new("RGB", (1, 1), color=(0, 0, 255)).save(buffer, format="PNG")
+    result = await _dispatch(
+        provider=provider,
+        request=request,
+        image=buffer.getvalue(),
+        media_type="image/png",
+        capabilities=caps,
+    )
+    config = _OBJECT.validate_python(result.wire["generationConfig"])
+    assert config["responseModalities"] == ["TEXT", "IMAGE"]
+    assert config["imageConfig"] == {"imageSize": "2K"}
+    assert any(isinstance(part, FilePart) for part in result.parts)
+    assert len(result.output.pending_provider_files) == 1
+
+
+@pytest.mark.parametrize(
+    "provider", [LLMProvider.GOOGLE_GEMINI, LLMProvider.GOOGLE_VERTEX_AI]
+)
+@pytest.mark.parametrize("hosted", [False, None])
+async def test_saved_google_image_denial_is_not_reenabled_by_codec_defaults(
+    provider: LLMProvider,
+    hosted: bool | None,
+) -> None:
+    model = "gemini-3.1-flash-image-preview"
+    namespace = "gemini" if provider == LLMProvider.GOOGLE_GEMINI else "vertex_ai"
+    source = decode_catalog_source(
+        json.dumps(
+            {
+                f"{namespace}/{model}": {
+                    "litellm_provider": namespace,
+                    "mode": "chat",
+                    "supported_output_modalities": ["text", "image"],
+                }
+            }
+        ).encode()
+    ).models[0]
+    caps = project_capabilities(
+        provider=provider,
+        exact_model=model,
+        source_model=source,
+        evidence=ProviderCapabilityEvidence(
+            hosted_image_generation=CatalogFact(
+                state="null" if hosted is None else "value",
+                value=hosted,
+            )
+        ),
+        model_developer=LLMModelDeveloper.GOOGLE,
+    )
+    assert "image_generation" not in caps.built_in_tools.supported
+    lowerer = PydanticAILowerer(
+        top_k=None,
+        provider=provider.value,
+        provider_id=provider,
+        model=model,
+        tools=None,
+        model_developer=LLMModelDeveloper.GOOGLE,
+        model_capabilities=caps,
+        supported_execution_options=[],
+        enabled_execution_options=[],
+        hosted_tools=[BuiltinToolSpec(name="image_generation", config={})],
+    )
+    with pytest.raises(ValueError):
+        lowerer.lower([], model=model)
+    lowerer = PydanticAILowerer(
+        top_k=None,
+        provider=provider.value,
+        provider_id=provider,
+        model=model,
+        tools=None,
+        model_developer=LLMModelDeveloper.GOOGLE,
+        model_capabilities=caps,
+        supported_execution_options=[],
+        enabled_execution_options=[],
+        hosted_tools=None,
+    )
+    result = await _dispatch(
+        provider=provider,
+        request=lowerer.lower([], model=model),
+        image=None,
+        media_type=None,
+        capabilities=caps,
+    )
+    config = _OBJECT.validate_python(result.wire["generationConfig"])
+    assert config.get("responseModalities") in (None, ["TEXT"])
+
+
+@pytest.mark.parametrize(
+    "provider", [LLMProvider.GOOGLE_GEMINI, LLMProvider.GOOGLE_VERTEX_AI]
+)
+@pytest.mark.parametrize(
+    "effort",
+    [
+        ModelReasoningEffort.MINIMAL,
+        ModelReasoningEffort.LOW,
+        ModelReasoningEffort.MEDIUM,
+        ModelReasoningEffort.HIGH,
+    ],
+)
+async def test_explicit_source_effort_survives_sparse_google_codec_on_wire(
+    provider: LLMProvider,
+    effort: ModelReasoningEffort,
+) -> None:
+    model = "gemini-3-flash-preview"
+    namespace = "gemini" if provider == LLMProvider.GOOGLE_GEMINI else "vertex_ai"
+    source = decode_catalog_source(
+        json.dumps(
+            {
+                f"{namespace}/{model}": {
+                    "litellm_provider": namespace,
+                    "mode": "chat",
+                    "supports_reasoning": True,
+                    "reasoning_effort_levels": ["minimal", "low", "medium", "high"],
+                }
+            }
+        ).encode()
+    ).models[0]
+    caps = project_capabilities(
+        provider=provider,
+        exact_model=model,
+        source_model=source,
+        evidence=None,
+        model_developer=LLMModelDeveloper.GOOGLE,
+    )
+    caps = ModelCapabilities.model_validate_json(caps.model_dump_json())
+    assert effort in caps.reasoning.effort_levels
+    request = PydanticAILowerer(
+        top_k=None,
+        provider=provider.value,
+        provider_id=provider,
+        model=model,
+        tools=None,
+        model_developer=LLMModelDeveloper.GOOGLE,
+        model_capabilities=caps,
+        supported_execution_options=[],
+        enabled_execution_options=[],
+        reasoning_effort=effort,
+        hosted_tools=None,
+    ).lower([], model=model, system_prompt="Exact source scalar test")
+    result = await _dispatch(
+        provider=provider,
+        request=request,
+        image=None,
+        media_type=None,
+        capabilities=caps,
+    )
+    config = _OBJECT.validate_python(result.wire["generationConfig"])
+    thinking = _OBJECT.validate_python(config["thinkingConfig"])
+    assert thinking["thinking_level"] == effort.value.upper()
+    assert "thinking_budget" not in thinking

@@ -203,6 +203,7 @@ def test_openai_lowerer_maps_bounded_fast_service_tier(
 ) -> None:
     """Map Fast only for a supported OpenAI authentication path."""
     request = OpenAIResponsesLowerer(
+        top_k=None,
         provider=provider_id.value,
         model="gpt-5.1",
         provider_id=provider_id,
@@ -224,6 +225,7 @@ def test_openai_lowerer_rejects_unbounded_service_tier_kwarg() -> None:
         match="service_tier must be derived from model execution options",
     ):
         OpenAIResponsesLowerer(
+            top_k=None,
             supported_execution_options=[],
             enabled_execution_options=[],
             provider="openai",
@@ -240,6 +242,7 @@ def test_responses_lowerers_reject_conflicting_speed_preferences(
     """Reject conflicts before either Responses adapter can invoke a provider."""
     options = [ModelExecutionOptionId.FAST, ModelExecutionOptionId.ULTRAFAST]
     lowerer = OpenAIResponsesLowerer(
+        top_k=None,
         provider=provider.value,
         model="gpt-6-astra",
         provider_id=provider,
@@ -253,6 +256,7 @@ def test_responses_lowerers_reject_conflicting_speed_preferences(
 def test_openai_lowerer_rejects_enabled_unsupported_fast() -> None:
     """Fail before dispatch instead of silently dropping accepted Fast intent."""
     lowerer = OpenAIResponsesLowerer(
+        top_k=None,
         provider="openai",
         model="gpt-5.1",
         provider_id=LLMProvider.OPENAI,
@@ -538,6 +542,7 @@ def _sampling_context(
 def test_openai_lowerer_omits_endpoint_credentials_and_store() -> None:
     """API-key logical requests retain semantics without client credentials."""
     lowerer = OpenAIResponsesLowerer(
+        top_k=None,
         supported_execution_options=[],
         enabled_execution_options=[],
         provider="openai",
@@ -560,6 +565,7 @@ def test_openai_lowerer_omits_endpoint_credentials_and_store() -> None:
 def test_openai_lowerer_resumes_from_compaction_handoff() -> None:
     """Official SDK lowering uses the shared compaction continuation reminder."""
     lowerer = OpenAIResponsesLowerer(
+        top_k=None,
         supported_execution_options=[],
         enabled_execution_options=[],
         provider="openai",
@@ -592,6 +598,7 @@ def test_openai_lowerer_resumes_from_compaction_handoff() -> None:
 def test_openai_lowerer_renders_agent_result_terminal_envelope() -> None:
     """Official SDK lowering shares terminal mailbox envelope semantics."""
     lowerer = OpenAIResponsesLowerer(
+        top_k=None,
         supported_execution_options=[],
         enabled_execution_options=[],
         provider="openai",
@@ -644,6 +651,7 @@ def test_chatgpt_lowerer_uses_standard_full_context_request() -> None:
         "parameters": {"type": "object"},
     }
     lowerer = OpenAIResponsesLowerer(
+        top_k=None,
         supported_execution_options=[],
         enabled_execution_options=[],
         provider="chatgpt_oauth",
@@ -684,6 +692,7 @@ def test_openai_sdk_lowerer_accepts_plaintext_custom_apply_patch_tool() -> None:
         "format": {"type": "text"},
     }
     lowerer = OpenAIResponsesLowerer(
+        top_k=None,
         supported_execution_options=[],
         enabled_execution_options=[],
         provider="openai",
@@ -701,6 +710,7 @@ def test_openai_sdk_lowerer_accepts_plaintext_custom_apply_patch_tool() -> None:
 def test_openai_sdk_lowerer_projects_incompatible_custom_history() -> None:
     """Do not emit a historical custom call on a function-only SDK request."""
     lowerer = OpenAIResponsesLowerer(
+        top_k=None,
         supported_execution_options=[],
         enabled_execution_options=[],
         provider="openai",
@@ -769,6 +779,7 @@ def test_chatgpt_lowerer_uses_standard_hosted_web_search_tool() -> None:
     capabilities = ModelCapabilities()
     capabilities.built_in_tools.supported = ["web_search"]
     lowerer = OpenAIResponsesLowerer(
+        top_k=None,
         supported_execution_options=[],
         enabled_execution_options=[],
         provider="chatgpt_oauth",
@@ -801,6 +812,7 @@ def test_openai_sdk_lowerer_uses_standard_image_generation_tool(
     capabilities = ModelCapabilities()
     capabilities.built_in_tools.supported = ["image_generation"]
     lowerer = OpenAIResponsesLowerer(
+        top_k=None,
         supported_execution_options=[],
         enabled_execution_options=[],
         provider=provider,
@@ -833,6 +845,7 @@ def test_openai_sdk_lowerer_uses_standard_image_generation_tool(
 def test_chatgpt_oauth_rehydrates_image_generation_with_store_false() -> None:
     """Complete legacy running image state when replaying stateless ChatGPT."""
     lowerer = OpenAIResponsesLowerer(
+        top_k=None,
         supported_execution_options=[],
         enabled_execution_options=[],
         provider="chatgpt_oauth",
@@ -904,6 +917,7 @@ def test_chatgpt_oauth_rehydrates_image_generation_with_store_false() -> None:
 def test_chatgpt_oauth_degrades_failed_image_generation_without_result() -> None:
     """Keep failed image history without emitting an invalid stateless item."""
     lowerer = OpenAIResponsesLowerer(
+        top_k=None,
         supported_execution_options=[],
         enabled_execution_options=[],
         provider="chatgpt_oauth",
@@ -966,6 +980,7 @@ def test_chatgpt_oauth_degrades_failed_image_generation_without_result() -> None
 def test_openai_sdk_replays_failed_image_generation_by_retained_id() -> None:
     """Keep valid native failed-image replay when stored identity is available."""
     lowerer = OpenAIResponsesLowerer(
+        top_k=None,
         supported_execution_options=[],
         enabled_execution_options=[],
         provider="openai",
@@ -1026,6 +1041,7 @@ def test_openai_sdk_replays_failed_image_generation_by_retained_id() -> None:
 def test_openai_sdk_rehydrates_image_generation_call() -> None:
     """Replay a generated-image call through the SDK lowerer."""
     lowerer = OpenAIResponsesLowerer(
+        top_k=None,
         supported_execution_options=[],
         enabled_execution_options=[],
         provider="openai",
@@ -1100,6 +1116,7 @@ def test_openai_sdk_lowerer_rejects_invalid_image_generation_config() -> None:
     capabilities = ModelCapabilities()
     capabilities.built_in_tools.supported = ["image_generation"]
     lowerer = OpenAIResponsesLowerer(
+        top_k=None,
         supported_execution_options=[],
         enabled_execution_options=[],
         provider="openai",
@@ -2341,6 +2358,7 @@ async def test_projected_chatgpt_search_reaches_official_sdk_wire(model: str) ->
     saved = capabilities.model_dump_json()
     assert builtin_tool_configurable(capabilities, tool="web_search")
     request = OpenAIResponsesLowerer(
+        top_k=None,
         provider="chatgpt_oauth",
         provider_id=LLMProvider.CHATGPT_OAUTH,
         model=model,
@@ -2439,6 +2457,7 @@ async def test_official_sdk_preserves_saved_v2_effort_wire(
         ),
     )
     request = OpenAIResponsesLowerer(
+        top_k=None,
         provider=LLMProvider.OPENAI,
         model="exact-supported-model",
         credential_kwargs={},
@@ -2496,6 +2515,7 @@ async def test_official_sdk_wire_request_sanitizes_unstored_generated_image() ->
         )
 
     lowerer = OpenAIResponsesLowerer(
+        top_k=None,
         supported_execution_options=[],
         enabled_execution_options=[],
         provider="chatgpt_oauth",
@@ -2686,6 +2706,7 @@ def test_typed_normalizer_admits_completed_custom_tool_call() -> None:
         created_at=datetime.datetime.now(datetime.UTC),
     )
     request = OpenAIResponsesLowerer(
+        top_k=None,
         supported_execution_options=[],
         enabled_execution_options=[],
         provider="openai",
@@ -2873,6 +2894,7 @@ def test_typed_completed_message_does_not_replay_output_index() -> None:
     assert isinstance(payload, AssistantMessagePayload)
     assert "output_index" not in payload.native_artifact.item
     request = OpenAIResponsesLowerer(
+        top_k=None,
         supported_execution_options=[],
         enabled_execution_options=[],
         provider="openai",
@@ -3483,6 +3505,7 @@ def test_cross_adapter_artifacts_use_canonical_fallback() -> None:
         created_at=datetime.datetime.now(datetime.UTC),
     )
     model_request = PydanticAILowerer(
+        top_k=None,
         supported_execution_options=[],
         enabled_execution_options=[],
         provider="openai",
@@ -3750,6 +3773,7 @@ async def test_missing_previous_response_retries_full_input_once(
 def test_openai_lowerer_groups_external_invocation_batch() -> None:
     """OpenAI lowerer uses the same explicit external-turn envelope."""
     lowerer = OpenAIResponsesLowerer(
+        top_k=None,
         supported_execution_options=[],
         enabled_execution_options=[],
         provider="openai",

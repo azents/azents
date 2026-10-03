@@ -185,7 +185,7 @@ def _supports_image_generation(
     if provider in {LLMProvider.OPENAI, LLMProvider.CHATGPT_OAUTH}:
         if metadata.get("supports_function_calling") is False:
             return False
-        if metadata.get("mode") not in {None, "chat"}:
+        if metadata.get("mode") not in {None, "chat", "responses"}:
             return False
         normalized = model_identifier.removeprefix("openai/").lower()
         return normalized.startswith(_IMAGE_GENERATION_OPENAI_MODEL_PREFIXES) or any(
@@ -195,7 +195,7 @@ def _supports_image_generation(
 
     if provider in {LLMProvider.XAI, LLMProvider.XAI_OAUTH}:
         return (
-            metadata.get("mode") == "chat"
+            metadata.get("mode") in {"chat", "responses"}
             and metadata.get("supports_function_calling") is True
         )
 
