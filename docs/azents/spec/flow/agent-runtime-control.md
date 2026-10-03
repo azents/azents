@@ -6,6 +6,14 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [agent, workspace, conversation, toolkit]
 code_paths:
+  - python/apps/azents/src/azents/core/agent_session_input_data.py
+  - python/apps/azents/src/azents/core/chat_data.py
+  - python/apps/azents/src/azents/core/exchange_file_errors.py
+  - python/apps/azents/src/azents/core/session_resource_authority.py
+  - python/apps/azents/src/azents/core/session_workspace_items.py
+  - python/apps/azents/src/azents/core/session_workspace_paths.py
+  - python/apps/azents/src/azents/repos/engine_tool_repositories.py
+  - python/apps/azents/src/azents/repos/skill_state_store.py
   - proto/azents/runtime_control/v1/**
   - python/libs/azents-runtime-control/**
   - python/apps/azents/src/azents/repos/agent_runtime/**
@@ -896,6 +904,18 @@ operating-system filesystem permissions. Native operations do not launch a per-o
 framed helper protocol. Model-visible operation envelopes, logical paths, results, deadlines,
 cancellation, bounded-resource, atomicity, and error contracts remain unchanged. Product services
 may retain narrower boundaries for their own actions, such as user-visible file presentation.
+
+Runner operation ingress decodes transport JSON into operation-specific typed
+payloads before dispatch. Extension keys and the existing optional null/default
+choices remain supported; malformed supplied fields retain their operation's
+validation/error boundary, and handlers own filesystem, process, and Git outcomes.
+
+Handled Runner authentication, Control-stream, transfer, Web-protocol, and
+operation failures use bounded implementation-owned reason labels. Logging formats
+a new bounded exception value, while separate structured fields retain the original
+exception type and at most 16 origin-frame locations: file basename, function, and
+line. Original exception values, chains, locals, and source text are excluded.
+This diagnostic projection does not change the operation result or reconnect policy.
 
 `file.stat` is the authoritative operation for classifying a workspace path as file, directory, symlink, other, or missing before a caller chooses a file or directory operation.
 

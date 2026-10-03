@@ -56,6 +56,10 @@ from wsproto.events import (
 from wsproto.utilities import LocalProtocolError as WsprotoLocalProtocolError
 from wsproto.utilities import RemoteProtocolError as WsprotoRemoteProtocolError
 
+from azents_runtime_runner.diagnostics import (
+    RunnerDiagnosticReason,
+    runner_exception_diagnostic,
+)
 from azents_runtime_runner.stream_session import (
     RunnerStreamSessionManager,
     RunnerWebLoopbackProtocolError,
@@ -1004,17 +1008,31 @@ class RunnerWebSessionDispatcher:
             h11.LocalProtocolError,
             WsprotoLocalProtocolError,
             WsprotoRemoteProtocolError,
-        ):
+        ) as exc:
             stream.close_reason = CloseReason.PROTOCOL_VIOLATION
-            _LOGGER.warning("Runtime Web Runner WebSocket protocol failed")
+            diagnostic = runner_exception_diagnostic(
+                exc, RunnerDiagnosticReason.WEB_PROTOCOL_FAILED
+            )
+            _LOGGER.warning(
+                "Runtime Web Runner WebSocket protocol failed",
+                exc_info=diagnostic.exc_info,
+                extra=diagnostic.log_fields(),
+            )
             await self._reset(
                 stream_id,
                 CloseReason.PROTOCOL_VIOLATION,
                 stream=stream,
             )
-        except RunnerStreamResourceExhausted:
+        except RunnerStreamResourceExhausted as exc:
             stream.close_reason = CloseReason.RESOURCE_EXHAUSTED
-            _LOGGER.warning("Runtime Web Runner hard process limit was exhausted")
+            diagnostic = runner_exception_diagnostic(
+                exc, RunnerDiagnosticReason.WEB_RESOURCE_EXHAUSTED
+            )
+            _LOGGER.warning(
+                "Runtime Web Runner hard process limit was exhausted",
+                exc_info=diagnostic.exc_info,
+                extra=diagnostic.log_fields(),
+            )
             await self._reset(
                 stream_id,
                 CloseReason.RESOURCE_EXHAUSTED,

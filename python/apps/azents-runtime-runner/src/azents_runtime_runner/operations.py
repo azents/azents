@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal, Protocol, TypeVar
+from typing import Literal, Protocol, TypeVar, assert_never
 
 from azents_runtime_control.grpc_runner_client import (
     RuntimeRunnerControlStreamClosed,
@@ -34,12 +34,17 @@ from azents_runtime_control.runner import (
     RuntimeRunnerEventType,
 )
 
+import azents_runtime_runner.operation_payloads as payloads
 from azents_runtime_runner.apply_patch import (
     ApplyPatchFailure,
     ApplyPatchFaultInjector,
     ApplyPatchLimits,
     ApplyPatchResult,
     execute_apply_patch,
+)
+from azents_runtime_runner.diagnostics import (
+    RunnerDiagnosticReason,
+    runner_exception_diagnostic,
 )
 from azents_runtime_runner.execution import (
     ExecutionBackend,
@@ -51,16 +56,11 @@ from azents_runtime_runner.workspace import Workspace
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_BASH_TIMEOUT_SECONDS = 120
 _MAX_FILE_READ_BYTES = 8 * 1024 * 1024
 _MAX_TEXT_READ_CHARACTERS = 64 * 1024
 _TEXT_READ_CHUNK_BYTES = 64 * 1024
 _DEFAULT_MAX_FILE_OPERATION_WORKERS = 8
-_DEFAULT_MAX_GREP_SEARCHED_FILES = 10_000
-_DEFAULT_MAX_GREP_SCANNED_BYTES = 128 * 1024 * 1024
 _MAX_BRACE_EXPANSIONS = 256
-_DEFAULT_PROCESS_YIELD_TIME_MS = 1_000
-_DEFAULT_PROCESS_MAX_OUTPUT_BYTES = 64 * 1024
 _DEFAULT_PROCESS_MAX_UNREAD_BYTES = 256 * 1024
 _DEFAULT_PROCESS_IDLE_TIMEOUT_SECONDS = 30 * 60
 _DEFAULT_PROCESS_MAX_LIFETIME_SECONDS = 2 * 60 * 60
@@ -123,6 +123,38 @@ class _GitWorktreeRegistration:
 
     registered: bool
     branch_name: str | None
+
+
+@dataclass(frozen=True)
+class _ExpandableBrace:
+    """Exact brace span and ordered alternatives."""
+
+    opening: int
+    closing: int
+    alternatives: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class _DiscoveredWorktree:
+    """Content-free discovery observation consumed before JSON egress."""
+
+    worktree_path: str
+    registered: bool
+    repository_anchor_path: str
+    branch_name: str
+    fingerprint: str
+    failure_code: str
+
+    def payload(self) -> dict[str, JsonValue]:
+        """Serialize the established discovery output at the final boundary."""
+        return {
+            "worktree_path": self.worktree_path,
+            "registered": self.registered,
+            "repository_anchor_path": self.repository_anchor_path,
+            "branch_name": self.branch_name,
+            "fingerprint": self.fingerprint,
+            "failure_code": self.failure_code,
+        }
 
 
 class _FileOperationSemanticError(Exception):
@@ -263,98 +295,106 @@ class RunnerOperations:
         self._execution_backend = execution_backend
 
     async def handle(self, operation: RunnerOperationEnvelope) -> None:
-        """Run one operation and publish progress/final events."""
+        """Decode once, run one operation, and publish progress/final events."""
         try:
             await self._event(
                 operation,
                 RuntimeRunnerEventType.ACCEPTED,
                 {"operation_type": operation.operation_type},
             )
-            if operation.operation_type == "bash":
-                await self._bash(operation)
-                return
-            if operation.operation_type in {"file.read", "file.download"}:
-                await self._file_read(operation)
-                return
-            if operation.operation_type == "file.read_text":
-                await self._file_read_text(operation)
-                return
-            if operation.operation_type in {"file.write", "file.upload"}:
-                await self._file_write(operation)
-                return
-            if operation.operation_type == "file.apply_patch":
-                await self._file_apply_patch(operation)
-                return
-            if operation.operation_type == "file.edit":
-                await self._file_edit(operation)
-                return
-            if operation.operation_type == "file.list":
-                await self._file_list(operation)
-                return
-            if operation.operation_type == "file.glob":
-                await self._file_glob(operation)
-                return
-            if operation.operation_type == "file.grep":
-                await self._file_grep(operation)
-                return
-            if operation.operation_type == "file.stat":
-                await self._file_stat(operation)
-                return
-            if operation.operation_type == "process.start":
-                await self._process_start(operation)
-                return
-            if operation.operation_type == "process.write":
-                await self._process_write(operation)
-                return
-            if operation.operation_type == "file.delete":
-                await self._file_delete(operation)
-                return
-            if operation.operation_type == "file.mkdir":
-                await self._file_mkdir(operation)
-                return
-            if operation.operation_type == "file.move":
-                await self._file_move(operation)
-                return
-            if operation.operation_type == "process.terminate_session":
-                await self._process_terminate_session(operation)
-                return
-            if operation.operation_type == "file.bulk_delete":
-                await self._file_bulk_delete(operation)
-                return
-            if operation.operation_type == "file.bulk_move":
-                await self._file_bulk_move(operation)
-                return
-            if operation.operation_type == "list_git_refs":
-                await self._git_list_refs(operation)
-                return
-            if operation.operation_type == "create_git_worktree":
-                await self._git_create_worktree(operation)
-                return
-            if operation.operation_type == "inspect_git_worktree":
-                await self._git_inspect_worktree(operation)
-                return
-            if operation.operation_type == "discover_managed_git_worktrees":
-                await self._git_discover_managed_worktrees(operation)
-                return
-            if operation.operation_type == "remove_discovered_git_worktree":
-                await self._git_remove_discovered_worktree(operation)
-                return
-            if operation.operation_type == "remove_git_worktree":
-                await self._git_remove_worktree(operation)
-                return
-            if operation.operation_type == "delete_git_branch":
-                await self._git_delete_branch(operation)
-                return
-            await self._final_error(
-                operation,
-                "UNSUPPORTED_OPERATION",
-                f"Unsupported Runner operation: {operation.operation_type}",
+            request = payloads.decode_operation_payload(
+                operation.operation_type, operation.payload
             )
+            match request:
+                case payloads.BashPayload():
+                    await self._bash(operation, request)
+                case payloads.FileReadPayload():
+                    await self._file_read(operation, request)
+                case payloads.FileReadTextPayload():
+                    await self._file_read_text(operation, request)
+                case payloads.FileWritePayload():
+                    await self._file_write(operation, request)
+                case payloads.FileApplyPatchPayload():
+                    await self._file_apply_patch(operation, request)
+                case payloads.FileEditPayload():
+                    await self._file_edit(operation, request)
+                case payloads.FileListPayload():
+                    await self._file_list(operation, request)
+                case payloads.FileGlobPayload():
+                    await self._file_glob(operation, request)
+                case payloads.FileGrepPayload():
+                    await self._file_grep(operation, request)
+                case payloads.FileStatPayload():
+                    await self._file_stat(operation, request)
+                case payloads.FileDeletePayload():
+                    await self._file_delete(operation, request)
+                case payloads.FileMkdirPayload():
+                    await self._file_mkdir(operation, request)
+                case payloads.FileMovePayload():
+                    await self._file_move(operation, request)
+                case payloads.FileBulkDeletePayload():
+                    await self._file_bulk_delete(operation, request)
+                case payloads.FileBulkMovePayload():
+                    await self._file_bulk_move(operation, request)
+                case payloads.ProcessStartPayload():
+                    await self._process_start(operation, request)
+                case payloads.ProcessWritePayload():
+                    await self._process_write(operation, request)
+                case payloads.ProcessTerminateSessionPayload():
+                    await self._process_terminate_session(operation, request)
+                case payloads.GitListRefsPayload():
+                    await self._git_list_refs(operation, request)
+                case payloads.GitCreateWorktreePayload():
+                    await self._git_create_worktree(operation, request)
+                case payloads.GitInspectWorktreePayload():
+                    await self._git_inspect_worktree(operation, request)
+                case payloads.GitDiscoverManagedWorktreesPayload():
+                    await self._git_discover_managed_worktrees(operation, request)
+                case payloads.GitRemoveDiscoveredWorktreePayload():
+                    await self._git_remove_discovered_worktree(operation, request)
+                case payloads.GitRemoveWorktreePayload():
+                    await self._git_remove_worktree(operation, request)
+                case payloads.GitDeleteBranchPayload():
+                    await self._git_delete_branch(operation, request)
+                case payloads.UnsupportedPayload():
+                    await self._final_error(
+                        operation,
+                        "UNSUPPORTED_OPERATION",
+                        f"Unsupported Runner operation: {request.operation_type}",
+                    )
+                case _:
+                    assert_never(request)
         except asyncio.CancelledError:
             raise
         except RuntimeRunnerControlStreamClosed:
             raise
+        except payloads.OperationPayloadError as exc:
+            if exc.patch_reason is not None:
+                await self._file_apply_patch_error(
+                    operation,
+                    ApplyPatchFailure(
+                        phase="preflight"
+                        if exc.patch_reason == "base_path_required"
+                        else "parse",
+                        reason=exc.patch_reason,
+                        message=str(exc),
+                        applied=(),
+                        failed=None,
+                        not_attempted=(),
+                        exact=True,
+                    ),
+                )
+            else:
+                await self._final_error(operation, exc.code, str(exc))
         except Exception as exc:
+            diagnostic = runner_exception_diagnostic(
+                exc, RunnerDiagnosticReason.OPERATION_FAILED
+            )
+            logger.error(
+                "Runner operation failed",
+                exc_info=diagnostic.exc_info,
+                extra=diagnostic.log_fields(),
+            )
             await self._final_error(operation, "RUNNER_OPERATION_ERROR", str(exc))
 
     async def cancel(self, operation: RunnerOperationEnvelope) -> None:
@@ -515,16 +555,14 @@ class RunnerOperations:
             },
         )
 
-    async def _bash(self, operation: RunnerOperationEnvelope) -> None:
-        command = _str_payload(operation.payload, "command")
+    async def _bash(
+        self, operation: RunnerOperationEnvelope, request: payloads.BashPayload
+    ) -> None:
+        command = request.command
         if not command:
             await self._final_error(operation, "INVALID_PAYLOAD", "command is required")
             return
-        timeout_seconds = _int_payload(
-            operation.payload,
-            "timeout_seconds",
-            default=_DEFAULT_BASH_TIMEOUT_SECONDS,
-        )
+        timeout_seconds = request.timeout_seconds
         try:
             process = await self._execution_backend.start(
                 shell_execution_spec(
@@ -532,10 +570,7 @@ class RunnerOperations:
                     command=command,
                     cwd=self._workspace.root,
                     workspace_path=str(self._workspace.root),
-                    operation_environment=_str_mapping_payload(
-                        operation.payload,
-                        "env",
-                    ),
+                    operation_environment=request.env,
                     managed=False,
                 )
             )
@@ -587,14 +622,16 @@ class RunnerOperations:
             )
         await self._final_success(operation, {"exit_code": process.returncode or 0})
 
-    async def _file_read(self, operation: RunnerOperationEnvelope) -> None:
+    async def _file_read(
+        self, operation: RunnerOperationEnvelope, request: payloads.FileReadPayload
+    ) -> None:
         try:
-            path = self._workspace.resolve(operation.payload.get("path"))
+            path = self._workspace.resolve(request.path)
         except ValueError as exc:
             await self._final_error(operation, "INVALID_PATH", str(exc))
             return
-        offset = _int_payload(operation.payload, "offset", default=0)
-        requested = _optional_int_payload(operation.payload, "max_bytes")
+        offset = request.offset
+        requested = request.max_bytes
         if offset < 0 or (requested is not None and requested <= 0):
             await self._final_error(
                 operation,
@@ -622,23 +659,17 @@ class RunnerOperations:
         )
         await self._final_success(operation, {"bytes_read": len(data)})
 
-    async def _file_read_text(self, operation: RunnerOperationEnvelope) -> None:
+    async def _file_read_text(
+        self, operation: RunnerOperationEnvelope, request: payloads.FileReadTextPayload
+    ) -> None:
         """Read a decoded character range without a Base64 file event."""
         try:
-            path = self._workspace.resolve(operation.payload.get("path"))
+            path = self._workspace.resolve(request.path)
         except ValueError as exc:
             await self._final_error(operation, "INVALID_PATH", str(exc))
             return
-        character_offset = _int_payload(
-            operation.payload,
-            "character_offset",
-            default=0,
-        )
-        requested = _int_payload(
-            operation.payload,
-            "max_characters",
-            default=0,
-        )
+        character_offset = request.character_offset
+        requested = request.max_characters
         if character_offset < 0 or requested <= 0:
             await self._final_error(
                 operation,
@@ -650,7 +681,7 @@ class RunnerOperations:
             )
             return
         max_characters = min(requested, _MAX_TEXT_READ_CHARACTERS)
-        encoding = _optional_str_payload(operation.payload, "encoding") or "utf-8"
+        encoding = request.encoding
         try:
             decoder = codecs.getincrementaldecoder(encoding)(errors="strict")
             empty_decoded = decoder.decode(b"", final=False)
@@ -695,10 +726,12 @@ class RunnerOperations:
             },
         )
 
-    async def _file_write(self, operation: RunnerOperationEnvelope) -> None:
+    async def _file_write(
+        self, operation: RunnerOperationEnvelope, request: payloads.FileWritePayload
+    ) -> None:
         try:
             path = self._workspace.resolve(
-                operation.payload.get("path"),
+                request.path,
                 write=True,
             )
         except ValueError as exc:
@@ -715,8 +748,12 @@ class RunnerOperations:
         )
         await self._final_success(operation, {"bytes_written": bytes_written})
 
-    async def _file_apply_patch(self, operation: RunnerOperationEnvelope) -> None:
-        base_path = _str_payload(operation.payload, "base_path")
+    async def _file_apply_patch(
+        self,
+        operation: RunnerOperationEnvelope,
+        request: payloads.FileApplyPatchPayload,
+    ) -> None:
+        base_path = request.base_path
         if not base_path:
             await self._file_apply_patch_error(
                 operation,
@@ -751,16 +788,8 @@ class RunnerOperations:
             )
             return
         patch = b"".join(chunk.data for chunk in operation.body_chunks)
-        declared_patch_bytes = _int_payload(
-            operation.payload,
-            "total_bytes",
-            default=-1,
-        )
-        schema_version = _int_payload(
-            operation.payload,
-            "schema_version",
-            default=0,
-        )
+        declared_patch_bytes = request.total_bytes
+        schema_version = request.schema_version
         async with self._apply_patch_lock:
             result = await self._run_apply_patch_operation(
                 operation,
@@ -774,19 +803,21 @@ class RunnerOperations:
             return
         await self._final_success(operation, result.payload())
 
-    async def _file_edit(self, operation: RunnerOperationEnvelope) -> None:
+    async def _file_edit(
+        self, operation: RunnerOperationEnvelope, request: payloads.FileEditPayload
+    ) -> None:
         """Apply one exact UTF-8 text replacement without exposing file contents."""
         try:
             path = _resolve_lexical_path(
-                operation.payload.get("path"),
+                request.path,
                 workspace=self._workspace,
             )
         except ValueError as exc:
             await self._final_error(operation, "FILE_EDIT_INVALID_PATH", str(exc))
             return
-        old_string = _str_payload(operation.payload, "old_string")
-        new_string = _str_payload(operation.payload, "new_string")
-        replace_all = _bool_payload(operation.payload, "replace_all", default=False)
+        old_string = request.old_string
+        new_string = request.new_string
+        replace_all = request.replace_all
         try:
             replacements = await self._run_file_operation(
                 operation,
@@ -866,14 +897,16 @@ class RunnerOperations:
             final=True,
         )
 
-    async def _file_list(self, operation: RunnerOperationEnvelope) -> None:
+    async def _file_list(
+        self, operation: RunnerOperationEnvelope, request: payloads.FileListPayload
+    ) -> None:
         try:
-            path = self._workspace.resolve(operation.payload.get("path"))
+            path = self._workspace.resolve(request.path)
         except ValueError as exc:
             await self._final_error(operation, "INVALID_PATH", str(exc))
             return
-        recursive = _bool_payload(operation.payload, "recursive", default=False)
-        exclude_patterns = _str_list_payload(operation.payload, "exclude_patterns")
+        recursive = request.recursive
+        exclude_patterns = request.exclude_patterns
         entries = await self._run_file_operation(
             operation,
             lambda cancellation: _list_file_entries(
@@ -886,12 +919,14 @@ class RunnerOperations:
         )
         await self._final_success(operation, {"entries": entries})
 
-    async def _file_glob(self, operation: RunnerOperationEnvelope) -> None:
-        pattern = _str_payload(operation.payload, "pattern")
+    async def _file_glob(
+        self, operation: RunnerOperationEnvelope, request: payloads.FileGlobPayload
+    ) -> None:
+        pattern = request.pattern
         if not pattern:
             await self._final_error(operation, "INVALID_PATTERN", "pattern is required")
             return
-        exclude_patterns = _str_list_payload(operation.payload, "exclude_patterns")
+        exclude_patterns = request.exclude_patterns
         try:
             entries = await self._run_file_operation(
                 operation,
@@ -907,10 +942,12 @@ class RunnerOperations:
             return
         await self._final_success(operation, {"matches": entries})
 
-    async def _file_stat(self, operation: RunnerOperationEnvelope) -> None:
+    async def _file_stat(
+        self, operation: RunnerOperationEnvelope, request: payloads.FileStatPayload
+    ) -> None:
         try:
             path = _resolve_lexical_path(
-                operation.payload.get("path"),
+                request.path,
                 workspace=self._workspace,
                 write=False,
             )
@@ -934,16 +971,18 @@ class RunnerOperations:
             return
         await self._final_success(operation, payload)
 
-    async def _file_delete(self, operation: RunnerOperationEnvelope) -> None:
+    async def _file_delete(
+        self, operation: RunnerOperationEnvelope, request: payloads.FileDeletePayload
+    ) -> None:
         try:
             path = _resolve_lexical_path(
-                operation.payload.get("path"),
+                request.path,
                 workspace=self._workspace,
             )
         except ValueError as exc:
             await self._final_error(operation, "INVALID_PATH", str(exc))
             return
-        recursive = _bool_payload(operation.payload, "recursive", default=False)
+        recursive = request.recursive
         try:
             payload = await self._run_file_operation(
                 operation,
@@ -959,16 +998,18 @@ class RunnerOperations:
             return
         await self._final_success(operation, payload)
 
-    async def _file_mkdir(self, operation: RunnerOperationEnvelope) -> None:
+    async def _file_mkdir(
+        self, operation: RunnerOperationEnvelope, request: payloads.FileMkdirPayload
+    ) -> None:
         try:
             path = _resolve_lexical_path(
-                operation.payload.get("path"),
+                request.path,
                 workspace=self._workspace,
             )
         except ValueError as exc:
             await self._final_error(operation, "INVALID_PATH", str(exc))
             return
-        parents = _bool_payload(operation.payload, "parents", default=False)
+        parents = request.parents
         try:
             payload = await self._run_file_operation(
                 operation,
@@ -984,20 +1025,22 @@ class RunnerOperations:
             return
         await self._final_success(operation, payload)
 
-    async def _file_move(self, operation: RunnerOperationEnvelope) -> None:
+    async def _file_move(
+        self, operation: RunnerOperationEnvelope, request: payloads.FileMovePayload
+    ) -> None:
         try:
             source_path = _resolve_lexical_path(
-                operation.payload.get("source_path"),
+                request.source_path,
                 workspace=self._workspace,
             )
             destination_path = _resolve_lexical_path(
-                operation.payload.get("destination_path"),
+                request.destination_path,
                 workspace=self._workspace,
             )
         except ValueError as exc:
             await self._final_error(operation, "INVALID_PATH", str(exc))
             return
-        overwrite = _bool_payload(operation.payload, "overwrite", default=False)
+        overwrite = request.overwrite
         try:
             payload = await self._run_file_operation(
                 operation,
@@ -1014,9 +1057,13 @@ class RunnerOperations:
             return
         await self._final_success(operation, payload)
 
-    async def _file_bulk_delete(self, operation: RunnerOperationEnvelope) -> None:
+    async def _file_bulk_delete(
+        self,
+        operation: RunnerOperationEnvelope,
+        request: payloads.FileBulkDeletePayload,
+    ) -> None:
         paths: list[Path] = []
-        for raw_path in _str_list_payload(operation.payload, "paths"):
+        for raw_path in request.paths:
             try:
                 paths.append(_resolve_lexical_path(raw_path, workspace=self._workspace))
             except ValueError as exc:
@@ -1025,7 +1072,7 @@ class RunnerOperations:
         if not paths:
             await self._final_error(operation, "INVALID_PAYLOAD", "paths is required")
             return
-        recursive = _bool_payload(operation.payload, "recursive", default=False)
+        recursive = request.recursive
         try:
             payload = await self._run_file_operation(
                 operation,
@@ -1041,9 +1088,11 @@ class RunnerOperations:
             return
         await self._final_success(operation, payload)
 
-    async def _file_bulk_move(self, operation: RunnerOperationEnvelope) -> None:
+    async def _file_bulk_move(
+        self, operation: RunnerOperationEnvelope, request: payloads.FileBulkMovePayload
+    ) -> None:
         source_paths: list[Path] = []
-        for raw_path in _str_list_payload(operation.payload, "source_paths"):
+        for raw_path in request.source_paths:
             try:
                 source_paths.append(
                     _resolve_lexical_path(raw_path, workspace=self._workspace)
@@ -1058,13 +1107,13 @@ class RunnerOperations:
             return
         try:
             destination_directory = _resolve_lexical_path(
-                operation.payload.get("destination_directory"),
+                request.destination_directory,
                 workspace=self._workspace,
             )
         except ValueError as exc:
             await self._final_error(operation, "INVALID_PATH", str(exc))
             return
-        overwrite = _bool_payload(operation.payload, "overwrite", default=False)
+        overwrite = request.overwrite
         try:
             payload = await self._run_file_operation(
                 operation,
@@ -1081,13 +1130,15 @@ class RunnerOperations:
             return
         await self._final_success(operation, payload)
 
-    async def _file_grep(self, operation: RunnerOperationEnvelope) -> None:
+    async def _file_grep(
+        self, operation: RunnerOperationEnvelope, request: payloads.FileGrepPayload
+    ) -> None:
         try:
-            path = self._workspace.resolve(operation.payload.get("path"))
+            path = self._workspace.resolve(request.path)
         except ValueError as exc:
             await self._final_error(operation, "INVALID_PATH", str(exc))
             return
-        pattern = _str_payload(operation.payload, "pattern")
+        pattern = request.pattern
         if not pattern:
             await self._final_error(operation, "INVALID_PAYLOAD", "pattern is required")
             return
@@ -1096,28 +1147,12 @@ class RunnerOperations:
         except re.error as exc:
             await self._final_error(operation, "INVALID_REGEX", str(exc))
             return
-        recursive = _bool_payload(operation.payload, "recursive", default=True)
-        exclude_patterns = _str_list_payload(operation.payload, "exclude_patterns")
-        max_matching_files = _positive_int_payload(
-            operation.payload,
-            "max_matching_files",
-            default=50,
-        )
-        max_lines_per_file = _positive_int_payload(
-            operation.payload,
-            "max_lines_per_file",
-            default=10,
-        )
-        max_searched_files = _positive_int_payload(
-            operation.payload,
-            "max_searched_files",
-            default=_DEFAULT_MAX_GREP_SEARCHED_FILES,
-        )
-        max_scanned_bytes = _positive_int_payload(
-            operation.payload,
-            "max_scanned_bytes",
-            default=_DEFAULT_MAX_GREP_SCANNED_BYTES,
-        )
+        recursive = request.recursive
+        exclude_patterns = request.exclude_patterns
+        max_matching_files = request.max_matching_files
+        max_lines_per_file = request.max_lines_per_file
+        max_searched_files = request.max_searched_files
+        max_scanned_bytes = request.max_scanned_bytes
         payload = await self._run_file_operation(
             operation,
             lambda cancellation: _grep_files(
@@ -1135,8 +1170,12 @@ class RunnerOperations:
         )
         await self._final_success(operation, payload)
 
-    async def _git_list_refs(self, operation: RunnerOperationEnvelope) -> None:
-        source_path = await self._git_source_path(operation)
+    async def _git_list_refs(
+        self, operation: RunnerOperationEnvelope, request: payloads.GitListRefsPayload
+    ) -> None:
+        source_path = await self._git_source_path(
+            operation, request.source_project_path
+        )
         if source_path is None:
             return
         refs_result = await self._run_git_capture(
@@ -1186,11 +1225,17 @@ class RunnerOperations:
             },
         )
 
-    async def _git_create_worktree(self, operation: RunnerOperationEnvelope) -> None:
-        source_path = await self._git_source_path(operation)
+    async def _git_create_worktree(
+        self,
+        operation: RunnerOperationEnvelope,
+        request: payloads.GitCreateWorktreePayload,
+    ) -> None:
+        source_path = await self._git_source_path(
+            operation, request.source_project_path
+        )
         if source_path is None:
             return
-        starting_ref = _str_payload(operation.payload, "starting_ref")
+        starting_ref = request.starting_ref
         if not starting_ref:
             await self._final_error(
                 operation,
@@ -1198,7 +1243,7 @@ class RunnerOperations:
                 "starting_ref is required",
             )
             return
-        branch_name = _str_payload(operation.payload, "branch_name")
+        branch_name = request.branch_name
         if not branch_name:
             await self._final_error(
                 operation,
@@ -1208,7 +1253,7 @@ class RunnerOperations:
             return
         try:
             worktree_path = _resolve_lexical_path(
-                operation.payload.get("worktree_path"),
+                request.worktree_path,
                 workspace=self._workspace,
             )
         except ValueError as exc:
@@ -1270,11 +1315,19 @@ class RunnerOperations:
             },
         )
 
-    async def _git_inspect_worktree(self, operation: RunnerOperationEnvelope) -> None:
-        source_path = await self._git_source_path(operation)
+    async def _git_inspect_worktree(
+        self,
+        operation: RunnerOperationEnvelope,
+        request: payloads.GitInspectWorktreePayload,
+    ) -> None:
+        source_path = await self._git_source_path(
+            operation, request.source_project_path
+        )
         if source_path is None:
             return
-        inspection = await self._inspect_git_worktree(operation, source_path)
+        inspection = await self._inspect_git_worktree(
+            operation, source_path, request.worktree_path
+        )
         if inspection is None:
             return
         payload: dict[str, JsonValue] = {
@@ -1293,6 +1346,7 @@ class RunnerOperations:
     async def _git_discover_managed_worktrees(
         self,
         operation: RunnerOperationEnvelope,
+        request: payloads.GitDiscoverManagedWorktreesPayload,
     ) -> None:
         """Discover Git worktrees below the fixed Agent Workspace managed root."""
         root = self._workspace.root / _MANAGED_WORKTREE_ROOT
@@ -1314,7 +1368,7 @@ class RunnerOperations:
                 operation,
                 session_directory,
             )
-            if _bool_payload(direct_entry, "registered", default=False):
+            if direct_entry.registered:
                 if len(entries) >= _MAX_MANAGED_WORKTREE_DISCOVERY_ENTRIES:
                     await self._final_error(
                         operation,
@@ -1322,7 +1376,7 @@ class RunnerOperations:
                         "Managed worktree inventory exceeds the operation limit.",
                     )
                     return
-                entries.append(direct_entry)
+                entries.append(direct_entry.payload())
                 continue
             for candidate in sorted(
                 session_directory.iterdir(),
@@ -1338,7 +1392,11 @@ class RunnerOperations:
                     )
                     return
                 entries.append(
-                    await self._discover_managed_worktree_entry(operation, candidate)
+                    (
+                        await self._discover_managed_worktree_entry(
+                            operation, candidate
+                        )
+                    ).payload()
                 )
         await self._final_success(operation, {"discovered_worktrees": entries})
 
@@ -1346,10 +1404,10 @@ class RunnerOperations:
         self,
         operation: RunnerOperationEnvelope,
         candidate: Path,
-    ) -> dict[str, JsonValue]:
+    ) -> _DiscoveredWorktree:
         """Return a content-free managed worktree identity or bounded failure."""
         if candidate.is_symlink() or not candidate.is_dir():
-            return _discovered_worktree_payload(
+            return _discovered_worktree_result(
                 candidate,
                 registered=False,
                 repository_anchor_path="",
@@ -1362,7 +1420,7 @@ class RunnerOperations:
             cwd=candidate,
         )
         if result is None or result.exit_code != 0:
-            return _discovered_worktree_payload(
+            return _discovered_worktree_result(
                 candidate,
                 registered=False,
                 repository_anchor_path="",
@@ -1371,7 +1429,7 @@ class RunnerOperations:
             )
         registration = _registered_worktree(result.stdout, worktree_path=candidate)
         if not registration.registered:
-            return _discovered_worktree_payload(
+            return _discovered_worktree_result(
                 candidate,
                 registered=False,
                 repository_anchor_path="",
@@ -1394,7 +1452,7 @@ class RunnerOperations:
             or head_result is None
             or head_result.exit_code != 0
         ):
-            return _discovered_worktree_payload(
+            return _discovered_worktree_result(
                 candidate,
                 registered=False,
                 repository_anchor_path="",
@@ -1404,7 +1462,7 @@ class RunnerOperations:
             )
         repository_anchor_path = Path(anchor_result.stdout.strip())
         if not _path_is_within(repository_anchor_path, self._workspace.root):
-            return _discovered_worktree_payload(
+            return _discovered_worktree_result(
                 candidate,
                 registered=False,
                 repository_anchor_path="",
@@ -1412,7 +1470,7 @@ class RunnerOperations:
                 head_commit="",
                 failure_code="worktree_ownership_ambiguous",
             )
-        return _discovered_worktree_payload(
+        return _discovered_worktree_result(
             candidate,
             registered=True,
             repository_anchor_path=str(repository_anchor_path),
@@ -1424,11 +1482,12 @@ class RunnerOperations:
     async def _git_remove_discovered_worktree(
         self,
         operation: RunnerOperationEnvelope,
+        request: payloads.GitRemoveDiscoveredWorktreePayload,
     ) -> None:
         """Force-remove a previously discovered managed worktree after revalidation."""
         try:
             worktree_path = _resolve_lexical_path(
-                operation.payload.get("worktree_path"),
+                request.worktree_path,
                 workspace=self._workspace,
             )
         except ValueError as exc:
@@ -1446,7 +1505,7 @@ class RunnerOperations:
         if not worktree_path.exists():
             try:
                 repository_anchor_path = _resolve_lexical_path(
-                    operation.payload.get("repository_anchor_path"),
+                    request.repository_anchor_path,
                     workspace=self._workspace,
                 )
             except ValueError as exc:
@@ -1493,29 +1552,24 @@ class RunnerOperations:
             )
             return
         observed = await self._discover_managed_worktree_entry(operation, worktree_path)
-        if not _bool_payload(observed, "registered", default=False):
+        if not observed.registered:
             await self._final_error(
                 operation,
-                _str_payload(observed, "failure_code")
-                or "worktree_ownership_ambiguous",
+                observed.failure_code or "worktree_ownership_ambiguous",
                 "Managed worktree identity could not be revalidated.",
             )
             return
         expected = (
-            _str_payload(operation.payload, "repository_anchor_path"),
-            _str_payload(operation.payload, "branch_name"),
-            _str_payload(operation.payload, "fingerprint"),
+            request.repository_anchor_path,
+            request.branch_name,
+            request.fingerprint,
         )
         actual = (
-            _str_payload(observed, "repository_anchor_path"),
-            _str_payload(observed, "branch_name"),
-            _str_payload(observed, "fingerprint"),
+            observed.repository_anchor_path,
+            observed.branch_name,
+            observed.fingerprint,
         )
-        if expected != actual or not _bool_payload(
-            operation.payload,
-            "force",
-            default=False,
-        ):
+        if expected != actual or not request.force:
             await self._final_error(
                 operation,
                 "identity_changed",
@@ -1544,14 +1598,22 @@ class RunnerOperations:
             },
         )
 
-    async def _git_remove_worktree(self, operation: RunnerOperationEnvelope) -> None:
-        source_path = await self._git_source_path(operation)
+    async def _git_remove_worktree(
+        self,
+        operation: RunnerOperationEnvelope,
+        request: payloads.GitRemoveWorktreePayload,
+    ) -> None:
+        source_path = await self._git_source_path(
+            operation, request.source_project_path
+        )
         if source_path is None:
             return
-        inspection = await self._inspect_git_worktree(operation, source_path)
+        inspection = await self._inspect_git_worktree(
+            operation, source_path, request.worktree_path
+        )
         if inspection is None:
             return
-        expected_branch_name = _str_payload(operation.payload, "branch_name")
+        expected_branch_name = request.branch_name
         if not expected_branch_name:
             await self._final_error(
                 operation,
@@ -1598,7 +1660,7 @@ class RunnerOperations:
             )
             return
         argv = ["worktree", "remove"]
-        if _bool_payload(operation.payload, "force", default=False):
+        if request.force:
             argv.append("--force")
         argv.append(str(inspection.worktree_path))
         result = await self._run_git_streaming(operation, tuple(argv), cwd=source_path)
@@ -1625,11 +1687,17 @@ class RunnerOperations:
             },
         )
 
-    async def _git_delete_branch(self, operation: RunnerOperationEnvelope) -> None:
-        source_path = await self._git_source_path(operation)
+    async def _git_delete_branch(
+        self,
+        operation: RunnerOperationEnvelope,
+        request: payloads.GitDeleteBranchPayload,
+    ) -> None:
+        source_path = await self._git_source_path(
+            operation, request.source_project_path
+        )
         if source_path is None:
             return
-        branch_name = _str_payload(operation.payload, "branch_name")
+        branch_name = request.branch_name
         if not branch_name:
             await self._final_error(
                 operation,
@@ -1670,8 +1738,10 @@ class RunnerOperations:
             {"deleted_branch_name": branch_name, "outcome": "deleted"},
         )
 
-    async def _process_start(self, operation: RunnerOperationEnvelope) -> None:
-        command = _str_payload(operation.payload, "command")
+    async def _process_start(
+        self, operation: RunnerOperationEnvelope, request: payloads.ProcessStartPayload
+    ) -> None:
+        command = request.command
         if not command:
             await self._final_error(operation, "INVALID_PAYLOAD", "command is required")
             return
@@ -1685,7 +1755,7 @@ class RunnerOperations:
             return
         await self._cleanup_expired_processes()
         await self._enforce_process_quota(owner_session_id)
-        workdir = _optional_str_payload(operation.payload, "workdir")
+        workdir = request.workdir
         try:
             cwd = (
                 self._workspace.root
@@ -1702,10 +1772,7 @@ class RunnerOperations:
                     command=command,
                     cwd=cwd,
                     workspace_path=str(self._workspace.root),
-                    operation_environment=_str_mapping_payload(
-                        operation.payload,
-                        "env",
-                    ),
+                    operation_environment=request.env,
                     managed=True,
                 )
             )
@@ -1722,19 +1789,20 @@ class RunnerOperations:
         async with record.lock:
             await self._wait_for_exit_or_yield(
                 record,
-                yield_time_ms=_yield_time_ms(operation.payload),
+                yield_time_ms=request.yield_time_ms,
             )
             await self._emit_process_snapshot(
                 operation,
                 record,
-                max_output_bytes=_max_output_bytes(operation.payload),
+                max_output_bytes=request.max_output_bytes,
             )
 
     async def _process_terminate_session(
         self,
         operation: RunnerOperationEnvelope,
+        request: payloads.ProcessTerminateSessionPayload,
     ) -> None:
-        owner_session_id = _str_payload(operation.payload, "owner_session_id")
+        owner_session_id = request.owner_session_id
         if not owner_session_id:
             await self._final_error(
                 operation,
@@ -1758,8 +1826,10 @@ class RunnerOperations:
             {"terminated_count": len(records)},
         )
 
-    async def _process_write(self, operation: RunnerOperationEnvelope) -> None:
-        process_id = _str_payload(operation.payload, "process_id")
+    async def _process_write(
+        self, operation: RunnerOperationEnvelope, request: payloads.ProcessWritePayload
+    ) -> None:
+        process_id = request.process_id
         if not process_id:
             await self._final_error(
                 operation,
@@ -1806,17 +1876,17 @@ class RunnerOperations:
             return
         async with record.lock:
             record.last_accessed_at = time.monotonic()
-            stdin = _str_payload(operation.payload, "stdin")
+            stdin = request.stdin
             if stdin and not _process_exited(record):
                 await self._write_stdin(record, stdin)
             await self._wait_for_exit_or_yield(
                 record,
-                yield_time_ms=_yield_time_ms(operation.payload),
+                yield_time_ms=request.yield_time_ms,
             )
             await self._emit_process_snapshot(
                 operation,
                 record,
-                max_output_bytes=_max_output_bytes(operation.payload),
+                max_output_bytes=request.max_output_bytes,
             )
 
     def _register_process(
@@ -2283,10 +2353,12 @@ class RunnerOperations:
             missing_reason=missing.reason,
         )
 
-    async def _git_source_path(self, operation: RunnerOperationEnvelope) -> Path | None:
+    async def _git_source_path(
+        self, operation: RunnerOperationEnvelope, raw_source_project_path: str | None
+    ) -> Path | None:
         try:
             source_path = _resolve_lexical_path(
-                operation.payload.get("source_project_path"),
+                raw_source_project_path,
                 workspace=self._workspace,
             )
         except ValueError as exc:
@@ -2401,11 +2473,12 @@ class RunnerOperations:
         self,
         operation: RunnerOperationEnvelope,
         source_path: Path,
+        raw_worktree_path: str | None,
     ) -> _GitWorktreeInspection | None:
         """Inspect exact Git registration and physical target state."""
         try:
             worktree_path = _resolve_lexical_path(
-                operation.payload.get("worktree_path"),
+                raw_worktree_path,
                 workspace=self._workspace,
             )
         except ValueError as exc:
@@ -2760,7 +2833,7 @@ def _registered_worktree(
     )
 
 
-def _discovered_worktree_payload(
+def _discovered_worktree_result(
     worktree_path: Path,
     *,
     registered: bool,
@@ -2768,7 +2841,7 @@ def _discovered_worktree_payload(
     branch_name: str,
     failure_code: str,
     head_commit: str | None = None,
-) -> dict[str, JsonValue]:
+) -> _DiscoveredWorktree:
     """Build one content-free managed worktree discovery result."""
     fingerprint_head_commit = head_commit if head_commit is not None else ""
     fingerprint = hashlib.sha256(
@@ -2783,14 +2856,14 @@ def _discovered_worktree_payload(
             )
         ).encode()
     ).hexdigest()
-    return {
-        "worktree_path": str(worktree_path),
-        "registered": registered,
-        "repository_anchor_path": repository_anchor_path,
-        "branch_name": branch_name,
-        "fingerprint": fingerprint,
-        "failure_code": failure_code,
-    }
+    return _DiscoveredWorktree(
+        worktree_path=str(worktree_path),
+        registered=registered,
+        repository_anchor_path=repository_anchor_path,
+        branch_name=branch_name,
+        fingerprint=fingerprint,
+        failure_code=failure_code,
+    )
 
 
 def _path_is_within(path: Path, root: Path) -> bool:
@@ -2826,94 +2899,6 @@ def _git_ref_is_default(ref: str, short_name: str, default_branch: str | None) -
     if default_branch is None:
         return False
     return short_name == default_branch or ref == f"refs/heads/{default_branch}"
-
-
-def _yield_time_ms(payload: Mapping[str, JsonValue]) -> int:
-    return _non_negative_int_payload(
-        payload,
-        "yield_time_ms",
-        default=_DEFAULT_PROCESS_YIELD_TIME_MS,
-    )
-
-
-def _max_output_bytes(payload: Mapping[str, JsonValue]) -> int:
-    return _positive_int_payload(
-        payload,
-        "max_output_bytes",
-        default=_DEFAULT_PROCESS_MAX_OUTPUT_BYTES,
-    )
-
-
-def _str_payload(payload: Mapping[str, JsonValue], key: str) -> str:
-    value = payload.get(key)
-    return value if isinstance(value, str) else ""
-
-
-def _optional_str_payload(payload: Mapping[str, JsonValue], key: str) -> str | None:
-    value = payload.get(key)
-    return value if isinstance(value, str) else None
-
-
-def _int_payload(payload: Mapping[str, JsonValue], key: str, *, default: int) -> int:
-    value = payload.get(key)
-    if isinstance(value, int) and not isinstance(value, bool):
-        return value
-    return default
-
-
-def _bool_payload(payload: Mapping[str, JsonValue], key: str, *, default: bool) -> bool:
-    value = payload.get(key)
-    return value if isinstance(value, bool) else default
-
-
-def _optional_int_payload(payload: Mapping[str, JsonValue], key: str) -> int | None:
-    value = payload.get(key)
-    return value if isinstance(value, int) and not isinstance(value, bool) else None
-
-
-def _non_negative_int_payload(
-    payload: Mapping[str, JsonValue],
-    key: str,
-    *,
-    default: int,
-) -> int:
-    value = payload.get(key)
-    if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
-        return value
-    return default
-
-
-def _positive_int_payload(
-    payload: Mapping[str, JsonValue],
-    key: str,
-    *,
-    default: int,
-) -> int:
-    value = payload.get(key)
-    if isinstance(value, int) and not isinstance(value, bool) and value > 0:
-        return value
-    return default
-
-
-def _str_mapping_payload(
-    payload: Mapping[str, JsonValue],
-    key: str,
-) -> dict[str, str]:
-    value = payload.get(key)
-    if not isinstance(value, dict):
-        return {}
-    return {
-        str(item_key): item_value
-        for item_key, item_value in value.items()
-        if isinstance(item_value, str)
-    }
-
-
-def _str_list_payload(payload: Mapping[str, JsonValue], key: str) -> list[str]:
-    value = payload.get(key)
-    if not isinstance(value, list):
-        return []
-    return [item for item in value if isinstance(item, str)]
 
 
 def _delete_path(
@@ -3533,11 +3518,11 @@ def _expand_braces(pattern: str) -> tuple[str, ...]:
             expansions.append(candidate)
             continue
 
-        opening, closing, alternatives = expandable
-        prefix = candidate[:opening]
-        suffix = candidate[closing + 1 :]
+        prefix = candidate[: expandable.opening]
+        suffix = candidate[expandable.closing + 1 :]
         pending.extend(
-            f"{prefix}{alternative}{suffix}" for alternative in reversed(alternatives)
+            f"{prefix}{alternative}{suffix}"
+            for alternative in reversed(expandable.alternatives)
         )
         if len(expansions) + len(pending) > _MAX_BRACE_EXPANSIONS:
             raise _FileOperationSemanticError(
@@ -3550,7 +3535,7 @@ def _expand_braces(pattern: str) -> tuple[str, ...]:
 
 def _find_expandable_brace(
     pattern: str,
-) -> tuple[int, int, tuple[str, ...]] | None:
+) -> _ExpandableBrace | None:
     """Find the first balanced brace containing top-level alternatives."""
     for opening, opening_char in enumerate(pattern):
         if opening_char != "{":
@@ -3567,7 +3552,9 @@ def _find_expandable_brace(
                         pattern[opening + 1 : closing]
                     )
                     if len(alternatives) >= 2:
-                        return opening, closing, alternatives
+                        return _ExpandableBrace(
+                            opening=opening, closing=closing, alternatives=alternatives
+                        )
                     break
     return None
 
