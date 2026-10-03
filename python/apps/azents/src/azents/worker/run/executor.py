@@ -39,6 +39,7 @@ from azents.core.inference_profile import (
     InferenceProfileSource,
     RequestedInferenceProfile,
     SessionInferenceState,
+    adapt_inference_profile_to_model,
 )
 from azents.core.mailbox_errors import (
     MailboxOwnerGenerationStaleError,
@@ -136,7 +137,6 @@ from azents.engine.run.provider_failure import (
 )
 from azents.engine.run.resolve import (
     resolve_agent_tools,
-    resolve_invoke_input_with_profile,
     resolve_invoke_input_with_resolved_profile,
     resolve_model_candidate_runtime,
 )
@@ -2753,6 +2753,9 @@ class RunExecutor:
             compaction_selection = prepared.value.compaction_selection
 
             candidate = selection.candidate
+            applied_profile = adapt_inference_profile_to_model(
+                selected.profile, candidate.model_selection
+            )
             compaction_candidate = compaction_selection.candidate
             context_source = CapturedContextSource(
                 snapshot=await self.model_metadata_service.capture_for_context(
@@ -2762,71 +2765,27 @@ class RunExecutor:
                     ]
                 ),
             )
-            if candidate.ordinal == 1:
-                primary = await resolve_invoke_input_with_profile(
-                    invoke_input,
-                    context_source=context_source,
-                    requested_profile=selected.profile,
-                    repositories=self.resolve_repositories,
-                    model_metadata_service=self.model_metadata_service,
-                    oauth_clients=self.oauth_clients,
-                    exchange_file_service=self.exchange_file_service,
-                    model_file_service=self.model_file_service,
-                    image_generation_catalog_service=(
-                        self.image_generation_catalog_service
-                    ),
-                )
-                if primary.failure:
-                    return Failure(primary.error)
-                if (
-                    primary.value.model_selection == candidate.model_selection
-                    and primary.value.model_settings == candidate.settings
-                ):
-                    resolved_request = primary.value.run_request
-                else:
-                    frozen = await resolve_invoke_input_with_resolved_profile(
-                        invoke_input,
-                        context_source=context_source,
-                        resolved_model_selection=candidate.model_selection,
-                        resolved_model_settings=candidate.settings,
-                        resolved_reasoning_effort=selected.profile.reasoning_effort,
-                        resolved_enabled_execution_options=(
-                            selected.profile.enabled_execution_options
-                        ),
-                        repositories=self.resolve_repositories,
-                        model_metadata_service=self.model_metadata_service,
-                        oauth_clients=self.oauth_clients,
-                        exchange_file_service=self.exchange_file_service,
-                        model_file_service=self.model_file_service,
-                        image_generation_catalog_service=(
-                            self.image_generation_catalog_service
-                        ),
-                    )
-                    if frozen.failure:
-                        return Failure(frozen.error)
-                    resolved_request = frozen.value
-            else:
-                resolved = await resolve_invoke_input_with_resolved_profile(
-                    invoke_input,
-                    context_source=context_source,
-                    resolved_model_selection=candidate.model_selection,
-                    resolved_model_settings=candidate.settings,
-                    resolved_reasoning_effort=selected.profile.reasoning_effort,
-                    resolved_enabled_execution_options=(
-                        selected.profile.enabled_execution_options
-                    ),
-                    repositories=self.resolve_repositories,
-                    model_metadata_service=self.model_metadata_service,
-                    oauth_clients=self.oauth_clients,
-                    exchange_file_service=self.exchange_file_service,
-                    model_file_service=self.model_file_service,
-                    image_generation_catalog_service=(
-                        self.image_generation_catalog_service
-                    ),
-                )
-                if resolved.failure:
-                    return Failure(resolved.error)
-                resolved_request = resolved.value
+            resolved = await resolve_invoke_input_with_resolved_profile(
+                invoke_input,
+                context_source=context_source,
+                resolved_model_selection=candidate.model_selection,
+                resolved_model_settings=candidate.settings,
+                resolved_reasoning_effort=applied_profile.reasoning_effort,
+                resolved_enabled_execution_options=(
+                    applied_profile.enabled_execution_options
+                ),
+                repositories=self.resolve_repositories,
+                model_metadata_service=self.model_metadata_service,
+                oauth_clients=self.oauth_clients,
+                exchange_file_service=self.exchange_file_service,
+                model_file_service=self.model_file_service,
+                image_generation_catalog_service=(
+                    self.image_generation_catalog_service
+                ),
+            )
+            if resolved.failure:
+                return Failure(resolved.error)
+            resolved_request = resolved.value
             compaction_model = compaction_candidate.model_selection.model_identifier
             compaction_capabilities = (
                 compaction_candidate.model_selection.normalized_capabilities
@@ -2894,8 +2853,8 @@ class RunExecutor:
                 model_target_label=selected.profile.model_target_label,
                 model_selection=candidate.model_selection,
                 model_settings=candidate.settings,
-                reasoning_effort=selected.profile.reasoning_effort,
-                enabled_execution_options=selected.profile.enabled_execution_options,
+                reasoning_effort=applied_profile.reasoning_effort,
+                enabled_execution_options=applied_profile.enabled_execution_options,
                 effective_context_window_tokens=effective_context_window_tokens,
                 effective_auto_compaction_threshold_tokens=(
                     effective_compaction_threshold_tokens
@@ -3052,7 +3011,12 @@ class RunExecutor:
             if applied_profile is not None
             else agent_default_inference_profile(current_agent)
         )
-        if current_profile != requested_profile:
+        prepared_profile = RequestedInferenceProfile(
+            model_target_label=prepared_inference_state.model_target_label,
+            reasoning_effort=prepared_inference_state.reasoning_effort,
+            enabled_execution_options=prepared_inference_state.enabled_execution_options,
+        )
+        if current_profile not in (requested_profile, prepared_profile):
             return True
 
         current_option = next(

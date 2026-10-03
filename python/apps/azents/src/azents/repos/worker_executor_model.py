@@ -13,7 +13,6 @@ from azents.core.inference_profile import (
     InferenceProfileSource,
     RequestedInferenceProfile,
     SessionInferenceState,
-    validate_requested_profile_against_options,
 )
 from azents.core.model_operation import (
     ModelOperationChainExhaustedError,
@@ -385,9 +384,13 @@ class WorkerExecutorModelOperationRepository:
                     enabled_execution_options=expected.enabled_execution_options,
                 )
 
-            option = validate_requested_profile_against_options(
-                locked_agent.selectable_model_options,
-                expected,
+            option = next(
+                (
+                    item
+                    for item in locked_agent.selectable_model_options
+                    if item.label == expected.model_target_label
+                ),
+                None,
             )
             if option is None:
                 return Failure(

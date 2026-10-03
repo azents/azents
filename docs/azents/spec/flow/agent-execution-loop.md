@@ -181,7 +181,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
   - typescript/apps/azents-web/messages/*/chat.json
 last_verified_at: 2026-10-03
-spec_version: 207
+spec_version: 208
 ---
 
 # Agent Execution Loop
@@ -572,8 +572,16 @@ maximum-only snapshot as having that same default, and clamps an explicit cap to
 the normalized maximum before the smaller-window calculation. An explicit empty
 built-in tool list remains all-off. Ordinary same-candidate retry rebuilds from the
 Session-owned selection and settings snapshot. Quota progression advances the frozen
-operation cursor and prepares the next compatible candidate without weakening the
-requested effort or execution options. Recovery and Worker takeover preserve the
+operation cursor and prepares the next assigned model. A reasoning or execution-option
+mismatch never skips or drops an otherwise available model. Actual controls are
+adapted to that model: preserve a supported reasoning effort, otherwise use the
+greatest supported lower level, otherwise the smallest supported level, or null
+without explicit levels; an explicit no-override null stays null. Unsupported
+execution options are removed while supported options remain. The operation keeps
+original requested intent, and the prepared Session/turn snapshot records the
+effective controls actually sent. This adaptation is not configuration drift.
+Frozen-model validation uses effective reasoning before checking the request,
+instead of reapplying an incompatible Agent-global effort. Recovery and Worker takeover preserve the
 frozen chain, cursor, attempted identities, and transferred probe/reservation claims
 rather than rematching the mutable Agent option list.
 

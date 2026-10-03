@@ -458,6 +458,7 @@ async def resolve_invoke_input(
         resolved_model_selection=None,
         context_source=None,
         resolved_model_settings=None,
+        resolved_reasoning_effort=None,
         resolved_enabled_execution_options=None,
         repositories=repositories,
         oauth_clients=oauth_clients,
@@ -495,6 +496,7 @@ async def resolve_invoke_input_with_profile(
         context_source=context_source,
         resolved_model_selection=None,
         resolved_model_settings=None,
+        resolved_reasoning_effort=None,
         resolved_enabled_execution_options=None,
         repositories=repositories,
         oauth_clients=oauth_clients,
@@ -543,6 +545,7 @@ async def resolve_invoke_input_with_resolved_profile(
         context_source=context_source,
         resolved_model_settings=resolved_model_settings,
         resolved_enabled_execution_options=resolved_enabled_execution_options,
+        resolved_reasoning_effort=resolved_reasoning_effort,
         repositories=repositories,
         oauth_clients=oauth_clients,
         exchange_file_service=exchange_file_service,
@@ -572,6 +575,7 @@ async def resolve_invoke_input_with_model_source(
     requested_profile: RequestedInferenceProfile | None,
     resolved_model_selection: AgentModelSelection | None,
     resolved_model_settings: SelectableModelSettings | None,
+    resolved_reasoning_effort: ModelReasoningEffort | None,
     resolved_enabled_execution_options: list[ModelExecutionOptionId] | None,
     repositories: EngineResolveRepositories,
     oauth_clients: RuntimeOAuthClientFactories,
@@ -706,12 +710,17 @@ async def resolve_invoke_input_with_model_source(
             assert_never(settings_result)
 
     reasoning_effort = (
-        requested_profile.reasoning_effort
-        if requested_profile is not None
-        else _resolve_reasoning_effort(main_selection, params)
+        resolved_reasoning_effort
+        if resolved_model_selection is not None
+        else (
+            requested_profile.reasoning_effort
+            if requested_profile is not None
+            else _resolve_reasoning_effort(main_selection, params)
+        )
     )
     if (
         requested_profile is None
+        and resolved_model_selection is None
         and params is not None
         and params.reasoning_effort is not None
         and main_selection.normalized_capabilities.semantic_contract is not None

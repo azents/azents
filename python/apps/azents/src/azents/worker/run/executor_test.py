@@ -21,6 +21,7 @@ from azents.core.agent import (
     AgentModelSelection,
     SelectableModelCandidate,
     SelectableModelOption,
+    SelectableModelSettings,
 )
 from azents.core.chat_data import ChatLiveRunState
 from azents.core.enums import (
@@ -138,7 +139,6 @@ from azents.engine.run.provider_failure import (
     model_provider_failure,
 )
 from azents.engine.run.resolve import (
-    ResolvedInvokeInputProfile,
     ResolvedModelCandidateRuntime,
 )
 from azents.engine.run.retry_policy import FailedRunRetryPolicy
@@ -2599,33 +2599,27 @@ async def _resolve_success(*args: object, **kwargs: object) -> object:
     del args, kwargs
     selection = make_test_model_selection()
     return Success(
-        ResolvedInvokeInputProfile(
-            run_request=RunRequest(
-                top_k=None,
-                model_assembly_metadata=None,
-                compaction_assembly_metadata=None,
-                enabled_execution_options=[],
-                session_id="session-001",
-                user_messages=[],
-                agent_prompt=None,
-                toolkits=[],
-                model="gpt-test",
-                credential_kwargs={},
-                workspace_id="workspace-001",
-                agent_id="agent-001",
-                tool_search_enabled=False,
-                auto_compaction_threshold_tokens=None,
-                compaction_provider_integration_id=(
-                    selection.llm_provider_integration_id
-                ),
-                compaction_model=selection.model_identifier,
-                compaction_provider=selection.provider,
-                compaction_credential_kwargs={},
-                compaction_max_input_tokens=128_000,
-                inference_state=None,
-            ),
-            model_selection=selection,
-            model_settings=make_test_model_settings(),
+        RunRequest(
+            top_k=None,
+            model_assembly_metadata=None,
+            compaction_assembly_metadata=None,
+            enabled_execution_options=[],
+            session_id="session-001",
+            user_messages=[],
+            agent_prompt=None,
+            toolkits=[],
+            model="gpt-test",
+            credential_kwargs={},
+            workspace_id="workspace-001",
+            agent_id="agent-001",
+            tool_search_enabled=False,
+            auto_compaction_threshold_tokens=None,
+            compaction_provider_integration_id=selection.llm_provider_integration_id,
+            compaction_model=selection.model_identifier,
+            compaction_provider=selection.provider,
+            compaction_credential_kwargs={},
+            compaction_max_input_tokens=128000,
+            inference_state=None,
             reasoning_effort=None,
         )
     )
@@ -2672,7 +2666,9 @@ def _patch_successful_resolution(
 ) -> None:
     """Patch RunExecutor dependencies to resolve a basic run request."""
     monkeypatch.setattr(
-        run_executor_module, "resolve_invoke_input_with_profile", _resolve_success
+        run_executor_module,
+        "resolve_invoke_input_with_resolved_profile",
+        _resolve_success,
     )
     monkeypatch.setattr(
         run_executor_module,
@@ -2918,7 +2914,7 @@ async def test_execute_reports_resolve_failure(
     monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
     monkeypatch.setattr(
         run_executor_module,
-        "resolve_invoke_input_with_profile",
+        "resolve_invoke_input_with_resolved_profile",
         resolve_failure,
     )
 
@@ -3114,8 +3110,8 @@ async def test_execute_recovers_activated_run_before_flushing_input(
         resolve_recovered,
     )
     monkeypatch.setattr(
-        run_executor_module,
-        "resolve_invoke_input_with_profile",
+        executor,
+        "_prepare_fresh_main_model_turn",
         resolve_new,
     )
     monkeypatch.setattr(run_executor_module, "resolve_agent_tools", resolve_tools)
@@ -3269,8 +3265,8 @@ async def test_execute_recovers_activated_command_run(
         resolve_recovered,
     )
     monkeypatch.setattr(
-        run_executor_module,
-        "resolve_invoke_input_with_profile",
+        executor,
+        "_prepare_fresh_main_model_turn",
         resolve_new,
     )
     monkeypatch.setattr(run_executor_module, "resolve_agent_tools", _resolve_no_tools)
@@ -3346,30 +3342,9 @@ async def test_execute_recovers_durable_retry_budget(
         )
 
     async def resolve_recovered(
-        *args: object,
-        **kwargs: Unpack[_ResolvedSelectionKwargs],
+        *args: object, **kwargs: Unpack[_ResolvedSelectionKwargs]
     ) -> object:
-        del args, kwargs
-        return Success(
-            RunRequest(
-                top_k=None,
-                model_assembly_metadata=None,
-                compaction_assembly_metadata=None,
-                enabled_execution_options=[],
-                session_id="session-001",
-                user_messages=[],
-                agent_prompt=None,
-                toolkits=[],
-                model="gpt-test",
-                credential_kwargs={},
-                workspace_id="workspace-001",
-                agent_id="agent-001",
-                tool_search_enabled=False,
-                auto_compaction_threshold_tokens=None,
-                compaction_provider_integration_id=None,
-                inference_state=None,
-            )
-        )
+        return await _resolve_success(*args, **kwargs)
 
     monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
     monkeypatch.setattr(
@@ -3461,40 +3436,45 @@ async def test_execute_recovers_unclassified_provider_retry_with_current_profile
 
     async def resolve_profile(*args: object, **kwargs: object) -> object:
         del args
-        requested_profile = kwargs["requested_profile"]
-        assert isinstance(requested_profile, RequestedInferenceProfile)
+        if kwargs["context_source"] is None:
+            return await _resolve_existing_success(**kwargs)
+        requested_profile = RequestedInferenceProfile.model_validate(
+            {
+                "model_target_label": (
+                    session_repository.applied_inference_profile.model_target_label
+                    if session_repository.applied_inference_profile is not None
+                    else "default"
+                ),
+                "reasoning_effort": kwargs["resolved_reasoning_effort"],
+                "enabled_execution_options": kwargs[
+                    "resolved_enabled_execution_options"
+                ],
+            }
+        )
         resolved_profiles.append(requested_profile)
         selection = make_test_model_selection()
         return Success(
-            ResolvedInvokeInputProfile(
-                run_request=RunRequest(
-                    top_k=None,
-                    model_assembly_metadata=None,
-                    compaction_assembly_metadata=None,
-                    enabled_execution_options=(
-                        requested_profile.enabled_execution_options
-                    ),
-                    session_id="session-001",
-                    user_messages=[],
-                    agent_prompt=None,
-                    toolkits=[],
-                    model=requested_profile.model_target_label,
-                    credential_kwargs={},
-                    workspace_id="workspace-001",
-                    agent_id="agent-001",
-                    tool_search_enabled=False,
-                    auto_compaction_threshold_tokens=None,
-                    compaction_provider_integration_id=(
-                        selection.llm_provider_integration_id
-                    ),
-                    compaction_model=selection.model_identifier,
-                    compaction_provider=selection.provider,
-                    compaction_credential_kwargs={},
-                    compaction_max_input_tokens=128_000,
-                    inference_state=None,
-                ),
-                model_selection=selection,
-                model_settings=make_test_model_settings(),
+            RunRequest(
+                top_k=None,
+                model_assembly_metadata=None,
+                compaction_assembly_metadata=None,
+                enabled_execution_options=requested_profile.enabled_execution_options,
+                session_id="session-001",
+                user_messages=[],
+                agent_prompt=None,
+                toolkits=[],
+                model=requested_profile.model_target_label,
+                credential_kwargs={},
+                workspace_id="workspace-001",
+                agent_id="agent-001",
+                tool_search_enabled=False,
+                auto_compaction_threshold_tokens=None,
+                compaction_provider_integration_id=selection.llm_provider_integration_id,
+                compaction_model=selection.model_identifier,
+                compaction_provider=selection.provider,
+                compaction_credential_kwargs={},
+                compaction_max_input_tokens=128000,
+                inference_state=None,
                 reasoning_effort=requested_profile.reasoning_effort,
             )
         )
@@ -3507,7 +3487,7 @@ async def test_execute_recovers_unclassified_provider_retry_with_current_profile
     )
     monkeypatch.setattr(
         run_executor_module,
-        "resolve_invoke_input_with_profile",
+        "resolve_invoke_input_with_resolved_profile",
         resolve_profile,
     )
     monkeypatch.setattr(run_executor_module, "resolve_agent_tools", _resolve_no_tools)
@@ -3647,7 +3627,7 @@ async def test_execute_activates_pending_child_from_session_snapshot(
     monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
     monkeypatch.setattr(
         run_executor_module,
-        "resolve_invoke_input_with_profile",
+        "resolve_invoke_input_with_resolved_profile",
         resolve_target,
     )
     monkeypatch.setattr(run_executor_module, "resolve_agent_tools", _resolve_no_tools)
@@ -3705,7 +3685,7 @@ async def test_prepare_fresh_turn_remaps_same_label_to_current_agent_selection(
     executor = _executor(session_state=session_repository)
     monkeypatch.setattr(
         run_executor_module,
-        "resolve_invoke_input_with_profile",
+        "resolve_invoke_input_with_resolved_profile",
         _resolve_success,
     )
 
@@ -3747,7 +3727,7 @@ async def test_prepare_fresh_turn_falls_back_and_persists_stale_session_profile(
     executor = _executor(session_state=session_repository)
     monkeypatch.setattr(
         run_executor_module,
-        "resolve_invoke_input_with_profile",
+        "resolve_invoke_input_with_resolved_profile",
         _resolve_success,
     )
 
@@ -3806,7 +3786,6 @@ async def test_prepare_fresh_turn_materializes_the_frozen_primary_candidate(
 ) -> None:
     """A concurrent Agent edit cannot replace the committed operation route."""
     executor = _executor()
-    live_selection = make_test_model_selection(model_identifier="gpt-live-edit")
     frozen_selections: list[AgentModelSelection] = []
 
     async def resolve_live_profile(*args: object, **kwargs: object) -> object:
@@ -3816,11 +3795,7 @@ async def test_prepare_fresh_turn_materializes_the_frozen_primary_candidate(
         return Success(
             dataclasses.replace(
                 resolved.value,
-                run_request=dataclasses.replace(
-                    resolved.value.run_request,
-                    model="gpt-live-edit",
-                ),
-                model_selection=live_selection,
+                model="gpt-live-edit",
             )
         )
 
@@ -3834,7 +3809,7 @@ async def test_prepare_fresh_turn_materializes_the_frozen_primary_candidate(
 
     monkeypatch.setattr(
         run_executor_module,
-        "resolve_invoke_input_with_profile",
+        "resolve_invoke_input_with_resolved_profile",
         resolve_live_profile,
     )
     monkeypatch.setattr(
@@ -3877,10 +3852,7 @@ async def test_prepare_fresh_turn_materializes_the_frozen_compaction_candidate(
         return Success(
             dataclasses.replace(
                 resolved.value,
-                run_request=dataclasses.replace(
-                    resolved.value.run_request,
-                    compaction_model="openai/gpt-live-edit",
-                ),
+                compaction_model="openai/gpt-live-edit",
             )
         )
 
@@ -3903,7 +3875,7 @@ async def test_prepare_fresh_turn_materializes_the_frozen_compaction_candidate(
 
     monkeypatch.setattr(
         run_executor_module,
-        "resolve_invoke_input_with_profile",
+        "resolve_invoke_input_with_resolved_profile",
         resolve_live_profile,
     )
     monkeypatch.setattr(
@@ -3982,7 +3954,7 @@ async def test_prepare_compaction_recreates_slot_after_prior_success(
         session_id="session-001",
         run_id="run-001",
         owner_generation=1,
-        current_request=resolved.value.run_request,
+        current_request=resolved.value,
     )
     first_state = lifecycle.run_state.run.model_operation_state
     assert first_state is not None
@@ -4101,7 +4073,7 @@ async def test_prepare_fresh_turn_fails_closed_when_session_is_missing(
     executor = _executor(session_state=session_repository)
     monkeypatch.setattr(
         run_executor_module,
-        "resolve_invoke_input_with_profile",
+        "resolve_invoke_input_with_resolved_profile",
         AsyncMock(side_effect=AssertionError("missing Session must not resolve")),
     )
 
@@ -4135,7 +4107,7 @@ async def test_prepare_fresh_turn_fails_closed_when_agent_is_missing(
     executor.test_agent_state.agent = agent_repository.agent
     monkeypatch.setattr(
         run_executor_module,
-        "resolve_invoke_input_with_profile",
+        "resolve_invoke_input_with_resolved_profile",
         AsyncMock(side_effect=AssertionError("missing Agent must not resolve")),
     )
 
@@ -4164,7 +4136,7 @@ async def test_prepare_fresh_turn_rejects_owner_generation_drift(
     executor = _executor(session_state=session_repository)
     monkeypatch.setattr(
         run_executor_module,
-        "resolve_invoke_input_with_profile",
+        "resolve_invoke_input_with_resolved_profile",
         _resolve_success,
     )
 
@@ -4378,44 +4350,32 @@ async def test_execute_refreshes_same_label_settings_before_next_model_call(
         **kwargs: object,
     ) -> object:
         del args
-        requested_profile = kwargs["requested_profile"]
-        assert isinstance(requested_profile, RequestedInferenceProfile)
+
         current_repository = agent_repository
         if current_repository is None or not isinstance(
             current_repository.agent, Agent
         ):
             raise AssertionError("Agent repository is not initialized")
-        current_agent = current_repository.agent
-        selected_option = next(
-            option
-            for option in current_agent.selectable_model_options
-            if option.label == requested_profile.model_target_label
-        )
-        candidate = selected_option.candidates[0]
-        selection = candidate.model_selection
+        selection = kwargs["resolved_model_selection"]
+        settings = kwargs["resolved_model_settings"]
+        assert isinstance(selection, AgentModelSelection)
+        assert isinstance(settings, SelectableModelSettings)
         runtime_model = selection.model_identifier
         resolved = await _resolve_success()
         assert isinstance(resolved, Success)
         request = dataclasses.replace(
-            resolved.value.run_request,
+            resolved.value,
             model=runtime_model,
             provider=selection.provider,
             model_developer=selection.model_developer,
-            max_output_tokens=candidate.settings.max_output_tokens,
+            max_output_tokens=settings.max_output_tokens,
             compaction_provider_integration_id=(selection.llm_provider_integration_id),
             compaction_model=runtime_model,
             compaction_provider=selection.provider,
             compaction_credential_kwargs={},
             compaction_max_input_tokens=128_000,
         )
-        return Success(
-            dataclasses.replace(
-                resolved.value,
-                run_request=request,
-                model_selection=selection,
-                model_settings=candidate.settings,
-            )
-        )
+        return Success(request)
 
     async def poll_run_inputs(
         *args: object,
@@ -4450,7 +4410,7 @@ async def test_execute_refreshes_same_label_settings_before_next_model_call(
 
     monkeypatch.setattr(
         run_executor_module,
-        "resolve_invoke_input_with_profile",
+        "resolve_invoke_input_with_resolved_profile",
         resolve_current_profile,
     )
     monkeypatch.setattr(
@@ -4601,7 +4561,7 @@ async def test_execute_terminalizes_late_profile_failure_without_retry_or_overwr
     monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
     monkeypatch.setattr(
         run_executor_module,
-        "resolve_invoke_input_with_profile",
+        "resolve_invoke_input_with_resolved_profile",
         resolve_profile,
     )
     monkeypatch.setattr(run_executor_module, "resolve_agent_tools", _resolve_no_tools)
@@ -4676,7 +4636,7 @@ async def test_execute_enqueues_follow_up_for_pending_context_invalidating_actio
     )
     monkeypatch.setattr(
         run_executor_module,
-        "resolve_invoke_input_with_profile",
+        "resolve_invoke_input_with_resolved_profile",
         resolve_failure,
     )
 
@@ -5941,7 +5901,7 @@ async def test_execute_cancels_pending_run_after_terminal_preparation_failure(
     monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
     monkeypatch.setattr(
         run_executor_module,
-        "resolve_invoke_input_with_profile",
+        "resolve_invoke_input_with_resolved_profile",
         resolve_failure,
     )
 
@@ -6023,7 +5983,7 @@ async def test_execute_suppresses_recovered_bridge_predecessor_result(
     monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
     monkeypatch.setattr(
         run_executor_module,
-        "resolve_invoke_input_with_profile",
+        "resolve_invoke_input_with_resolved_profile",
         resolve_failure,
     )
 
@@ -6169,7 +6129,7 @@ async def test_execute_ignores_wake_up_without_runtime_input(
     monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
     monkeypatch.setattr(
         run_executor_module,
-        "resolve_invoke_input_with_profile",
+        "resolve_invoke_input_with_resolved_profile",
         resolve_failure,
     )
 
@@ -6489,7 +6449,7 @@ async def test_execute_clears_live_projection_after_run_complete(
     monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
     monkeypatch.setattr(
         run_executor_module,
-        "resolve_invoke_input_with_profile",
+        "resolve_invoke_input_with_resolved_profile",
         resolve_success,
     )
     monkeypatch.setattr(
@@ -6670,7 +6630,7 @@ async def test_active_heartbeat_owner_loss_cancels_execution_without_retry_or_cl
     monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
     monkeypatch.setattr(
         run_executor_module,
-        "resolve_invoke_input_with_profile",
+        "resolve_invoke_input_with_resolved_profile",
         resolve_success,
     )
     monkeypatch.setattr(
@@ -6883,14 +6843,7 @@ async def test_quota_progresses_candidate_before_generic_retry(
 
     async def resolve_primary(*args: object, **kwargs: object) -> object:
         del args, kwargs
-        return Success(
-            ResolvedInvokeInputProfile(
-                run_request=request_for(primary),
-                model_selection=primary,
-                model_settings=make_test_model_settings(),
-                reasoning_effort=None,
-            )
-        )
+        return Success(request_for(primary))
 
     async def resolve_fallback(
         *args: object,
@@ -6919,7 +6872,7 @@ async def test_quota_progresses_candidate_before_generic_retry(
     monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
     monkeypatch.setattr(
         run_executor_module,
-        "resolve_invoke_input_with_profile",
+        "resolve_invoke_input_with_resolved_profile",
         resolve_primary,
     )
     monkeypatch.setattr(
@@ -6999,7 +6952,9 @@ async def test_execute_retries_failed_run_without_durable_error(
 
     monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
     monkeypatch.setattr(
-        run_executor_module, "resolve_invoke_input_with_profile", resolve_success
+        run_executor_module,
+        "resolve_invoke_input_with_resolved_profile",
+        resolve_success,
     )
     monkeypatch.setattr(
         run_executor_module, "resolve_agent_tools", resolve_agent_tools_success
@@ -7087,40 +7042,43 @@ async def test_execute_refreshes_session_profile_before_model_retry(
         **kwargs: object,
     ) -> object:
         del args
-        requested_profile = kwargs["requested_profile"]
-        assert isinstance(requested_profile, RequestedInferenceProfile)
+        requested_profile = RequestedInferenceProfile.model_validate(
+            {
+                "model_target_label": (
+                    session_repository.applied_inference_profile.model_target_label
+                    if session_repository.applied_inference_profile is not None
+                    else "default"
+                ),
+                "reasoning_effort": kwargs["resolved_reasoning_effort"],
+                "enabled_execution_options": kwargs[
+                    "resolved_enabled_execution_options"
+                ],
+            }
+        )
         resolved_profiles.append(requested_profile)
         selection = make_test_model_selection()
         return Success(
-            ResolvedInvokeInputProfile(
-                run_request=RunRequest(
-                    top_k=None,
-                    model_assembly_metadata=None,
-                    compaction_assembly_metadata=None,
-                    enabled_execution_options=(
-                        requested_profile.enabled_execution_options
-                    ),
-                    session_id="session-001",
-                    user_messages=[],
-                    agent_prompt=None,
-                    toolkits=[],
-                    model=requested_profile.model_target_label,
-                    credential_kwargs={},
-                    workspace_id="workspace-001",
-                    agent_id="agent-001",
-                    tool_search_enabled=False,
-                    auto_compaction_threshold_tokens=None,
-                    compaction_provider_integration_id=(
-                        selection.llm_provider_integration_id
-                    ),
-                    compaction_model=selection.model_identifier,
-                    compaction_provider=selection.provider,
-                    compaction_credential_kwargs={},
-                    compaction_max_input_tokens=128_000,
-                    inference_state=None,
-                ),
-                model_selection=selection,
-                model_settings=make_test_model_settings(),
+            RunRequest(
+                top_k=None,
+                model_assembly_metadata=None,
+                compaction_assembly_metadata=None,
+                enabled_execution_options=requested_profile.enabled_execution_options,
+                session_id="session-001",
+                user_messages=[],
+                agent_prompt=None,
+                toolkits=[],
+                model=requested_profile.model_target_label,
+                credential_kwargs={},
+                workspace_id="workspace-001",
+                agent_id="agent-001",
+                tool_search_enabled=False,
+                auto_compaction_threshold_tokens=None,
+                compaction_provider_integration_id=selection.llm_provider_integration_id,
+                compaction_model=selection.model_identifier,
+                compaction_provider=selection.provider,
+                compaction_credential_kwargs={},
+                compaction_max_input_tokens=128000,
+                inference_state=None,
                 reasoning_effort=requested_profile.reasoning_effort,
             )
         )
@@ -7142,7 +7100,7 @@ async def test_execute_refreshes_session_profile_before_model_retry(
     )
     monkeypatch.setattr(
         run_executor_module,
-        "resolve_invoke_input_with_profile",
+        "resolve_invoke_input_with_resolved_profile",
         resolve_profile,
     )
     monkeypatch.setattr(run_executor_module, "resolve_agent_tools", _resolve_no_tools)
@@ -7283,7 +7241,9 @@ async def test_execute_publishes_retry_state_after_internal_attempt_failure(
 
     monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
     monkeypatch.setattr(
-        run_executor_module, "resolve_invoke_input_with_profile", resolve_success
+        run_executor_module,
+        "resolve_invoke_input_with_resolved_profile",
+        resolve_success,
     )
     monkeypatch.setattr(
         run_executor_module, "resolve_agent_tools", resolve_agent_tools_success
@@ -7497,7 +7457,9 @@ async def test_execute_prioritizes_stop_over_provider_failure_persistence(
 
     monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
     monkeypatch.setattr(
-        run_executor_module, "resolve_invoke_input_with_profile", resolve_success
+        run_executor_module,
+        "resolve_invoke_input_with_resolved_profile",
+        resolve_success,
     )
     monkeypatch.setattr(
         run_executor_module, "resolve_agent_tools", resolve_agent_tools_success
@@ -7640,7 +7602,9 @@ async def test_execute_finalizes_when_failed_run_retry_is_exhausted(
 
     monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
     monkeypatch.setattr(
-        run_executor_module, "resolve_invoke_input_with_profile", resolve_success
+        run_executor_module,
+        "resolve_invoke_input_with_resolved_profile",
+        resolve_success,
     )
     monkeypatch.setattr(
         run_executor_module, "resolve_agent_tools", resolve_agent_tools_success
@@ -7772,7 +7736,9 @@ async def test_execute_finalizes_non_retryable_failed_run_without_waiting(
 
     monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
     monkeypatch.setattr(
-        run_executor_module, "resolve_invoke_input_with_profile", resolve_success
+        run_executor_module,
+        "resolve_invoke_input_with_resolved_profile",
+        resolve_success,
     )
     monkeypatch.setattr(
         run_executor_module, "resolve_agent_tools", resolve_agent_tools_success
@@ -7844,7 +7810,7 @@ async def test_fresh_profile_drift_retains_exact_three_outer_attempts(
     )
     monkeypatch.setattr(executor.model_operation_repository, "prepare_fresh", prepare)
     monkeypatch.setattr(
-        run_executor_module, "resolve_invoke_input_with_profile", external
+        run_executor_module, "resolve_invoke_input_with_resolved_profile", external
     )
     with pytest.raises(
         CanonicalExecutionWorkDriftError, match="fresh turn preparation"
@@ -7874,7 +7840,7 @@ async def test_fresh_final_fence_drift_retains_committed_selection_and_three_att
     external = AsyncMock(side_effect=_resolve_success)
     monkeypatch.setattr(executor.model_operation_repository, "finalize_fresh", final)
     monkeypatch.setattr(
-        run_executor_module, "resolve_invoke_input_with_profile", external
+        run_executor_module, "resolve_invoke_input_with_resolved_profile", external
     )
     with pytest.raises(
         CanonicalExecutionWorkDriftError, match="fresh turn preparation"
@@ -7904,7 +7870,7 @@ async def test_external_fresh_resolution_failure_does_not_replay_or_discard_prep
     external = AsyncMock(return_value=Failure(AgentNotFound(agent_id="agent-001")))
     final = AsyncMock(side_effect=AssertionError("External failure has no final write"))
     monkeypatch.setattr(
-        run_executor_module, "resolve_invoke_input_with_profile", external
+        run_executor_module, "resolve_invoke_input_with_resolved_profile", external
     )
     monkeypatch.setattr(executor.model_operation_repository, "finalize_fresh", final)
     result = await executor._prepare_fresh_main_model_turn(
@@ -7943,9 +7909,9 @@ async def test_real_fresh_executor_materializers_observe_closed_postgres_phases(
     callbacks: list[str] = []
     resolved = await _resolve_success()
     assert isinstance(resolved, Success)
-    assert isinstance(resolved.value, ResolvedInvokeInputProfile)
+    assert isinstance(resolved.value, RunRequest)
     request = dataclasses.replace(
-        resolved.value.run_request,
+        resolved.value,
         agent_id=fixture.agent_id,
         session_id=fixture.session_id,
         workspace_id=fixture.workspace_id,
@@ -7963,14 +7929,7 @@ async def test_real_fresh_executor_materializers_observe_closed_postgres_phases(
             return Failure(AgentNotFound(agent_id=fixture.agent_id))
         if outcome == "cancel":
             raise asyncio.CancelledError("external materialization cancelled")
-        return Success(
-            ResolvedInvokeInputProfile(
-                run_request=request,
-                model_selection=primary.model_selection,
-                model_settings=primary.settings,
-                reasoning_effort=None,
-            )
-        )
+        return Success(request)
 
     async def resolve_runtime(
         *, selection: AgentModelSelection, **kwargs: object
@@ -8008,7 +7967,9 @@ async def test_real_fresh_executor_materializers_observe_closed_postgres_phases(
         AsyncMock(side_effect=capture),
     )
     monkeypatch.setattr(
-        run_executor_module, "resolve_invoke_input_with_profile", resolve_profile
+        run_executor_module,
+        "resolve_invoke_input_with_resolved_profile",
+        resolve_profile,
     )
     monkeypatch.setattr(
         run_executor_module, "resolve_model_candidate_runtime", resolve_runtime
