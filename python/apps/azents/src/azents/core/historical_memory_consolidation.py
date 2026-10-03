@@ -26,6 +26,13 @@ class ConsolidationWorkKind(enum.StrEnum):
     RESTORED = "restored"
 
 
+class ConsolidationDisposition(enum.StrEnum):
+    """Explicit private work choice, independent from evidence exposure."""
+
+    CONSIDERED = "considered"
+    OMITTED = "omitted"
+
+
 class ConsolidationWorkState(enum.StrEnum):
     """Exact work disposition, independent of the current published overview."""
 

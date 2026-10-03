@@ -7,10 +7,12 @@ import sqlalchemy as sa
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql.selectable import Subquery
 from uuid6 import uuid7
 
 from azents.core.historical_memory_consolidation import (
     ConsolidationJobPrincipal,
+    ConsolidationUnitKey,
 )
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.historical_memory import RDBHistoricalMemorySource
@@ -112,6 +114,22 @@ async def check_draft_influence(
         RDBConsolidationEvidence.membership_grant_id,
     ).where(RDBConsolidationEvidence.attempt_id == principal.attempt_id)
     influence = inherited.union_all(exposed).subquery("complete_draft_influence")
+    await check_dependency_manifest(
+        session,
+        key=principal.unit,
+        membership_grant_id=owner.attempt.membership_grant_id,
+        influence=influence,
+    )
+
+
+async def check_dependency_manifest(
+    session: AsyncSession,
+    *,
+    key: ConsolidationUnitKey,
+    membership_grant_id: str | None,
+    influence: Subquery,
+) -> None:
+    """Recheck a complete independent manifest under caller-owned authority."""
     source_ids = sa.select(influence.c.source_session_id).distinct()
     expected = sa.select(sa.func.count()).select_from(source_ids.subquery())
     # Count server-side locked rows, not an uncapped Python manifest. Each source
@@ -120,7 +138,7 @@ async def check_draft_influence(
         sa.select(RDBAgentSession.id)
         .where(
             RDBAgentSession.id.in_(source_ids),
-            source_predicate(principal.unit),
+            source_predicate(key),
         )
         .order_by(RDBAgentSession.id)
         .with_for_update(read=True, nowait=True)
@@ -161,9 +179,7 @@ async def check_draft_influence(
             sa.or_(
                 RDBHistoricalMemorySource.availability_generation
                 != influence.c.availability_generation,
-                influence.c.membership_grant_id.is_distinct_from(
-                    owner.attempt.membership_grant_id
-                ),
+                influence.c.membership_grant_id.is_distinct_from(membership_grant_id),
                 RDBHistoricalMemorySource.summary_generation
                 < influence.c.summary_generation,
                 sa.and_(

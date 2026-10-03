@@ -23,6 +23,9 @@ from azents.repos.historical_memory_consolidation.ownership import (
 from azents.repos.historical_memory_consolidation.sources import (
     ConsolidationSourceRepository,
 )
+from azents.repos.historical_memory_consolidation.work import (
+    ConsolidationWorkRepository,
+)
 from azents.services.file_storage import TextReadResult
 from azents.services.historical_memory.draft_vfs import (
     ConsolidationDraftVfsBackend,
@@ -74,7 +77,9 @@ async def bind_consolidation_test_vfs(
     ledger = ConsolidationVfsObservations(claim.principal)
     draft = ConsolidationDraftVfsBackend(ConsolidationDraftRepository(manager), ledger)
     source = ConsolidationSourceVfsBackend(
-        ConsolidationSourceRepository(manager), ledger
+        ConsolidationSourceRepository(manager),
+        ledger,
+        ConsolidationWorkRepository(manager),
     )
     authority = ConsolidationVfsAuthorityValidator(owner_repository)
     mutations = VfsMutationRouter(

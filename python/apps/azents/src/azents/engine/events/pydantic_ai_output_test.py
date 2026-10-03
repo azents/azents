@@ -124,6 +124,93 @@ def _pricing() -> CapturedModelPricing:
     )
 
 
+@pytest.mark.parametrize(
+    "protocol,prompt_key,completion_key",
+    [
+        ("anthropic", "input_tokens", "output_tokens"),
+        ("google", "promptTokenCount", "candidatesTokenCount"),
+        ("bedrock", "inputTokens", "outputTokens"),
+        ("chat_completions", "prompt_tokens", "completion_tokens"),
+        ("responses", "input_tokens", "output_tokens"),
+    ],
+)
+@pytest.mark.parametrize("missing_side", ["input", "output"])
+def test_partial_native_usage_cannot_release_missing_counter_as_sdk_default_zero(
+    protocol: NativeModelProtocol,
+    prompt_key: str,
+    completion_key: str,
+    missing_side: str,
+) -> None:
+    stream = _normalizer().start_transient()
+    stream.process_event(
+        _event(
+            response=ModelResponse(
+                parts=[TextPart("Completed")],
+                usage=RequestUsage(
+                    input_tokens=0 if missing_side == "input" else 20,
+                    output_tokens=5 if missing_side == "input" else 0,
+                ),
+            ),
+            observation=_observation(
+                protocol=protocol,
+                terminal="success",
+                usage={completion_key: 5}
+                if missing_side == "input"
+                else {prompt_key: 20},
+            ),
+        )
+    )
+    assert stream.complete().usage is None
+
+
+@pytest.mark.parametrize(
+    "protocol,prompt_key,completion_key",
+    [
+        ("anthropic", "input_tokens", "output_tokens"),
+        ("google", "promptTokenCount", "candidatesTokenCount"),
+        ("bedrock", "inputTokens", "outputTokens"),
+        ("chat_completions", "prompt_tokens", "completion_tokens"),
+        ("responses", "input_tokens", "output_tokens"),
+    ],
+)
+def test_native_explicit_zero_output_remains_known_usage(
+    protocol: NativeModelProtocol,
+    prompt_key: str,
+    completion_key: str,
+) -> None:
+    stream = _normalizer().start_transient()
+    stream.process_event(
+        _event(
+            response=ModelResponse(
+                parts=[TextPart("Completed")],
+                usage=RequestUsage(input_tokens=20, output_tokens=0),
+            ),
+            observation=_observation(
+                protocol=protocol,
+                terminal="success",
+                usage={prompt_key: 20, completion_key: 0},
+            ),
+        )
+    )
+    usage = stream.complete().usage
+    assert usage is not None
+    assert usage.prompt_tokens == 20 and usage.completion_tokens == 0
+
+
+def test_sdk_non_token_details_do_not_prove_missing_zero_usage() -> None:
+    stream = _normalizer().start_transient()
+    stream.process_event(
+        _event(
+            response=ModelResponse(
+                parts=[TextPart("Completed")],
+                usage=RequestUsage(details={"reasoning_tokens": 0}),
+            ),
+            observation=_observation(terminal="success"),
+        )
+    )
+    assert stream.complete().usage is None
+
+
 def test_common_complete_or_content_eof_is_not_native_success() -> None:
     stream = _normalizer().start("session-1")
     stream.process_event(

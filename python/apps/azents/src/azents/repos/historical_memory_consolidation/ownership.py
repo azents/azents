@@ -1,6 +1,7 @@
 """Repository-owned claim, renewal and terminal transactions for private jobs."""
 
 import datetime
+import logging
 from dataclasses import dataclass
 
 import sqlalchemy as sa
@@ -27,15 +28,21 @@ from azents.repos.historical_memory_consolidation.authority import (
     require_commit_owner,
     unit_predicate,
 )
+from azents.repos.historical_memory_consolidation.work import (
+    pending_work_query,
+    work_predicate,
+)
 
 _LEASE = datetime.timedelta(seconds=120)
 _ATTEMPT = datetime.timedelta(minutes=10)
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
 class ConsolidationClaim:
     """Committed owner identity and stable finite-pass admission boundary."""
 
+    unit_id: str
     principal: ConsolidationJobPrincipal
     pass_upper_sequence: int
     deadline_at: datetime.datetime
@@ -81,20 +88,23 @@ class ConsolidationOwnershipRepository:
                     previous.state = ConsolidationAttemptState.CANCELLED
                     previous.failure_code = "lease_expired"
                     previous.finished_at = now
-            upper = await session.scalar(
+            upper = unit.pass_upper_sequence
+            remaining = upper is not None and await session.scalar(
                 sa.select(
-                    sa.func.coalesce(sa.func.max(RDBConsolidationWork.sequence), 0)
-                ).where(
-                    RDBConsolidationWork.agent_id == key.agent_id,
-                    RDBConsolidationWork.workspace_id == key.workspace_id,
-                    RDBConsolidationWork.scope == key.scope,
-                    RDBConsolidationWork.associated_user_id.is_not_distinct_from(
-                        key.associated_user_id
-                    ),
+                    pending_work_query(key, grant)
+                    .where(RDBConsolidationWork.sequence <= upper)
+                    .exists()
                 )
             )
+            if not remaining:
+                upper = await session.scalar(
+                    sa.select(
+                        sa.func.coalesce(sa.func.max(RDBConsolidationWork.sequence), 0)
+                    ).where(work_predicate(key))
+                )
             if not isinstance(upper, int):
                 raise TypeError("Consolidation sequence boundary is not an integer.")
+            unit.pass_upper_sequence = upper
             attempt_id = uuid7().hex
             token = uuid7().hex
             unit.owner_generation += 1
@@ -113,6 +123,7 @@ class ConsolidationOwnershipRepository:
             session.add(attempt)
             await session.flush()
             claim = ConsolidationClaim(
+                unit_id=unit.id,
                 principal=ConsolidationJobPrincipal(
                     unit=key,
                     attempt_id=attempt_id,
@@ -147,6 +158,7 @@ class ConsolidationOwnershipRepository:
             )
         async with consolidation_job_session(self.session_manager, principal) as job:
             session, owner = job.session, job.owner
+            await require_commit_owner(session, owner)
             owner.attempt.state = (
                 ConsolidationAttemptState.CANCELLED
                 if cancelled
@@ -158,6 +170,20 @@ class ConsolidationOwnershipRepository:
             owner.unit.lease_until = None
             owner.unit.active_attempt_id = None
             owner.unit.failure_count += 1
+            owner.unit.no_progress_count += 1
             delay = min(60 * 2 ** min(owner.unit.failure_count - 1, 9), 21600)
             owner.unit.retry_at = owner.database_now + datetime.timedelta(seconds=delay)
             await session.flush()
+            unit_id = owner.unit.id
+            no_progress_count = owner.unit.no_progress_count
+        if no_progress_count >= 3:
+            logger.warning(
+                "Historical consolidation attempts made no completed coverage progress",
+                extra={
+                    "agent_id": principal.unit.agent_id,
+                    "workspace_id": principal.unit.workspace_id,
+                    "consolidation_unit_id": unit_id,
+                    "consolidation_attempt_id": principal.attempt_id,
+                    "no_progress_count": no_progress_count,
+                },
+            )

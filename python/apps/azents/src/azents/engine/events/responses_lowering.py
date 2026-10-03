@@ -27,6 +27,7 @@ from azents.engine.events.file_parts import (
     ModelFileResolver,
     lower_file_output_part,
 )
+from azents.engine.events.model_messages import ModelTranscriptMessage
 from azents.engine.events.model_support_contract import (
     ModelSupportContext,
     decode_model_support_options,
@@ -61,7 +62,6 @@ from azents.engine.events.types import (
     ClientToolCallPayload,
     ClientToolResultPayload,
     CompactionSummaryPayload,
-    Event,
     ExternalChannelMessagePayload,
     FileOutputPart,
     InputContentPart,
@@ -305,7 +305,7 @@ class ResponsesRequestLowerer:
 
     def lower(
         self,
-        transcript: Sequence[Event],
+        transcript: Sequence[ModelTranscriptMessage],
         *,
         model: str,
         system_prompt: str | None = None,
@@ -538,7 +538,7 @@ class ResponsesRequestLowerer:
 
     def _compatible_native_items(
         self,
-        event: Event,
+        event: ModelTranscriptMessage,
         *,
         retain_response_item_ids: bool,
     ) -> list[dict[str, object]] | None:
@@ -642,7 +642,7 @@ class ResponsesRequestLowerer:
 
     def _lower_event(
         self,
-        event: Event,
+        event: ModelTranscriptMessage,
         *,
         replayable_plaintext_custom_call_ids: set[str],
     ) -> dict[str, object] | None:
@@ -851,7 +851,7 @@ def _historical_custom_tool_result_projection(
 
 
 def _replays_plaintext_custom_call(
-    event: Event,
+    event: ModelTranscriptMessage,
     native_items: Sequence[dict[str, object]],
 ) -> bool:
     """Return whether compatible native replay retained a custom call item."""
@@ -862,7 +862,9 @@ def _replays_plaintext_custom_call(
     )
 
 
-def _lowers_plaintext_custom_call(event: Event, item: dict[str, object]) -> bool:
+def _lowers_plaintext_custom_call(
+    event: ModelTranscriptMessage, item: dict[str, object]
+) -> bool:
     """Return whether semantic lowering emitted a custom call item."""
     return (
         isinstance(event.payload, ClientToolCallPayload)

@@ -16,6 +16,9 @@ from azents.repos.historical_memory_consolidation.ownership import (
 from azents.repos.historical_memory_consolidation.sources import (
     ConsolidationSourceRepository,
 )
+from azents.repos.historical_memory_consolidation.work import (
+    ConsolidationWorkRepository,
+)
 from azents.services.file_storage import GrepResult, TextReadResult
 from azents.services.historical_memory.draft_vfs import ConsolidationVfsObservations
 from azents.services.vfs_read import (
@@ -50,6 +53,7 @@ class ConsolidationSourceVfsBackend:
 
     repository: ConsolidationSourceRepository
     observations: ConsolidationVfsObservations
+    work_repository: ConsolidationWorkRepository
 
     @property
     def mount(self) -> str:
@@ -127,6 +131,41 @@ class ConsolidationSourceVfsBackend:
             raise ValueError("Scoped summary reads require positive bounds and UTF-8.")
         try:
             path = location.path.removeprefix("/")
+            if path.startswith("inventory/work/") and path.endswith("/README.md"):
+                parts = path.split("/")
+                if len(parts) == 3:
+                    after_sequence = None
+                elif len(parts) == 4 and parts[2].isascii() and parts[2].isdigit():
+                    after_sequence = int(parts[2])
+                else:
+                    raise VfsReadError("not_found", "VFS location is unavailable.")
+                work = await self.work_repository.page(
+                    context, after_sequence=after_sequence, limit=10
+                )
+                self.observations.record_source_epoch(work.observation_epoch)
+                lines = ["# Pending source changes", ""]
+                for entry in work.entries:
+                    lines.append(
+                        f"- Work {entry.work_id}; {entry.kind.value}; "
+                        f"{self.source_uri(entry.version.source_session_id)} "
+                        f"— {(entry.title or 'Untitled source')[:120]}"
+                    )
+                if work.next_after_sequence is not None:
+                    lines.extend(
+                        [
+                            "",
+                            "Next page: azents://memory/inventory/work/"
+                            f"{work.next_after_sequence}/README.md",
+                        ]
+                    )
+                full = "\n".join(lines) + "\n"
+                text = (
+                    full[offset : offset + limit]
+                    .encode("utf-8")[:11000]
+                    .decode("utf-8", errors="ignore")
+                )
+                end = offset + len(text)
+                return TextReadResult(text, offset, end, end < len(full))
             if path == "inventory/README.md" or (
                 path.startswith("inventory/") and path.endswith("/README.md")
             ):
