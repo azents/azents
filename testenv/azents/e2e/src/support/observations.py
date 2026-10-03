@@ -250,9 +250,21 @@ class ChatActionObservation(ExtensionObservation):
 class RuntimeHookObservation(ExtensionObservation):
     """Structured hook log evidence; unrelated log fields stay extensions."""
 
+    runtime_hook_qa_lifecycle: StrictStr | None
     message: StrictStr | None = None
     tool_name: StrictStr | None = None
     toolkit_slug: StrictStr | None = None
+
+
+def decode_runtime_hook(value: object) -> RuntimeHookObservation | None:
+    """Select structured hook evidence; unrelated or incomplete logs cannot match."""
+    if not isinstance(value, dict):
+        return None
+    if value.get("message") != "Runtime hook QA lifecycle event":
+        return None
+    if "runtime_hook_qa_lifecycle" not in value:
+        return None
+    return RuntimeHookObservation.model_validate(value)
 
 
 class HistoricalSampleObservation(ExtensionObservation):

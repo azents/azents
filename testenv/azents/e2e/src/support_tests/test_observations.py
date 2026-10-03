@@ -15,6 +15,7 @@ from support.observations import (
     ChatActionObservation,
     InputMessageObservation,
     RunMarkerObservation,
+    RuntimeHookObservation,
     SeleniumStatusObservation,
     SystemErrorObservation,
     ToolCallObservation,
@@ -24,6 +25,7 @@ from support.observations import (
     decode_chat_write,
     decode_historical_memory,
     decode_history_page,
+    decode_runtime_hook,
     decode_runtime_providers,
     decode_session,
     decode_subagent_tree,
@@ -590,3 +592,66 @@ def test_idle_polling_reads_authoritative_generated_live_state(
         session_id="session",
         timeout=1,
     )
+
+
+def test_runtime_hook_decoder_declares_structured_lifecycle() -> None:
+    observation = decode_runtime_hook(
+        {
+            "message": "Runtime hook QA lifecycle event",
+            "runtime_hook_qa_lifecycle": "on_before_tool_call",
+            "tool_name": "dupmcp__instance",
+            "toolkit_slug": "dupmcp",
+            "future_log_field": {"retained": True},
+        }
+    )
+    assert observation is not None
+    assert observation.runtime_hook_qa_lifecycle == "on_before_tool_call"
+    assert observation.tool_name == "dupmcp__instance"
+    assert observation.toolkit_slug == "dupmcp"
+    assert observation.model_extra == {"future_log_field": {"retained": True}}
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        [],
+        None,
+        {},
+        {"message": "Unrelated event", "runtime_hook_qa_lifecycle": 1},
+        {"message": "Runtime hook QA lifecycle event"},
+        {
+            "message": "Runtime hook QA lifecycle event: on_before_tool_call",
+            "runtime_hook_qa_lifecycle": "on_before_tool_call",
+        },
+    ],
+)
+def test_runtime_hook_decoder_rejects_unrelated_or_incomplete_evidence(
+    value: object,
+) -> None:
+    assert decode_runtime_hook(value) is None
+
+
+@pytest.mark.parametrize("invalid", [1, True, [], {}])
+def test_runtime_hook_decoder_rejects_invalid_lifecycle_type(invalid: object) -> None:
+    with pytest.raises(ValidationError):
+        decode_runtime_hook(
+            {
+                "message": "Runtime hook QA lifecycle event",
+                "runtime_hook_qa_lifecycle": invalid,
+            }
+        )
+
+
+def test_runtime_hook_observation_requires_nullable_lifecycle() -> None:
+    with pytest.raises(ValidationError):
+        RuntimeHookObservation.model_validate(
+            {"message": "Runtime hook QA lifecycle event"}
+        )
+    explicit_null = decode_runtime_hook(
+        {
+            "message": "Runtime hook QA lifecycle event",
+            "runtime_hook_qa_lifecycle": None,
+        }
+    )
+    assert explicit_null is not None
+    assert explicit_null.runtime_hook_qa_lifecycle is None

@@ -116,8 +116,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/approval-requests/{access_request_id}
-last_verified_at: 2026-09-30
-spec_version: 81
+last_verified_at: 2026-10-03
+spec_version: 82
 ---
 
 # External Channel
@@ -368,10 +368,12 @@ effects are not replayed.
   Resume checkpoint. Durable provider-event idempotency and the current
   lease/configuration/App-claim fence protect canonical admission.
 - The same fenced Discord Gateway connection owner reconciles ephemeral typing targets
-  from connected active Bindings and schema-valid ready active Channel Work. Hidden
-  and visible ready Work both request typing on the Resource's exact parent or
-  delivery-thread channel; awaiting Work does not. One public-SDK task per Bot/channel
-  renews typing while any contributing Work remains ready. `finish`, `ignore`, binding
+  from connected active Bindings and schema-valid ready active Channel Work whose bound
+  Session is running with a running AgentRun and no stop request. Hidden and visible
+  ready Work both request typing on the Resource's exact parent or delivery-thread
+  channel while execution is running; awaiting Work does not. One public-SDK task per
+  Bot/channel renews typing while any contributing Work has running execution.
+  Run termination, Session idle state, `finish`, `ignore`, binding
   termination, lease loss, disconnect, Client shutdown, and process shutdown remove
   or cancel targets.
   Gateway ready/resume and worker restart rebuild targets from PostgreSQL. Typing
@@ -676,6 +678,9 @@ already admitted for immediate one-attempt delivery. No cross-I/O lock, provider
 history, queue, retry, or fallback target is part of this boundary.
 
 ## Changelog
+
+- **2026-10-03** (spec_version 82) — Required running execution for Discord typing,
+  separating retained Channel Work from actual Run activity.
 
 - **2026-09-30** (spec_version 81) — Aligned provider ingress with shared 128 MiB
   eligibility and direct Runner GET/PUT, retaining trusted staging and outbound policy.

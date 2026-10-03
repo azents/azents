@@ -17,7 +17,9 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from azents.core.enums import (
     AgentLifecycleStatus,
+    AgentRunStatus,
     AgentSessionProductMode,
+    AgentSessionRunState,
     AgentSessionStatus,
     ExternalChannelAccessGrantScope,
     ExternalChannelAppMode,
@@ -45,6 +47,7 @@ from azents.core.external_model_settings import (
 )
 from azents.core.workspace import WorkspaceCreate
 from azents.rdb.models.agent import RDBAgent
+from azents.rdb.models.agent_run import RDBAgentRun
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.external_account_link import RDBExternalAccountLink
@@ -299,6 +302,20 @@ async def _create_discord_gateway_typing_fixture(
             title=None,
         ),
     )
+    await AgentSessionRepository().mark_running(session, agent_session.id)
+    session.add(
+        RDBAgentRun(
+            session_id=agent_session.id,
+            scheduled_task_cycle_id=None,
+            run_index=1,
+            parent_agent_run_id=None,
+            requested_model_target_label=None,
+            requested_reasoning_effort=None,
+            requested_enabled_execution_options=[],
+            status=AgentRunStatus.RUNNING,
+        )
+    )
+    await session.flush()
     claim = await repository.claim_discord_gateway_lease(
         session,
         connection_id=connection.id,
@@ -643,7 +660,7 @@ async def test_discord_gateway_typing_targets_project_active_current_work(
 async def test_discord_gateway_typing_targets_exclude_stopping_session(
     rdb_session: AsyncSession,
 ) -> None:
-    """A stop request immediately removes otherwise active Work from projection."""
+    """Stop intent and subsequent idle cleanup both exclude retained active Work."""
     fixture = await _create_discord_gateway_typing_fixture(rdb_session)
     await _create_discord_gateway_typing_binding(
         rdb_session,
@@ -673,6 +690,125 @@ async def test_discord_gateway_typing_targets_exclude_stopping_session(
     )
 
     assert targets == ()
+
+    await AgentSessionRepository().mark_idle(rdb_session, fixture.agent_session_id)
+    assert agent_session.stop_requested_at is None
+    after_cleanup = await fixture.repository.list_owned_discord_typing_targets(
+        rdb_session,
+        connection_id=fixture.connection_id,
+        lease_owner=fixture.lease_owner,
+        lease_generation=fixture.lease_generation,
+        now=_at(4),
+    )
+    assert after_cleanup == ()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "run_status",
+    [
+        AgentRunStatus.PENDING,
+        AgentRunStatus.COMPLETED,
+        AgentRunStatus.STOPPED,
+        AgentRunStatus.FAILED,
+        AgentRunStatus.INTERRUPTED,
+        AgentRunStatus.CANCELLED,
+    ],
+)
+async def test_discord_gateway_typing_stops_when_run_is_not_running(
+    rdb_session: AsyncSession,
+    run_status: AgentRunStatus,
+) -> None:
+    """Retained Work cannot renew typing after a Run ends or before activation."""
+    fixture = await _create_discord_gateway_typing_fixture(rdb_session)
+    await _create_discord_gateway_typing_binding(
+        rdb_session,
+        fixture,
+        key="typing-run-transition",
+        resource_type=ExternalChannelResourceType.PARENT_CHANNEL,
+        labels={"guild_id": "100", "parent_channel_id": "200"},
+        work_cycle_id="work-run-transition",
+    )
+    running = await fixture.repository.list_owned_discord_typing_targets(
+        rdb_session,
+        connection_id=fixture.connection_id,
+        lease_owner=fixture.lease_owner,
+        lease_generation=fixture.lease_generation,
+        now=_at(2),
+    )
+    assert running is not None
+    assert len(running) == 1
+    run = await rdb_session.scalar(
+        sa.select(RDBAgentRun).where(
+            RDBAgentRun.session_id == fixture.agent_session_id,
+        )
+    )
+    assert run is not None
+    run.status = run_status
+    await rdb_session.flush()
+
+    stopped = await fixture.repository.list_owned_discord_typing_targets(
+        rdb_session,
+        connection_id=fixture.connection_id,
+        lease_owner=fixture.lease_owner,
+        lease_generation=fixture.lease_generation,
+        now=_at(3),
+    )
+    assert stopped == ()
+
+    run.status = AgentRunStatus.RUNNING
+    await rdb_session.flush()
+    restored = await fixture.repository.list_owned_discord_typing_targets(
+        rdb_session,
+        connection_id=fixture.connection_id,
+        lease_owner=fixture.lease_owner,
+        lease_generation=fixture.lease_generation,
+        now=_at(4),
+    )
+    assert restored == running
+
+
+@pytest.mark.asyncio
+async def test_discord_gateway_typing_excludes_idle_session_and_absent_run(
+    rdb_session: AsyncSession,
+) -> None:
+    """Work needs both running Session ownership and an actual running Run."""
+    fixture = await _create_discord_gateway_typing_fixture(rdb_session)
+    await _create_discord_gateway_typing_binding(
+        rdb_session,
+        fixture,
+        key="typing-idle-session",
+        resource_type=ExternalChannelResourceType.PARENT_CHANNEL,
+        labels={"guild_id": "100", "parent_channel_id": "200"},
+        work_cycle_id="work-idle-session",
+    )
+    agent_session = await rdb_session.get(RDBAgentSession, fixture.agent_session_id)
+    assert agent_session is not None
+    await AgentSessionRepository().mark_idle(rdb_session, fixture.agent_session_id)
+    idle = await fixture.repository.list_owned_discord_typing_targets(
+        rdb_session,
+        connection_id=fixture.connection_id,
+        lease_owner=fixture.lease_owner,
+        lease_generation=fixture.lease_generation,
+        now=_at(2),
+    )
+    assert idle == ()
+
+    agent_session.run_state = AgentSessionRunState.RUNNING
+    await rdb_session.execute(
+        sa.delete(RDBAgentRun).where(
+            RDBAgentRun.session_id == fixture.agent_session_id,
+        )
+    )
+    await rdb_session.flush()
+    absent = await fixture.repository.list_owned_discord_typing_targets(
+        rdb_session,
+        connection_id=fixture.connection_id,
+        lease_owner=fixture.lease_owner,
+        lease_generation=fixture.lease_generation,
+        now=_at(3),
+    )
+    assert absent == ()
 
 
 @pytest.mark.asyncio

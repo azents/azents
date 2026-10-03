@@ -1264,6 +1264,13 @@ def _selector_admission_id(slack_provider_fake_url: str) -> str:
     return ""
 
 
+def _decode_transient_view(payload: object) -> _TransientView | None:
+    """Decode the fake's exact absence sentinel before signed handoff validation."""
+    if payload is None or (isinstance(payload, dict) and not payload):
+        return None
+    return _TransientView.model_validate(payload)
+
+
 def _latest_selector_view(
     slack_provider_fake_url: str,
 ) -> _TransientView | None:
@@ -1275,7 +1282,7 @@ def _latest_selector_view(
     )
     response.raise_for_status()
     payload = response.json()
-    return None if payload is None else _TransientView.model_validate(payload)
+    return _decode_transient_view(payload)
 
 
 def _latest_setup_view(
@@ -1289,7 +1296,7 @@ def _latest_setup_view(
     )
     response.raise_for_status()
     payload = response.json()
-    return None if payload is None else _TransientView.model_validate(payload)
+    return _decode_transient_view(payload)
 
 
 def _open_slack_setup_modal(

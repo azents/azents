@@ -141,3 +141,39 @@ def test_programming_failure_is_not_mapped() -> None:
     with pytest.raises(TypeError) as caught:
         map_model_provider_error(exception, call_context=_context())
     assert caught.value is exception
+
+
+@pytest.mark.parametrize("sdk", ["openai", "anthropic", "model"])
+@pytest.mark.parametrize(
+    ("body", "expected"),
+    [
+        (
+            "Argument not supported: search_context_size",
+            "Argument not supported: search_context_size",
+        ),
+        ("Rejected api_key=sk-supersecret123", "Rejected api_key=[REDACTED]"),
+        ('{"detail":"Unsupported option"}', "Unsupported option"),
+        ("<html>" + "private upstream debug " * 50 + "</html>", None),
+        ("x" * 8193, None),
+        ('["opaque response body"]', None),
+    ],
+)
+def test_scalar_sdk_http_error_body_preserves_only_safe_text(
+    sdk: str, body: str, expected: str | None
+) -> None:
+    response = httpx2.Response(
+        400, request=httpx2.Request("POST", "https://synthetic.invalid/responses")
+    )
+    serialized = f"Error code: 400 - {body}"
+    error = (
+        openai.BadRequestError(serialized, response=response, body=body)
+        if sdk == "openai"
+        else anthropic.BadRequestError(serialized, response=response, body=body)
+        if sdk == "anthropic"
+        else ModelHTTPError(400, "publisher/exact/model", body=body)
+    )
+    failure = map_model_provider_error(error, call_context=_context())
+    assert failure.category is ModelProviderFailureCategory.INVALID_REQUEST
+    assert failure.status_code == 400
+    assert failure.provider_message == expected
+    assert "sk-supersecret123" not in str(failure)

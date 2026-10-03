@@ -53,8 +53,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/session_lifecycle_finalizer/**
   - typescript/apps/azents-web/src/features/external-channel-management/**
   - typescript/apps/azents-web/src/features/session-channels/**
-last_verified_at: 2026-10-01
-spec_version: 45
+last_verified_at: 2026-10-03
+spec_version: 46
 ---
 
 # External Channel Lifecycle
@@ -238,9 +238,12 @@ does not run a second Gateway reconnect or Resume loop. A one-minute continuous
 unready deadline preserves brief SDK-owned Resume but cancels and discards a client
 that remains unavailable, records a fenced degraded gap, releases its lease, and lets
 the connection be reclaimed with a fresh client. The current Gateway owner also
-reconciles process-local typing tasks from ready active Work under the same lease and
-generation fences. Awaiting Work is excluded. A restart or Resume restores still-ready
-targets; Work finished or awaiting during the gap is absent. Typing provider failure
+reconciles process-local typing tasks from ready active Work whose bound Session is
+running with a running AgentRun and no stop request, under the same lease and generation
+fences. Awaiting Work is excluded. A restart or Resume restores only still-running
+targets; Work finished, awaiting, or without running execution during the gap is absent.
+Run termination or Session idle state removes typing without finishing retained Work.
+Typing provider failure
 does not change connection health.
 
 Slack Socket Mode keeps one SDK lifecycle per current fenced lease. SDK endpoint
@@ -354,6 +357,9 @@ started cycles, removes residual Task/trigger/cycle state, and verifies absence
 before finalization.
 
 ## Changelog
+
+- **2026-10-03** (spec_version 46) — Restricted typing restoration and renewal to
+  Work with running execution, including after stop-request cleanup.
 
 - **2026-09-12** (spec_version 45) — Added Session purge ordering for private
   external model drafts and clarified Workspace/User link-proof cleanup and retained

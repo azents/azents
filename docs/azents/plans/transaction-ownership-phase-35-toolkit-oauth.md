@@ -249,7 +249,8 @@ phase before this phase PR exists.
   focus and overlapping 45 actual-service M3 cases passed, bounded 16-path/
   11-schema OpenAPI equality and final frozen-state checks passed. Only execution
   metadata changes after review; all 13 Python and two Spec hashes stay reviewed.
-  Commit/stacked PR submission and exact-head CI remain pending.
+  Submitted as PR #2073 against main at exact head
+  `8c949fbffac8ac24020d760725f40aaafcacf4a1`.
 - The original PR creation over #2067 failed because that base branch had been
   merged/deleted. All four parent PRs are now externally merged; no Agent merge.
   Fresh main contains a52ef0254 and only three dependency/hook paths changed
@@ -257,8 +258,14 @@ phase before this phase PR exists.
   Updated-environment root QA passed 328 focused and 8,409 full backend cases
   with the same three existing Redis-only skips; all nine gates passed.
   All 13 source/test and two Spec hashes remain independently reviewed.
-  Submission now targets main; current and parent exact-head CI remain separate
-  unfinished evidence rather than inferred from merger.
+  Latest actual CI37079167588 attempt1 succeeded: native37success/two path skips
+  includes four external CodeQL checks; actual CI jobs33success/two skips.
+  Required E2E4shards/web1/aggregate passed; OPEN/MERGEABLE/CLEAN. All four parent
+  exact-head latest CI runs also succeeded. Superseded cancelled placeholder jobs
+  are separately retained, not treated as current failures or silently discarded.
+  Current and parent CI are verified, not inferred from merger. PR #2073 was
+  subsequently externally merged on 2026-10-03 KST at merge commit `c90fbbec9`;
+  the successor Phase36 therefore submits against main. No Agent merge.
   Design delta None; exception ledger None unless actual evidence
   requires an authority return. No live infrastructure, provider/credential
   mutation, Agent merge, implemented marker or issue #1718 closure.

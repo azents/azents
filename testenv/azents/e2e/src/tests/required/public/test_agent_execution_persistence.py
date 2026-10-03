@@ -65,7 +65,6 @@ from support.observations import (
     FailedRunObservation,
     InputMessageObservation,
     RunMarkerObservation,
-    RuntimeHookObservation,
     SystemErrorObservation,
     ToolCallObservation,
     ToolkitSourceObservation,
@@ -74,6 +73,7 @@ from support.observations import (
     UsageObservation,
     decode_chat_write,
     decode_history_page,
+    decode_runtime_hook,
     decode_session,
 )
 from support.runtime_profiles import (
@@ -1063,12 +1063,11 @@ def _wait_for_runtime_hook_source(
                 value = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            if not isinstance(value, dict):
+            observation = decode_runtime_hook(value)
+            if observation is None:
                 continue
-            observation = RuntimeHookObservation.model_validate(value)
             if (
-                observation.message
-                == "Runtime hook QA lifecycle event: on_before_tool_call"
+                observation.runtime_hook_qa_lifecycle == "on_before_tool_call"
                 and observation.tool_name == tool_name
                 and observation.toolkit_slug == toolkit_namespace
             ):

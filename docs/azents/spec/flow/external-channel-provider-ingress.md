@@ -98,8 +98,8 @@ code_paths:
 api_routes:
   - /external-channel/v1/slack/events
   - /external-channel/v1/discord/interactions/{selector}
-last_verified_at: 2026-10-02
-spec_version: 64
+last_verified_at: 2026-10-03
+spec_version: 65
 ---
 
 # External Channel Provider Ingress
@@ -351,9 +351,11 @@ session state.
 
 The same current Gateway owner runs one ephemeral typing registry on its existing
 `discord.Client`. A complete lease/App-claim/configuration fence projects exact
-delivery channels for connected ready active conversational Work; awaiting Work is
-excluded. Ready and Resume rebuild the registry from PostgreSQL; disconnect, lease
-loss, Client close, and shutdown cancel its tasks. Public SDK typing failures are
+delivery channels for connected ready active conversational Work whose bound Session
+is running with a running AgentRun and no stop request; awaiting Work and retained Work
+without running execution are excluded. Ready and Resume rebuild the registry from
+PostgreSQL; disconnect, lease loss, Client close, and shutdown cancel its tasks.
+Public SDK typing failures are
 isolated from event admission and durable connection health.
 
 Credential failures and Gateway outcomes that cannot reconnect terminalize the current
@@ -429,7 +431,8 @@ durable queue content.
    then records the Binding/Session on the same owner without moving its items. Slack
    derives initial Tracker visibility from that queued item's provider-native
    invocation flag. Discord always creates hidden conversational Work and relies on
-   the Gateway typing registry for automatic activity, whether the trigger was a
+   the Gateway typing registry for automatic activity during running execution,
+   whether the trigger was a
    mention or an ordinary all-messages item. A stopped Session, disconnected Binding,
    stale setting, or terminal provider result cannot become ready.
 6. A ready owner's first claim contains exactly one due item; later claims contain at
@@ -648,6 +651,9 @@ shared gateway unready. General Agent Workers own Session execution and do not o
 persistent provider connections.
 
 ## Changelog
+
+- **2026-10-03** (spec_version 65) — Added Session and AgentRun execution authority
+  to the Gateway typing target projection.
 
 - **2026-10-02** (spec_version 64) — Completed bounded ingress observation and
   owner-release read ownership before metrics, not-found responses, and Job Runtime

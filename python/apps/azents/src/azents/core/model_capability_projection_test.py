@@ -67,6 +67,43 @@ def _project(
     )
 
 
+@pytest.mark.parametrize("value", [False, None, True])
+def test_chatgpt_explicit_web_evidence_is_not_replaced_by_route_policy(
+    value: bool | None,
+) -> None:
+    evidence = ProviderCapabilityEvidence(
+        web_search=CatalogFact(state="null" if value is None else "value", value=value)
+    )
+    caps = _project(LLMProvider.CHATGPT_OAUTH, None, evidence, LLMModelDeveloper.OPENAI)
+    assert caps.semantic_contract is not None
+    web = next(
+        item.support
+        for item in caps.semantic_contract.built_in_tools
+        if item.tool == "web_search"
+    )
+    assert web.state == (
+        "unknown" if value is None else "supported" if value else "unsupported"
+    )
+    assert web.origin == (None if value is None else "explicit")
+
+
+@pytest.mark.parametrize(
+    "provider", [LLMProvider.OPENAI, LLMProvider.XAI, LLMProvider.OPENROUTER]
+)
+def test_chatgpt_web_route_policy_does_not_enable_other_provider_unknowns(
+    provider: LLMProvider,
+) -> None:
+    caps = _project(provider, None, None, LLMModelDeveloper.OPENAI)
+    assert "web_search" not in caps.built_in_tools.supported
+    assert caps.semantic_contract is not None
+    web = next(
+        item.support
+        for item in caps.semantic_contract.built_in_tools
+        if item.tool == "web_search"
+    )
+    assert web.state == "unknown"
+
+
 def test_native_source_efforts_do_not_consult_pydantic_profiles(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
