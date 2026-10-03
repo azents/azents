@@ -156,6 +156,7 @@ class ImageGenerationCatalogOperationsRepository:
                 source_key=_IMAGE_GENERATION_SOURCE_KEY,
                 started_at=started_at,
                 trigger=trigger,
+                required_projection_version=None,
             )
             return CatalogAttemptStart(catalog=catalog, claim=claim)
 

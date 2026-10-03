@@ -43,12 +43,22 @@ class CatalogSyncAttemptState:
 
 
 @dataclasses.dataclass(frozen=True)
+class CatalogProjectionVersion:
+    """Stored or required procedural versions for conversation projections."""
+
+    schema_version: str | None
+    resolver_revision: str | None
+
+
+@dataclasses.dataclass(frozen=True)
 class IntegrationCatalogSyncPolicyInput:
     """Inputs required to decide whether a synchronization may start."""
 
     trigger: IntegrationCatalogSyncTrigger
     now: datetime.datetime
     current_snapshot_created_at: datetime.datetime | None
+    current_projection_version: CatalogProjectionVersion | None
+    required_projection_version: CatalogProjectionVersion | None
     latest_catalog_attempt: CatalogSyncAttemptState | None
     latest_workspace_attempt: CatalogSyncAttemptState | None
 
@@ -72,6 +82,10 @@ def evaluate_integration_catalog_sync_policy(
     stale = _snapshot_stale(
         current_snapshot_created_at=policy_input.current_snapshot_created_at,
         now=policy_input.now,
+    ) or (
+        policy_input.required_projection_version is not None
+        and policy_input.current_projection_version
+        != policy_input.required_projection_version
     )
     trigger = policy_input.trigger
     latest = policy_input.latest_catalog_attempt

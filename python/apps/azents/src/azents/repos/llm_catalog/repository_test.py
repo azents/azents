@@ -22,6 +22,7 @@ from azents.core.enums import (
 )
 from azents.core.llm_catalog import ModelCapabilities
 from azents.core.llm_catalog_sync import (
+    CatalogProjectionVersion,
     IntegrationCatalogSyncDenialReason,
     IntegrationCatalogSyncPolicyDecision,
     IntegrationCatalogSyncTrigger,
@@ -386,6 +387,7 @@ async def test_integration_attempt_claim_enforces_running_and_cooldown(
         source_key=CATALOG_SOURCE_KEY,
         started_at=now,
         trigger=IntegrationCatalogSyncTrigger.CREATE,
+        required_projection_version=None,
     )
     assert isinstance(first, IntegrationCatalogSyncClaim)
 
@@ -396,6 +398,7 @@ async def test_integration_attempt_claim_enforces_running_and_cooldown(
         source_key=CATALOG_SOURCE_KEY,
         started_at=now + datetime.timedelta(seconds=1),
         trigger=IntegrationCatalogSyncTrigger.CONFIG_UPDATE,
+        required_projection_version=None,
     )
     assert isinstance(duplicate, IntegrationCatalogSyncPolicyDecision)
     assert duplicate.denial_reason == IntegrationCatalogSyncDenialReason.ALREADY_RUNNING
@@ -419,6 +422,7 @@ async def test_integration_attempt_claim_enforces_running_and_cooldown(
         source_key=CATALOG_SOURCE_KEY,
         started_at=now + datetime.timedelta(seconds=10),
         trigger=IntegrationCatalogSyncTrigger.EXPLICIT,
+        required_projection_version=None,
     )
     assert isinstance(throttled, IntegrationCatalogSyncPolicyDecision)
     assert throttled.denial_reason == IntegrationCatalogSyncDenialReason.THROTTLED
@@ -430,6 +434,7 @@ async def test_integration_attempt_claim_enforces_running_and_cooldown(
         source_key=CATALOG_SOURCE_KEY,
         started_at=now + datetime.timedelta(seconds=31),
         trigger=IntegrationCatalogSyncTrigger.EXPLICIT,
+        required_projection_version=None,
     )
     assert isinstance(after_cooldown, IntegrationCatalogSyncClaim)
     current_attempt_id = await repository.lock_catalog_for_attempt_completion(
@@ -486,6 +491,86 @@ async def test_catalog_identity_is_purpose_aware(
     ) == image
 
 
+@pytest.mark.parametrize(
+    ("schema", "resolver", "stale"),
+    [("2", "4", True), ("2", "5", False)],
+)
+async def test_version_stale_claim_reads_real_fresh_snapshot_without_replacing_it(
+    rdb_session: AsyncSession,
+    schema: str | None,
+    resolver: str | None,
+    stale: bool,
+) -> None:
+    """A stored version mismatch is stale independently of actual creation time."""
+    fixture = await _create_openai_integration(
+        rdb_session, handle="projection-version-claim"
+    )
+    repository = LLMCatalogRepository()
+    catalog = await repository.ensure_integration_catalog(
+        rdb_session,
+        integration_id=fixture.integration_id,
+        provider=LLMProvider.OPENAI,
+        purpose=LLMCatalogPurpose.CONVERSATION,
+    )
+    stored = RDBLLMCatalogSnapshot(
+        id="projection-version-snapshot",
+        catalog_id=catalog.id,
+        entry_count=0,
+        visible_count=0,
+        hidden_count=0,
+        projection_schema_version=schema,
+        runtime_profile_resolver_revision=resolver,
+    )
+    rdb_session.add(stored)
+    current = await rdb_session.get(RDBLLMCatalog, catalog.id)
+    assert current is not None
+    current.current_snapshot_id = stored.id
+    await rdb_session.flush()
+    captured = await repository.get_by_integration(
+        rdb_session,
+        integration_id=fixture.integration_id,
+        workspace_id=fixture.workspace_id,
+        purpose=LLMCatalogPurpose.CONVERSATION,
+    )
+    assert captured is not None
+    assert await repository.get_current_snapshot_projection_version(
+        rdb_session, catalog=captured
+    ) == CatalogProjectionVersion(schema, resolver)
+
+    decision = await repository.begin_integration_attempt(
+        rdb_session,
+        catalog_id=catalog.id,
+        workspace_id=fixture.workspace_id,
+        source_key=CATALOG_SOURCE_KEY,
+        started_at=stored.created_at,
+        trigger=IntegrationCatalogSyncTrigger.STALE_REFRESH,
+        required_projection_version=CatalogProjectionVersion("2", "5"),
+    )
+    if stale:
+        assert isinstance(decision, IntegrationCatalogSyncClaim)
+        assert decision.expected_current_snapshot_id == stored.id
+        duplicate = await repository.begin_integration_attempt(
+            rdb_session,
+            catalog_id=catalog.id,
+            workspace_id=fixture.workspace_id,
+            source_key=CATALOG_SOURCE_KEY,
+            started_at=stored.created_at + datetime.timedelta(seconds=1),
+            trigger=IntegrationCatalogSyncTrigger.STALE_REFRESH,
+            required_projection_version=CatalogProjectionVersion("2", "5"),
+        )
+        assert isinstance(duplicate, IntegrationCatalogSyncPolicyDecision)
+        assert (
+            duplicate.denial_reason
+            is IntegrationCatalogSyncDenialReason.ALREADY_RUNNING
+        )
+    else:
+        assert isinstance(decision, IntegrationCatalogSyncPolicyDecision)
+        assert decision.denial_reason is IntegrationCatalogSyncDenialReason.NOT_STALE
+    assert current.current_snapshot_id == stored.id
+    assert stored.projection_schema_version == schema
+    assert stored.runtime_profile_resolver_revision == resolver
+
+
 async def test_image_catalog_fences_generation_and_preserves_last_good(
     rdb_session: AsyncSession,
 ) -> None:
@@ -513,6 +598,7 @@ async def test_image_catalog_fences_generation_and_preserves_last_good(
         source_key="openai_models_list:image_generation",
         started_at=started_at,
         trigger=IntegrationCatalogSyncTrigger.CREATE,
+        required_projection_version=None,
     )
     assert isinstance(first_attempt, IntegrationCatalogSyncClaim)
     first_publication = await repository.replace_current_image_generation_snapshot(
@@ -587,6 +673,7 @@ async def test_image_catalog_fences_generation_and_preserves_last_good(
         source_key="openai_models_list:image_generation",
         started_at=started_at + datetime.timedelta(seconds=31),
         trigger=IntegrationCatalogSyncTrigger.CONFIG_UPDATE,
+        required_projection_version=None,
     )
     assert isinstance(second_attempt, IntegrationCatalogSyncClaim)
     second_update = await integration_repository.update_by_id(
