@@ -40,12 +40,13 @@ from openai.types.responses.response_usage import (
     InputTokensDetails,
     OutputTokensDetails,
 )
-from pydantic import ValidationError
+from pydantic import JsonValue, TypeAdapter, ValidationError
 from pydantic_ai.messages import ModelResponse, TextPart
 from websockets.datastructures import Headers
 from websockets.exceptions import InvalidStatus
 from websockets.http11 import Response as WebSocketHTTPResponse
 
+from azents.core.builtin_tools import builtin_tool_configurable
 from azents.core.chatgpt_oauth import CHATGPT_OAUTH_BACKEND_BASE_URL
 from azents.core.enums import (
     AgentRunStatus,
@@ -112,6 +113,11 @@ from azents.engine.run.provider_failure import (
     UnclassifiedModelProviderError,
 )
 from azents.engine.run.types import BuiltinToolSpec
+from azents.services.model_listing.data import NormalizedModelCandidate
+from azents.services.model_listing.providers import _candidate_from_chatgpt_model
+from azents.services.model_metadata_projection import (
+    project_integration_replacement_entries,
+)
 from azents.testing.model_metadata import make_test_model_pricing
 from azents.testing.model_stream import make_test_model_stream_watchdog
 
@@ -2297,6 +2303,95 @@ async def test_official_sdk_wire_request_preserves_presence_and_stop() -> None:
     assert "store" not in captured_body
     assert "tools" not in captured_body
     assert "previous_response_id" not in captured_body
+
+
+@pytest.mark.parametrize("model", ["gpt-5.5", "gpt-6-astra", "account-visible"])
+async def test_projected_chatgpt_search_reaches_official_sdk_wire(model: str) -> None:
+    """A final saved account catalog permits search without source-price facts."""
+    candidate = _candidate_from_chatgpt_model(
+        {"slug": model, "visibility": "list", "supported_in_api": True},
+        fetched_at=datetime.datetime(2026, 10, 3, tzinfo=datetime.UTC),
+    )
+    assert candidate is not None
+    candidate = NormalizedModelCandidate.model_validate_json(
+        candidate.model_dump_json()
+    )
+    [entry] = project_integration_replacement_entries(
+        integration_id="integration-chatgpt",
+        provider=LLMProvider.CHATGPT_OAUTH,
+        candidates=[candidate],
+        source=None,
+        provider_listing_source="chatgpt:codex_models",
+    )
+    capabilities = ModelCapabilities.model_validate_json(
+        json.dumps(entry.normalized_capabilities)
+    )
+    saved = capabilities.model_dump_json()
+    assert builtin_tool_configurable(capabilities, tool="web_search")
+    request = OpenAIResponsesLowerer(
+        provider="chatgpt_oauth",
+        provider_id=LLMProvider.CHATGPT_OAUTH,
+        model=model,
+        supported_execution_options=[],
+        enabled_execution_options=[],
+        model_capabilities=capabilities,
+        hosted_tools=[BuiltinToolSpec(name="web_search", config={})],
+    ).lower([], model=model, system_prompt="Synthetic web-search regression")
+    bodies: list[dict[str, JsonValue]] = []
+    decoder = TypeAdapter(dict[str, JsonValue])
+
+    def respond(wire: httpx2.Request) -> httpx2.Response:
+        bodies.append(decoder.validate_json(wire.content))
+        event = _completed_event().model_dump_json(exclude_unset=True)
+        return httpx2.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            content=f"data: {event}\n\ndata: [DONE]\n\n",
+            request=wire,
+        )
+
+    sdk = AsyncOpenAI(
+        api_key="synthetic-test-key",
+        base_url="https://provider.example/v1",
+        max_retries=0,
+        http_client=httpx2.AsyncClient(transport=httpx2.MockTransport(respond)),
+    )
+    adapter = OpenAIResponsesModelAdapter(
+        client=OpenAISDKResponsesClient(sdk, websocket_headers=None),
+        continuation_planner=None,
+        transport_state=None,
+        transport_key=None,
+        websocket_endpoint_eligible=False,
+    )
+    watchdog = make_test_model_stream_watchdog()
+    try:
+        events = [
+            event
+            async for event in adapter.stream(
+                request,
+                watchdog=watchdog,
+                timeout_policy=watchdog.resolve_policy(
+                    provider="chatgpt_oauth", model=model, inference_profile=None
+                ),
+                call_context=ModelStreamCallContext(
+                    call_kind="sampling",
+                    provider="chatgpt_oauth",
+                    provider_integration_id="integration-chatgpt",
+                    model=model,
+                    session_id="session-1",
+                    run_id="run-1",
+                    attempt_number=None,
+                    check_stop=None,
+                ),
+            )
+        ]
+    finally:
+        await adapter.close()
+    assert len(events) == 1
+    assert len(bodies) == 1
+    assert bodies[0]["model"] == model
+    assert bodies[0]["tools"] == [{"type": "web_search"}]
+    assert capabilities.model_dump_json() == saved
 
 
 @pytest.mark.parametrize(
