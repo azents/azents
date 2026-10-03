@@ -2,8 +2,6 @@
 
 from unittest.mock import AsyncMock
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from azents.core.tools import (
     ResolveContext,
     Toolkit,
@@ -43,7 +41,6 @@ def _make_resolve_context(
         credentials_json=credentials_json,
         agent_id="agent1",
         session_id="session1",
-        session=AsyncMock(spec=AsyncSession),
         web_url="https://test.example.com",
         oauth_secret_key="test-key",
         workspace_id="ws1",

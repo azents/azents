@@ -13,8 +13,8 @@ from azents.engine.events.input_projection import (
     refresh_attachment_availability,
     replace_unavailable_file_parts,
 )
-from azents.engine.events.protocols import EventPayloadRepository
 from azents.engine.events.types import Event
+from azents.repos.engine_event_contracts import EventPayloadRepository
 
 
 class ModelFileStatusRepository(Protocol):

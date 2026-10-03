@@ -15,8 +15,17 @@ from azents.api.public.chat.v1 import (
     read_agent_workspace_path,
 )
 from azents.core.auth.deps import CurrentUser
+from azents.core.chat_data import (
+    NotWorkspaceMember,
+    SessionAccessDenied,
+)
+from azents.core.exchange_file_errors import (
+    FileAccessDenied,
+    FileExpired,
+    FileNotFound,
+    FileUnavailable,
+)
 from azents.services.browser_file_download import BrowserFileDownloadTicket
-from azents.services.chat.data import NotWorkspaceMember, SessionAccessDenied
 from azents.services.chat.workspace import (
     AgentWorkspaceFileNotFound,
     AgentWorkspaceFileReadError,
@@ -25,11 +34,7 @@ from azents.services.chat.workspace import (
 )
 from azents.services.exchange_file import (
     ExchangeFileService,
-    FileAccessDenied,
-    FileExpired,
-    FileNotFound,
     FileTooLarge,
-    FileUnavailable,
 )
 
 _AGENT_ID = "0123456789abcdef0123456789abcdef"

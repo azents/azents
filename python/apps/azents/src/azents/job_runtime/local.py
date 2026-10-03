@@ -9,6 +9,7 @@ from contextlib import AsyncExitStack
 from dataclasses import dataclass
 
 from azcommon import di
+from azcommon.logging import bind_extra
 
 from azents.job_runtime.types import (
     JobExecutionContext,
@@ -281,17 +282,22 @@ class LocalJobRuntime:
         request: JobRequest,
     ) -> bool:
         """Cancel one handler and report whether it settled within grace."""
+        L = bind_extra(
+            logger,
+            {
+                "job_handler_key": request.handler_key,
+                "job_execution_key": request.execution_key,
+            },
+        )
         task.cancel()
         done, _ = await asyncio.wait(
             {task},
             timeout=self.cancellation_grace_seconds,
         )
         if task not in done:
-            logger.warning(
+            L.warning(
                 "Registered job handler exceeded cancellation grace",
                 extra={
-                    "job_handler_key": request.handler_key,
-                    "job_execution_key": request.execution_key,
                     "job_cancellation_grace_seconds": (self.cancellation_grace_seconds),
                 },
             )
@@ -301,11 +307,9 @@ class LocalJobRuntime:
         except asyncio.CancelledError:
             pass
         except Exception as error:
-            logger.warning(
+            L.warning(
                 "Registered job handler failed during cancellation grace",
                 extra={
-                    "job_handler_key": request.handler_key,
-                    "job_execution_key": request.execution_key,
                     "failure_kind": type(error).__name__[:120],
                 },
                 exc_info=sanitized_exception_info(

@@ -6,6 +6,17 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [external-channel, agent, conversation, toolkit]
 code_paths:
+  - python/apps/azents/src/azents/core/exchange_file_errors.py
+  - python/apps/azents/src/azents/core/external_channel_conversation_data.py
+  - python/apps/azents/src/azents/core/external_channel_ingestion.py
+  - python/apps/azents/src/azents/core/session_resource_authority.py
+  - python/apps/azents/src/azents/repos/discord_connection_dependencies.py
+  - python/apps/azents/src/azents/repos/engine_resolve.py
+  - python/apps/azents/src/azents/repos/engine_tool_repositories.py
+  - python/apps/azents/src/azents/repos/scheduled_task_terminal_operations.py
+  - python/apps/azents/src/azents/repos/skill_state_store.py
+  - python/apps/azents/src/azents/repos/vfs_projection_operations.py
+  - python/apps/azents/src/azents/repos/vfs_read_authority.py
   - python/apps/azents/src/azents/core/external_channel_progress.py
   - python/apps/azents/src/azents/core/external_channel_file.py
   - python/apps/azents/src/azents/core/external_channel_provider.py
@@ -22,7 +33,7 @@ code_paths:
   - python/apps/azents/src/azents/services/external_channel/channel_action.py
   - python/apps/azents/src/azents/services/external_channel/discord_http.py
   - python/apps/azents/src/azents/services/external_channel/file_transfer.py
-  - python/apps/azents/src/azents/services/external_channel/mailbox_ingestion_store.py
+  - python/apps/azents/src/azents/repos/external_channel/mailbox_ingestion.py
   - python/apps/azents/src/azents/services/external_channel/presentation.py
   - python/apps/azents/src/azents/services/external_channel/provider_control.py
   - python/apps/azents/src/azents/services/external_channel/slack_events.py
@@ -39,7 +50,7 @@ code_paths:
   - python/apps/azents/src/azents/services/scheduled_task/channel.py
   - python/apps/azents/src/azents/services/scheduled_task/control.py
   - python/apps/azents/src/azents/services/exchange_file/**
-  - python/apps/azents/src/azents/services/session_resource_authority.py
+  - python/apps/azents/src/azents/repos/session_resource_authority.py
   - python/apps/azents/src/azents/repos/external_channel/management.py
   - python/apps/azents/src/azents/repos/external_channel/management_data.py
   - python/apps/azents/src/azents/repos/external_channel/work.py

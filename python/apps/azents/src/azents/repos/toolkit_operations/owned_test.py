@@ -9,12 +9,13 @@ from azcommon.result import Failure, Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import AgentLifecycleStatus, WorkspaceUserRole
+from azents.core.toolkit_errors import NotFound
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_admin import AgentAdminRepository
 from azents.repos.github_user_installation import GithubUserInstallationRepository
 from azents.repos.mcp_oauth_connection import MCPOAuthConnectionRepository
 from azents.repos.toolkit import ToolkitRepository
-from azents.repos.toolkit.data import NotFound, ToolkitUpdate
+from azents.repos.toolkit.data import ToolkitUpdate
 from azents.repos.toolkit_namespace import ToolkitNamespaceRepository
 from azents.repos.toolkit_operations import ToolkitOperationsRepository
 from azents.repos.toolkit_operations.owned import AgentToolkitOperationsRepository

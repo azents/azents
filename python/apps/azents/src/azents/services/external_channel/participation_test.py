@@ -21,6 +21,21 @@ from azents.core.enums import (
     ExternalChannelResponseMode,
     ExternalChannelSetupClaimStatus,
 )
+from azents.core.external_channel_conversation_data import (
+    ExternalChannelConversationLockLease,
+    ExternalChannelConversationScope,
+    ExternalChannelOperationDeadline,
+    ExternalChannelParticipationScope,
+)
+from azents.core.external_channel_ingestion import (
+    ExternalChannelIngestionOutcome,
+    ExternalChannelIngestionOutcomeKind,
+    ExternalChannelIngestionReason,
+)
+from azents.core.external_channel_participation_state import (
+    ExternalChannelSetupSourceProjection,
+    projection_with_setup_source,
+)
 from azents.rdb.session import SessionManager
 from azents.repos.external_channel.data import (
     ExternalChannelAgentRoute,
@@ -28,17 +43,6 @@ from azents.repos.external_channel.data import (
     ExternalChannelParticipationSetting,
     ExternalChannelResource,
     ExternalChannelSetupClaim,
-)
-from azents.services.external_channel.conversation import (
-    ExternalChannelConversationLockLease,
-    ExternalChannelConversationScope,
-    ExternalChannelOperationDeadline,
-    ExternalChannelParticipationScope,
-)
-from azents.services.external_channel.ingestion import (
-    ExternalChannelIngestionOutcome,
-    ExternalChannelIngestionOutcomeKind,
-    ExternalChannelIngestionReason,
 )
 from azents.services.external_channel.participation import (
     ExternalChannelParticipationError,
@@ -48,10 +52,6 @@ from azents.services.external_channel.participation import (
     _CommittedLocation,
     _session_navigation,
     _thread_conversation_scope,
-)
-from azents.services.external_channel.participation_state import (
-    ExternalChannelSetupSourceProjection,
-    projection_with_setup_source,
 )
 
 _NOW = datetime.datetime(2026, 8, 1, tzinfo=datetime.UTC)

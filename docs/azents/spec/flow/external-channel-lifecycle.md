@@ -6,6 +6,17 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [external-channel, agent, conversation]
 code_paths:
+  - python/apps/azents/src/azents/core/exchange_file_errors.py
+  - python/apps/azents/src/azents/core/external_channel_access.py
+  - python/apps/azents/src/azents/core/external_channel_conversation_data.py
+  - python/apps/azents/src/azents/core/external_channel_conversation_preparation.py
+  - python/apps/azents/src/azents/core/external_channel_ingestion.py
+  - python/apps/azents/src/azents/core/session_lifecycle_registry.py
+  - python/apps/azents/src/azents/core/session_resource_authority.py
+  - python/apps/azents/src/azents/repos/discord_connection_dependencies.py
+  - python/apps/azents/src/azents/repos/external_channel/access_operations.py
+  - python/apps/azents/src/azents/repos/chat_operations.py
+  - python/apps/azents/src/azents/repos/session_lifecycle_operations.py
   - python/apps/azents/src/azents/core/external_channel_session_presence.py
   - python/apps/azents/src/azents/core/session_lifecycle.py
   - python/apps/azents/src/azents/repos/external_channel/connection.py
@@ -254,7 +265,9 @@ creates no recovery work.
 
 External Channel is registered as the `session.external-channel` lifecycle participant.
 
-Archive uses the explicit terminal transition policy inside the caller-owned archive transaction:
+Archive uses the explicit terminal transition policy inside the archive
+repository's transaction. The concrete lifecycle operation composes participant
+mutations and the root transition in registry order:
 
 1. lock connected bindings in the Session subtree;
 2. set their terminal disconnect timestamps and preserve their history;

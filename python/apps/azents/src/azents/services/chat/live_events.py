@@ -10,6 +10,17 @@ from fastapi import Depends
 from pydantic import TypeAdapter
 from redis.asyncio import Redis
 
+from azents.core.chat_data import (
+    PendingMailboxActionPresentation,
+    PendingMailboxAgentMessagePresentation,
+    PendingMailboxEnvelope,
+    PendingMailboxExternalChannelContinuationPresentation,
+    PendingMailboxExternalChannelPresentation,
+    PendingMailboxGoalContinuationPresentation,
+    PendingMailboxItem,
+    PendingMailboxScheduledTaskPresentation,
+    PendingMailboxUserMessagePresentation,
+)
 from azents.core.config import Config
 from azents.core.deps import get_appctx
 from azents.core.enums import EventKind, MailboxItemKind
@@ -47,17 +58,6 @@ from azents.repos.mailbox.data import (
     MailboxItem,
     ScheduledTaskContinuationMailboxPayload,
     ScheduledTaskTriggerMailboxPayload,
-)
-from azents.services.chat.data import (
-    PendingMailboxActionPresentation,
-    PendingMailboxAgentMessagePresentation,
-    PendingMailboxEnvelope,
-    PendingMailboxExternalChannelContinuationPresentation,
-    PendingMailboxExternalChannelPresentation,
-    PendingMailboxGoalContinuationPresentation,
-    PendingMailboxItem,
-    PendingMailboxScheduledTaskPresentation,
-    PendingMailboxUserMessagePresentation,
 )
 from azents.utils.appctx import AppContext
 

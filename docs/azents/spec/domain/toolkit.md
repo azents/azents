@@ -6,6 +6,25 @@ spec_type: domain
 domain: toolkit
 owner: "@Hardtack"
 code_paths:
+  - python/apps/azents/src/azents/core/agent_errors.py
+  - python/apps/azents/src/azents/core/chat_data.py
+  - python/apps/azents/src/azents/core/exchange_file_errors.py
+  - python/apps/azents/src/azents/core/historical_memory_settings.py
+  - python/apps/azents/src/azents/core/historical_memory_snapshot_policy.py
+  - python/apps/azents/src/azents/core/mailbox_errors.py
+  - python/apps/azents/src/azents/core/memory_scope.py
+  - python/apps/azents/src/azents/core/session_resource_authority.py
+  - python/apps/azents/src/azents/core/toolkit_errors.py
+  - python/apps/azents/src/azents/repos/engine_event_repositories.py
+  - python/apps/azents/src/azents/repos/engine_resolve.py
+  - python/apps/azents/src/azents/repos/engine_tool_repositories.py
+  - python/apps/azents/src/azents/repos/historical_memory/context_snapshot_operations.py
+  - python/apps/azents/src/azents/repos/historical_memory/source_events.py
+  - python/apps/azents/src/azents/repos/skill_state_store.py
+  - python/apps/azents/src/azents/repos/vfs_projection_operations.py
+  - python/apps/azents/src/azents/repos/vfs_read_authority.py
+  - python/apps/azents/src/azents/repos/worker_run_operations.py
+  - python/apps/azents/src/azents/repos/worker_toolkit_repositories.py
   - python/apps/azents/src/azents/core/tools.py
   - python/apps/azents/src/azents/core/runtime_profile.py
   - python/apps/azents/src/azents/core/runtime_capabilities.py
@@ -252,7 +271,7 @@ Every ToolkitConfig belongs to one Workspace and has one explicit ownership kind
 To mount a Workspace-shared Toolkit on an Agent:
 
 1. Call `attach_to_agent(agent_id, toolkit_id)`.
-2. Service checks Agent → Workspace ownership, Toolkit → Workspace ownership, and whether toolkit is in user's available list.
+2. The attachment repository operation checks Agent → Workspace ownership, Toolkit → Workspace ownership, and whether toolkit is in user's available list before returning to the service.
 3. INSERT `AgentToolkit` row. UNIQUE violation on `(agent_id, toolkit_id)` returns `DuplicateAgentToolkit`.
 
 `effective_agent_toolkit_relation(enabled_only=True)` is the canonical runtime and VFS relation. It unions enabled shared `AgentToolkit` attachments with enabled Agent-owned ToolkitConfigs whose `owner_agent_id` equals the Agent, carries a stable source discriminator, and joins exactly one active namespace reservation for every relation row. Missing, duplicate, or base-Slug-mismatched active reservations are invariant failures; runtime reads never allocate or guess a fallback. Disabling or detaching a Toolkit keeps its reservation for later reuse. Deleting a Toolkit retires the active mapping while retaining the reserved namespace and sequence history. Disabling or deleting an Agent-only Toolkit removes it from later effective reads; already-prepared calls and immutable AgentRun VFS projections retain their normal snapshot semantics.

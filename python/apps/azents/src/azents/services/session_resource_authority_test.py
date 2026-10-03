@@ -13,22 +13,23 @@ from azents.core.enums import (
     AgentSessionStatus,
     WorkspaceUserRole,
 )
-from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSession, SessionAgent
-from azents.repos.workspace_user import WorkspaceUserRepository
-from azents.repos.workspace_user.data import WorkspaceUser
-from azents.services.chat import ChatSessionService
-
-from .session_resource_authority import (
-    AuthorizedPublicSessionResource,
-    PublicSessionResourceDenied,
-    PublicSessionResourceNotFound,
+from azents.core.session_resource_authority import (
     SessionExecutionOwner,
     SessionResourceAuthority,
     accepts_execution_authority,
     accepts_execution_owner,
+)
+from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.agent_session.data import AgentSession, SessionAgent
+from azents.repos.chat_operations import ChatOperationsRepository
+from azents.repos.session_resource_authority import (
+    AuthorizedPublicSessionResource,
+    PublicSessionResourceDenied,
+    PublicSessionResourceNotFound,
     authorize_public_session_resource,
 )
+from azents.repos.workspace_user import WorkspaceUserRepository
+from azents.repos.workspace_user.data import WorkspaceUser
 
 
 class _ResourceAuthorityRepositories(NamedTuple):
@@ -308,7 +309,7 @@ class TestPublicSessionResourceAuthority:
             sessions={archived.id: archived},
             members={("workspace", "member")},
         )
-        chat = ChatSessionService.__new__(ChatSessionService)
+        chat = ChatOperationsRepository.__new__(ChatOperationsRepository)
         chat.agent_session_repository = agent_sessions
         chat.workspace_user_repository = workspace_users
         session: AsyncSession = AsyncMock(spec=AsyncSession)

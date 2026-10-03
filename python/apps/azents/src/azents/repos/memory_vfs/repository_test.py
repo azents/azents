@@ -3,6 +3,7 @@
 import dataclasses
 import datetime
 import hashlib
+from typing import NamedTuple
 
 import sqlalchemy as sa
 from psycopg import AsyncCursor
@@ -54,11 +55,18 @@ _NOW = datetime.datetime(2026, 10, 1, 12, 0, tzinfo=datetime.UTC)
 _PAYLOAD_ADAPTER: TypeAdapter[dict[str, JSONValue]] = TypeAdapter(dict[str, JSONValue])
 
 
+class _AgentFixture(NamedTuple):
+    """Created Agent and its Workspace identity."""
+
+    agent: RDBAgent
+    workspace_id: str
+
+
 async def _create_agent(
     session: AsyncSession,
     *,
     slug: str,
-) -> tuple[RDBAgent, str]:
+) -> _AgentFixture:
     workspace = RDBWorkspace(name="Memory VFS", handle=f"memory-vfs-{slug}")
     session.add(workspace)
     await session.flush()
@@ -82,7 +90,14 @@ async def _create_agent(
     runtime.workspace_path = "/workspace/agent"
     session.add(runtime)
     await session.flush()
-    return agent, workspace.id
+    return _AgentFixture(agent=agent, workspace_id=workspace.id)
+
+
+class _SourceFixture(NamedTuple):
+    """Created source Session and its captured tail Event."""
+
+    session_id: str
+    event_id: str
 
 
 async def _create_source(
@@ -93,7 +108,7 @@ async def _create_source(
     slug: str,
     mode: AgentSessionProductMode,
     associated_user_id: str | None,
-) -> tuple[str, str]:
+) -> _SourceFixture:
     source = await AgentSessionRepository().create(
         session,
         AgentSessionCreate(
@@ -127,7 +142,7 @@ async def _create_source(
     row.summary = f"{slug} historical summary"
     session.add(row)
     await session.flush()
-    return source.id, event.id
+    return _SourceFixture(session_id=source.id, event_id=event.id)
 
 
 async def test_repository_applies_scope_membership_lifecycle_and_enablement(

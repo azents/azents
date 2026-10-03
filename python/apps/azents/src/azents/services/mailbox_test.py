@@ -36,12 +36,25 @@ from azents.core.enums import (
     RuntimeRunnerState,
     ScheduledTaskScheduleType,
 )
+from azents.core.exchange_file_errors import (
+    FileAccessDenied,
+    FileNotFound,
+    SessionNotFound,
+)
+from azents.core.external_channel_mailbox_payload import (
+    build_external_channel_mailbox_payload,
+)
 from azents.core.inference_profile import (
     AppliedInferenceProfile,
     RequestedInferenceProfile,
     SessionInferenceState,
 )
 from azents.core.llm_catalog import ModelReasoningEffort
+from azents.core.mailbox_errors import (
+    MailboxOwnerGenerationStaleError,
+    MailboxPreparationStaleError,
+)
+from azents.core.session_resource_authority import SessionResourceAuthority
 from azents.core.skill_projection import (
     SkillProjectionItem,
     SkillProjectionSnapshot,
@@ -63,7 +76,6 @@ from azents.engine.events.types import (
 from azents.engine.run.resolve import (
     materialize_admitted_input_exchange_file_attachments,
 )
-from azents.engine.tools.skill import SkillStateStore
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.event import RDBEvent
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
@@ -72,13 +84,13 @@ from azents.rdb.models.scheduled_task import RDBScheduledTask
 from azents.rdb.session import SessionManager
 from azents.repos.action_execution import ActionExecutionRepository
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
+from azents.repos.agent_execution.data import EventCreate
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.exchange_file.data import ExchangeFile
 from azents.repos.external_channel.data import (
     ExternalChannelMailboxProjectionItem,
 )
-from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.goal.store import GoalStateStore
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.mailbox.admission import MailboxAdmissionRepository
@@ -94,12 +106,14 @@ from azents.repos.mailbox.data import (
     TurnActionContinuationMailboxPayload,
 )
 from azents.repos.mailbox.promotion import MailboxPromotionRepository
+from azents.repos.mailbox_runtime_operations import MailboxRuntimeOperations
 from azents.repos.model_file.data import ModelFile
 from azents.repos.scheduled_task.data import ScheduledTaskCreate
 from azents.repos.scheduled_task.repository import ScheduledTaskRepository
 from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
 from azents.repos.scheduled_task_cycle.data import ScheduledTaskCycleSnapshot
 from azents.repos.skill_state import SkillStateRepository
+from azents.repos.skill_state_store import SkillStateStore
 from azents.repos.toolkit_state import ToolkitStateRepository
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
@@ -108,9 +122,6 @@ from azents.services.exchange_file import (
     ExchangeFileDownload,
     ExchangeFileError,
     ExchangeFileService,
-    FileAccessDenied,
-    FileNotFound,
-    SessionNotFound,
 )
 from azents.services.model_file import (
     ModelFileCreateError,
@@ -122,7 +133,6 @@ from azents.services.scheduled_task.service import (
     RDBScheduledTaskAuthorityValidator,
     ScheduledTaskService,
 )
-from azents.services.session_resource_authority import SessionResourceAuthority
 from azents.services.turn_action import (
     TurnActionCapabilityRegistry,
     TurnActionVfsProjectionService,
@@ -136,15 +146,12 @@ from azents.testing.model_selection import (
 
 from .mailbox import (
     ExternalChannelMessageMailboxProcessor,
-    MailboxOwnerGenerationStaleError,
     MailboxPreparationContext,
-    MailboxPreparationStaleError,
     MailboxService,
     PreparedMailboxFiles,
     TurnEffect,
     _buffer_requires_inference,
     _PromotedMailboxItem,
-    build_external_channel_mailbox_payload,
     fold_turn_eligibility,
 )
 
@@ -1026,20 +1033,21 @@ def _mailbox_item_service(
     """Create MailboxService for tests."""
     agent_session_repository = AgentSessionRepository()
     return MailboxService(
-        session_manager=rdb_session_manager,
-        mailbox_item_repository=MailboxRepository(),
+        runtime_operations=MailboxRuntimeOperations(
+            session_manager=rdb_session_manager,
+            mailbox_item_repository=MailboxRepository(),
+            agent_session_repository=agent_session_repository,
+            event_transcript_repository=event_transcript_repository
+            or EventTranscriptRepository(),
+            agent_run_repository=AgentRunRepository(),
+            scheduled_task_repository=ScheduledTaskRepository(),
+            scheduled_task_cycle_repository=ScheduledTaskCycleRepository(
+                toolkit_state_repository=ToolkitStateRepository(),
+            ),
+            action_execution_repository=ActionExecutionRepository(),
+        ),
         exchange_file_service=exchange_file_service or _ExchangeFileService(),
         model_file_service=model_file_service or _ModelFileService(),
-        agent_session_repository=agent_session_repository,
-        event_transcript_repository=(
-            event_transcript_repository or EventTranscriptRepository()
-        ),
-        agent_run_repository=AgentRunRepository(),
-        scheduled_task_repository=ScheduledTaskRepository(),
-        scheduled_task_cycle_repository=ScheduledTaskCycleRepository(
-            toolkit_state_repository=ToolkitStateRepository(),
-        ),
-        action_execution_repository=ActionExecutionRepository(),
         turn_action_capabilities=_turn_action_capabilities(
             rdb_session_manager,
             agent_session_repository,
@@ -1059,7 +1067,6 @@ def _mailbox_item_service(
                 session_manager=rdb_session_manager
             ),
         ),
-        external_channel_repository=ExternalChannelRepository(),
     )
 
 
@@ -1183,20 +1190,21 @@ async def test_prepare_attachment_creates_model_file_part_before_fifo_lock() -> 
         status=AgentRunStatus.RUNNING,
     )
     service = MailboxService(
-        session_manager=_unit_session_manager,
-        mailbox_item_repository=mailbox_item_repository,
+        runtime_operations=MailboxRuntimeOperations(
+            session_manager=_unit_session_manager,
+            mailbox_item_repository=mailbox_item_repository,
+            agent_session_repository=agent_session_repository,
+            event_transcript_repository=AsyncMock(spec=EventTranscriptRepository),
+            agent_run_repository=agent_run_repository,
+            scheduled_task_repository=ScheduledTaskRepository(),
+            scheduled_task_cycle_repository=ScheduledTaskCycleRepository(
+                toolkit_state_repository=ToolkitStateRepository(),
+            ),
+            action_execution_repository=AsyncMock(spec=ActionExecutionRepository),
+        ),
         exchange_file_service=exchange_file_service,
         model_file_service=model_file_service,
-        agent_session_repository=agent_session_repository,
-        event_transcript_repository=AsyncMock(spec=EventTranscriptRepository),
-        agent_run_repository=agent_run_repository,
-        scheduled_task_repository=ScheduledTaskRepository(),
-        scheduled_task_cycle_repository=ScheduledTaskCycleRepository(
-            toolkit_state_repository=ToolkitStateRepository(),
-        ),
-        action_execution_repository=AsyncMock(spec=ActionExecutionRepository),
         promotion_repository=AsyncMock(spec=MailboxPromotionRepository),
-        external_channel_repository=ExternalChannelRepository(),
         turn_action_capabilities=_turn_action_capabilities(
             _unit_session_manager,
             agent_session_repository,
@@ -1310,20 +1318,21 @@ async def test_prepare_skips_deferred_action_attachment_materialization() -> Non
     model_file_service = _ModelFileService()
     agent_run_repository: AgentRunRepository = AsyncMock(spec=AgentRunRepository)
     service = MailboxService(
-        session_manager=_unit_session_manager,
-        mailbox_item_repository=mailbox_item_repository,
+        runtime_operations=MailboxRuntimeOperations(
+            session_manager=_unit_session_manager,
+            mailbox_item_repository=mailbox_item_repository,
+            agent_session_repository=agent_session_repository,
+            event_transcript_repository=AsyncMock(spec=EventTranscriptRepository),
+            agent_run_repository=agent_run_repository,
+            scheduled_task_repository=ScheduledTaskRepository(),
+            scheduled_task_cycle_repository=ScheduledTaskCycleRepository(
+                toolkit_state_repository=ToolkitStateRepository(),
+            ),
+            action_execution_repository=AsyncMock(spec=ActionExecutionRepository),
+        ),
         exchange_file_service=exchange_file_service,
         model_file_service=model_file_service,
-        agent_session_repository=agent_session_repository,
-        event_transcript_repository=AsyncMock(spec=EventTranscriptRepository),
-        agent_run_repository=agent_run_repository,
-        scheduled_task_repository=ScheduledTaskRepository(),
-        scheduled_task_cycle_repository=ScheduledTaskCycleRepository(
-            toolkit_state_repository=ToolkitStateRepository(),
-        ),
-        action_execution_repository=AsyncMock(spec=ActionExecutionRepository),
         promotion_repository=AsyncMock(spec=MailboxPromotionRepository),
-        external_channel_repository=ExternalChannelRepository(),
         turn_action_capabilities=_turn_action_capabilities(
             _unit_session_manager,
             agent_session_repository,
@@ -1816,10 +1825,23 @@ class TestMailboxService:
             ),
         ]
 
-        inserted = await service._append_mailbox_item_events(  # noqa: SLF001
+        inserted = await service.runtime_operations.append_events_in_session(
             session,
             "session-1",
-            promoted,
+            [
+                EventCreate(
+                    session_id="session-1",
+                    kind=item.event_kind,
+                    payload={
+                        **item.payload,
+                        "mailbox_item_id": item.buffer.id,
+                        "mailbox_item_key": item.item_key
+                        or item.buffer.presentation.item_key,
+                    },
+                    external_id=item.external_id,
+                )
+                for item in promoted
+            ],
         )
 
         assert [event.id for event in inserted] == ["event-1", "event-2"]
@@ -1885,10 +1907,23 @@ class TestMailboxService:
             )
         ]
 
-        inserted = await service._append_mailbox_item_events(  # noqa: SLF001
+        inserted = await service.runtime_operations.append_events_in_session(
             session,
             "session-1",
-            promoted,
+            [
+                EventCreate(
+                    session_id="session-1",
+                    kind=item.event_kind,
+                    payload={
+                        **item.payload,
+                        "mailbox_item_id": item.buffer.id,
+                        "mailbox_item_key": item.item_key
+                        or item.buffer.presentation.item_key,
+                    },
+                    external_id=item.external_id,
+                )
+                for item in promoted
+            ],
         )
 
         assert inserted == []
@@ -1981,6 +2016,7 @@ class TestMailboxService:
                     idempotency_key="client-request-001",
                     metadata={"source": "test"},
                     action=None,
+                    payload=None,
                     attachments=[],
                     file_parts=[],
                     requested_enabled_execution_options=[],
@@ -2028,6 +2064,7 @@ class TestMailboxService:
                     idempotency_key=None,
                     metadata={"source": "test"},
                     action=None,
+                    payload=None,
                     attachments=[],
                     file_parts=[],
                     requested_enabled_execution_options=[],
@@ -2069,6 +2106,7 @@ class TestMailboxService:
             idempotency_key="client-request-replay",
             metadata={"source": "test"},
             action=None,
+            payload=None,
             attachments=[],
             file_parts=[],
             requested_enabled_execution_options=[],
@@ -2146,6 +2184,7 @@ class TestMailboxService:
             idempotency_key="client-request-profile",
             metadata={"source": "test"},
             action=None,
+            payload=None,
             attachments=[],
             file_parts=[],
             requested_enabled_execution_options=[],
@@ -2240,6 +2279,7 @@ class TestMailboxService:
             idempotency_key="client-request-race",
             metadata={"source": "test"},
             action=None,
+            payload=None,
             attachments=[],
             file_parts=[],
             requested_enabled_execution_options=[],

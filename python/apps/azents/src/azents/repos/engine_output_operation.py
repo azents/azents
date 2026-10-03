@@ -9,7 +9,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import AgentRunPhase
 from azents.core.inference_profile import SessionInferenceState
-from azents.engine.events.protocols import AgentRunCreateRepository, RunStateRepository
 from azents.engine.events.types import (
     ActiveToolCall,
     ClientToolCallPayload,
@@ -19,6 +18,10 @@ from azents.engine.events.types import (
     TokenUsagePayload,
 )
 from azents.rdb.session import SessionManager
+from azents.repos.engine_event_contracts import (
+    AgentRunCreateRepository,
+    RunStateRepository,
+)
 from azents.repos.engine_event_mutation import EngineEventMutationRepository
 from azents.repos.engine_tool_result_operation import (
     EngineToolResultOperationRepository,

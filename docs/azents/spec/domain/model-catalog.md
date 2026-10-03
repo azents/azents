@@ -5,6 +5,21 @@ tags: [backend, frontend, engine]
 spec_type: domain
 domain: model-catalog
 code_paths:
+  - typescript/apps/azents-web/src/features/agents/containers/SelectableModelOptionsEditorContainer.tsx
+  - typescript/apps/azents-web/src/features/agents/containers/useSelectableModelOptionsEditor.ts
+  - typescript/apps/azents-web/src/features/agents/model-option-editor.ts
+  - typescript/apps/azents-web/src/features/agents/image-generation-config.ts
+  - python/apps/azents/src/azents/core/agent_errors.py
+  - python/apps/azents/src/azents/core/model_metadata_collection_data.py
+  - python/apps/azents/src/azents/core/model_metadata_projection_data.py
+  - python/apps/azents/src/azents/core/session_resource_authority.py
+  - python/apps/azents/src/azents/repos/engine_event_repositories.py
+  - python/apps/azents/src/azents/repos/engine_resolve.py
+  - python/apps/azents/src/azents/repos/image_generation_catalog_operations.py
+  - python/apps/azents/src/azents/repos/kimi_oauth_runtime/**
+  - python/apps/azents/src/azents/repos/llm_catalog_operations.py
+  - python/apps/azents/src/azents/repos/model_metadata_operations.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/1c42cc5ce89f_align_repository_index_names_and_source_.py
   - python/apps/azents/src/azents/core/model_execution_options.py
   - python/apps/azents/src/azents/core/openai_client_config.py
   - python/apps/azents/src/azents/core/model_catalog_source.py
@@ -200,6 +215,11 @@ additional ChatGPT usage/credits. Ultrafast hints disclose unavailable cost
 estimation without promising entitlement, billing multipliers, or latency.
 
 ## Source snapshots and sync attempts
+
+Snapshot `source_kind` uses the closed PostgreSQL `model_metadata_source_kind`
+ENUM with `genai_prices` and `litellm_json`. The former remains valid only as
+retained historical provenance; the latter is the active source contract.
+The schema alignment preserves existing values, snapshots, and writer fences.
 
 The active source is `litellm_catalog`, kind `litellm_json`, schema/interpreter
 version `1`. The controlled `MODEL_CATALOG_SOURCE_URL` defaults to the public

@@ -39,6 +39,7 @@ from azents.core.runtime_capabilities import (
     RuntimeCapability,
     RuntimeCapabilityResolver,
 )
+from azents.core.session_resource_authority import SessionResourceAuthority
 from azents.core.tools import (
     ResolveContext,
     Toolkit,
@@ -95,17 +96,18 @@ from azents.repos.engine_read import (
     EngineAgentNotFound,
     EngineIntegrationDisabled,
     EngineIntegrationNotFound,
-    EngineInvokeReadRepository,
     EngineModelReadRepository,
     EngineModelTargetNotFound,
     EngineReasoningEffortUnsupported,
-    EngineToolkitReadRepository,
 )
+from azents.repos.engine_resolve import EngineResolveRepositories
 from azents.repos.exchange_file.data import ExchangeFile
+from azents.repos.llm_provider_integration.data import LLMProviderIntegrationWithSecrets
 from azents.repos.model_metadata_source_data import CapturedContextSource
 from azents.runtime.types import RuntimeDomainConfig
 from azents.services.engine_runtime_tokens import (
     EngineRuntimeTokenResolver,
+    RuntimeTokenRefreshError,
 )
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.image_generation_catalog import (
@@ -123,7 +125,7 @@ from azents.services.model_file import (
     model_file_source_size_error,
 )
 from azents.services.model_metadata import ModelMetadataService
-from azents.services.session_resource_authority import SessionResourceAuthority
+from azents.services.oauth_runtime_clients import RuntimeOAuthClientFactories
 
 from .input import (
     AgentDisabled,
@@ -345,6 +347,22 @@ async def resolve_model_candidate_runtime(
     )
 
 
+async def _ensure_provider_runtime_tokens(
+    *,
+    integration: LLMProviderIntegrationWithSecrets,
+    repositories: EngineResolveRepositories,
+    oauth_clients: RuntimeOAuthClientFactories,
+) -> Result[LLMProviderIntegrationWithSecrets, RuntimeTokenRefreshError]:
+    """Refresh provider OAuth credentials before Runtime execution."""
+    resolver = EngineRuntimeTokenResolver(
+        chatgpt_repository=repositories.chatgpt_oauth,
+        xai_repository=repositories.xai_oauth,
+        kimi_repository=repositories.kimi_oauth,
+        oauth_clients=oauth_clients,
+    )
+    return await resolver.ensure(integration)
+
+
 def _resolve_reasoning_effort(
     selection: AgentModelSelection,
     params: ModelParameters | None,
@@ -425,8 +443,8 @@ def _validate_model_parameters(
 async def resolve_invoke_input(
     invoke_input: InvokeInput,
     *,
-    invoke_read_repository: EngineInvokeReadRepository,
-    runtime_token_resolver: EngineRuntimeTokenResolver,
+    repositories: EngineResolveRepositories,
+    oauth_clients: RuntimeOAuthClientFactories,
     exchange_file_service: ExchangeFileService,
     model_file_service: ModelFileService,
     image_generation_catalog_service: ImageGenerationCatalogService,
@@ -441,8 +459,8 @@ async def resolve_invoke_input(
         context_source=None,
         resolved_model_settings=None,
         resolved_enabled_execution_options=None,
-        invoke_read_repository=invoke_read_repository,
-        runtime_token_resolver=runtime_token_resolver,
+        repositories=repositories,
+        oauth_clients=oauth_clients,
         exchange_file_service=exchange_file_service,
         model_file_service=model_file_service,
         image_generation_catalog_service=image_generation_catalog_service,
@@ -462,8 +480,8 @@ async def resolve_invoke_input_with_profile(
     *,
     requested_profile: RequestedInferenceProfile,
     context_source: CapturedContextSource | None,
-    invoke_read_repository: EngineInvokeReadRepository,
-    runtime_token_resolver: EngineRuntimeTokenResolver,
+    repositories: EngineResolveRepositories,
+    oauth_clients: RuntimeOAuthClientFactories,
     exchange_file_service: ExchangeFileService,
     model_file_service: ModelFileService,
     image_generation_catalog_service: ImageGenerationCatalogService,
@@ -478,8 +496,8 @@ async def resolve_invoke_input_with_profile(
         resolved_model_selection=None,
         resolved_model_settings=None,
         resolved_enabled_execution_options=None,
-        invoke_read_repository=invoke_read_repository,
-        runtime_token_resolver=runtime_token_resolver,
+        repositories=repositories,
+        oauth_clients=oauth_clients,
         exchange_file_service=exchange_file_service,
         model_file_service=model_file_service,
         image_generation_catalog_service=image_generation_catalog_service,
@@ -509,8 +527,8 @@ async def resolve_invoke_input_with_resolved_profile(
     context_source: CapturedContextSource | None,
     resolved_reasoning_effort: ModelReasoningEffort | None,
     resolved_enabled_execution_options: list[ModelExecutionOptionId],
-    invoke_read_repository: EngineInvokeReadRepository,
-    runtime_token_resolver: EngineRuntimeTokenResolver,
+    repositories: EngineResolveRepositories,
+    oauth_clients: RuntimeOAuthClientFactories,
     exchange_file_service: ExchangeFileService,
     model_file_service: ModelFileService,
     image_generation_catalog_service: ImageGenerationCatalogService,
@@ -525,8 +543,8 @@ async def resolve_invoke_input_with_resolved_profile(
         context_source=context_source,
         resolved_model_settings=resolved_model_settings,
         resolved_enabled_execution_options=resolved_enabled_execution_options,
-        invoke_read_repository=invoke_read_repository,
-        runtime_token_resolver=runtime_token_resolver,
+        repositories=repositories,
+        oauth_clients=oauth_clients,
         exchange_file_service=exchange_file_service,
         model_file_service=model_file_service,
         image_generation_catalog_service=image_generation_catalog_service,
@@ -555,15 +573,15 @@ async def resolve_invoke_input_with_model_source(
     resolved_model_selection: AgentModelSelection | None,
     resolved_model_settings: SelectableModelSettings | None,
     resolved_enabled_execution_options: list[ModelExecutionOptionId] | None,
-    invoke_read_repository: EngineInvokeReadRepository,
-    runtime_token_resolver: EngineRuntimeTokenResolver,
+    repositories: EngineResolveRepositories,
+    oauth_clients: RuntimeOAuthClientFactories,
     exchange_file_service: ExchangeFileService,
     model_file_service: ModelFileService,
     image_generation_catalog_service: ImageGenerationCatalogService,
     model_metadata_service: ModelMetadataService,
 ) -> Result[_ResolvedInvokeInputModelSource, ResolveError]:
     """Resolve a run request and main selection from one Agent snapshot."""
-    snapshot_result = await invoke_read_repository.load_model_source(
+    snapshot_result = await repositories.invoke_read.load_model_source(
         agent_id=invoke_input.agent_id,
         model_source_agent_id=model_source_agent_id,
         requested_profile=requested_profile,
@@ -626,7 +644,11 @@ async def resolve_invoke_input_with_model_source(
             )
         )
 
-    refreshed_integration = await runtime_token_resolver.ensure(integration)
+    refreshed_integration = await _ensure_provider_runtime_tokens(
+        integration=integration,
+        repositories=repositories,
+        oauth_clients=oauth_clients,
+    )
     match refreshed_integration:
         case Success(value):
             integration = value
@@ -639,8 +661,10 @@ async def resolve_invoke_input_with_model_source(
 
     lightweight_integration = integration
     if loaded_lightweight_integration.id != integration.id:
-        refreshed_lightweight_integration = await runtime_token_resolver.ensure(
-            loaded_lightweight_integration
+        refreshed_lightweight_integration = await _ensure_provider_runtime_tokens(
+            integration=loaded_lightweight_integration,
+            repositories=repositories,
+            oauth_clients=oauth_clients,
         )
         match refreshed_lightweight_integration:
             case Success(value):
@@ -1349,12 +1373,12 @@ async def resolve_agent_tools(
     *,
     execution_mode: ToolkitExecutionMode,
     toolkit_registry: dict[str, ToolkitProvider[Any]],
-    toolkit_read_repository: EngineToolkitReadRepository,
+    repositories: EngineResolveRepositories,
     web_url: str,
     oauth_secret_key: str,
     mcp_proxy_url: str | None,
     runtime_domain_config: RuntimeDomainConfig,
-    workspace_handle: str = "",
+    workspace_handle: str | None,
     builtin_toolkit_provider: BuiltinToolkitProvider | None = None,
     claude_rules_toolkit_provider: ClaudeRulesToolkitProvider | None = None,
     todo_toolkit_provider: TodoToolkitProvider | None = None,
@@ -1374,7 +1398,7 @@ async def resolve_agent_tools(
     :param context: Toolkit runtime context
     :param execution_mode: Toolkit resolution mode for root or future subagent runs
     :param toolkit_registry: toolkit_type to ToolkitProvider instance mapping
-    :param toolkit_read_repository: Completed effective Toolkit read dependency
+    :param repositories: Completed request-resolution database operations
     :param web_url: Frontend URL for OAuth redirect_uri construction
     :param oauth_secret_key: OAuth HMAC signing key
     :param runtime_domain_config: Runtime domain allow/deny policy. Parent
@@ -1393,7 +1417,7 @@ async def resolve_agent_tools(
     :param runtime_capability_resolver: Agent Runtime capability resolver.
     :return: List of (Toolkit, slug) tuples
     """
-    registered_toolkits = await toolkit_read_repository.list_effective_for_agent(
+    registered_toolkits = await repositories.toolkit_read.list_effective_for_agent(
         agent_id,
         workspace_id=context.workspace_id,
     )
@@ -1436,7 +1460,6 @@ async def resolve_agent_tools(
             credentials_json=toolkit.credentials,
             agent_id=context.agent_id,
             session_id=context.session_id,
-            session=None,
             web_url=web_url,
             oauth_secret_key=oauth_secret_key,
             workspace_id=context.workspace_id,
@@ -1515,7 +1538,6 @@ async def resolve_agent_tools(
                     credentials_json=None,
                     agent_id=context.agent_id,
                     session_id=context.session_id,
-                    session=None,
                     web_url=web_url,
                     oauth_secret_key=oauth_secret_key,
                     workspace_id=context.workspace_id,
@@ -1557,7 +1579,6 @@ async def resolve_agent_tools(
                     credentials_json=None,
                     agent_id=context.agent_id,
                     session_id=context.session_id,
-                    session=None,
                     web_url=web_url,
                     oauth_secret_key=oauth_secret_key,
                     workspace_id=context.workspace_id,
@@ -1599,7 +1620,6 @@ async def resolve_agent_tools(
                 credentials_json=None,
                 agent_id=context.agent_id,
                 session_id=context.session_id,
-                session=None,
                 web_url=web_url,
                 oauth_secret_key=oauth_secret_key,
                 workspace_id=context.workspace_id,
@@ -1651,7 +1671,6 @@ async def resolve_agent_tools(
                     credentials_json=None,
                     agent_id=context.agent_id,
                     session_id=context.session_id,
-                    session=None,
                     web_url=web_url,
                     oauth_secret_key=oauth_secret_key,
                     workspace_id=context.workspace_id,
@@ -1716,7 +1735,6 @@ async def resolve_agent_tools(
                         credentials_json=None,
                         agent_id=context.agent_id,
                         session_id=context.session_id,
-                        session=None,
                         web_url=web_url,
                         oauth_secret_key=oauth_secret_key,
                         workspace_id=context.workspace_id,
@@ -1769,7 +1787,6 @@ async def resolve_agent_tools(
             credentials_json=None,
             agent_id=context.agent_id,
             session_id=context.session_id,
-            session=None,
             web_url=web_url,
             oauth_secret_key=oauth_secret_key,
             workspace_id=context.workspace_id,
@@ -1813,7 +1830,6 @@ async def resolve_agent_tools(
             credentials_json=None,
             agent_id=context.agent_id,
             session_id=context.session_id,
-            session=None,
             web_url=web_url,
             oauth_secret_key=oauth_secret_key,
             workspace_id=context.workspace_id,
@@ -1857,7 +1873,6 @@ async def resolve_agent_tools(
             credentials_json=None,
             agent_id=context.agent_id,
             session_id=context.session_id,
-            session=None,
             web_url=web_url,
             oauth_secret_key=oauth_secret_key,
             workspace_id=context.workspace_id,
@@ -1901,7 +1916,6 @@ async def resolve_agent_tools(
             credentials_json=None,
             agent_id=context.agent_id,
             session_id=context.session_id,
-            session=None,
             web_url=web_url,
             oauth_secret_key=oauth_secret_key,
             workspace_id=context.workspace_id,
@@ -1948,7 +1962,6 @@ async def resolve_agent_tools(
             credentials_json=None,
             agent_id=context.agent_id,
             session_id=context.session_id,
-            session=None,
             web_url=web_url,
             oauth_secret_key=oauth_secret_key,
             workspace_id=context.workspace_id,
@@ -1997,7 +2010,6 @@ async def resolve_agent_tools(
             credentials_json=None,
             agent_id=context.agent_id,
             session_id=context.session_id,
-            session=None,
             web_url=web_url,
             oauth_secret_key=oauth_secret_key,
             workspace_id=context.workspace_id,
@@ -2047,7 +2059,6 @@ async def resolve_agent_tools(
             credentials_json=None,
             agent_id=context.agent_id,
             session_id=context.session_id,
-            session=None,
             web_url=web_url,
             oauth_secret_key=oauth_secret_key,
             workspace_id=context.workspace_id,
@@ -2095,7 +2106,6 @@ async def resolve_agent_tools(
             credentials_json=None,
             agent_id=context.agent_id,
             session_id=context.session_id,
-            session=None,
             web_url=web_url,
             oauth_secret_key=oauth_secret_key,
             workspace_id=context.workspace_id,

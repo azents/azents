@@ -1,7 +1,7 @@
 """Typed Agent mailbox database composition tests."""
 
 import datetime
-from typing import Any
+from typing import Any, NamedTuple
 from unittest.mock import MagicMock
 
 import pytest
@@ -179,27 +179,31 @@ class _AgentSessionRepository(AgentSessionRepository):
         self.running_session_ids.append(session_id)
 
 
+class _MailboxFixture(NamedTuple):
+    """Repository and observable collaborators for Mailbox tests."""
+
+    repository: AgentMailboxRepository
+    admission: _MailboxAdmissionRepository
+    sessions: _AgentSessionRepository
+
+
 def _repository(
     *,
     target_status: AgentSessionStatus = AgentSessionStatus.ACTIVE,
     target_stopping: bool = False,
-) -> tuple[
-    AgentMailboxRepository,
-    _MailboxAdmissionRepository,
-    _AgentSessionRepository,
-]:
+) -> _MailboxFixture:
     admission = _MailboxAdmissionRepository()
     sessions = _AgentSessionRepository(
         target_status=target_status,
         target_stopping=target_stopping,
     )
-    return (
-        AgentMailboxRepository(
+    return _MailboxFixture(
+        repository=AgentMailboxRepository(
             mailbox_admission_repository=admission,
             agent_session_repository=sessions,
         ),
-        admission,
-        sessions,
+        admission=admission,
+        sessions=sessions,
     )
 
 

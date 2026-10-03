@@ -10,9 +10,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.core.crypto import CredentialCipher
 from azents.core.deps import get_credential_cipher
 from azents.core.enums import ToolkitScopeType
+from azents.core.github_system_setting import PlatformGitHubAppConfig
 from azents.core.system_setting import (
     SystemSettingFieldSource,
     SystemSettingSection,
+)
+from azents.core.toolkit_errors import (
+    DuplicateAgentToolkit,
+    DuplicateScope,
+    NotFound,
+    ScopeNotFound,
 )
 from azents.core.toolkit_identifiers import resolve_default_toolkit_slug
 from azents.rdb.deps import get_session_manager
@@ -30,10 +37,6 @@ from azents.repos.toolkit import (
 from azents.repos.toolkit.data import (
     AgentToolkit,
     AgentToolkitCreate,
-    DuplicateAgentToolkit,
-    DuplicateScope,
-    NotFound,
-    ScopeNotFound,
     ToolkitConfig,
     ToolkitCreate,
     ToolkitScope,
@@ -534,8 +537,8 @@ class ToolkitOperationsRepository:
             )
             if current is None:
                 return PlatformAuthorityRejected(_PLATFORM_NOT_CONFIGURED)
-            current_app_id = current.config.get("app_id")
-            if current_app_id != authority.app_id:
+            config = PlatformGitHubAppConfig.model_validate(current.config)
+            if config.app_id != authority.app_id:
                 return PlatformAuthorityRejected(_PLATFORM_RECONNECT_REQUIRED)
         elif authority.app_id_source is not SystemSettingFieldSource.ENVIRONMENT:
             return PlatformAuthorityRejected(_PLATFORM_NOT_CONFIGURED)

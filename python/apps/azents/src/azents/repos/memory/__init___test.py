@@ -4,6 +4,7 @@ from azcommon.result import Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import LLMProvider
+from azents.core.memory_scope import MemoryScope
 from azents.core.workspace import WorkspaceCreate
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
@@ -14,7 +15,7 @@ from azents.testing.model_selection import (
 )
 
 from . import MemoryRepository
-from .data import MemoryCreate, MemoryScope, MemorySummary
+from .data import MemoryCreate, MemorySummary
 
 
 async def _create_workspace(session: AsyncSession, handle: str = "mem-test-ws") -> str:

@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, Mock, create_autospec
 
 import pytest
 from fastapi import HTTPException
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 
 from azents.core.auth.deps import SystemAdmin
 from azents.core.external_channel_file_system_setting import (
@@ -259,9 +259,8 @@ def test_external_channel_files_patch_rejects_out_of_range_limits(
 ) -> None:
     """The dedicated request schema publishes the configured hard bounds."""
     with pytest.raises(ValidationError):
-        ExternalChannelFilesPatchRequest(
-            expected_version=0,
-            **{field_name: value},
+        TypeAdapter(ExternalChannelFilesPatchRequest).validate_python(
+            {"expected_version": 0, field_name: value}
         )
 
 

@@ -7,12 +7,12 @@ import sqlalchemy as sa
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.memory_scope import MemoryScope
 from azents.rdb.models.memory import RDBAgentMemory
 
 from .data import (
     Memory,
     MemoryCreate,
-    MemoryScope,
     MemorySearchMatch,
     MemorySummary,
     MemoryUpdate,

@@ -11,8 +11,8 @@ from fastapi import Depends
 from azents.core.config import RuntimeProviderBootstrapConfig
 from azents.core.deps import get_runtime_provider_bootstrap_config
 from azents.core.enums import RuntimeProviderBootstrapAdapterKind
+from azents.core.runtime_provider_bootstrap import RuntimeProviderBootstrapSourceError
 
-from .data import RuntimeProviderBootstrapSourceError
 from .helm_file import (
     HelmFileRuntimeProviderBootstrapAdapter,
     RuntimeProviderBootstrapSourceDocumentError,

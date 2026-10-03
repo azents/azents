@@ -19,6 +19,10 @@ from azents.services.chatgpt_oauth.runtime import (
 from azents.services.kimi_oauth.data import ProviderRejected as KimiRejected
 from azents.services.kimi_oauth.data import ProviderUnavailable as KimiUnavailable
 from azents.services.kimi_oauth.runtime import ensure_runtime_tokens as ensure_kimi
+from azents.services.oauth_runtime_clients import (
+    RuntimeOAuthClientFactories,
+    create_runtime_oauth_client_factories,
+)
 from azents.services.xai_oauth.data import (
     ProviderEntitlementDenied as XaiEntitlementDenied,
 )
@@ -50,6 +54,9 @@ class EngineRuntimeTokenResolver:
     kimi_repository: Annotated[
         KimiOAuthRuntimeRepository, Depends(KimiOAuthRuntimeRepository)
     ]
+    oauth_clients: Annotated[
+        RuntimeOAuthClientFactories, Depends(create_runtime_oauth_client_factories)
+    ]
 
     async def ensure(
         self, integration: LLMProviderIntegrationWithSecrets
@@ -57,15 +64,21 @@ class EngineRuntimeTokenResolver:
         """Resolve fresh credentials using the same provider branch and outcomes."""
         if integration.provider == LLMProvider.XAI_OAUTH:
             result = await ensure_xai(
-                integration=integration, persistence_repository=self.xai_repository
+                integration=integration,
+                persistence_repository=self.xai_repository,
+                client_factory=self.oauth_clients.xai,
             )
         elif integration.provider == LLMProvider.KIMI_OAUTH:
             result = await ensure_kimi(
-                integration=integration, persistence_repository=self.kimi_repository
+                integration=integration,
+                persistence_repository=self.kimi_repository,
+                client_factory=self.oauth_clients.kimi,
             )
         else:
             result = await ensure_chatgpt(
-                integration=integration, persistence_repository=self.chatgpt_repository
+                integration=integration,
+                persistence_repository=self.chatgpt_repository,
+                client_factory=self.oauth_clients.chatgpt,
             )
         match result:
             case Success(value):

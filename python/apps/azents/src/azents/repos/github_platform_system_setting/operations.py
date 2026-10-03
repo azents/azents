@@ -1,7 +1,7 @@
 """Concrete database-only Platform GitHub identity impact composition."""
 
 import dataclasses
-from typing import Annotated, Any
+from typing import Annotated
 
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,6 +16,9 @@ from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.github_platform_system_setting.binding import (
     PlatformGitHubAppBindingRepository,
+)
+from azents.repos.github_platform_system_setting.data import (
+    PlatformGitHubAppConfirmationImpact,
 )
 from azents.repos.github_platform_system_setting.repository import (
     PlatformGitHubAppSystemSettingRepository,
@@ -45,7 +48,7 @@ class PlatformGitHubAppImpactRepository:
 
     async def resolve_impact(
         self, current: ResolvedSystemSetting, candidate: ResolvedSystemSetting
-    ) -> dict[str, Any]:
+    ) -> PlatformGitHubAppConfirmationImpact:
         """Finish impact inspection before external validation finalization."""
         async with self.session_manager() as session:
             return await self.resolve_impact_in_session(session, current, candidate)
@@ -55,7 +58,7 @@ class PlatformGitHubAppImpactRepository:
         session: AsyncSession,
         current: ResolvedSystemSetting,
         candidate: ResolvedSystemSetting,
-    ) -> dict[str, Any]:
+    ) -> PlatformGitHubAppConfirmationImpact:
         current_config = _config(current)
         candidate_config = _config(candidate)
         app_id_changed = current_config.app_id != candidate_config.app_id
@@ -100,9 +103,7 @@ class PlatformGitHubAppImpactRepository:
             current_app_id_source=current.field_sources["app_id"].value,
             confirmation_actions=confirmation_actions,
         )
-        metadata = impact.to_metadata()
-        metadata["confirmation_required"] = impact.confirmation_required
-        return metadata
+        return PlatformGitHubAppConfirmationImpact.from_impact(impact)
 
     async def resolve_current_binding_impact(
         self,

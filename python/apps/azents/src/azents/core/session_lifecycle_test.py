@@ -12,7 +12,7 @@ from azents.core.session_lifecycle import (
     SessionLifecycleResourceKind,
     SessionLifecycleTransitionPolicy,
 )
-from azents.services.session_lifecycle.registry import get_session_lifecycle_registry
+from azents.core.session_lifecycle_registry import get_session_lifecycle_registry
 
 
 def _participant(

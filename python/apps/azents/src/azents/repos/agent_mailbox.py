@@ -208,6 +208,7 @@ class AgentMailboxRepository:
                 idempotency_key=idempotency_key,
                 metadata=metadata,
                 action=None,
+                payload=None,
                 attachments=[],
                 file_parts=[],
             ),

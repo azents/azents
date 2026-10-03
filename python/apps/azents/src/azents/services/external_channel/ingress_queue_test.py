@@ -26,12 +26,30 @@ from azents.core.enums import (
     ExternalChannelResourceType,
     ExternalChannelResponseMode,
 )
+from azents.core.external_channel_conversation_data import (
+    ExternalChannelHistoryPermissionDenied,
+    ExternalChannelHistoryRange,
+)
+from azents.core.external_channel_ingestion import (
+    ExternalChannelCanonicalHistoryMessage,
+    ExternalChannelIngressFailureCategory,
+    _PreparedFailure,
+    _PreparedSuccess,
+    _provider_failure,
+    _retry_transition,
+)
 from azents.rdb.session import SessionManager
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.external_channel.data import (
     ExternalChannelBinding,
     ExternalChannelConnection,
     ExternalChannelResource,
+)
+from azents.repos.external_channel.ingress_drain import (
+    ExternalChannelIngressDrainRepository,
+)
+from azents.repos.external_channel.ingress_provisioning import (
+    ExternalChannelIngressProvisioningRepository,
 )
 from azents.repos.external_channel.ingress_queue import (
     ExternalChannelIngressQueueRepository,
@@ -43,18 +61,14 @@ from azents.repos.external_channel.ingress_queue_data import (
     ExternalChannelIngressLeaseClaim,
     ExternalChannelIngressOwner,
 )
+from azents.repos.external_channel.mailbox_ingestion import (
+    ExternalChannelConfiguredBindingResult,
+)
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.external_channel.work import ExternalChannelWorkRepository
 from azents.repos.mailbox.admission import MailboxAdmissionRepository
 from azents.repos.mailbox.admission_data import MailboxAdmissionResult
 from azents.repos.mailbox.data import MailboxItem
-from azents.services.external_channel.conversation import (
-    ExternalChannelHistoryPermissionDenied,
-    ExternalChannelHistoryRange,
-)
-from azents.services.external_channel.ingestion import (
-    ExternalChannelCanonicalHistoryMessage,
-)
 from azents.services.external_channel.ingress_metrics import (
     ExternalChannelIngressMetrics,
 )
@@ -63,16 +77,8 @@ from azents.services.external_channel.ingress_provisioning import (
 )
 from azents.services.external_channel.ingress_queue import (
     ExternalChannelIngressDrainService,
-    ExternalChannelIngressFailureCategory,
     ExternalChannelIngressProviderPolicyRegistry,
-    _PreparedFailure,
-    _PreparedSuccess,
-    _provider_failure,
-    _retry_transition,
     build_external_channel_ingress_job_request,
-)
-from azents.services.external_channel.mailbox_ingestion_store import (
-    ExternalChannelConfiguredBindingResult,
 )
 from azents.services.external_channel.mailbox_wake import (
     ExternalChannelMailboxWakeDispatcher,
@@ -342,15 +348,25 @@ def _service(
     wake_dispatcher.mock_add_spec(ExternalChannelMailboxWakeDispatcher)
     control.mock_add_spec(ExternalChannelProviderControlService)
     return ExternalChannelIngressDrainService(
-        session_manager=session_manager,
-        repository=require_instance(repository, ExternalChannelRepository),
-        queue_repository=require_instance(
-            queue_repository,
-            ExternalChannelIngressQueueRepository,
-        ),
-        agent_session_repository=require_instance(
-            agent_session_repository,
-            AgentSessionRepository,
+        operations=ExternalChannelIngressDrainRepository(
+            session_manager=session_manager,
+            repository=require_instance(repository, ExternalChannelRepository),
+            queue_repository=require_instance(
+                queue_repository,
+                ExternalChannelIngressQueueRepository,
+            ),
+            agent_session_repository=require_instance(
+                agent_session_repository,
+                AgentSessionRepository,
+            ),
+            work_repository=require_instance(work, ExternalChannelWorkRepository),
+            mailbox_admission_repository=require_instance(
+                mailbox_admission_repository, MailboxAdmissionRepository
+            ),
+            provisioning_repository=require_instance(
+                MagicMock(spec=ExternalChannelIngressProvisioningRepository),
+                ExternalChannelIngressProvisioningRepository,
+            ),
         ),
         provider_policies=require_instance(
             MagicMock(spec=ExternalChannelIngressProviderPolicyRegistry),
@@ -359,10 +375,6 @@ def _service(
         provisioning_service=require_instance(
             MagicMock(spec=ExternalChannelIngressProvisioningService),
             ExternalChannelIngressProvisioningService,
-        ),
-        work_repository=require_instance(work, ExternalChannelWorkRepository),
-        mailbox_admission_repository=require_instance(
-            mailbox_admission_repository, MailboxAdmissionRepository
         ),
         wake_dispatcher=require_instance(
             wake_dispatcher,
@@ -502,7 +514,7 @@ async def test_ownership_check_reads_session_without_a_row_lock() -> None:
         connection_id=item.connection_id,
     )
 
-    current = await service._ownership_current(  # noqa: SLF001
+    current = await service.operations._ownership_current(  # noqa: SLF001
         MagicMock(spec=AsyncSession),
         item=item,
         batch=_batch(item),
@@ -547,7 +559,9 @@ async def test_late_cursor_cas_conflict_rolls_back_and_resets_claim(
         agent_session_repository=agent_session_repository,
         wake_dispatcher=wake_dispatcher,
     )
-    monkeypatch.setattr(service, "_ownership_current", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        service.operations, "_ownership_current", AsyncMock(return_value=True)
+    )
 
     stale = await service._finalize_batch(  # noqa: SLF001
         _batch(item),
@@ -605,7 +619,9 @@ async def test_session_admission_cas_failure_rolls_back_and_resets_claim(
         agent_session_repository=agent_session_repository,
         wake_dispatcher=wake_dispatcher,
     )
-    monkeypatch.setattr(service, "_ownership_current", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        service.operations, "_ownership_current", AsyncMock(return_value=True)
+    )
 
     stale = await service._finalize_batch(  # noqa: SLF001
         _batch(item),
@@ -790,7 +806,9 @@ async def test_finalization_connection_first_order_prevents_admission_deadlock(
         agent_session_repository=MagicMock(),
         wake_dispatcher=MagicMock(),
     )
-    monkeypatch.setattr(service, "_ownership_current", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        service.operations, "_ownership_current", AsyncMock(return_value=True)
+    )
 
     async def callback_admission() -> None:
         async with session_manager() as session:
@@ -901,7 +919,7 @@ async def test_preparation_locks_connection_before_owner() -> None:
     )
     preparation = object()
     service.provisioning_service.prepare = AsyncMock(return_value=preparation)
-    service.provisioning_service.complete = AsyncMock(
+    service.operations.provisioning_repository.complete_in_session = AsyncMock(
         return_value=ExternalChannelConfiguredBindingResult(
             binding=ExternalChannelBinding.model_construct(
                 id="binding-1",
@@ -920,7 +938,7 @@ async def test_preparation_locks_connection_before_owner() -> None:
 
     assert prepared
     assert calls == ["connection", "owner", "item"]
-    service.provisioning_service.complete.assert_awaited_once_with(
+    service.operations.provisioning_repository.complete_in_session.assert_awaited_once_with(
         transaction,
         owner=owner,
         preparation=preparation,
@@ -977,7 +995,7 @@ async def test_unready_discord_nonmention_starts_hidden_without_progress() -> No
     )
     preparation = object()
     service.provisioning_service.prepare = AsyncMock(return_value=preparation)
-    service.provisioning_service.complete = AsyncMock(
+    service.operations.provisioning_repository.complete_in_session = AsyncMock(
         return_value=ExternalChannelConfiguredBindingResult(
             binding=ExternalChannelBinding.model_construct(
                 id="binding-1",
@@ -995,7 +1013,7 @@ async def test_unready_discord_nonmention_starts_hidden_without_progress() -> No
     )
 
     assert prepared
-    service.provisioning_service.complete.assert_awaited_once_with(
+    service.operations.provisioning_repository.complete_in_session.assert_awaited_once_with(
         transaction,
         owner=owner,
         preparation=preparation,
@@ -1039,7 +1057,9 @@ async def test_success_covers_earlier_retry_and_dispatches_one_batch_wake(
         agent_session_repository=agent_session_repository,
         wake_dispatcher=wake_dispatcher,
     )
-    monkeypatch.setattr(service, "_ownership_current", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        service.operations, "_ownership_current", AsyncMock(return_value=True)
+    )
 
     stale = await service._finalize_batch(  # noqa: SLF001
         _batch(failed_item, successful_item),
@@ -1121,7 +1141,9 @@ async def test_missing_trigger_warns_and_is_ignored_while_batch_continues(
         agent_session_repository=agent_session_repository,
         wake_dispatcher=wake_dispatcher,
     )
-    monkeypatch.setattr(service, "_ownership_current", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        service.operations, "_ownership_current", AsyncMock(return_value=True)
+    )
 
     with caplog.at_level(
         logging.WARNING,
@@ -1212,7 +1234,9 @@ async def test_admitted_all_messages_trigger_is_invocation_with_retained_context
         agent_session_repository=agent_session_repository,
         wake_dispatcher=wake_dispatcher,
     )
-    monkeypatch.setattr(service, "_ownership_current", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        service.operations, "_ownership_current", AsyncMock(return_value=True)
+    )
 
     stale = await service._finalize_batch(  # noqa: SLF001
         _batch(item),
@@ -1303,7 +1327,9 @@ async def test_explicit_followup_controls_precede_wake(
         work_repository=work_repository,
         provider_control=provider_control,
     )
-    monkeypatch.setattr(service, "_ownership_current", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        service.operations, "_ownership_current", AsyncMock(return_value=True)
+    )
 
     stale = await service._finalize_batch(  # noqa: SLF001
         _batch(item),
@@ -1392,7 +1418,9 @@ async def test_followup_visibility_uses_explicit_invocation(
         wake_dispatcher=wake_dispatcher,
         work_repository=work_repository,
     )
-    monkeypatch.setattr(service, "_ownership_current", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        service.operations, "_ownership_current", AsyncMock(return_value=True)
+    )
 
     stale = await service._finalize_batch(  # noqa: SLF001
         _batch(item),
@@ -1452,7 +1480,9 @@ async def test_unmentioned_discord_input_requests_hidden_tracker_visibility(
         wake_dispatcher=wake_dispatcher,
         work_repository=work_repository,
     )
-    monkeypatch.setattr(service, "_ownership_current", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        service.operations, "_ownership_current", AsyncMock(return_value=True)
+    )
 
     stale = await service._finalize_batch(  # noqa: SLF001
         _batch(item),
@@ -1518,7 +1548,9 @@ async def test_late_discord_mention_keeps_tracker_hidden(
         wake_dispatcher=wake_dispatcher,
         work_repository=work_repository,
     )
-    monkeypatch.setattr(service, "_ownership_current", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        service.operations, "_ownership_current", AsyncMock(return_value=True)
+    )
 
     stale = await service._finalize_batch(  # noqa: SLF001
         _batch(ordinary, mention),
@@ -1581,7 +1613,9 @@ async def test_duplicate_explicit_invocation_does_not_project_tracker(
         wake_dispatcher=wake_dispatcher,
         work_repository=work_repository,
     )
-    monkeypatch.setattr(service, "_ownership_current", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        service.operations, "_ownership_current", AsyncMock(return_value=True)
+    )
 
     stale = await service._finalize_batch(  # noqa: SLF001
         _batch(item),
@@ -1641,7 +1675,9 @@ async def test_new_context_with_duplicate_trigger_does_not_resume_work(
         wake_dispatcher=wake_dispatcher,
         work_repository=work_repository,
     )
-    monkeypatch.setattr(service, "_ownership_current", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        service.operations, "_ownership_current", AsyncMock(return_value=True)
+    )
 
     stale = await service._finalize_batch(  # noqa: SLF001
         _batch(item),
@@ -1699,7 +1735,9 @@ async def test_duplicate_discord_mention_does_not_request_tracker_promotion(
         wake_dispatcher=wake_dispatcher,
         work_repository=work_repository,
     )
-    monkeypatch.setattr(service, "_ownership_current", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        service.operations, "_ownership_current", AsyncMock(return_value=True)
+    )
 
     stale = await service._finalize_batch(  # noqa: SLF001
         _batch(item),
@@ -1760,7 +1798,9 @@ async def test_tracker_control_failure_does_not_gate_wake(
         work_repository=work_repository,
         provider_control=provider_control,
     )
-    monkeypatch.setattr(service, "_ownership_current", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        service.operations, "_ownership_current", AsyncMock(return_value=True)
+    )
 
     stale = await service._finalize_batch(  # noqa: SLF001
         _batch(item),
@@ -1811,7 +1851,9 @@ async def test_stale_ownership_does_not_enqueue_or_advance_cursor_and_logs_safel
         agent_session_repository=agent_session_repository,
         wake_dispatcher=wake_dispatcher,
     )
-    monkeypatch.setattr(service, "_ownership_current", AsyncMock(return_value=False))
+    monkeypatch.setattr(
+        service.operations, "_ownership_current", AsyncMock(return_value=False)
+    )
 
     with caplog.at_level(logging.WARNING):
         stale = await service._finalize_batch(  # noqa: SLF001

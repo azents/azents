@@ -5,6 +5,18 @@ tags: [backend, engine]
 spec_type: domain
 domain: goal
 code_paths:
+  - python/apps/azents/src/azents/core/agent_session_input_data.py
+  - python/apps/azents/src/azents/core/chat_data.py
+  - python/apps/azents/src/azents/core/chat_projection.py
+  - python/apps/azents/src/azents/core/exchange_file_errors.py
+  - python/apps/azents/src/azents/core/mailbox_errors.py
+  - python/apps/azents/src/azents/core/session_resource_authority.py
+  - python/apps/azents/src/azents/core/session_workspace_paths.py
+  - python/apps/azents/src/azents/repos/chat_operations.py
+  - python/apps/azents/src/azents/repos/mailbox_runtime_operations.py
+  - python/apps/azents/src/azents/repos/skill_state_store.py
+  - python/apps/azents/src/azents/repos/worker_session_lifecycle.py
+  - python/apps/azents/src/azents/repos/worker_user_stop.py
   - python/apps/azents/src/azents/engine/tools/goal.py
   - python/apps/azents/src/azents/engine/events/pydantic_ai_lowering.py
   - python/apps/azents/src/azents/engine/events/system_reminders.py

@@ -9,7 +9,6 @@ from typing import Annotated
 from fastapi import Depends
 from openai.types.responses.response_text_config_param import ResponseTextConfigParam
 from pydantic import TypeAdapter, ValidationError
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import LLMProvider
 from azents.core.historical_memory import (
@@ -39,15 +38,15 @@ from azents.engine.run.provider_failure import (
     ModelProviderFailureCategory,
 )
 from azents.engine.run.resolve import resolve_model_candidate_runtime
-from azents.rdb.deps import get_session_manager
-from azents.rdb.session import SessionManager
 from azents.repos.engine_read import EngineModelReadRepository
 from azents.repos.engine_read_deps import get_engine_model_read_repository
 from azents.repos.historical_memory import HistoricalMemoryRepository
 from azents.repos.historical_memory.preparation import (
     HistoricalMemoryPreparationRepository,
 )
-from azents.repos.message import MessageRepository
+from azents.repos.historical_memory.source_events import (
+    HistoricalMemorySourceEventRepository,
+)
 from azents.services.engine_runtime_tokens import EngineRuntimeTokenResolver
 from azents.services.model_metadata import ModelMetadataService
 
@@ -122,7 +121,10 @@ class HistoricalMemoryPreparationService:
         HistoricalMemoryRepository,
         Depends(HistoricalMemoryRepository),
     ]
-    message_repository: Annotated[MessageRepository, Depends(MessageRepository)]
+    source_events_repository: Annotated[
+        HistoricalMemorySourceEventRepository,
+        Depends(HistoricalMemorySourceEventRepository),
+    ]
     model_read_repository: Annotated[
         EngineModelReadRepository, Depends(get_engine_model_read_repository)
     ]
@@ -138,10 +140,6 @@ class HistoricalMemoryPreparationService:
         Depends(ModelMetadataService),
     ]
     sdk_factories: Annotated[ModelSDKFactories, Depends(get_model_sdk_factories)]
-    session_manager: Annotated[
-        SessionManager[AsyncSession],
-        Depends(get_session_manager),
-    ]
 
     async def prepare_agent(
         self,
@@ -257,15 +255,11 @@ class HistoricalMemoryPreparationService:
         if resolved.failure:
             raise HistoricalMemoryOutputError("runtime_unavailable")
         runtime = resolved.value
-        async with self.session_manager() as session:
-            events = (
-                await self.message_repository.list_historical_memory_events_by_tier(
-                    session,
-                    session_id=source.source_session_id,
-                    tail_event_id=source.source_tail_event_id,
-                    per_tier_limit=_SOURCE_TIER_EVENT_LIMIT,
-                )
-            )
+        events = await self.source_events_repository.capture(
+            session_id=source.source_session_id,
+            tail_event_id=source.source_tail_event_id,
+            per_tier_limit=_SOURCE_TIER_EVENT_LIMIT,
+        )
         projection = project_historical_memory_input(
             events,
             token_limit=max(

@@ -1,18 +1,12 @@
 """Memory repository data models."""
 
 import datetime
-import enum
 from typing import Annotated
 
 from pydantic import BaseModel, Field
 from typing_extensions import TypedDict
 
-
-class MemoryScope(enum.StrEnum):
-    """Memory scope."""
-
-    AGENT = "agent"
-    USER = "user"
+from azents.core.memory_scope import MemoryScope
 
 
 class Memory(BaseModel):

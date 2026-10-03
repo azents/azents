@@ -6,6 +6,10 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [agent, workspace, conversation]
 code_paths:
+  - python/apps/azents/src/azents/core/chat_data.py
+  - python/apps/azents/src/azents/core/session_resource_authority.py
+  - python/apps/azents/src/azents/core/session_workspace_paths.py
+  - python/apps/azents/src/azents/repos/skill_state_store.py
   - proto/azents/runtime_control/v1/**
   - python/libs/azents-runtime-control/**
   - python/apps/azents/src/azents/rdb/models/agent_runtime.py

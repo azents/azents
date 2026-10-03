@@ -69,14 +69,14 @@ class RDBLLMCatalog(RDBModel):
     __tablename__ = "llm_catalogs"
 
     UQ_SYSTEM_CATALOG = sa.Index(
-        "uq_llm_catalogs_system_scope_provider_purpose",
+        "ix_llm_catalogs_provider_purpose",
         "provider",
         "purpose",
         unique=True,
         postgresql_where=sa.text("scope = 'system'"),
     )
     UQ_INTEGRATION_CATALOG = sa.Index(
-        "uq_llm_catalogs_integration_purpose",
+        "ix_llm_catalogs_provider_integration_id_purpose",
         "provider_integration_id",
         "purpose",
         unique=True,
@@ -203,10 +203,10 @@ class RDBLLMCatalogEntry(RDBModel):
     __tablename__ = "llm_catalog_entries"
 
     IX_CATALOG_DISPLAY = sa.Index(
-        "ix_llm_catalog_entries_catalog_display", "catalog_id", "display_name"
+        "ix_llm_catalog_entries_catalog_id_display_name", "catalog_id", "display_name"
     )
     IX_CATALOG_MODEL = sa.Index(
-        "ix_llm_catalog_entries_catalog_model",
+        "ix_llm_catalog_entries_catalog_id_provider_model_identifier",
         "catalog_id",
         "provider_model_identifier",
     )

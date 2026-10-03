@@ -2,7 +2,7 @@
 
 import logging
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from azents.engine.run.types import FunctionTool, FunctionToolError
 from azents.engine.tooling.make_tool import make_tool
@@ -16,6 +16,8 @@ _MAX_TEXT_READ_CHARACTERS = 64 * 1024
 
 class ReadTextInput(BaseModel):
     """read_text tool input."""
+
+    model_config = ConfigDict(extra="forbid")
 
     path: str = Field(
         description=(

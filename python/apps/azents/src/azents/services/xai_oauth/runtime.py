@@ -3,7 +3,6 @@
 import datetime
 from typing import assert_never
 
-import httpx
 from azcommon.result import Failure, Result, Success
 
 from azents.core.credentials import XaiOAuthConfig, XaiOAuthSecrets
@@ -16,8 +15,8 @@ from azents.repos.llm_provider_integration.data import (
     LLMProviderIntegrationWithSecrets,
 )
 from azents.repos.xai_oauth_runtime import XaiOAuthRuntimeRepository
+from azents.services.oauth_runtime_clients import XaiOAuthClientFactory
 
-from .client import XaiOAuthClient
 from .data import (
     ProviderEntitlementDenied,
     ProviderRejected,
@@ -32,6 +31,7 @@ async def ensure_runtime_tokens(
     *,
     integration: LLMProviderIntegrationWithSecrets,
     persistence_repository: XaiOAuthRuntimeRepository,
+    client_factory: XaiOAuthClientFactory,
 ) -> Result[
     LLMProviderIntegrationWithSecrets,
     ProviderRejected | ProviderEntitlementDenied | ProviderUnavailable,
@@ -55,6 +55,7 @@ async def ensure_runtime_tokens(
     return await refresh_runtime_tokens(
         integration=integration,
         persistence_repository=persistence_repository,
+        client_factory=client_factory,
     )
 
 
@@ -62,6 +63,7 @@ async def refresh_runtime_tokens(
     *,
     integration: LLMProviderIntegrationWithSecrets,
     persistence_repository: XaiOAuthRuntimeRepository,
+    client_factory: XaiOAuthClientFactory,
 ) -> Result[
     LLMProviderIntegrationWithSecrets,
     ProviderRejected | ProviderEntitlementDenied | ProviderUnavailable,
@@ -73,8 +75,8 @@ async def refresh_runtime_tokens(
         integration.config, XaiOAuthConfig
     ):
         return Failure(ProviderRejected(reason="xAI OAuth integration is invalid"))
-    async with httpx.AsyncClient(timeout=20.0) as http_client:
-        refresh_result = await XaiOAuthClient(http_client).refresh_tokens(
+    async with client_factory() as client:
+        refresh_result = await client.refresh_tokens(
             refresh_token=integration.secrets.refresh_token,
             connection_method=XaiOAuthConnectionMethod(
                 integration.config.connection_method

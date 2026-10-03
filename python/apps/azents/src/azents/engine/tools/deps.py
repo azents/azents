@@ -4,11 +4,9 @@ from collections.abc import AsyncIterator
 from typing import Annotated, Any
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.config import Config
-from azents.core.crypto import CredentialCipher
-from azents.core.deps import get_appctx, get_config, get_credential_cipher
+from azents.core.deps import get_appctx, get_config
 from azents.core.tools import ToolkitProvider
 from azents.engine.tools.aws import AwsToolkitProvider
 from azents.engine.tools.brave_search import BraveSearchToolkitProvider
@@ -25,23 +23,35 @@ from azents.engine.tools.notion import NotionToolkitProvider
 from azents.engine.tools.runtime_web import RuntimeWebToolkitProvider
 from azents.engine.tools.scheduled import ScheduledToolkitProvider
 from azents.engine.tools.sentry import SentryToolkitProvider
-from azents.engine.tools.skill import SkillStateStore, SkillToolkitProvider
+from azents.engine.tools.skill import SkillToolkitProvider
 from azents.engine.tools.todo import TodoToolkitProvider
-from azents.rdb.deps import get_session_manager
-from azents.rdb.session import SessionManager
-from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
-from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.engine_tool_repositories import (
+    EngineToolRepositories,
+    get_engine_scheduled_tool_operations,
+    get_engine_todo_store,
+    get_engine_tool_repositories,
+)
 from azents.repos.goal.store import GoalStateStore
-from azents.repos.mailbox import MailboxRepository
-from azents.repos.mcp_oauth_connection import MCPOAuthConnectionRepository
+from azents.repos.goal.store import (
+    get_goal_state_store as get_repository_goal_state_store,
+)
 from azents.repos.memory_vfs.repository import MemoryVfsRepository
-from azents.repos.scheduled_task.repository import ScheduledTaskRepository
 from azents.repos.scheduled_task.tool_operations import (
     ScheduledTaskToolOperationRepository,
 )
-from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
-from azents.repos.toolkit import ToolkitRepository
+from azents.repos.skill_state_store import SkillStateStore
+from azents.repos.skill_state_store import (
+    get_skill_state_store as get_repository_skill_state_store,
+)
 from azents.repos.toolkit_state.engine import TodoStateStore
+from azents.repos.vfs_projection_operations import (
+    VfsProjectionOperationProtocol,
+    get_vfs_projection_operations,
+)
+from azents.repos.vfs_read_authority import (
+    VfsReadAuthorityRepository,
+    get_vfs_read_authority_repository,
+)
 from azents.services.artifact import ArtifactService
 from azents.services.external_channel.channel_action import (
     ExternalChannelActionService,
@@ -61,7 +71,10 @@ from azents.services.scheduled_task.channel import (
     ScheduledTaskChannelService,
     get_scheduled_task_channel_service,
 )
-from azents.services.scheduled_task.terminal import ScheduledTaskTerminalService
+from azents.services.scheduled_task.terminal import (
+    ScheduledTaskTerminalService,
+    get_scheduled_task_terminal_service,
+)
 from azents.services.vfs import ReleaseVfsCatalog, VfsProjectionService
 from azents.services.vfs_read import (
     OwnerBoundVfsReadAuthorityValidator,
@@ -74,9 +87,8 @@ from azents.utils.appctx import AppContext
 
 
 def get_toolkit_registry(
-    cipher: Annotated[CredentialCipher, Depends(get_credential_cipher)],
-    session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+    repositories: Annotated[
+        EngineToolRepositories, Depends(get_engine_tool_repositories)
     ],
     config: Annotated[Config, Depends(get_config)],
     artifact_service: Annotated[ArtifactService, Depends(ArtifactService)],
@@ -84,8 +96,7 @@ def get_toolkit_registry(
 ) -> dict[str, ToolkitProvider[Any]]:
     """Create the Toolkit registry.
 
-    :param cipher: Credential encryption/decryption for the MCP toolkit repo
-    :param session_manager: DB session manager for MCP toolkits
+    :param repositories: Completed tool repositories and snapshot factories
     :param config: Process-wide application settings
     :param artifact_service: Service that stores MCP binary output
     :param github_runtime: Operation-boundary Platform GitHub App resolver
@@ -93,31 +104,28 @@ def get_toolkit_registry(
     """
     registry: dict[str, ToolkitProvider[Any]] = {
         "mcp": McpToolkitProvider(
-            connection_repo=MCPOAuthConnectionRepository(cipher=cipher),
-            session_manager=session_manager,
+            repositories=repositories,
             artifact_service=artifact_service,
         ),
         "github": GitHubToolkitProvider(
             platform_runtime=github_runtime,
-            session_manager=session_manager,
+            snapshot_factory=repositories.snapshots,
         ),
         "notion": NotionToolkitProvider(
-            connection_repo=MCPOAuthConnectionRepository(cipher=cipher),
-            session_manager=session_manager,
+            repositories=repositories,
             artifact_service=artifact_service,
         ),
         "sentry": SentryToolkitProvider(
-            connection_repo=MCPOAuthConnectionRepository(cipher=cipher),
-            session_manager=session_manager,
+            repositories=repositories,
             artifact_service=artifact_service,
         ),
         "gcp": GcpToolkitProvider(
             artifact_service=artifact_service,
-            session_manager=session_manager,
+            snapshot_factory=repositories.snapshots,
         ),
         "aws": AwsToolkitProvider(
             artifact_service=artifact_service,
-            session_manager=session_manager,
+            snapshot_factory=repositories.snapshots,
         ),
         "google_analytics": GoogleAnalyticsToolkitProvider(),
         "brave_search": BraveSearchToolkitProvider(
@@ -145,50 +153,30 @@ async def get_release_vfs_catalog(
 
 
 def get_scheduled_toolkit_provider(
-    session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+    operations: Annotated[
+        ScheduledTaskToolOperationRepository,
+        Depends(get_engine_scheduled_tool_operations),
     ],
-    cycle_repository: Annotated[
-        ScheduledTaskCycleRepository, Depends(ScheduledTaskCycleRepository)
+    terminal_service: Annotated[
+        ScheduledTaskTerminalService, Depends(get_scheduled_task_terminal_service)
     ],
-    run_repository: Annotated[AgentRunRepository, Depends(AgentRunRepository)],
-    task_repository: Annotated[
-        ScheduledTaskRepository, Depends(ScheduledTaskRepository)
-    ],
-    mailbox_repository: Annotated[MailboxRepository, Depends(MailboxRepository)],
     channel_service: Annotated[
-        ScheduledTaskChannelService,
-        Depends(get_scheduled_task_channel_service),
+        ScheduledTaskChannelService, Depends(get_scheduled_task_channel_service)
     ],
-    file_transfer_service: Annotated[
-        ExternalChannelFileTransferService,
-        Depends(),
-    ],
+    file_transfer_service: Annotated[ExternalChannelFileTransferService, Depends()],
 ) -> ScheduledToolkitProvider:
-    """Scheduled Toolkit dependency without ToolkitConfig or credentials."""
+    """Wire completed Scheduled operations and external publication services."""
     return ScheduledToolkitProvider(
-        operations=ScheduledTaskToolOperationRepository(
-            session_manager=session_manager,
-            task_repository=task_repository,
-            cycle_repository=cycle_repository,
-            mailbox_repository=mailbox_repository,
-            run_repository=run_repository,
-        ),
-        terminal_service=ScheduledTaskTerminalService(
-            session_manager=session_manager,
-            run_repository=run_repository,
-            event_repository=EventTranscriptRepository(),
-            task_repository=task_repository,
-            cycle_repository=cycle_repository,
-        ),
+        operations=operations,
+        terminal_service=terminal_service,
         channel_service=channel_service,
         file_transfer_service=file_transfer_service,
     )
 
 
 def get_vfs_projection_service(
-    session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+    operations: Annotated[
+        VfsProjectionOperationProtocol, Depends(get_vfs_projection_operations)
     ],
     toolkit_registry: Annotated[
         dict[str, ToolkitProvider[Any]], Depends(get_toolkit_registry)
@@ -197,15 +185,12 @@ def get_vfs_projection_service(
     scheduled_toolkit_provider: Annotated[
         ScheduledToolkitProvider, Depends(get_scheduled_toolkit_provider)
     ],
-) -> VfsProjectionService[AsyncSession]:
-    """Create the run VFS projection service."""
+) -> VfsProjectionService:
+    """Wire detached VFS projection behavior to completed database operations."""
     return VfsProjectionService(
-        session_manager=session_manager,
+        operations=operations,
         toolkit_registry=toolkit_registry,
         catalog=catalog,
-        agent_run_repository=AgentRunRepository(),
-        agent_session_repository=AgentSessionRepository(),
-        toolkit_repository=ToolkitRepository(),
         required_provider_sources={
             scheduled_toolkit_provider.slug: scheduled_toolkit_provider
         },
@@ -213,19 +198,15 @@ def get_vfs_projection_service(
 
 
 def get_vfs_read_router(
-    session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+    authority_repository: Annotated[
+        VfsReadAuthorityRepository, Depends(get_vfs_read_authority_repository)
     ],
     projection_service: Annotated[
-        VfsProjectionService[AsyncSession],
-        Depends(get_vfs_projection_service),
+        VfsProjectionService, Depends(get_vfs_projection_service)
     ],
-    memory_repository: Annotated[
-        MemoryVfsRepository,
-        Depends(MemoryVfsRepository),
-    ],
+    memory_repository: Annotated[MemoryVfsRepository, Depends(MemoryVfsRepository)],
 ) -> VfsReadRouter:
-    """Create the registered Skills and Memory VFS read router."""
+    """Create Skills and Memory routing after completed authority checks."""
     return VfsReadRouter(
         registry=VfsReadBackendRegistry(
             [
@@ -234,18 +215,16 @@ def get_vfs_read_router(
             ]
         ),
         authority_validator=OwnerBoundVfsReadAuthorityValidator(
-            session_manager=session_manager
+            repository=authority_repository
         ),
     )
 
 
 def get_todo_toolkit_provider(
-    session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
-    ],
+    store: Annotated[TodoStateStore, Depends(get_engine_todo_store)],
 ) -> TodoToolkitProvider:
-    """TodoToolkitProvider dependency."""
-    return TodoToolkitProvider(store=TodoStateStore(session_manager=session_manager))
+    """Create the Todo provider from completed repository operations."""
+    return TodoToolkitProvider(store=store)
 
 
 def get_goal_toolkit_provider(
@@ -263,12 +242,10 @@ def get_runtime_web_toolkit_provider(
 
 
 def get_goal_state_store(
-    session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
-    ],
+    store: Annotated[GoalStateStore, Depends(get_repository_goal_state_store)],
 ) -> GoalStateStore:
-    """GoalStateStore dependency."""
-    return GoalStateStore(session_manager=session_manager)
+    """Expose the completed Goal store dependency."""
+    return store
 
 
 def get_external_channel_toolkit_provider(
@@ -291,18 +268,16 @@ def get_external_channel_toolkit_provider(
 
 
 def get_skill_state_store(
-    session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
-    ],
+    store: Annotated[SkillStateStore, Depends(get_repository_skill_state_store)],
 ) -> SkillStateStore:
-    """SkillStateStore dependency."""
-    return SkillStateStore(session_manager=session_manager)
+    """Expose the completed Skill store dependency."""
+    return store
 
 
 def get_skill_toolkit_provider(
     skill_store: Annotated[SkillStateStore, Depends(get_skill_state_store)],
     vfs_projection_service: Annotated[
-        VfsProjectionService[AsyncSession],
+        VfsProjectionService,
         Depends(get_vfs_projection_service),
     ],
 ) -> SkillToolkitProvider:

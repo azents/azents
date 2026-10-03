@@ -12,10 +12,15 @@ from azents.core.deps import get_config
 from azents.core.enums import (
     ExternalChannelAppMode,
     ExternalChannelConnectionStatus,
+    ExternalChannelIngressAuthorityKind,
     ExternalChannelIngressProfile,
     ExternalChannelInteractionStatus,
     ExternalChannelProvider,
     ExternalChannelTransport,
+)
+from azents.core.external_channel_ingestion import (
+    ExternalChannelIngestionOutcomeKind,
+    ExternalChannelIngressAuthority,
 )
 from azents.core.external_channel_provider import SlackConnectionCredentials
 from azents.core.external_channel_provider_effect import ProviderEffectPlan
@@ -30,11 +35,6 @@ from azents.services.external_channel.connection_revocation import (
     ExternalChannelConnectionRevocationService,
 )
 from azents.services.external_channel.credentials import ExternalChannelCredentialsCodec
-from azents.services.external_channel.ingestion import (
-    ExternalChannelIngestionOutcomeKind,
-    ExternalChannelIngressAuthority,
-    ExternalChannelIngressAuthorityKind,
-)
 from azents.services.external_channel.interaction import (
     ExternalChannelInteractionHandoff,
     ExternalChannelInteractionProcessor,

@@ -21,6 +21,7 @@ from azents_runtime_control.grpc_transfer_coordinator_client import (
 )
 from pydantic import BaseModel, Field
 
+from azents.core.session_resource_authority import SessionResourceAuthority
 from azents.engine.client_tools import ClientToolWireDialect
 from azents.engine.events.generated_files import (
     GeneratedFileOutput,
@@ -74,7 +75,6 @@ from azents.services.exchange_file import ExchangeFileService
 from azents.services.file_storage import FileStorage
 from azents.services.model_file import ModelFileService
 from azents.services.runtime_storage_error import RuntimeStorageError
-from azents.services.session_resource_authority import SessionResourceAuthority
 
 logger = logging.getLogger(__name__)
 

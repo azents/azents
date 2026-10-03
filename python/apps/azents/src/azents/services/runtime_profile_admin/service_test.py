@@ -34,7 +34,7 @@ from azents.repos.runtime_provider.data import RuntimeProvider
 from azents.repos.runtime_provider_policy.repository import (
     RuntimeProviderPolicyRepository,
 )
-from azents.repos.workspace.data import Workspace
+from azents.repos.workspace.data import Workspace, WorkspaceSnapshot
 from azents.services.terminal_policy.invalidation import (
     NoopTerminalPolicyInvalidationPublisher,
 )
@@ -353,7 +353,10 @@ async def test_admin_detail_uses_system_admin_projection_without_membership() ->
         selected_agent_count=4,
         running_runtime_count=2,
     )
-    workspaces.get_with_id_by_handle.return_value = ("workspace-1", workspace)
+    workspaces.get_with_id_by_handle.return_value = WorkspaceSnapshot(
+        workspace_id="workspace-1",
+        workspace=workspace,
+    )
     profiles.get_workspace_runtime_profile.return_value = workspace_profile
     profiles.get_infrastructure_profile.return_value = infrastructure
     profiles.get_workspace_runtime_profile_usage.return_value = usage

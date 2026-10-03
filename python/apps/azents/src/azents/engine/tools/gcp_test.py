@@ -25,6 +25,7 @@ from azents.engine.tools.gcp import (
     _GcpServerConfig,  # directly configure internal server settings in tests
     _is_read_only_tool,  # directly validate internal utility function in tests
 )
+from azents.repos.engine_tool_repositories import EngineMcpSnapshotFactory
 from azents.testing.types import is_object_factory
 
 
@@ -196,7 +197,7 @@ def _make_toolkit(
         writable_services=writable_services or set(),
         proxy_url=None,
         artifact_service=None,
-        session_manager=_session_manager,
+        snapshot_factory=EngineMcpSnapshotFactory(session_manager=_session_manager),
         agent_id="agent-1",
         session_id="session-1",
         state_name="tool_snapshot:test",

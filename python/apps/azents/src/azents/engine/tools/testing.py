@@ -6,7 +6,7 @@ Provides helpers reused in tests, such as fake storage.
 import fnmatch
 import re
 from functools import lru_cache
-from typing import List
+from typing import List, NamedTuple
 
 from azents.engine.io.attachments import RuntimeAttachment
 from azents.services.file_storage import (
@@ -395,11 +395,11 @@ def _expand_braces(pattern: str) -> tuple[str, ...]:
         if expandable is None:
             expansions.append(candidate)
             continue
-        opening, closing, alternatives = expandable
-        prefix = candidate[:opening]
-        suffix = candidate[closing + 1 :]
+        prefix = candidate[: expandable.opening]
+        suffix = candidate[expandable.closing + 1 :]
         pending.extend(
-            f"{prefix}{alternative}{suffix}" for alternative in reversed(alternatives)
+            f"{prefix}{alternative}{suffix}"
+            for alternative in reversed(expandable.alternatives)
         )
         if len(expansions) + len(pending) > _MAX_BRACE_EXPANSIONS:
             raise ValueError(
@@ -409,9 +409,17 @@ def _expand_braces(pattern: str) -> tuple[str, ...]:
     return tuple(expansions)
 
 
+class _BraceExpansion(NamedTuple):
+    """The named source bounds and ordered alternatives of one expansion."""
+
+    opening: int
+    closing: int
+    alternatives: tuple[str, ...]
+
+
 def _find_expandable_brace(
     pattern: str,
-) -> tuple[int, int, tuple[str, ...]] | None:
+) -> _BraceExpansion | None:
     """Find the first balanced brace containing top-level alternatives."""
     for opening, opening_char in enumerate(pattern):
         if opening_char != "{":
@@ -428,7 +436,11 @@ def _find_expandable_brace(
                         pattern[opening + 1 : closing]
                     )
                     if len(alternatives) >= 2:
-                        return opening, closing, alternatives
+                        return _BraceExpansion(
+                            opening=opening,
+                            closing=closing,
+                            alternatives=alternatives,
+                        )
                     break
     return None
 

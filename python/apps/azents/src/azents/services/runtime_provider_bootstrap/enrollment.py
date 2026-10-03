@@ -9,6 +9,7 @@ from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import RuntimeProviderBootstrapDeclarationState
+from azents.core.runtime_provider_bootstrap import RuntimeProviderBootstrapSnapshot
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
@@ -22,7 +23,6 @@ from azents.services.runtime_provider_control.service import (
     RuntimeProviderEnrollmentService,
 )
 
-from .data import RuntimeProviderBootstrapSnapshot
 from .service import RuntimeProviderBootstrapService
 
 

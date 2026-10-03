@@ -38,6 +38,7 @@ from azents.repos.runtime_profile.data import (
     RuntimeInfrastructureProfile,
     WorkspaceRuntimeProfile,
 )
+from azents.repos.workspace.data import Workspace, WorkspaceSnapshot
 from azents.runtime.control_protocol.data import (
     RuntimeProtocolCapabilities,
     RuntimeRunnerRegistration,
@@ -203,9 +204,16 @@ def _resolver(
         revoked_at=None,
         expires_at=_NOW + datetime.timedelta(hours=1),
     )
-    workspace_repository.get_with_id_by_handle.return_value = (
-        "workspace-1",
-        SimpleNamespace(handle="workspace"),
+    workspace_repository.get_with_id_by_handle.return_value = WorkspaceSnapshot(
+        workspace_id="workspace-1",
+        workspace=Workspace(
+            name="Workspace",
+            handle="workspace",
+            default_runtime_profile_id=None,
+            default_runtime_profile_version=1,
+            created_at=_NOW,
+            updated_at=_NOW,
+        ),
     )
     workspace_user_repository.get_by_workspace_and_user.return_value = SimpleNamespace(
         id="workspace-user-1",

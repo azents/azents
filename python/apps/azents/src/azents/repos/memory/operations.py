@@ -5,13 +5,13 @@ import dataclasses
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import AgentSessionKind, AgentSessionProductMode
+from azents.core.memory_scope import MemoryScope
 from azents.rdb.session import SessionManager
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.memory import MemoryRepository
 from azents.repos.memory.data import (
     Memory,
     MemoryCreate,
-    MemoryScope,
     MemorySearchMatch,
     MemorySummary,
 )

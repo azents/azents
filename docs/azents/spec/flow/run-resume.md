@@ -6,6 +6,20 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [agent, conversation]
 code_paths:
+  - python/apps/azents/src/azents/core/agent_session_input_data.py
+  - python/apps/azents/src/azents/core/chat_data.py
+  - python/apps/azents/src/azents/core/mailbox_errors.py
+  - python/apps/azents/src/azents/core/session_resource_authority.py
+  - python/apps/azents/src/azents/core/session_workspace_items.py
+  - python/apps/azents/src/azents/core/session_workspace_paths.py
+  - python/apps/azents/src/azents/repos/agent_session_input_operations.py
+  - python/apps/azents/src/azents/repos/engine_event_repositories.py
+  - python/apps/azents/src/azents/repos/engine_resolve.py
+  - python/apps/azents/src/azents/repos/skill_state_store.py
+  - python/apps/azents/src/azents/repos/vfs_projection_operations.py
+  - python/apps/azents/src/azents/repos/worker_run_operations.py
+  - python/apps/azents/src/azents/repos/worker_session_lifecycle.py
+  - python/apps/azents/src/azents/repos/worker_user_stop.py
   - python/apps/azents/src/azents/core/vfs.py
   - python/apps/azents/src/azents/broker/redis.py
   - python/apps/azents/src/azents/broker/types.py

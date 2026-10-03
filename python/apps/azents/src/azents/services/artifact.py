@@ -22,6 +22,7 @@ from azents.core.config import Config
 from azents.core.deps import get_config
 from azents.core.enums import ArtifactStatus
 from azents.core.s3.deps import get_s3_service
+from azents.core.session_resource_authority import SessionResourceAuthority
 from azents.repos.artifact import artifact_storage_key
 from azents.repos.artifact.data import Artifact, ArtifactCreate
 from azents.repos.artifact.operations import (
@@ -30,7 +31,6 @@ from azents.repos.artifact.operations import (
 )
 from azents.repos.file_metadata_authority import FileResourceAuthority
 from azents.services.file_lifecycle_policy import artifact_expires_at
-from azents.services.session_resource_authority import SessionResourceAuthority
 
 logger = logging.getLogger(__name__)
 

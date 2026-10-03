@@ -1,16 +1,10 @@
 """Historical Memory settings query contracts."""
 
 import datetime
-import enum
 
 from pydantic import BaseModel, ConfigDict, Field
 
-
-class HistoricalMemorySettingsScope(enum.StrEnum):
-    """One exact Historical Memory settings source scope."""
-
-    TEAM = "team"
-    USER = "user"
+from azents.core.historical_memory_settings import HistoricalMemorySettingsScope
 
 
 class HistoricalMemorySettingsRecord(BaseModel):

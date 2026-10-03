@@ -1,4 +1,4 @@
-"""Root AgentSession creation service tests."""
+"""Root AgentSession creation repository tests."""
 
 import asyncio
 from uuid import uuid4
@@ -13,6 +13,11 @@ from azents.core.enums import (
     AgentSessionProductMode,
     LLMProvider,
     RuntimeRunnerState,
+)
+from azents.core.root_agent_session_creation import (
+    AgentDefaultRootWorkspaceIntent,
+    ExplicitRootWorkspaceIntent,
+    RootAgentSessionCreationResult,
 )
 from azents.core.workspace import WorkspaceCreate
 from azents.rdb.models.agent import RDBAgent
@@ -31,18 +36,14 @@ from azents.repos.agent_project_preset import AgentProjectPresetRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSessionCreate
+from azents.repos.root_agent_session_creation import (
+    RootAgentSessionCreationRepository,
+)
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 from azents.repos.workspace import WorkspaceRepository
 from azents.testing.model_selection import (
     make_test_model_selection_dict,
     make_test_selectable_model_option_dicts,
-)
-
-from . import RootAgentSessionCreationService
-from .data import (
-    AgentDefaultRootWorkspaceIntent,
-    ExplicitRootWorkspaceIntent,
-    RootAgentSessionCreationResult,
 )
 
 
@@ -142,9 +143,9 @@ async def _create_agent(
     return agent.id
 
 
-def _service() -> RootAgentSessionCreationService:
+def _service() -> RootAgentSessionCreationRepository:
     """Build the shared root Session creation boundary."""
-    return RootAgentSessionCreationService(
+    return RootAgentSessionCreationRepository(
         agent_session_repository=AgentSessionRepository(),
         agent_repository=AgentRepository(),
         automatic_project_repository=AgentAutomaticProjectRepository(),
@@ -152,7 +153,7 @@ def _service() -> RootAgentSessionCreationService:
     )
 
 
-class TestRootAgentSessionCreationService:
+class TestRootAgentSessionCreationRepository:
     """Root Session Project initialization behavior."""
 
     async def test_runtime_free_explicit_empty_root_session_is_allowed(

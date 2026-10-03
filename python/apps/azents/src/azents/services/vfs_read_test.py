@@ -9,6 +9,7 @@ from dataclasses import dataclass
 import pytest
 
 import azents.services.vfs_read as vfs_read_module
+from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.core.vfs import (
     VfsLocation,
     VfsProjection,
@@ -19,7 +20,6 @@ from azents.core.vfs import (
     parse_vfs_search_uri,
 )
 from azents.services.file_storage import GrepResult, TextReadResult
-from azents.services.session_resource_authority import SessionExecutionOwner
 from azents.services.vfs_read import (
     SkillsVfsReadBackend,
     VfsGlobResult,

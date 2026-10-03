@@ -22,6 +22,12 @@ from azents.core.enums import (
     ExternalChannelResourceType,
     ExternalChannelResponseMode,
 )
+from azents.core.external_channel_ingestion import (
+    ExternalChannelIngestionOutcomeKind,
+    ExternalChannelIngestionReason,
+    ExternalChannelIngestionRequest,
+    ExternalChannelTriggerLocator,
+)
 from azents.job_runtime.types import JobRuntime
 from azents.rdb.session import SessionManager
 from azents.repos.agent_session import AgentSessionRepository
@@ -36,12 +42,6 @@ from azents.repos.external_channel.ingress_queue import (
     ExternalChannelIngressQueueRepository,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
-from azents.services.external_channel.ingestion import (
-    ExternalChannelIngestionOutcomeKind,
-    ExternalChannelIngestionReason,
-    ExternalChannelIngestionRequest,
-    ExternalChannelTriggerLocator,
-)
 from azents.services.external_channel.ingress_admission import (
     ExternalChannelIngressAdmissionService,
     _response_mode_triggered,

@@ -30,6 +30,9 @@ from azents.core.external_channel_progress import (
     ExternalChannelDesiredProgress,
     checking_progress,
 )
+from azents.core.external_channel_progress import (
+    ExternalChannelWorkTask as ChannelWorkTask,
+)
 from azents.core.external_channel_provider_effect import ProviderMutationOutcome
 from azents.core.external_channel_title import DISCORD_INITIAL_THREAD_TITLE_LABEL
 from azents.core.workspace import WorkspaceCreate
@@ -43,7 +46,6 @@ from azents.repos.external_channel.work import (
 from azents.repos.external_channel.work_data import (
     ChannelActionEffectPlan,
     ChannelActionTransition,
-    ChannelWorkTask,
 )
 from azents.repos.external_channel.work_state import (
     ChannelWorkProjectionPartState,

@@ -7,7 +7,8 @@ from typing import Annotated
 from pydantic import BaseModel, Field
 from typing_extensions import Self, TypedDict
 
-from azents.repos.memory.data import Memory, MemoryScope
+from azents.core.memory_scope import MemoryScope
+from azents.repos.memory.data import Memory
 
 
 class MemoryOutput(BaseModel):

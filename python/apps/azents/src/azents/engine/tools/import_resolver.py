@@ -6,6 +6,14 @@ from typing import Protocol, assert_never
 
 from azcommon.result import Success
 
+from azents.core.exchange_file_errors import (
+    FileAccessDenied,
+    FileExpired,
+    FileNotFound,
+    FileUnavailable,
+    SessionNotFound,
+)
+from azents.core.session_resource_authority import SessionResourceAuthority
 from azents.services.artifact import (
     ArtifactAccessDenied,
     ArtifactExpired,
@@ -18,13 +26,7 @@ from azents.services.artifact import (
 from azents.services.exchange_file import (
     ExchangeFileService,
     ExchangeFileTransferSource,
-    FileAccessDenied,
-    FileExpired,
-    FileNotFound,
-    FileUnavailable,
-    SessionNotFound,
 )
-from azents.services.session_resource_authority import SessionResourceAuthority
 from azents.services.vfs import VfsFileResolutionError, VfsResolvedFile
 
 

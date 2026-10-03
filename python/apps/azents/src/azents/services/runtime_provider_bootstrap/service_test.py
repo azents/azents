@@ -19,6 +19,11 @@ from azents.core.enums import (
     RuntimeProviderScope,
 )
 from azents.core.platform_runtime_system_setting import PlatformRuntimeConfig
+from azents.core.runtime_provider_bootstrap import (
+    RuntimeProviderBootstrapAuthenticationInput,
+    RuntimeProviderBootstrapDeclarationInput,
+    RuntimeProviderBootstrapSnapshot,
+)
 from azents.core.system_setting import SystemSettingSection
 from azents.rdb.session import SessionManager
 from azents.repos.runtime_provider.data import RuntimeProviderCreate
@@ -29,13 +34,11 @@ from azents.repos.runtime_provider_binding.data import (
 from azents.repos.runtime_provider_binding.repository import (
     RuntimeProviderAuthBindingRepository,
 )
+from azents.repos.runtime_provider_bootstrap_operations import (
+    RuntimeProviderBootstrapOperations,
+)
 from azents.repos.system_setting.repository import SystemSettingRepository
 
-from .data import (
-    RuntimeProviderBootstrapAuthenticationInput,
-    RuntimeProviderBootstrapDeclarationInput,
-    RuntimeProviderBootstrapSnapshot,
-)
 from .service import RuntimeProviderBootstrapService
 
 
@@ -102,10 +105,12 @@ class TestRuntimeProviderBootstrapService:
         """A matching second snapshot reuses the original aggregate."""
         repository = RuntimeProviderRepository()
         service = RuntimeProviderBootstrapService(
-            session_manager=_single_session_manager(rdb_session),
-            repository=repository,
-            system_setting_repository=SystemSettingRepository(),
-            binding_repository=RuntimeProviderAuthBindingRepository(),
+            operations=RuntimeProviderBootstrapOperations(
+                session_manager=_single_session_manager(rdb_session),
+                repository=repository,
+                system_setting_repository=SystemSettingRepository(),
+                binding_repository=RuntimeProviderAuthBindingRepository(),
+            )
         )
 
         first = await service.reconcile(_snapshot())
@@ -193,10 +198,12 @@ class TestRuntimeProviderBootstrapService:
             ),
         )
         service = RuntimeProviderBootstrapService(
-            session_manager=_single_session_manager(rdb_session),
-            repository=repository,
-            system_setting_repository=SystemSettingRepository(),
-            binding_repository=RuntimeProviderAuthBindingRepository(),
+            operations=RuntimeProviderBootstrapOperations(
+                session_manager=_single_session_manager(rdb_session),
+                repository=repository,
+                system_setting_repository=SystemSettingRepository(),
+                binding_repository=RuntimeProviderAuthBindingRepository(),
+            )
         )
 
         result = await service.reconcile(
@@ -280,10 +287,12 @@ class TestRuntimeProviderBootstrapService:
             ),
         )
         service = RuntimeProviderBootstrapService(
-            session_manager=_single_session_manager(rdb_session),
-            repository=repository,
-            system_setting_repository=SystemSettingRepository(),
-            binding_repository=binding_repository,
+            operations=RuntimeProviderBootstrapOperations(
+                session_manager=_single_session_manager(rdb_session),
+                repository=repository,
+                system_setting_repository=SystemSettingRepository(),
+                binding_repository=binding_repository,
+            )
         )
 
         result = await service.reconcile(_snapshot())
@@ -307,10 +316,12 @@ class TestRuntimeProviderBootstrapService:
         repository = RuntimeProviderRepository()
         binding_repository = RuntimeProviderAuthBindingRepository()
         service = RuntimeProviderBootstrapService(
-            session_manager=_single_session_manager(rdb_session),
-            repository=repository,
-            system_setting_repository=SystemSettingRepository(),
-            binding_repository=binding_repository,
+            operations=RuntimeProviderBootstrapOperations(
+                session_manager=_single_session_manager(rdb_session),
+                repository=repository,
+                system_setting_repository=SystemSettingRepository(),
+                binding_repository=binding_repository,
+            )
         )
         initial_snapshot = _snapshot()
         initial = await service.reconcile(initial_snapshot)
@@ -349,10 +360,12 @@ class TestRuntimeProviderBootstrapService:
         """A source cannot claim the logical identity owned by another source."""
         repository = RuntimeProviderRepository()
         service = RuntimeProviderBootstrapService(
-            session_manager=_single_session_manager(rdb_session),
-            repository=repository,
-            system_setting_repository=SystemSettingRepository(),
-            binding_repository=RuntimeProviderAuthBindingRepository(),
+            operations=RuntimeProviderBootstrapOperations(
+                session_manager=_single_session_manager(rdb_session),
+                repository=repository,
+                system_setting_repository=SystemSettingRepository(),
+                binding_repository=RuntimeProviderAuthBindingRepository(),
+            )
         )
         first = await service.reconcile(_snapshot(source_key="helm/one/azents"))
         second = await service.reconcile(_snapshot(source_key="helm/two/azents"))
@@ -377,10 +390,12 @@ class TestRuntimeProviderBootstrapService:
         """Withdrawal preserves the aggregate and records declaration absence."""
         repository = RuntimeProviderRepository()
         service = RuntimeProviderBootstrapService(
-            session_manager=_single_session_manager(rdb_session),
-            repository=repository,
-            system_setting_repository=SystemSettingRepository(),
-            binding_repository=RuntimeProviderAuthBindingRepository(),
+            operations=RuntimeProviderBootstrapOperations(
+                session_manager=_single_session_manager(rdb_session),
+                repository=repository,
+                system_setting_repository=SystemSettingRepository(),
+                binding_repository=RuntimeProviderAuthBindingRepository(),
+            )
         )
         initial = await service.reconcile(_snapshot())
 
@@ -420,10 +435,12 @@ class TestRuntimeProviderBootstrapService:
         """A force-retired logical identity remains reserved after source return."""
         repository = RuntimeProviderRepository()
         service = RuntimeProviderBootstrapService(
-            session_manager=_single_session_manager(rdb_session),
-            repository=repository,
-            system_setting_repository=SystemSettingRepository(),
-            binding_repository=RuntimeProviderAuthBindingRepository(),
+            operations=RuntimeProviderBootstrapOperations(
+                session_manager=_single_session_manager(rdb_session),
+                repository=repository,
+                system_setting_repository=SystemSettingRepository(),
+                binding_repository=RuntimeProviderAuthBindingRepository(),
+            )
         )
         initial = await service.reconcile(_snapshot())
         provider_id = initial.created_provider_ids[0]

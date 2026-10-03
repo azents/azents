@@ -33,6 +33,7 @@ from azents.core.external_channel_provider_effect import (
     ProviderOperationKey,
     ProviderTarget,
 )
+from azents.core.session_resource_authority import SessionResourceAuthority
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.external_channel.work import ExternalChannelWorkRepository
 from azents.repos.scheduled_task.data import ScheduledTask
@@ -50,6 +51,9 @@ from azents.repos.scheduled_task_cycle.progress_data import (
     ScheduledTaskProgressPreparation,
     ScheduledTaskTrackerEffect,
 )
+from azents.repos.scheduled_task_terminal_operations import (
+    ScheduledTaskTerminalEffectSnapshot,
+)
 from azents.runtime.transfer.runtime_to_provider import (
     RuntimeToProviderDeliveryExecutor,
 )
@@ -57,10 +61,6 @@ from azents.runtime.transfer.server_to_runtime import ServerToRuntimeTarget
 from azents.services.external_channel.channel_action import ExternalChannelActionService
 from azents.services.file_storage import FileStorage
 from azents.services.scheduled_task.channel import ScheduledTaskChannelService
-from azents.services.scheduled_task.terminal import (
-    ScheduledTaskTerminalEffectSnapshot,
-)
-from azents.services.session_resource_authority import SessionResourceAuthority
 from azents.testing.types import require_instance
 
 _NOW = datetime.datetime(2026, 8, 16, 12, 0, tzinfo=datetime.UTC)

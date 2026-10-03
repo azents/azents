@@ -7,8 +7,7 @@ import time
 from collections.abc import AsyncIterator, Awaitable
 from dataclasses import dataclass
 
-from azents.core.external_channel_projection import is_external_channel_projection
-from azents.services.external_channel.conversation import (
+from azents.core.external_channel_conversation_data import (
     ExternalChannelHistoryCredentialsInvalid,
     ExternalChannelHistoryDeadlineExceeded,
     ExternalChannelHistoryMalformed,
@@ -22,6 +21,7 @@ from azents.services.external_channel.conversation import (
     ExternalChannelHistoryTriggerMissing,
     ExternalChannelOperationDeadline,
 )
+from azents.core.external_channel_projection import is_external_channel_projection
 from azents.services.external_channel.discord_events import (
     DiscordEventExcluded,
     DiscordNormalizedMessage,

@@ -36,6 +36,16 @@ from azents.core.enums import (
     ExternalChannelResponseMode,
     WorkspaceUserRole,
 )
+from azents.core.exchange_file_errors import (
+    FileAccessDenied,
+    FileExpired,
+    FileNotFound,
+    FileRetentionOwnerConflict,
+    FileUnavailable,
+    SessionNotFound,
+    exchange_object_key_from_uri,
+)
+from azents.core.session_resource_authority import SessionResourceAuthority
 from azents.repos.agent.data import Agent
 from azents.repos.agent_session.data import AgentSession, SessionAgent
 from azents.repos.exchange_file import ExchangeFileRepository
@@ -54,24 +64,16 @@ from azents.repos.exchange_file.operations import (
     ExchangeFileMetadataFailure,
     ExchangeFileOperationRepository,
 )
+from azents.repos.input_attachment_claim import InputAttachmentClaimRepository
 from azents.repos.workspace_user.data import WorkspaceUser
-from azents.services.exchange_file import make_exchange_preview_thumbnail
-from azents.services.session_resource_authority import SessionResourceAuthority
+from azents.services.exchange_file import (
+    ExchangeFileService,
+    FileTooLarge,
+    make_exchange_preview_thumbnail,
+)
 from azents.testing.model_selection import (
     make_test_model_selection,
     make_test_selectable_model_options,
-)
-
-from . import (
-    ExchangeFileService,
-    FileAccessDenied,
-    FileExpired,
-    FileNotFound,
-    FileRetentionOwnerConflict,
-    FileTooLarge,
-    FileUnavailable,
-    SessionNotFound,
-    exchange_object_key_from_uri,
 )
 
 _NOW = datetime.datetime.now(datetime.timezone.utc)
@@ -1283,7 +1285,12 @@ async def test_claim_input_attachment_binds_preview_and_rejects_another_root() -
     source = created.value
     assert source.preview_thumbnail_file_id is not None
 
-    claim = await service.claim_input_attachments(
+    claim_repository = InputAttachmentClaimRepository(
+        exchange_file_repository=service.exchange_file_repository,
+        agent_session_repository=service.agent_session_repository,
+        workspace_user_repository=service.workspace_user_repository,
+    )
+    claim = await claim_repository.claim_input_attachments(
         _SessionBoundary._DBSession(),
         agent_id="agent-1",
         session_id="session-1",
@@ -1298,7 +1305,7 @@ async def test_claim_input_attachment_binds_preview_and_rejects_another_root() -
     assert claimed_source.retention_bound_at is not None
     assert claimed_preview.retention_bound_at == claimed_source.retention_bound_at
 
-    retry = await service.claim_input_attachments(
+    retry = await claim_repository.claim_input_attachments(
         _SessionBoundary._DBSession(),
         agent_id="agent-1",
         session_id="session-1",
@@ -1313,7 +1320,7 @@ async def test_claim_input_attachment_binds_preview_and_rejects_another_root() -
     root_lookup.return_value = SessionAgent.model_construct(
         agent_session_id="another-root-session"
     )
-    conflict = await service.claim_input_attachments(
+    conflict = await claim_repository.claim_input_attachments(
         _SessionBoundary._DBSession(),
         agent_id="agent-1",
         session_id="session-1",

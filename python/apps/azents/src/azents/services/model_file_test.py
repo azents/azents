@@ -14,6 +14,7 @@ from PIL import Image
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import AgentRunStatus, AgentSessionStatus, ModelFileStatus
+from azents.core.session_resource_authority import SessionResourceAuthority
 from azents.repos.model_file import model_file_storage_key
 from azents.repos.model_file.data import ModelFile, ModelFileCreate
 from azents.repos.model_file.operations import ModelFileOperationRepository
@@ -25,7 +26,6 @@ from azents.services.model_file import (
     model_file_size_limit_message,
     normalize_model_file_body,
 )
-from azents.services.session_resource_authority import SessionResourceAuthority
 
 
 class _SessionBoundary:

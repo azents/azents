@@ -1,4 +1,4 @@
-"""Chat session service data models."""
+"""Chat domain presentation and operation outcome models."""
 
 import dataclasses
 import datetime

@@ -7,6 +7,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import NamedTuple
 
+import httpx
 import pytest
 import pytest_asyncio
 import sqlalchemy as sa
@@ -40,6 +41,20 @@ from azents.services.xai_oauth.runtime import (
     _persist_refresh_success,
     ensure_runtime_tokens,
 )
+
+
+def _unexpected_http(_request: httpx.Request) -> httpx.Response:
+    """Fail if the controlled refresh hook leaks an actual transport request."""
+    raise AssertionError("OAuth repository fixtures must not perform external HTTP")
+
+
+@asynccontextmanager
+async def _client_factory() -> AsyncIterator[XaiOAuthClient]:
+    """Retain class-level refresh mocks behind a network-denying transport."""
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(_unexpected_http), timeout=20.0
+    ) as client:
+        yield XaiOAuthClient(client)
 
 
 class _Sessions:
@@ -264,7 +279,9 @@ async def test_provider_refresh_runs_after_completed_database_operations(
 
     monkeypatch.setattr(XaiOAuthClient, "refresh_tokens", refresh)
     result = await ensure_runtime_tokens(
-        integration=harness.integration, persistence_repository=harness.persistence
+        integration=harness.integration,
+        persistence_repository=harness.persistence,
+        client_factory=_client_factory,
     )
     assert harness.sessions.active_transactions == 0
     stored = await harness.persistence.load_integration(
@@ -477,7 +494,9 @@ async def test_concurrent_success_preserves_fresh_credentials_and_metadata(
             != harness.integration.config.last_refreshed_at
         )
         usable = await ensure_runtime_tokens(
-            integration=stored, persistence_repository=harness.persistence
+            integration=stored,
+            persistence_repository=harness.persistence,
+            client_factory=_client_factory,
         )
         assert usable == Success(stored)
     finally:

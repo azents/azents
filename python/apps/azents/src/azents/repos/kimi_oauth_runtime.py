@@ -37,6 +37,15 @@ class KimiOAuthRuntimeRepository:
         Depends(get_llm_provider_integration_repository),
     ]
 
+    async def load_integration(
+        self, *, integration_id: str
+    ) -> LLMProviderIntegrationWithSecrets | None:
+        """Capture detached credentials before a separate provider operation."""
+        async with self.session_manager() as session:
+            return await self.integration_repository.get_by_id_with_secrets(
+                session, integration_id
+            )
+
     async def persist_success(
         self,
         *,

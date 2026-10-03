@@ -8,11 +8,11 @@ from fastapi import Depends
 from azents.core.config import Config
 from azents.core.deps import get_appctx, get_config
 from azents.core.enums import ExternalChannelConversationLockBackend
-from azents.core.redis import create_redis_client
-from azents.services.external_channel.conversation import (
+from azents.core.external_channel_conversation_data import (
     ExternalChannelConversationLock,
     ExternalChannelParticipationLock,
 )
+from azents.core.redis import create_redis_client
 from azents.services.external_channel.conversation_lock import (
     InMemoryExternalChannelConversationLock,
     RedisExternalChannelConversationLock,

@@ -152,6 +152,7 @@ from azents.engine.tools.run_tool_to_file import (
 )
 from azents.engine.tools.xai_image_generation import XaiImagineClientFactory
 from azents.rdb.session import SessionManager
+from azents.repos.agent import AgentRepository
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import AgentRunCreate, EventCreate
 from azents.repos.agent_session import AgentSessionRepository
@@ -159,13 +160,19 @@ from azents.repos.agent_session.data import AgentSession, SessionAgent
 from azents.repos.agent_session_system_prompt_snapshot import (
     AgentSessionSystemPromptSnapshotRepository,
 )
-from azents.repos.compaction_operation import CompactionCommitContext
+from azents.repos.compaction_operation import (
+    CompactionCommitContext,
+    CompactionOperationRepository,
+)
+from azents.repos.engine_event_repositories import EngineEventRepositoryFactory
 from azents.repos.engine_input_projection import EngineInputProjectionRepository
 from azents.repos.engine_model_input_operation import (
     EngineModelInputOperationRepository,
 )
 from azents.repos.engine_output_operation import EngineOutputOperationRepository
+from azents.repos.engine_resolve import get_engine_resolve_repositories
 from azents.repos.exchange_file import ExchangeFileRepository
+from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.model_candidate_health import ModelCandidateHealthRepository
 from azents.repos.model_file import ModelFileRepository
 from azents.repos.model_file_pin import ModelFilePinRepository
@@ -175,6 +182,7 @@ from azents.repos.session_execution import (
     CanonicalExecutionOwnerGenerationStaleError,
 )
 from azents.repos.terminal_finalization import TerminalRunFinalizationRepository
+from azents.repos.toolkit import ToolkitRepository
 from azents.repos.toolkit_state.engine import ToolWorkingSetStore
 from azents.services.artifact import ArtifactService
 from azents.services.exchange_file import ExchangeFileService
@@ -183,6 +191,7 @@ from azents.services.model_listing.providers import _candidate_from_xai_api_key_
 from azents.services.model_metadata_projection import (
     project_integration_replacement_entries,
 )
+from azents.services.oauth_runtime_clients import create_runtime_oauth_client_factories
 from azents.services.xai_imagine import (
     XaiImagineAuthenticationError,
     XaiImagineClient,
@@ -610,11 +619,11 @@ class _Compactor:
         self.reason: str | None = None
         self.commit_context: CompactionCommitContext | None = None
 
-    def with_session_manager(
-        self, session_manager: SessionManager[AsyncSession]
+    def with_operations(
+        self, operations: CompactionOperationRepository
     ) -> "_Compactor":
         """Return the in-memory compactor for assembly tests."""
-        del session_manager
+        del operations
         return self
 
     async def compact(
@@ -672,11 +681,11 @@ class _Compactor:
 class _FailingCompactor:
     """Failing compactor for tests."""
 
-    def with_session_manager(
-        self, session_manager: SessionManager[AsyncSession]
+    def with_operations(
+        self, operations: CompactionOperationRepository
     ) -> "_FailingCompactor":
         """Return the failing compactor for assembly tests."""
-        del session_manager
+        del operations
         return self
 
     async def compact(
@@ -2257,7 +2266,7 @@ async def test_xai_oauth_refresh_updates_later_model_turn_credentials(
     """Reuse a forced-refresh token for later model calls and tool bindings."""
     tokens: list[str] = []
     execution = _Execution()
-    integration_repository = AsyncMock()
+    integration_repository = AsyncMock(spec=LLMProviderIntegrationRepository)
     integration_repository.get_by_id_with_secrets.return_value = SimpleNamespace(
         workspace_id="workspace-1",
         provider=LLMProvider.XAI_OAUTH,
@@ -2371,7 +2380,7 @@ async def test_xai_oauth_refresh_preserves_failure_classification(
     expected_message: str,
 ) -> None:
     """Keep forced-refresh credential, entitlement, and outage errors distinct."""
-    integration_repository = AsyncMock()
+    integration_repository = AsyncMock(spec=LLMProviderIntegrationRepository)
     integration_repository.get_by_id_with_secrets.return_value = SimpleNamespace(
         workspace_id="workspace-1",
         provider=LLMProvider.XAI_OAUTH,
@@ -3550,41 +3559,72 @@ def _agent_engine_adapter(
 ) -> AgentEngineAdapter:
     """Create AgentEngineAdapter for tests."""
     watchdog = make_test_model_stream_watchdog()
-    return AgentEngineAdapter(
-        sdk_factories=get_model_sdk_factories(),
+    store = tool_working_set_store or _ToolWorkingSetStore()
+    runs = run_repo or _RunRepo()
+    sessions = agent_session_repo or _AgentSessionRepo()
+    heads = session_head_repo or _EventSessionHeadRepo(None)
+    transcript = transcript_repo or _TranscriptRepo([])
+    system_prompts = AgentSessionSystemPromptSnapshotRepository()
+    file_pins = _ModelFilePinRepo()
+    model_operations = ModelOperationCompletionRepository(
+        agent_session_repository=AgentSessionRepository(),
+        agent_run_repository=AgentRunRepository(),
+        model_candidate_health_repository=ModelCandidateHealthRepository(
+            session_manager=session_manager
+        ),
+    )
+    terminal_operations = require_instance(
+        AsyncMock(spec=TerminalRunFinalizationRepository),
+        TerminalRunFinalizationRepository,
+    )
+    output_metadata = AsyncMock(spec=ProviderOutputOperationRepository)
+    integration = require_instance(
+        integration_repository or AsyncMock(spec=LLMProviderIntegrationRepository),
+        LLMProviderIntegrationRepository,
+    )
+    repository_factory = EngineEventRepositoryFactory(
         session_manager=session_manager,
-        tool_working_set_store=(tool_working_set_store or _ToolWorkingSetStore()),
+        run_repository=runs,
+        agent_session_repository=sessions,
+        session_head_repository=heads,
+        transcript_repository=transcript,
+        event_payload_repository=EventTranscriptRepository(),
+        tool_working_set_repository=store,
+        system_prompt_repository=system_prompts,
+        model_file_pin_repository=file_pins,
+        model_operation_repository=model_operations,
+        terminal_repository=terminal_operations,
+        output_metadata_repository=output_metadata,
+        compaction_repository=CompactionOperationRepository(
+            session_manager=session_manager,
+            transcript_repository=transcript,
+            agent_session_repository=sessions,
+            model_operation_completion_repository=model_operations,
+            tool_working_set_store=store,
+        ),
+        exchange_file_repository=ExchangeFileRepository(),
+        model_file_repository=ModelFileRepository(),
+    )
+    return AgentEngineAdapter(
+        repository_factory=repository_factory,
+        resolve_repositories=get_engine_resolve_repositories(
+            session_manager=session_manager,
+            agent_repository=AgentRepository(),
+            integration_repository=integration,
+            toolkit_repository=ToolkitRepository(cipher=None),
+        ),
+        oauth_clients=create_runtime_oauth_client_factories(),
+        sdk_factories=get_model_sdk_factories(),
         artifact_service=artifact_service or _ArtifactService(),
         exchange_file_service=exchange_file_service or _ExchangeFileService(),
         model_file_service=model_file_service or _ModelFileService(),
-        provider_output_operation_repository=AsyncMock(
-            spec=ProviderOutputOperationRepository
-        ),
-        integration_repository=integration_repository or AsyncMock(),
+        provider_output_operation_repository=output_metadata,
         metadata_service=make_test_model_metadata_service(snapshot=None),
-        xai_imagine_client_factory=(
-            xai_imagine_client_factory or _xai_imagine_client_factory()
-        ),
+        xai_imagine_client_factory=xai_imagine_client_factory
+        or _xai_imagine_client_factory(),
         config=config or EventEngineAdapterConfig(),
         model_stream_watchdog=watchdog,
         execution_factory=execution_factory or (lambda **kwargs: _Execution()),
-        run_repo=run_repo or _RunRepo(),
-        agent_session_repo=agent_session_repo or _AgentSessionRepo(),
-        session_head_repo=session_head_repo or _EventSessionHeadRepo(None),
-        transcript_repo=transcript_repo or _TranscriptRepo([]),
-        system_prompt_snapshot_repo=AgentSessionSystemPromptSnapshotRepository(),
-        model_file_pin_repo=_ModelFilePinRepo(),
-        model_operation_completion_repository=ModelOperationCompletionRepository(
-            agent_session_repository=AgentSessionRepository(),
-            agent_run_repository=AgentRunRepository(),
-            model_candidate_health_repository=ModelCandidateHealthRepository(
-                session_manager=session_manager
-            ),
-        ),
-        terminal_finalization_repository=require_instance(
-            AsyncMock(spec=TerminalRunFinalizationRepository),
-            TerminalRunFinalizationRepository,
-        ),
         compactor=compactor or _Compactor(),
         summary_model_call=summary_model_call
         or functools.partial(

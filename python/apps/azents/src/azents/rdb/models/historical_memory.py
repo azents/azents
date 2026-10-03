@@ -44,7 +44,7 @@ class RDBHistoricalMemorySource(RDBModel):
         postgresql_where=sa.text("prepared_at IS NOT NULL"),
     )
     IX_ADMITTED_UNPREPARED = sa.Index(
-        "ix_historical_memory_sources_admitted_unprepared",
+        "ix_historical_memory_sources_admitted_at",
         "admitted_at",
         postgresql_where=sa.text("prepared_at IS NULL"),
     )

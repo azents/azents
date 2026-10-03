@@ -1,4 +1,4 @@
-"""Declarative projection of client tools that publish conversation."""
+"""Typed historical projection of client tools that publish conversation."""
 
 from __future__ import annotations
 
@@ -6,7 +6,9 @@ import dataclasses
 import json
 from collections.abc import Mapping
 from types import MappingProxyType
-from typing import Literal
+from typing import Literal, NamedTuple
+
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from azents.engine.events.output_parts import lower_output_to_text
 from azents.engine.events.sensitive_text import (
@@ -17,37 +19,21 @@ from azents.engine.events.types import ClientToolCallPayload, ClientToolResultPa
 
 ConversationSpeaker = Literal["assistant"]
 ConversationDeliveryStatus = Literal["delivered", "failed", "unknown"]
-JsonPath = tuple[str, ...]
 
 
-@dataclasses.dataclass(frozen=True)
-class JsonValueExclusion:
-    """Exclude a projection when one JSON path has a listed scalar value."""
+class RenderedConversationContext(NamedTuple):
+    """One named context value ready for historical text rendering."""
 
-    path: JsonPath
-    values: frozenset[str]
-
-
-@dataclasses.dataclass(frozen=True)
-class JsonArrayStatusSelector:
-    """Select a delivery status from one array of JSON objects."""
-
-    array_path: JsonPath
-    match_field: str
-    match_value: str
-    status_field: str
+    label: str
+    value: str
 
 
 @dataclasses.dataclass(frozen=True)
 class ConversationToolProjectionSpec:
-    """Declarative participant-visible projection for one durable tool name."""
+    """Participant attribution for one registered durable tool name."""
 
     durable_tool_name: str
     speaker: ConversationSpeaker
-    text_paths: tuple[JsonPath, ...]
-    context_paths: tuple[JsonPath, ...]
-    exclusions: tuple[JsonValueExclusion, ...]
-    result_status: JsonArrayStatusSelector | None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -57,7 +43,7 @@ class ConversationalToolProjection:
     tool_name: str
     speaker: ConversationSpeaker
     text: str | None
-    context: tuple[tuple[str, str], ...]
+    context: tuple[RenderedConversationContext, ...]
     delivery_status: ConversationDeliveryStatus | None
 
     def render(self) -> str:
@@ -70,112 +56,14 @@ class ConversationalToolProjection:
             lines.append(self.text)
         if self.context:
             lines.append("Scoped work state:")
-            lines.extend(f"- {label}: {value}" for label, value in self.context)
+            lines.extend(f"- {item.label}: {item.value}" for item in self.context)
         return "\n".join(lines)
 
 
-_CHANNEL_ACTION_SPEC = ConversationToolProjectionSpec(
-    durable_tool_name="channel_action",
-    speaker="assistant",
-    text_paths=(("message",),),
-    context_paths=(("title",), ("todo_update",)),
-    exclusions=(JsonValueExclusion(path=("mode",), values=frozenset({"ignore"})),),
-    result_status=JsonArrayStatusSelector(
-        array_path=("outcomes",),
-        match_field="operation",
-        match_value="reply",
-        status_field="status",
-    ),
-)
-
-CONVERSATIONAL_TOOL_PROJECTIONS: Mapping[str, ConversationToolProjectionSpec] = (
-    MappingProxyType(
-        {
-            _CHANNEL_ACTION_SPEC.durable_tool_name: _CHANNEL_ACTION_SPEC,
-        }
-    )
-)
-
-
-def project_conversational_tool_call(
-    call: ClientToolCallPayload,
-    result: ClientToolResultPayload | None,
-) -> ConversationalToolProjection | None:
-    """Project one registered client call into participant-visible conversation."""
-    spec = CONVERSATIONAL_TOOL_PROJECTIONS.get(call.name)
-    if spec is None or call.wire_dialect != "json_function":
-        return None
-    arguments = _decode_object(call.arguments)
-    if arguments is None or _is_excluded(arguments, spec.exclusions):
-        return None
-
-    text = _first_text(arguments, spec.text_paths)
-    context = tuple(
-        rendered
-        for path in spec.context_paths
-        if (rendered := _render_context(arguments, path)) is not None
-    )
-    if text is None and not context:
-        return None
-    delivery_status = _delivery_status(result, spec.result_status)
-    return ConversationalToolProjection(
-        tool_name=call.name,
-        speaker=spec.speaker,
-        text=text,
-        context=context,
-        delivery_status=delivery_status if text is not None else None,
-    )
-
-
-def _decode_object(source: str) -> dict[str, object] | None:
-    try:
-        value = json.loads(source)
-    except json.JSONDecodeError:
-        return None
-    if not isinstance(value, dict):
-        return None
-    return {str(key): item for key, item in value.items()}
-
-
-def _value_at(value: object, path: JsonPath) -> object | None:
-    current = value
-    for segment in path:
-        if not isinstance(current, dict) or segment not in current:
-            return None
-        current = current[segment]
-    return current
-
-
-def _is_excluded(
-    arguments: dict[str, object],
-    exclusions: tuple[JsonValueExclusion, ...],
-) -> bool:
-    for exclusion in exclusions:
-        value = _value_at(arguments, exclusion.path)
-        if isinstance(value, str) and value in exclusion.values:
-            return True
-    return False
-
-
-def _first_text(
-    arguments: dict[str, object],
-    paths: tuple[JsonPath, ...],
-) -> str | None:
-    for path in paths:
-        value = _value_at(arguments, path)
-        if isinstance(value, str) and value.strip():
-            return redact_sensitive_text(value.strip())
-    return None
-
-
-def _render_context(
-    arguments: dict[str, object],
-    path: JsonPath,
-) -> tuple[str, str] | None:
-    value = _value_at(arguments, path)
+def _render_context(value: object, *, label: str) -> RenderedConversationContext | None:
+    """Normalize one historical context value at the decoding boundary."""
     if value is None or value == [] or value == {}:
         return None
-    label = ".".join(path)
     if isinstance(value, str):
         rendered = redact_sensitive_text(value.strip())
         if not rendered:
@@ -187,36 +75,137 @@ def _render_context(
             separators=(",", ":"),
             sort_keys=True,
         )
-    return label, rendered
+    return RenderedConversationContext(label=label, value=rendered)
+
+
+class _ChannelActionConversationInput(BaseModel):
+    """Decode the historical conversation view, not today's executable input.
+
+    Historical calls may omit current execution fields or contain unrelated
+    fields. Invalid optional text is ignored and arbitrary context is rendered
+    at ingress, preserving the existing historical projection contract.
+    """
+
+    model_config = ConfigDict(extra="ignore", frozen=True)
+    ignored: bool = Field(default=False, validation_alias="mode")
+    text: str | None = Field(default=None, validation_alias="message")
+    title: RenderedConversationContext | None = None
+    todo_update: RenderedConversationContext | None = None
+
+    @field_validator("ignored", mode="before")
+    @classmethod
+    def decode_mode(cls, value: object) -> bool:
+        return isinstance(value, str) and value == "ignore"
+
+    @field_validator("text", mode="before")
+    @classmethod
+    def decode_text(cls, value: object) -> str | None:
+        if isinstance(value, str) and value.strip():
+            return redact_sensitive_text(value.strip())
+        return None
+
+    @field_validator("title", mode="before")
+    @classmethod
+    def decode_title(cls, value: object) -> RenderedConversationContext | None:
+        return _render_context(value, label="title")
+
+    @field_validator("todo_update", mode="before")
+    @classmethod
+    def decode_todo_update(cls, value: object) -> RenderedConversationContext | None:
+        return _render_context(value, label="todo_update")
+
+
+class _ChannelActionReplyOutcome(BaseModel):
+    """Typed reply evidence with tolerant historical field decoding."""
+
+    model_config = ConfigDict(extra="ignore", frozen=True)
+    operation: str | None = None
+    status: str | None = None
+
+    @field_validator("operation", "status", mode="before")
+    @classmethod
+    def decode_text(cls, value: object) -> str | None:
+        return value if isinstance(value, str) else None
+
+
+class _ChannelActionConversationResult(BaseModel):
+    """Decode only ordered historical outcomes; ignore unrelated output fields."""
+
+    model_config = ConfigDict(extra="ignore", frozen=True)
+    outcomes: tuple[_ChannelActionReplyOutcome, ...] = ()
+
+    @field_validator("outcomes", mode="before")
+    @classmethod
+    def decode_outcomes(cls, value: object) -> tuple[_ChannelActionReplyOutcome, ...]:
+        if not isinstance(value, list):
+            return ()
+        return tuple(
+            _ChannelActionReplyOutcome.model_validate(item)
+            for item in value
+            if isinstance(item, dict)
+        )
+
+
+_CHANNEL_ACTION_SPEC = ConversationToolProjectionSpec(
+    durable_tool_name="channel_action",
+    speaker="assistant",
+)
+CONVERSATIONAL_TOOL_PROJECTIONS: Mapping[str, ConversationToolProjectionSpec] = (
+    MappingProxyType({_CHANNEL_ACTION_SPEC.durable_tool_name: _CHANNEL_ACTION_SPEC})
+)
+
+
+def project_conversational_tool_call(
+    call: ClientToolCallPayload,
+    result: ClientToolResultPayload | None,
+) -> ConversationalToolProjection | None:
+    """Project one registered client call into participant-visible conversation."""
+    spec = CONVERSATIONAL_TOOL_PROJECTIONS.get(call.name)
+    if spec is None or call.wire_dialect != "json_function":
+        return None
+    try:
+        arguments = _ChannelActionConversationInput.model_validate_json(call.arguments)
+    except ValidationError:
+        return None
+    if arguments.ignored:
+        return None
+    context = tuple(
+        item for item in (arguments.title, arguments.todo_update) if item is not None
+    )
+    if arguments.text is None and not context:
+        return None
+    return ConversationalToolProjection(
+        tool_name=call.name,
+        speaker=spec.speaker,
+        text=arguments.text,
+        context=context,
+        delivery_status=_delivery_status(result)
+        if arguments.text is not None
+        else None,
+    )
 
 
 def _delivery_status(
     result: ClientToolResultPayload | None,
-    selector: JsonArrayStatusSelector | None,
-) -> ConversationDeliveryStatus | None:
-    if selector is None:
-        return None
+) -> ConversationDeliveryStatus:
     if result is None:
         return "unknown"
     if result.status == "failed":
         return "failed"
     if result.status != "completed":
         return "unknown"
-    payload = _decode_object(lower_output_to_text(result.output))
-    if payload is None:
+    try:
+        payload = _ChannelActionConversationResult.model_validate_json(
+            lower_output_to_text(result.output)
+        )
+    except ValidationError:
         return "unknown"
-    values = _value_at(payload, selector.array_path)
-    if not isinstance(values, list):
-        return "unknown"
-    for value in values:
-        if not isinstance(value, dict):
+    for outcome in payload.outcomes:
+        if outcome.operation != "reply":
             continue
-        if value.get(selector.match_field) != selector.match_value:
-            continue
-        status = value.get(selector.status_field)
-        if status == "delivered":
+        if outcome.status == "delivered":
             return "delivered"
-        if status in {"failed", "not_attempted"}:
+        if outcome.status in {"failed", "not_attempted"}:
             return "failed"
         return "unknown"
     return "unknown"

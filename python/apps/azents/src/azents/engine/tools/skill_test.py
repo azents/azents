@@ -19,6 +19,10 @@ from azents.core.runtime_capabilities import (
     RuntimeCapabilityResolver,
     RuntimeCapabilitySnapshot,
 )
+from azents.core.session_resource_authority import (
+    SessionExecutionOwner,
+    SessionResourceAuthority,
+)
 from azents.core.skill_projection import (
     SkillProjectionItem,
     SkillProjectionSnapshot,
@@ -40,7 +44,6 @@ from azents.engine.tools.runtime_io import (
 from azents.engine.tools.skill import (
     SkillProjectionService,
     SkillRuntimeFileReader,
-    SkillStateStore,
     SkillToolkit,
     load_skill_projection_for_actions,
     make_load_skill_tool,
@@ -57,13 +60,10 @@ from azents.repos.session_execution import (
     CanonicalExecutionOwnerGenerationStaleError,
 )
 from azents.repos.session_workspace_project.data import SessionWorkspaceProject
+from azents.repos.skill_state_store import SkillStateStore
 from azents.services.agent_runtime.lifecycle_data import (
     RuntimeOperationTarget,
     RuntimeOperationTargetResolver,
-)
-from azents.services.session_resource_authority import (
-    SessionExecutionOwner,
-    SessionResourceAuthority,
 )
 from azents.services.vfs import VfsFileResolutionError, VfsResolvedFile
 

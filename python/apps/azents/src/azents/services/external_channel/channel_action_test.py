@@ -31,6 +31,7 @@ from azents.core.external_channel_provider_effect import (
     ProviderOperationKey,
     ProviderTarget,
 )
+from azents.core.session_resource_authority import SessionResourceAuthority
 from azents.rdb.session import SessionManager
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSessionCreate
@@ -57,7 +58,6 @@ from azents.services.external_channel.discord_settings_scope import (
     build_discord_binding_settings_open_custom_id,
 )
 from azents.services.external_channel.slack_events import SlackControlMessageResult
-from azents.services.session_resource_authority import SessionResourceAuthority
 from azents.testing.types import require_instance
 
 _SESSION_URL = "https://azents.example/w/team/agents/agent-1/sessions/session-1"

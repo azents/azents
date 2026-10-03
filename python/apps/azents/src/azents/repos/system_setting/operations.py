@@ -7,6 +7,7 @@ from typing import Annotated
 from azcommon.datetime import tznow
 from azcommon.uuid import uuid7
 from fastapi import Depends
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.system_setting import (
@@ -46,6 +47,9 @@ from azents.core.system_setting_data import (
 from azents.core.system_setting_payload import SystemSettingPayloadResolver
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.repos.github_platform_system_setting.data import (
+    PlatformGitHubAppConfirmationImpact,
+)
 from azents.repos.github_platform_system_setting.operations import (
     PlatformGitHubAppImpactRepository,
 )
@@ -396,19 +400,25 @@ class SystemSettingsRepository:
                 current_impact = await self.github_impact.resolve_impact_in_session(
                     session, current_resolved, candidate_resolved
                 )
-                if current_impact != candidate.impact:
+                try:
+                    candidate_impact = (
+                        PlatformGitHubAppConfirmationImpact.model_validate(
+                            candidate.impact
+                        )
+                    )
+                except ValidationError as error:
                     raise SystemSettingImpactChanged(
                         section=section,
                         candidate_id=candidate.id,
-                        current_impact=current_impact,
+                        current_impact=current_impact.model_dump(mode="json"),
+                    ) from error
+                if current_impact != candidate_impact:
+                    raise SystemSettingImpactChanged(
+                        section=section,
+                        candidate_id=candidate.id,
+                        current_impact=current_impact.model_dump(mode="json"),
                     )
-                raw_actions = current_impact.get("confirmation_actions")
-                allowed_actions = (
-                    tuple(item for item in raw_actions if isinstance(item, str))
-                    if isinstance(raw_actions, (list, tuple))
-                    else ()
-                )
-                if confirmation_action not in allowed_actions:
+                if confirmation_action not in current_impact.confirmation_actions:
                     raise ValueError(
                         "Unsupported Platform GitHub App confirmation action."
                     )

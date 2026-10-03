@@ -3,7 +3,6 @@
 import datetime
 from typing import assert_never
 
-import httpx
 from azcommon.result import Failure, Result, Success
 
 from azents.core.enums import LLMProvider
@@ -16,8 +15,8 @@ from azents.repos.kimi_oauth_runtime_data import (
     kimi_oauth_credentials,
 )
 from azents.repos.llm_provider_integration.data import LLMProviderIntegrationWithSecrets
+from azents.services.oauth_runtime_clients import KimiOAuthClientFactory
 
-from .client import KimiOAuthClient
 from .data import ProviderRejected, ProviderUnavailable
 
 _REFRESH_WINDOW = datetime.timedelta(minutes=5)
@@ -27,6 +26,7 @@ async def ensure_runtime_tokens(
     *,
     integration: LLMProviderIntegrationWithSecrets,
     persistence_repository: KimiOAuthRuntimeRepository,
+    client_factory: KimiOAuthClientFactory,
 ) -> Result[LLMProviderIntegrationWithSecrets, ProviderRejected | ProviderUnavailable]:
     """Ensure Kimi token freshness using the existing status and time predicates."""
     if integration.provider != LLMProvider.KIMI_OAUTH:
@@ -47,6 +47,7 @@ async def ensure_runtime_tokens(
     return await refresh_runtime_tokens(
         integration=integration,
         persistence_repository=persistence_repository,
+        client_factory=client_factory,
     )
 
 
@@ -54,14 +55,15 @@ async def refresh_runtime_tokens(
     *,
     integration: LLMProviderIntegrationWithSecrets,
     persistence_repository: KimiOAuthRuntimeRepository,
+    client_factory: KimiOAuthClientFactory,
 ) -> Result[LLMProviderIntegrationWithSecrets, ProviderRejected | ProviderUnavailable]:
     """Perform the existing bounded HTTP refresh before database finalization."""
     credentials = kimi_oauth_credentials(integration)
     if integration.provider != LLMProvider.KIMI_OAUTH or credentials is None:
         return Failure(ProviderRejected(reason="Kimi OAuth integration is invalid"))
     secrets, config = credentials
-    async with httpx.AsyncClient(timeout=20.0) as http_client:
-        refresh_result = await KimiOAuthClient(http_client).refresh_tokens(
+    async with client_factory() as client:
+        refresh_result = await client.refresh_tokens(
             refresh_token=secrets.refresh_token,
             device_id=secrets.device_id,
             connection_method=KimiOAuthConnectionMethod(config.connection_method),

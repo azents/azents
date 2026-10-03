@@ -59,10 +59,8 @@ from azents.repos.mailbox import MailboxRepository
 from azents.repos.mailbox.data import MailboxItemCreate
 from azents.repos.scheduled_task.data import ScheduledTaskCreate
 from azents.repos.scheduled_task.repository import ScheduledTaskRepository
-from azents.repos.scheduled_task_cycle import (
-    ScheduledTaskCycleRepository,
-    ScheduledTaskCycleSnapshot,
-)
+from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
+from azents.repos.scheduled_task_cycle.data import ScheduledTaskCycleSnapshot
 from azents.repos.toolkit_state import ToolkitStateRepository
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate

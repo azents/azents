@@ -7,16 +7,16 @@ from typing import cast
 import pytest
 
 from azents.core.config import Config
+from azents.core.external_channel_ingestion import (
+    ExternalChannelIngestionOutcome,
+    ExternalChannelIngestionOutcomeKind,
+    ExternalChannelIngestionReason,
+)
 from azents.repos.external_channel.data import ExternalChannelInteraction
 from azents.services.external_channel.discord_selector import (
     DiscordSelectorResponseService,
     build_discord_selector_custom_id,
     parse_discord_selector_custom_id,
-)
-from azents.services.external_channel.ingestion import (
-    ExternalChannelIngestionOutcome,
-    ExternalChannelIngestionOutcomeKind,
-    ExternalChannelIngestionReason,
 )
 from azents.services.external_channel.ingestion_replay import (
     ExternalChannelIngestionReplayService,

@@ -10,6 +10,11 @@ from sqlalchemy.sql.selectable import Subquery
 
 from azents.core.crypto import CredentialCipher
 from azents.core.enums import ToolkitScopeType
+from azents.core.toolkit_errors import (
+    DuplicateAgentToolkit,
+    DuplicateScope,
+    NotFound,
+)
 from azents.rdb.models.toolkit import (
     RDBAgentToolkit,
     RDBAgentToolkitNamespaceReservation,
@@ -21,13 +26,10 @@ from azents.rdb.models.workspace_user import RDBWorkspaceUser
 from .data import (
     AgentToolkit,
     AgentToolkitCreate,
-    DuplicateAgentToolkit,
-    DuplicateScope,
     EffectiveToolkitConfig,
     EffectiveToolkitNamespaceMismatch,
     EffectiveToolkitNamespaceMissing,
     EffectiveToolkitSource,
-    NotFound,
     ToolkitConfig,
     ToolkitCreate,
     ToolkitScope,
@@ -77,7 +79,7 @@ class ToolkitRepository:
         :param cipher: Credential encryption/decryption object. Required for
             credentials read/write.
         """
-        self._cipher = cipher
+        self.cipher = cipher
 
     async def create(
         self,
@@ -411,18 +413,18 @@ class ToolkitRepository:
         """Encrypt plaintext. Return None when None."""
         if plaintext is None:
             return None
-        if self._cipher is None:
+        if self.cipher is None:
             msg = "cipher is required to encrypt credentials"
             raise RuntimeError(msg)
-        return self._cipher.encrypt(plaintext)
+        return self.cipher.encrypt(plaintext)
 
     def _decrypt(self, ciphertext: str | None) -> str | None:
         """Decrypt ciphertext. Return None when None."""
         if ciphertext is None:
             return None
-        if self._cipher is None:
+        if self.cipher is None:
             return None
-        return self._cipher.decrypt(ciphertext)
+        return self.cipher.decrypt(ciphertext)
 
     def _build(self, rdb: RDBToolkitConfig) -> ToolkitConfig:
         """Convert RDB model to domain model."""

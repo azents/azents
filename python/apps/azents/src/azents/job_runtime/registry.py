@@ -9,9 +9,11 @@ from azents.services.external_channel.ingress_queue import (
     EXTERNAL_CHANNEL_INGRESS_JOB_HANDLER_KEY,
     execute_external_channel_ingress_job,
 )
+from azents.services.historical_memory.constants import (
+    HISTORICAL_MEMORY_PREPARE_HANDLER_KEY,
+)
 from azents.services.historical_memory.job import (
     HISTORICAL_MEMORY_MAX_CONCURRENCY,
-    HISTORICAL_MEMORY_PREPARE_HANDLER_KEY,
     execute_historical_memory_preparation_job,
 )
 

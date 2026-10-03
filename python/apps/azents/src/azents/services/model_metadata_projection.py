@@ -8,7 +8,6 @@ import json
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     LLMCatalogEntryVisibility,
@@ -24,18 +23,19 @@ from azents.core.model_capability_projection import (
 )
 from azents.core.model_catalog_identity import system_catalog_models
 from azents.core.model_catalog_source import CatalogSourceModel
+from azents.core.model_metadata_projection_data import (
+    SystemCatalogCandidateSummary,
+    SystemCatalogCutoverSummary,
+)
 from azents.engine.providers.model_profiles import (
     RUNTIME_MODEL_PROFILE_RESOLVER_REVISION,
     protocol_for_provider,
 )
-from azents.rdb.deps import get_session_manager
-from azents.rdb.session import SessionManager
-from azents.repos.llm_catalog import LLMCatalogRepository
 from azents.repos.llm_catalog.data import (
     CatalogProjectionProvenance,
-    CatalogSyncAlreadyRunning,
     LLMCatalogEntryCreate,
 )
+from azents.repos.model_metadata_operations import ModelMetadataProjectionOperations
 from azents.repos.model_metadata_source_data import ModelMetadataSourceSnapshot
 from azents.services.model_listing.data import NormalizedModelCandidate
 from azents.services.model_listing.providers import _openai_supported_execution_options
@@ -51,48 +51,17 @@ _SYSTEM_PROVIDERS = (
 )
 
 
-@dataclasses.dataclass(frozen=True)
-class SystemCatalogCandidateSummary:
-    """One complete replacement projection awaiting atomic publication."""
-
-    provider: LLMProvider
-    catalog_id: str
-    candidate_snapshot_id: str
-    expected_current_snapshot_id: str | None
-    visible_count: int
-    hidden_count: int
-    projection_fingerprint: str
-
-
-@dataclasses.dataclass(frozen=True)
-class SystemCatalogCutoverSummary:
-    """Result of an existing scheduled or administrator publication operation."""
-
-    provider: LLMProvider
-    catalog_id: str
-    snapshot_id: str | None
-    visible_count: int
-    hidden_count: int
-    projection_fingerprint: str
-    status: str = "succeeded"
-
-
 class ModelMetadataProjectionError(RuntimeError):
     """Source evidence cannot produce a complete system projection."""
-
-
-class _SystemCatalogPublicationBusy(RuntimeError):
-    """One catalog in an atomic system publication set is already running."""
 
 
 @dataclasses.dataclass(frozen=True)
 class SystemCatalogReplacementProjectionService:
     """Refresh and publish stored catalogs through the established lifecycle."""
 
-    session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+    operations: Annotated[
+        ModelMetadataProjectionOperations, Depends(ModelMetadataProjectionOperations)
     ]
-    catalog_repository: Annotated[LLMCatalogRepository, Depends(LLMCatalogRepository)]
     source_sync_service: Annotated[
         ModelMetadataSourceSyncService, Depends(ModelMetadataSourceSyncService)
     ]
@@ -113,20 +82,10 @@ class SystemCatalogReplacementProjectionService:
         source = await self.source_sync_service.sync_current_source()
         providers = (provider,) if provider is not None else _SYSTEM_PROVIDERS
         candidates = await self._prepare_candidates(source=source, providers=providers)
-        attempt_ids: dict[str, str] = {}
-        try:
-            async with self.session_manager() as session:
-                for candidate in candidates:
-                    attempt = await self.catalog_repository.begin_attempt(
-                        session,
-                        catalog_id=candidate.catalog_id,
-                        source_key=source.source_key,
-                        started_at=datetime.datetime.now(datetime.UTC),
-                    )
-                    if isinstance(attempt, CatalogSyncAlreadyRunning):
-                        raise _SystemCatalogPublicationBusy
-                    attempt_ids[candidate.catalog_id] = attempt
-        except _SystemCatalogPublicationBusy:
+        attempt_ids = await self.operations.begin_publication(
+            candidates=candidates, source_key=source.source_key
+        )
+        if attempt_ids is None:
             return [
                 SystemCatalogCutoverSummary(
                     provider=item.provider,
@@ -139,63 +98,18 @@ class SystemCatalogReplacementProjectionService:
                 )
                 for item in candidates
             ]
-        snapshot_ids: dict[str, str] = {}
         try:
-            async with self.session_manager() as session:
-                for candidate in candidates:
-                    latest = await (
-                        self.catalog_repository.lock_catalog_for_attempt_completion
-                    )(session, catalog_id=candidate.catalog_id)
-                    if latest != attempt_ids[candidate.catalog_id]:
-                        raise RuntimeError("The system catalog refresh was superseded.")
-                    snapshot_ids[
-                        candidate.catalog_id
-                    ] = await self.catalog_repository.publish_candidate_snapshot(
-                        session,
-                        catalog_id=candidate.catalog_id,
-                        candidate_snapshot_id=candidate.candidate_snapshot_id,
-                        expected_current_snapshot_id=candidate.expected_current_snapshot_id,
-                        expected_catalog_configuration_version=None,
-                        expected_projection_fingerprint=candidate.projection_fingerprint,
-                        expected_source_key=source.source_key,
-                        expected_source_snapshot_id=source.id,
-                        fence_latest_attempt=True,
-                        expected_latest_attempt_id=attempt_ids[candidate.catalog_id],
-                    )
-                for candidate in candidates:
-                    await self.catalog_repository.mark_attempt_succeeded(
-                        session,
-                        attempt_id=attempt_ids[candidate.catalog_id],
-                        finished_at=datetime.datetime.now(datetime.UTC),
-                        produced_snapshot_id=snapshot_ids[candidate.catalog_id],
-                        fetched_count=source.model_count,
-                        matched_count=candidate.visible_count + candidate.hidden_count,
-                        skipped_count=0,
-                        hidden_count=candidate.hidden_count,
-                        diagnostics={
-                            "provider": candidate.provider.value,
-                            "source_snapshot_id": source.id,
-                            "projection_fingerprint": candidate.projection_fingerprint,
-                        },
-                    )
+            snapshot_ids = await self.operations.publish(
+                candidates=candidates, source=source, attempt_ids=attempt_ids
+            )
         except Exception as error:
-            async with self.session_manager() as session:
-                for candidate in candidates:
-                    await self.catalog_repository.mark_attempt_failed(
-                        session,
-                        attempt_id=attempt_ids[candidate.catalog_id],
-                        finished_at=datetime.datetime.now(datetime.UTC),
-                        failure_code=type(error).__name__,
-                        failure_message=str(error),
-                        action_hint=(
-                            "Check replacement source and projection readiness."
-                        ),
-                        diagnostics={
-                            "provider": candidate.provider.value,
-                            "source_snapshot_id": source.id,
-                            "projection_fingerprint": candidate.projection_fingerprint,
-                        },
-                    )
+            await self.operations.fail_publication(
+                candidates=candidates,
+                source_snapshot_id=source.id,
+                attempt_ids=attempt_ids,
+                failure_code=type(error).__name__,
+                failure_message=str(error),
+            )
             raise
         return [
             SystemCatalogCutoverSummary(
@@ -205,6 +119,7 @@ class SystemCatalogReplacementProjectionService:
                 visible_count=item.visible_count,
                 hidden_count=item.hidden_count,
                 projection_fingerprint=item.projection_fingerprint,
+                status="succeeded",
             )
             for item in candidates
         ]
@@ -236,13 +151,9 @@ class SystemCatalogReplacementProjectionService:
                 genai_prices_version=None,
                 projection_fingerprint=fingerprint,
             )
-            async with self.session_manager() as session:
-                catalog = await self.catalog_repository.ensure_system_catalog(
-                    session, provider=provider, purpose=LLMCatalogPurpose.CONVERSATION
-                )
-                candidate_id = await self.catalog_repository.create_candidate_snapshot(
-                    session,
-                    catalog=catalog,
+            summaries.append(
+                await self.operations.create_candidate(
+                    provider=provider,
                     entries=entries,
                     diagnostics={
                         "source_kind": source.source_kind,
@@ -252,21 +163,6 @@ class SystemCatalogReplacementProjectionService:
                         "effective_date": effective_date.isoformat(),
                     },
                     provenance=provenance,
-                    catalog_configuration_version=None,
-                )
-            visible = sum(
-                entry.visibility_status == LLMCatalogEntryVisibility.SELECTABLE
-                for entry in entries
-            )
-            summaries.append(
-                SystemCatalogCandidateSummary(
-                    provider=provider,
-                    catalog_id=catalog.id,
-                    candidate_snapshot_id=candidate_id,
-                    expected_current_snapshot_id=catalog.current_snapshot_id,
-                    visible_count=visible,
-                    hidden_count=len(entries) - visible,
-                    projection_fingerprint=fingerprint,
                 )
             )
         return summaries

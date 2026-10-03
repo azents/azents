@@ -12,6 +12,7 @@ from azents.core.enums import (
     ExchangeFileProvenanceKind,
     ExchangeFileStatus,
 )
+from azents.core.session_resource_authority import SessionResourceAuthority
 from azents.engine.run.types import FunctionTool, FunctionToolError, FunctionToolResult
 from azents.engine.tooling.execution_context import client_tool_execution_context
 from azents.engine.tools.present_file import (
@@ -27,7 +28,6 @@ from azents.runtime.transfer.present_file_publication import (
 from azents.runtime.transfer.runtime_to_server import RuntimeToServerTransferError
 from azents.runtime.transfer.server_to_runtime import ServerToRuntimeTarget
 from azents.services.runtime_storage_error import RuntimeStorageError
-from azents.services.session_resource_authority import SessionResourceAuthority
 
 _NOW = datetime.datetime.now(datetime.timezone.utc)
 _TARGET = ServerToRuntimeTarget(runtime_id="runtime-1", desired_generation=3)

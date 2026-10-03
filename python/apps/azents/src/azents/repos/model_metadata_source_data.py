@@ -4,7 +4,10 @@ import datetime
 from dataclasses import dataclass
 
 from azents.core.enums import LLMCatalogAttemptStatus
-from azents.core.model_catalog_source import CatalogSourcePayload
+from azents.core.model_catalog_source import (
+    CatalogSourcePayload,
+    ModelMetadataSourceKind,
+)
 
 
 @dataclass(frozen=True)
@@ -13,7 +16,7 @@ class ModelMetadataSourceSnapshot:
 
     id: str
     source_key: str
-    source_kind: str
+    source_kind: ModelMetadataSourceKind
     source_schema_version: str
     source_url: str
     source_hash: str

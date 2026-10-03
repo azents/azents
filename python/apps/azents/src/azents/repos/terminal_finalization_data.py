@@ -19,4 +19,4 @@ class TerminalFinalizationOutcome:
 
     run_id: str
     disposition: TerminalDeliveryDisposition
-    mailbox_item_id: str | None = None
+    mailbox_item_id: str | None

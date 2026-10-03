@@ -16,6 +16,7 @@ from azents.core.enums import (
     AgentSessionProductMode,
     AgentSessionStatus,
 )
+from azents.core.historical_memory_settings import HistoricalMemorySettingsScope
 from azents.core.vfs import VFS_FILE_MAX_BYTES
 from azents.rdb.deps import get_session_manager
 from azents.rdb.models.agent_session import RDBAgentSession
@@ -26,7 +27,6 @@ from azents.repos.historical_memory.settings_data import (
     HistoricalMemorySettingsCursorError,
     HistoricalMemorySettingsPage,
     HistoricalMemorySettingsRecord,
-    HistoricalMemorySettingsScope,
 )
 
 

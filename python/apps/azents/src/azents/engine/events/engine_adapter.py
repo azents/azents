@@ -9,11 +9,11 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequenc
 from typing import Annotated, Protocol, assert_never
 
 import httpx
+from azcommon.logging import bind_extra
 from azcommon.result import Failure, Success
 from azcommon.uuid import uuid7
 from fastapi import Depends
 from openai import AsyncOpenAI
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.builtin_tools import builtin_tool_configurable
 from azents.core.credentials import ChatGPTOAuthSecrets, XaiOAuthSecrets
@@ -31,6 +31,7 @@ from azents.core.model_pricing import (
     normalize_model_pricing,
 )
 from azents.core.openai_client_config import openai_responses_client_config
+from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.core.tools import TurnContext
 from azents.core.xai import resolve_xai_api_base_url
 from azents.engine.context.compaction import (
@@ -93,11 +94,9 @@ from azents.engine.events.protocols import (
     NormalizedAdapterOutput,
     ProviderToolActivityProjection,
     ReasoningDeltaProjection,
-    SessionHeadRepository,
     StreamProjection,
     SummaryEnricher,
     SummaryGenerator,
-    TranscriptRepository,
 )
 from azents.engine.events.provider_output import ProviderOutputMaterializer
 from azents.engine.events.provider_tool_rendering import render_provider_tool_semantic
@@ -201,45 +200,16 @@ from azents.engine.tools.xai_image_generation import (
     XaiImageGenerationExecutor,
     XaiImagineClientFactory,
 )
-from azents.rdb.deps import get_session_manager
-from azents.rdb.session import SessionManager
-from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
-from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session_system_prompt_snapshot import (
-    AgentSessionSystemPromptSnapshotRepository,
-)
-from azents.repos.chatgpt_oauth_runtime import ChatGPTOAuthRuntimeRepository
 from azents.repos.compaction_operation import CompactionCommitContext
-from azents.repos.engine_event_mutation import EngineEventMutationRepository
 from azents.repos.engine_event_operation import EngineEventOperationRepository
-from azents.repos.engine_execution_operation import EngineExecutionOperationRepository
-from azents.repos.engine_input_projection import EngineInputProjectionRepository
-from azents.repos.engine_model_input_operation import (
-    EngineModelInputOperationRepository,
+from azents.repos.engine_event_repositories import EngineEventRepositoryFactory
+from azents.repos.engine_resolve import (
+    EngineResolveRepositories,
+    get_engine_resolve_repositories,
 )
-from azents.repos.engine_output_operation import (
-    EngineOutputOperationRepository,
-    EngineRunRepository,
-)
-from azents.repos.engine_run_finalization_operation import (
-    EngineRunFinalizationOperationRepository,
-)
-from azents.repos.engine_tool_result_operation import (
-    EngineToolResultOperationRepository,
-)
-from azents.repos.exchange_file import ExchangeFileRepository
-from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
-from azents.repos.llm_provider_integration.deps import (
-    get_llm_provider_integration_repository,
-)
-from azents.repos.model_file import ModelFileRepository
-from azents.repos.model_file_pin import ModelFilePinRepository
-from azents.repos.model_operation_completion import ModelOperationCompletionRepository
 from azents.repos.provider_output_operation import ProviderOutputOperationRepository
-from azents.repos.session_execution.ownership import OwnerBoundSessionManager
-from azents.repos.terminal_finalization import TerminalRunFinalizationRepository
+from azents.repos.session_execution.ownership import SessionExecutionAuthorityRepository
 from azents.repos.toolkit_state.engine import ToolWorkingSetStore
-from azents.repos.xai_oauth_runtime import XaiOAuthRuntimeRepository
 from azents.services.artifact import ArtifactService
 from azents.services.chatgpt_oauth.data import (
     ProviderRejected as ChatGPTProviderRejected,
@@ -253,6 +223,10 @@ from azents.services.chatgpt_oauth.runtime import (
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.model_file import ModelFileService
 from azents.services.model_metadata import ModelMetadataService
+from azents.services.oauth_runtime_clients import (
+    RuntimeOAuthClientFactories,
+    create_runtime_oauth_client_factories,
+)
 from azents.services.xai_imagine import XaiImagineClient
 from azents.services.xai_oauth.data import (
     ProviderEntitlementDenied,
@@ -299,16 +273,6 @@ def _xai_imagine_client_factory() -> XaiImagineClientFactory:
             )
 
     return create
-
-
-def _tool_working_set_store(
-    session_manager: Annotated[
-        SessionManager[AsyncSession],
-        Depends(get_session_manager),
-    ],
-) -> ToolWorkingSetStore:
-    """Build the session-scoped deferred-tool working-set store."""
-    return ToolWorkingSetStore(session_manager=session_manager)
 
 
 def _summary_model_call(
@@ -382,13 +346,14 @@ class AgentEngineAdapter:
     event adapter/tool catalog.
     """
 
-    session_manager: Annotated[
-        SessionManager[AsyncSession],
-        Depends(get_session_manager),
+    repository_factory: Annotated[
+        EngineEventRepositoryFactory, Depends(EngineEventRepositoryFactory)
     ]
-    tool_working_set_store: Annotated[
-        ToolWorkingSetStore,
-        Depends(_tool_working_set_store),
+    resolve_repositories: Annotated[
+        EngineResolveRepositories, Depends(get_engine_resolve_repositories)
+    ]
+    oauth_clients: Annotated[
+        RuntimeOAuthClientFactories, Depends(create_runtime_oauth_client_factories)
     ]
     artifact_service: Annotated[ArtifactService, Depends(ArtifactService)]
     exchange_file_service: Annotated[ExchangeFileService, Depends(ExchangeFileService)]
@@ -396,10 +361,6 @@ class AgentEngineAdapter:
     provider_output_operation_repository: Annotated[
         ProviderOutputOperationRepository,
         Depends(ProviderOutputOperationRepository),
-    ]
-    integration_repository: Annotated[
-        LLMProviderIntegrationRepository,
-        Depends(get_llm_provider_integration_repository),
     ]
     metadata_service: Annotated[ModelMetadataService, Depends(ModelMetadataService)]
     sdk_factories: Annotated[ModelSDKFactories, Depends(get_model_sdk_factories)]
@@ -414,26 +375,6 @@ class AgentEngineAdapter:
     ]
     execution_factory: Annotated[
         RunExecutionFactory, Depends(_agent_run_execution_factory)
-    ]
-    run_repo: Annotated[EngineRunRepository, Depends(AgentRunRepository)]
-    agent_session_repo: Annotated[
-        AgentSessionRepository, Depends(AgentSessionRepository)
-    ]
-    session_head_repo: Annotated[SessionHeadRepository, Depends(AgentSessionRepository)]
-    transcript_repo: Annotated[TranscriptRepository, Depends(EventTranscriptRepository)]
-    system_prompt_snapshot_repo: Annotated[
-        AgentSessionSystemPromptSnapshotRepository,
-        Depends(AgentSessionSystemPromptSnapshotRepository),
-    ]
-    model_file_pin_repo: Annotated[
-        ModelFilePinRepository, Depends(ModelFilePinRepository)
-    ]
-    model_operation_completion_repository: Annotated[
-        ModelOperationCompletionRepository, Depends(ModelOperationCompletionRepository)
-    ]
-    terminal_finalization_repository: Annotated[
-        TerminalRunFinalizationRepository,
-        Depends(TerminalRunFinalizationRepository),
     ]
     compactor: Annotated[ManualCompactor, Depends(EventCompactor)]
     summary_model_call: Annotated[SummaryModelCall, Depends(_summary_model_call)]
@@ -456,10 +397,7 @@ class AgentEngineAdapter:
                 raise FunctionToolError(
                     "xAI OAuth reconnect is required for image generation."
                 )
-            persistence_repository = XaiOAuthRuntimeRepository(
-                integration_repository=self.integration_repository,
-                session_manager=self.session_manager,
-            )
+            persistence_repository = self.resolve_repositories.xai_oauth
             integration = await persistence_repository.load_integration(
                 integration_id=integration_id
             )
@@ -474,6 +412,7 @@ class AgentEngineAdapter:
             refresh_result = await refresh_runtime_tokens(
                 integration=integration,
                 persistence_repository=persistence_repository,
+                client_factory=self.oauth_clients.xai,
             )
             match refresh_result:
                 case Failure(error):
@@ -539,10 +478,7 @@ class AgentEngineAdapter:
                 raise FunctionToolError(
                     "ChatGPT OAuth reconnect is required for image generation."
                 )
-            persistence_repository = ChatGPTOAuthRuntimeRepository(
-                integration_repository=self.integration_repository,
-                session_manager=self.session_manager,
-            )
+            persistence_repository = self.resolve_repositories.chatgpt_oauth
             integration = await persistence_repository.load_integration(
                 integration_id=integration_id
             )
@@ -557,6 +493,7 @@ class AgentEngineAdapter:
             refreshed = await refresh_chatgpt_runtime_tokens(
                 integration=integration,
                 persistence_repository=persistence_repository,
+                client_factory=self.oauth_clients.chatgpt,
             )
             match refreshed:
                 case Success(updated):
@@ -606,14 +543,12 @@ class AgentEngineAdapter:
         owner_generation: int,
     ) -> Event:
         """Store Event system_error under the current Session owner generation."""
-        owner_session_manager = OwnerBoundSessionManager(
-            session_manager=self.session_manager,
-            session_id=session_id,
-            owner_generation=owner_generation,
+        repositories = self.repository_factory.for_execution(
+            SessionExecutionOwner(
+                session_id=session_id, owner_generation=owner_generation
+            )
         )
-        return await self._event_operation_repository(
-            owner_session_manager
-        ).append_system_error(
+        return await repositories.events.append_system_error(
             session_id=session_id,
             content=content,
         )
@@ -623,16 +558,16 @@ class AgentEngineAdapter:
     ) -> AsyncIterator[Emit]:
         """Run manual event compaction in append-only style."""
         compaction_request = request
-        owner_session_manager = OwnerBoundSessionManager(
-            session_manager=self.session_manager,
-            session_id=request.session_id,
-            owner_generation=context.owner_generation,
+        repositories = self.repository_factory.for_execution(
+            SessionExecutionOwner(
+                session_id=request.session_id, owner_generation=context.owner_generation
+            )
         )
-        compactor = self.compactor.with_session_manager(owner_session_manager)
+        compactor = self.compactor.with_operations(repositories.compaction)
         yield ephemeral(CompactionStarted())
-        transcript = await self._event_operation_repository(
-            owner_session_manager
-        ).prepare_compaction(session_id=request.session_id)
+        transcript = await repositories.events.prepare_compaction(
+            session_id=request.session_id
+        )
 
         hook_dispatcher = RuntimeHookDispatcher()
         hook_providers = _runtime_hook_provider_refs(request.toolkits)
@@ -692,18 +627,15 @@ class AgentEngineAdapter:
         check_stop: CheckStop | None = None,
     ) -> AsyncIterator[Emit]:
         """Run Event AgentRunExecution and yield terminal event."""
-        owner_session_manager = OwnerBoundSessionManager(
-            session_manager=self.session_manager,
-            session_id=request.session_id,
-            owner_generation=context.owner_generation,
+        repositories = self.repository_factory.for_execution(
+            SessionExecutionOwner(
+                session_id=request.session_id, owner_generation=context.owner_generation
+            )
         )
-        tool_working_set_store = self.tool_working_set_store.with_session_manager(
-            owner_session_manager
-        )
-        compactor = self.compactor.with_session_manager(owner_session_manager)
-        event_operation_repository = self._event_operation_repository(
-            owner_session_manager
-        )
+        authority = repositories.authority
+        tool_working_set_store = repositories.tool_working_set
+        compactor = self.compactor.with_operations(repositories.compaction)
+        event_operation_repository = repositories.events
         preparation = await event_operation_repository.prepare_run(
             session_id=request.session_id,
             run_id=context.run_id,
@@ -729,7 +661,11 @@ class AgentEngineAdapter:
             transcript: Sequence[Event],
             model: str,
         ) -> PreparedModelCall[PydanticAIRequest | OpenAIResponsesRequest]:
-            await owner_session_manager.assert_current()
+            L = bind_extra(
+                logger,
+                {"session_id": request.session_id, "run_id": context.run_id},
+            )
+            await authority.assert_current()
             model_selection = (
                 request.inference_state.model_selection
                 if request.inference_state is not None
@@ -858,11 +794,9 @@ class AgentEngineAdapter:
                     client_tool_model_profiles,
                     client_tool_adapter_profile,
                 )
-            logger.info(
+            L.info(
                 "Projected client tools for model compatibility",
                 extra={
-                    "session_id": request.session_id,
-                    "run_id": context.run_id,
                     "model_developer": (
                         model_developer.value if model_developer is not None else None
                     ),
@@ -967,11 +901,9 @@ class AgentEngineAdapter:
                 )
                 provider_visible_tool_names = projection.provider_visible_tool_names
                 deferred_tool_names = frozenset(catalog.deferred_tool_names)
-                logger.info(
+                L.info(
                     "Prepared model tool projection",
                     extra={
-                        "session_id": request.session_id,
-                        "run_id": context.run_id,
                         "provider": request.provider.value,
                         "model": model,
                         "supported_execution_options": [
@@ -1004,11 +936,9 @@ class AgentEngineAdapter:
             else:
                 provider_visible_tool_names = tuple(catalog.tools)
                 deferred_tool_names = frozenset()
-                logger.info(
+                L.info(
                     "Prepared complete model tool catalog",
                     extra={
-                        "session_id": request.session_id,
-                        "run_id": context.run_id,
                         "provider": request.provider.value,
                         "model": model,
                         "tool_count": len(provider_visible_tool_names),
@@ -1072,7 +1002,7 @@ class AgentEngineAdapter:
             )
             shared_tool_invoker = _OwnerBoundClientToolInvoker(
                 inner=shared_tool_invoker,
-                owner=owner_session_manager,
+                owner=authority,
             )
             shared_tool_invoker = _HookedClientToolInvoker(
                 inner=shared_tool_invoker,
@@ -1117,7 +1047,7 @@ class AgentEngineAdapter:
             )
 
             async def on_turn_end(reason: TurnEndReason) -> None:
-                await owner_session_manager.assert_current()
+                await authority.assert_current()
                 await hook_dispatcher.dispatch_observation(
                     hook_providers,
                     "on_turn_end",
@@ -1190,11 +1120,6 @@ class AgentEngineAdapter:
                 ),
             )
 
-        input_projection_repository = EngineInputProjectionRepository(
-            exchange_file_repository=ExchangeFileRepository(),
-            model_file_repository=ModelFileRepository(),
-            transcript_repository=EventTranscriptRepository(),
-        )
         auto_compaction_filter = EventAutoCompactionFilter(
             session_id=request.session_id,
             compactor=compactor,
@@ -1292,45 +1217,12 @@ class AgentEngineAdapter:
             if context.resource_authority is not None
             else None
         )
-        event_mutation_repository = EngineEventMutationRepository(
-            transcript_repository=self.transcript_repo
-        )
-        tool_result_operation_repository = EngineToolResultOperationRepository(
-            session_manager=owner_session_manager,
-            run_repository=self.run_repo,
-            transcript_repository=self.transcript_repo,
-        )
         execution = self.execution_factory(
-            execution_operation_repository=EngineExecutionOperationRepository(
-                session_manager=owner_session_manager,
-                run_repository=self.run_repo,
-                model_file_pin_repository=self.model_file_pin_repo,
-            ),
-            model_input_operation_repository=EngineModelInputOperationRepository(
-                session_manager=owner_session_manager,
-                run_repository=self.run_repo,
-                transcript_repository=self.transcript_repo,
-                session_head_repository=self.session_head_repo,
-                tool_result_repository=tool_result_operation_repository,
-                input_projection_repository=input_projection_repository,
-            ),
-            tool_result_operation_repository=tool_result_operation_repository,
-            output_operation_repository=EngineOutputOperationRepository(
-                session_manager=owner_session_manager,
-                run_repository=self.run_repo,
-                event_mutation_repository=event_mutation_repository,
-                metadata_repository=self.provider_output_operation_repository,
-                tool_result_repository=tool_result_operation_repository,
-                system_prompt_repository=self.system_prompt_snapshot_repo,
-            ),
-            run_finalization_operation_repository=EngineRunFinalizationOperationRepository(
-                session_manager=owner_session_manager,
-                run_repository=self.run_repo,
-                event_mutation_repository=event_mutation_repository,
-                model_operation_repository=self.model_operation_completion_repository,
-                terminal_finalization_repository=self.terminal_finalization_repository,
-                model_file_pin_repository=self.model_file_pin_repo,
-            ),
+            execution_operation_repository=repositories.execution,
+            model_input_operation_repository=repositories.model_input,
+            tool_result_operation_repository=repositories.tool_results,
+            output_operation_repository=repositories.output,
+            run_finalization_operation_repository=repositories.finalization,
             model_operation_completion=context.model_operation_completion,
             post_lower_filter=PostLowerFilterPipeline(
                 [
@@ -1420,19 +1312,6 @@ class AgentEngineAdapter:
         else:
             yield ephemeral(RunStopped(run_id=context.run_id))
 
-    def _event_operation_repository(
-        self,
-        session_manager: SessionManager[AsyncSession],
-    ) -> EngineEventOperationRepository:
-        """Bind completed Event operations to one transaction authority."""
-        return EngineEventOperationRepository(
-            session_manager=session_manager,
-            run_repository=self.run_repo,
-            agent_session_repository=self.agent_session_repo,
-            session_head_repository=self.session_head_repo,
-            transcript_repository=self.transcript_repo,
-        )
-
 
 def _cancel_run_task(
     run_task: asyncio.Task[AgentRunStatus],
@@ -1471,25 +1350,6 @@ async def _capture_model_pricing(
         source_hash=snapshot.source_hash if snapshot is not None else None,
         source_model=metadata,
         request_timestamp=datetime.datetime.now(datetime.UTC),
-    )
-
-
-async def _current_model_input_transcript(
-    session: AsyncSession,
-    session_id: str,
-    *,
-    session_repo: SessionHeadRepository,
-    transcript_repo: TranscriptRepository,
-) -> list[Event]:
-    """Return model input transcript based on current event session head."""
-    session_state = await session_repo.get_by_id(session, session_id)
-    head_event_id = (
-        session_state.model_input_head_event_id if session_state is not None else None
-    )
-    return await transcript_repo.list_for_model_input(
-        session,
-        session_id,
-        head_event_id=head_event_id,
     )
 
 
@@ -1570,7 +1430,7 @@ class _OwnerBoundClientToolInvoker:
     """Admit external tool work only after a database-only owner check."""
 
     def __init__(
-        self, *, inner: ClientToolInvoker, owner: OwnerBoundSessionManager
+        self, *, inner: ClientToolInvoker, owner: SessionExecutionAuthorityRepository
     ) -> None:
         self.inner = inner
         self.owner = owner

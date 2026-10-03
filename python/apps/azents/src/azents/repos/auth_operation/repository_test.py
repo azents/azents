@@ -5,6 +5,7 @@ import dataclasses
 import datetime
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import NamedTuple
 
 import sqlalchemy as sa
 from azcommon.datetime import tznow
@@ -86,6 +87,13 @@ async def _create_user(
     return user.id
 
 
+class _AuthenticationFixture(NamedTuple):
+    """User and authentication Session identities created together."""
+
+    user_id: str
+    session_id: str
+
+
 async def _create_authentication_session(
     session_manager: SessionManager[AsyncSession],
     *,
@@ -93,7 +101,7 @@ async def _create_authentication_session(
     refresh_token: str,
     expires_at: datetime.datetime | None = None,
     max_expires_at: datetime.datetime | None = None,
-) -> tuple[str, str]:
+) -> _AuthenticationFixture:
     """Create a User and authentication Session."""
     user_id = await _create_user(session_manager, email=email)
     async with session_manager() as session:
@@ -106,7 +114,10 @@ async def _create_authentication_session(
                 max_expires_at=max_expires_at,
             ),
         )
-    return user_id, authentication_session.id
+    return _AuthenticationFixture(
+        user_id=user_id,
+        session_id=authentication_session.id,
+    )
 
 
 def _refresh_input(

@@ -17,6 +17,11 @@ from azents.core.enums import (
     ExternalChannelPrincipalAuthorType,
     ExternalChannelSetupClaimStatus,
 )
+from azents.core.external_channel_selector_state import (
+    ExternalChannelSelectorState,
+    projection_with_selector_state,
+    selector_state_from_interaction,
+)
 from azents.rdb.session import SessionManager
 from azents.repos.external_channel.data import (
     ExternalChannelAgentRoute,
@@ -33,11 +38,6 @@ from azents.services.external_channel.selector import (
     ExternalChannelSelectorCandidate,
     ExternalChannelSelectorError,
     ExternalChannelSelectorService,
-)
-from azents.services.external_channel.selector_state import (
-    ExternalChannelSelectorState,
-    projection_with_selector_state,
-    selector_state_from_interaction,
 )
 
 _NOW = datetime.datetime(2026, 7, 31, tzinfo=datetime.UTC)

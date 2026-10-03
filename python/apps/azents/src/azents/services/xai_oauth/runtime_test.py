@@ -26,6 +26,7 @@ from azents.repos.llm_provider_integration import LLMProviderIntegrationReposito
 from azents.repos.llm_provider_integration.data import LLMProviderIntegrationCreate
 from azents.repos.workspace import WorkspaceRepository
 from azents.repos.xai_oauth_runtime import XaiOAuthRuntimeRepository
+from azents.services.oauth_runtime_clients import create_runtime_oauth_client_factories
 
 from .client import XaiOAuthClient
 from .data import (
@@ -176,6 +177,7 @@ class TestEnsureRuntimeTokens:
         result = await ensure_runtime_tokens(
             integration=integration,
             persistence_repository=_persistence_repository(repo, rdb_session),
+            client_factory=create_runtime_oauth_client_factories().xai,
         )
 
         assert isinstance(result, Success)
@@ -202,6 +204,7 @@ class TestEnsureRuntimeTokens:
         result = await ensure_runtime_tokens(
             integration=integration,
             persistence_repository=_persistence_repository(repo, rdb_session),
+            client_factory=create_runtime_oauth_client_factories().xai,
         )
 
         assert isinstance(result, Success)
@@ -227,6 +230,7 @@ class TestEnsureRuntimeTokens:
         result = await ensure_runtime_tokens(
             integration=integration,
             persistence_repository=_persistence_repository(repo, rdb_session),
+            client_factory=create_runtime_oauth_client_factories().xai,
         )
 
         assert isinstance(result, Success)
@@ -269,6 +273,7 @@ class TestEnsureRuntimeTokens:
         result = await refresh_runtime_tokens(
             integration=integration,
             persistence_repository=_persistence_repository(repo, rdb_session),
+            client_factory=create_runtime_oauth_client_factories().xai,
         )
 
         assert isinstance(result, Success)
@@ -312,6 +317,7 @@ class TestEnsureRuntimeTokens:
         result = await ensure_runtime_tokens(
             integration=integration,
             persistence_repository=_persistence_repository(repo, rdb_session),
+            client_factory=create_runtime_oauth_client_factories().xai,
         )
 
         assert isinstance(result, Success)
@@ -347,6 +353,7 @@ class TestEnsureRuntimeTokens:
         result = await ensure_runtime_tokens(
             integration=integration,
             persistence_repository=_persistence_repository(repo, rdb_session),
+            client_factory=create_runtime_oauth_client_factories().xai,
         )
         updated = await repo.get_by_id(rdb_session, integration_id)
 
@@ -385,6 +392,7 @@ class TestEnsureRuntimeTokens:
         first = await ensure_runtime_tokens(
             integration=integration,
             persistence_repository=_persistence_repository(repo, rdb_session),
+            client_factory=create_runtime_oauth_client_factories().xai,
         )
         after_failure = await repo.get_by_id_with_secrets(rdb_session, integration_id)
         assert isinstance(first, Failure)
@@ -418,6 +426,7 @@ class TestEnsureRuntimeTokens:
         second = await ensure_runtime_tokens(
             integration=after_failure,
             persistence_repository=_persistence_repository(repo, rdb_session),
+            client_factory=create_runtime_oauth_client_factories().xai,
         )
 
         assert isinstance(second, Success)

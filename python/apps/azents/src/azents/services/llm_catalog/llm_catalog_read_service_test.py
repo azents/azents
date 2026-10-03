@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime
+from unittest.mock import AsyncMock
 
 import pytest
 from azcommon.result import Success
@@ -14,13 +15,15 @@ from azents.core.enums import (
     LLMCatalogScope,
     LLMProvider,
 )
+from azents.core.model_catalog_source import CATALOG_SOURCE_KEY
 from azents.repos.llm_catalog import LLMCatalogRepository
 from azents.repos.llm_catalog.data import (
     LLMCatalog,
     LLMCatalogEntryList,
     LLMCatalogSyncAttempt,
 )
-from azents.services.catalog_source_collection import CATALOG_SOURCE_KEY
+from azents.repos.llm_catalog_operations import LLMCatalogOperationsRepository
+from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.services.llm_catalog import ModelCatalogReadService
 
 
@@ -104,8 +107,11 @@ async def test_read_service_returns_latest_failed_attempt_without_snapshot() -> 
         ),
     )
     service = ModelCatalogReadService(
-        session_manager=_SessionManager(),
-        catalog_repository=_CatalogRepository(page),
+        operations=LLMCatalogOperationsRepository(
+            session_manager=_SessionManager(),
+            catalog_repository=_CatalogRepository(page),
+            integration_repository=AsyncMock(spec=LLMProviderIntegrationRepository),
+        ),
     )
 
     result = await service.list_entries_by_integration(

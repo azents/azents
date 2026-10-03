@@ -5,10 +5,10 @@ import datetime
 
 import pytest
 
-from azents.broker.types import PublishedEvent
 from azents.core.enums import EventKind
 from azents.engine.events.engine_events import RunComplete
 from azents.engine.events.types import Event, RunMarkerPayload, SystemErrorPayload
+from azents.engine.run.emit import PublishedEvent
 from azents.engine.run.failure import (
     FailedRunAttempt,
     FailedRunFailureMetadata,

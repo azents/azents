@@ -6,7 +6,7 @@ import datetime
 import json
 import re
 from collections.abc import Sequence
-from typing import Literal
+from typing import Literal, NamedTuple
 
 import pytest
 
@@ -333,7 +333,14 @@ def _external_event() -> Event:
     )
 
 
-def _channel_action_event_pair() -> tuple[Event, Event]:
+class _ChannelActionEvents(NamedTuple):
+    """Related semantic call and result events."""
+
+    call: Event
+    result: Event
+
+
+def _channel_action_event_pair() -> _ChannelActionEvents:
     compat_key = build_native_compat_key(
         adapter="pydantic_ai",
         native_format="model_messages",
@@ -412,7 +419,7 @@ def _channel_action_event_pair() -> tuple[Event, Event]:
         schema_version="1",
         created_at=_NOW,
     )
-    return call, result
+    return _ChannelActionEvents(call, result)
 
 
 def _backend(repository: MemoryVfsRepository | None = None) -> MemoryVfsReadBackend:

@@ -6,7 +6,7 @@ import json
 import re
 import time
 from collections.abc import Sequence
-from typing import Literal, Never
+from typing import Literal, NamedTuple, Never
 
 from azents.core.vfs import VFS_FILE_MAX_BYTES, VfsLocation
 from azents.engine.events.action_messages import ActionMessagePayload
@@ -163,13 +163,15 @@ class MemoryVfsReadBackend:
         deadline = time.monotonic() + _MEMORY_OPERATION_MAX_SECONDS
         try:
             async with asyncio.timeout(_MEMORY_OPERATION_MAX_SECONDS):
-                records, repository_truncated = await self._grep_records(
+                page = await self._grep_records(
                     context,
                     location=location,
                     recursive=recursive,
                     limit=max_searched_files,
                     max_candidate_bytes=max_scanned_bytes,
                 )
+                records = page.records
+                repository_truncated = page.truncated
         except TimeoutError:
             return GrepResult(
                 files=(),
@@ -407,20 +409,21 @@ class MemoryVfsReadBackend:
         recursive: bool,
         limit: int,
         max_candidate_bytes: int,
-    ) -> tuple[list[tuple[str, MemoryVfsRecord | _ReadmeRecord]], bool]:
+    ) -> _GrepRecordPage:
         authority = self._authority(context)
         if not await self.repository.authorized(authority):
             self._unavailable()
         parts = self._parts(location.path)
-        exact, exact_record = await self._exact_grep_record(
+        resolved = await self._exact_grep_record(
             authority,
             parts,
             max_bytes=max_candidate_bytes,
         )
-        if exact:
+        if resolved.exact:
+            exact_record = resolved.record
             if exact_record is None:
                 self._unavailable()
-            return [(location.canonical, exact_record)], False
+            return _GrepRecordPage([(location.canonical, exact_record)], False)
         query_budgets = self._grep_query_budgets(
             parts,
             recursive=recursive,
@@ -437,7 +440,7 @@ class MemoryVfsReadBackend:
                     )
                 )
             if not parts and not recursive:
-                return records, False
+                return _GrepRecordPage(records, False)
         if not parts or parts[0] == "saved":
             scopes = self._saved_scopes(parts)
             saved_budget = query_budgets["saved"]
@@ -559,7 +562,7 @@ class MemoryVfsReadBackend:
                     )
                     records.append((f"{base}/events/{event.event.id}.md", event))
                 truncated = truncated or event_page.has_more
-        return records[:limit], truncated or len(records) > limit
+        return _GrepRecordPage(records[:limit], truncated or len(records) > limit)
 
     @staticmethod
     def _grep_query_budgets(
@@ -594,21 +597,24 @@ class MemoryVfsReadBackend:
         parts: tuple[str, ...],
         *,
         max_bytes: int,
-    ) -> tuple[bool, MemoryVfsRecord | _ReadmeRecord | None]:
+    ) -> _ExactGrepRecord:
         """Resolve exact-file grep locations before any bounded directory list."""
         if parts == ("README.md",):
-            return True, _ReadmeRecord()
+            return _ExactGrepRecord(True, _ReadmeRecord())
         if (
             len(parts) == 3
             and parts[0] == "saved"
             and parts[1] in {"agent", "user"}
             and parts[2].endswith(".md")
         ):
-            return True, await self.repository.get_saved(
-                authority,
-                scope=parts[1],
-                memory_id=parts[2].removesuffix(".md"),
-                max_bytes=max_bytes,
+            return _ExactGrepRecord(
+                True,
+                await self.repository.get_saved(
+                    authority,
+                    scope=parts[1],
+                    memory_id=parts[2].removesuffix(".md"),
+                    max_bytes=max_bytes,
+                ),
             )
         if (
             len(parts) == 4
@@ -616,11 +622,14 @@ class MemoryVfsReadBackend:
             and parts[1] in {"team", "user"}
             and parts[3] == "summary.md"
         ):
-            return True, await self.repository.get_historical(
-                authority,
-                scope=parts[1],
-                source_session_id=parts[2],
-                max_bytes=max_bytes,
+            return _ExactGrepRecord(
+                True,
+                await self.repository.get_historical(
+                    authority,
+                    scope=parts[1],
+                    source_session_id=parts[2],
+                    max_bytes=max_bytes,
+                ),
             )
         if (
             len(parts) == 4
@@ -628,11 +637,14 @@ class MemoryVfsReadBackend:
             and parts[1] in {"team", "user"}
             and parts[3] == "session.md"
         ):
-            return True, await self.repository.get_source(
-                authority,
-                scope=parts[1],
-                session_id=parts[2],
-                max_bytes=max_bytes,
+            return _ExactGrepRecord(
+                True,
+                await self.repository.get_source(
+                    authority,
+                    scope=parts[1],
+                    session_id=parts[2],
+                    max_bytes=max_bytes,
+                ),
             )
         if (
             len(parts) == 5
@@ -641,14 +653,17 @@ class MemoryVfsReadBackend:
             and parts[3] == "events"
             and parts[4].endswith(".md")
         ):
-            return True, await self.repository.get_event(
-                authority,
-                scope=parts[1],
-                session_id=parts[2],
-                event_id=parts[4].removesuffix(".md"),
-                max_bytes=max_bytes,
+            return _ExactGrepRecord(
+                True,
+                await self.repository.get_event(
+                    authority,
+                    scope=parts[1],
+                    session_id=parts[2],
+                    event_id=parts[4].removesuffix(".md"),
+                    max_bytes=max_bytes,
+                ),
             )
-        return False, None
+        return _ExactGrepRecord(False, None)
 
     @classmethod
     def _glob_query(cls, location: VfsLocation) -> MemoryVfsUriQuery:
@@ -783,6 +798,27 @@ class _ReadmeRecord:
     """Internal grep candidate for the static README."""
 
 
+class _GrepRecordPage(NamedTuple):
+    """Authorized grep candidates and their repository truncation state."""
+
+    records: list[tuple[str, MemoryVfsRecord | _ReadmeRecord]]
+    truncated: bool
+
+
+class _ExactGrepRecord(NamedTuple):
+    """Whether the URI names an exact record and its authorized value."""
+
+    exact: bool
+    record: MemoryVfsRecord | _ReadmeRecord | None
+
+
+class _EventBody(NamedTuple):
+    """Rendered semantic text and separate tool-result availability."""
+
+    text: str
+    tool_result: bool
+
+
 def _render_saved(record: SavedMemoryVfsRecord) -> str:
     return "\n".join(
         [
@@ -885,26 +921,30 @@ def _render_event(record: SourceEventVfsRecord) -> str:
         lines.append(f"previous: {base}/events/{record.previous_event_id}.md")
     if record.next_event_id is not None:
         lines.append(f"next: {base}/events/{record.next_event_id}.md")
-    body, tool_result = _event_body(record)
-    if tool_result:
+    body = _event_body(record)
+    if body.tool_result:
         lines.append(f"tool_result: {base}/tool-results/{event.id}.txt")
-    lines.extend(["", body or "[No semantic text]"])
+    lines.extend(["", body.text or "[No semantic text]"])
     return "\n".join(lines)
 
 
-def _event_body(record: SourceEventVfsRecord) -> tuple[str, bool]:
+def _event_body(record: SourceEventVfsRecord) -> _EventBody:
     payload = record.event.payload
     if isinstance(payload, UserMessagePayload):
-        return f"[User]\n{redact_sensitive_text(_content_text(payload.content))}", False
+        return _EventBody(
+            f"[User]\n{redact_sensitive_text(_content_text(payload.content))}", False
+        )
     if isinstance(payload, AssistantMessagePayload):
-        return (
+        return _EventBody(
             f"[Assistant]\n{redact_sensitive_text(_content_text(payload.content))}",
             False,
         )
     if isinstance(payload, ActionMessagePayload):
-        return f"[User action]\n{redact_sensitive_text(payload.message)}", False
+        return _EventBody(
+            f"[User action]\n{redact_sensitive_text(payload.message)}", False
+        )
     if isinstance(payload, AgentMessagePayload):
-        return (
+        return _EventBody(
             "[Agent message; "
             f"kind={payload.message_kind}; source={payload.source_path}; "
             f"target={payload.target_path}]\n"
@@ -914,7 +954,7 @@ def _event_body(record: SourceEventVfsRecord) -> tuple[str, bool]:
     if isinstance(payload, ExternalChannelMessagePayload):
         sender = payload.sender_display_name or payload.provider_user_id or "unknown"
         status = payload.lifecycle.value if payload.lifecycle is not None else "unknown"
-        return (
+        return _EventBody(
             redact_sensitive_text(
                 "[External Channel message; "
                 f"provider={payload.provider.value}; "
@@ -934,21 +974,21 @@ def _event_body(record: SourceEventVfsRecord) -> tuple[str, bool]:
         )
         conversation = project_conversational_tool_call(payload, result)
         if conversation is not None:
-            return conversation.render(), False
-        return f"[Client tool call]\nTool: {payload.name}", False
+            return _EventBody(conversation.render(), False)
+        return _EventBody(f"[Client tool call]\nTool: {payload.name}", False)
     if isinstance(payload, ClientToolResultPayload):
-        return (
+        return _EventBody(
             f"[Client tool result]\nTool: {payload.name or 'tool'}\n"
             f"Status: {payload.status}",
             True,
         )
     if isinstance(payload, ProviderToolCallPayload):
-        return (
+        return _EventBody(
             f"[Provider tool]\nTool: {payload.name}\n"
             f"Status: {payload.status or 'unknown'}",
             True,
         )
-    return "", False
+    return _EventBody("", False)
 
 
 def _render_tool_result(record: ToolResultVfsRecord) -> str:

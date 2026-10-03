@@ -36,6 +36,7 @@ from azents.rdb.models.workspace import RDBWorkspace
 
 from .data import (
     CatalogProjectionProvenance,
+    CatalogRetryPolicy,
     CatalogSyncAlreadyRunning,
     ImageGenerationCatalogEntry,
     ImageGenerationCatalogEntryCreate,
@@ -1085,15 +1086,13 @@ class LLMCatalogRepository:
     ) -> CatalogSyncAttemptState | None:
         if attempt is None:
             return None
-        diagnostics = attempt.diagnostics or {}
+        retry_policy = CatalogRetryPolicy.from_diagnostics(attempt.diagnostics)
         return CatalogSyncAttemptState(
             id=attempt.id,
             status=attempt.status,
             started_at=attempt.started_at,
             finished_at=attempt.finished_at,
-            automatic_retry_blocked=(
-                diagnostics.get("automatic_retry_blocked") is True
-            ),
+            automatic_retry_blocked=retry_policy.automatic_retry_blocked,
         )
 
     def _build_catalog(self, rdb: RDBLLMCatalog) -> LLMCatalog:

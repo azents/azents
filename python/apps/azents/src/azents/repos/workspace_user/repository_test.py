@@ -9,12 +9,12 @@ import sqlalchemy as sa
 from azcommon.result import Failure, Success
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from azents.core.enums import WorkspaceUserRole
 from azents.core.workspace import WorkspaceCreate
 from azents.rdb.models.workspace import RDBWorkspace
 from azents.repos.user import UserRepository as UserRepo
 from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository
-from azents.repos.workspace_user.data import WorkspaceUserRole
 
 from . import WorkspaceUserRepository
 from .data import (

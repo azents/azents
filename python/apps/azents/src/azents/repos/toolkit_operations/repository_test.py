@@ -4,6 +4,7 @@ import datetime
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
+from typing import NamedTuple
 from unittest.mock import AsyncMock
 
 import pytest
@@ -109,16 +110,20 @@ def _create() -> ToolkitCreate:
     )
 
 
+class _ToolkitFixture(NamedTuple):
+    """Repository and observable collaborators for Toolkit operations."""
+
+    repository: ToolkitOperationsRepository
+    toolkits: AsyncMock
+    scopes: AsyncMock
+    oauth: AsyncMock
+    github: AsyncMock
+    settings: AsyncMock
+
+
 def _repository(
     session_manager: _TrackedSessionManager,
-) -> tuple[
-    ToolkitOperationsRepository,
-    AsyncMock,
-    AsyncMock,
-    AsyncMock,
-    AsyncMock,
-    AsyncMock,
-]:
+) -> _ToolkitFixture:
     toolkit_repository = AsyncMock(spec=ToolkitRepository)
     scope_repository = AsyncMock(spec=ToolkitScopeRepository)
     oauth_repository = AsyncMock(spec=MCPOAuthConnectionRepository)
@@ -141,13 +146,13 @@ def _repository(
         system_setting_repository=system_setting_repository,
         session_manager=session_manager,
     )
-    return (
-        repository,
-        toolkit_repository,
-        scope_repository,
-        oauth_repository,
-        github_repository,
-        system_setting_repository,
+    return _ToolkitFixture(
+        repository=repository,
+        toolkits=toolkit_repository,
+        scopes=scope_repository,
+        oauth=oauth_repository,
+        github=github_repository,
+        settings=system_setting_repository,
     )
 
 

@@ -295,7 +295,7 @@ class DatabaseRuntimeTerminalAuthorityResolver:
             )
             if workspace_snapshot is None:
                 return _empty_snapshot(RuntimeTerminalReasonCode.ACCESS_DENIED)
-            workspace_id, _workspace = workspace_snapshot
+            workspace_id = workspace_snapshot.workspace_id
             membership = await self.workspace_user_repository.get_by_workspace_and_user(
                 session,
                 workspace_id,

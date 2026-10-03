@@ -8,8 +8,6 @@ Provides a dedicated Toolkit with fixed server URL and authentication method.
 import logging
 from textwrap import dedent
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from azents.core.tools import (
     McpToolkitConfig,
     NotionToolkitConfig,
@@ -21,8 +19,7 @@ from azents.core.tools import (
     TurnContext,
 )
 from azents.engine.tools.mcp import McpToolkit, McpToolkitProvider
-from azents.rdb.session import SessionManager
-from azents.repos.mcp_oauth_connection import MCPOAuthConnectionRepository
+from azents.repos.engine_tool_repositories import EngineToolRepositories
 from azents.services.artifact import ArtifactService
 
 logger = logging.getLogger(__name__)
@@ -103,19 +100,16 @@ class NotionToolkitProvider(ToolkitProvider[NotionToolkitConfig]):
     def __init__(
         self,
         *,
-        connection_repo: MCPOAuthConnectionRepository | None = None,
-        session_manager: SessionManager[AsyncSession] | None = None,
+        repositories: EngineToolRepositories | None = None,
         artifact_service: ArtifactService | None = None,
     ) -> None:
         """NotionToolkitProvider initialization.
 
-        :param connection_repo: MCP OAuth connection repository
-        :param session_manager: DB session manager
+        :param repositories: Completed MCP OAuth and snapshot repositories
         :param artifact_service: MCP binary output storage service
         """
         self.mcp_provider = McpToolkitProvider(
-            connection_repo=connection_repo,
-            session_manager=session_manager,
+            repositories=repositories,
             artifact_service=artifact_service,
         )
 

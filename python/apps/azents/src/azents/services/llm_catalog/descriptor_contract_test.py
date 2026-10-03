@@ -2,6 +2,7 @@
 
 import ast
 import dataclasses
+from unittest.mock import AsyncMock
 
 import pytest
 from azcommon.result import Success
@@ -28,6 +29,7 @@ from azents.repos.llm_catalog.data import (
     LLMCatalogEntry,
     LLMCatalogEntryCreate,
 )
+from azents.repos.llm_catalog_operations import LLMCatalogOperationsRepository
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.llm_provider_integration.data import LLMProviderIntegrationCreate
 from azents.repos.workspace import WorkspaceRepository
@@ -152,7 +154,11 @@ async def test_new_selection_diagnostics_preserve_raw_identifier_without_descrip
             expected_projection_fingerprint="f" * 64,
         )
     result = await ModelCatalogReadService(
-        session_manager=rdb_session_manager, catalog_repository=catalog_repository
+        operations=LLMCatalogOperationsRepository(
+            session_manager=rdb_session_manager,
+            catalog_repository=catalog_repository,
+            integration_repository=AsyncMock(spec=LLMProviderIntegrationRepository),
+        )
     ).resolve_agent_model_selection(
         workspace_id=workspace_id,
         selection_input=AgentModelSelectionInput(

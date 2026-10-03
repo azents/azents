@@ -15,6 +15,17 @@ from azents.core.toolkit_identifiers import (
     slugify_toolkit_name,
 )
 from azents.engine.tools.deps import get_toolkit_registry
+from azents.repos.engine_runtime_tool_read import EngineRuntimeToolReadRepository
+from azents.repos.engine_tool_repositories import (
+    EngineMcpSnapshotFactory,
+    EngineToolRepositories,
+)
+from azents.repos.mcp_oauth_connection.operations import (
+    MCPOAuthRuntimeOperationRepository,
+)
+from azents.repos.memory.operations import MemoryOperationRepository
+from azents.repos.toolkit_state.engine import ToolkitAgentsAppendixDedupeStateStore
+from azents.testing.types import require_instance
 
 _CORPUS_PATH = (
     Path(__file__).parents[7] / "testdata" / "toolkit_identifier_conformance_v1.json"
@@ -71,8 +82,26 @@ def test_explicit_slug_conformance(corpus: dict[str, Any]) -> None:
 def test_registered_provider_names_produce_fallback_slugs() -> None:
     """Require every configurable Provider Name to satisfy the fallback invariant."""
     registry = get_toolkit_registry(
-        MagicMock(),
-        MagicMock(),
+        EngineToolRepositories(
+            memory=require_instance(
+                MagicMock(spec=MemoryOperationRepository), MemoryOperationRepository
+            ),
+            runtime=require_instance(
+                MagicMock(spec=EngineRuntimeToolReadRepository),
+                EngineRuntimeToolReadRepository,
+            ),
+            mcp_oauth=require_instance(
+                MagicMock(spec=MCPOAuthRuntimeOperationRepository),
+                MCPOAuthRuntimeOperationRepository,
+            ),
+            snapshots=require_instance(
+                MagicMock(spec=EngineMcpSnapshotFactory), EngineMcpSnapshotFactory
+            ),
+            appendix=require_instance(
+                MagicMock(spec=ToolkitAgentsAppendixDedupeStateStore),
+                ToolkitAgentsAppendixDedupeStateStore,
+            ),
+        ),
         MagicMock(testenv_api_enabled=False),
         MagicMock(),
         MagicMock(),

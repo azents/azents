@@ -8,14 +8,19 @@ from azcommon.result import Failure, Result, Success
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.agent_automatic_project import AgentAutomaticProjectPolicy
+from azents.core.agent_errors import NotFound
 from azents.core.enums import AgentProjectCatalogStatus
+from azents.core.session_workspace_paths import (
+    InvalidProjectPath,
+    normalize_agent_workspace_root,
+    normalize_session_workspace_path,
+)
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
-from azents.repos.agent.data import NotFound
 from azents.repos.agent_admin import AgentAdminRepository
 from azents.repos.agent_automatic_project import AgentAutomaticProjectRepository
-from azents.repos.agent_automatic_project.data import AgentAutomaticProjectPolicy
 from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
 from azents.repos.agent_project_catalog.data import AgentProjectCatalogStatusPatch
 from azents.runtime.control_protocol.runner_operations import (
@@ -35,11 +40,6 @@ from azents.services.runtime_directory_validation import (
     validate_runtime_directory,
 )
 from azents.services.runtime_storage_error import RuntimeStorageError
-from azents.services.session_workspace_project import (
-    InvalidProjectPath,
-    normalize_agent_workspace_root,
-    normalize_session_workspace_path,
-)
 
 from .data import (
     AgentAutomaticProjectPolicyNotFound,

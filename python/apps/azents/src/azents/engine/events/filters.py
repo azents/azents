@@ -7,7 +7,6 @@ from collections.abc import Awaitable, Callable, Sequence
 from typing import Annotated, NamedTuple, assert_never
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import EventKind
 from azents.engine.context.compaction import compute_summary_budget
@@ -59,7 +58,6 @@ from azents.engine.events.types import (
     UserMessagePayload,
 )
 from azents.engine.run.errors import CompactionFailedError, CompactionPlanStaleError
-from azents.rdb.session import SessionManager
 from azents.repos.compaction_operation import (
     CompactionCommitContext,
     CompactionOperationRepository,
@@ -189,15 +187,13 @@ class EventCompactor:
     ]
     summary_context_window_tokens: int | None = None
 
-    def with_session_manager(
-        self, session_manager: SessionManager[AsyncSession]
+    def with_operations(
+        self, operations: CompactionOperationRepository
     ) -> "EventCompactor":
         """Return an execution-local compactor without changing shared state."""
         return dataclasses.replace(
             self,
-            operation_repository=self.operation_repository.with_session_manager(
-                session_manager
-            ),
+            operation_repository=operations,
         )
 
     async def compact(
