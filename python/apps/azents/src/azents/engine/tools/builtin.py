@@ -67,6 +67,7 @@ from azents.engine.run.types import (
     FunctionToolResult,
     PlaintextCustomToolHandler,
 )
+from azents.engine.tooling.execution_context import get_client_tool_execution_context
 from azents.engine.tooling.make_tool import make_tool
 from azents.engine.tools.apply_patch import RuntimePatchTarget, make_apply_patch_tool
 from azents.engine.tools.builtin_agents import (
@@ -84,6 +85,10 @@ from azents.engine.tools.import_file import (
 from azents.engine.tools.memory import (
     make_delete_memory_tool,
     make_save_memory_tool,
+)
+from azents.engine.tools.mutable_storage import (
+    RoutedMutationTools,
+    RuntimeMutationToolProvider,
 )
 from azents.engine.tools.present_file import make_present_file_tool
 from azents.engine.tools.read_image import make_read_image_tool
@@ -158,6 +163,12 @@ from azents.services.session_working_folder_binding import (
     SessionWorkingFolderBindingService,
 )
 from azents.services.vfs import VfsProjectionService
+from azents.services.vfs_mutation import (
+    VfsBackendRegistration,
+    VfsMutationCapabilities,
+    VfsMutationRegistry,
+    VfsMutationRouter,
+)
 from azents.services.vfs_read import VfsReadContext, VfsReadRouter
 
 logger = logging.getLogger(__name__)
@@ -622,6 +633,31 @@ class ReadableStorageToolkit(Toolkit[ShellToolkitConfig]):
             ),
             runtime_capability_resolver=resolver,
         )
+        runtime_mutations = (
+            provider.make_mutation_tools()
+            if isinstance(provider, RuntimeMutationToolProvider)
+            else []
+        )
+        mutation_router = VfsMutationRouter(
+            registry=VfsMutationRegistry(
+                [
+                    VfsBackendRegistration(
+                        read_backend=self.vfs_read_router.registry.get(mount),
+                        mutation_backend=None,
+                        patch_backend=None,
+                        capabilities=VfsMutationCapabilities(False, False),
+                    )
+                    for mount in self.vfs_read_router.registry.mounts
+                ]
+            ),
+            authority_validator=self.vfs_read_router.authority_validator,
+        )
+        mutation_tools = RoutedMutationTools(
+            principal=vfs_context,
+            router=mutation_router,
+            runtime_tools={tool.spec.name: tool for tool in runtime_mutations},
+            execution_context_provider=get_client_tool_execution_context,
+        ).tools()
         return ToolkitState(
             status=ToolkitStatus.ENABLED,
             tools=[
@@ -637,6 +673,7 @@ class ReadableStorageToolkit(Toolkit[ShellToolkitConfig]):
                     session_storage=storage,
                     agent_id=self._agent_id,
                 ),
+                *mutation_tools,
             ],
         )
 
@@ -862,8 +899,8 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         """Set the shared Agent Runtime capability resolver."""
         self.runtime_capability_resolver = resolver
 
-    def make_readable_storage(self) -> FileStorage:
-        """Return one lazy Runtime storage adapter for generic read tools."""
+    def make_readable_storage(self) -> RuntimeRunnerFileStorage:
+        """Return one lazy native Runtime storage adapter for generic file tools."""
         if self._readable_file_storage is not None:
             return self._readable_file_storage
         return RuntimeRunnerFileStorage(
@@ -873,6 +910,67 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
             owner_session_id=self._runtime_session_id,
             expected_authority_provider=self._required_runtime_authority,
         )
+
+    def make_mutation_tools(self) -> list[FunctionTool]:
+        """Build native guarded adapters; storage owns generic registration."""
+        storage = self.make_readable_storage()
+
+        async def resolve_operation_target() -> RuntimeOperationTarget:
+            return await _ready_runtime_for_agent(
+                agent_runtime_service=self.agent_runtime_service,
+                agent_id=self._runtime_agent_id,
+                expected_authority=self._required_runtime_authority(),
+            )
+
+        async def resolve_edit_target() -> RuntimeEditTarget:
+            runtime = await resolve_operation_target()
+            return RuntimeEditTarget(
+                runtime_id=runtime.id, runner_generation=runtime.runner_generation
+            )
+
+        async def resolve_patch_target() -> RuntimePatchTarget:
+            runtime = await resolve_operation_target()
+            return RuntimePatchTarget(
+                runtime_id=runtime.id, runner_generation=runtime.runner_generation
+            )
+
+        tools = [
+            make_apply_patch_tool(
+                runner_operations=self.runner_operations,
+                resolve_runtime_target=resolve_patch_target,
+                owner_session_id=self._runtime_session_id,
+                agent_id=self._runtime_agent_id,
+            ),
+            _with_runtime_native_file_tool_diagnostics(
+                make_edit_tool(
+                    runner_operations=self.runner_operations,
+                    resolve_runtime_target=resolve_edit_target,
+                    owner_session_id=self._runtime_session_id,
+                    agent_id=self._runtime_agent_id,
+                ),
+                agent_id=self._runtime_agent_id,
+                owner_session_id=self._runtime_session_id,
+            ),
+            *[
+                _with_runtime_file_tool_diagnostics(
+                    tool,
+                    file_storage=storage,
+                    agent_id=self._runtime_agent_id,
+                    owner_session_id=self._runtime_session_id,
+                )
+                for tool in [
+                    make_write_tool(session_storage=storage, agent_id=self._agent_id),
+                    make_delete_file_tool(
+                        session_storage=storage, agent_id=self._agent_id
+                    ),
+                ]
+            ],
+        ]
+        return [
+            self._guard_runtime_tool(tool, RuntimeCapability.RUNTIME_FILESYSTEM)
+            for tool in tools
+            if tool.spec.name not in self._excluded_tools
+        ]
 
     def set_peer_toolkits(self, peers: Sequence[RuntimeEnvProvider]) -> None:
         """Register peer toolkits that collect env during Shell execution.
@@ -1066,13 +1164,6 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
                 desired_generation=runtime.desired_generation,
             )
 
-        async def resolve_patch_target() -> RuntimePatchTarget:
-            runtime = await resolve_exact_runtime_target()
-            return RuntimePatchTarget(
-                runtime_id=runtime.id,
-                runner_generation=runtime.runner_generation,
-            )
-
         async def resolve_image_target() -> ServerToRuntimeTarget:
             runtime = await resolve_exact_runtime_target()
             return ServerToRuntimeTarget(
@@ -1086,35 +1177,7 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
                 return False
             return await self.model_file_service.validate_resource_authority(authority)
 
-        async def resolve_edit_target() -> RuntimeEditTarget:
-            runtime = await resolve_exact_runtime_target()
-            return RuntimeEditTarget(
-                runtime_id=runtime.id,
-                runner_generation=runtime.runner_generation,
-            )
-
-        apply_patch_tool = make_apply_patch_tool(
-            runner_operations=self.runner_operations,
-            resolve_runtime_target=resolve_patch_target,
-            owner_session_id=self._runtime_session_id,
-            agent_id=runtime_agent_id,
-        )
-        edit_tool = make_edit_tool(
-            runner_operations=self.runner_operations,
-            resolve_runtime_target=resolve_edit_target,
-            owner_session_id=self._runtime_session_id,
-            agent_id=runtime_agent_id,
-        )
-        file_tools = [
-            make_write_tool(
-                session_storage=file_ss,
-                agent_id=self._agent_id,
-            ),
-            make_delete_file_tool(
-                session_storage=file_ss,
-                agent_id=self._agent_id,
-            ),
-        ]
+        file_tools: list[FunctionTool] = []
         if context.resource_authority is not None:
             authority = context.resource_authority
             self._run_tool_to_file_context = RunToolToFileRuntimeContext(
@@ -1176,12 +1239,6 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
                 publish_event=context.publish_event,
                 owner_session_id=self._session_id,
                 expected_authority_provider=self._required_runtime_authority,
-            ),
-            apply_patch_tool,
-            _with_runtime_native_file_tool_diagnostics(
-                edit_tool,
-                agent_id=runtime_agent_id,
-                owner_session_id=self._runtime_session_id,
             ),
             *[
                 _with_runtime_file_tool_diagnostics(
