@@ -41,6 +41,11 @@ from azents_runtime_control.transfer import (
     RUNNER_TRANSFER_PROTOCOL_VERSION,
 )
 
+from azents_runtime_runner.diagnostics import (
+    RunnerDiagnosticReason,
+    bind_extra,
+    runner_exception_diagnostic,
+)
 from azents_runtime_runner.execution import DirectExecutionBackend
 from azents_runtime_runner.network import prepare_runner_network_environment
 from azents_runtime_runner.operations import RunnerOperations
@@ -312,11 +317,10 @@ async def run_runtime_runner(*, workspace_path: str | None = None) -> None:
         auth_credential_id=credential_id,
         runtime_configuration=runtime_configuration,
     )
-    _LOGGER.info(
+    L = bind_extra(_LOGGER, {"runtime_id": runtime_id, "runner_id": runner_id})
+    L.info(
         "Runtime Runner starting",
         extra={
-            "runtime_id": runtime_id,
-            "runner_id": runner_id,
             "workspace_path": workspace_path,
             "control_endpoint": endpoint,
             "max_concurrent_operations_per_session": (
@@ -333,7 +337,7 @@ async def run_runtime_runner(*, workspace_path: str | None = None) -> None:
             "max_concurrent_control_operations": (
                 limit_config.max_concurrent_control_operations
             ),
-            "runtime_web_maximum_sessions": (limit_config.runtime_web_maximum_sessions),
+            "runtime_web_maximum_sessions": limit_config.runtime_web_maximum_sessions,
             "runtime_web_maximum_active_streams": (
                 limit_config.runtime_web_maximum_active_streams
             ),
@@ -479,13 +483,9 @@ async def run_runtime_runner(*, workspace_path: str | None = None) -> None:
                     terminal_manager.handle_terminate
                 )
                 client.set_stream_session_offer_handler(web_dispatcher.handle_offer)
-                _LOGGER.info(
+                L.info(
                     "Runtime Runner connecting to Control",
-                    extra={
-                        "runtime_id": runtime_id,
-                        "runner_id": runner_id,
-                        "connection_id": connection_id,
-                    },
+                    extra={"connection_id": connection_id},
                 )
                 await transfer_manager.start()
                 await run_loop.run_forever()
@@ -493,48 +493,55 @@ async def run_runtime_runner(*, workspace_path: str | None = None) -> None:
                 shutting_down = True
                 raise
             except RunnerConnectionRejected as exc:
+                diagnostic = runner_exception_diagnostic(
+                    exc, RunnerDiagnosticReason.AUTHORITY_REJECTED
+                )
                 error_code = _runner_reprovisioning_error_code(exc)
                 assert error_code is not None
                 shutting_down = True
-                _LOGGER.warning(
+                L.warning(
                     "Runtime Runner authority rejected; stopping for Provider "
                     "reprovisioning",
-                    extra={
-                        "runtime_id": runtime_id,
-                        "runner_id": runner_id,
-                        "error_code": error_code,
-                    },
+                    extra={**{"error_code": error_code}, **diagnostic.log_fields()},
+                    exc_info=diagnostic.exc_info,
                 )
                 return
             except grpc.aio.AioRpcError as exc:
                 error_code = _runner_reprovisioning_error_code(exc.code())
+                diagnostic = runner_exception_diagnostic(
+                    exc,
+                    RunnerDiagnosticReason.CREDENTIAL_REJECTED
+                    if error_code is not None
+                    else RunnerDiagnosticReason.CONTROL_STREAM_FAILED,
+                )
                 if error_code is not None:
                     shutting_down = True
-                    _LOGGER.warning(
+                    L.warning(
                         "Runtime Runner credential rejected; stopping for Provider "
                         "reprovisioning",
                         extra={
-                            "runtime_id": runtime_id,
-                            "runner_id": runner_id,
-                            "error_code": error_code,
-                            "grpc_status": exc.code().name,
+                            **{
+                                "error_code": error_code,
+                                "grpc_status": exc.code().name,
+                            },
+                            **diagnostic.log_fields(),
                         },
+                        exc_info=diagnostic.exc_info,
                     )
                     return
-                _LOGGER.warning(
+                L.warning(
                     "Runtime Runner Control stream disconnected; reconnecting",
-                    exc_info=True,
                     extra={
-                        "runtime_id": runtime_id,
-                        "runner_id": runner_id,
-                        "grpc_status": exc.code().name,
+                        **{"grpc_status": exc.code().name},
+                        **diagnostic.log_fields(),
                     },
+                    exc_info=diagnostic.exc_info,
                 )
             except RuntimeRunnerControlStreamClosed:
-                _LOGGER.warning(
+                L.warning(
                     "Runtime Runner Control stream disconnected; reconnecting",
                     exc_info=True,
-                    extra={"runtime_id": runtime_id, "runner_id": runner_id},
+                    extra={},
                 )
             finally:
                 if shutting_down:
@@ -556,14 +563,11 @@ async def run_runtime_runner(*, workspace_path: str | None = None) -> None:
                         client.close(),
                         timeout=_CONTROL_CLIENT_CLOSE_TIMEOUT_SECONDS,
                     )
-                except TimeoutError:
-                    _LOGGER.warning(
-                        "Runtime Runner Control client close timed out",
-                        extra={
-                            "runtime_id": runtime_id,
-                            "runner_id": runner_id,
-                            "timeout_seconds": _CONTROL_CLIENT_CLOSE_TIMEOUT_SECONDS,
-                        },
+                except TimeoutError as exc:
+                    _log_control_client_close_timeout(
+                        L,
+                        exc,
+                        timeout_seconds=_CONTROL_CLIENT_CLOSE_TIMEOUT_SECONDS,
                     )
             await asyncio.sleep(_CONTROL_RECONNECT_DELAY_SECONDS)
     finally:
@@ -573,6 +577,26 @@ async def run_runtime_runner(*, workspace_path: str | None = None) -> None:
         except asyncio.CancelledError:
             pass
         await execution_backend.close()
+
+
+def _log_control_client_close_timeout(
+    logger: logging.Logger | logging.LoggerAdapter[logging.Logger],
+    error: TimeoutError,
+    *,
+    timeout_seconds: float,
+) -> None:
+    """Log close-timeout origin without formatting its value, chain, or source."""
+    diagnostic = runner_exception_diagnostic(
+        error, RunnerDiagnosticReason.CONTROL_CLOSE_TIMED_OUT
+    )
+    logger.warning(
+        "Runtime Runner Control client close timed out",
+        exc_info=diagnostic.exc_info,
+        extra={
+            "timeout_seconds": timeout_seconds,
+            **diagnostic.log_fields(),
+        },
+    )
 
 
 async def _observe_terminal_cleanup(
