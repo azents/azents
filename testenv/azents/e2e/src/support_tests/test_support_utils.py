@@ -22,7 +22,7 @@ def test_model_listing_rejects_system_catalog_fallback(
     response = _catalog_response(
         {
             "catalog_scope": "system",
-            "latest_attempt": {"status": "succeeded"},
+            "latest_sync": {"status": "succeeded"},
             "entries": [{"provider_model_identifier": "system-model"}],
         }
     )
@@ -35,11 +35,11 @@ def test_model_listing_rejects_system_catalog_fallback(
 def test_model_listing_requires_completed_integration_sync(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Do not select entries from an integration snapshot still being replaced."""
+    """Wait for the fixture's current integration sync to finish."""
     response = _catalog_response(
         {
             "catalog_scope": "integration",
-            "latest_attempt": {"status": "running"},
+            "latest_sync": {"status": "running"},
             "entries": [{"provider_model_identifier": "stale-model"}],
         }
     )
@@ -55,7 +55,7 @@ def test_model_listing_accepts_completed_integration_catalog(
     """Return selectable entries only after the integration projection succeeds."""
     payload: dict[str, object] = {
         "catalog_scope": "integration",
-        "latest_attempt": {"status": "succeeded"},
+        "latest_sync": {"status": "succeeded"},
         "entries": [{"provider_model_identifier": "gpt-5.5"}],
     }
     response = _catalog_response(payload)
@@ -65,5 +65,17 @@ def test_model_listing_accepts_completed_integration_catalog(
         "http://server", "token", "workspace", "integration"
     )
     assert result.catalog_scope == "integration"
-    assert result.latest_attempt_status == "succeeded"
+    assert result.latest_sync_status == "succeeded"
     assert result.entries[0].provider_model_identifier == "gpt-5.5"
+
+
+def test_model_listing_rejects_removed_attempt_contract() -> None:
+    """Decode only the current sync contract without a legacy API fallback."""
+    with pytest.raises(AssertionError, match="latest sync"):
+        utils.IntegrationCatalogObservation.decode(
+            {
+                "catalog_scope": "integration",
+                "latest_attempt": {"status": "succeeded"},
+                "entries": [{"provider_model_identifier": "gpt-5.5"}],
+            }
+        )

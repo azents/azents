@@ -44,8 +44,36 @@ class TestWorkspaceRuntimeProfileListResponse(unittest.TestCase):
                         description = '', 
                         lifecycle = 'active', 
                         policy = null, 
-                        infrastructure_network = { }, 
-                        effective_network = { }, 
+                        infrastructure_network = azentspublicclient.models.runtime_network_projection.RuntimeNetworkProjection(
+                            mode = 'direct', 
+                            allowed_cidrs = [
+                                ''
+                                ], 
+                            denied_cidrs = [
+                                ''
+                                ], 
+                            domain_mode = 'unrestricted', 
+                            allowed_domains = [
+                                ''
+                                ], 
+                            denied_domains = [
+                                ''
+                                ], ), 
+                        effective_network = azentspublicclient.models.runtime_network_projection.RuntimeNetworkProjection(
+                            mode = 'direct', 
+                            allowed_cidrs = [
+                                ''
+                                ], 
+                            denied_cidrs = [
+                                ''
+                                ], 
+                            domain_mode = 'unrestricted', 
+                            allowed_domains = [
+                                ''
+                                ], 
+                            denied_domains = [
+                                ''
+                                ], ), 
                         terminal_enabled = True, 
                         infrastructure_terminal_enabled = True, 
                         effective_terminal_enabled = True, 
@@ -77,8 +105,36 @@ class TestWorkspaceRuntimeProfileListResponse(unittest.TestCase):
                         description = '', 
                         lifecycle = 'active', 
                         policy = null, 
-                        infrastructure_network = { }, 
-                        effective_network = { }, 
+                        infrastructure_network = azentspublicclient.models.runtime_network_projection.RuntimeNetworkProjection(
+                            mode = 'direct', 
+                            allowed_cidrs = [
+                                ''
+                                ], 
+                            denied_cidrs = [
+                                ''
+                                ], 
+                            domain_mode = 'unrestricted', 
+                            allowed_domains = [
+                                ''
+                                ], 
+                            denied_domains = [
+                                ''
+                                ], ), 
+                        effective_network = azentspublicclient.models.runtime_network_projection.RuntimeNetworkProjection(
+                            mode = 'direct', 
+                            allowed_cidrs = [
+                                ''
+                                ], 
+                            denied_cidrs = [
+                                ''
+                                ], 
+                            domain_mode = 'unrestricted', 
+                            allowed_domains = [
+                                ''
+                                ], 
+                            denied_domains = [
+                                ''
+                                ], ), 
                         terminal_enabled = True, 
                         infrastructure_terminal_enabled = True, 
                         effective_terminal_enabled = True, 

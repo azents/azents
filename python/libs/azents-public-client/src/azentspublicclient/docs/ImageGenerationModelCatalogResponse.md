@@ -9,13 +9,10 @@ Name | Type | Description | Notes
 **default_available** | **bool** |  | 
 **explicit_selection_supported** | **bool** |  | 
 **catalog_id** | **str** |  | 
-**snapshot_id** | **str** |  | 
-**snapshot_configuration_version** | **int** |  | 
-**current_configuration_version** | **int** |  | 
-**snapshot_created_at** | **datetime** |  | 
-**latest_attempt** | [**ImageGenerationCatalogAttemptResponse**](ImageGenerationCatalogAttemptResponse.md) |  | 
+**last_success_at** | **datetime** |  | 
+**latest_sync** | [**ImageGenerationCatalogSyncStatusResponse**](ImageGenerationCatalogSyncStatusResponse.md) |  | 
 **stale** | **bool** |  | 
-**generation_current** | **bool** |  | 
+**usable** | **bool** |  | 
 **sync_available_at** | **datetime** |  | 
 **automatic_retry_blocked** | **bool** |  | 
 **entries** | [**List[ImageGenerationCatalogEntryResponse]**](ImageGenerationCatalogEntryResponse.md) |  | 

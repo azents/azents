@@ -817,7 +817,7 @@
       "reasoningBadge": "推論",
       "hostedToolsBadge": "ホスト型ツール",
       "toolCallingBadge": "ツール呼び出し",
-      "syncingWithoutSnapshot": "カタログを同期中です。最初の snapshot が成功するとモデルが表示されます。"
+      "syncingWithoutData": "カタログを同期中です。最初の同期が完了するとモデルが表示されます。"
     },
     "memorySettings": {
       "title": "Agent メモリ",

@@ -39,8 +39,10 @@ function formatProvider(provider: string): string {
   }
 }
 
-function formatSnapshot(snapshotId: string | null): string {
-  return snapshotId ?? "No snapshot";
+function formatLastSuccess(lastSuccessAt: string | null): string {
+  return lastSuccessAt === null
+    ? "Not synced yet"
+    : new Date(lastSuccessAt).toLocaleString();
 }
 
 function CatalogStatusCard({
@@ -65,11 +67,9 @@ function CatalogStatusCard({
             <Title order={4}>{formatProvider(status.provider)}</Title>
           </Group>
           <Badge
-            color={
-              catalog?.latest_attempt?.status === "failed" ? "red" : "blue"
-            }
+            color={catalog?.latest_sync?.status === "failed" ? "red" : "blue"}
           >
-            {catalog?.latest_attempt?.status ?? "not synced"}
+            {catalog?.latest_sync?.status ?? "not synced"}
           </Badge>
         </Group>
 
@@ -84,10 +84,10 @@ function CatalogStatusCard({
 
         <Stack gap={4}>
           <Text size="sm" c="dimmed">
-            Current snapshot
+            Last successful refresh
           </Text>
           <Text size="sm" ff="monospace">
-            {formatSnapshot(catalog?.snapshot_id ?? null)}
+            {formatLastSuccess(catalog?.last_success_at ?? null)}
           </Text>
         </Stack>
 
@@ -100,15 +100,15 @@ function CatalogStatusCard({
           </Badge>
         </Group>
 
-        {catalog?.latest_attempt?.failure_message && (
+        {catalog?.latest_sync?.failure_message && (
           <Alert
             color="red"
-            title={catalog.latest_attempt.failure_code ?? "Refresh failed"}
+            title={catalog.latest_sync.failure_code ?? "Refresh failed"}
           >
-            {catalog.latest_attempt.failure_message}
-            {catalog.latest_attempt.action_hint && (
+            {catalog.latest_sync.failure_message}
+            {catalog.latest_sync.action_hint && (
               <Text size="sm" mt="xs">
-                {catalog.latest_attempt.action_hint}
+                {catalog.latest_sync.action_hint}
               </Text>
             )}
           </Alert>

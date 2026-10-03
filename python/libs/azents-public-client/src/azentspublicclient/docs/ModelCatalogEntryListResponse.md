@@ -8,9 +8,8 @@ Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **catalog_id** | **str** |  | 
 **catalog_scope** | [**LLMCatalogScope**](LLMCatalogScope.md) |  | 
-**current_snapshot_id** | **str** |  | 
-**current_snapshot_created_at** | **datetime** |  | 
-**latest_attempt** | [**ModelCatalogSyncAttemptResponse**](ModelCatalogSyncAttemptResponse.md) |  | 
+**last_success_at** | **datetime** |  | 
+**latest_sync** | [**ModelCatalogSyncStatusResponse**](ModelCatalogSyncStatusResponse.md) |  | 
 **stale** | **bool** |  | 
 **sync_available_at** | **datetime** |  | 
 **automatic_retry_blocked** | **bool** |  | 

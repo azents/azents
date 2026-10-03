@@ -42,7 +42,7 @@ class TestRuntimeProviderOptionListResponse(unittest.TestCase):
                         kind = '', 
                         scope = '', 
                         availability_mode = '', 
-                        capabilities = { }, 
+                        capabilities = azentspublicclient.models.capabilities.Capabilities(), 
                         current_contract_revision_id = '', 
                         active_config_revision_id = '', )
                     ]
@@ -56,7 +56,7 @@ class TestRuntimeProviderOptionListResponse(unittest.TestCase):
                         kind = '', 
                         scope = '', 
                         availability_mode = '', 
-                        capabilities = { }, 
+                        capabilities = azentspublicclient.models.capabilities.Capabilities(), 
                         current_contract_revision_id = '', 
                         active_config_revision_id = '', )
                     ],

@@ -810,7 +810,7 @@ class TestSessionTitleHelpers:
         """Model call failures are logged by the title service and not re-raised."""
         service = SessionTitleService(
             sdk_factories=get_model_sdk_factories(),
-            model_metadata_service=make_test_model_metadata_service(snapshot=None),
+            model_metadata_service=make_test_model_metadata_service(source=None),
             session_title_repository=_session_title_repository(
                 strict_json_schema=None,
                 session_manager=_session_manager,
@@ -927,7 +927,7 @@ class TestSessionTitleHelpers:
         """Standalone title generation does not retry unclassified outcomes."""
         service = SessionTitleService(
             sdk_factories=get_model_sdk_factories(),
-            model_metadata_service=make_test_model_metadata_service(snapshot=None),
+            model_metadata_service=make_test_model_metadata_service(source=None),
             session_title_repository=_session_title_repository(
                 strict_json_schema=None,
                 session_manager=_session_manager,
@@ -1030,7 +1030,7 @@ class TestSessionTitleHelpers:
         title_repository = MutableTitleRepository()
         service = SessionTitleService(
             sdk_factories=get_model_sdk_factories(),
-            model_metadata_service=make_test_model_metadata_service(snapshot=None),
+            model_metadata_service=make_test_model_metadata_service(source=None),
             session_title_repository=SessionTitleRepository(
                 agent_repository=_AgentRepository(),
                 agent_session_repository=title_repository,
@@ -1168,7 +1168,7 @@ class TestSessionTitleHelpers:
         repository = WinningRepository()
         service = SessionTitleService(
             sdk_factories=get_model_sdk_factories(),
-            model_metadata_service=make_test_model_metadata_service(snapshot=None),
+            model_metadata_service=make_test_model_metadata_service(source=None),
             session_title_repository=SessionTitleRepository(
                 agent_repository=_AgentRepository(),
                 agent_session_repository=repository,
@@ -1312,7 +1312,7 @@ class TestSessionTitleHelpers:
         )
         service = SessionTitleService(
             sdk_factories=get_model_sdk_factories(),
-            model_metadata_service=make_test_model_metadata_service(snapshot=None),
+            model_metadata_service=make_test_model_metadata_service(source=None),
             session_title_repository=SessionTitleRepository(
                 agent_repository=_AgentRepository(),
                 agent_session_repository=WinningRepository(),
@@ -1481,6 +1481,7 @@ def _model_selection(
         model_identifier="gpt-test",
         model_display_name="GPT Test",
         model_developer=LLMModelDeveloper.OPENAI,
+        pricing=None,
         normalized_capabilities=ModelCapabilities(
             tool_calling=ModelToolCallingCapabilities(
                 strict_json_schema=strict_json_schema
@@ -1589,7 +1590,7 @@ def _title_service(
 ) -> SessionTitleService:
     return SessionTitleService(
         sdk_factories=get_model_sdk_factories(),
-        model_metadata_service=make_test_model_metadata_service(snapshot=None),
+        model_metadata_service=make_test_model_metadata_service(source=None),
         session_title_repository=_session_title_repository(
             strict_json_schema=strict_json_schema,
             session_manager=_session_manager,

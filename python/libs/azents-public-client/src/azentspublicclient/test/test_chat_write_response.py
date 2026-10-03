@@ -46,7 +46,7 @@ class TestChatWriteResponse(unittest.TestCase):
                             id = '', 
                             session_id = '', 
                             kind = 'user_message', 
-                            payload = { }, 
+                            payload = azentspublicclient.models.payload.Payload(), 
                             external_id = '', 
                             adapter = '', 
                             provider = '', 
@@ -77,7 +77,13 @@ class TestChatWriteResponse(unittest.TestCase):
                         run_id = '', 
                         phase = 'idle', 
                         status = 'pending', 
-                        inference_profile = { }, 
+                        inference_profile = azentspublicclient.models.applied_inference_profile.AppliedInferenceProfile(
+                            model_target_label = '0', 
+                            model_display_name = '0', 
+                            reasoning_effort = '', 
+                            enabled_execution_options = [
+                                'fast'
+                                ], ), 
                         using_fallback = True, 
                         model_call_started_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                         operation = azentspublicclient.models.chat_live_run_operation_response.ChatLiveRunOperationResponse(
@@ -166,7 +172,7 @@ class TestChatWriteResponse(unittest.TestCase):
                             id = '', 
                             session_id = '', 
                             kind = 'user_message', 
-                            payload = { }, 
+                            payload = azentspublicclient.models.payload.Payload(), 
                             external_id = '', 
                             adapter = '', 
                             provider = '', 
@@ -197,7 +203,13 @@ class TestChatWriteResponse(unittest.TestCase):
                         run_id = '', 
                         phase = 'idle', 
                         status = 'pending', 
-                        inference_profile = { }, 
+                        inference_profile = azentspublicclient.models.applied_inference_profile.AppliedInferenceProfile(
+                            model_target_label = '0', 
+                            model_display_name = '0', 
+                            reasoning_effort = '', 
+                            enabled_execution_options = [
+                                'fast'
+                                ], ), 
                         using_fallback = True, 
                         model_call_started_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                         operation = azentspublicclient.models.chat_live_run_operation_response.ChatLiveRunOperationResponse(

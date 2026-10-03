@@ -85,8 +85,15 @@ def test_operation_timeout_is_bounded(timeout: float) -> None:
 
 
 @pytest.mark.asyncio
-async def test_collect_decodes_payload_and_records_both_hashes() -> None:
+async def test_collect_decodes_current_payload_and_descriptive_provenance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     requests: list[httpx2.Request] = []
+
+    def reject_content_hash(*args: object, **kwargs: object) -> None:
+        raise AssertionError("Current catalog collection must not compute a hash.")
+
+    monkeypatch.setattr(hashlib, "sha256", reject_content_hash)
 
     def respond(request: httpx2.Request) -> httpx2.Response:
         requests.append(request)
@@ -102,9 +109,6 @@ async def test_collect_decodes_payload_and_records_both_hashes() -> None:
     assert requests[0].headers["accept"] == "application/json"
     assert result.source_key == CATALOG_SOURCE_KEY
     assert result.source_kind == CATALOG_SOURCE_KIND
-    assert result.raw_document_hash == hashlib.sha256(_BODY).hexdigest()
-    assert result.source_hash == result.payload.content_hash
-    assert result.etag == '"data-v1"'
     assert result.payload.model_count == 1
     assert result.payload.provider_count == 1
     assert (

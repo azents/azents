@@ -652,7 +652,7 @@ class TestResolveInvokeInput:
             image_generation_catalog_service=(
                 image_catalog_service := _make_image_generation_catalog_service()
             ),
-            model_metadata_service=make_test_model_metadata_service(snapshot=None),
+            model_metadata_service=make_test_model_metadata_service(source=None),
             repositories=get_engine_resolve_repositories(
                 session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
                 agent_repository=agent_repository,
@@ -721,7 +721,7 @@ class TestResolveInvokeInput:
             exchange_file_service=AsyncMock(),
             model_file_service=AsyncMock(),
             image_generation_catalog_service=_make_image_generation_catalog_service(),
-            model_metadata_service=make_test_model_metadata_service(snapshot=None),
+            model_metadata_service=make_test_model_metadata_service(source=None),
             repositories=get_engine_resolve_repositories(
                 session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
                 agent_repository=agent_repository,
@@ -791,7 +791,7 @@ class TestResolveInvokeInput:
             exchange_file_service=AsyncMock(),
             model_file_service=AsyncMock(),
             image_generation_catalog_service=_make_image_generation_catalog_service(),
-            model_metadata_service=make_test_model_metadata_service(snapshot=None),
+            model_metadata_service=make_test_model_metadata_service(source=None),
             repositories=get_engine_resolve_repositories(
                 session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
                 agent_repository=agent_repository,
@@ -836,7 +836,7 @@ class TestResolveInvokeInput:
             exchange_file_service=AsyncMock(),
             model_file_service=AsyncMock(),
             image_generation_catalog_service=_make_image_generation_catalog_service(),
-            model_metadata_service=make_test_model_metadata_service(snapshot=None),
+            model_metadata_service=make_test_model_metadata_service(source=None),
             repositories=get_engine_resolve_repositories(
                 session_manager=session_manager,
                 agent_repository=agent_repository,
@@ -888,7 +888,7 @@ class TestResolveInvokeInput:
             exchange_file_service=AsyncMock(),
             model_file_service=AsyncMock(),
             image_generation_catalog_service=image_service,
-            model_metadata_service=make_test_model_metadata_service(snapshot=None),
+            model_metadata_service=make_test_model_metadata_service(source=None),
             repositories=get_engine_resolve_repositories(
                 session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
                 agent_repository=agent_repository,
@@ -950,7 +950,7 @@ class TestResolveInvokeInput:
             exchange_file_service=AsyncMock(),
             model_file_service=AsyncMock(),
             image_generation_catalog_service=image_service,
-            model_metadata_service=make_test_model_metadata_service(snapshot=None),
+            model_metadata_service=make_test_model_metadata_service(source=None),
             repositories=get_engine_resolve_repositories(
                 session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
                 agent_repository=agent_repository,
@@ -1019,7 +1019,7 @@ class TestResolveInvokeInput:
             exchange_file_service=AsyncMock(),
             model_file_service=AsyncMock(),
             image_generation_catalog_service=image_service,
-            model_metadata_service=make_test_model_metadata_service(snapshot=None),
+            model_metadata_service=make_test_model_metadata_service(source=None),
             repositories=get_engine_resolve_repositories(
                 session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
                 agent_repository=agent_repository,
@@ -1055,7 +1055,7 @@ class TestResolveInvokeInput:
         integration_repository = AsyncMock()
         integration_repository.get_by_id_with_secrets.return_value = _make_integration()
         error = ImageGenerationRuntimeConfigurationError(
-            reason="catalog_generation_mismatch",
+            reason="catalog_unusable",
             integration_id="integ-1",
             model_identifier="gpt-image-2.5-flare",
         )
@@ -1077,7 +1077,7 @@ class TestResolveInvokeInput:
             exchange_file_service=AsyncMock(),
             model_file_service=AsyncMock(),
             image_generation_catalog_service=image_service,
-            model_metadata_service=make_test_model_metadata_service(snapshot=None),
+            model_metadata_service=make_test_model_metadata_service(source=None),
             repositories=get_engine_resolve_repositories(
                 session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
                 agent_repository=agent_repository,
@@ -1140,7 +1140,7 @@ class TestResolveInvokeInput:
             exchange_file_service=AsyncMock(),
             model_file_service=AsyncMock(),
             image_generation_catalog_service=image_service,
-            model_metadata_service=make_test_model_metadata_service(snapshot=None),
+            model_metadata_service=make_test_model_metadata_service(source=None),
             repositories=get_engine_resolve_repositories(
                 session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
                 agent_repository=agent_repository,
@@ -1204,7 +1204,7 @@ class TestResolveInvokeInput:
             exchange_file_service=AsyncMock(),
             model_file_service=AsyncMock(),
             image_generation_catalog_service=_make_image_generation_catalog_service(),
-            model_metadata_service=make_test_model_metadata_service(snapshot=None),
+            model_metadata_service=make_test_model_metadata_service(source=None),
             repositories=get_engine_resolve_repositories(
                 session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
                 agent_repository=agent_repository,
@@ -1245,7 +1245,7 @@ class TestResolveInvokeInput:
             exchange_file_service=AsyncMock(),
             model_file_service=AsyncMock(),
             image_generation_catalog_service=_make_image_generation_catalog_service(),
-            model_metadata_service=make_test_model_metadata_service(snapshot=None),
+            model_metadata_service=make_test_model_metadata_service(source=None),
             repositories=get_engine_resolve_repositories(
                 session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
                 agent_repository=agent_repository,
@@ -1318,7 +1318,7 @@ class TestResolveInvokeInput:
             exchange_file_service=AsyncMock(),
             model_file_service=AsyncMock(),
             image_generation_catalog_service=_make_image_generation_catalog_service(),
-            model_metadata_service=make_test_model_metadata_service(snapshot=None),
+            model_metadata_service=make_test_model_metadata_service(source=None),
             repositories=get_engine_resolve_repositories(
                 session_manager=session_manager,
                 agent_repository=agent_repository,
@@ -1359,7 +1359,7 @@ class TestResolveInvokeInput:
             exchange_file_service=AsyncMock(),
             model_file_service=AsyncMock(),
             image_generation_catalog_service=_make_image_generation_catalog_service(),
-            model_metadata_service=make_test_model_metadata_service(snapshot=None),
+            model_metadata_service=make_test_model_metadata_service(source=None),
             repositories=get_engine_resolve_repositories(
                 session_manager=session_manager,
                 agent_repository=agent_repository,
@@ -1397,7 +1397,7 @@ class TestResolveInvokeInput:
             exchange_file_service=AsyncMock(),
             model_file_service=AsyncMock(),
             image_generation_catalog_service=_make_image_generation_catalog_service(),
-            model_metadata_service=make_test_model_metadata_service(snapshot=None),
+            model_metadata_service=make_test_model_metadata_service(source=None),
             repositories=get_engine_resolve_repositories(
                 session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
                 agent_repository=agent_repository,
@@ -1434,7 +1434,7 @@ class TestResolveInvokeInput:
             exchange_file_service=AsyncMock(),
             model_file_service=AsyncMock(),
             image_generation_catalog_service=_make_image_generation_catalog_service(),
-            model_metadata_service=make_test_model_metadata_service(snapshot=None),
+            model_metadata_service=make_test_model_metadata_service(source=None),
             repositories=get_engine_resolve_repositories(
                 session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
                 agent_repository=agent_repository,
@@ -1475,7 +1475,7 @@ class TestResolveInvokeInput:
             exchange_file_service=AsyncMock(),
             model_file_service=AsyncMock(),
             image_generation_catalog_service=_make_image_generation_catalog_service(),
-            model_metadata_service=make_test_model_metadata_service(snapshot=None),
+            model_metadata_service=make_test_model_metadata_service(source=None),
             repositories=get_engine_resolve_repositories(
                 session_manager=session_manager,
                 agent_repository=agent_repository,
@@ -1517,7 +1517,7 @@ class TestResolveInvokeInput:
             exchange_file_service=AsyncMock(),
             model_file_service=AsyncMock(),
             image_generation_catalog_service=_make_image_generation_catalog_service(),
-            model_metadata_service=make_test_model_metadata_service(snapshot=None),
+            model_metadata_service=make_test_model_metadata_service(source=None),
             repositories=get_engine_resolve_repositories(
                 session_manager=session_manager,
                 agent_repository=agent_repository,
@@ -1560,7 +1560,7 @@ class TestResolveInvokeInput:
             exchange_file_service=AsyncMock(),
             model_file_service=AsyncMock(),
             image_generation_catalog_service=_make_image_generation_catalog_service(),
-            model_metadata_service=make_test_model_metadata_service(snapshot=None),
+            model_metadata_service=make_test_model_metadata_service(source=None),
             repositories=get_engine_resolve_repositories(
                 session_manager=session_manager,
                 agent_repository=agent_repository,
@@ -1604,7 +1604,7 @@ class TestResolveInvokeInput:
             exchange_file_service=AsyncMock(),
             model_file_service=AsyncMock(),
             image_generation_catalog_service=_make_image_generation_catalog_service(),
-            model_metadata_service=make_test_model_metadata_service(snapshot=None),
+            model_metadata_service=make_test_model_metadata_service(source=None),
             repositories=get_engine_resolve_repositories(
                 session_manager=session_manager,
                 agent_repository=agent_repository,
@@ -2001,7 +2001,7 @@ async def test_existing_agent_top_k_reaches_run_and_retry_carrier(
         exchange_file_service=AsyncMock(),
         model_file_service=AsyncMock(),
         image_generation_catalog_service=_make_image_generation_catalog_service(),
-        model_metadata_service=make_test_model_metadata_service(snapshot=None),
+        model_metadata_service=make_test_model_metadata_service(source=None),
     )
     assert isinstance(result, Success)
     assert result.value.top_k == top_k

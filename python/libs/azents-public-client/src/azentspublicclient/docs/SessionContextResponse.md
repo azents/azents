@@ -7,7 +7,7 @@ Agent session context inspector response.
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **session** | [**SessionContextSessionResponse**](SessionContextSessionResponse.md) | Session summary | 
-**usage** | **Dict[str, object]** |  | [optional] 
+**usage** | **object** |  | [optional] 
 **stats** | [**SessionContextStatsResponse**](SessionContextStatsResponse.md) | Aggregate stats | 
 **breakdown** | [**List[SessionContextBreakdownSegmentResponse]**](SessionContextBreakdownSegmentResponse.md) | Prompt character breakdown | 
 **system_prompt** | [**SessionContextSystemPromptResponse**](SessionContextSystemPromptResponse.md) |  | [optional] 

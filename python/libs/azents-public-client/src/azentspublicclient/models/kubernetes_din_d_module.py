@@ -18,7 +18,7 @@ import re  # noqa: F401
 import json
 
 from pydantic import BaseModel, ConfigDict, Field
-from typing import Any, ClassVar, Dict, List
+from typing import Any, ClassVar, Dict
 from typing_extensions import Annotated
 from azentspublicclient.models.kubernetes_container_resources import KubernetesContainerResources
 from typing import Optional, Set
@@ -31,7 +31,6 @@ class KubernetesDinDModule(BaseModel):
     engine_resources: KubernetesContainerResources
     docker_storage_bytes: Annotated[int, Field(strict=True, ge=1)]
     shared_temporary_storage_bytes: Annotated[int, Field(strict=True, ge=1)]
-    additional_properties: Dict[str, Any] = {}
     __properties: ClassVar[List[str]] = ["engine_resources", "docker_storage_bytes", "shared_temporary_storage_bytes"]
 
     model_config = ConfigDict(
@@ -64,10 +63,8 @@ class KubernetesDinDModule(BaseModel):
         * `None` is only added to the output dict for nullable fields that
           were set at model initialization. Other fields with value `None`
           are ignored.
-        * Fields in `self.additional_properties` are added to the output dict.
         """
         excluded_fields: Set[str] = set([
-            "additional_properties",
         ])
 
         _dict = self.model_dump(
@@ -78,11 +75,6 @@ class KubernetesDinDModule(BaseModel):
         # override the default output from pydantic by calling `to_dict()` of engine_resources
         if self.engine_resources:
             _dict['engine_resources'] = self.engine_resources.to_dict()
-        # puts key-value pairs in additional_properties in the top level
-        if self.additional_properties is not None:
-            for _key, _value in self.additional_properties.items():
-                _dict[_key] = _value
-
         return _dict
 
     @classmethod
@@ -99,11 +91,6 @@ class KubernetesDinDModule(BaseModel):
             "docker_storage_bytes": obj.get("docker_storage_bytes"),
             "shared_temporary_storage_bytes": obj.get("shared_temporary_storage_bytes")
         })
-        # store additional fields in additional_properties
-        for _key in obj.keys():
-            if _key not in cls.__properties:
-                _obj.additional_properties[_key] = obj.get(_key)
-
         return _obj
 
 

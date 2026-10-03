@@ -10,8 +10,7 @@ const systemCatalogProviderSchema = z.enum([
 
 type SystemCatalogProvider = z.infer<typeof systemCatalogProviderSchema>;
 
-const systemModelCatalogSyncAttemptResponseSchema = z.object({
-  id: z.string(),
+const systemModelCatalogSyncStatusResponseSchema = z.object({
   status: z.string(),
   started_at: z.string(),
   finished_at: z.string().nullable(),
@@ -27,16 +26,16 @@ const systemModelCatalogSyncAttemptResponseSchema = z.object({
 const systemModelCatalogResponseSchema = z.object({
   provider: systemCatalogProviderSchema,
   catalog_id: z.string().nullable(),
-  snapshot_id: z.string().nullable(),
+  last_success_at: z.string().nullable(),
   visible_count: z.number(),
   hidden_count: z.number(),
-  latest_attempt: systemModelCatalogSyncAttemptResponseSchema.nullable(),
+  latest_sync: systemModelCatalogSyncStatusResponseSchema.nullable(),
 });
 
 const systemModelCatalogRefreshResponseSchema = z.object({
   provider: systemCatalogProviderSchema,
   catalog_id: z.string(),
-  snapshot_id: z.string().nullable(),
+  last_success_at: z.string().nullable(),
   visible_count: z.number(),
   hidden_count: z.number(),
   status: z.string(),

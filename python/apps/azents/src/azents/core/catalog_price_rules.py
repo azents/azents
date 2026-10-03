@@ -8,7 +8,7 @@ import json
 import re
 from decimal import Decimal, localcontext
 from enum import StrEnum
-from typing import Literal
+from typing import Annotated, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import (
@@ -17,6 +17,7 @@ from pydantic import (
     StrictInt,
     StrictStr,
     ValidationError,
+    WithJsonSchema,
     field_validator,
 )
 
@@ -61,7 +62,22 @@ class CatalogPriceRate:
     metric: PriceMetric
     tier: PriceTier | None
     above_input_tokens: int | None
-    usd_per_unit: Decimal | None
+    # Normalized Decimal JSON includes exponent notation without float conversion.
+    usd_per_unit: (
+        Annotated[
+            Decimal,
+            WithJsonSchema(
+                {
+                    "type": "string",
+                    "pattern": (
+                        r"^[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)"
+                        r"(?:[eE][+-]?[0-9]+)?$"
+                    ),
+                }
+            ),
+        ]
+        | None
+    )
     search_context_size: Literal["low", "medium", "high"] | None
 
 

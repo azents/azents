@@ -35,13 +35,21 @@ class TestKubernetesDinDModule(unittest.TestCase):
         model = KubernetesDinDModule()
         if include_optional:
             return KubernetesDinDModule(
-                engine_resources = { },
+                engine_resources = azentspublicclient.models.kubernetes_container_resources.KubernetesContainerResources(
+                    cpu_request_millicores = 1.0, 
+                    cpu_limit_millicores = 1.0, 
+                    memory_request_bytes = 1.0, 
+                    memory_limit_bytes = 1.0, ),
                 docker_storage_bytes = 1.0,
                 shared_temporary_storage_bytes = 1.0
             )
         else:
             return KubernetesDinDModule(
-                engine_resources = { },
+                engine_resources = azentspublicclient.models.kubernetes_container_resources.KubernetesContainerResources(
+                    cpu_request_millicores = 1.0, 
+                    cpu_limit_millicores = 1.0, 
+                    memory_request_bytes = 1.0, 
+                    memory_limit_bytes = 1.0, ),
                 docker_storage_bytes = 1.0,
                 shared_temporary_storage_bytes = 1.0,
         )

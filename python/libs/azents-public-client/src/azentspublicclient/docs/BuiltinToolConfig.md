@@ -7,7 +7,7 @@ Built-in tool setting enabled for one selectable model option.
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **name** | **str** | Built-in tool name, for example web_search | 
-**config** | **Dict[str, object]** | Per-tool options | [optional] 
+**config** | **object** | Per-tool options | [optional] 
 
 ## Example
 

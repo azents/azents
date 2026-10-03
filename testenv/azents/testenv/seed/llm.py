@@ -1,23 +1,28 @@
-"""LLM integration and ModelConfig seeding helpers.
+"""LLM integration and current catalog seeding helpers.
 
 Normally use this through `TestenvClient.llm`.
 """
 
+import time
 from dataclasses import dataclass
 
-import httpx
 from azentspublicclient.api.llm_provider_integration_v1_api import (
     LLMProviderIntegrationV1Api,
 )
+from azentspublicclient.exceptions import NotFoundException
 from azentspublicclient.models.api_key_secrets import ApiKeySecrets
 from azentspublicclient.models.aws_config import AwsConfig
 from azentspublicclient.models.aws_secrets import AwsSecrets
+from azentspublicclient.models.llm_catalog_scope import LLMCatalogScope
 from azentspublicclient.models.llm_provider import LLMProvider
 from azentspublicclient.models.llm_provider_integration_create_request import (
     LLMProviderIntegrationCreateRequest,
 )
 from azentspublicclient.models.llm_provider_integration_create_request_config import (
     LLMProviderIntegrationCreateRequestConfig,
+)
+from azentspublicclient.models.model_catalog_entry_list_response import (
+    ModelCatalogEntryListResponse,
 )
 from azentspublicclient.models.secrets import Secrets
 
@@ -26,6 +31,24 @@ from testenv.runtime_config import TestenvConfig
 from .client import public_client
 from .types import Integration, User, Workspace
 from .unique import unique
+
+_INITIAL_CATALOG_TIMEOUT_SECONDS = 10.0
+_INITIAL_CATALOG_POLL_SECONDS = 0.1
+
+
+def _first_identifier(listing: ModelCatalogEntryListResponse, integration: Integration) -> str:
+    """Read one exact typed candidate without a Workspace/default substitution."""
+    if not listing.entries:
+        raise RuntimeError(
+            "The integration catalog has no selectable models. "
+            "Complete catalog synchronization before creating the seed Agent."
+        )
+    candidate = listing.entries[0]
+    if candidate.provider.value != integration.provider:
+        raise RuntimeError("The current catalog model does not match the seed provider.")
+    if not candidate.provider_model_identifier.strip():
+        raise RuntimeError("The current catalog model identifier is blank.")
+    return candidate.provider_model_identifier
 
 
 @dataclass(frozen=True)
@@ -43,14 +66,14 @@ class LLM:
     ) -> None:
         """Block use of the legacy static catalog helper.
 
-        Phase 5 testenv flows must use dynamic listing plus the ModelConfig API.
+        Testenv flows use current catalog listing and canonical model option inputs.
         Any scenario that still calls this helper should fail because it depends
         on the removed static catalog path.
         """
         _ = (slug, model_developer, provider)
         raise RuntimeError(
             "Static LLM catalog seeding is not supported. "
-            "Create an integration and ModelConfig through public APIs instead."
+            "Create an integration and select a current model through public APIs instead."
         )
 
     def create_integration(
@@ -93,55 +116,63 @@ class LLM:
         user: User,
         workspace: Workspace,
         integration: Integration,
-    ) -> dict[str, object]:
-        """Fetch integration-scoped dynamic model listing through the public API."""
-        response = httpx.get(
-            f"{self.config.public_url}/llm-provider-integration/v1/workspaces/"
-            f"{workspace.handle}/llm-provider-integrations/{integration.id}/models",
-            headers={"Authorization": f"Bearer {user.access_token}"},
-            timeout=10,
+    ) -> ModelCatalogEntryListResponse:
+        """Read typed selectable current models through the generated public client."""
+        api = LLMProviderIntegrationV1Api(public_client(self.config))
+        return api.llm_provider_integration_v1_list_integration_catalog_entries(
+            handle=workspace.handle,
+            integration_id=integration.id,
+            _headers={"Authorization": f"Bearer {user.access_token}"},
+            _request_timeout=10,
         )
-        response.raise_for_status()
-        return response.json()
 
-    def create_model_config_from_first_candidate(
+    def first_model_identifier(
         self,
         user: User,
         workspace: Workspace,
         integration: Integration,
-        *,
-        label: str | None = None,
-        default_model: bool = True,
-        default_lightweight_model: bool = True,
     ) -> str:
-        """Create a ModelConfig from the first dynamic-listing candidate and return its ID."""
+        """Return the exact first current candidate; never substitute a default model."""
         listing = self.list_integration_models(user, workspace, integration)
-        models = listing.get("models")
-        if not isinstance(models, list) or not models:
-            raise RuntimeError("Dynamic listing did not return usable models.")
-        candidate = models[0]
-        if not isinstance(candidate, dict):
-            raise RuntimeError("Dynamic listing returned an invalid candidate.")
-        provider = candidate.get("provider")
-        model_identifier = candidate.get("model_identifier")
-        if not isinstance(provider, str) or not isinstance(model_identifier, str):
-            raise RuntimeError("Dynamic listing candidate is missing model identity.")
-        response = httpx.post(
-            f"{self.config.public_url}/model-config/v1/workspaces/{workspace.handle}/model-configs",
-            headers={"Authorization": f"Bearer {user.access_token}"},
-            json={
-                "label": label if label is not None else f"Test Model {unique()}",
-                "llm_provider_integration_id": integration.id,
-                "provider": provider,
-                "model_identifier": model_identifier,
-                "default_model": default_model,
-                "default_lightweight_model": default_lightweight_model,
-                "enabled": True,
-            },
-            timeout=10,
-        )
-        response.raise_for_status()
-        return str(response.json()["id"])
+        return _first_identifier(listing, integration)
+
+    def wait_for_initial_model_identifier(
+        self,
+        user: User,
+        workspace: Workspace,
+        integration: Integration,
+    ) -> str:
+        """Wait for the newly created fixture's authoritative integration publication."""
+        api = LLMProviderIntegrationV1Api(public_client(self.config))
+        deadline = time.monotonic() + _INITIAL_CATALOG_TIMEOUT_SECONDS
+        while (remaining := deadline - time.monotonic()) > 0:
+            try:
+                listing = api.llm_provider_integration_v1_list_integration_catalog_entries(
+                    handle=workspace.handle,
+                    integration_id=integration.id,
+                    _headers={"Authorization": f"Bearer {user.access_token}"},
+                    _request_timeout=min(10.0, remaining),
+                )
+            except NotFoundException:
+                pass
+            else:
+                if listing.catalog_scope is LLMCatalogScope.INTEGRATION:
+                    sync = listing.latest_sync
+                    if sync is not None:
+                        match sync.status:
+                            case "succeeded":
+                                return _first_identifier(listing, integration)
+                            case "failed":
+                                raise RuntimeError(
+                                    "Initial integration catalog synchronization failed."
+                                )
+                            case "running":
+                                pass
+                            case _:
+                                raise ValueError("Unknown current catalog sync status.")
+            if (remaining := deadline - time.monotonic()) > 0:
+                time.sleep(min(_INITIAL_CATALOG_POLL_SECONDS, remaining))
+        raise TimeoutError("Initial integration catalog publication did not become ready.")
 
     def create_bedrock_integration(
         self,

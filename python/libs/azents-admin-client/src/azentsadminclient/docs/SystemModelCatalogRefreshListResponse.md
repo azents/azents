@@ -1,6 +1,5 @@
 # SystemModelCatalogRefreshListResponse
 
-System model catalog refresh list response.
 
 ## Properties
 

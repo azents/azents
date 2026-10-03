@@ -27,8 +27,8 @@ code_paths:
   - typescript/apps/azents-web/src/shared/subscription-usage/**
   - testenv/azents/e2e/src/tests/required/public/test_llm_provider_integration.py
   - testenv/azents/e2e/src/tests/required/public/test_model_selection.py
-last_verified_at: 2026-10-01
-spec_version: 6
+last_verified_at: 2026-10-04
+spec_version: 7
 ---
 
 # OpenRouter API Key Provider Flow
@@ -95,7 +95,8 @@ The provider response is normalized under these rules:
 - Unknown publishers map to `model_developer=other`; they never fall back to Anthropic.
 - Invalid records are skipped with bounded aggregate diagnostics instead of exposing raw provider payloads.
 - Catalog reads use the stored projection and never call OpenRouter on the picker read path.
-- Failed refreshes use the common catalog-attempt status, retry, backoff, and stale-snapshot behavior.
+- Failed refreshes use the common current sync status, retry, backoff, and stale-current-data
+  behavior, preserving entries, embedded prices, and last-success time.
 
 Runtime dispatch uses the exact saved provider identifier, for example
 `anthropic/claude-sonnet-4.6`, without an execution-library prefix or publisher-path stripping.
@@ -126,7 +127,7 @@ Azents does not send `HTTP-Referer` by default and does not add request-level up
 
 OpenRouter execution uses the Pydantic AI public Responses model boundary with an official
 OpenAI-compatible SDK client. It retains the Responses API envelope rather than switching to a
-Chat Completions wrapper. Canonical transcript, provider-safe failures, usage and captured-source
+Chat Completions wrapper. Canonical transcript, provider-safe failures, usage and saved-candidate
 cost normalization remain Azents-owned. Response-handle acquisition has a provider-specific
 60-second deadline; parsed-native-event idle and absolute-attempt deadlines remain on the common
 policy. Provider-first lowering applies these dialect rules:
@@ -148,7 +149,7 @@ policy. Provider-first lowering applies these dialect rules:
 
 ## Snapshot Semantics
 
-Workspace defaults and Agent model choices resolve through the stored OpenRouter catalog. The resulting snapshot preserves the hosting provider, exact provider model identifier, display name, recognized or neutral developer, family, normalized capabilities, source metadata, and refresh time.
+Workspace defaults and Agent model choices resolve through the stored OpenRouter catalog. The resulting snapshot preserves the hosting provider, exact provider model identifier, display name, recognized or neutral developer, family, normalized capabilities, server-owned normalized pricing, source metadata, and refresh time.
 
 Later OpenRouter catalog changes do not mutate existing Agent or Workspace snapshots. Execution can fail when the referenced integration is disabled, deleted, or rejected by OpenRouter; this remains an integration/provider availability failure rather than automatic snapshot replacement.
 
@@ -166,6 +167,7 @@ Later OpenRouter catalog changes do not mutate existing Agent or Workspace snaps
 
 | Date | Version | Change | Rationale |
 |---|---:|---|---|
+| 2026-10-03 | 7 | Adopted current catalog/latest sync state and embedded normalized selection prices | Preserve exact publisher identity, account visibility and reported charge priority |
 | 2026-10-01 | 6 | Removed the former metadata-source compatibility path while retaining direct account catalog projection | Keep every valid account-visible text model independent of optional generic metadata |
 | 2026-09-30 | 5 | Replaced executable transport with the public Pydantic AI Responses/SDK boundary and exact raw model identity | Preserve the existing account, envelope and execution-control contracts |
 | 2026-09-04 | 4 | Mapped the shared subscription-usage state and container modules | Keep bounded-key usage eligibility, retained-success refresh state, summary, and threshold presentation linked after the frontend boundary relocation |

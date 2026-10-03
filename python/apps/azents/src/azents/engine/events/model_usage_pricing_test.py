@@ -6,10 +6,34 @@ import json
 import pytest
 
 from azents.core.enums import LLMProvider
-from azents.core.model_catalog_source import decode_catalog_source
-from azents.core.model_pricing import normalize_model_pricing
+from azents.core.model_catalog_source import CatalogSourceModel, decode_catalog_source
+from azents.core.model_pricing import (
+    CapturedModelPricing,
+    capture_model_pricing,
+    normalize_model_pricing,
+)
 from azents.engine.events.model_usage_pricing import apply_model_usage_pricing
 from azents.engine.events.types import TokenUsagePayload
+
+
+def _pricing(
+    *,
+    provider: LLMProvider,
+    model_identifier: str,
+    source_model: CatalogSourceModel,
+    request_timestamp: datetime.datetime,
+) -> CapturedModelPricing:
+    """Normalize outside dispatch and capture only the saved definition."""
+    return capture_model_pricing(
+        provider=provider,
+        model_identifier=model_identifier,
+        definition=normalize_model_pricing(
+            source_key="litellm_catalog",
+            source_model=source_model,
+            collected_at=datetime.datetime(2026, 10, 1, tzinfo=datetime.UTC),
+        ),
+        request_timestamp=request_timestamp,
+    )
 
 
 def _usage(raw: dict[str, object]) -> TokenUsagePayload:
@@ -42,7 +66,7 @@ def test_reported_charge_survives_absent_price_authority(charge: float) -> None:
     assert result.cost_usd == charge
     assert result.cost_provenance is not None
     assert result.cost_provenance.method == "provider_reported"
-    assert result.cost_provenance.source_snapshot_id is None
+    assert result.cost_provenance.source_key is None
 
 
 @pytest.mark.parametrize("reported_charge", [True, -1.0, float("nan"), float("inf")])
@@ -69,11 +93,9 @@ def test_generic_estimate_retains_captured_provenance() -> None:
         _usage({}),
         provider="openai",
         model_identifier="selected-model",
-        pricing=normalize_model_pricing(
+        pricing=_pricing(
             provider=LLMProvider.OPENAI,
             model_identifier="selected-model",
-            source_snapshot_id="source-snapshot-1",
-            source_hash="source-hash",
             source_model=decode_catalog_source(
                 b'{"selected-model":{"litellm_provider":"openai",'
                 b'"input_cost_per_token":0.1,'
@@ -89,7 +111,12 @@ def test_generic_estimate_retains_captured_provenance() -> None:
     assert result.cost_usd == pytest.approx(1.97)
     assert result.cost_provenance is not None
     assert result.cost_provenance.method == "estimated"
-    assert result.cost_provenance.source_snapshot_id == "source-snapshot-1"
+    assert result.cost_provenance.source_key == "litellm_catalog"
+    assert result.cost_provenance.collected_at == datetime.datetime(
+        2026, 10, 1, tzinfo=datetime.UTC
+    )
+    assert "source_hash" not in result.cost_provenance.model_dump()
+    assert "source_snapshot_id" not in result.cost_provenance.model_dump()
 
 
 @pytest.mark.parametrize(
@@ -98,11 +125,9 @@ def test_generic_estimate_retains_captured_provenance() -> None:
 def test_output_item_count_does_not_invent_session_or_media_quantity(
     item_type: str,
 ) -> None:
-    pricing = normalize_model_pricing(
+    pricing = _pricing(
         provider=LLMProvider.OPENAI,
         model_identifier="selected-model",
-        source_snapshot_id="s",
-        source_hash="h",
         source_model=decode_catalog_source(
             b'{"selected-model":{"litellm_provider":"openai",'
             b'"input_cost_per_token":0.1,'
@@ -137,11 +162,9 @@ def test_output_item_count_does_not_invent_session_or_media_quantity(
 def test_malformed_or_undirected_breakdown_does_not_produce_a_partial_estimate(
     raw: dict[str, object],
 ) -> None:
-    pricing = normalize_model_pricing(
+    pricing = _pricing(
         provider=LLMProvider.OPENAI,
         model_identifier="m",
-        source_snapshot_id="s",
-        source_hash="h",
         source_model=decode_catalog_source(
             b'{"m":{"litellm_provider":"openai","input_cost_per_token":0.1,'
             b'"output_cost_per_token":0.2,"cache_read_input_token_cost":0.01,'
@@ -200,11 +223,9 @@ def _google_estimate(
         b'"output_cost_per_image_token":0.8,"output_cost_per_audio_token":0.9,'
         b'"cache_read_input_token_cost":0.01}}'
     ).models[0]
-    pricing = normalize_model_pricing(
+    pricing = _pricing(
         provider=LLMProvider.GOOGLE_GEMINI,
         model_identifier="selected-model",
-        source_snapshot_id="google-capture",
-        source_hash="google-hash",
         source_model=source,
         request_timestamp=datetime.datetime(2026, 10, 3, tzinfo=datetime.UTC),
     )
@@ -244,7 +265,7 @@ def test_google_directed_media_partition_is_not_priced_as_ordinary_tokens() -> N
     result = _google_estimate(_google_raw(), cached=None, charge=None)
     assert result.cost_usd == pytest.approx(3.5)
     assert result.cost_provenance is not None
-    assert result.cost_provenance.source_snapshot_id == "google-capture"
+    assert result.cost_provenance.source_model_key == "gemini/selected-model"
     audio = _google_raw()
     audio["promptTokensDetails"] = [
         {"modality": "TEXT", "tokenCount": 3},

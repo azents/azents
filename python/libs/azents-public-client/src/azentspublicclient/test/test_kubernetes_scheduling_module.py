@@ -39,7 +39,12 @@ class TestKubernetesSchedulingModule(unittest.TestCase):
                     'key' : ''
                     },
                 tolerations = [
-                    { }
+                    azentspublicclient.models.kubernetes_toleration.KubernetesToleration(
+                        key = '0', 
+                        operator = 'Equal', 
+                        value = '', 
+                        effect = 'NoSchedule', 
+                        toleration_seconds = 0.0, )
                     ]
             )
         else:

@@ -152,7 +152,7 @@ __all__ = [
     "SystemModelCatalogRefreshListResponse",
     "SystemModelCatalogRefreshResponse",
     "SystemModelCatalogResponse",
-    "SystemModelCatalogSyncAttemptResponse",
+    "SystemModelCatalogSyncStatusResponse",
     "SystemSettingAuditEventListResponse",
     "SystemSettingAuditEventResponse",
     "SystemSettingAuditEventType",
@@ -336,7 +336,7 @@ from azentsadminclient.models.system_model_catalog_list_response import SystemMo
 from azentsadminclient.models.system_model_catalog_refresh_list_response import SystemModelCatalogRefreshListResponse as SystemModelCatalogRefreshListResponse
 from azentsadminclient.models.system_model_catalog_refresh_response import SystemModelCatalogRefreshResponse as SystemModelCatalogRefreshResponse
 from azentsadminclient.models.system_model_catalog_response import SystemModelCatalogResponse as SystemModelCatalogResponse
-from azentsadminclient.models.system_model_catalog_sync_attempt_response import SystemModelCatalogSyncAttemptResponse as SystemModelCatalogSyncAttemptResponse
+from azentsadminclient.models.system_model_catalog_sync_status_response import SystemModelCatalogSyncStatusResponse as SystemModelCatalogSyncStatusResponse
 from azentsadminclient.models.system_setting_audit_event_list_response import SystemSettingAuditEventListResponse as SystemSettingAuditEventListResponse
 from azentsadminclient.models.system_setting_audit_event_response import SystemSettingAuditEventResponse as SystemSettingAuditEventResponse
 from azentsadminclient.models.system_setting_audit_event_type import SystemSettingAuditEventType as SystemSettingAuditEventType

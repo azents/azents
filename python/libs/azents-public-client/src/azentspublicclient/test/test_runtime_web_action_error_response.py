@@ -35,11 +35,15 @@ class TestRuntimeWebActionErrorResponse(unittest.TestCase):
         model = RuntimeWebActionErrorResponse()
         if include_optional:
             return RuntimeWebActionErrorResponse(
-                detail = { }
+                detail = azentspublicclient.models.runtime_web_action_error_detail.RuntimeWebActionErrorDetail(
+                    code = 'not_found', 
+                    scope = '', )
             )
         else:
             return RuntimeWebActionErrorResponse(
-                detail = { },
+                detail = azentspublicclient.models.runtime_web_action_error_detail.RuntimeWebActionErrorDetail(
+                    code = 'not_found', 
+                    scope = '', ),
         )
         """
 

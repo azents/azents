@@ -9,7 +9,7 @@ Name | Type | Description | Notes
 **id** | **str** | Event ID | 
 **session_id** | **str** | AgentSession ID | 
 **kind** | [**EventKind**](EventKind.md) | Event kind | 
-**payload** | **Dict[str, object]** | Event payload | 
+**payload** | **object** | Event payload | 
 **external_id** | **str** |  | [optional] 
 **adapter** | **str** |  | [optional] 
 **provider** | **str** |  | [optional] 

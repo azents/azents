@@ -55,7 +55,12 @@ class TestPendingMailboxUserMessagePresentation(unittest.TestCase):
                             'key' : ''
                             }, )
                     ],
-                requested_inference_profile = { }
+                requested_inference_profile = azentspublicclient.models.requested_inference_profile.RequestedInferenceProfile(
+                    model_target_label = '0', 
+                    reasoning_effort = '', 
+                    enabled_execution_options = [
+                        'fast'
+                        ], )
             )
         else:
             return PendingMailboxUserMessagePresentation(

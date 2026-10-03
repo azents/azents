@@ -14,8 +14,8 @@ Name | Type | Description | Notes
 **recommendation_rank** | **int** |  | 
 **lifecycle_status** | **str** |  | 
 **visibility_status** | **str** |  | 
-**source_metadata** | **Dict[str, object]** |  | 
-**projection_metadata** | **Dict[str, object]** |  | 
+**source_metadata** | **object** |  | 
+**projection_metadata** | **object** |  | 
 
 ## Example
 

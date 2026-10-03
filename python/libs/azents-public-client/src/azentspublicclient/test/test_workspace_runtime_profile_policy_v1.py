@@ -36,12 +36,24 @@ class TestWorkspaceRuntimeProfilePolicyV1(unittest.TestCase):
         if include_optional:
             return WorkspaceRuntimeProfilePolicyV1(
                 schema_version = 1,
-                network_restriction = { }
+                network_restriction = azentspublicclient.models.runtime_network_policy_module.RuntimeNetworkPolicyModule(
+                    allowed_cidrs = [
+                        ''
+                        ], 
+                    denied_cidrs = [
+                        ''
+                        ], )
             )
         else:
             return WorkspaceRuntimeProfilePolicyV1(
                 schema_version = 1,
-                network_restriction = { },
+                network_restriction = azentspublicclient.models.runtime_network_policy_module.RuntimeNetworkPolicyModule(
+                    allowed_cidrs = [
+                        ''
+                        ], 
+                    denied_cidrs = [
+                        ''
+                        ], ),
         )
         """
 

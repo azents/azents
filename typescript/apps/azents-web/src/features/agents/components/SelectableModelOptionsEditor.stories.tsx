@@ -62,13 +62,10 @@ const imageCatalogData = {
   default_available: true,
   explicit_selection_supported: true,
   catalog_id: "image-catalog-main",
-  snapshot_id: "image-snapshot-main",
-  snapshot_configuration_version: 1,
-  current_configuration_version: 1,
-  snapshot_created_at: "2026-09-10T00:00:00Z",
-  latest_attempt: null,
+  last_success_at: "2026-09-10T00:00:00Z",
+  latest_sync: null,
   stale: false,
-  generation_current: true,
+  usable: true,
   sync_available_at: null,
   automatic_retry_blocked: false,
   entries: [
@@ -449,6 +446,68 @@ export const ImageGenerationCatalogError = {
   },
 } satisfies Story;
 
+export const ImageGenerationCatalogNeverSynced = {
+  args: {
+    options: [explicitImageOption],
+    lightweightModelLabel: "default",
+    imageGenerationCatalogStates: new Map([
+      [
+        "integration-main",
+        {
+          type: "LOADED",
+          data: {
+            ...imageCatalogData,
+            last_success_at: null,
+            usable: false,
+            entries: [],
+            total: 0,
+          },
+        },
+      ],
+    ]),
+  },
+  play: async ({ canvasElement }) => {
+    await userEvent.click(
+      within(canvasElement).getByRole("button", { name: "Model settings" }),
+    );
+    const body = within(canvasElement.ownerDocument.body);
+    await expect(body.getByText("No image models synced yet")).toBeVisible();
+    await expect(
+      body.getByRole("button", { name: "Sync image models" }),
+    ).toBeVisible();
+    await expect(body.getByText("Image model not verified")).toBeVisible();
+  },
+} satisfies Story;
+
+export const ImageGenerationCatalogNeedsSync = {
+  args: {
+    options: [explicitImageOption],
+    lightweightModelLabel: "default",
+    imageGenerationCatalogStates: new Map([
+      [
+        "integration-main",
+        {
+          type: "LOADED",
+          data: { ...imageCatalogData, usable: false },
+        },
+      ],
+    ]),
+  },
+  play: async ({ canvasElement }) => {
+    await userEvent.click(
+      within(canvasElement).getByRole("button", { name: "Model settings" }),
+    );
+    const body = within(canvasElement.ownerDocument.body);
+    await expect(
+      body.getByText("Image models need to be synced"),
+    ).toBeVisible();
+    await expect(body.getByText("Image model not verified")).toBeVisible();
+    await expect(
+      body.getByRole("button", { name: "Sync image models" }),
+    ).toBeVisible();
+  },
+} satisfies Story;
+
 export const ImageGenerationLastSyncFailed = {
   args: {
     options: [explicitImageOption],
@@ -460,8 +519,7 @@ export const ImageGenerationLastSyncFailed = {
           type: "LOADED",
           data: {
             ...imageCatalogData,
-            latest_attempt: {
-              id: "image-attempt-failed",
+            latest_sync: {
               status: "failed",
               started_at: "2026-09-10T00:00:00Z",
               finished_at: "2026-09-10T00:00:01Z",
@@ -508,10 +566,7 @@ export const ImageGenerationDefaultOnly = {
             ...imageCatalogData,
             explicit_selection_supported: false,
             catalog_id: null,
-            snapshot_id: null,
-            snapshot_configuration_version: null,
-            current_configuration_version: null,
-            snapshot_created_at: null,
+            last_success_at: null,
             entries: [],
             total: 0,
           },

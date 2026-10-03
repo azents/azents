@@ -24,6 +24,7 @@ _TOOLKIT_REVISION = "cda14157c46c"
 _HISTORICAL_MEMORY_REVISION = "459a4285993c"
 _DATA_SOURCE_CUTOVER_REVISION = "c8bc0a5dcab0"
 _SCHEMA_ALIGNMENT_REVISION = "1c42cc5ce89f"
+_CURRENT_DATA_REVISION = "d9bff320245f"
 
 
 @dataclass(frozen=True)
@@ -196,7 +197,10 @@ def test_fresh_upgrade_has_only_generic_source_schema(
 ) -> None:
     """A fresh database reaches the fenced source head without legacy objects."""
     scripts = ScriptDirectory.from_config(migration_database.config)
-    assert scripts.get_heads() == [_SCHEMA_ALIGNMENT_REVISION]
+    assert scripts.get_heads() == [_CURRENT_DATA_REVISION]
+    current = scripts.get_revision(_CURRENT_DATA_REVISION)
+    assert current is not None
+    assert current.down_revision == _SCHEMA_ALIGNMENT_REVISION
     head = scripts.get_revision(_SCHEMA_ALIGNMENT_REVISION)
     assert head is not None
     assert head.down_revision == _DATA_SOURCE_CUTOVER_REVISION
@@ -215,7 +219,7 @@ def test_fresh_upgrade_has_only_generic_source_schema(
     namespace = scripts.get_revision(_NAMESPACE_REVISION)
     assert namespace is not None
     assert namespace.down_revision == _CLEANUP_REVISION
-    command.upgrade(migration_database.config, "head")
+    command.upgrade(migration_database.config, _SCHEMA_ALIGNMENT_REVISION)
     _assert_revision(migration_database.engine, _SCHEMA_ALIGNMENT_REVISION)
     _assert_cleanup_schema(migration_database.engine)
 
@@ -225,7 +229,10 @@ def test_historical_memory_revision_extends_toolkit_head(
 ) -> None:
     """Historical Memory preserves the complete canonical Toolkit chain."""
     scripts = ScriptDirectory.from_config(migration_database.config)
-    assert scripts.get_heads() == [_SCHEMA_ALIGNMENT_REVISION]
+    assert scripts.get_heads() == [_CURRENT_DATA_REVISION]
+    current = scripts.get_revision(_CURRENT_DATA_REVISION)
+    assert current is not None
+    assert current.down_revision == _SCHEMA_ALIGNMENT_REVISION
     head = scripts.get_revision(_SCHEMA_ALIGNMENT_REVISION)
     assert head is not None
     assert head.down_revision == _DATA_SOURCE_CUTOVER_REVISION

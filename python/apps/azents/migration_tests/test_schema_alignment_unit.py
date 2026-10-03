@@ -23,7 +23,7 @@ from azents.rdb.models.llm_catalog import (
     RDBLLMCatalog,
     RDBLLMCatalogEntry,
 )
-from azents.rdb.models.model_metadata_source import RDBModelMetadataSourceSnapshot
+from azents.rdb.models.model_metadata_source import RDBModelMetadataSource
 from azents.rdb.models.toolkit import RDBAgentToolkitNamespaceReservation
 
 _REVISION = "1c42cc5ce89f"
@@ -56,16 +56,20 @@ def _offline_sql(*, upgrade: bool) -> str:
     return output.getvalue()
 
 
-def test_generated_alignment_revision_is_the_single_linear_head() -> None:
-    """The marker and generated Alembic successor agree without moving history."""
+def test_generated_alignment_revision_remains_in_the_single_linear_chain() -> None:
+    """The historical successor stays fixed while the marker follows the head."""
     directory = ScriptDirectory.from_config(
         Config(PROJECT_ROOT / "db-schemas/rdb/alembic.ini")
     )
     revision = directory.get_revision(_REVISION)
     assert revision is not None
     assert revision.down_revision == _PARENT
-    assert directory.get_heads() == [_REVISION]
-    assert (PROJECT_ROOT / "db-schemas/rdb/revision").read_text().strip() == _REVISION
+    head = directory.get_current_head()
+    assert head is not None
+    assert _REVISION in {
+        item.revision for item in directory.iterate_revisions(head, "base")
+    }
+    assert (PROJECT_ROOT / "db-schemas/rdb/revision").read_text().strip() == head
 
 
 def test_upgrade_validates_inventory_and_guards_before_any_schema_change() -> None:
@@ -138,9 +142,9 @@ def test_downgrade_is_lossless_and_retains_cutover_guards() -> None:
     assert "ix_image_generation_catalog_entries_catalog_rank" not in sql
 
 
-def test_models_keep_both_enum_labels_and_the_authority_blocked_long_index() -> None:
-    """Mappings match the forward change; long-name policy remains undecided."""
-    kind = RDBModelMetadataSourceSnapshot.__table__.c.source_kind.type
+def test_current_models_keep_enum_labels_and_bounded_named_indexes() -> None:
+    """Current mappings preserve enum compatibility and bounded index names."""
+    kind = RDBModelMetadataSource.__table__.c.source_kind.type
     assert isinstance(kind, ENUM)
     assert kind.name == "model_metadata_source_kind"
     assert kind.enums == ["genai_prices", "litellm_json"]
@@ -151,24 +155,23 @@ def test_models_keep_both_enum_labels_and_the_authority_blocked_long_index() -> 
     assert ModelMetadataSourceKind.GENAI_PRICES == "genai_prices"
     indexes = (
         RDBHistoricalMemorySource.IX_ADMITTED_UNPREPARED,
-        RDBModelMetadataSourceSnapshot.IX_SOURCE_CREATED,
         RDBLLMCatalog.UQ_SYSTEM_CATALOG,
         RDBLLMCatalog.UQ_INTEGRATION_CATALOG,
         RDBLLMCatalogEntry.IX_CATALOG_DISPLAY,
-        RDBLLMCatalogEntry.IX_CATALOG_MODEL,
         RDBAgentToolkitNamespaceReservation.UQ_ACTIVE_AGENT_TOOLKIT,
     )
     assert [index.name for index in indexes] == [
         "ix_historical_memory_sources_admitted_at",
-        "ix_model_metadata_source_snapshots_source_key_created_at",
         "ix_llm_catalogs_provider_purpose",
         "ix_llm_catalogs_provider_integration_id_purpose",
         "ix_llm_catalog_entries_catalog_id_display_name",
-        "ix_llm_catalog_entries_catalog_id_provider_model_identifier",
         "ix_agent_toolkit_namespace_reservations_agent_id_toolkit_id",
     ]
     assert all(index.name is not None and len(index.name) <= 63 for index in indexes)
     assert RDBLLMCatalog.UQ_SYSTEM_CATALOG.unique is True
+    assert RDBLLMCatalogEntry.UQ_CATALOG_MODEL.name == (
+        "uq_llm_catalog_entries_catalog_model"
+    )
     assert RDBAgentToolkitNamespaceReservation.UQ_ACTIVE_AGENT_TOOLKIT.unique is True
     assert RDBImageGenerationCatalogEntry.IX_CATALOG_RANK.name == (
         "ix_image_generation_catalog_entries_catalog_rank"

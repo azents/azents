@@ -1,5 +1,6 @@
 """Disposable PostgreSQL coverage for the data-only source writer cutover."""
 
+import hashlib
 import json
 from collections.abc import Generator
 from contextlib import contextmanager
@@ -21,11 +22,13 @@ from azents.core.model_catalog_source import (
     CATALOG_SOURCE_KEY,
     CATALOG_SOURCE_KIND,
     CATALOG_SOURCE_SCHEMA_VERSION,
+    CatalogSourcePayload,
     decode_catalog_source,
 )
 
 _PARENT = "459a4285993c"
 _CUTOVER = "c8bc0a5dcab0"
+_ALIGNMENT = "1c42cc5ce89f"
 _OLD_SOURCE = "s" * 32
 _OLD_UNUSED_SOURCE = "u" * 32
 _OLD_SNAPSHOT = "o" * 32
@@ -358,7 +361,7 @@ def _new_source(connection: Connection, *, snapshot_id: str) -> None:
         source_kind=CATALOG_SOURCE_KIND,
         schema=CATALOG_SOURCE_SCHEMA_VERSION,
         payload=payload.model_dump_json(),
-        content_hash=payload.content_hash,
+        content_hash=_historical_source_hash(payload),
     )
     connection.execute(
         sa.text(
@@ -367,6 +370,18 @@ def _new_source(connection: Connection, *, snapshot_id: str) -> None:
         ),
         {"source": snapshot_id, "key": CATALOG_SOURCE_KEY},
     )
+
+
+def _historical_source_hash(payload: CatalogSourcePayload) -> str:
+    """Reproduce only the old migration fixture's canonical hash contract."""
+    canonical = json.dumps(
+        payload.model_dump(mode="json"),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    )
+    return hashlib.sha256(canonical.encode()).hexdigest()
 
 
 def _preserved_rows(engine: Engine) -> dict[str, object]:
@@ -393,7 +408,7 @@ def _preserved_rows(engine: Engine) -> dict[str, object]:
         }
 
 
-@pytest.mark.parametrize("upgrade_target", [_CUTOVER, "head"])
+@pytest.mark.parametrize("upgrade_target", [_CUTOVER, _ALIGNMENT])
 def test_old_only_upgrade_is_sql_only_and_preserves_history(
     database: _Database,
     monkeypatch: pytest.MonkeyPatch,
@@ -668,13 +683,13 @@ def test_catalog_pointer_change_cannot_bypass_admission(
         )
 
 
-@pytest.mark.parametrize("upgrade_to_head", [False, True])
+@pytest.mark.parametrize("upgrade_to_alignment", [False, True])
 def test_unchanged_old_pointer_allows_operational_updates(
-    cutover: _Database, upgrade_to_head: bool
+    cutover: _Database, upgrade_to_alignment: bool
 ) -> None:
     """Old historical pointers do not block lease and diagnostic operations."""
-    if upgrade_to_head:
-        command.upgrade(cutover.config, "head")
+    if upgrade_to_alignment:
+        command.upgrade(cutover.config, _ALIGNMENT)
     with cutover.engine.begin() as connection:
         connection.execute(
             sa.text(

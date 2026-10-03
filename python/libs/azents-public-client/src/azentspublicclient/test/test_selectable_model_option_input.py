@@ -37,7 +37,18 @@ class TestSelectableModelOptionInput(unittest.TestCase):
             return SelectableModelOptionInput(
                 label = '0',
                 candidates = [
-                    { }
+                    azentspublicclient.models.selectable_model_candidate_input.SelectableModelCandidateInput(
+                        model_selection = azentspublicclient.models.agent_model_selection_input.AgentModelSelectionInput(
+                            llm_provider_integration_id = '', 
+                            model_identifier = '', ), 
+                        settings = azentspublicclient.models.selectable_model_settings_input.SelectableModelSettingsInput(
+                            context_window_tokens = 1.0, 
+                            max_output_tokens = 1.0, 
+                            builtin_tools = [
+                                azentspublicclient.models.builtin_tool_config.BuiltinToolConfig(
+                                    name = '', 
+                                    config = azentspublicclient.models.config.Config(), )
+                                ], ), )
                     ],
                 subagent_enabled = True,
                 subagent_guidance = ''
@@ -46,7 +57,18 @@ class TestSelectableModelOptionInput(unittest.TestCase):
             return SelectableModelOptionInput(
                 label = '0',
                 candidates = [
-                    { }
+                    azentspublicclient.models.selectable_model_candidate_input.SelectableModelCandidateInput(
+                        model_selection = azentspublicclient.models.agent_model_selection_input.AgentModelSelectionInput(
+                            llm_provider_integration_id = '', 
+                            model_identifier = '', ), 
+                        settings = azentspublicclient.models.selectable_model_settings_input.SelectableModelSettingsInput(
+                            context_window_tokens = 1.0, 
+                            max_output_tokens = 1.0, 
+                            builtin_tools = [
+                                azentspublicclient.models.builtin_tool_config.BuiltinToolConfig(
+                                    name = '', 
+                                    config = azentspublicclient.models.config.Config(), )
+                                ], ), )
                     ],
         )
         """

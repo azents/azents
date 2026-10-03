@@ -18,7 +18,7 @@ import re  # noqa: F401
 import json
 
 from pydantic import BaseModel, ConfigDict, Field
-from typing import Any, ClassVar, Dict, List, Optional
+from typing import Any, ClassVar, Dict, Optional
 from azentspublicclient.models.agent_model_selection_input import AgentModelSelectionInput
 from azentspublicclient.models.selectable_model_settings_input import SelectableModelSettingsInput
 from typing import Optional, Set
@@ -30,7 +30,6 @@ class SelectableModelCandidateInput(BaseModel):
     """ # noqa: E501
     model_selection: AgentModelSelectionInput = Field(description="Physical model selection input")
     settings: Optional[SelectableModelSettingsInput] = None
-    additional_properties: Dict[str, Any] = {}
     __properties: ClassVar[List[str]] = ["model_selection", "settings"]
 
     model_config = ConfigDict(
@@ -63,10 +62,8 @@ class SelectableModelCandidateInput(BaseModel):
         * `None` is only added to the output dict for nullable fields that
           were set at model initialization. Other fields with value `None`
           are ignored.
-        * Fields in `self.additional_properties` are added to the output dict.
         """
         excluded_fields: Set[str] = set([
-            "additional_properties",
         ])
 
         _dict = self.model_dump(
@@ -80,11 +77,6 @@ class SelectableModelCandidateInput(BaseModel):
         # override the default output from pydantic by calling `to_dict()` of settings
         if self.settings:
             _dict['settings'] = self.settings.to_dict()
-        # puts key-value pairs in additional_properties in the top level
-        if self.additional_properties is not None:
-            for _key, _value in self.additional_properties.items():
-                _dict[_key] = _value
-
         # set to None if settings (nullable) is None
         # and model_fields_set contains the field
         if self.settings is None and "settings" in self.model_fields_set:
@@ -105,11 +97,6 @@ class SelectableModelCandidateInput(BaseModel):
             "model_selection": AgentModelSelectionInput.from_dict(obj["model_selection"]) if obj.get("model_selection") is not None else None,
             "settings": SelectableModelSettingsInput.from_dict(obj["settings"]) if obj.get("settings") is not None else None
         })
-        # store additional fields in additional_properties
-        for _key in obj.keys():
-            if _key not in cls.__properties:
-                _obj.additional_properties[_key] = obj.get(_key)
-
         return _obj
 
 

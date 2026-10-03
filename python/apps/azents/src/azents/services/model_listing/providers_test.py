@@ -54,8 +54,8 @@ from azents.services.model_metadata_projection import (
     project_integration_replacement_entries,
 )
 from azents.testing.model_metadata import (
+    make_test_source,
     make_test_source_payload,
-    make_test_source_snapshot,
 )
 
 
@@ -772,7 +772,7 @@ async def test_chatgpt_web_search_survives_final_catalog_projection(
     source = (
         None
         if source_kind == "absent"
-        else make_test_source_snapshot(make_test_source_payload(rows))
+        else make_test_source(make_test_source_payload(rows))
     )
     entries = project_integration_replacement_entries(
         integration_id="integration-id",
@@ -1396,7 +1396,7 @@ def test_openrouter_structured_response_source_enriches_only_absent_declaration(
     )
     assert candidate is not None
     replayed = NormalizedModelCandidate.model_validate_json(candidate.model_dump_json())
-    source = make_test_source_snapshot(
+    source = make_test_source(
         make_test_source_payload(
             {
                 "openrouter/publisher/new-model": {

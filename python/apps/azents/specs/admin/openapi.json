@@ -8672,8 +8672,7 @@
         "required": [
           "items"
         ],
-        "title": "SystemModelCatalogListResponse",
-        "description": "System model catalog list response."
+        "title": "SystemModelCatalogListResponse"
       },
       "SystemModelCatalogRefreshListResponse": {
         "properties": {
@@ -8689,8 +8688,7 @@
         "required": [
           "items"
         ],
-        "title": "SystemModelCatalogRefreshListResponse",
-        "description": "System model catalog refresh list response."
+        "title": "SystemModelCatalogRefreshListResponse"
       },
       "SystemModelCatalogRefreshResponse": {
         "properties": {
@@ -8701,16 +8699,17 @@
             "type": "string",
             "title": "Catalog Id"
           },
-          "snapshot_id": {
+          "last_success_at": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "format": "date-time"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Snapshot Id"
+            "title": "Last Success At"
           },
           "visible_count": {
             "type": "integer",
@@ -8762,7 +8761,7 @@
         "required": [
           "provider",
           "catalog_id",
-          "snapshot_id",
+          "last_success_at",
           "visible_count",
           "hidden_count",
           "status",
@@ -8770,8 +8769,7 @@
           "failure_message",
           "action_hint"
         ],
-        "title": "SystemModelCatalogRefreshResponse",
-        "description": "System model catalog refresh response."
+        "title": "SystemModelCatalogRefreshResponse"
       },
       "SystemModelCatalogResponse": {
         "properties": {
@@ -8789,16 +8787,17 @@
             ],
             "title": "Catalog Id"
           },
-          "snapshot_id": {
+          "last_success_at": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "format": "date-time"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Snapshot Id"
+            "title": "Last Success At"
           },
           "visible_count": {
             "type": "integer",
@@ -8808,10 +8807,10 @@
             "type": "integer",
             "title": "Hidden Count"
           },
-          "latest_attempt": {
+          "latest_sync": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/SystemModelCatalogSyncAttemptResponse"
+                "$ref": "#/components/schemas/SystemModelCatalogSyncStatusResponse"
               },
               {
                 "type": "null"
@@ -8823,20 +8822,15 @@
         "required": [
           "provider",
           "catalog_id",
-          "snapshot_id",
+          "last_success_at",
           "visible_count",
           "hidden_count",
-          "latest_attempt"
+          "latest_sync"
         ],
-        "title": "SystemModelCatalogResponse",
-        "description": "System model catalog response."
+        "title": "SystemModelCatalogResponse"
       },
-      "SystemModelCatalogSyncAttemptResponse": {
+      "SystemModelCatalogSyncStatusResponse": {
         "properties": {
-          "id": {
-            "type": "string",
-            "title": "Id"
-          },
           "status": {
             "type": "string",
             "title": "Status"
@@ -8910,7 +8904,6 @@
         },
         "type": "object",
         "required": [
-          "id",
           "status",
           "started_at",
           "finished_at",
@@ -8922,8 +8915,8 @@
           "skipped_count",
           "hidden_count"
         ],
-        "title": "SystemModelCatalogSyncAttemptResponse",
-        "description": "Latest model catalog sync attempt response."
+        "title": "SystemModelCatalogSyncStatusResponse",
+        "description": "Latest operational state, excluding opaque active work ownership."
       },
       "SystemSettingAuditEventListResponse": {
         "properties": {

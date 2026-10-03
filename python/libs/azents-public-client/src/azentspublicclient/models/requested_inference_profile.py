@@ -31,7 +31,6 @@ class RequestedInferenceProfile(BaseModel):
     model_target_label: Annotated[str, Field(min_length=1, strict=True)] = Field(description="Agent-owned selectable model target label")
     reasoning_effort: Optional[StrictStr]
     enabled_execution_options: List[ModelExecutionOptionId] = Field(description="Explicitly enabled model execution option IDs")
-    additional_properties: Dict[str, Any] = {}
     __properties: ClassVar[List[str]] = ["model_target_label", "reasoning_effort", "enabled_execution_options"]
 
     model_config = ConfigDict(
@@ -64,10 +63,8 @@ class RequestedInferenceProfile(BaseModel):
         * `None` is only added to the output dict for nullable fields that
           were set at model initialization. Other fields with value `None`
           are ignored.
-        * Fields in `self.additional_properties` are added to the output dict.
         """
         excluded_fields: Set[str] = set([
-            "additional_properties",
         ])
 
         _dict = self.model_dump(
@@ -75,11 +72,6 @@ class RequestedInferenceProfile(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
-        # puts key-value pairs in additional_properties in the top level
-        if self.additional_properties is not None:
-            for _key, _value in self.additional_properties.items():
-                _dict[_key] = _value
-
         # set to None if reasoning_effort (nullable) is None
         # and model_fields_set contains the field
         if self.reasoning_effort is None and "reasoning_effort" in self.model_fields_set:
@@ -101,11 +93,6 @@ class RequestedInferenceProfile(BaseModel):
             "reasoning_effort": obj.get("reasoning_effort"),
             "enabled_execution_options": obj.get("enabled_execution_options")
         })
-        # store additional fields in additional_properties
-        for _key in obj.keys():
-            if _key not in cls.__properties:
-                _obj.additional_properties[_key] = obj.get(_key)
-
         return _obj
 
 

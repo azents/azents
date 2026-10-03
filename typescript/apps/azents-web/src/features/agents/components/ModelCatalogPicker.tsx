@@ -22,8 +22,8 @@ import {
 import { useLocale } from "@/shared/providers/locale";
 import { modelContextBadgeValue } from "../model-selection";
 import type {
-  ModelCatalogAttemptState,
   ModelCatalogState,
+  ModelCatalogSyncStatus,
   ProviderIntegrationOption,
   SelectableModelCandidate,
 } from "../model-selection";
@@ -34,10 +34,10 @@ export type PickerCatalogUiState =
   | { type: "NO_INTEGRATION" }
   | { type: "LOADING_STATUS" }
   | { type: "NEVER_SYNCED" }
-  | { type: "SYNCING_WITHOUT_SNAPSHOT" }
-  | { type: "FAILED_WITHOUT_SNAPSHOT"; attempt: ModelCatalogAttemptState }
+  | { type: "SYNCING_WITHOUT_DATA" }
+  | { type: "FAILED_WITHOUT_DATA"; sync: ModelCatalogSyncStatus }
   | { type: "READY" }
-  | { type: "READY_WITH_FAILED_ATTEMPT"; attempt: ModelCatalogAttemptState }
+  | { type: "READY_WITH_FAILED_SYNC"; sync: ModelCatalogSyncStatus }
   | { type: "READY_EMPTY" }
   | { type: "LOADING_NEXT_PAGE" };
 
@@ -128,8 +128,8 @@ function modelSelectionValue(
   return `${integrationId}:${model.model_identifier}`;
 }
 
-function failureMessage(attempt: ModelCatalogAttemptState): string {
-  return attempt.failure_message ?? "The latest catalog sync failed.";
+function failureMessage(sync: ModelCatalogSyncStatus): string {
+  return sync.failure_message ?? "The latest catalog sync failed.";
 }
 
 function catalogStatusTranslationKey(
@@ -170,7 +170,7 @@ export function ModelCatalogPicker({
 }: ModelCatalogPickerProps): React.ReactElement {
   const t = useTranslations("workspace.agents.modelCatalogPicker");
   const { locale } = useLocale();
-  const latestAttempt = state.catalog?.latestAttempt ?? null;
+  const latestSync = state.catalog?.latestSync ?? null;
 
   return (
     <Modal opened={opened} onClose={onClose} title={title} size="xl">
@@ -208,16 +208,14 @@ export function ModelCatalogPicker({
                   <Text size="sm" c="dimmed">
                     {t("catalogStatus", {
                       status: t(
-                        catalogStatusTranslationKey(
-                          latestAttempt?.status ?? null,
-                        ),
+                        catalogStatusTranslationKey(latestSync?.status ?? null),
                       ),
                     })}
                   </Text>
                   <Text size="sm" c="dimmed">
                     {t("lastSynced", {
                       value: formatDate(
-                        state.catalog?.currentSnapshotCreatedAt ?? null,
+                        state.catalog?.lastSuccessAt ?? null,
                         t("never"),
                         locale,
                       ),
@@ -261,12 +259,12 @@ export function ModelCatalogPicker({
               {state.syncError != null && (
                 <Alert color="red">{state.syncError}</Alert>
               )}
-              {state.ui.type === "READY_WITH_FAILED_ATTEMPT" && (
+              {state.ui.type === "READY_WITH_FAILED_SYNC" && (
                 <Alert color="yellow" title={t("catalogSyncFailedTitle")}>
                   <Stack gap={4}>
-                    <Text size="sm">{failureMessage(state.ui.attempt)}</Text>
-                    {state.ui.attempt.action_hint && (
-                      <Text size="sm">{state.ui.attempt.action_hint}</Text>
+                    <Text size="sm">{failureMessage(state.ui.sync)}</Text>
+                    {state.ui.sync.action_hint && (
+                      <Text size="sm">{state.ui.sync.action_hint}</Text>
                     )}
                   </Stack>
                 </Alert>
@@ -289,12 +287,12 @@ export function ModelCatalogPicker({
               <Loader size="sm" />
             </Group>
           )}
-          {state.ui.type === "FAILED_WITHOUT_SNAPSHOT" && (
+          {state.ui.type === "FAILED_WITHOUT_DATA" && (
             <Alert color="red" title={t("catalogSyncFailedTitle")}>
               <Stack gap={4}>
-                <Text size="sm">{failureMessage(state.ui.attempt)}</Text>
-                {state.ui.attempt.action_hint && (
-                  <Text size="sm">{state.ui.attempt.action_hint}</Text>
+                <Text size="sm">{failureMessage(state.ui.sync)}</Text>
+                {state.ui.sync.action_hint && (
+                  <Text size="sm">{state.ui.sync.action_hint}</Text>
                 )}
               </Stack>
             </Alert>
@@ -302,10 +300,10 @@ export function ModelCatalogPicker({
           {state.ui.type === "NEVER_SYNCED" && (
             <Alert color="blue">{t("neverSynced")}</Alert>
           )}
-          {state.ui.type === "SYNCING_WITHOUT_SNAPSHOT" && (
-            <Alert color="blue">{t("syncingWithoutSnapshot")}</Alert>
+          {state.ui.type === "SYNCING_WITHOUT_DATA" && (
+            <Alert color="blue">{t("syncingWithoutData")}</Alert>
           )}
-          {state.ui.type !== "FAILED_WITHOUT_SNAPSHOT" &&
+          {state.ui.type !== "FAILED_WITHOUT_DATA" &&
             state.models.map((model) => {
               const value = modelSelectionValue(
                 selectedIntegrationId ?? "",

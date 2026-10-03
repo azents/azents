@@ -37,7 +37,9 @@ class TestPrimaryModelReservation(unittest.TestCase):
             return PrimaryModelReservation(
                 schema_version = 1,
                 semantic_label = '0',
-                candidate = { },
+                candidate = azentspublicclient.models.model_candidate_identity.ModelCandidateIdentity(
+                    llm_provider_integration_id = '0', 
+                    model_identifier = '0', ),
                 health_generation = 1.0,
                 reservation_generation = 1.0,
                 claim_token = '0',
@@ -47,7 +49,9 @@ class TestPrimaryModelReservation(unittest.TestCase):
         else:
             return PrimaryModelReservation(
                 semantic_label = '0',
-                candidate = { },
+                candidate = azentspublicclient.models.model_candidate_identity.ModelCandidateIdentity(
+                    llm_provider_integration_id = '0', 
+                    model_identifier = '0', ),
                 health_generation = 1.0,
                 reservation_generation = 1.0,
                 claim_token = '0',

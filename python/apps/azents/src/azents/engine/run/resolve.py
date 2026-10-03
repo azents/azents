@@ -318,12 +318,10 @@ async def resolve_model_candidate_runtime(
         )
     runtime_model = selection.model_identifier
     source_snapshot = (
-        context_source.snapshot
+        context_source
         if context_source is not None
         else await model_metadata_service.capture_for_context(
-            capability_maximums=[
-                selection.normalized_capabilities.context_window.max_input_tokens
-            ]
+            requests=model_metadata_service.context_requests([selection])
         )
     )
     input_tokens = resolve_model_input_tokens(
@@ -796,13 +794,12 @@ async def resolve_invoke_input_with_model_source(
         )
 
     source_snapshot = (
-        context_source.snapshot
+        context_source
         if context_source is not None
         else await model_metadata_service.capture_for_context(
-            capability_maximums=[
-                main_selection.normalized_capabilities.context_window.max_input_tokens,
-                lightweight_selection.normalized_capabilities.context_window.max_input_tokens,
-            ]
+            requests=model_metadata_service.context_requests(
+                [main_selection, lightweight_selection]
+            )
         )
     )
     main_input_tokens = resolve_model_input_tokens(

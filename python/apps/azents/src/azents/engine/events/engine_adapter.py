@@ -28,7 +28,8 @@ from azents.core.image_generation_config import (
 )
 from azents.core.model_pricing import (
     CapturedModelPricing,
-    normalize_model_pricing,
+    ModelPricingDefinition,
+    capture_model_pricing,
 )
 from azents.core.openai_client_config import openai_responses_client_config
 from azents.core.session_resource_authority import SessionExecutionOwner
@@ -222,7 +223,6 @@ from azents.services.chatgpt_oauth.runtime import (
 )
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.model_file import ModelFileService
-from azents.services.model_metadata import ModelMetadataService
 from azents.services.oauth_runtime_clients import (
     RuntimeOAuthClientFactories,
     create_runtime_oauth_client_factories,
@@ -362,7 +362,6 @@ class AgentEngineAdapter:
         ProviderOutputOperationRepository,
         Depends(ProviderOutputOperationRepository),
     ]
-    metadata_service: Annotated[ModelMetadataService, Depends(ModelMetadataService)]
     sdk_factories: Annotated[ModelSDKFactories, Depends(get_model_sdk_factories)]
     xai_imagine_client_factory: Annotated[
         XaiImagineClientFactory,
@@ -671,8 +670,10 @@ class AgentEngineAdapter:
                 if request.inference_state is not None
                 else None
             )
-            output_normalizer.pricing = await _capture_model_pricing(
-                metadata_service=self.metadata_service,
+            output_normalizer.pricing = _capture_model_pricing(
+                definition=model_selection.pricing
+                if model_selection is not None
+                else None,
                 provider=request.provider,
                 model_identifier=(
                     model_selection.model_identifier
@@ -1325,31 +1326,23 @@ def _cancel_run_task(
     run_task.cancel()
 
 
-async def _capture_model_pricing(
+def _capture_model_pricing(
     *,
-    metadata_service: ModelMetadataService,
+    definition: ModelPricingDefinition | None,
     provider: LLMProvider,
     model_identifier: str,
 ) -> CapturedModelPricing:
-    """Capture validated price authority before one physical model dispatch.
+    """Capture saved price authority before one physical model dispatch.
 
-    :param metadata_service: injected local validated-source reader
+    :param definition: actual candidate's already-normalized saved prices
     :param provider: authoritative selected provider identity
     :param model_identifier: exact semantic model selection
-    :returns: immutable source pricing, including explicit unavailable evidence
+    :returns: immutable prices and call time, including unavailable evidence
     """
-    snapshot = await metadata_service.capture()
-    metadata = metadata_service.lookup(
-        snapshot,
+    return capture_model_pricing(
         provider=provider,
         model_identifier=model_identifier,
-    )
-    return normalize_model_pricing(
-        provider=provider,
-        model_identifier=model_identifier,
-        source_snapshot_id=snapshot.id if snapshot is not None else None,
-        source_hash=snapshot.source_hash if snapshot is not None else None,
-        source_model=metadata,
+        definition=definition,
         request_timestamp=datetime.datetime.now(datetime.UTC),
     )
 

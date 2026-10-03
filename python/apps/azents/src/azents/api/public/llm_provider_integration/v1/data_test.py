@@ -17,8 +17,8 @@ from azents.core.enums import (
     LLMProvider,
 )
 from azents.services.image_generation_catalog.data import (
-    ImageGenerationCatalogAttemptOutput,
     ImageGenerationCatalogEntryOutput,
+    ImageGenerationCatalogSyncStatusOutput,
     ImageGenerationModelCatalogOutput,
 )
 
@@ -86,12 +86,8 @@ def test_image_generation_catalog_response_projects_only_safe_stored_data() -> N
             default_available=True,
             explicit_selection_supported=True,
             catalog_id="catalog",
-            snapshot_id="snapshot",
-            snapshot_configuration_version=2,
-            current_configuration_version=2,
-            snapshot_created_at=now,
-            latest_attempt=ImageGenerationCatalogAttemptOutput(
-                id="attempt",
+            last_success_at=now,
+            latest_sync=ImageGenerationCatalogSyncStatusOutput(
                 status="succeeded",
                 started_at=now,
                 finished_at=now,
@@ -104,7 +100,7 @@ def test_image_generation_catalog_response_projects_only_safe_stored_data() -> N
                 hidden_count=0,
             ),
             stale=False,
-            generation_current=True,
+            usable=True,
             sync_available_at=None,
             automatic_retry_blocked=False,
             entries=[
@@ -118,7 +114,7 @@ def test_image_generation_catalog_response_projects_only_safe_stored_data() -> N
                     lifecycle_status=LLMModelLifecycleStatus.ACTIVE,
                     visibility_status=LLMCatalogEntryVisibility.SELECTABLE,
                     source_metadata={"provider": "openai"},
-                    projection_metadata={"registry_revision": 1},
+                    projection_metadata=None,
                 )
             ],
             total=1,
@@ -129,12 +125,8 @@ def test_image_generation_catalog_response_projects_only_safe_stored_data() -> N
         "default_available": True,
         "explicit_selection_supported": True,
         "catalog_id": "catalog",
-        "snapshot_id": "snapshot",
-        "snapshot_configuration_version": 2,
-        "current_configuration_version": 2,
-        "snapshot_created_at": now,
-        "latest_attempt": {
-            "id": "attempt",
+        "last_success_at": now,
+        "latest_sync": {
             "status": "succeeded",
             "started_at": now,
             "finished_at": now,
@@ -147,7 +139,7 @@ def test_image_generation_catalog_response_projects_only_safe_stored_data() -> N
             "hidden_count": 0,
         },
         "stale": False,
-        "generation_current": True,
+        "usable": True,
         "sync_available_at": None,
         "automatic_retry_blocked": False,
         "entries": [
@@ -163,7 +155,7 @@ def test_image_generation_catalog_response_projects_only_safe_stored_data() -> N
                 "lifecycle_status": "active",
                 "visibility_status": "selectable",
                 "source_metadata": {"provider": "openai"},
-                "projection_metadata": {"registry_revision": 1},
+                "projection_metadata": None,
             }
         ],
         "total": 1,

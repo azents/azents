@@ -12,7 +12,7 @@ Name | Type | Description | Notes
 **slug** | **str** |  | 
 **name** | **str** |  | 
 **description** | **str** |  | 
-**config** | **Dict[str, object]** |  | 
+**config** | **object** |  | 
 **prompt** | **str** |  | 
 **has_credentials** | **bool** | Whether credentials exist | [optional] [default to False]
 **enabled** | **bool** |  | 

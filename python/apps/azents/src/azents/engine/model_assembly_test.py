@@ -11,6 +11,7 @@ from azents.engine.model_assembly import ModelAssemblyMetadata
 def test_capture_uses_typed_saved_family_not_mutable_diagnostics() -> None:
     """A later selection/catalog mutation cannot rewrite captured wire authority."""
     selection = AgentModelSelection(
+        pricing=None,
         llm_provider_integration_id="integration",
         provider=LLMProvider.AWS_BEDROCK,
         model_identifier=(

@@ -4,8 +4,8 @@ import { partialReasoningCapabilities } from "@/shared/storybook/model-capabilit
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import { ModelCatalogPicker } from "./ModelCatalogPicker";
 import type {
-  ModelCatalogAttemptState,
   ModelCatalogState,
+  ModelCatalogSyncStatus,
   ProviderIntegrationOption,
   SelectableModelCandidate,
 } from "../model-selection";
@@ -57,7 +57,7 @@ const models: SelectableModelCandidate[] = [
   },
 ];
 
-const failedAttempt: ModelCatalogAttemptState = {
+const failedSync: ModelCatalogSyncStatus = {
   status: "failed",
   started_at: "2026-08-27T09:00:00Z",
   finished_at: "2026-08-27T09:00:04Z",
@@ -73,9 +73,8 @@ const failedAttempt: ModelCatalogAttemptState = {
 const failedCatalog: ModelCatalogState = {
   catalogId: "catalog-1",
   catalogScope: "integration",
-  currentSnapshotId: null,
-  currentSnapshotCreatedAt: null,
-  latestAttempt: failedAttempt,
+  lastSuccessAt: null,
+  latestSync: failedSync,
   stale: false,
   syncAvailableAt: null,
   automaticRetryBlocked: false,
@@ -88,9 +87,8 @@ const readyState: ModelCatalogPickerState = {
   catalog: {
     catalogId: "catalog-1",
     catalogScope: "integration",
-    currentSnapshotId: "snapshot-1",
-    currentSnapshotCreatedAt: "2026-08-27T09:00:00Z",
-    latestAttempt: {
+    lastSuccessAt: "2026-08-27T09:00:00Z",
+    latestSync: {
       status: "succeeded",
       started_at: "2026-08-27T08:59:30Z",
       finished_at: "2026-08-27T09:00:00Z",
@@ -165,18 +163,17 @@ export const ReadyEmpty = {
   },
 } satisfies Story;
 
-export const ReadyWithFailedAttempt = {
+export const ReadyWithFailedSync = {
   args: {
     state: {
       ...readyState,
       catalog: {
         ...failedCatalog,
-        currentSnapshotId: "previous-success",
-        currentSnapshotCreatedAt: "2026-08-26T09:00:00Z",
+        lastSuccessAt: "2026-08-26T09:00:00Z",
         total: 1,
         loaded: 1,
       },
-      ui: { type: "READY_WITH_FAILED_ATTEMPT", attempt: failedAttempt },
+      ui: { type: "READY_WITH_FAILED_SYNC", sync: failedSync },
     },
     onSelectModel: fn(),
   },
@@ -196,13 +193,13 @@ export const NeverSynced = {
     state: {
       ...readyState,
       models: [],
-      catalog: { ...failedCatalog, latestAttempt: null },
+      catalog: { ...failedCatalog, latestSync: null },
       ui: { type: "NEVER_SYNCED" },
     },
   },
 } satisfies Story;
 
-export const SyncingWithoutSnapshot = {
+export const SyncingWithoutData = {
   args: {
     state: {
       ...readyState,
@@ -211,8 +208,8 @@ export const SyncingWithoutSnapshot = {
       syncRunning: true,
       catalog: {
         ...failedCatalog,
-        latestAttempt: {
-          ...failedAttempt,
+        latestSync: {
+          ...failedSync,
           status: "running",
           finished_at: null,
           failure_code: null,
@@ -220,7 +217,7 @@ export const SyncingWithoutSnapshot = {
           action_hint: null,
         },
       },
-      ui: { type: "SYNCING_WITHOUT_SNAPSHOT" },
+      ui: { type: "SYNCING_WITHOUT_DATA" },
     },
   },
   play: async ({ canvasElement }) => {
@@ -238,8 +235,8 @@ export const UnknownCatalogStatus = {
       ...readyState,
       catalog: {
         ...failedCatalog,
-        currentSnapshotId: "previous-success",
-        latestAttempt: { ...failedAttempt, status: "future_status" },
+        lastSuccessAt: "2026-08-26T09:00:00Z",
+        latestSync: { ...failedSync, status: "future_status" },
       },
     },
   },
@@ -298,7 +295,7 @@ export const Loading = {
   },
 } satisfies Story;
 
-export const FailedWithoutSnapshot = {
+export const FailedWithoutData = {
   args: {
     state: {
       ...readyState,
@@ -306,8 +303,8 @@ export const FailedWithoutSnapshot = {
       models: [],
       canSync: true,
       ui: {
-        type: "FAILED_WITHOUT_SNAPSHOT",
-        attempt: failedAttempt,
+        type: "FAILED_WITHOUT_DATA",
+        sync: failedSync,
       },
     },
   },

@@ -24,6 +24,7 @@ from azentspublicclient.models.llm_model_developer import LLMModelDeveloper
 from azentspublicclient.models.llm_provider import LLMProvider
 from azentspublicclient.models.model_capabilities import ModelCapabilities
 from azentspublicclient.models.model_execution_option_id import ModelExecutionOptionId
+from azentspublicclient.models.model_pricing_definition import ModelPricingDefinition
 from typing import Optional, Set
 from typing_extensions import Self
 
@@ -38,12 +39,13 @@ class AgentModelSelection(BaseModel):
     model_developer: LLMModelDeveloper = Field(description="Model developer")
     model_family: Optional[StrictStr] = None
     normalized_capabilities: ModelCapabilities = Field(description="Runtime capability snapshot")
+    pricing: Optional[ModelPricingDefinition]
     model_snapshot: Dict[str, Any] = Field(description="Normalized model snapshot")
     supported_execution_options: Optional[List[ModelExecutionOptionId]] = Field(default=None, description="Directly selectable execution options supported by this model")
     source_metadata: Optional[Dict[str, Any]] = None
     last_refreshed_at: Optional[datetime] = None
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["llm_provider_integration_id", "provider", "model_identifier", "model_display_name", "model_developer", "model_family", "normalized_capabilities", "model_snapshot", "supported_execution_options", "source_metadata", "last_refreshed_at"]
+    __properties: ClassVar[List[str]] = ["llm_provider_integration_id", "provider", "model_identifier", "model_display_name", "model_developer", "model_family", "normalized_capabilities", "pricing", "model_snapshot", "supported_execution_options", "source_metadata", "last_refreshed_at"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -89,6 +91,9 @@ class AgentModelSelection(BaseModel):
         # override the default output from pydantic by calling `to_dict()` of normalized_capabilities
         if self.normalized_capabilities:
             _dict['normalized_capabilities'] = self.normalized_capabilities.to_dict()
+        # override the default output from pydantic by calling `to_dict()` of pricing
+        if self.pricing:
+            _dict['pricing'] = self.pricing.to_dict()
         # puts key-value pairs in additional_properties in the top level
         if self.additional_properties is not None:
             for _key, _value in self.additional_properties.items():
@@ -98,6 +103,11 @@ class AgentModelSelection(BaseModel):
         # and model_fields_set contains the field
         if self.model_family is None and "model_family" in self.model_fields_set:
             _dict['model_family'] = None
+
+        # set to None if pricing (nullable) is None
+        # and model_fields_set contains the field
+        if self.pricing is None and "pricing" in self.model_fields_set:
+            _dict['pricing'] = None
 
         # set to None if source_metadata (nullable) is None
         # and model_fields_set contains the field
@@ -128,6 +138,7 @@ class AgentModelSelection(BaseModel):
             "model_developer": obj.get("model_developer"),
             "model_family": obj.get("model_family"),
             "normalized_capabilities": ModelCapabilities.from_dict(obj["normalized_capabilities"]) if obj.get("normalized_capabilities") is not None else None,
+            "pricing": ModelPricingDefinition.from_dict(obj["pricing"]) if obj.get("pricing") is not None else None,
             "model_snapshot": obj.get("model_snapshot"),
             "supported_execution_options": obj.get("supported_execution_options"),
             "source_metadata": obj.get("source_metadata"),

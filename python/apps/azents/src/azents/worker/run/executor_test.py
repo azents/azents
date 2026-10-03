@@ -174,6 +174,7 @@ from azents.repos.external_channel.data import ExternalChannelMailboxProjectionI
 from azents.repos.kimi_oauth_runtime import KimiOAuthRuntimeRepository
 from azents.repos.mailbox.data import MailboxItem
 from azents.repos.model_candidate_selection import ModelCandidateSelection
+from azents.repos.model_metadata_source_data import ContextModelRequest
 from azents.repos.session_execution import (
     CanonicalExecutionOwnerGenerationStaleError,
 )
@@ -2118,7 +2119,7 @@ def _executor(
             spec=run_executor_module.VfsProjectionService,
             wraps=vfs_projection_service,
         ),
-        model_metadata_service=make_test_model_metadata_service(snapshot=None),
+        model_metadata_service=make_test_model_metadata_service(source=None),
         engine=Mock(spec=run_executor_module.AgentEngineAdapter, wraps=engine),
         command_registry={
             name: Mock(spec=run_executor_module.CommandHandler, wraps=handler)
@@ -7950,13 +7951,11 @@ async def test_real_fresh_executor_materializers_observe_closed_postgres_phases(
 
     metadata = executor.model_metadata_service
 
-    async def capture(*, capability_maximums: Sequence[int | None]) -> object:
+    async def capture(*, requests: Sequence[ContextModelRequest]) -> object:
         fixture.manager.assert_closed()
         assert fixture.manager.commits == 2
         callbacks.append("local-metadata")
-        return await metadata.capture_for_context(
-            capability_maximums=capability_maximums
-        )
+        return await metadata.capture_for_context(requests=requests)
 
     executor.model_metadata_service = Mock(
         spec=run_executor_module.ModelMetadataService, wraps=metadata

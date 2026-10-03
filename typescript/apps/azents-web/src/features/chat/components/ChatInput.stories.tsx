@@ -35,6 +35,7 @@ const reasoningModel: AgentModelSelection = {
   },
   supported_execution_options: ["fast", "ultrafast"],
   model_snapshot: {},
+  pricing: null,
   source_metadata: null,
   last_refreshed_at: "2026-05-14T00:00:00Z",
 };

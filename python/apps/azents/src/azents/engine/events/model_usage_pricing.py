@@ -373,9 +373,9 @@ def apply_model_usage_pricing(
                 pricing.model_identifier if pricing is not None else model_identifier
             ),
             service_tier=service_tier,
-            source_snapshot_id=None,
-            source_hash=None,
+            source_key=None,
             source_model_key=None,
+            collected_at=None,
             estimator_version=None,
         )
         return usage.model_copy(
@@ -456,7 +456,7 @@ def apply_model_usage_pricing(
             extra={
                 "provider": provider,
                 "model": model_identifier,
-                "source_snapshot_id": pricing.source_snapshot_id,
+                "source_key": pricing.source_key,
                 "price_unavailable_reason": estimate.unavailable_reason,
             },
         )
@@ -466,9 +466,9 @@ def apply_model_usage_pricing(
             provider=pricing.provider.value,
             model_identifier=pricing.model_identifier,
             service_tier=estimate.service_tier,
-            source_snapshot_id=pricing.source_snapshot_id,
-            source_hash=pricing.source_hash,
+            source_key=pricing.source_key,
             source_model_key=pricing.source_model_key,
+            collected_at=pricing.collected_at,
             estimator_version=pricing.estimator_version,
         )
         if estimate.cost_usd is not None

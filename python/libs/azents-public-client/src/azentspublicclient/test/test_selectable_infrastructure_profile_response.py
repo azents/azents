@@ -43,7 +43,21 @@ class TestSelectableInfrastructureProfileResponse(unittest.TestCase):
                 display_name = '',
                 description = '',
                 spec = None,
-                infrastructure_network = { },
+                infrastructure_network = azentspublicclient.models.runtime_network_projection.RuntimeNetworkProjection(
+                    mode = 'direct', 
+                    allowed_cidrs = [
+                        ''
+                        ], 
+                    denied_cidrs = [
+                        ''
+                        ], 
+                    domain_mode = 'unrestricted', 
+                    allowed_domains = [
+                        ''
+                        ], 
+                    denied_domains = [
+                        ''
+                        ], ),
                 required_capabilities = [
                     ''
                     ],
@@ -62,7 +76,21 @@ class TestSelectableInfrastructureProfileResponse(unittest.TestCase):
                 display_name = '',
                 description = '',
                 spec = None,
-                infrastructure_network = { },
+                infrastructure_network = azentspublicclient.models.runtime_network_projection.RuntimeNetworkProjection(
+                    mode = 'direct', 
+                    allowed_cidrs = [
+                        ''
+                        ], 
+                    denied_cidrs = [
+                        ''
+                        ], 
+                    domain_mode = 'unrestricted', 
+                    allowed_domains = [
+                        ''
+                        ], 
+                    denied_domains = [
+                        ''
+                        ], ),
                 required_capabilities = [
                     ''
                     ],

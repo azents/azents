@@ -38,7 +38,7 @@ cd testenv/azents
 uv run testenv fixture up agent-basic --json
 ```
 
-The handler reconstructs the user, workspace, and integration from the fixture state, creates an agent with the `gpt-4o-mini` model slug, and records the identifiers under `agent` in `state.json`.
+The handler reconstructs the user, workspace, and integration from fixture state and creates an Agent with the exact `integration.model_identifier` selected by the prerequisite. The public request supplies one canonical selectable option for both main and lightweight roles. The server resolves its capabilities and pricing; the seed supplies neither authoritative model facts nor rates. The handler records the resulting Agent identifier and actual requested model identifier under `agent` in `state.json`.
 
 ## Verify
 

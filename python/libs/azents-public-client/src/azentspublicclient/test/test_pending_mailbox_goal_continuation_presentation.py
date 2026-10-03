@@ -37,7 +37,12 @@ class TestPendingMailboxGoalContinuationPresentation(unittest.TestCase):
             return PendingMailboxGoalContinuationPresentation(
                 type = 'goal_continuation',
                 content = '',
-                requested_inference_profile = { }
+                requested_inference_profile = azentspublicclient.models.requested_inference_profile.RequestedInferenceProfile(
+                    model_target_label = '0', 
+                    reasoning_effort = '', 
+                    enabled_execution_options = [
+                        'fast'
+                        ], )
             )
         else:
             return PendingMailboxGoalContinuationPresentation(

@@ -36,12 +36,16 @@ class TestAgentSessionPrimaryModelReserveRequest(unittest.TestCase):
         if include_optional:
             return AgentSessionPrimaryModelReserveRequest(
                 semantic_label = '0',
-                primary = { }
+                primary = azentspublicclient.models.model_candidate_identity.ModelCandidateIdentity(
+                    llm_provider_integration_id = '0', 
+                    model_identifier = '0', )
             )
         else:
             return AgentSessionPrimaryModelReserveRequest(
                 semantic_label = '0',
-                primary = { },
+                primary = azentspublicclient.models.model_candidate_identity.ModelCandidateIdentity(
+                    llm_provider_integration_id = '0', 
+                    model_identifier = '0', ),
         )
         """
 

@@ -3,11 +3,12 @@
 import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from azents.core.enums import LLMModelDeveloper, LLMProvider
 from azents.core.llm_catalog import ModelCapabilities, ModelReasoningEffort
 from azents.core.model_execution_options import ModelExecutionOptionId
+from azents.core.model_pricing import ModelPricingDefinition
 
 
 class AgentModelSelectionInput(BaseModel):
@@ -33,6 +34,9 @@ class AgentModelSelection(BaseModel):
     normalized_capabilities: ModelCapabilities = Field(
         description="Runtime capability snapshot"
     )
+    pricing: ModelPricingDefinition | None = Field(
+        description="Saved normalized pricing; absent on historical selections"
+    )
     model_snapshot: dict[str, Any] = Field(description="Normalized model snapshot")
     supported_execution_options: list[ModelExecutionOptionId] = Field(
         default_factory=list,
@@ -46,6 +50,14 @@ class AgentModelSelection(BaseModel):
         default=None,
         description="Latest successful listing refresh timestamp",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def decode_historical_pricing(cls, value: object) -> object:
+        """Decode old saved selections without filling or mutating their JSON."""
+        if isinstance(value, dict) and "pricing" not in value:
+            return {**value, "pricing": None}
+        return value
 
 
 MAX_SELECTABLE_MODEL_OPTIONS = 10

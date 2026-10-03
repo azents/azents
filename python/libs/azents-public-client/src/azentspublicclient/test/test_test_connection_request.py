@@ -36,13 +36,13 @@ class TestTestConnectionRequest(unittest.TestCase):
         if include_optional:
             return TestConnectionRequest(
                 toolkit_type = 'mcp',
-                config = { },
-                credentials = { },
+                config = azentspublicclient.models.config.Config(),
+                credentials = azentspublicclient.models.git.git(),
                 toolkit_config_id = ''
             )
         else:
             return TestConnectionRequest(
-                config = { },
+                config = azentspublicclient.models.config.Config(),
         )
         """
 

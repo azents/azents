@@ -46,7 +46,7 @@ class TestSlackManifestGuidance(unittest.TestCase):
                 socket_mode_enabled = True,
                 app_token_scope = '',
                 callback_url = '',
-                manifest = { },
+                manifest = azentspublicclient.models.manifest.Manifest(),
                 manifest_json = ''
             )
         else:
@@ -61,7 +61,7 @@ class TestSlackManifestGuidance(unittest.TestCase):
                 socket_mode_enabled = True,
                 app_token_scope = '',
                 callback_url = '',
-                manifest = { },
+                manifest = azentspublicclient.models.manifest.Manifest(),
                 manifest_json = '',
         )
         """

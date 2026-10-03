@@ -32,7 +32,6 @@ class SelectableModelOption(BaseModel):
     candidates: Annotated[List[SelectableModelCandidate], Field(min_length=1, max_length=5)] = Field(description="Ordered physical model candidates; first is Primary")
     subagent_enabled: StrictBool = Field(description="Available as an explicit subagent model target")
     subagent_guidance: Optional[Annotated[str, Field(strict=True, max_length=500)]]
-    additional_properties: Dict[str, Any] = {}
     __properties: ClassVar[List[str]] = ["label", "candidates", "subagent_enabled", "subagent_guidance"]
 
     model_config = ConfigDict(
@@ -65,10 +64,8 @@ class SelectableModelOption(BaseModel):
         * `None` is only added to the output dict for nullable fields that
           were set at model initialization. Other fields with value `None`
           are ignored.
-        * Fields in `self.additional_properties` are added to the output dict.
         """
         excluded_fields: Set[str] = set([
-            "additional_properties",
         ])
 
         _dict = self.model_dump(
@@ -83,11 +80,6 @@ class SelectableModelOption(BaseModel):
                 if _item_candidates:
                     _items.append(_item_candidates.to_dict())
             _dict['candidates'] = _items
-        # puts key-value pairs in additional_properties in the top level
-        if self.additional_properties is not None:
-            for _key, _value in self.additional_properties.items():
-                _dict[_key] = _value
-
         # set to None if subagent_guidance (nullable) is None
         # and model_fields_set contains the field
         if self.subagent_guidance is None and "subagent_guidance" in self.model_fields_set:
@@ -110,11 +102,6 @@ class SelectableModelOption(BaseModel):
             "subagent_enabled": obj.get("subagent_enabled"),
             "subagent_guidance": obj.get("subagent_guidance")
         })
-        # store additional fields in additional_properties
-        for _key in obj.keys():
-            if _key not in cls.__properties:
-                _obj.additional_properties[_key] = obj.get(_key)
-
         return _obj
 
 

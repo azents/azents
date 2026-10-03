@@ -1,6 +1,5 @@
 # SystemModelCatalogListResponse
 
-System model catalog list response.
 
 ## Properties
 

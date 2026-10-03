@@ -80,7 +80,7 @@ class InferenceProfileFailureCode(enum.StrEnum):
     IMAGE_INTEGRATION_DISABLED = "integration_disabled"
     IMAGE_EXPLICIT_SELECTION_UNSUPPORTED = "explicit_selection_unsupported"
     IMAGE_CATALOG_UNAVAILABLE = "catalog_unavailable"
-    IMAGE_CATALOG_GENERATION_MISMATCH = "catalog_generation_mismatch"
+    IMAGE_CATALOG_UNUSABLE = "image_catalog_unusable"
     IMAGE_MODEL_UNAVAILABLE = "model_unavailable"
     IMAGE_PROVIDER_MODEL_MISMATCH = "provider_model_mismatch"
 

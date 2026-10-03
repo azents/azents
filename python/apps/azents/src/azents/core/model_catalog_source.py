@@ -5,7 +5,6 @@ from __future__ import annotations
 import dataclasses
 import datetime
 import enum
-import hashlib
 import json
 import re
 from collections.abc import Callable, Mapping
@@ -234,7 +233,7 @@ class CatalogSourceModel(_FrozenModel):
 
 
 class CatalogSourcePayload(_FrozenModel):
-    """Canonical snapshot payload; document transport metadata is stored separately."""
+    """Validated transient source model set with descriptive transport metadata."""
 
     schema_version: Literal["1"]
     interpreter_version: Literal["1"]
@@ -242,7 +241,7 @@ class CatalogSourcePayload(_FrozenModel):
 
     @model_validator(mode="after")
     def validate_identities(self) -> CatalogSourcePayload:
-        """Reject ambiguous exact identities, including restored snapshots."""
+        """Reject ambiguous exact identities, including restored current rows."""
         if not 0 < len(self.models) <= _MAX_MODELS:
             raise ValueError("Source must contain bounded model records.")
         identities = [(model.provider, model.source_key) for model in self.models]
@@ -261,18 +260,6 @@ class CatalogSourcePayload(_FrozenModel):
     def provider_count(self) -> int:
         """Count exact source namespaces without joining related hosts."""
         return len({model.provider for model in self.models})
-
-    @property
-    def content_hash(self) -> str:
-        """Hash canonical JSON-safe evidence, independent of document formatting."""
-        canonical = json.dumps(
-            self.model_dump(mode="json"),
-            sort_keys=True,
-            separators=(",", ":"),
-            ensure_ascii=False,
-            allow_nan=False,
-        )
-        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
     def lookup_exact(
         self, *, provider: str, model_key: str

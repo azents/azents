@@ -1,18 +1,16 @@
-"""LLM catalog repository tests."""
+"""Current catalog replacement, ownership and purpose-specific authority."""
 
+import dataclasses
 import datetime
 from typing import NamedTuple
 
 import pytest
+import sqlalchemy as sa
 from azcommon.result import Success
 from cryptography.fernet import Fernet
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.credentials import (
-    ApiKeySecrets,
-    ChatGPTOAuthConfig,
-    ChatGPTOAuthSecrets,
-)
+from azents.core.credentials import ApiKeySecrets
 from azents.core.crypto import CredentialCipher
 from azents.core.enums import (
     LLMCatalogEntryVisibility,
@@ -21,600 +19,450 @@ from azents.core.enums import (
     LLMProvider,
 )
 from azents.core.llm_catalog import ModelCapabilities
-from azents.core.llm_catalog_sync import (
-    IntegrationCatalogSyncDenialReason,
-    IntegrationCatalogSyncPolicyDecision,
-    IntegrationCatalogSyncTrigger,
-)
-from azents.core.model_catalog_source import (
-    CATALOG_SOURCE_KEY,
-    CATALOG_SOURCE_KIND,
-    CATALOG_SOURCE_SCHEMA_VERSION,
-    decode_catalog_source,
-)
+from azents.core.llm_catalog_sync import IntegrationCatalogSyncTrigger
+from azents.core.model_pricing import normalize_model_pricing
 from azents.core.workspace import WorkspaceCreate
-from azents.rdb.models.llm_catalog import (
-    RDBLLMCatalog,
-    RDBLLMCatalogSnapshot,
-    RDBLLMCatalogSyncAttempt,
-)
-from azents.rdb.models.model_metadata_source import (
-    RDBModelMetadataSource,
-    RDBModelMetadataSourceSnapshot,
-)
+from azents.rdb.models.llm_catalog import RDBLLMCatalogEntry
 from azents.repos.llm_catalog import LLMCatalogRepository
 from azents.repos.llm_catalog.data import (
-    CatalogProjectionProvenance,
-    CatalogSyncAlreadyRunning,
     ImageGenerationCatalogEntryCreate,
     IntegrationCatalogSyncClaim,
+    LLMCatalog,
     LLMCatalogEntryCreate,
 )
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
-from azents.repos.llm_provider_integration.data import (
-    LLMProviderIntegrationCreate,
-    LLMProviderIntegrationUpdate,
-)
+from azents.repos.llm_provider_integration.data import LLMProviderIntegrationCreate
 from azents.repos.workspace import WorkspaceRepository
 
 pytestmark = pytest.mark.asyncio
+_NOW = datetime.datetime(2026, 10, 3, tzinfo=datetime.UTC)
 
 
-class _OpenAIIntegrationFixture(NamedTuple):
-    """OpenAI integration repository test fixture."""
-
+class _Fixture(NamedTuple):
     workspace_id: str
-    repository: LLMProviderIntegrationRepository
     integration_id: str
+    integration_repository: LLMProviderIntegrationRepository
 
 
-async def _create_openai_integration(
-    rdb_session: AsyncSession,
-    *,
-    handle: str,
-) -> _OpenAIIntegrationFixture:
-    """Create an OpenAI integration and return its workspace and repositories."""
-    workspace_repository = WorkspaceRepository()
-    workspace_result = await workspace_repository.create(
-        rdb_session,
-        WorkspaceCreate(
-            name=f"{handle} workspace",
-            handle=handle,
-        ),
+async def _integration(
+    session: AsyncSession, *, handle: str, provider: LLMProvider = LLMProvider.XAI
+) -> _Fixture:
+    workspaces = WorkspaceRepository()
+    result = await workspaces.create(
+        session, WorkspaceCreate(name=handle, handle=handle)
     )
-    assert isinstance(workspace_result, Success)
-    workspace_id = await workspace_repository.resolve_id(rdb_session, handle)
+    assert isinstance(result, Success)
+    workspace_id = await workspaces.resolve_id(session, handle)
     assert workspace_id is not None
-    integration_repository = LLMProviderIntegrationRepository(
+    integrations = LLMProviderIntegrationRepository(
         CredentialCipher(Fernet.generate_key().decode())
     )
-    integration = await integration_repository.create(
-        rdb_session,
+    integration = await integrations.create(
+        session,
         LLMProviderIntegrationCreate(
             workspace_id=workspace_id,
-            provider=LLMProvider.OPENAI,
-            name="OpenAI",
-            secrets=ApiKeySecrets(api_key="sk-test"),
+            provider=provider,
+            name="Catalog test",
+            secrets=ApiKeySecrets(api_key="test-key"),
         ),
     )
-    return _OpenAIIntegrationFixture(
+    return _Fixture(
         workspace_id=workspace_id,
-        repository=integration_repository,
         integration_id=integration.id,
+        integration_repository=integrations,
     )
 
 
-async def test_system_attempt_reclaims_an_abandoned_running_lease(
-    rdb_session: AsyncSession,
-) -> None:
-    """A process-lost system refresh cannot wedge later scheduler or Admin runs."""
-    repository = LLMCatalogRepository()
-    catalog = await repository.ensure_system_catalog(
-        rdb_session,
-        provider=LLMProvider.OPENAI,
-        purpose=LLMCatalogPurpose.CONVERSATION,
-    )
-    started_at = datetime.datetime(2026, 10, 1, tzinfo=datetime.UTC)
-    first = await repository.begin_attempt(
-        rdb_session,
-        catalog_id=catalog.id,
-        source_key=CATALOG_SOURCE_KEY,
-        started_at=started_at,
-    )
-    assert isinstance(first, str)
-
-    still_running = await repository.begin_attempt(
-        rdb_session,
-        catalog_id=catalog.id,
-        source_key=CATALOG_SOURCE_KEY,
-        started_at=started_at + datetime.timedelta(minutes=4, seconds=59),
-    )
-    assert isinstance(still_running, CatalogSyncAlreadyRunning)
-    assert still_running.attempt_id == first
-
-    reclaimed = await repository.begin_attempt(
-        rdb_session,
-        catalog_id=catalog.id,
-        source_key=CATALOG_SOURCE_KEY,
-        started_at=started_at + datetime.timedelta(minutes=5),
-    )
-    assert isinstance(reclaimed, str)
-    assert reclaimed != first
-    abandoned = await rdb_session.get(RDBLLMCatalogSyncAttempt, first)
-    assert abandoned is not None
-    assert abandoned.failure_code == "SystemCatalogSyncRunningTimeout"
-
-
-async def test_candidate_snapshot_is_complete_and_does_not_publish(
-    rdb_session: AsyncSession,
-) -> None:
-    """Shadow projection remains non-current and is reused by fingerprint."""
-    repository = LLMCatalogRepository()
-    catalog = await repository.ensure_system_catalog(
-        rdb_session,
-        provider=LLMProvider.OPENAI,
-        purpose=LLMCatalogPurpose.CONVERSATION,
-    )
-    entry = LLMCatalogEntryCreate(
-        provider=LLMProvider.OPENAI,
-        provider_model_identifier="gpt-shadow",
-        display_name="GPT Shadow",
+def _entry(
+    *,
+    integration_id: str,
+    identifier: str,
+    provider: LLMProvider = LLMProvider.XAI,
+    visibility: LLMCatalogEntryVisibility = LLMCatalogEntryVisibility.SELECTABLE,
+) -> LLMCatalogEntryCreate:
+    return LLMCatalogEntryCreate(
+        provider=provider,
+        provider_model_identifier=identifier,
+        display_name=identifier,
         normalized_capabilities=ModelCapabilities().model_dump(mode="json"),
         supported_execution_options=[],
         lifecycle_status=LLMModelLifecycleStatus.ACTIVE,
+        visibility_status=visibility,
+        provider_integration_id=integration_id,
+        publisher=None,
+        family=None,
+        source_metadata=None,
+        projection_metadata=None,
+        hidden_reason=None,
+        pricing=normalize_model_pricing(
+            source_key=None, source_model=None, collected_at=None
+        ),
+    )
+
+
+def _image(
+    *, integration_id: str, identifier: str
+) -> ImageGenerationCatalogEntryCreate:
+    return ImageGenerationCatalogEntryCreate(
+        provider=LLMProvider.OPENAI,
+        provider_model_identifier=identifier,
+        display_name=identifier,
+        description="Reviewed fixture model.",
+        recommendation_rank=1,
+        lifecycle_status=LLMModelLifecycleStatus.ACTIVE,
         visibility_status=LLMCatalogEntryVisibility.SELECTABLE,
-        provider_integration_id=None,
-        publisher="openai",
-        family="gpt",
-        source_metadata={"source_kind": CATALOG_SOURCE_KIND},
-        projection_metadata={"resolver_revision": "1"},
+        provider_integration_id=integration_id,
+        source_metadata=None,
+        projection_metadata=None,
         hidden_reason=None,
     )
-    source_id = "s" * 32
-    source_payload = decode_catalog_source(
-        b'{"gpt-shadow":{"litellm_provider":"openai","mode":"chat"}}'
-    )
-    source_authority = await rdb_session.get(RDBModelMetadataSource, CATALOG_SOURCE_KEY)
-    assert source_authority is not None
-    rdb_session.add(
-        RDBModelMetadataSourceSnapshot(
-            id=source_id,
-            source_key=CATALOG_SOURCE_KEY,
-            source_kind=CATALOG_SOURCE_KIND,
-            source_schema_version=CATALOG_SOURCE_SCHEMA_VERSION,
-            source_url="https://metadata.example/data.json",
-            source_hash=source_payload.content_hash,
-            producer_name="azents-catalog-source",
-            producer_version="1",
-            provider_count=source_payload.provider_count,
-            model_count=source_payload.model_count,
-            payload=source_payload.model_dump(mode="json"),
-        )
-    )
-    await rdb_session.flush()
-    source_authority.current_snapshot_id = source_id
-    await rdb_session.flush()
-    provenance = CatalogProjectionProvenance(
-        source_snapshot_id=source_id,
-        projection_schema_version="2",
-        runtime_profile_resolver_revision="1",
-        pydantic_ai_version="2.52.0",
-        genai_prices_version=None,
-        projection_fingerprint="a" * 64,
-    )
-
-    candidate_id = await repository.create_candidate_snapshot(
-        rdb_session,
-        catalog=catalog,
-        entries=[entry],
-        diagnostics={"shadow": True},
-        provenance=provenance,
-        catalog_configuration_version=None,
-    )
-    reused_id = await repository.create_candidate_snapshot(
-        rdb_session,
-        catalog=catalog,
-        entries=[entry],
-        diagnostics={"shadow": True},
-        provenance=provenance,
-        catalog_configuration_version=None,
-    )
-
-    catalog_row = await rdb_session.get(RDBLLMCatalog, catalog.id)
-    snapshot = await rdb_session.get(RDBLLMCatalogSnapshot, candidate_id)
-    assert reused_id == candidate_id
-    assert catalog_row is not None
-    assert catalog_row.current_snapshot_id is None
-    assert snapshot is not None
-    assert snapshot.source_snapshot_id == source_id
-    assert snapshot.projection_fingerprint == "a" * 64
-
-    newer_source_id = "t" * 32
-    newer_payload = decode_catalog_source(
-        b'{"gpt-newer":{"litellm_provider":"openai","mode":"chat"}}'
-    )
-    rdb_session.add(
-        RDBModelMetadataSourceSnapshot(
-            id=newer_source_id,
-            source_key=CATALOG_SOURCE_KEY,
-            source_kind=CATALOG_SOURCE_KIND,
-            source_schema_version=CATALOG_SOURCE_SCHEMA_VERSION,
-            source_url="https://metadata.example/newer.json",
-            source_hash=newer_payload.content_hash,
-            producer_name="azents-catalog-source",
-            producer_version="1",
-            provider_count=newer_payload.provider_count,
-            model_count=newer_payload.model_count,
-            payload=newer_payload.model_dump(mode="json"),
-        )
-    )
-    await rdb_session.flush()
-    source_row = await rdb_session.get(RDBModelMetadataSource, CATALOG_SOURCE_KEY)
-    assert source_row is not None
-    source_row.current_snapshot_id = newer_source_id
-    await rdb_session.flush()
-
-    with pytest.raises(RuntimeError, match="current model metadata source changed"):
-        await repository.publish_candidate_snapshot(
-            rdb_session,
-            catalog_id=catalog.id,
-            candidate_snapshot_id=candidate_id,
-            expected_current_snapshot_id=None,
-            expected_catalog_configuration_version=None,
-            expected_projection_fingerprint="a" * 64,
-            expected_source_key=CATALOG_SOURCE_KEY,
-            expected_source_snapshot_id=source_id,
-        )
-    await rdb_session.refresh(catalog_row)
-    assert catalog_row.current_snapshot_id is None
 
 
-async def test_partial_catalog_upserts_survive_prepared_statement_reuse(
+async def _publish(
+    session: AsyncSession,
+    repository: LLMCatalogRepository,
+    *,
+    fixture: _Fixture,
+    catalog: LLMCatalog,
+    entries: list[LLMCatalogEntryCreate],
+    finished_at: datetime.datetime,
+) -> IntegrationCatalogSyncClaim:
+    claim = await repository.begin_integration_sync(
+        session,
+        catalog_id=catalog.id,
+        workspace_id=fixture.workspace_id,
+        started_at=finished_at,
+        trigger=IntegrationCatalogSyncTrigger.CONFIG_UPDATE,
+    )
+    assert isinstance(claim, IntegrationCatalogSyncClaim)
+    owner = await repository.lock_catalog(session, catalog_id=catalog.id)
+    await repository.replace_current_entries(
+        session, owner=owner, entries=entries, diagnostics=None, finished_at=finished_at
+    )
+    await repository.complete_sync(
+        session,
+        catalog_id=catalog.id,
+        work_token=claim.work_token,
+        finished_at=finished_at,
+        fetched_count=len(entries),
+        matched_count=len(entries),
+        skipped_count=0,
+        hidden_count=owner.hidden_count,
+        diagnostics=None,
+    )
+    return claim
+
+
+async def test_current_upsert_preserves_ids_removes_absent_and_advances_refresh(
     rdb_session: AsyncSession,
 ) -> None:
-    """Partial-index upserts must remain inferable after psycopg prepares them."""
-    workspace_repository = WorkspaceRepository()
-    workspace_result = await workspace_repository.create(
-        rdb_session,
-        WorkspaceCreate(
-            name="Prepared catalog workspace",
-            handle="prepared-catalog-workspace",
-        ),
-    )
-    assert isinstance(workspace_result, Success)
-    workspace_id = await workspace_repository.resolve_id(
-        rdb_session, "prepared-catalog-workspace"
-    )
-    assert workspace_id is not None
-
-    integration = await LLMProviderIntegrationRepository(
-        CredentialCipher(Fernet.generate_key().decode())
-    ).create(
-        rdb_session,
-        LLMProviderIntegrationCreate(
-            workspace_id=workspace_id,
-            provider=LLMProvider.CHATGPT_OAUTH,
-            name="Prepared ChatGPT integration",
-            secrets=ChatGPTOAuthSecrets(
-                access_token="access-token",
-                refresh_token="refresh-token",
-                expires_at=datetime.datetime(2030, 1, 1, tzinfo=datetime.UTC),
-            ),
-            config=ChatGPTOAuthConfig(
-                connection_method="callback",
-                status="connected",
-            ),
-        ),
-    )
-
-    repository = LLMCatalogRepository()
-    integration_catalog_ids = {
-        (
-            await repository.ensure_integration_catalog(
-                rdb_session,
-                integration_id=integration.id,
-                provider=LLMProvider.CHATGPT_OAUTH,
-                purpose=LLMCatalogPurpose.CONVERSATION,
-            )
-        ).id
-        for _ in range(8)
-    }
-    system_catalog_ids = {
-        (
-            await repository.ensure_system_catalog(
-                rdb_session,
-                provider=LLMProvider.OPENAI,
-                purpose=LLMCatalogPurpose.CONVERSATION,
-            )
-        ).id
-        for _ in range(8)
-    }
-
-    assert len(integration_catalog_ids) == 1
-    assert len(system_catalog_ids) == 1
-
-
-async def test_integration_attempt_claim_enforces_running_and_cooldown(
-    rdb_session: AsyncSession,
-) -> None:
-    """Integration attempt claims serialize starts and enforce cooldown."""
-    workspace_repository = WorkspaceRepository()
-    workspace_result = await workspace_repository.create(
-        rdb_session,
-        WorkspaceCreate(
-            name="Catalog policy workspace",
-            handle="catalog-policy-workspace",
-        ),
-    )
-    assert isinstance(workspace_result, Success)
-    workspace_id = await workspace_repository.resolve_id(
-        rdb_session, "catalog-policy-workspace"
-    )
-    assert workspace_id is not None
-    integration = await LLMProviderIntegrationRepository(
-        CredentialCipher(Fernet.generate_key().decode())
-    ).create(
-        rdb_session,
-        LLMProviderIntegrationCreate(
-            workspace_id=workspace_id,
-            provider=LLMProvider.CHATGPT_OAUTH,
-            name="Catalog policy ChatGPT integration",
-            secrets=ChatGPTOAuthSecrets(
-                access_token="access-token",
-                refresh_token="refresh-token",
-                expires_at=datetime.datetime(2030, 1, 1, tzinfo=datetime.UTC),
-            ),
-            config=ChatGPTOAuthConfig(
-                connection_method="callback",
-                status="connected",
-            ),
-        ),
-    )
+    fixture = await _integration(rdb_session, handle="catalog-current")
     repository = LLMCatalogRepository()
     catalog = await repository.ensure_integration_catalog(
         rdb_session,
-        integration_id=integration.id,
-        provider=integration.provider,
+        integration_id=fixture.integration_id,
+        provider=LLMProvider.XAI,
         purpose=LLMCatalogPurpose.CONVERSATION,
     )
-    now = datetime.datetime(2026, 7, 16, 12, 0, tzinfo=datetime.UTC)
-
-    first = await repository.begin_integration_attempt(
+    entries = [
+        _entry(integration_id=fixture.integration_id, identifier="literal"),
+        _entry(integration_id=fixture.integration_id, identifier="removed"),
+    ]
+    await _publish(
         rdb_session,
-        catalog_id=catalog.id,
-        workspace_id=workspace_id,
-        source_key=CATALOG_SOURCE_KEY,
-        started_at=now,
-        trigger=IntegrationCatalogSyncTrigger.CREATE,
+        repository,
+        fixture=fixture,
+        catalog=catalog,
+        entries=entries,
+        finished_at=_NOW,
     )
-    assert isinstance(first, IntegrationCatalogSyncClaim)
-
-    duplicate = await repository.begin_integration_attempt(
+    first = await repository.get_selectable_entry_by_integration_model(
         rdb_session,
-        catalog_id=catalog.id,
-        workspace_id=workspace_id,
-        source_key=CATALOG_SOURCE_KEY,
-        started_at=now + datetime.timedelta(seconds=1),
-        trigger=IntegrationCatalogSyncTrigger.CONFIG_UPDATE,
+        integration_id=fixture.integration_id,
+        workspace_id=fixture.workspace_id,
+        model_identifier="literal",
+        purpose=LLMCatalogPurpose.CONVERSATION,
     )
-    assert isinstance(duplicate, IntegrationCatalogSyncPolicyDecision)
-    assert duplicate.denial_reason == IntegrationCatalogSyncDenialReason.ALREADY_RUNNING
-    assert duplicate.blocking_attempt_id == first.attempt_id
-
-    await repository.mark_attempt_succeeded(
+    assert first is not None
+    newer = _NOW + datetime.timedelta(seconds=1)
+    await _publish(
         rdb_session,
-        attempt_id=first.attempt_id,
-        finished_at=now + datetime.timedelta(seconds=2),
-        produced_snapshot_id=None,
-        fetched_count=0,
-        matched_count=0,
-        skipped_count=0,
-        hidden_count=0,
-        diagnostics={"trigger": IntegrationCatalogSyncTrigger.CREATE.value},
+        repository,
+        fixture=fixture,
+        catalog=catalog,
+        entries=[dataclasses.replace(entries[0], display_name="Updated literal")],
+        finished_at=newer,
     )
-    throttled = await repository.begin_integration_attempt(
+    current = await repository.get_selectable_entry_by_integration_model(
         rdb_session,
-        catalog_id=catalog.id,
-        workspace_id=workspace_id,
-        source_key=CATALOG_SOURCE_KEY,
-        started_at=now + datetime.timedelta(seconds=10),
-        trigger=IntegrationCatalogSyncTrigger.EXPLICIT,
+        integration_id=fixture.integration_id,
+        workspace_id=fixture.workspace_id,
+        model_identifier="literal",
+        purpose=LLMCatalogPurpose.CONVERSATION,
     )
-    assert isinstance(throttled, IntegrationCatalogSyncPolicyDecision)
-    assert throttled.denial_reason == IntegrationCatalogSyncDenialReason.THROTTLED
-
-    after_cooldown = await repository.begin_integration_attempt(
-        rdb_session,
-        catalog_id=catalog.id,
-        workspace_id=workspace_id,
-        source_key=CATALOG_SOURCE_KEY,
-        started_at=now + datetime.timedelta(seconds=31),
-        trigger=IntegrationCatalogSyncTrigger.EXPLICIT,
+    assert current is not None
+    assert current.entry.id == first.entry.id
+    assert current.entry.created_at == first.entry.created_at
+    assert current.entry.updated_at == newer
+    assert current.entry.display_name == "Updated literal"
+    assert current.catalog.last_success_at == newer
+    count = await rdb_session.scalar(
+        sa.select(sa.func.count())
+        .select_from(RDBLLMCatalogEntry)
+        .where(RDBLLMCatalogEntry.catalog_id == catalog.id)
     )
-    assert isinstance(after_cooldown, IntegrationCatalogSyncClaim)
-    current_attempt_id = await repository.lock_catalog_for_attempt_completion(
-        rdb_session,
-        catalog_id=catalog.id,
-    )
-    assert current_attempt_id == after_cooldown.attempt_id
-    assert current_attempt_id != first.attempt_id
+    assert count == 1
+    assert current.catalog.entry_count == 1
+    assert current.catalog.sync_status is not None
+    assert current.catalog.sync_status.work_token is None
 
 
-async def test_catalog_identity_is_purpose_aware(
+async def test_failed_refresh_does_not_gate_current_conversation_selection(
     rdb_session: AsyncSession,
 ) -> None:
-    """The same integration and lowerer target may own both catalog purposes."""
-    (
-        workspace_id,
-        _integration_repository,
-        integration_id,
-    ) = await _create_openai_integration(
+    fixture = await _integration(rdb_session, handle="catalog-stale-readable")
+    repository = LLMCatalogRepository()
+    catalog = await repository.ensure_integration_catalog(
         rdb_session,
-        handle="purpose-aware-catalog",
+        integration_id=fixture.integration_id,
+        provider=LLMProvider.XAI,
+        purpose=LLMCatalogPurpose.CONVERSATION,
+    )
+    await _publish(
+        rdb_session,
+        repository,
+        fixture=fixture,
+        catalog=catalog,
+        entries=[_entry(integration_id=fixture.integration_id, identifier="literal")],
+        finished_at=_NOW,
+    )
+    claim = await repository.begin_integration_sync(
+        rdb_session,
+        catalog_id=catalog.id,
+        workspace_id=fixture.workspace_id,
+        started_at=_NOW + datetime.timedelta(hours=1),
+        trigger=IntegrationCatalogSyncTrigger.CONFIG_UPDATE,
+    )
+    assert isinstance(claim, IntegrationCatalogSyncClaim)
+    await repository.fail_sync(
+        rdb_session,
+        catalog_id=catalog.id,
+        work_token=claim.work_token,
+        finished_at=_NOW + datetime.timedelta(hours=1),
+        failure_code="ListingFailed",
+        failure_message="Listing failed.",
+        action_hint=None,
+        diagnostics={"automatic_retry_blocked": True},
+    )
+    selected = await repository.get_selectable_entry_by_integration_model(
+        rdb_session,
+        integration_id=fixture.integration_id,
+        workspace_id=fixture.workspace_id,
+        model_identifier="literal",
+        purpose=LLMCatalogPurpose.CONVERSATION,
+    )
+    assert selected is not None
+    assert selected.catalog.last_success_at == _NOW
+    assert selected.catalog.image_usable is None
+    assert selected.catalog.sync_status is not None
+    assert selected.catalog.sync_status.status.value == "failed"
+
+
+async def test_superseded_failure_does_not_mutate_new_work(
+    rdb_session: AsyncSession,
+) -> None:
+    fixture = await _integration(rdb_session, handle="catalog-work-ownership")
+    repository = LLMCatalogRepository()
+    catalog = await repository.ensure_integration_catalog(
+        rdb_session,
+        integration_id=fixture.integration_id,
+        provider=LLMProvider.XAI,
+        purpose=LLMCatalogPurpose.CONVERSATION,
+    )
+    first = await repository.begin_integration_sync(
+        rdb_session,
+        catalog_id=catalog.id,
+        workspace_id=fixture.workspace_id,
+        started_at=_NOW,
+        trigger=IntegrationCatalogSyncTrigger.CONFIG_UPDATE,
+    )
+    assert isinstance(first, IntegrationCatalogSyncClaim)
+    second = await repository.begin_integration_sync(
+        rdb_session,
+        catalog_id=catalog.id,
+        workspace_id=fixture.workspace_id,
+        started_at=_NOW + datetime.timedelta(minutes=16),
+        trigger=IntegrationCatalogSyncTrigger.CONFIG_UPDATE,
+    )
+    assert isinstance(second, IntegrationCatalogSyncClaim)
+    assert not await repository.fail_sync(
+        rdb_session,
+        catalog_id=catalog.id,
+        work_token=first.work_token,
+        finished_at=_NOW,
+        failure_code="OldFailed",
+        failure_message="Old worker failed.",
+        action_hint=None,
+        diagnostics=None,
+    )
+    status = await repository.get_sync_status(rdb_session, catalog=catalog)
+    assert status is not None
+    assert status.work_token == second.work_token
+    assert status.status.value == "running"
+
+
+async def test_visibility_workspace_and_literal_model_predicates_survive(
+    rdb_session: AsyncSession,
+) -> None:
+    fixture = await _integration(rdb_session, handle="catalog-selectable")
+    repository = LLMCatalogRepository()
+    catalog = await repository.ensure_integration_catalog(
+        rdb_session,
+        integration_id=fixture.integration_id,
+        provider=LLMProvider.XAI,
+        purpose=LLMCatalogPurpose.CONVERSATION,
+    )
+    await _publish(
+        rdb_session,
+        repository,
+        fixture=fixture,
+        catalog=catalog,
+        entries=[
+            _entry(integration_id=fixture.integration_id, identifier="literal"),
+            _entry(
+                integration_id=fixture.integration_id,
+                identifier="hidden",
+                visibility=LLMCatalogEntryVisibility.HIDDEN,
+            ),
+        ],
+        finished_at=_NOW,
+    )
+    for workspace_id, identifier in [
+        (fixture.workspace_id, "hidden"),
+        (fixture.workspace_id, "xai/literal"),
+        ("other-workspace", "literal"),
+    ]:
+        assert (
+            await repository.get_selectable_entry_by_integration_model(
+                rdb_session,
+                integration_id=fixture.integration_id,
+                workspace_id=workspace_id,
+                model_identifier=identifier,
+                purpose=LLMCatalogPurpose.CONVERSATION,
+            )
+            is None
+        )
+    page = await repository.list_entries_by_integration(
+        rdb_session,
+        integration_id=fixture.integration_id,
+        workspace_id=fixture.workspace_id,
+        purpose=LLMCatalogPurpose.CONVERSATION,
+        search=None,
+        limit=20,
+        offset=0,
+    )
+    assert page is not None
+    assert page.total == 1
+    assert page.catalog.visible_count == 1
+    assert page.catalog.hidden_count == 1
+
+
+async def test_image_credential_change_invalidates_only_image_usability(
+    rdb_session: AsyncSession,
+) -> None:
+    fixture = await _integration(
+        rdb_session, handle="catalog-image-authority", provider=LLMProvider.OPENAI
     )
     repository = LLMCatalogRepository()
-
     conversation = await repository.ensure_integration_catalog(
         rdb_session,
-        integration_id=integration_id,
+        integration_id=fixture.integration_id,
         provider=LLMProvider.OPENAI,
         purpose=LLMCatalogPurpose.CONVERSATION,
+    )
+    await _publish(
+        rdb_session,
+        repository,
+        fixture=fixture,
+        catalog=conversation,
+        entries=[
+            _entry(
+                integration_id=fixture.integration_id,
+                identifier="literal",
+                provider=LLMProvider.OPENAI,
+            )
+        ],
+        finished_at=_NOW,
     )
     image = await repository.ensure_integration_catalog(
         rdb_session,
-        integration_id=integration_id,
+        integration_id=fixture.integration_id,
         provider=LLMProvider.OPENAI,
         purpose=LLMCatalogPurpose.IMAGE_GENERATION,
     )
-
-    assert conversation.id != image.id
-    assert (
-        await repository.get_by_integration(
-            rdb_session,
-            integration_id=integration_id,
-            workspace_id=workspace_id,
-            purpose=LLMCatalogPurpose.CONVERSATION,
-        )
-    ) == conversation
-    assert (
-        await repository.get_by_integration(
-            rdb_session,
-            integration_id=integration_id,
-            workspace_id=workspace_id,
-            purpose=LLMCatalogPurpose.IMAGE_GENERATION,
-        )
-    ) == image
-
-
-async def test_image_catalog_fences_generation_and_preserves_last_good(
-    rdb_session: AsyncSession,
-) -> None:
-    """Failed or superseded refreshes keep the prior snapshot diagnostic state."""
-    (
-        workspace_id,
-        integration_repository,
-        integration_id,
-    ) = await _create_openai_integration(
+    owner = await repository.lock_catalog(rdb_session, catalog_id=image.id)
+    await repository.replace_current_image_entries(
         rdb_session,
-        handle="image-generation-fencing",
-    )
-    repository = LLMCatalogRepository()
-    catalog = await repository.ensure_integration_catalog(
-        rdb_session,
-        integration_id=integration_id,
-        provider=LLMProvider.OPENAI,
-        purpose=LLMCatalogPurpose.IMAGE_GENERATION,
-    )
-    started_at = datetime.datetime.now(datetime.UTC)
-    first_attempt = await repository.begin_integration_attempt(
-        rdb_session,
-        catalog_id=catalog.id,
-        workspace_id=workspace_id,
-        source_key="openai_models_list:image_generation",
-        started_at=started_at,
-        trigger=IntegrationCatalogSyncTrigger.CREATE,
-    )
-    assert isinstance(first_attempt, IntegrationCatalogSyncClaim)
-    first_publication = await repository.replace_current_image_generation_snapshot(
-        rdb_session,
-        catalog=catalog,
-        attempt_id=first_attempt.attempt_id,
+        owner=owner,
         entries=[
-            ImageGenerationCatalogEntryCreate(
-                provider=LLMProvider.OPENAI,
-                provider_model_identifier="gpt-image-2.5-flare",
-                display_name="GPT Image 2.5 Flare",
-                description="Recommended image model.",
-                recommendation_rank=1,
-                lifecycle_status=LLMModelLifecycleStatus.ACTIVE,
-                visibility_status=LLMCatalogEntryVisibility.SELECTABLE,
-                provider_integration_id=integration_id,
-                source_metadata=None,
-                projection_metadata={"registry_revision": 1},
-                hidden_reason=None,
+            _image(
+                integration_id=fixture.integration_id, identifier="gpt-image-2.5-flare"
             )
         ],
-        diagnostics={"catalog_purpose": "image_generation"},
+        diagnostics=None,
+        finished_at=_NOW,
     )
-    assert first_publication.snapshot_id is not None
-    await repository.mark_attempt_succeeded(
+    selected_image = await repository.get_selectable_image_generation_entry(
         rdb_session,
-        attempt_id=first_attempt.attempt_id,
-        finished_at=started_at + datetime.timedelta(seconds=1),
-        produced_snapshot_id=first_publication.snapshot_id,
-        fetched_count=1,
-        matched_count=1,
-        skipped_count=0,
-        hidden_count=0,
-        diagnostics={"catalog_purpose": "image_generation"},
+        integration_id=fixture.integration_id,
+        workspace_id=fixture.workspace_id,
+        model_identifier="gpt-image-2.5-flare",
     )
-
-    update_result = await integration_repository.update_by_id(
+    assert selected_image is not None
+    updated = await fixture.integration_repository.update_by_id(
         rdb_session,
-        integration_id,
-        LLMProviderIntegrationUpdate(
-            secrets=ApiKeySecrets(api_key="sk-updated"),
-        ),
+        fixture.integration_id,
+        {"secrets": ApiKeySecrets(api_key="replacement-key")},
     )
-    assert isinstance(update_result, Success)
-    assert update_result.value.catalog_configuration_version == 2
-    page = await repository.list_image_generation_entries_by_integration(
-        rdb_session,
-        integration_id=integration_id,
-        workspace_id=workspace_id,
-    )
-    assert page is not None
-    assert page.catalog.current_snapshot_id == first_publication.snapshot_id
-    assert page.snapshot_catalog_configuration_version == 1
-    assert page.current_integration_catalog_configuration_version == 2
-    assert [entry.provider_model_identifier for entry in page.entries] == [
-        "gpt-image-2.5-flare"
-    ]
+    assert isinstance(updated, Success)
     assert (
         await repository.get_selectable_image_generation_entry(
             rdb_session,
-            integration_id=integration_id,
-            workspace_id=workspace_id,
+            integration_id=fixture.integration_id,
+            workspace_id=fixture.workspace_id,
             model_identifier="gpt-image-2.5-flare",
         )
         is None
     )
-
-    second_attempt = await repository.begin_integration_attempt(
+    page = await repository.list_image_generation_entries_by_integration(
         rdb_session,
-        catalog_id=catalog.id,
-        workspace_id=workspace_id,
-        source_key="openai_models_list:image_generation",
-        started_at=started_at + datetime.timedelta(seconds=31),
-        trigger=IntegrationCatalogSyncTrigger.CONFIG_UPDATE,
+        integration_id=fixture.integration_id,
+        workspace_id=fixture.workspace_id,
     )
-    assert isinstance(second_attempt, IntegrationCatalogSyncClaim)
-    second_update = await integration_repository.update_by_id(
-        rdb_session,
-        integration_id,
-        LLMProviderIntegrationUpdate(
-            secrets=ApiKeySecrets(api_key="sk-newer"),
-        ),
+    assert page is not None
+    assert page.catalog.image_usable is False
+    assert page.catalog.last_success_at == _NOW
+    assert len(page.entries) == 1
+    disabled = await fixture.integration_repository.update_by_id(
+        rdb_session, fixture.integration_id, {"enabled": False}
     )
-    assert isinstance(second_update, Success)
-    assert second_update.value.catalog_configuration_version == 3
-    superseded = await repository.replace_current_image_generation_snapshot(
-        rdb_session,
-        catalog=catalog,
-        attempt_id=second_attempt.attempt_id,
-        entries=[],
-        diagnostics=None,
+    assert isinstance(disabled, Success)
+    assert (
+        await repository.get_selectable_image_generation_entry(
+            rdb_session,
+            integration_id=fixture.integration_id,
+            workspace_id=fixture.workspace_id,
+            model_identifier="gpt-image-2.5-flare",
+        )
+        is None
     )
-    assert superseded.snapshot_id is None
-    assert superseded.current_catalog_configuration_version == 3
-
-    preserved = await repository.list_image_generation_entries_by_integration(
-        rdb_session,
-        integration_id=integration_id,
-        workspace_id=workspace_id,
+    assert (
+        await repository.get_selectable_entry_by_integration_model(
+            rdb_session,
+            integration_id=fixture.integration_id,
+            workspace_id=fixture.workspace_id,
+            model_identifier="literal",
+            purpose=LLMCatalogPurpose.CONVERSATION,
+        )
+        is not None
     )
-    assert preserved is not None
-    assert preserved.catalog.current_snapshot_id == first_publication.snapshot_id
-    assert [entry.provider_model_identifier for entry in preserved.entries] == [
-        "gpt-image-2.5-flare"
-    ]

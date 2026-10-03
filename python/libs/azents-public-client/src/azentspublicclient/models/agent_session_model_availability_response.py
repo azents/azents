@@ -19,7 +19,7 @@ import json
 
 from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field, StrictStr, field_validator
-from typing import Any, ClassVar, Dict, List, Optional
+from typing import Any, ClassVar, Dict, Optional
 from typing_extensions import Annotated
 from azentspublicclient.models.model_candidate_identity import ModelCandidateIdentity
 from azentspublicclient.models.primary_model_reservation import PrimaryModelReservation
@@ -38,7 +38,6 @@ class AgentSessionModelAvailabilityResponse(BaseModel):
     server_time: datetime
     first_usable_fallback_display_name: Optional[StrictStr]
     reservation: Optional[PrimaryModelReservation]
-    additional_properties: Dict[str, Any] = {}
     __properties: ClassVar[List[str]] = ["semantic_label", "primary", "primary_display_name", "state", "deadline", "server_time", "first_usable_fallback_display_name", "reservation"]
 
     @field_validator('state')
@@ -78,10 +77,8 @@ class AgentSessionModelAvailabilityResponse(BaseModel):
         * `None` is only added to the output dict for nullable fields that
           were set at model initialization. Other fields with value `None`
           are ignored.
-        * Fields in `self.additional_properties` are added to the output dict.
         """
         excluded_fields: Set[str] = set([
-            "additional_properties",
         ])
 
         _dict = self.model_dump(
@@ -95,11 +92,6 @@ class AgentSessionModelAvailabilityResponse(BaseModel):
         # override the default output from pydantic by calling `to_dict()` of reservation
         if self.reservation:
             _dict['reservation'] = self.reservation.to_dict()
-        # puts key-value pairs in additional_properties in the top level
-        if self.additional_properties is not None:
-            for _key, _value in self.additional_properties.items():
-                _dict[_key] = _value
-
         # set to None if deadline (nullable) is None
         # and model_fields_set contains the field
         if self.deadline is None and "deadline" in self.model_fields_set:
@@ -136,11 +128,6 @@ class AgentSessionModelAvailabilityResponse(BaseModel):
             "first_usable_fallback_display_name": obj.get("first_usable_fallback_display_name"),
             "reservation": PrimaryModelReservation.from_dict(obj["reservation"]) if obj.get("reservation") is not None else None
         })
-        # store additional fields in additional_properties
-        for _key in obj.keys():
-            if _key not in cls.__properties:
-                _obj.additional_properties[_key] = obj.get(_key)
-
         return _obj
 
 

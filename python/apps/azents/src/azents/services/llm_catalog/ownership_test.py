@@ -1,23 +1,22 @@
-"""Catalog discovery sequencing across completed repository operations."""
+"""Provider I/O sequencing and bounded source repreparation at service boundaries."""
 
+import datetime
 from unittest.mock import AsyncMock
 
 import pytest
 from azcommon.result import Success
 
 from azents.core.credentials import ApiKeySecrets
-from azents.core.enums import LLMCatalogPurpose, LLMProvider
-from azents.repos.catalog_operations_test import (
-    _NOW,
-    _catalog,
-    _claim,
-    _TransactionProbe,
-)
+from azents.core.enums import LLMCatalogPurpose, LLMCatalogScope, LLMProvider
 from azents.repos.chatgpt_oauth_runtime import ChatGPTOAuthRuntimeRepository
 from azents.repos.kimi_oauth_runtime import KimiOAuthRuntimeRepository
-from azents.repos.llm_catalog import LLMCatalogRepository
-from azents.repos.llm_catalog_operations import LLMCatalogOperationsRepository
-from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
+from azents.repos.llm_catalog.data import IntegrationCatalogSyncClaim, LLMCatalog
+from azents.repos.llm_catalog_operations import (
+    CatalogPublicationSourceChanged,
+    CatalogPublicationSucceeded,
+    CatalogSyncStart,
+    LLMCatalogOperationsRepository,
+)
 from azents.repos.llm_provider_integration.data import LLMProviderIntegrationWithSecrets
 from azents.repos.xai_oauth_runtime import XaiOAuthRuntimeRepository
 from azents.services.llm_catalog import (
@@ -32,9 +31,10 @@ from azents.services.model_listing.providers import (
 from azents.services.model_metadata_source import ModelMetadataSourceSyncService
 from azents.services.oauth_runtime_clients import create_runtime_oauth_client_factories
 
+_NOW = datetime.datetime(2026, 10, 3, tzinfo=datetime.UTC)
+
 
 def _integration() -> LLMProviderIntegrationWithSecrets:
-    """Build a normal API-key integration without deterministic fixture routing."""
     return LLMProviderIntegrationWithSecrets(
         id="integration",
         workspace_id="workspace",
@@ -49,25 +49,40 @@ def _integration() -> LLMProviderIntegrationWithSecrets:
     )
 
 
-def _service(
-    manager: _TransactionProbe,
-    catalogs: AsyncMock,
-    listing: IntegrationModelListing,
-) -> IntegrationCatalogProjectionService:
-    """Wire actual operation ownership with mocked persistence/provider dependencies."""
-    integrations = AsyncMock(spec=LLMProviderIntegrationRepository)
-    integrations.get_by_id_with_secrets.return_value = _integration()
-    catalogs.ensure_integration_catalog.return_value = _catalog(
-        LLMCatalogPurpose.CONVERSATION
+def _catalog() -> LLMCatalog:
+    return LLMCatalog(
+        id="catalog",
+        scope=LLMCatalogScope.INTEGRATION,
+        provider=LLMProvider.XAI,
+        purpose=LLMCatalogPurpose.CONVERSATION,
+        provider_integration_id="integration",
+        entry_count=0,
+        visible_count=0,
+        hidden_count=0,
+        last_success_at=_NOW,
+        image_usable=None,
+        diagnostics=None,
+        sync_status=None,
     )
-    catalogs.begin_integration_attempt.return_value = _claim()
-    catalogs.lock_catalog_for_attempt_completion.return_value = "attempt"
-    catalogs.create_candidate_snapshot.return_value = "candidate"
-    catalogs.publish_candidate_snapshot.return_value = "published"
+
+
+def _service(
+    operations: AsyncMock, listing: IntegrationModelListing
+) -> IntegrationCatalogProjectionService:
+    operations.load_integration.return_value = _integration()
+    operations.begin_sync.return_value = CatalogSyncStart(
+        catalog=_catalog(),
+        claim=IntegrationCatalogSyncClaim(
+            work_token="work", catalog_configuration_version=4
+        ),
+    )
+    operations.publish.return_value = CatalogPublicationSucceeded(
+        catalog=_catalog(), visible_count=0, hidden_count=0
+    )
     source = AsyncMock(spec=ModelMetadataSourceSyncService)
     source.get_current_source.return_value = None
     return IntegrationCatalogProjectionService(
-        operations=LLMCatalogOperationsRepository(manager, catalogs, integrations),
+        operations=operations,
         chatgpt_oauth_runtime_repository=AsyncMock(spec=ChatGPTOAuthRuntimeRepository),
         xai_oauth_runtime_repository=AsyncMock(spec=XaiOAuthRuntimeRepository),
         kimi_oauth_runtime_repository=AsyncMock(spec=KimiOAuthRuntimeRepository),
@@ -78,67 +93,80 @@ def _service(
     )
 
 
-async def test_provider_listing_starts_only_after_claim_and_reload_complete() -> None:
-    """Provider callbacks cannot observe an active catalog database transaction."""
-    manager = _TransactionProbe()
-    catalogs = AsyncMock(spec=LLMCatalogRepository)
+def _listing() -> ModelListingOutput:
+    return ModelListingOutput(
+        summary=ModelListingSummary(
+            source="fixture:provider-visibility",
+            fetched_at=_NOW,
+            returned_count=0,
+            skipped_count=0,
+        ),
+        models=[],
+        skips=[],
+    )
+
+
+async def test_provider_listing_starts_after_completed_claim_and_reload() -> None:
+    operations = AsyncMock(spec=LLMCatalogOperationsRepository)
 
     async def listing(
-        integration: LLMProviderIntegrationWithSecrets,
-        clients: ListingClientFactories,
+        integration: LLMProviderIntegrationWithSecrets, clients: ListingClientFactories
     ) -> ModelListingOutput:
-        assert manager.active is False
-        assert manager.commits == 3
+        operations.begin_sync.assert_awaited_once()
+        assert operations.load_integration.await_count == 2
         assert integration.catalog_configuration_version == 4
         assert isinstance(clients, ListingClientFactories)
-        return ModelListingOutput(
-            summary=ModelListingSummary(
-                source="fixture:provider-visibility",
-                fetched_at=_NOW,
-                returned_count=0,
-                skipped_count=0,
-            ),
-            models=[],
-            skips=[],
-        )
+        operations.publish.assert_not_awaited()
+        return _listing()
 
-    service = _service(manager, catalogs, listing)
+    result = await _service(operations, listing).sync_integration_catalog(
+        integration_id="integration", workspace_id="workspace"
+    )
+    assert isinstance(result, Success)
+    assert result.value.last_success_at == _NOW
+    operations.publish.assert_awaited_once()
+
+
+async def test_source_change_reprepares_without_repeating_provider_io() -> None:
+    operations = AsyncMock(spec=LLMCatalogOperationsRepository)
+    count = 0
+
+    async def listing(
+        integration: LLMProviderIntegrationWithSecrets, clients: ListingClientFactories
+    ) -> ModelListingOutput:
+        nonlocal count
+        count += 1
+        return _listing()
+
+    service = _service(operations, listing)
+    operations.publish.side_effect = [
+        CatalogPublicationSourceChanged(),
+        CatalogPublicationSucceeded(
+            catalog=_catalog(), visible_count=0, hidden_count=0
+        ),
+    ]
     result = await service.sync_integration_catalog(
         integration_id="integration", workspace_id="workspace"
     )
     assert isinstance(result, Success)
-    assert result.value.snapshot_id == "published"
-    assert manager.commits == 4
-    assert manager.active is False
+    assert count == 1 and operations.publish.await_count == 2
 
 
-async def test_unexpected_listing_failure_is_recorded_after_closure_and_raised() -> (
-    None
-):
-    """Completed failure persistence does not disguise an unexpected exception."""
-    manager = _TransactionProbe()
-    catalogs = AsyncMock(spec=LLMCatalogRepository)
+async def test_unexpected_listing_failure_records_current_failure_and_raises() -> None:
+    operations = AsyncMock(spec=LLMCatalogOperationsRepository)
 
     async def listing(
-        integration: LLMProviderIntegrationWithSecrets,
-        clients: ListingClientFactories,
+        integration: LLMProviderIntegrationWithSecrets, clients: ListingClientFactories
     ) -> ModelListingOutput:
-        del integration, clients
-        assert manager.active is False
         raise RuntimeError("Unexpected provider failure")
 
-    service = _service(manager, catalogs, listing)
+    service = _service(operations, listing)
     with pytest.raises(RuntimeError, match="Unexpected provider failure"):
         await service.sync_integration_catalog(
             integration_id="integration", workspace_id="workspace"
         )
-    catalogs.create_candidate_snapshot.assert_not_awaited()
-    catalogs.mark_attempt_failed.assert_awaited_once()
-    failure = catalogs.mark_attempt_failed.await_args
-    assert failure is not None
-    assert failure.kwargs["failure_code"] == "RuntimeError"
-    assert (
-        failure.kwargs["diagnostics"]["failure_category"] == "catalog_service_failure"
-    )
-    assert manager.commits == 4
-    assert manager.active is False
+    operations.publish.assert_not_awaited()
+    operations.fail_sync.assert_awaited_once()
+    recorded = operations.fail_sync.await_args
+    assert recorded is not None and recorded.args[0].failure_code == "RuntimeError"
+    assert recorded.args[0].diagnostics["failure_category"] == "catalog_service_failure"
