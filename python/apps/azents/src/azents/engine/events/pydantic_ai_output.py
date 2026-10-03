@@ -1,6 +1,5 @@
 """Normalize model assembly with separate native completion and artifact evidence."""
 
-import datetime
 import hashlib
 import json
 from collections.abc import Sequence
@@ -31,6 +30,11 @@ from azents.core.enums import EventKind
 from azents.core.model_pricing import CapturedModelPricing
 from azents.core.type_guards import is_string_object_dict
 from azents.engine.events.generated_files import PendingGeneratedFileOutput
+from azents.engine.events.model_messages import (
+    ModelMessageFactory,
+    TransientModelMessage,
+    transient_model_message,
+)
 from azents.engine.events.model_usage_pricing import apply_model_usage_pricing
 from azents.engine.events.output_parts import enforce_tool_output_text_hard_cap
 from azents.engine.events.protocols import (
@@ -48,7 +52,10 @@ from azents.engine.events.pydantic_ai_types import (
     NativeModelObservation,
     PydanticAIStreamEvent,
 )
-from azents.engine.events.responses_output import ResponsesOutputNormalizer
+from azents.engine.events.responses_output import (
+    ResponsesOutputNormalizer,
+    durable_response_message_factory,
+)
 from azents.engine.events.types import (
     AssistantMessagePayload,
     ClientToolCallPayload,
@@ -117,17 +124,27 @@ class PydanticAIOutputNormalizer:
             integration=integration,
         )
 
-    def start(self, session_id: str) -> "PydanticAIOutputStream":
+    def start(self, session_id: str) -> "PydanticAIOutputStream[Event]":
         """Freeze request-scoped price authority before observing the dispatch."""
-        return PydanticAIOutputStream(self, session_id)
+        return PydanticAIOutputStream(
+            self, durable_response_message_factory(session_id)
+        )
+
+    def start_transient(self) -> "PydanticAIOutputStream[TransientModelMessage]":
+        """Use the same SDK semantic parser with an independent RAM envelope."""
+        return PydanticAIOutputStream(self, transient_model_message)
 
 
-class PydanticAIOutputStream:
+class PydanticAIOutputStream[MessageT: Event | TransientModelMessage]:
     """Common live parts and same-dispatch native evidence for one attempt."""
 
-    def __init__(self, normalizer: PydanticAIOutputNormalizer, session_id: str) -> None:
+    def __init__(
+        self,
+        normalizer: PydanticAIOutputNormalizer,
+        make_message: ModelMessageFactory[MessageT],
+    ) -> None:
         self.normalizer = normalizer
-        self.session_id = session_id
+        self.make_message = make_message
         self.pricing = normalizer.pricing
         self.service_tier = normalizer.service_tier
         self.parts: dict[int, ModelResponsePart] = {}
@@ -145,7 +162,7 @@ class PydanticAIOutputStream:
 
     def process_event(
         self, native_event: PydanticAIStreamEvent
-    ) -> NormalizedAdapterOutput:
+    ) -> NormalizedAdapterOutput[MessageT]:
         """Publish provisional semantic deltas; native observations never imply text."""
         projections: list[StreamProjection] = []
         if native_event.observation is not None:
@@ -213,7 +230,7 @@ class PydanticAIOutputStream:
             if self.response is not None
             else list(self.parts.values())
         )
-        return NormalizedAdapterOutput(
+        return NormalizedAdapterOutput[MessageT](
             needs_follow_up=False,
             projections=projections,
             usage=self._usage(current_parts),
@@ -345,7 +362,7 @@ class PydanticAIOutputStream:
             ]
         return []
 
-    def complete(self) -> NormalizedAdapterOutput:
+    def complete(self) -> NormalizedAdapterOutput[MessageT]:
         """Admit durable parts only after recognized route-native success."""
         if self.native_failure is not None:
             raise self.native_failure
@@ -364,13 +381,13 @@ class PydanticAIOutputStream:
             )
         return self._build(interrupted=False)
 
-    def interrupt(self) -> NormalizedAdapterOutput:
+    def interrupt(self) -> NormalizedAdapterOutput[MessageT]:
         """Preserve bounded completed/assistant output without a success claim."""
         return self._build(interrupted=True).model_copy(
             update={"needs_follow_up": False}
         )
 
-    def _build(self, *, interrupted: bool) -> NormalizedAdapterOutput:
+    def _build(self, *, interrupted: bool) -> NormalizedAdapterOutput[MessageT]:
         final_parts = (
             list(self.response.parts)
             if self.response is not None
@@ -383,7 +400,7 @@ class PydanticAIOutputStream:
                 if index not in self.closed_parts
                 and isinstance(part, TextPart | ThinkingPart)
             )
-        events: list[Event] = []
+        events: list[MessageT] = []
         pending: list[PendingGeneratedFileOutput] = []
         common_hosted: dict[str, list[ModelResponsePart]] = {}
         for part in final_parts:
@@ -527,8 +544,8 @@ class PydanticAIOutputStream:
                 continue
             represented.add(identity)
             parts = common_hosted.get(identity, [])
-            mapped = self.normalizer.canonical.normalize_completed_output(
-                self.session_id, {"output": [item]}, []
+            mapped = self.normalizer.canonical.normalize_completed_output_for(
+                self.make_message, {"output": [item]}, []
             )
             for event in mapped.events:
                 if isinstance(event.payload, ProviderToolCallPayload):
@@ -630,7 +647,7 @@ class PydanticAIOutputStream:
                     }
                 )
         follow_up = not self.end_turn if self.end_turn is not None else calls
-        return NormalizedAdapterOutput(
+        return NormalizedAdapterOutput[MessageT](
             needs_follow_up=follow_up,
             events=events,
             usage=self._usage(final_parts),
@@ -666,7 +683,7 @@ class PydanticAIOutputStream:
             )
         )
 
-    def _invalid_call_event(self, part: ToolCallPart, *, diagnostic: str) -> Event:
+    def _invalid_call_event(self, part: ToolCallPart, *, diagnostic: str) -> MessageT:
         return self._event(
             EventKind.UNKNOWN_ADAPTER_OUTPUT,
             UnknownAdapterOutputPayload(
@@ -726,14 +743,8 @@ class PydanticAIOutputStream:
         | ClientToolCallPayload
         | ProviderToolCallPayload
         | UnknownAdapterOutputPayload,
-    ) -> Event:
-        return Event(
-            id=uuid7().hex,
-            session_id=self.session_id,
-            kind=kind,
-            payload=payload,
-            created_at=datetime.datetime.now(datetime.UTC),
-        )
+    ) -> MessageT:
+        return self.make_message(kind, payload)
 
     def _usage(self, parts: Sequence[ModelResponsePart]) -> TokenUsagePayload | None:
         common = self.response.usage if self.response is not None else None
@@ -850,24 +861,32 @@ class PydanticAIOutputStream:
             )
         if prompt is None or completion is None:
             return None
-        if (
-            common is not None
-            and not details
-            and prompt == 0
-            and completion == 0
-            and not any(
-                _int(raw.get(key)) is not None
+        native_prompt_evidence = _first_int(
+            *(
+                _int(raw.get(key))
                 for key in (
                     "input_tokens",
-                    "output_tokens",
                     "prompt_tokens",
-                    "completion_tokens",
                     "promptTokenCount",
-                    "candidatesTokenCount",
                     "inputTokens",
+                )
+            )
+        )
+        native_completion_evidence = _first_int(
+            *(
+                _int(raw.get(key))
+                for key in (
+                    "output_tokens",
+                    "completion_tokens",
+                    "candidatesTokenCount",
                     "outputTokens",
                 )
             )
+        )
+        # SDK RequestUsage fields default to zero independently. A partial
+        # native counter or unrelated details cannot prove the missing side.
+        if (prompt == 0 and native_prompt_evidence is None) or (
+            completion == 0 and native_completion_evidence is None
         ):
             return None
         raw.update(

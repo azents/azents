@@ -11,6 +11,8 @@ from azents.job_runtime.types import (
     validate_job_payload,
 )
 from azents.services.historical_memory.constants import (
+    HISTORICAL_MEMORY_COMBINED_MAX_CONCURRENCY,
+    HISTORICAL_MEMORY_CONSOLIDATION_MAX_CONCURRENCY,
     HISTORICAL_MEMORY_PREPARE_HANDLER_KEY,
 )
 from azents.services.historical_memory.preparation import (
@@ -18,7 +20,7 @@ from azents.services.historical_memory.preparation import (
 )
 
 _LOCAL_JOB_RUNTIME_MAX_CONCURRENCY = 16
-_DEFAULT_MAX_CONCURRENCY = _LOCAL_JOB_RUNTIME_MAX_CONCURRENCY - 1
+_DEFAULT_MAX_CONCURRENCY = 12
 
 
 class HistoricalMemoryPreparationJobPayload(BaseModel):
@@ -33,10 +35,16 @@ def _max_concurrency() -> int:
         str(_DEFAULT_MAX_CONCURRENCY),
     )
     value = int(raw)
-    if value < 1 or value >= _LOCAL_JOB_RUNTIME_MAX_CONCURRENCY:
+    if (
+        value < 1
+        or value + HISTORICAL_MEMORY_CONSOLIDATION_MAX_CONCURRENCY
+        > HISTORICAL_MEMORY_COMBINED_MAX_CONCURRENCY
+        or HISTORICAL_MEMORY_COMBINED_MAX_CONCURRENCY
+        > _LOCAL_JOB_RUNTIME_MAX_CONCURRENCY - 2
+    ):
         raise ValueError(
-            "AZ_HISTORICAL_MEMORY_MAX_CONCURRENCY must reserve at least one "
-            "Job Runtime slot."
+            "AZ_HISTORICAL_MEMORY_MAX_CONCURRENCY plus consolidation capacity "
+            "must not exceed 14, reserving two ordinary Job Runtime slots."
         )
     return value
 
@@ -48,6 +56,10 @@ async def execute_historical_memory_preparation_job(
     context: JobExecutionContext,
 ) -> JobPayload | None:
     """Run one bounded target-Agent source batch under reserved concurrency."""
+    from azents.services.historical_memory.consolidation_discovery import (  # noqa: PLC0415
+        HistoricalMemoryConsolidationDiscoveryService,
+    )
+
     payload = HistoricalMemoryPreparationJobPayload.model_validate(
         context.request.payload
     )
@@ -57,6 +69,11 @@ async def execute_historical_memory_preparation_job(
         deadline=context.request.deadline,
         now=None,
     )
+    if summary.prepared or summary.empty:
+        consolidation = await context.container.solve(
+            HistoricalMemoryConsolidationDiscoveryService
+        )
+        await consolidation.dispatch_pending(agent_id=payload.agent_id)
     return validate_job_payload(dataclasses.asdict(summary))
 
 

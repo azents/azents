@@ -64,6 +64,9 @@ async def test_generic_create_read_edit_delete_and_replay_without_runtime(
         await tools["write"].handler(
             json.dumps({"path": _URI, "content": "first 한글"})
         )
+    assert binding.draft.observations.files[_URI].content == "first 한글"
+    # A new RAM observation ledger must read an already-existing target.
+    binding.draft.observations.files.clear()
     with pytest.raises(FunctionToolError, match="before overwrite"):
         await _invoke(
             tools["write"],

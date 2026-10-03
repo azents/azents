@@ -9,6 +9,7 @@ from azents.engine.events.pydantic_ai_types import (
     PydanticAIStreamEvent,
 )
 from azents.engine.model_stream import (
+    ModelDispatchAdmissionError,
     ModelStreamCallContext,
     ModelStreamTimeoutPolicy,
     ModelStreamWatchdog,
@@ -209,7 +210,11 @@ class PydanticAIModelAdapter:
             await state.emit(StreamFinished())
         except asyncio.CancelledError:
             raise
-        except (ModelProviderFailure, UnclassifiedModelProviderError) as error:
+        except (
+            ModelProviderFailure,
+            UnclassifiedModelProviderError,
+            ModelDispatchAdmissionError,
+        ) as error:
             state.fail_acquisition(error)
             if not state.closing:
                 await state.emit(StreamFailure(error=error))

@@ -118,7 +118,7 @@ class ObservedHTTPX2Transport(httpx2.AsyncBaseTransport):
         self.state = state
 
     async def handle_async_request(self, request: httpx2.Request) -> httpx2.Response:
-        self.state.authorize_dispatch()
+        await self.state.authorize_dispatch_with_admission()
         request.extensions["timeout"] = {
             "connect": self.state.timeout_policy.connect_timeout_seconds,
             "read": None,

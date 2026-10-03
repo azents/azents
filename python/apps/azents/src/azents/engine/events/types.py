@@ -885,6 +885,25 @@ NATIVE_ARTIFACT_REQUIRED_KINDS = frozenset(
 NATIVE_ARTIFACT_ABSENT_KINDS = frozenset(EventKind) - NATIVE_ARTIFACT_REQUIRED_KINDS
 
 
+def validate_message_payload(kind: EventKind, payload: EventPayload) -> None:
+    """Apply the same canonical payload/native invariant to any execution host."""
+    payload_type = PAYLOAD_BY_KIND[kind]
+    if not isinstance(payload, payload_type):
+        raise ValueError("event payload does not match event kind")
+    has_artifact = isinstance(
+        payload,
+        AssistantMessagePayload
+        | ReasoningPayload
+        | ClientToolCallPayload
+        | ProviderToolCallPayload
+        | UnknownAdapterOutputPayload,
+    )
+    if kind in NATIVE_ARTIFACT_REQUIRED_KINDS and not has_artifact:
+        raise ValueError("event payload requires native_artifact")
+    if kind in NATIVE_ARTIFACT_ABSENT_KINDS and has_artifact:
+        raise ValueError("event payload must not include native_artifact")
+
+
 class Event(BaseModel):
     """Event transcript event."""
 
@@ -905,22 +924,7 @@ class Event(BaseModel):
     @model_validator(mode="after")
     def validate_payload_shape(self) -> "Event":
         """Validate kind, payload type, and native artifact invariant."""
-        payload_type = PAYLOAD_BY_KIND[self.kind]
-        if not isinstance(self.payload, payload_type):
-            raise ValueError("event payload does not match event kind")
-
-        has_artifact = isinstance(
-            self.payload,
-            AssistantMessagePayload
-            | ReasoningPayload
-            | ClientToolCallPayload
-            | ProviderToolCallPayload
-            | UnknownAdapterOutputPayload,
-        )
-        if self.kind in NATIVE_ARTIFACT_REQUIRED_KINDS and not has_artifact:
-            raise ValueError("event payload requires native_artifact")
-        if self.kind in NATIVE_ARTIFACT_ABSENT_KINDS and has_artifact:
-            raise ValueError("event payload must not include native_artifact")
+        validate_message_payload(self.kind, self.payload)
         return self
 
 

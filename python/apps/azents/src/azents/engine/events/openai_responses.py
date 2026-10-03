@@ -85,6 +85,12 @@ from azents.core.openai_client_config import (
 )
 from azents.core.type_guards import is_string_object_dict
 from azents.engine.events.file_parts import ModelFileResolver
+from azents.engine.events.model_messages import (
+    ModelMessageFactory,
+    ModelTranscriptMessage,
+    TransientModelMessage,
+    transient_model_message,
+)
 from azents.engine.events.model_usage_pricing import apply_model_usage_pricing
 from azents.engine.events.protocols import (
     CompletedAdapterOutput,
@@ -106,6 +112,7 @@ from azents.engine.events.responses_continuation import (
 from azents.engine.events.responses_lowering import ResponsesRequestLowerer
 from azents.engine.events.responses_output import (
     ResponsesOutputNormalizer,
+    durable_response_message_factory,
     responses_need_follow_up,
 )
 from azents.engine.events.types import (
@@ -115,9 +122,11 @@ from azents.engine.events.types import (
     TokenUsagePayload,
 )
 from azents.engine.model_stream import (
+    InternalModelStreamCallContext,
     ModelStreamCallContext,
     ModelStreamTimeoutPolicy,
     ModelStreamWatchdog,
+    admit_model_dispatch,
     close_stream_response,
 )
 from azents.engine.run.errors import ModelStreamCallKind
@@ -312,7 +321,7 @@ class OpenAIResponsesLowerer:
 
     def lower(
         self,
-        transcript: Sequence[Event],
+        transcript: Sequence[ModelTranscriptMessage],
         *,
         model: str,
         system_prompt: str | None = None,
@@ -669,11 +678,13 @@ class OpenAIResponsesModelAdapter:
                     physical_response = await self._create_websocket_stream(
                         request,
                         plan=plan,
+                        call_context=call_context,
                     )
                 else:
                     physical_response = await self._create_http_stream(
                         request,
                         plan=plan,
+                        call_context=call_context,
                         connect_timeout_seconds=(
                             timeout_policy.connect_timeout_seconds
                         ),
@@ -700,6 +711,7 @@ class OpenAIResponsesModelAdapter:
                 physical_response = await self._create_http_stream(
                     request,
                     plan=plan,
+                    call_context=call_context,
                     connect_timeout_seconds=timeout_policy.connect_timeout_seconds,
                 )
                 return physical_response
@@ -850,9 +862,11 @@ class OpenAIResponsesModelAdapter:
         *,
         plan: ResponsesContinuationPlan,
         connect_timeout_seconds: float,
+        call_context: ModelStreamCallContext,
     ) -> object:
         """Dispatch one HTTP streaming request through the public SDK surface."""
         options = request.options
+        await admit_model_dispatch(call_context)
         return await self.client.create_response(
             **self._response_create_kwargs(request, plan=plan),
             extra_headers=_optional_headers(options, "extra_headers"),
@@ -865,6 +879,7 @@ class OpenAIResponsesModelAdapter:
         request: OpenAIResponsesRequest,
         *,
         plan: ResponsesContinuationPlan,
+        call_context: ModelStreamCallContext,
     ) -> object:
         """Lazily connect, send one request, and return a finite response stream."""
         try:
@@ -883,6 +898,7 @@ class OpenAIResponsesModelAdapter:
             raise _OpenAIResponsesWebSocketFailure(stage="connect") from exc
 
         try:
+            await admit_model_dispatch(call_context)
             await connection.create_response(
                 **self._response_create_kwargs(request, plan=plan)
             )
@@ -1094,7 +1110,7 @@ def _openai_call_context_log_fields(
     call_context: ModelStreamCallContext,
 ) -> dict[str, object]:
     """Return safe Run correlation fields for adapter-owned logs."""
-    return {
+    fields: dict[str, object] = {
         "provider": call_context.provider,
         "provider_integration_id": call_context.provider_integration_id,
         "model": call_context.model,
@@ -1102,6 +1118,9 @@ def _openai_call_context_log_fields(
         "run_id": call_context.run_id,
         "attempt_number": call_context.attempt_number,
     }
+    if isinstance(call_context, InternalModelStreamCallContext):
+        fields.update(call_context.identity.log_fields())
+    return fields
 
 
 def _provider_message_length(value: object) -> int | None:
@@ -1147,9 +1166,15 @@ class OpenAIResponsesOutputNormalizer:
             integration=integration,
         )
 
-    def start(self, session_id: str) -> "_OpenAIResponsesOutputStream":
+    def start(self, session_id: str) -> "_OpenAIResponsesOutputStream[Event]":
         """Start typed normalization state for one SDK stream."""
-        return _OpenAIResponsesOutputStream(self, session_id)
+        return _OpenAIResponsesOutputStream(
+            self, durable_response_message_factory(session_id)
+        )
+
+    def start_transient(self) -> "_OpenAIResponsesOutputStream[TransientModelMessage]":
+        """Normalize internal messages with no fabricated durable identity."""
+        return _OpenAIResponsesOutputStream(self, transient_model_message)
 
     def normalize_completed(
         self,
@@ -1181,19 +1206,34 @@ class OpenAIResponsesOutputNormalizer:
         """Create a canonical fallback for interrupted partial text."""
         return self._canonical.normalize_partial_assistant(session_id, text)
 
+    def normalize_completed_output_for[MessageT: Event | TransientModelMessage](
+        self,
+        make_message: ModelMessageFactory[MessageT],
+        response: dict[str, object],
+        completed_output_items: Sequence[dict[str, object]],
+    ) -> CompletedAdapterOutput[MessageT]:
+        return self._canonical.normalize_completed_output_for(
+            make_message, response, completed_output_items
+        )
 
-class _OpenAIResponsesOutputStream:
+    def normalize_partial_assistant_for[MessageT: Event | TransientModelMessage](
+        self, make_message: ModelMessageFactory[MessageT], text: str
+    ) -> MessageT:
+        return self._canonical.normalize_partial_assistant_for(make_message, text)
+
+
+class _OpenAIResponsesOutputStream[MessageT: Event | TransientModelMessage]:
     """Typed normalization state for one official SDK Responses stream."""
 
     def __init__(
         self,
         normalizer: OpenAIResponsesOutputNormalizer,
-        session_id: str,
+        make_message: ModelMessageFactory[MessageT],
     ) -> None:
         self.normalizer = normalizer
         self.pricing = normalizer.pricing
         self.service_tier = normalizer.service_tier
-        self._session_id = session_id
+        self.make_message = make_message
         self._tool_refs: dict[int, tuple[str, str]] = {}
         self._custom_tool_inputs: dict[int, _CustomToolInputStreamState] = {}
         self._rejected_custom_tool_call_ids: set[str] = set()
@@ -1207,7 +1247,7 @@ class _OpenAIResponsesOutputStream:
     def process_event(
         self,
         native_event: ResponseStreamEvent,
-    ) -> NormalizedAdapterOutput:
+    ) -> NormalizedAdapterOutput[MessageT]:
         """Consume one class-and-wire matched SDK event."""
         projections: list[StreamProjection] = []
         observation = _openai_provider_tool_observation(native_event)
@@ -1258,7 +1298,7 @@ class _OpenAIResponsesOutputStream:
                     raw_item,
                 ):
                     self._reject_custom_tool_call(raw_item)
-                    return NormalizedAdapterOutput(
+                    return NormalizedAdapterOutput[MessageT](
                         needs_follow_up=False,
                         projections=projections,
                     )
@@ -1391,12 +1431,12 @@ class _OpenAIResponsesOutputStream:
             self._completed_response_seen = True
             self._completed_response = native_event.response
 
-        return NormalizedAdapterOutput(
+        return NormalizedAdapterOutput[MessageT](
             needs_follow_up=False,
             projections=projections,
         )
 
-    def complete(self) -> NormalizedAdapterOutput:
+    def complete(self) -> NormalizedAdapterOutput[MessageT]:
         """Build durable output only after typed explicit completion."""
         if self._terminal_error is not None:
             raise self._terminal_error
@@ -1415,7 +1455,7 @@ class _OpenAIResponsesOutputStream:
             )
         return self._build_output()
 
-    def interrupt(self) -> NormalizedAdapterOutput:
+    def interrupt(self) -> NormalizedAdapterOutput[MessageT]:
         """Preserve completed items and non-empty partial assistant text."""
         if self._terminal_error is not None:
             raise self._terminal_error
@@ -1423,15 +1463,15 @@ class _OpenAIResponsesOutputStream:
         partial_text = "".join(self._partial_text)
         if not partial_text or _has_assistant_text(completed.events):
             return completed
-        partial_event = self.normalizer.normalize_partial_assistant(
-            self._session_id,
+        partial_event = self.normalizer.normalize_partial_assistant_for(
+            self.make_message,
             partial_text,
         )
         return completed.model_copy(
             update={"events": [*completed.events, partial_event]}
         )
 
-    def _build_output(self) -> NormalizedAdapterOutput:
+    def _build_output(self) -> NormalizedAdapterOutput[MessageT]:
         """Build canonical output from all currently completed SDK items."""
         response = self._completed_response
         response_dict = _sdk_model_dump(response) if response is not None else {}
@@ -1439,8 +1479,8 @@ class _OpenAIResponsesOutputStream:
             response_dict,
             self._rejected_custom_tool_call_ids,
         )
-        completed = self.normalizer.normalize_completed_output(
-            self._session_id,
+        completed = self.normalizer.normalize_completed_output_for(
+            self.make_message,
             response_dict,
             self._completed_output_items,
         )
@@ -1456,7 +1496,7 @@ class _OpenAIResponsesOutputStream:
             if response is not None
             else None
         )
-        return NormalizedAdapterOutput(
+        return NormalizedAdapterOutput[MessageT](
             needs_follow_up=responses_need_follow_up(
                 response_dict,
                 completed.events,
@@ -1919,7 +1959,7 @@ async def call_openai_responses_text(
     return result.text
 
 
-def _assistant_text(events: Sequence[Event]) -> str:
+def _assistant_text(events: Sequence[ModelTranscriptMessage]) -> str:
     """Extract completed assistant text from canonical message events."""
     texts: list[str] = []
     for event in events:
@@ -2263,5 +2303,5 @@ def _string_value(value: object) -> str:
     return value if isinstance(value, str) else ""
 
 
-def _has_assistant_text(events: Sequence[Event]) -> bool:
+def _has_assistant_text(events: Sequence[ModelTranscriptMessage]) -> bool:
     return bool(_assistant_text(events))

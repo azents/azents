@@ -4,6 +4,7 @@ import asyncio
 import dataclasses
 import datetime
 
+import pytest
 from azcommon import di
 
 from azents.job_runtime.local import LocalJobRuntime
@@ -16,9 +17,15 @@ from azents.job_runtime.types import (
     JobRequest,
 )
 from azents.scheduler.executor import SCHEDULER_JOB_HANDLER_KEY
+from azents.services.historical_memory.constants import (
+    HISTORICAL_MEMORY_COMBINED_MAX_CONCURRENCY,
+    HISTORICAL_MEMORY_CONSOLIDATE_HANDLER_KEY,
+    HISTORICAL_MEMORY_CONSOLIDATION_MAX_CONCURRENCY,
+)
 from azents.services.historical_memory.job import (
     HISTORICAL_MEMORY_MAX_CONCURRENCY,
     HISTORICAL_MEMORY_PREPARE_HANDLER_KEY,
+    _max_concurrency,
 )
 
 
@@ -101,3 +108,112 @@ async def test_historical_backlog_preserves_non_memory_runtime_capacity() -> Non
         release_memory.set()
         await runtime.close()
     assert runtime.active_count == 0
+
+
+async def test_preparation_and_consolidation_leave_two_ordinary_local_slots() -> None:
+    counts = {"preparation": 0, "consolidation": 0}
+    preparation_ready, consolidation_ready = asyncio.Event(), asyncio.Event()
+    release = asyncio.Event()
+
+    async def preparation(_context: JobExecutionContext) -> JobPayload:
+        counts["preparation"] += 1
+        if counts["preparation"] == HISTORICAL_MEMORY_MAX_CONCURRENCY:
+            preparation_ready.set()
+        await release.wait()
+        return {"prepared": True}
+
+    async def consolidation(_context: JobExecutionContext) -> JobPayload:
+        counts["consolidation"] += 1
+        if counts["consolidation"] == HISTORICAL_MEMORY_CONSOLIDATION_MAX_CONCURRENCY:
+            consolidation_ready.set()
+        await release.wait()
+        return {"consolidated": True}
+
+    async def ordinary(_context: JobExecutionContext) -> JobPayload:
+        return {"ordinary": True}
+
+    handlers = {
+        HISTORICAL_MEMORY_PREPARE_HANDLER_KEY: preparation,
+        HISTORICAL_MEMORY_CONSOLIDATE_HANDLER_KEY: consolidation,
+        SCHEDULER_JOB_HANDLER_KEY: ordinary,
+    }
+    definitions = tuple(
+        dataclasses.replace(definition, handler=handlers[definition.key])
+        for definition in get_job_handler_registry().definitions()
+        if definition.key in handlers
+    )
+    runtime = LocalJobRuntime(
+        handlers=JobHandlerRegistry(definitions),
+        container_factory=di.Container,
+        max_concurrency=16,
+        cancellation_grace_seconds=0.1,
+    )
+    deadline = datetime.datetime.now(datetime.UTC) + datetime.timedelta(seconds=30)
+    try:
+        handles = []
+        for key, maximum in (
+            (HISTORICAL_MEMORY_PREPARE_HANDLER_KEY, HISTORICAL_MEMORY_MAX_CONCURRENCY),
+            (
+                HISTORICAL_MEMORY_CONSOLIDATE_HANDLER_KEY,
+                HISTORICAL_MEMORY_CONSOLIDATION_MAX_CONCURRENCY,
+            ),
+        ):
+            for index in range(maximum + 1):
+                handles.append(
+                    await runtime.submit(
+                        JobRequest(
+                            handler_key=key,
+                            execution_key=f"{key}:{index}",
+                            deadline=deadline,
+                            payload={},
+                        )
+                    )
+                )
+        async with asyncio.timeout(5):
+            await preparation_ready.wait()
+            await consolidation_ready.wait()
+            assert sum(counts.values()) == HISTORICAL_MEMORY_COMBINED_MAX_CONCURRENCY
+            ordinary_handles = [
+                await runtime.submit(
+                    JobRequest(
+                        handler_key=SCHEDULER_JOB_HANDLER_KEY,
+                        execution_key=f"ordinary:{index}",
+                        deadline=deadline,
+                        payload={},
+                    )
+                )
+                for index in range(2)
+            ]
+            outcomes = await asyncio.gather(
+                *(handle.wait() for handle in ordinary_handles)
+            )
+            assert all(
+                outcome.status is JobOutcomeStatus.SUCCEEDED for outcome in outcomes
+            )
+        assert not release.is_set()
+        release.set()
+        assert all(
+            outcome.status is JobOutcomeStatus.SUCCEEDED
+            for outcome in await asyncio.gather(*(handle.wait() for handle in handles))
+        )
+    finally:
+        release.set()
+        await runtime.close()
+    assert runtime.active_count == 0
+
+
+@pytest.mark.parametrize("value", ["13", "15", "16", "0"])
+def test_configured_preparation_cannot_exceed_combined_memory_capacity(
+    monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    monkeypatch.setenv("AZ_HISTORICAL_MEMORY_MAX_CONCURRENCY", value)
+    with pytest.raises(ValueError, match="must not exceed 14"):
+        _max_concurrency()
+
+
+def test_preparation_default_is_twelve_with_two_consolidation_slots(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("AZ_HISTORICAL_MEMORY_MAX_CONCURRENCY", raising=False)
+    assert _max_concurrency() == 12
+    assert HISTORICAL_MEMORY_CONSOLIDATION_MAX_CONCURRENCY == 2
