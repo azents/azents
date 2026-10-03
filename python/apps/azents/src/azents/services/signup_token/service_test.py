@@ -18,19 +18,22 @@ from azents.core.config import (
 )
 from azents.core.email.service import EmailService
 from azents.core.enums import SignupTokenDeliveryMethod
+from azents.core.signup_token_operations import (
+    InvalidSignupToken,
+    SignupTokenEmailMismatch,
+)
 from azents.rdb.session import SessionManager
 from azents.repos.password_login import PasswordLoginRepository
 from azents.repos.session import SessionRepository
 from azents.repos.signup_token import SignupTokenRepository
+from azents.repos.signup_token_operations import SignupTokenOperationRepository
 from azents.repos.user import UserRepository
 from azents.repos.user_email import UserEmailRepository
 from azents.services.signup_token import SignupTokenService, hash_signup_token
 from azents.services.signup_token.data import (
     CreateSignupTokenInput,
-    InvalidSignupToken,
     RedeemSignupTokenInput,
     SignupEmailDeliveryUnavailable,
-    SignupTokenEmailMismatch,
     WeakSignupPassword,
 )
 
@@ -58,13 +61,15 @@ def _make_service(
     if email_service is None:
         email_service = EmailService(config=None, ses_client=None)
     return SignupTokenService(
-        signup_token_repo=SignupTokenRepository(),
-        user_repo=UserRepository(),
-        user_email_repo=UserEmailRepository(),
-        password_login_repo=PasswordLoginRepository(),
-        session_repo=SessionRepository(),
+        operation_repository=SignupTokenOperationRepository(
+            session_manager=rdb_session_manager,
+            signup_token_repository=SignupTokenRepository(),
+            user_repository=UserRepository(),
+            user_email_repository=UserEmailRepository(),
+            password_login_repository=PasswordLoginRepository(),
+            session_repository=SessionRepository(),
+        ),
         email_service=email_service,
-        session_manager=rdb_session_manager,
         auth_config=_TEST_AUTH_CONFIG,
         config=Config.model_construct(
             runtime_env=RuntimeEnvironment.LOCAL,

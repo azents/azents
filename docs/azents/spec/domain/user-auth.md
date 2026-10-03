@@ -4,12 +4,13 @@ spec_type: domain
 domain: user-auth
 owner: "@Hardtack"
 created: 2026-04-20
-updated: 2026-10-02
+updated: 2026-10-03
 tags: [backend, security, api]
 code_paths:
   - python/apps/azents/src/azents/core/auth/**
   - python/apps/azents/src/azents/core/account_access.py
   - python/apps/azents/src/azents/core/credential_read.py
+  - python/apps/azents/src/azents/core/signup_token_operations.py
   - python/apps/azents/src/azents/core/user.py
   - python/apps/azents/src/azents/core/user_email.py
   - python/apps/azents/src/azents/core/system_user_role.py
@@ -43,6 +44,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/email_verification/**
   - python/apps/azents/src/azents/repos/email_verification_operation/**
   - python/apps/azents/src/azents/repos/signup_token/**
+  - python/apps/azents/src/azents/repos/signup_token_operations.py
   - python/apps/azents/src/azents/repos/password_reset_token/**
   - python/apps/azents/src/azents/repos/system_user_role/**
   - python/apps/azents/src/azents/repos/system_bootstrap/**
@@ -121,8 +123,8 @@ api_routes:
   - /system/v1
   - /system-setting/v1
   - /debug/v1
-last_verified_at: 2026-10-02
-spec_version: 24
+last_verified_at: 2026-10-03
+spec_version: 25
 ---
 
 # User & Authentication
@@ -294,9 +296,32 @@ Token usable conditions:
 
 Redeem transaction first validates token usability, email match, and existing registration. After all validations that can fail pass, it claims `used_count` with conditional update and creates user, verified primary email, password login, session, and redemption audit row.
 
+Token creation, count/page listing, exact preview lookup, revocation and redemption
+finish in completed repository-owned database groups. Password strength, token
+hashing, the captured application clock, bcrypt and refresh-token generation are
+prepared before redemption enters its database scope. That same pre-bcrypt clock
+drives the existing eligibility, conditional claim and audit timestamps.
+
+Redemption preserves one atomic claim/account/password/authentication-Session/audit
+operation, including the original email and availability checks and failure
+ordering. A post-write password-creation failure abandons the group through the
+existing narrow primitive rollback. No successful query follows that rollback.
+Committed success returns detached User/Session IDs before JWT construction;
+post-commit JWT failure does not replay or compensate accepted database creation.
+
+Preview evaluates the original detached-token predicates with its pre-read clock,
+and revocation retains timestamp capture inside its owned scope. These boundaries
+add no registration, creator-role or enabled-user filter, lock, retry, isolation,
+TTL or public-schema policy.
+
 ### 3.3 Email signup delivery
 
 `POST /auth/v1/signup/email` creates email-bound signup token and sends `/signup?token=...` link by email if email service is configured. If email service is not configured, it fails with `SignupEmailDeliveryUnavailable`. Manual delivery uses admin signup token create API.
+
+Email availability is checked before token creation; rendering and delivery follow
+the completed token operation. Delivery returning false, raising or being cancelled
+does not revoke the already-created token. The existing email-request availability
+predicate and error status are unchanged by transaction-ownership migration.
 
 ### 3.4 Password login
 
@@ -654,6 +679,10 @@ Admin-issued signup/password-reset token management and other instance-wide oper
 
 ## 9. Changelog
 
+- **2026-10-03** (v25) — Completed all five SignupToken database groups in domain
+  repository operations. Preserved prepared-clock/crypto ordering, atomic
+  claim/account/password/Session/audit behavior, public errors and post-commit
+  JWT/email failure retention; shared domain failures use canonical pure definitions.
 - **2026-10-02** (v24) — Completed Credential grouped-read transaction ownership
   and session-free provider projection while preserving query/order/duplicate
   behavior, public/admission contracts and separate password deletion authority.
