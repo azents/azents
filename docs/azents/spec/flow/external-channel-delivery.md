@@ -48,8 +48,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/external_channel/file_access.py
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - typescript/apps/azents-web/src/features/session-channels/**
-last_verified_at: 2026-10-01
-spec_version: 63
+last_verified_at: 2026-10-03
+spec_version: 64
 ---
 
 # External Channel Delivery and Channel Work
@@ -334,7 +334,8 @@ Session title and Agent execution.
   Channel Work cycle before Session wake-up. Slack cycles are visible for an eligible
   explicit invocation and hidden for an ordinary message admitted by an existing
   all-messages Binding. Discord cycles are always initially hidden; active connected
-  ready Work is projected through Gateway typing instead. Initial Slack checking
+  ready Work with running execution is projected through Gateway typing instead.
+  Initial Slack checking
   visibility does not depend on a `channel_action` call.
 - Initial binding acceptance separately creates one Session presence control and the
   eligible Slack initial Activity Tracker plan in the same transaction as the
@@ -532,20 +533,27 @@ Tracker state, or reply delivery.
 
 ## Discord Typing Presence
 
-Every ready active Discord conversational Work requests typing regardless of Tracker
-visibility; awaiting Work is excluded until same-binding input or `continue` resumes
-it. The current lease-fenced Discord Gateway owner derives distinct exact delivery
-channels from PostgreSQL Binding, Resource, Session, Agent, route, connection,
-App-claim, lease, and Work authority. It uses the existing long-lived
+Ready active Discord conversational Work requests typing regardless of Tracker
+visibility only while its bound Session is running, has a running AgentRun, and has
+no stop request. Awaiting Work is excluded until same-binding input or `continue`
+resumes it and execution is running. Retained Work with no Run, a pending Run, or
+only terminal Runs does not request typing. The current lease-fenced Discord Gateway
+owner derives distinct exact delivery channels from PostgreSQL Binding, Resource,
+Session, AgentRun, Agent, route, connection, App-claim, lease, and Work authority.
+It uses the existing long-lived
 `discord.Client`, public `get_partial_messageable()`, and awaitable public `typing()`
 operation to maintain one renewal task per Bot/channel.
 
 Ready and Resume reconcile immediately and then periodically before the provider's
 ten-second indicator expiry. Several Work cycles targeting one channel share one task
-until the final cycle finishes. Target removal, `finish`, `ignore`, binding
+while at least one contributing cycle has running execution. Run completion, failure,
+stop, or Session idle state removes its contribution at the next reconciliation,
+even when Work remains active. Target removal, `finish`, `ignore`, binding
 termination, disconnect, lease loss, Client close, and process shutdown cancel and
-await renewal tasks. Gateway restart reloads still-active targets; Work finished while
-the Gateway is unavailable is not restored.
+await renewal tasks. Gateway restart reloads only targets with still-running execution;
+Work finished or execution stopped while the Gateway is unavailable is not restored.
+Cancellation stops renewal; an already-sent indicator expires on Discord's
+provider-defined timeout because the public API has no explicit typing-clear operation.
 
 Discord exposes no explicit stop operation, so the final indicator may remain until
 provider expiry after renewal stops. HTTP or OS failures are sanitized, retried at a
@@ -616,6 +624,9 @@ outbox, compensation, canonical rollback, or fallback target. Recovery of an
 already-committed terminal result does not replay provider publication.
 
 ## Changelog
+
+- **2026-10-03** (spec_version 64) — Required running Session and AgentRun authority
+  for Discord typing, preserving retained Work after stop, failure, or completion.
 
 - **2026-09-30** (spec_version 63) — Documented HTTP-authoritative 128 MiB ingress,
   direct Runner GET/PUT, and the unchanged trusted provider-delivery boundary.
