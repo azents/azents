@@ -980,6 +980,7 @@ class AgentEngineAdapter:
                 temperature=request.temperature,
                 max_output_tokens=request.max_output_tokens,
                 top_p=request.top_p,
+                top_k=request.top_k,
                 stop=request.stop,
                 reasoning_effort=request.reasoning_effort,
                 supported_execution_options=(

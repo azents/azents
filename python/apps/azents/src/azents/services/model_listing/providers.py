@@ -845,12 +845,9 @@ def _xai_oauth_capability_evidence(
     effort_fact: CatalogFact[tuple[ModelReasoningEffort, ...]] = _listing_fact(
         payload, "reasoning_efforts", levels
     )
-    if (
-        effort_fact.state == "absent"
-        and control.state == "value"
-        and control.value is False
-    ):
+    if control.state == "value" and control.value is False:
         effort_fact = CatalogFact(state="value", value=())
+        default = None
     elif effort_fact.state == "absent" and control.state == "null":
         effort_fact = CatalogFact(state="null", value=None)
     backend = _listing_fact(payload, "api_backend", payload.api_backend)
@@ -1678,6 +1675,10 @@ def _candidate_from_xai_oauth_model(
     source_metadata.update(
         _effort_diagnostics([value for value in raw_efforts if value is not None])
     )
+    if model.supports_reasoning_effort is False and model.reasoning_efforts:
+        source_metadata["capability_conflicts"] = [
+            "reasoning_effort_controls_disabled_with_presets"
+        ]
     display_name = model.name or model.model or model.id
     return NormalizedModelCandidate(
         provider=LLMProvider.XAI_OAUTH,

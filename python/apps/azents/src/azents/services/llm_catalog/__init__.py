@@ -2,7 +2,6 @@
 
 import dataclasses
 import datetime
-import importlib.metadata
 from collections.abc import Awaitable, Callable
 from typing import Annotated, Any, assert_never
 
@@ -80,6 +79,7 @@ from azents.services.model_metadata_projection import (
     SystemCatalogReplacementProjectionService,
     integration_projection_fingerprint,
     project_integration_replacement_entries,
+    projection_runtime_versions,
 )
 from azents.services.model_metadata_source import (
     ModelMetadataSourceSyncService,
@@ -812,7 +812,9 @@ class IntegrationCatalogProjectionService:
                 runtime_profile_resolver_revision=(
                     RUNTIME_MODEL_PROFILE_RESOLVER_REVISION
                 ),
-                pydantic_ai_version=importlib.metadata.version("pydantic-ai-slim"),
+                pydantic_ai_version=projection_runtime_versions(
+                    integration.provider
+                ).get("pydantic-ai-slim"),
                 genai_prices_version=None,
                 projection_fingerprint=fingerprint,
             )

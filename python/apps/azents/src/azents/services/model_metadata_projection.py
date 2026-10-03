@@ -5,7 +5,7 @@ import datetime
 import hashlib
 import importlib.metadata
 import json
-from typing import Annotated
+from typing import Annotated, assert_never
 
 from fastapi import Depends
 
@@ -151,6 +151,7 @@ class SystemCatalogReplacementProjectionService:
                 genai_prices_version=None,
                 projection_fingerprint=fingerprint,
             )
+            runtime_versions = projection_runtime_versions(provider)
             summaries.append(
                 await self.operations.create_candidate(
                     provider=provider,
@@ -161,6 +162,7 @@ class SystemCatalogReplacementProjectionService:
                         "projection_fingerprint": fingerprint,
                         "resolver_revision": RUNTIME_MODEL_PROFILE_RESOLVER_REVISION,
                         "effective_date": effective_date.isoformat(),
+                        "runtime_dependency_versions": runtime_versions,
                     },
                     provenance=provenance,
                 )
@@ -249,6 +251,9 @@ def project_integration_replacement_entries(
                 },
                 projection_metadata={
                     "matched": source_model is not None,
+                    "runtime_dependency_versions": projection_runtime_versions(
+                        provider
+                    ),
                     "resolver_revision": RUNTIME_MODEL_PROFILE_RESOLVER_REVISION,
                     "capability_projection_revision": CAPABILITY_PROJECTION_REVISION,
                     "native_protocol": protocol_for_provider(
@@ -271,6 +276,31 @@ def _adapter_version(provider: LLMProvider) -> str | None:
         if provider in {LLMProvider.OPENAI, LLMProvider.CHATGPT_OAUTH}
         else importlib.metadata.version("pydantic-ai-slim")
     )
+
+
+def projection_runtime_versions(provider: LLMProvider) -> dict[str, str]:
+    """Fingerprint installed codec dependencies without adopting their model facts."""
+    match provider:
+        case LLMProvider.OPENAI | LLMProvider.CHATGPT_OAUTH:
+            packages = ("openai",)
+        case LLMProvider.ANTHROPIC:
+            packages = ("pydantic-ai-slim", "anthropic")
+        case LLMProvider.GOOGLE_GEMINI:
+            packages = ("pydantic-ai-slim", "google-genai")
+        case LLMProvider.GOOGLE_VERTEX_AI:
+            packages = ("pydantic-ai-slim", "google-genai", "anthropic")
+        case LLMProvider.AWS_BEDROCK:
+            packages = ("pydantic-ai-slim", "boto3", "botocore")
+        case (
+            LLMProvider.XAI
+            | LLMProvider.XAI_OAUTH
+            | LLMProvider.OPENROUTER
+            | LLMProvider.KIMI_OAUTH
+        ):
+            packages = ("pydantic-ai-slim", "openai")
+        case _ as unreachable:
+            assert_never(unreachable)
+    return {package: importlib.metadata.version(package) for package in packages}
 
 
 def _fingerprint(value: dict[str, object]) -> str:
@@ -296,6 +326,7 @@ def projection_fingerprint(
             "source_schema_version": source.source_schema_version,
             "source_interpreter_revision": source.payload.interpreter_version,
             "pydantic_ai_version": _adapter_version(provider),
+            "runtime_dependency_versions": projection_runtime_versions(provider),
             "resolver_revision": RUNTIME_MODEL_PROFILE_RESOLVER_REVISION,
             "capability_projection_revision": CAPABILITY_PROJECTION_REVISION,
             "projection_schema_version": MODEL_METADATA_PROJECTION_SCHEMA_VERSION,
@@ -325,6 +356,7 @@ def integration_projection_fingerprint(
             if source
             else None,
             "pydantic_ai_version": _adapter_version(provider),
+            "runtime_dependency_versions": projection_runtime_versions(provider),
             "resolver_revision": RUNTIME_MODEL_PROFILE_RESOLVER_REVISION,
             "capability_projection_revision": CAPABILITY_PROJECTION_REVISION,
             "projection_schema_version": MODEL_METADATA_PROJECTION_SCHEMA_VERSION,
@@ -403,6 +435,7 @@ def _project_system_model(
         },
         projection_metadata={
             "projection_mode": "replacement",
+            "runtime_dependency_versions": projection_runtime_versions(provider),
             "resolver_revision": RUNTIME_MODEL_PROFILE_RESOLVER_REVISION,
             "capability_projection_revision": CAPABILITY_PROJECTION_REVISION,
             "freshness_rank": model_freshness_rank(identifier),

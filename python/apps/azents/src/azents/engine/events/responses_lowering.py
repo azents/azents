@@ -250,6 +250,7 @@ class ResponsesRequestLowerer:
         reasoning_effort: str | None = None,
         supported_execution_options: Sequence[ModelExecutionOptionId],
         enabled_execution_options: Sequence[ModelExecutionOptionId],
+        top_k: int | None,
         hosted_tools: Sequence[BuiltinToolSpec] | None = None,
         prompt_cache_scope: str | None = None,
         model_developer: LLMModelDeveloper | None = None,
@@ -271,6 +272,7 @@ class ResponsesRequestLowerer:
         self._temperature = temperature
         self._max_output_tokens = max_output_tokens
         self._top_p = top_p
+        self._top_k = top_k
         self._stop = list(stop) if stop is not None else None
         self._reasoning_effort = reasoning_effort
         self._supported_execution_options = list(supported_execution_options)
@@ -414,6 +416,14 @@ class ResponsesRequestLowerer:
                 requested_effort=request.reasoning_effort,
                 function_tools=function_tools,
             )
+            if (
+                "parallel_tool_calls" not in kwargs
+                and model_support_allowed(
+                    contract.parallel_function_calls, context=context
+                )
+                is False
+            ):
+                kwargs["parallel_tool_calls"] = False
         else:
             context = ModelSupportContext(
                 reasoning_effort=self._reasoning_effort, function_tools=None
@@ -446,6 +456,8 @@ class ResponsesRequestLowerer:
     def _lower_model_kwargs(self) -> dict[str, object]:
         """Lower RunRequest model options to provider-native Responses kwargs."""
         kwargs: dict[str, object] = dict(self._credential_kwargs)
+        if self._top_k is not None or self._extra_kwargs.get("top_k") is not None:
+            raise ValueError("Selected top-k has no mapping in this model codec.")
         if self._provider_id in {LLMProvider.OPENAI, LLMProvider.CHATGPT_OAUTH}:
             kwargs.setdefault("custom_llm_provider", "openai")
             base_url = kwargs.get("base_url") or kwargs.get("api_base")

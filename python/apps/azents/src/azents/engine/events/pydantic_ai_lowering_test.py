@@ -116,6 +116,7 @@ def _lowerer(
     reasoning_effort: str | None = None,
 ) -> PydanticAILowerer:
     return PydanticAILowerer(
+        top_k=None,
         provider=provider.value,
         provider_id=provider,
         model=model,
@@ -743,6 +744,7 @@ def test_bedrock_settings_and_structured_helper_import_in_fresh_process(
         model = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
         profile = "arn:aws:bedrock:us-east-1:123456789012:inference-profile/fixture"
         lowerer = PydanticAILowerer(
+        top_k=None,
             provider="aws_bedrock",
             provider_id=LLMProvider.AWS_BEDROCK,
             model=model,

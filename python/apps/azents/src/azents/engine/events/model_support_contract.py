@@ -60,6 +60,16 @@ class _ExtraBodyOptions(BaseModel):
     model_config = ConfigDict(extra="ignore", frozen=True)
 
     reasoning: _ReasoningOptions | None = None
+    temperature: float | None = None
+    top_p: float | None = None
+    max_output_tokens: int | None = None
+    max_tokens: int | None = None
+    top_k: int | None = None
+    stop: str | list[str] | None = None
+    stop_sequences: list[str] | None = None
+    parallel_tool_calls: bool | None = None
+    text: _ResponseText | None = None
+    response_format: _ResponseFormat | None = None
 
 
 class ModelSupportOptions(BaseModel):
@@ -85,6 +95,17 @@ class ModelSupportOptions(BaseModel):
     stop_sequences: list[str] | None = None
     parallel_tool_calls: bool | None = None
     text: _ResponseText | None = None
+    response_format: _ResponseFormat | None = None
+
+    @property
+    def effective_controls(self) -> _ExtraBodyOptions:
+        """Validate the same body-over-option precedence used by the public SDK."""
+        controls = self.model_dump(
+            include=set(_ExtraBodyOptions.model_fields), exclude_unset=True
+        )
+        if self.extra_body is not None:
+            controls.update(self.extra_body.model_dump(exclude_unset=True))
+        return _ExtraBodyOptions.model_validate(controls)
 
     @property
     def explicit_effort(self) -> str | None:
@@ -108,6 +129,14 @@ class ModelSupportOptions(BaseModel):
     @property
     def summary_requested(self) -> bool:
         """Return whether a supported wire dialect explicitly requests summary."""
+        if (
+            self.extra_body is not None
+            and "reasoning" in self.extra_body.model_fields_set
+        ):
+            return (
+                self.extra_body.reasoning is not None
+                and self.extra_body.reasoning.summary not in {None, "none"}
+            )
         return any(
             summary not in {None, "none"}
             for summary in (
@@ -122,10 +151,14 @@ class ModelSupportOptions(BaseModel):
     @property
     def structured_response_requested(self) -> bool:
         """Keep response schemas separate from strict function definitions."""
+        controls = self.effective_controls
         return (
-            self.text is not None
-            and self.text.format is not None
-            and self.text.format.type in {"json_schema", "json_object"}
+            controls.text is not None
+            and controls.text.format is not None
+            and controls.text.format.type in {"json_schema", "json_object"}
+        ) or (
+            controls.response_format is not None
+            and controls.response_format.type in {"json_schema", "json_object"}
         )
 
 
@@ -149,17 +182,18 @@ def model_support_request_from_options(
         and selected_effort != wire_effort
     ):
         raise ValueError("Conflicting reasoning effort settings are not supported.")
+    controls = options.effective_controls
     return ModelSupportRequest(
         reasoning_effort=wire_effort if wire_effort is not None else selected_effort,
         function_tools=function_tools,
-        temperature=options.temperature is not None,
+        temperature=controls.temperature is not None,
         max_output_tokens=(
-            options.max_output_tokens is not None or options.max_tokens is not None
+            controls.max_output_tokens is not None or controls.max_tokens is not None
         ),
-        top_p=options.top_p is not None,
-        top_k=options.top_k is not None,
-        stop_sequences=options.stop is not None or options.stop_sequences is not None,
-        parallel_function_calls=options.parallel_tool_calls is True,
+        top_p=controls.top_p is not None,
+        top_k=controls.top_k is not None,
+        stop_sequences=controls.stop is not None or controls.stop_sequences is not None,
+        parallel_function_calls=controls.parallel_tool_calls is True,
         strict_function_schema=strict_function_schema,
         structured_response=options.structured_response_requested,
         reasoning_summary=options.summary_requested,

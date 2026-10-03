@@ -189,6 +189,7 @@ async def test_build_tool_catalog_prefixes_and_lowers_native_schema() -> None:
     assert catalog.native_tools[0]["strict"] is False
 
     request = OpenAIResponsesLowerer(
+        top_k=None,
         supported_execution_options=[],
         enabled_execution_options=[],
         provider="openai",

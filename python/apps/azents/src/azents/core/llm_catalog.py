@@ -166,6 +166,26 @@ class ModelCapabilities(BaseModel):
         default=None, exclude_if=lambda value: value is None
     )
 
+    def configurable_reasoning_efforts(self) -> list[ModelReasoningEffort]:
+        """Expose known selection potential; dispatch evaluates actual conditions."""
+        contract = self.semantic_contract
+        if contract is None:
+            return list(self.reasoning.effort_levels)
+        support = contract.reasoning.support
+        if support.state not in {"supported", "conditional"}:
+            return []
+        predicate = support.predicate
+        return [
+            ModelReasoningEffort(declaration.level)
+            for declaration in contract.reasoning.efforts
+            if declaration.state == "supported"
+            and (
+                predicate is None
+                or predicate.reasoning_efforts is None
+                or declaration.level in predicate.reasoning_efforts
+            )
+        ]
+
     @model_validator(mode="after")
     def validate_semantic_views(self) -> Self:
         """Reject competing boolean/list facts for a versioned semantic contract."""
