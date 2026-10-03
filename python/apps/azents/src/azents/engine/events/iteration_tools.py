@@ -59,6 +59,8 @@ class ParallelIterationTools[TCall: IterationToolCall, TResult]:
 
     async def run(self, calls: Sequence[TCall]) -> bool:
         """Finalize each settled result independently and preserve stop ordering."""
+        if len({call.call_id for call in calls}) != len(calls):
+            raise ValueError("Parallel tool batch repeats a call identity.")
         completed_ids: set[str] = set()
         terminal_completed = False
         tasks_by_id = {
@@ -83,13 +85,34 @@ class ParallelIterationTools[TCall: IterationToolCall, TResult]:
                 return_exceptions=True,
             )
             cancelled: list[TCall] = []
-            for call, outcome in zip(unresolved, settled, strict=True):
-                if isinstance(outcome, IterationToolResult):
-                    await self.host.finalize(outcome.call, outcome.result)
-                    completed_ids.add(outcome.call.call_id)
-                else:
-                    cancelled.append(call)
-            await self.host.finalize_cancelled(cancelled)
+            try:
+                for call, outcome in zip(unresolved, settled, strict=True):
+                    if isinstance(outcome, IterationToolResult):
+                        await self.host.finalize(outcome.call, outcome.result)
+                        completed_ids.add(outcome.call.call_id)
+                    else:
+                        cancelled.append(call)
+                await self.host.finalize_cancelled(cancelled)
+            except asyncio.CancelledError:
+                raise
+            except Exception as finalization_error:
+                # Ownership can disappear while a defiant call is settling.
+                # Retain the diagnostic cause without replacing caller stop.
+                raise error from finalization_error
             await self.host.handle_cancellation(error)
+            raise
+        except Exception:
+            # A failed result/authority admission cannot leave siblings running
+            # after the owning host starts terminal validation or drops RAM.
+            unresolved = [call for call in calls if call.call_id not in completed_ids]
+            for call in unresolved:
+                self.host.request_cancel(call)
+                task = tasks_by_id[call.call_id]
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(
+                *(tasks_by_id[call.call_id] for call in unresolved),
+                return_exceptions=True,
+            )
             raise
         return terminal_completed

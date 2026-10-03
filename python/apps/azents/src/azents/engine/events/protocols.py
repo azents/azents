@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import AgentRunPhase, AgentRunStatus
 from azents.engine.events.generated_files import PendingGeneratedFileOutput
+from azents.engine.events.model_messages import TransientModelMessage
 from azents.engine.events.types import (
     ActiveToolCall,
     AgentRunState,
@@ -154,12 +155,14 @@ StreamProjection: TypeAlias = Annotated[
 ]
 
 
-class CompletedAdapterOutput(BaseModel):
+class CompletedAdapterOutput[MessageT: Event | TransientModelMessage = Event](
+    BaseModel
+):
     """Completed canonical events plus transient provider file outputs."""
 
     model_config = ConfigDict(frozen=True)
 
-    events: list[Event]
+    events: list[MessageT]
     pending_provider_files: list[PendingGeneratedFileOutput] = Field(
         default_factory=list,
         exclude=True,
@@ -167,7 +170,9 @@ class CompletedAdapterOutput(BaseModel):
     )
 
 
-class NormalizedAdapterOutput(BaseModel):
+class NormalizedAdapterOutput[MessageT: Event | TransientModelMessage = Event](
+    BaseModel
+):
     """Adapter output normalization result."""
 
     model_config = ConfigDict(frozen=True)
@@ -178,7 +183,7 @@ class NormalizedAdapterOutput(BaseModel):
             "another model step after current client tool calls complete"
         )
     )
-    events: list[Event] = Field(default_factory=list)
+    events: list[MessageT] = Field(default_factory=list)
     projections: list[StreamProjection] = Field(default_factory=list)
     usage: TokenUsagePayload | None = Field(default=None)
     pending_provider_files: list[PendingGeneratedFileOutput] = Field(

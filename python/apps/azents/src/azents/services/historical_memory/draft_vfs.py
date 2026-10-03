@@ -130,6 +130,35 @@ class ConsolidationVfsObservations:
     def record_source_epoch(self, epoch: int) -> None:
         self.evidence_epoch = max(self.evidence_epoch, epoch)
 
+    def snapshot(self) -> "ConsolidationVfsObservations":
+        """Freeze sibling mutation reads before parallel execution begins."""
+        frozen = ConsolidationVfsObservations(self.principal)
+        frozen.evidence_epoch = self.evidence_epoch
+        frozen.files = dict(self.files)
+        frozen.read_generations = dict(self.read_generations)
+        frozen.invalidated_files = set(self.invalidated_files)
+        return frozen
+
+    def merge_mutations(
+        self,
+        before: "ConsolidationVfsObservations",
+        after: "ConsolidationVfsObservations",
+    ) -> None:
+        """Advance changed observations without undoing a later independent read."""
+        for uri, observation in after.files.items():
+            if before.files.get(uri) == observation:
+                continue
+            if (
+                self.read_generations.get(uri, 0) == before.read_generations.get(uri, 0)
+                and self.files.get(uri) == before.files.get(uri)
+                and uri not in self.invalidated_files
+            ):
+                self.files[uri] = observation
+                self.read_generations.setdefault(uri, 0)
+                self.evidence_epoch = max(
+                    self.evidence_epoch, observation.observation_epoch
+                )
+
 
 @dataclasses.dataclass(frozen=True)
 class ConsolidationDraftVfsBackend:
@@ -360,7 +389,7 @@ class ConsolidationDraftVfsBackend:
                 request_digest=invocation.request_digest,
             )
             if replay is not None:
-                return self._result(replay)
+                return await self._result(principal, replay)
             observed = {file.uri: file for file in preconditions.files}
             group = preconditions.group_revision_id
             changes: list[DraftFileChange] = []
@@ -430,7 +459,7 @@ class ConsolidationDraftVfsBackend:
             raise
         except ValueError as error:
             raise VfsMutationError("invalid_mutation", str(error)) from None
-        return self._result(result)
+        return await self._result(principal, result)
 
     async def mutate(
         self,
@@ -447,7 +476,7 @@ class ConsolidationDraftVfsBackend:
                 request_digest=invocation.request_digest,
             )
             if replay is not None:
-                return self._result(replay)
+                return await self._result(principal, replay)
             observed = preconditions.files[0] if preconditions.files else None
             group_revision = preconditions.group_revision_id
             match request:
@@ -529,9 +558,26 @@ class ConsolidationDraftVfsBackend:
             raise
         except ValueError as error:
             raise VfsMutationError("invalid_mutation", str(error)) from None
-        return self._result(result)
+        return await self._result(principal, result)
 
-    def _result(self, result: DraftMutationResult) -> VfsMutationResult:
+    async def _result(
+        self, principal: ConsolidationJobPrincipal, result: DraftMutationResult
+    ) -> VfsMutationResult:
+        observations = await self.repository.inventory(principal)
+        by_path = {file.path: file.observation for file in observations}
+        # Replay metadata cannot install a stale revision as a current observation.
+        for path in result.changed_paths:
+            observation = by_path.get(path)
+            if observation is None:
+                observation = await self.repository.observe(principal, path=path)
+            if observation.draft_revision_id == result.draft_revision_id:
+                uri = f"azents://{self.mount}/{path}"
+                self.observations.files[uri] = observation
+                self.observations.read_generations.setdefault(uri, 0)
+                self.observations.invalidated_files.discard(uri)
+                self.observations.evidence_epoch = max(
+                    self.observations.evidence_epoch, observation.observation_epoch
+                )
         return VfsMutationResult(
             revision_id=result.draft_revision_id,
             uris=tuple(

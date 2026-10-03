@@ -9,6 +9,12 @@ from azcommon.uuid import uuid7
 from azents.core.enums import EventKind
 from azents.core.model_pricing import CapturedModelPricing
 from azents.core.type_guards import is_string_object_dict
+from azents.engine.events.model_messages import (
+    ModelMessageFactory,
+    ModelTranscriptMessage,
+    TransientModelMessage,
+    transient_model_message,
+)
 from azents.engine.events.model_usage_pricing import apply_model_usage_pricing
 from azents.engine.events.protocols import (
     CompletedAdapterOutput,
@@ -82,9 +88,15 @@ class ResponsesOutputNormalizer:
             schema_version=self.schema_version,
         )
 
-    def start(self, session_id: str) -> "_ResponsesOutputStream":
+    def start(self, session_id: str) -> "_ResponsesOutputStream[Event]":
         """Start incremental normalization for one native model stream."""
-        return _ResponsesOutputStream(self, session_id)
+        return _ResponsesOutputStream(
+            self, durable_response_message_factory(session_id)
+        )
+
+    def start_transient(self) -> "_ResponsesOutputStream[TransientModelMessage]":
+        """Normalize internal output without public Event/Session identity."""
+        return _ResponsesOutputStream(self, transient_model_message)
 
     def normalize(
         self,
@@ -119,11 +131,24 @@ class ResponsesOutputNormalizer:
         completed_output_items: Sequence[dict[str, object]],
     ) -> CompletedAdapterOutput:
         """Convert completed items to canonical events and transient files."""
+        return self.normalize_completed_output_for(
+            durable_response_message_factory(session_id),
+            response,
+            completed_output_items,
+        )
+
+    def normalize_completed_output_for[MessageT: Event | TransientModelMessage](
+        self,
+        make_message: ModelMessageFactory[MessageT],
+        response: dict[str, object],
+        completed_output_items: Sequence[dict[str, object]],
+    ) -> CompletedAdapterOutput[MessageT]:
+        """Share semantic parsing while the host owns envelope construction."""
         output = response.get("output")
         output_items: Sequence[object] = (
             output if isinstance(output, list) and output else completed_output_items
         )
-        events = self.normalize_output_items(session_id, output_items)
+        events = self.normalize_output_items_for(make_message, output_items)
         pending_provider_files = [
             pending_image_generation_output(raw_item, output_index=output_index)
             for output_index, output_item in enumerate(output_items)
@@ -132,7 +157,7 @@ class ResponsesOutputNormalizer:
             and _durable_provider_tool_status(raw_item)
             not in {"failed", "cancelled", "interrupted"}
         ]
-        return CompletedAdapterOutput(
+        return CompletedAdapterOutput[MessageT](
             events=events,
             pending_provider_files=pending_provider_files,
         )
@@ -143,14 +168,23 @@ class ResponsesOutputNormalizer:
         output_items: Sequence[object],
     ) -> list[Event]:
         """Convert output item list to events."""
-        events: list[Event] = []
+        return self.normalize_output_items_for(
+            durable_response_message_factory(session_id), output_items
+        )
+
+    def normalize_output_items_for[MessageT: Event | TransientModelMessage](
+        self,
+        make_message: ModelMessageFactory[MessageT],
+        output_items: Sequence[object],
+    ) -> list[MessageT]:
+        events: list[MessageT] = []
         for fallback_output_index, output_item in enumerate(output_items):
             raw_item = response_item_dict(output_item)
             if has_response_output_item_type(raw_item):
                 output_index = _int_or_none(raw_item.get("output_index"))
                 events.append(
-                    self.normalize_output_item(
-                        session_id,
+                    self.normalize_output_item_for(
+                        make_message,
                         raw_item,
                         output_index=(
                             output_index
@@ -169,6 +203,19 @@ class ResponsesOutputNormalizer:
         output_index: int,
     ) -> Event:
         """Convert one output item to event."""
+        return self.normalize_output_item_for(
+            durable_response_message_factory(session_id),
+            output_item,
+            output_index=output_index,
+        )
+
+    def normalize_output_item_for[MessageT: Event | TransientModelMessage](
+        self,
+        make_message: ModelMessageFactory[MessageT],
+        output_item: dict[str, object],
+        *,
+        output_index: int,
+    ) -> MessageT:
         item_type = str(output_item.get("type") or "")
         artifact = self._artifact(output_item, output_index=output_index)
 
@@ -178,14 +225,14 @@ class ResponsesOutputNormalizer:
                 attachments=[],
                 native_artifact=artifact,
             )
-            return _event(session_id, EventKind.ASSISTANT_MESSAGE, payload)
+            return make_message(EventKind.ASSISTANT_MESSAGE, payload)
         if item_type == "reasoning":
             payload = ReasoningPayload(
                 text=_extract_reasoning_part_text(output_item, "content") or None,
                 summary=_extract_reasoning_part_text(output_item, "summary") or None,
                 native_artifact=artifact,
             )
-            return _event(session_id, EventKind.REASONING, payload)
+            return make_message(EventKind.REASONING, payload)
         if item_type == "function_call":
             payload = ClientToolCallPayload(
                 call_id=str(output_item.get("call_id") or output_item.get("id") or ""),
@@ -194,7 +241,7 @@ class ResponsesOutputNormalizer:
                 wire_dialect="json_function",
                 native_artifact=artifact,
             )
-            return _event(session_id, EventKind.CLIENT_TOOL_CALL, payload)
+            return make_message(EventKind.CLIENT_TOOL_CALL, payload)
         if item_type == "custom_tool_call":
             call_id = output_item.get("call_id") or output_item.get("id")
             name = output_item.get("name")
@@ -206,8 +253,7 @@ class ResponsesOutputNormalizer:
                 and name
                 and isinstance(input_value, str)
             ):
-                return _event(
-                    session_id,
+                return make_message(
                     EventKind.UNKNOWN_ADAPTER_OUTPUT,
                     UnknownAdapterOutputPayload(
                         native_artifact=artifact,
@@ -221,13 +267,12 @@ class ResponsesOutputNormalizer:
                 wire_dialect="plaintext_custom",
                 native_artifact=artifact,
             )
-            return _event(session_id, EventKind.CLIENT_TOOL_CALL, payload)
+            return make_message(EventKind.CLIENT_TOOL_CALL, payload)
         provider_tool = normalize_responses_provider_tool_item(output_item)
         if provider_tool is not None:
             call_id = str(output_item.get("call_id") or output_item.get("id") or "")
             if not call_id:
-                return _event(
-                    session_id,
+                return make_message(
                     EventKind.UNKNOWN_ADAPTER_OUTPUT,
                     UnknownAdapterOutputPayload(
                         native_artifact=artifact,
@@ -241,14 +286,12 @@ class ResponsesOutputNormalizer:
                 semantic=provider_tool.semantic,
                 native_artifact=artifact,
             )
-            return _event(
-                session_id,
+            return make_message(
                 EventKind.PROVIDER_TOOL_CALL,
                 call_payload,
             )
 
-        return _event(
-            session_id,
+        return make_message(
             EventKind.UNKNOWN_ADAPTER_OUTPUT,
             UnknownAdapterOutputPayload(
                 native_artifact=artifact,
@@ -258,6 +301,13 @@ class ResponsesOutputNormalizer:
 
     def normalize_partial_assistant(self, session_id: str, text: str) -> Event:
         """Create canonical-fallback output from interrupted text deltas."""
+        return self.normalize_partial_assistant_for(
+            durable_response_message_factory(session_id), text
+        )
+
+    def normalize_partial_assistant_for[MessageT: Event | TransientModelMessage](
+        self, make_message: ModelMessageFactory[MessageT], text: str
+    ) -> MessageT:
         item: dict[str, object] = {
             "type": "message",
             "status": "incomplete",
@@ -279,8 +329,7 @@ class ResponsesOutputNormalizer:
             schema_version=partial_schema_version,
             item=item,
         )
-        return _event(
-            session_id,
+        return make_message(
             EventKind.ASSISTANT_MESSAGE,
             AssistantMessagePayload(
                 content=text,
@@ -312,7 +361,7 @@ class ResponsesOutputNormalizer:
 
 def responses_need_follow_up(
     response: dict[str, object],
-    events: Sequence[Event],
+    events: Sequence[ModelTranscriptMessage],
 ) -> bool:
     """Resolve dialect continuation before the standard client-tool fallback."""
     end_turn = response.get("end_turn")
@@ -321,18 +370,18 @@ def responses_need_follow_up(
     return any(isinstance(event.payload, ClientToolCallPayload) for event in events)
 
 
-class _ResponsesOutputStream:
+class _ResponsesOutputStream[MessageT: Event | TransientModelMessage]:
     """Minimal normalization state for one provider-native Responses stream."""
 
     def __init__(
         self,
         normalizer: ResponsesOutputNormalizer,
-        session_id: str,
+        make_message: ModelMessageFactory[MessageT],
     ) -> None:
         self.normalizer = normalizer
         self.pricing = normalizer.pricing
         self.service_tier = normalizer.service_tier
-        self._session_id = session_id
+        self.make_message = make_message
         self._tool_refs: dict[int, tuple[str, str]] = {}
         self._completed_output_items: list[dict[str, object]] = []
         self._completed_response: dict[str, object] | None = None
@@ -347,7 +396,7 @@ class _ResponsesOutputStream:
     def process_event(
         self,
         native_event: NativeEvent,
-    ) -> NormalizedAdapterOutput:
+    ) -> NormalizedAdapterOutput[MessageT]:
         """Update stream state and return projections for one native event."""
         event_type = native_event.type
         item = native_event.item
@@ -471,12 +520,12 @@ class _ResponsesOutputStream:
                     self._usage_billing_response = {}
                 self._usage_billing_response["service_tier"] = service_tier
 
-        return NormalizedAdapterOutput(
+        return NormalizedAdapterOutput[MessageT](
             needs_follow_up=False,
             projections=projections,
         )
 
-    def complete(self) -> NormalizedAdapterOutput:
+    def complete(self) -> NormalizedAdapterOutput[MessageT]:
         """Build durable output only after explicit successful completion."""
         if self._terminal_error is not None:
             raise self._terminal_error
@@ -495,7 +544,7 @@ class _ResponsesOutputStream:
             )
         return self._build_output()
 
-    def _build_output(self) -> NormalizedAdapterOutput:
+    def _build_output(self) -> NormalizedAdapterOutput[MessageT]:
         """Build output from received state without validating terminal status."""
         if self._completed_response is not None:
             self._usage = _normalize_response_usage(
@@ -509,12 +558,12 @@ class _ResponsesOutputStream:
                 requested_service_tier=self.service_tier,
                 completed_output_items=self._completed_output_items,
             )
-        completed = self.normalizer.normalize_completed_output(
-            self._session_id,
+        completed = self.normalizer.normalize_completed_output_for(
+            self.make_message,
             self._completed_response or {},
             self._completed_output_items,
         )
-        return NormalizedAdapterOutput(
+        return NormalizedAdapterOutput[MessageT](
             needs_follow_up=responses_need_follow_up(
                 self._completed_response or {},
                 completed.events,
@@ -524,7 +573,7 @@ class _ResponsesOutputStream:
             pending_provider_files=completed.pending_provider_files,
         )
 
-    def interrupt(self) -> NormalizedAdapterOutput:
+    def interrupt(self) -> NormalizedAdapterOutput[MessageT]:
         """Build completed output plus received partial assistant text."""
         if self._terminal_error is not None:
             raise self._terminal_error
@@ -532,8 +581,8 @@ class _ResponsesOutputStream:
         partial_text = "".join(self._partial_text)
         if not partial_text or _has_assistant_text(completed.events):
             return completed
-        partial_event = self.normalizer.normalize_partial_assistant(
-            self._session_id,
+        partial_event = self.normalizer.normalize_partial_assistant_for(
+            self.make_message,
             partial_text,
         )
         return completed.model_copy(
@@ -865,7 +914,7 @@ def _terminal_failure_fallback_message(
     return "The model provider could not process the request."
 
 
-def _has_assistant_text(events: Sequence[Event]) -> bool:
+def _has_assistant_text(events: Sequence[ModelTranscriptMessage]) -> bool:
     """Return whether normalized output already has assistant text."""
     for event in events:
         payload = event.payload
@@ -896,6 +945,15 @@ def _event(
         payload=payload,
         created_at=datetime.datetime.now(datetime.UTC),
     )
+
+
+def durable_response_message_factory(session_id: str) -> ModelMessageFactory[Event]:
+    """Bind foreground identity separately from shared semantic extraction."""
+
+    def make_message(kind: EventKind, payload: EventPayload) -> Event:
+        return _event(session_id, kind, payload)
+
+    return make_message
 
 
 def _response_usage_has_totals(raw_usage: dict[str, object]) -> bool:

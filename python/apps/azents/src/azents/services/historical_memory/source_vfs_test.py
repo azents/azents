@@ -22,6 +22,9 @@ from azents.repos.historical_memory_consolidation.ownership import (
 from azents.repos.historical_memory_consolidation.sources import (
     ConsolidationSourceRepository,
 )
+from azents.repos.historical_memory_consolidation.work import (
+    ConsolidationWorkRepository,
+)
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 from azents.services.historical_memory.draft_vfs import ConsolidationVfsObservations
@@ -114,6 +117,7 @@ async def test_personal_inventory_excludes_team_and_another_personal_user(
     backend = ConsolidationSourceVfsBackend(
         ConsolidationSourceRepository(rdb_session_manager),
         ConsolidationVfsObservations(claim.principal),
+        ConsolidationWorkRepository(rdb_session_manager),
     )
     inventory = await backend.read_text(
         claim.principal,

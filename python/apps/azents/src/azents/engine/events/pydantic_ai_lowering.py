@@ -47,6 +47,7 @@ from azents.engine.events.file_parts import (
     file_output_part_placeholder_text,
     lower_file_output_part,
 )
+from azents.engine.events.model_messages import ModelTranscriptMessage
 from azents.engine.events.output_parts import (
     enforce_tool_output_text_hard_cap,
     lower_output_to_text,
@@ -70,7 +71,6 @@ from azents.engine.events.types import (
     ClientToolCallPayload,
     ClientToolResultPayload,
     CompactionSummaryPayload,
-    Event,
     ExternalChannelMessagePayload,
     FileOutputPart,
     InputTextPart,
@@ -200,7 +200,7 @@ class PydanticAILowerer:
 
     def lower(
         self,
-        transcript: Sequence[Event],
+        transcript: Sequence[ModelTranscriptMessage],
         *,
         model: str,
         system_prompt: str | None = None,
@@ -378,7 +378,7 @@ class PydanticAILowerer:
     def _prompt(content: str | Sequence[UserContent]) -> ModelRequest:
         return ModelRequest(parts=[UserPromptPart(content)])
 
-    def _native(self, event: Event) -> list[ModelMessage] | None:
+    def _native(self, event: ModelTranscriptMessage) -> list[ModelMessage] | None:
         payload = event.payload
         if not isinstance(
             payload,
@@ -434,7 +434,7 @@ class PydanticAILowerer:
             return False
         return native_args == canonical_args
 
-    def _canonical(self, event: Event) -> ModelMessage | None:
+    def _canonical(self, event: ModelTranscriptMessage) -> ModelMessage | None:
         payload = event.payload
         if isinstance(payload, UserMessagePayload):
             if event.kind == EventKind.GOAL_CONTINUATION:

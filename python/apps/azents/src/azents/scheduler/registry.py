@@ -215,17 +215,25 @@ async def external_account_oauth_cleanup_handler(
 async def historical_memory_discovery_handler(
     context: TaskContext,
 ) -> TaskResult:
-    """Admit due Historical Memory sources and dispatch per-Agent work."""
+    """Admit sources, sweep private payloads and dispatch independent Memory work."""
     from azents.services.historical_memory import discovery  # noqa: PLC0415
+    from azents.services.historical_memory.consolidation_discovery import (  # noqa: PLC0415
+        HistoricalMemoryConsolidationDiscoveryService,
+    )
 
     service = await context.container.solve(discovery.HistoricalMemoryDiscoveryService)
     summary = await service.discover_once()
+    consolidation = await context.container.solve(
+        HistoricalMemoryConsolidationDiscoveryService
+    )
+    consolidation_summary = await consolidation.discover_once()
     return TaskResult(
         summary={
             "task_key": context.task_key,
             "attempt_started_at": context.attempt_started_at.isoformat(),
             "manual_triggered": context.manual_triggered,
             **dataclasses.asdict(summary),
+            **dataclasses.asdict(consolidation_summary),
         }
     )
 

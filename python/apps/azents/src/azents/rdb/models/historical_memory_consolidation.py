@@ -12,6 +12,7 @@ import azents.rdb.models.user as _user  # noqa: F401  # Register owner FK metada
 import azents.rdb.models.workspace as _workspace  # noqa: F401  # Register owner FK metadata.
 from azents.core.historical_memory_consolidation import (
     ConsolidationAttemptState,
+    ConsolidationDisposition,
     ConsolidationScope,
     ConsolidationWorkKind,
     ConsolidationWorkState,
@@ -92,6 +93,9 @@ class RDBConsolidationUnit(RDBModel):
     )
     no_progress_count: Mapped[int] = mapped_column(
         sa.Integer, init=False, nullable=False, server_default="0"
+    )
+    pass_upper_sequence: Mapped[int | None] = mapped_column(
+        sa.BigInteger, init=False, nullable=True, default=None
     )
     created_at: Mapped[datetime.datetime] = mapped_column(
         TimeZoneDateTime, init=False, server_default=sa.func.now()
@@ -178,6 +182,25 @@ class RDBConsolidationWork(RDBModel):
     )
     considered_draft_id: Mapped[str | None] = mapped_column(
         sa.String(32), init=False, nullable=True, default=None
+    )
+    considered_draft_revision_id: Mapped[str | None] = mapped_column(
+        sa.String(32), init=False, nullable=True, default=None
+    )
+    presented_attempt_id: Mapped[str | None] = mapped_column(
+        sa.String(32), init=False, nullable=True, default=None
+    )
+    disposition: Mapped[ConsolidationDisposition | None] = mapped_column(
+        ENUM(
+            ConsolidationDisposition,
+            name="consolidation_disposition",
+            create_type=False,
+        ),
+        init=False,
+        nullable=True,
+        default=None,
+    )
+    consideration_reason: Mapped[str | None] = mapped_column(
+        sa.String(512), init=False, nullable=True, default=None
     )
     published_revision_id: Mapped[str | None] = mapped_column(
         sa.String(32), init=False, nullable=True, default=None
@@ -463,3 +486,36 @@ class RDBConsolidationRevisionDependency(RDBModel):
         sa.String(32), nullable=True
     )
     __table_args__ = (UQ_VERSION, IX_SOURCE)
+
+
+class RDBConsolidationModelDispatch(RDBModel):
+    """Bounded content-free physical dispatch reservations and known usage."""
+
+    __tablename__ = "historical_consolidation_model_dispatches"
+    UQ_NUMBER = sa.UniqueConstraint(
+        "attempt_id",
+        "request_number",
+        name="uq_historical_consolidation_model_dispatches_number",
+    )
+    CK_BUDGET = sa.CheckConstraint(
+        "request_number >= 1 AND request_number <= 32 AND "
+        "reserved_input_tokens >= 0 AND reserved_input_tokens <= 250000 AND "
+        "reserved_output_tokens >= 1 AND reserved_output_tokens <= 16000",
+        name="ck_historical_consolidation_model_dispatches_budget",
+    )
+    attempt_id: Mapped[str] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey("historical_consolidation_attempts.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    dispatch_id: Mapped[str] = mapped_column(sa.String(32), primary_key=True)
+    request_number: Mapped[int] = mapped_column(sa.Integer, nullable=False)
+    reserved_input_tokens: Mapped[int] = mapped_column(sa.BigInteger, nullable=False)
+    reserved_output_tokens: Mapped[int] = mapped_column(sa.BigInteger, nullable=False)
+    usage_recorded: Mapped[bool] = mapped_column(
+        sa.Boolean, init=False, nullable=False, server_default=sa.text("false")
+    )
+    usage_json: Mapped[dict[str, JSONValue] | None] = mapped_column(
+        JSONB, init=False, nullable=True, default=None
+    )
+    __table_args__ = (UQ_NUMBER, CK_BUDGET)

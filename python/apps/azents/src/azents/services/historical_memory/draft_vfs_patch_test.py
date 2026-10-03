@@ -198,6 +198,7 @@ async def test_patch_existing_target_requires_read_before_applicability(
     binding = await _binding(rdb_session_manager)
     tools = binding.tools({})
     await _invoke(tools["write"], "create", {"path": _URI, "content": "old\n"})
+    binding.draft.observations.files.clear()
     with pytest.raises(FunctionToolError, match="Read every existing"):
         await _invoke(
             tools["apply_patch"],

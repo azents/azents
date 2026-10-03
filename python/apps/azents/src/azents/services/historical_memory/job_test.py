@@ -4,6 +4,9 @@ import datetime
 from unittest.mock import AsyncMock, Mock
 
 from azents.job_runtime.types import JobExecutionContext, JobRequest
+from azents.services.historical_memory.consolidation_discovery import (
+    HistoricalMemoryConsolidationDiscoveryService,
+)
 from azents.services.historical_memory.constants import (
     HISTORICAL_MEMORY_PREPARE_HANDLER_KEY,
 )
@@ -24,13 +27,17 @@ class _Container:
 
     async def solve(self, target: type[object]) -> object:
         """Return the configured preparation service."""
-        assert target is HistoricalMemoryPreparationService
+        assert target in {
+            HistoricalMemoryPreparationService,
+            HistoricalMemoryConsolidationDiscoveryService,
+        }
         return self.service
 
 
 async def test_registered_handler_runs_bounded_agent_job() -> None:
     """The handler validates identity and returns JSON-safe counters."""
     service = Mock()
+    service.dispatch_pending = AsyncMock(return_value=2)
     service.prepare_agent = AsyncMock(
         return_value=HistoricalMemoryPreparationSummary(
             attempted=3,
@@ -65,3 +72,4 @@ async def test_registered_handler_runs_bounded_agent_job() -> None:
         deadline=deadline,
         now=None,
     )
+    service.dispatch_pending.assert_awaited_once_with(agent_id="a" * 32)
