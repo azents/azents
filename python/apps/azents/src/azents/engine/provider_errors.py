@@ -82,6 +82,7 @@ def map_model_provider_error(
         provider_message=(
             extract_provider_message_text(body.get("message"))
             or extract_provider_message_text(body.get("Message"))
+            or extract_provider_message_text(evidence.body)
             or extract_provider_message_text(evidence.message)
         ),
         status_code=evidence.status,

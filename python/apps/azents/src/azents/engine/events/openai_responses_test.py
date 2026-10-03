@@ -1517,8 +1517,9 @@ async def test_adapter_logs_safe_typed_terminal_error_context(
     await adapter.close()
 
 
+@pytest.mark.parametrize("scalar_body", [False, True])
 async def test_adapter_maps_sdk_status_error_without_duplicate_adapter_log(
-    caplog: pytest.LogCaptureFixture,
+    caplog: pytest.LogCaptureFixture, scalar_body: bool
 ) -> None:
     """SDK status failures preserve their exception context for the error boundary."""
     caplog.set_level(logging.WARNING)
@@ -1530,7 +1531,9 @@ async def test_adapter_maps_sdk_status_error_without_duplicate_adapter_log(
             headers={"x-request-id": "req_synthetic"},
             request=request_handle,
         ),
-        body={
+        body="Rejected api_key=sk-abcdefghijk"
+        if scalar_body
+        else {
             "error": {
                 "code": "future_error",
                 "message": "Rejected api_key=sk-abcdefghijk",
@@ -1573,9 +1576,13 @@ async def test_adapter_maps_sdk_status_error_without_duplicate_adapter_log(
 
     assert raised.value.category is ModelProviderFailureCategory.INVALID_REQUEST
     assert raised.value.status_code == 400
-    assert raised.value.provider_code == "future_error"
-    assert raised.value.provider_error_type == "future_error_type"
-    assert raised.value.provider_error_param == "input[0].tools[1]"
+    assert raised.value.provider_code == (None if scalar_body else "future_error")
+    assert raised.value.provider_error_type == (
+        "BadRequestError" if scalar_body else "future_error_type"
+    )
+    assert raised.value.provider_error_param == (
+        None if scalar_body else "input[0].tools[1]"
+    )
     assert raised.value.provider_message == "Rejected api_key=[REDACTED]"
     assert raised.value.__cause__ is error
     assert "OpenAI Responses SDK request failed" not in caplog.text

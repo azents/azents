@@ -96,6 +96,7 @@ from azents.engine.events.types import (
     UserMessagePayload,
     build_native_compat_key,
 )
+from azents.engine.providers.xai_web_search import xai_web_search_declaration
 from azents.engine.run.types import BuiltinToolSpec
 
 _TOOL_DEFINITION_ADAPTER = TypeAdapter(ToolDefinition)
@@ -749,9 +750,9 @@ class PydanticAILowerer:
                     TypeAdapter(ImageGenerationTool).validate_python(selected.config)
                 )
             elif selected.name == "web_search":
-                native_tools.append(
-                    TypeAdapter(WebSearchTool).validate_python(selected.config)
-                )
+                search = TypeAdapter(WebSearchTool).validate_python(selected.config)
+                if self.provider_id not in {LLMProvider.XAI, LLMProvider.XAI_OAUTH}:
+                    native_tools.append(search)
             else:
                 raise ValueError(
                     "Selected hosted tool has no authorized model-layer implementation"
@@ -948,7 +949,23 @@ class PydanticAILowerer:
         if self.provider_id == LLMProvider.OPENROUTER:
             values["openai_include_raw_annotations"] = True
             values["openai_include_web_search_sources"] = True
-        return _OpenAISettings.model_validate({"value": values}).value
+        settings = _OpenAISettings.model_validate({"value": values}).value
+        if self.provider_id in {LLMProvider.XAI, LLMProvider.XAI_OAUTH}:
+            searches = [
+                xai_web_search_declaration(
+                    TypeAdapter(WebSearchTool).validate_python(selected.config)
+                )
+                for selected in self.hosted_tools
+                if selected.name == "web_search"
+            ]
+            if searches:
+                # The public native-tools setting leaves function serialization
+                # with the SDK without invoking its OpenAI search defaults.
+                settings["openai_native_tools"] = [
+                    *settings.get("openai_native_tools", ()),
+                    *searches,
+                ]
+        return settings
 
 
 def _object_arguments(value: str) -> bool:
