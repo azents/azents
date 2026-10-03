@@ -392,7 +392,7 @@ class MemoryContextToolkit(Toolkit[ShellToolkitConfig]):
         }
 
     async def _on_run_start(self, context: RunStartHookContext) -> None:
-        """Select current summaries before the root Run loop begins."""
+        """Select current whole unit documents before the root Run loop begins."""
         del context
         if self._session_id != self._root_session_id:
             return

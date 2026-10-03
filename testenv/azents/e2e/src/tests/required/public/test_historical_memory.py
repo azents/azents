@@ -263,7 +263,7 @@ def test_historical_preparation_snapshot_runtime_free_vfs_and_lifecycle(
     azents_admin_server_url: str,
     openai_proxy_url: str,
 ) -> None:
-    """Real summaries feed settings/snapshots while live reads enforce lifecycle."""
+    """Prepared sources keep settings/lookup without automatic source packing."""
     setup = _setup(public_api_client, admin_api_client, azents_public_server_url)
     source = _create_session(
         azents_public_server_url,
@@ -324,7 +324,9 @@ def test_historical_preparation_snapshot_runtime_free_vfs_and_lifecycle(
     ]
     assert foreground
     captured = json.dumps(foreground[-1], ensure_ascii=False)
-    assert f"azents://memory/historical/team/{source}/summary.md" in captured
+    # Stage 1 settings/inventory remain available, but no unit overview has been
+    # authored by this fixture. A boundary must not pack raw source summaries.
+    assert f"azents://memory/historical/team/{source}/summary.md" not in captured
     assert f"azents://memory/historical/user/{personal}/summary.md" not in captured
     assert all(
         name
