@@ -2034,6 +2034,9 @@ def _map_openai_error(
         provider_message=(
             extract_provider_message_text(error_body.get("message"))
             or extract_provider_message_text(
+                api_error.body if api_error is not None else None
+            )
+            or extract_provider_message_text(
                 api_error.message if api_error is not None else None
             )
             or extract_provider_message_text(str(exc))

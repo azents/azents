@@ -150,7 +150,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
   - typescript/apps/azents-web/messages/*/chat.json
 last_verified_at: 2026-10-03
-spec_version: 204
+spec_version: 205
 ---
 
 # Agent Execution Loop
@@ -302,7 +302,11 @@ credentials, headers, request/model output, and stream frames never cross the fa
 Supported SDK/model boundaries retain only allowlisted typed provider evidence; opaque exception
 serialization is not a durable failure contract. Every provider-attributed error
 emits the common structured provider fields, including the sanitized message and stable fingerprint,
-at the boundary that handles it. Every classified provider failure receives the complete configured
+at the boundary that handles it. Short UTF-8 plain-text and JSON-string HTTP errors preserve
+their provider message through the same bounded redaction as object-shaped errors. Oversized
+text, HTML debug pages, non-text scalar bodies, and invalid UTF-8 do not become diagnostic
+messages; raw body bytes still never cross the failure/logging boundary.
+Every classified provider failure receives the complete configured
 Run retry budget regardless of category or diagnostic retryability. An unclassified SDK exception is
 normalized into a credential-safe `UnclassifiedModelProviderError` and follows the ordinary internal-
 error traceback path, bypassing provider retry state and user-visible provider failure presentation;
@@ -701,6 +705,11 @@ xAI API-key and OAuth use the configured HTTP Responses endpoint through the off
 OpenAI-compatible SDK; OpenRouter retains Responses and Kimi OAuth uses Chat Completions with its
 existing device headers. Native OpenAI/ChatGPT execution and its HTTP/WebSocket continuation
 policy remain independent.
+
+xAI API-key and OAuth native search declarations use the public model setting
+`openai_native_tools` to omit OpenAI-only `search_context_size`. Saved search authorization,
+other search options, client function declarations, and SDK serialization remain intact.
+Other providers retain their existing SDK-native search translation.
 
 An operation-local observed SDK stream supplies acquisition, parsed-native-event progress, native
 terminal evidence, usage and authorized supplementary artifacts while stock public model assembly
@@ -1785,6 +1794,9 @@ icon.
 
 ## Changelog
 
+- **2026-10-03** (spec_version 205) — Omitted OpenAI-only search context size
+  from xAI native search declarations and retained bounded, redacted scalar HTTP
+  error messages without changing retry or user-visible error policy.
 - **2026-10-02** (spec_version 204) — Completed Executor model/read boundaries,
   local metadata and Wait snapshots, explicit Engine resolve dependencies and
   Kimi refresh persistence while retaining separate failure commit/rollback
