@@ -190,6 +190,25 @@ Session under `catalog-hotfix-*`, `catalog-omissions-*` and
   All four temporary catalog correction plans are removed after that clearance;
   current Specs, immutable authority and this verification record remain.
 
+### Latest-main stack integration
+
+- Both follow-ups were rebased front-to-back onto main `e9fad839e`, including
+  its xAI native-search/error correction. The phase-2 sampling bridge remains
+  before final typed settings and xAI native-search assembly; phase-3 production
+  changes remain identical and the execution Spec advances sequentially to v207.
+- The new main SDK test explicitly supplies nullable top-k and verifies v2
+  sampling `0.2` / `0.7` alongside native search, function tools, metadata and
+  output cap for both xAI authentication routes. OpenRouter retains its separate
+  generic search options; historical search behavior remains unchanged.
+- Root whole Ruff/format/ty passed. Affected integration suites passed 201 tests;
+  updated full integrated backend passed 8,763 tests with 3 skips in 352.16
+  seconds, and fresh deployed required E2E passed 29 tests in 129.70 seconds.
+  Both complete runs have JUnit and exit code zero.
+- The same independent reviewer cleared the composed boundary with 236 tests,
+  docs/diff checks and 85 explicit nullable constructor checks. Previous review
+  clearance remains valid. Old-SHA CI success is retained as historical evidence,
+  not certification of the rewritten heads; new-SHA CI is checked separately.
+
 Independent Session reports: `catalog-provider-omissions-audit.md`,
 `catalog-consumer-omissions-audit.md`, `catalog-source-pricing-persistence-audit.md`
 and `catalog-top-k-execution-discovery.md`. They include exact baseline anchors,
