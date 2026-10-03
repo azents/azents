@@ -66,6 +66,11 @@ from websockets.asyncio.client import connect as async_connect
 from websockets.sync.client import connect
 from websockets.typing import Origin
 
+from support.observations import (
+    BrowserTransportObservation,
+    decode_browser_transport,
+    decode_session,
+)
 from support.runtime_profiles import create_workspace_runtime_profile
 from support.system_bootstrap import SystemBootstrapEvidence
 from support.utils import (
@@ -1113,9 +1118,7 @@ def _create_workspace(
         timeout=10,
     )
     primary.raise_for_status()
-    session_id = primary.json()["id"]
-    if not isinstance(session_id, str):
-        raise AssertionError("Team primary Session omitted its ID")
+    session_id = decode_session(primary.json()).id
     workspace = _RuntimeWebWorkspace(
         token=token,
         email=email,
@@ -1693,7 +1696,7 @@ def _open_application_in_browser(
 
 def _browser_transport_evidence(
     driver: WebDriver,
-) -> dict[str, object]:
+) -> BrowserTransportObservation:
     """Exercise bounded browser transfer, fan-out, SSE, and WebSocket behavior."""
     result = driver.execute_async_script(
         """
@@ -1810,9 +1813,7 @@ const done = arguments[arguments.length - 1];
         _BROWSER_TRANSFER_BYTES,
         _BROWSER_ASSET_COUNT,
     )
-    if not isinstance(result, dict):
-        raise AssertionError(f"Browser transport evidence was invalid: {result!r}")
-    return result
+    return decode_browser_transport(result)
 
 
 def _decode_runtime_application_state(payload: object) -> _RuntimeApplicationState:
@@ -2181,29 +2182,24 @@ def test_runtime_web_gateway_real_runtime_browser_and_cross_replica_relay(
             _open_application_in_browser(driver, endpoint_url=service_url)
 
             evidence = _browser_transport_evidence(driver)
-            assert "error" not in evidence, evidence
-            assert evidence["echoBody"] == {
+            assert evidence.echo.model_dump(mode="json") == {
                 "body": "runtime-web-body",
                 "method": "POST",
             }
-            upload_evidence = evidence["uploadEvidence"]
-            assert isinstance(upload_evidence, dict)
-            assert upload_evidence["bytes"] == _BROWSER_TRANSFER_BYTES
-            assert upload_evidence["sha256"] == evidence["expectedUploadDigest"]
-            assert upload_evidence["content_length"] == _BROWSER_TRANSFER_BYTES
-            assert upload_evidence["transfer_encoding"] is None
-            assert evidence["eventsBody"] == (
+            assert evidence.upload.bytes == _BROWSER_TRANSFER_BYTES
+            assert evidence.upload.sha256 == evidence.expected_upload_digest
+            assert evidence.upload.content_length == _BROWSER_TRANSFER_BYTES
+            assert evidence.upload.transfer_encoding is None
+            assert evidence.events_body == (
                 "data: open\n\ndata: heartbeat\n\ndata: complete\n\n"
             )
-            assert evidence["redirectStatus"] == 200
-            assert evidence["redirectedUrl"] == service_url
-            redirected_body = evidence["redirectedBody"]
-            assert isinstance(redirected_body, str)
-            assert "Runtime Web E2E ready" in redirected_body
-            assert evidence["bytes"] == _BROWSER_TRANSFER_BYTES
-            assert evidence["assetCount"] == _BROWSER_ASSET_COUNT
-            assert evidence["assetsValid"] is True
-            assert evidence["websocket"] == {
+            assert evidence.redirect_status == 200
+            assert evidence.redirected_url == service_url
+            assert "Runtime Web E2E ready" in evidence.redirected_body
+            assert evidence.bytes == _BROWSER_TRANSFER_BYTES
+            assert evidence.asset_count == _BROWSER_ASSET_COUNT
+            assert evidence.assets_valid is True
+            assert evidence.websocket.model_dump(mode="json") == {
                 "text": "echo:runtime-web-socket",
                 "binary": [0, 1, 2, 255],
             }

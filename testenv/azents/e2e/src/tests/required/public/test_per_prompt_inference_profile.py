@@ -1,4 +1,8 @@
-"""Per-prompt inference profile product E2E tests."""
+"""Representative prepared inference, provider and subagent product journeys.
+
+Invalid speed preference wire shapes are covered by the backend public Chat
+``validation_audit_test.py`` admission contracts.
+"""
 
 import json
 import time
@@ -14,16 +18,54 @@ from azentspublicclient.api.llm_provider_integration_v1_api import (
     LLMProviderIntegrationV1Api,
 )
 from azentspublicclient.api.workspace_v1_api import WorkspaceV1Api
+from azentspublicclient.models.agent_model_selection import AgentModelSelection
+from azentspublicclient.models.agent_response import AgentResponse
+from azentspublicclient.models.agent_session_response import AgentSessionResponse
 from azentspublicclient.models.api_key_secrets import ApiKeySecrets
+from azentspublicclient.models.chat_event_response import ChatEventResponse
 from azentspublicclient.models.create_workspace_request import CreateWorkspaceRequest
 from azentspublicclient.models.llm_provider import LLMProvider
 from azentspublicclient.models.llm_provider_integration_create_request import (
     LLMProviderIntegrationCreateRequest,
 )
+from azentspublicclient.models.model_capabilities import ModelCapabilities
+from azentspublicclient.models.model_capability_contract import ModelCapabilityContract
+from azentspublicclient.models.model_catalog_entry_list_response import (
+    ModelCatalogEntryListResponse,
+)
+from azentspublicclient.models.model_catalog_entry_response import (
+    ModelCatalogEntryResponse,
+)
 from azentspublicclient.models.secrets import Secrets
-from pydantic import TypeAdapter, ValidationError
+from azentspublicclient.models.selectable_model_option import SelectableModelOption
+from azentspublicclient.models.selectable_model_option_response import (
+    SelectableModelOptionResponse,
+)
+from azentspublicclient.models.subagent_tree_node_response import (
+    SubagentTreeNodeResponse,
+)
+from azentspublicclient.models.subagent_tree_response import SubagentTreeResponse
+from azentspublicclient.models.workspace_model_settings_response import (
+    WorkspaceModelSettingsResponse,
+)
+from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from support.image_generation_openai_proxy import is_inference_profile_title_request
+from support.observations import (
+    InputMessageObservation,
+    RequestedProfileObservation,
+    ToolResultObservation,
+    TurnMarkerObservation,
+)
+from support.profile_observations import (
+    CatalogSourceObservation,
+    ProfileBarrierObservation,
+    ProfileProviderRequestObservation,
+    decode_mock_profile_journal,
+    decode_profile_history,
+    decode_profile_provider_journal,
+    profile_history_event_wire,
+)
 from support.runtime_profiles import (
     create_workspace_runtime_profile,
     start_and_wait_for_agent_runtime,
@@ -32,7 +74,7 @@ from support.system_bootstrap import SystemBootstrapEvidence
 from support.utils import authenticate_user, unique, wait_until
 
 _JSON_OBJECT = TypeAdapter(dict[str, object])
-_JSON_OBJECT_LIST = TypeAdapter(list[dict[str, object]])
+_LEGACY_OBJECT_LIST = TypeAdapter(list[dict[str, object]])
 _QUALITY_MESSAGE = "Per prompt quality profile"
 _QUALITY_STANDARD_MESSAGE = "Per prompt quality standard profile"
 _FAST_RETRY_MESSAGE = "Per prompt Fast retry preserves prepared option"
@@ -71,25 +113,12 @@ def _object(value: object, *, label: str) -> dict[str, object]:
         raise AssertionError(f"{label} is not an object: {value!r}") from exc
 
 
-def _objects(value: object, *, label: str) -> list[dict[str, object]]:
-    """Validate a JSON object list."""
-    try:
-        return _JSON_OBJECT_LIST.validate_python(value)
-    except ValidationError as exc:
-        raise AssertionError(f"{label} is not an object list: {value!r}") from exc
-
-
-def _string(value: object, *, label: str) -> str:
-    """Validate a JSON string."""
-    if not isinstance(value, str):
-        raise AssertionError(f"{label} is not a string: {value!r}")
-    return value
-
-
-def _response_object(response: requests.Response) -> dict[str, object]:
-    """Validate an HTTP JSON object response."""
+def _response_model[Observation: BaseModel](
+    response: requests.Response, model: type[Observation]
+) -> Observation:
+    """Decode a represented API contract at its HTTP ingress boundary."""
     response.raise_for_status()
-    return _object(response.json(), label="HTTP response")
+    return model.model_validate(response.json())
 
 
 def _setup_profile_agent(
@@ -133,16 +162,13 @@ def _setup_profile_agent(
         f"llm-provider-integrations/{integration.id}/catalog-entries"
     )
 
-    def populated_entries() -> list[dict[str, object]] | None:
+    def populated_entries() -> list[ModelCatalogEntryResponse] | None:
         response = requests.get(entries_url, headers=_headers(token), timeout=10)
         if response.status_code == 404:
             return None
         response.raise_for_status()
-        entries = _objects(
-            _response_object(response).get("entries"),
-            label="catalog entries",
-        )
-        identifiers = {entry.get("provider_model_identifier") for entry in entries}
+        entries = _response_model(response, ModelCatalogEntryListResponse).entries
+        identifiers = {entry.provider_model_identifier for entry in entries}
         expected_identifiers = {"gpt-5.5", "gpt-5.5-mini"}
         if speed_targets:
             expected_identifiers.update({"gpt-6-astra", "gpt-5.6-sol"})
@@ -157,15 +183,9 @@ def _setup_profile_agent(
         message="Deterministic catalog entries did not become readable",
     )
     assert entries is not None
-    by_identifier = {
-        _string(
-            entry.get("provider_model_identifier"),
-            label="provider model identifier",
-        ): entry
-        for entry in entries
-    }
-    assert by_identifier["gpt-5.5"].get("supported_execution_options") == ["fast"]
-    assert by_identifier["gpt-5.5-mini"].get("supported_execution_options") == []
+    by_identifier = {entry.provider_model_identifier: entry for entry in entries}
+    assert by_identifier["gpt-5.5"].supported_execution_options == ["fast"]
+    assert by_identifier["gpt-5.5-mini"].supported_execution_options == []
 
     def selection(identifier: str) -> dict[str, str]:
         return {
@@ -179,71 +199,51 @@ def _setup_profile_agent(
         workspace_handle=handle,
         provider_id="system-docker",
     )
-    agent_payload: dict[str, object] = {
-        "name": "Per Prompt Profile QA Agent",
-        "type": "public",
-        "selectable_model_options": [
-            {
-                "label": "Quality",
-                "candidates": [
-                    {
-                        "model_selection": selection(
-                            _string(
-                                by_identifier["gpt-5.5"].get(
-                                    "provider_model_identifier"
-                                ),
-                                label="Quality provider model identifier",
-                            )
-                        ),
-                        "settings": {
-                            "context_window_tokens": 96_000,
-                            "max_output_tokens": 12_000,
-                            "builtin_tools": [
-                                {"name": "web_search"},
-                                {"name": "image_generation"},
-                            ],
-                        },
-                    }
-                ],
-                "subagent_enabled": False,
-                "subagent_guidance": "Reserve for complex synthesis.",
-            },
-            {
-                "label": "Fast",
-                "candidates": [
-                    {
-                        "model_selection": selection(
-                            _string(
-                                by_identifier["gpt-5.5-mini"].get(
-                                    "provider_model_identifier"
-                                ),
-                                label="Fast provider model identifier",
-                            )
-                        ),
-                        "settings": {
-                            "context_window_tokens": 32_000,
-                            "max_output_tokens": 4_000,
-                            "builtin_tools": [],
-                        },
-                    }
-                ],
-                "subagent_enabled": True,
-                "subagent_guidance": "Prefer for bounded investigation.",
-            },
-        ],
-        "main_model_label": "Quality",
-        "lightweight_model_label": "Fast",
-        "runtime_profile_id": runtime_profile_id,
-    }
+    options: list[dict[str, object]] = [
+        {
+            "label": "Quality",
+            "candidates": [
+                {
+                    "model_selection": selection(
+                        by_identifier["gpt-5.5"].provider_model_identifier
+                    ),
+                    "settings": {
+                        "context_window_tokens": 96_000,
+                        "max_output_tokens": 12_000,
+                        "builtin_tools": [
+                            {"name": "web_search"},
+                            {"name": "image_generation"},
+                        ],
+                    },
+                }
+            ],
+            "subagent_enabled": False,
+            "subagent_guidance": "Reserve for complex synthesis.",
+        },
+        {
+            "label": "Fast",
+            "candidates": [
+                {
+                    "model_selection": selection(
+                        by_identifier["gpt-5.5-mini"].provider_model_identifier
+                    ),
+                    "settings": {
+                        "context_window_tokens": 32_000,
+                        "max_output_tokens": 4_000,
+                        "builtin_tools": [],
+                    },
+                }
+            ],
+            "subagent_enabled": True,
+            "subagent_guidance": "Prefer for bounded investigation.",
+        },
+    ]
     if speed_targets:
-        options = _objects(
-            agent_payload["selectable_model_options"], label="Agent model options"
-        )
         for label, identifier in (
             ("Astra", "gpt-6-astra"),
             ("Sol", "gpt-5.6-sol"),
         ):
-            assert by_identifier[identifier].get("supported_execution_options") == [
+            assert by_identifier[identifier].supported_execution_options == [
                 "fast",
                 "ultrafast",
             ]
@@ -263,85 +263,65 @@ def _setup_profile_agent(
                     "subagent_enabled": True,
                 }
             )
-        agent_payload["selectable_model_options"] = options
-    created = _response_object(
+    agent_payload: dict[str, object] = {
+        "name": "Per Prompt Profile QA Agent",
+        "type": "public",
+        "selectable_model_options": options,
+        "main_model_label": "Quality",
+        "lightweight_model_label": "Fast",
+        "runtime_profile_id": runtime_profile_id,
+    }
+    created = _response_model(
         requests.post(
             f"{server_url}/agent/v1/workspaces/{handle}/agents",
             headers={**_headers(token), "Content-Type": "application/json"},
             json=agent_payload,
             timeout=10,
-        )
+        ),
+        AgentResponse,
     )
-    agent_id = created.get("id")
-    if not isinstance(agent_id, str):
-        raise AssertionError(f"Agent response did not include id: {created!r}")
+    agent_id = created.id
     created_options = {
-        _string(option.get("label"), label="selectable model label"): option
-        for option in _objects(
-            created.get("selectable_model_options"),
-            label="created selectable model options",
-        )
+        option.label: option for option in created.selectable_model_options
     }
-    quality_candidates = _objects(
-        created_options["Quality"].get("candidates"),
-        label="Quality candidates",
-    )
-    quality_selection = _object(
-        quality_candidates[0].get("model_selection"),
-        label="Quality model selection",
-    )
-    assert quality_selection.get("supported_execution_options") == ["fast"]
-    quality_definitions = _objects(
-        created_options["Quality"].get("execution_option_definitions"),
-        label="Quality execution option definitions",
-    )
+    quality_selection = created_options["Quality"].candidates[0].model_selection
+    assert quality_selection.supported_execution_options == ["fast"]
+    quality_definitions = created_options["Quality"].execution_option_definitions
     assert len(quality_definitions) == 1
     quality_definition = quality_definitions[0]
-    assert quality_definition.get("id") == "fast"
-    assert quality_definition.get("control") == "boolean"
-    assert _string(quality_definition.get("label"), label="option label")
-    assert _string(quality_definition.get("description"), label="option description")
-    assert _string(quality_definition.get("cost_hint"), label="option cost hint")
-    fast_candidates = _objects(
-        created_options["Fast"].get("candidates"),
-        label="Fast candidates",
-    )
-    fast_selection = _object(
-        fast_candidates[0].get("model_selection"),
-        label="Fast model selection",
-    )
-    assert fast_selection.get("supported_execution_options") == []
-    assert created_options["Fast"].get("execution_option_definitions") == []
+    assert quality_definition.id == "fast"
+    assert quality_definition.control == "boolean"
+    assert quality_definition.label
+    assert quality_definition.description
+    assert quality_definition.cost_hint
+    fast_selection = created_options["Fast"].candidates[0].model_selection
+    assert fast_selection.supported_execution_options == []
+    assert created_options["Fast"].execution_option_definitions == []
     if speed_targets:
         for label in ("Astra", "Sol"):
-            definitions = _objects(
-                created_options[label].get("execution_option_definitions"),
-                label=f"{label} execution option definitions",
-            )
-            assert {definition["id"] for definition in definitions} == {
+            definitions = created_options[label].execution_option_definitions
+            assert {definition.id for definition in definitions} == {
                 "fast",
                 "ultrafast",
             }
             for definition in definitions:
-                assert definition["exclusive_group"] == "processing_speed"
-                assert _string(definition.get("cost_hint"), label="option cost hint")
+                assert definition.exclusive_group == "processing_speed"
+                assert definition.cost_hint
     start_and_wait_for_agent_runtime(
         public_api_client,
         token=token,
         workspace_handle=handle,
         agent_id=agent_id,
     )
-    session = _response_object(
+    session = _response_model(
         requests.get(
             f"{server_url}/chat/v1/agents/{agent_id}/team-primary-session",
             headers=_headers(token),
             timeout=10,
-        )
+        ),
+        AgentSessionResponse,
     )
-    session_id = session.get("id")
-    if not isinstance(session_id, str):
-        raise AssertionError(f"Session response did not include id: {session!r}")
-    return ProfileAgentSetup(token, agent_id, session_id)
+    return ProfileAgentSetup(token, agent_id, session.id)
 
 
 def _create_profile_session(
@@ -357,11 +337,7 @@ def _create_profile_session(
         json={"existing_project_paths": [], "setup_actions": []},
         timeout=10,
     )
-    session = _response_object(response)
-    session_id = session.get("id")
-    if not isinstance(session_id, str):
-        raise AssertionError(f"Session response did not include id: {session!r}")
-    return session_id
+    return _response_model(response, AgentSessionResponse).id
 
 
 def _write_profile(
@@ -435,7 +411,7 @@ def _wait_for_session_idle(
     agent_id: str,
     session_id: str,
     timeout: float = 120,
-) -> dict[str, object]:
+) -> AgentSessionResponse:
     """Wait for idle and return the authoritative session projection."""
     deadline = time.monotonic() + timeout
     last_state: object = None
@@ -445,15 +421,15 @@ def _wait_for_session_idle(
             headers=_headers(token),
             timeout=10,
         )
-        payload = _response_object(response)
-        last_state = payload.get("run_state")
+        payload = _response_model(response, AgentSessionResponse)
+        last_state = payload.run_state
         if last_state == "idle":
             return payload
         time.sleep(0.5)
     raise TimeoutError(f"Session did not become idle: {last_state!r}")
 
 
-def _wait_for_session_profile(
+def _typed_wait_for_session_profile(
     *,
     server_url: str,
     token: str,
@@ -463,7 +439,7 @@ def _wait_for_session_profile(
     effort: str | None,
     enabled_execution_options: list[str],
     timeout: float = 120,
-) -> dict[str, object]:
+) -> AgentSessionResponse:
     """Wait for the authoritative session projection to persist a profile."""
     deadline = time.monotonic() + timeout
     last_profile: tuple[object, object, object] = (None, None, None)
@@ -473,11 +449,11 @@ def _wait_for_session_profile(
             headers=_headers(token),
             timeout=10,
         )
-        payload = _response_object(response)
+        payload = _response_model(response, AgentSessionResponse)
         last_profile = (
-            payload.get("current_model_target_label"),
-            payload.get("current_reasoning_effort"),
-            payload.get("current_enabled_execution_options"),
+            payload.current_model_target_label,
+            payload.current_reasoning_effort,
+            payload.current_enabled_execution_options,
         )
         if last_profile == (target, effort, enabled_execution_options):
             return payload
@@ -485,14 +461,31 @@ def _wait_for_session_profile(
     raise TimeoutError(f"Session did not persist profile: {last_profile!r}")
 
 
-def _history(server_url: str, token: str, session_id: str) -> list[dict[str, object]]:
+def _typed_history(
+    server_url: str, token: str, session_id: str
+) -> list[ChatEventResponse]:
     """Fetch the current history page."""
     response = requests.get(
         f"{server_url}/chat/v1/sessions/{session_id}/history?limit=100",
         headers=_headers(token),
         timeout=10,
     )
-    return _objects(_response_object(response).get("items"), label="history items")
+    response.raise_for_status()
+    return decode_profile_history(response.json()).items
+
+
+def _serialized_history(events: list[ChatEventResponse]) -> str:
+    """Serialize opaque event content for product-output evidence."""
+    return json.dumps([profile_history_event_wire(event) for event in events])
+
+
+def _requested_profile(event: ChatEventResponse) -> RequestedProfileObservation:
+    """Require the prepared input profile consumed by the journey."""
+    profile = InputMessageObservation.model_validate(
+        event.payload
+    ).requested_inference_profile
+    assert profile is not None
+    return profile
 
 
 def _wait_for_tool_result(
@@ -502,56 +495,56 @@ def _wait_for_tool_result(
     session_id: str,
     call_id: str,
     timeout: float = 120,
-) -> dict[str, object]:
+) -> ToolResultObservation:
     """Wait until a tool call has produced a persisted result."""
     deadline = time.monotonic() + timeout
     last_kinds: list[object] = []
     while time.monotonic() < deadline:
-        events = _history(server_url, token, session_id)
-        last_kinds = [event.get("kind") for event in events]
+        events = _typed_history(server_url, token, session_id)
+        last_kinds = [event.kind for event in events]
         for event in events:
-            if event.get("kind") != "client_tool_result":
+            if event.kind != "client_tool_result":
                 continue
-            payload = _object(event.get("payload"), label="tool result payload")
-            if payload.get("call_id") == call_id:
+            payload = ToolResultObservation.model_validate(event.payload)
+            if payload.call_id == call_id:
                 return payload
         time.sleep(0.5)
     raise TimeoutError(f"Tool result was not observed: {call_id}, {last_kinds!r}")
 
 
 def _input_event(
-    events: list[dict[str, object]], message: str
-) -> dict[str, object] | None:
+    events: list[ChatEventResponse], message: str
+) -> ChatEventResponse | None:
     """Find a user or agent input event by content."""
     for event in events:
-        if event.get("kind") not in {"user_message", "agent_message"}:
+        if event.kind not in {"user_message", "agent_message"}:
             continue
-        payload = _object(event.get("payload"), label="input event payload")
-        if payload.get("content") == message:
+        payload = InputMessageObservation.model_validate(event.payload)
+        if payload.content == message:
             return event
     return None
 
 
-def _wait_for_input_event(
+def _typed_wait_for_input_event(
     *,
     server_url: str,
     token: str,
     session_id: str,
     message: str,
     timeout: float = 120,
-) -> dict[str, object]:
+) -> ChatEventResponse:
     """Wait for a durable input event without event-level run provenance."""
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        event = _input_event(_history(server_url, token, session_id), message)
+        event = _input_event(_typed_history(server_url, token, session_id), message)
         if event is not None:
-            assert "inference_run_summary" not in event
+            assert "inference_run_summary" not in event.additional_properties
             return event
         time.sleep(0.5)
     raise TimeoutError(f"Input event was not observed: {message!r}")
 
 
-def _wait_for_turn_provenance(
+def _typed_wait_for_turn_provenance(
     *,
     server_url: str,
     token: str,
@@ -562,40 +555,38 @@ def _wait_for_turn_provenance(
     display_name: str,
     effective_context_window_tokens: int,
     timeout: float = 120,
-) -> dict[str, object]:
+) -> TurnMarkerObservation:
     """Wait for a durable turn marker with the exact public provenance."""
     deadline = time.monotonic() + timeout
     last_profiles: list[object] = []
     while time.monotonic() < deadline:
         last_profiles = []
-        for event in _history(server_url, token, session_id):
-            if event.get("kind") != "turn_marker":
+        for event in _typed_history(server_url, token, session_id):
+            if event.kind != "turn_marker":
                 continue
-            payload = _object(event.get("payload"), label="turn marker payload")
-            profile_value = payload.get("applied_inference_profile")
-            try:
-                profile = _JSON_OBJECT.validate_python(profile_value)
-            except ValidationError:
-                last_profiles.append(profile_value)
+            payload = TurnMarkerObservation.model_validate(event.payload)
+            profile = payload.applied_inference_profile
+            if profile is None:
+                last_profiles.append(None)
                 continue
             last_profiles.append(profile)
             if (
-                profile.get("model_target_label") != target
-                or profile.get("reasoning_effort") != effort
-                or profile.get("enabled_execution_options") != enabled_execution_options
+                profile.model_target_label != target
+                or profile.reasoning_effort != effort
+                or profile.enabled_execution_options != enabled_execution_options
             ):
                 continue
-            assert profile.get("model_display_name") == display_name
+            assert profile.model_display_name == display_name
             assert (
-                payload.get("effective_context_window_tokens")
+                payload.effective_context_window_tokens
                 == effective_context_window_tokens
             )
-            assert payload.get("effective_auto_compaction_threshold_tokens") == int(
+            assert payload.effective_auto_compaction_threshold_tokens == int(
                 effective_context_window_tokens * 0.9
             )
-            assert "provider" not in payload
-            assert "model_selection" not in payload
-            assert "credential_kwargs" not in payload
+            assert "provider" not in (payload.model_extra or {})
+            assert "model_selection" not in (payload.model_extra or {})
+            assert "credential_kwargs" not in (payload.model_extra or {})
             return payload
         time.sleep(0.5)
     raise TimeoutError(
@@ -607,11 +598,17 @@ def _wait_for_mock_models(mock_openai_url: str, *model_ids: str) -> str:
     """Wait until the mock provider journal contains every expected model."""
 
     def complete_journal() -> str | None:
-        journal = json.dumps(
-            requests.get(f"{mock_openai_url}/v1/_requests", timeout=10).json()
-        )
-        if all(model_id in journal for model_id in model_ids):
-            return journal
+        response = requests.get(f"{mock_openai_url}/v1/_requests", timeout=10)
+        response.raise_for_status()
+        requests_seen = decode_mock_profile_journal(response.json())
+        identifiers = {request.body.model for request in requests_seen}
+        if all(model_id in identifiers for model_id in model_ids):
+            return json.dumps(
+                [
+                    request.model_dump(mode="json", exclude_unset=True)
+                    for request in requests_seen
+                ]
+            )
         return None
 
     journal = wait_until(
@@ -638,11 +635,11 @@ def _wait_for_mock_model_output_cap(
         response = requests.get(f"{mock_openai_url}/v1/_requests", timeout=10)
         response.raise_for_status()
         last_payload = response.json()
-        for item in _objects(last_payload, label="mock request journal"):
-            body = _object(item.get("body"), label="mock request body")
-            if body.get("model") != model_id:
+        for item in decode_mock_profile_journal(last_payload):
+            body = item.body
+            if body.model != model_id:
                 continue
-            if body.get("max_tokens") == max_output_tokens:
+            if body.max_tokens == max_output_tokens:
                 return
         time.sleep(0.5)
     raise TimeoutError(
@@ -668,15 +665,15 @@ def _wait_for_proxy_service_tier(
         )
         response.raise_for_status()
         last_payload = response.json()
-        for body in _objects(last_payload, label="proxy request journal"):
-            if body.get("model") != model_id:
+        for body in decode_profile_provider_journal(last_payload):
+            if body.model != model_id:
                 continue
-            if message not in json.dumps(body, ensure_ascii=False):
+            if message not in body.serialized():
                 continue
             if expected_tier is None:
-                assert "service_tier" not in body
+                assert "service_tier" not in body.model_fields_set
             else:
-                assert body.get("service_tier") == expected_tier
+                assert body.service_tier == expected_tier
             return
         time.sleep(0.5)
     raise TimeoutError(
@@ -691,19 +688,18 @@ def _wait_for_matching_proxy_requests(
     message: str,
     model_id: str,
     minimum_count: int,
-) -> list[dict[str, object]]:
+) -> list[ProfileProviderRequestObservation]:
     """Wait for an authoritative number of matching raw provider requests."""
 
-    def matching_requests() -> list[dict[str, object]] | None:
+    def matching_requests() -> list[ProfileProviderRequestObservation] | None:
         response = requests.get(
             f"{openai_proxy_url}/v1/_image_generation_requests", timeout=10
         )
         response.raise_for_status()
         matches = [
             body
-            for body in _objects(response.json(), label="proxy request journal")
-            if body.get("model") == model_id
-            and message in json.dumps(body, ensure_ascii=False)
+            for body in decode_profile_provider_journal(response.json())
+            if body.model == model_id and message in body.serialized()
         ]
         return matches if len(matches) >= minimum_count else None
 
@@ -723,27 +719,28 @@ def _subagent_tree(
     token: str,
     agent_id: str,
     session_id: str,
-) -> dict[str, object]:
+) -> SubagentTreeResponse:
     """Fetch the public Subagent Tree projection."""
-    return _response_object(
+    return _response_model(
         requests.get(
             f"{server_url}/chat/v1/agents/{agent_id}/sessions/{session_id}/subagents/tree",
             headers=_headers(token),
             timeout=10,
-        )
+        ),
+        SubagentTreeResponse,
     )
 
 
 def _find_tree_node(
-    nodes: list[dict[str, object]],
+    nodes: list[SubagentTreeNodeResponse],
     name: str,
-) -> dict[str, object] | None:
-    """Find a named node in a raw Subagent Tree."""
+) -> SubagentTreeNodeResponse | None:
+    """Find a named node in the recursive public Subagent Tree."""
     for node in nodes:
-        if node.get("name") == name:
+        if node.name == name:
             return node
         child = _find_tree_node(
-            _objects(node.get("children"), label="tree children"),
+            node.children or [],
             name,
         )
         if child is not None:
@@ -759,10 +756,10 @@ def _wait_for_tree_node(
     root_session_id: str,
     name: str,
     timeout: float = 120,
-) -> dict[str, object]:
+) -> SubagentTreeNodeResponse:
     """Wait for a named Subagent Tree node."""
     deadline = time.monotonic() + timeout
-    last_tree: dict[str, object] | None = None
+    last_tree: SubagentTreeResponse | None = None
     while time.monotonic() < deadline:
         last_tree = _subagent_tree(
             server_url=server_url,
@@ -771,28 +768,120 @@ def _wait_for_tree_node(
             session_id=root_session_id,
         )
         node = _find_tree_node(
-            _objects(last_tree.get("nodes"), label="tree nodes"),
+            last_tree.nodes,
             name,
         )
-        if node is not None and node.get("status") == "completed":
+        if node is not None and node.status == "completed":
             return node
         time.sleep(0.5)
     raise TimeoutError(f"Subagent Tree node did not complete: {name}, {last_tree!r}")
 
 
-def _tree_names(tree: dict[str, object]) -> set[str]:
-    """Collect all names in a raw Subagent Tree."""
+def _tree_names(tree: SubagentTreeResponse) -> set[str]:
+    """Collect declared names in a public Subagent Tree."""
     names: set[str] = set()
 
-    def collect(nodes: list[dict[str, object]]) -> None:
+    def collect(nodes: list[SubagentTreeNodeResponse]) -> None:
         for node in nodes:
-            name = node.get("name")
-            if isinstance(name, str):
-                names.add(name)
-            collect(_objects(node.get("children"), label="tree children"))
+            names.add(node.name)
+            collect(node.children or [])
 
-    collect(_objects(tree.get("nodes"), label="tree nodes"))
+    collect(tree.nodes)
     return names
+
+
+# Raw compatibility adapters are egress boundaries for adjacent, out-of-scope
+# E2E modules. The profile journeys above/below use the typed helpers directly.
+def _objects(value: object, *, label: str) -> list[dict[str, object]]:
+    """Preserve the legacy adjacent-module JSON-list boundary."""
+    try:
+        return _LEGACY_OBJECT_LIST.validate_python(value)
+    except ValidationError as error:
+        raise AssertionError(f"{label} is not an object list: {value!r}") from error
+
+
+def _response_object(response: requests.Response) -> dict[str, object]:
+    """Preserve the legacy adjacent-module raw HTTP observation boundary."""
+    response.raise_for_status()
+    return _object(response.json(), label="HTTP response")
+
+
+def _history(server_url: str, token: str, session_id: str) -> list[dict[str, object]]:
+    """Serialize typed history for existing adjacent-module wire consumers."""
+    return [
+        profile_history_event_wire(event)
+        for event in _typed_history(server_url, token, session_id)
+    ]
+
+
+def _wait_for_session_profile(
+    *,
+    server_url: str,
+    token: str,
+    agent_id: str,
+    session_id: str,
+    target: str,
+    effort: str | None,
+    enabled_execution_options: list[str],
+    timeout: float = 120,
+) -> dict[str, object]:
+    """Serialize authoritative typed Session evidence for legacy callers."""
+    return _typed_wait_for_session_profile(
+        server_url=server_url,
+        token=token,
+        agent_id=agent_id,
+        session_id=session_id,
+        target=target,
+        effort=effort,
+        enabled_execution_options=enabled_execution_options,
+        timeout=timeout,
+    ).model_dump(mode="json", exclude_unset=True)
+
+
+def _wait_for_input_event(
+    *,
+    server_url: str,
+    token: str,
+    session_id: str,
+    message: str,
+    timeout: float = 120,
+) -> dict[str, object]:
+    """Serialize a selected typed input event for legacy wire callers."""
+    return profile_history_event_wire(
+        _typed_wait_for_input_event(
+            server_url=server_url,
+            token=token,
+            session_id=session_id,
+            message=message,
+            timeout=timeout,
+        )
+    )
+
+
+def _wait_for_turn_provenance(
+    *,
+    server_url: str,
+    token: str,
+    session_id: str,
+    target: str,
+    effort: str | None,
+    enabled_execution_options: list[str],
+    display_name: str,
+    effective_context_window_tokens: int,
+    timeout: float = 120,
+) -> dict[str, object]:
+    """Serialize typed turn evidence for adjacent existing wire assertions."""
+    return _typed_wait_for_turn_provenance(
+        server_url=server_url,
+        token=token,
+        session_id=session_id,
+        target=target,
+        effort=effort,
+        enabled_execution_options=enabled_execution_options,
+        display_name=display_name,
+        effective_context_window_tokens=effective_context_window_tokens,
+        timeout=timeout,
+    ).model_dump(mode="json", exclude_unset=True)
 
 
 # Shared public-path helper used by provider-tool lifecycle E2E coverage.
@@ -865,22 +954,18 @@ class TestPerPromptInferenceProfile:
             effort="xhigh",
             enabled_execution_options=["fast"],
         )
-        quality_event = _wait_for_input_event(
+        quality_event = _typed_wait_for_input_event(
             server_url=azents_public_server_url,
             token=token,
             session_id=session_id,
             message=_QUALITY_MESSAGE,
         )
-        quality_payload = _object(
-            quality_event.get("payload"),
-            label="quality input payload",
-        )
-        assert quality_payload.get("requested_inference_profile") == {
+        assert _requested_profile(quality_event).model_dump(exclude_unset=True) == {
             "model_target_label": "Quality",
             "reasoning_effort": "xhigh",
             "enabled_execution_options": ["fast"],
         }
-        _wait_for_turn_provenance(
+        _typed_wait_for_turn_provenance(
             server_url=azents_public_server_url,
             token=token,
             session_id=session_id,
@@ -901,22 +986,18 @@ class TestPerPromptInferenceProfile:
             effort="high",
             enabled_execution_options=[],
         )
-        standard_event = _wait_for_input_event(
+        standard_event = _typed_wait_for_input_event(
             server_url=azents_public_server_url,
             token=token,
             session_id=session_id,
             message=_QUALITY_STANDARD_MESSAGE,
         )
-        standard_payload = _object(
-            standard_event.get("payload"),
-            label="standard input payload",
-        )
-        assert standard_payload.get("requested_inference_profile") == {
+        assert _requested_profile(standard_event).model_dump(exclude_unset=True) == {
             "model_target_label": "Quality",
             "reasoning_effort": "high",
             "enabled_execution_options": [],
         }
-        _wait_for_turn_provenance(
+        _typed_wait_for_turn_provenance(
             server_url=azents_public_server_url,
             token=token,
             session_id=session_id,
@@ -937,22 +1018,18 @@ class TestPerPromptInferenceProfile:
             effort=None,
             enabled_execution_options=[],
         )
-        fast_event = _wait_for_input_event(
+        fast_event = _typed_wait_for_input_event(
             server_url=azents_public_server_url,
             token=token,
             session_id=session_id,
             message=_FAST_MESSAGE,
         )
-        fast_payload = _object(
-            fast_event.get("payload"),
-            label="fast input payload",
-        )
-        assert fast_payload.get("requested_inference_profile") == {
+        assert _requested_profile(fast_event).model_dump(exclude_unset=True) == {
             "model_target_label": "Fast",
             "reasoning_effort": None,
             "enabled_execution_options": [],
         }
-        _wait_for_turn_provenance(
+        _typed_wait_for_turn_provenance(
             server_url=azents_public_server_url,
             token=token,
             session_id=session_id,
@@ -1007,7 +1084,7 @@ class TestPerPromptInferenceProfile:
         )
         assert (
             _input_event(
-                _history(azents_public_server_url, token, session_id),
+                _typed_history(azents_public_server_url, token, session_id),
                 unsupported_message,
             )
             is None
@@ -1026,7 +1103,7 @@ class TestPerPromptInferenceProfile:
         )
         assert (
             _input_event(
-                _history(azents_public_server_url, token, session_id),
+                _typed_history(azents_public_server_url, token, session_id),
                 unsupported_option_message,
             )
             is None
@@ -1037,8 +1114,8 @@ class TestPerPromptInferenceProfile:
             agent_id=agent_id,
             session_id=session_id,
         )
-        assert session["current_model_target_label"] == "Fast"
-        assert session["current_reasoning_effort"] is None
+        assert session.current_model_target_label == "Fast"
+        assert session.current_reasoning_effort is None
 
     def test_retry_preserves_prepared_fast_option(
         self,
@@ -1085,8 +1162,8 @@ class TestPerPromptInferenceProfile:
         )
         assert len(requests_) >= 2
         for body in requests_:
-            assert body.get("model") == "gpt-5.5"
-            assert body.get("service_tier") == "priority"
+            assert body.model == "gpt-5.5"
+            assert body.service_tier == "priority"
 
     @pytest.mark.parametrize(
         ("target", "model_id", "display_name", "scenario", "options", "tier", "priced"),
@@ -1167,15 +1244,13 @@ class TestPerPromptInferenceProfile:
             effort="high",
             enabled_execution_options=options,
         )
-        event = _wait_for_input_event(
+        event = _typed_wait_for_input_event(
             server_url=azents_public_server_url,
             token=token,
             session_id=session_id,
             message=message,
         )
-        assert _object(event["payload"], label="input payload")[
-            "requested_inference_profile"
-        ] == {
+        assert _requested_profile(event).model_dump(exclude_unset=True) == {
             "model_target_label": target,
             "reasoning_effort": "high",
             "enabled_execution_options": options,
@@ -1186,7 +1261,7 @@ class TestPerPromptInferenceProfile:
             model_id=model_id,
             expected_tier=tier,
         )
-        marker = _wait_for_turn_provenance(
+        marker = _typed_wait_for_turn_provenance(
             server_url=azents_public_server_url,
             token=token,
             session_id=session_id,
@@ -1196,27 +1271,28 @@ class TestPerPromptInferenceProfile:
             display_name=display_name,
             effective_context_window_tokens=32_000,
         )
-        usage = _object(marker["usage"], label="turn usage")
-        assert usage["prompt_tokens"] == 1
-        assert usage["completion_tokens"] == 1
+        usage = marker.usage
+        assert usage is not None
+        assert usage.prompt_tokens == 1
+        assert usage.completion_tokens == 1
         if priced:
-            assert isinstance(usage["cost_usd"], (int, float))
-            assert usage["cost_usd"] > 0
+            assert usage.cost_usd is not None
+            assert usage.cost_usd > 0
         else:
             # REST history omits null payload fields; unavailable is not zero.
-            assert usage.get("cost_usd") is None
-        history = _history(azents_public_server_url, token, session_id)
-        assert f"INFERENCE_PROFILE_COMPLETED {scenario}" in json.dumps(history)
-        assert not any(item.get("kind") == "system_error" for item in history)
+            assert usage.cost_usd is None
+        history = _typed_history(azents_public_server_url, token, session_id)
+        assert f"INFERENCE_PROFILE_COMPLETED {scenario}" in _serialized_history(history)
+        assert not any(item.kind == "system_error" for item in history)
         if target == "Astra" and scenario == "served-ultrafast":
 
-            def auxiliary_title_request() -> dict[str, object] | None:
+            def auxiliary_title_request() -> ProfileProviderRequestObservation | None:
                 response = requests.get(
                     f"{openai_proxy_url}/v1/_image_generation_requests", timeout=10
                 )
                 response.raise_for_status()
-                for body in _objects(response.json(), label="provider journal"):
-                    serialized = json.dumps(body)
+                for body in decode_profile_provider_journal(response.json()):
+                    serialized = body.serialized()
                     if (
                         message in serialized
                         and "Create a brief title from the request" in serialized
@@ -1231,7 +1307,7 @@ class TestPerPromptInferenceProfile:
                 message="Independent title request was not observed",
             )
             assert auxiliary is not None
-            assert auxiliary.get("service_tier") not in {"priority", "ultrafast"}
+            assert auxiliary.service_tier not in {"priority", "ultrafast"}
 
     @pytest.mark.parametrize("scenario", ["retry", "rejected"])
     def test_ultrafast_provider_errors_never_downgrade(
@@ -1257,7 +1333,7 @@ class TestPerPromptInferenceProfile:
             effort="high",
             enabled_execution_options=["ultrafast"],
         )
-        _wait_for_input_event(
+        _typed_wait_for_input_event(
             server_url=azents_public_server_url,
             token=token,
             session_id=session_id,
@@ -1270,9 +1346,9 @@ class TestPerPromptInferenceProfile:
             minimum_count=2 if scenario == "retry" else 1,
         )
         for body in matches:
-            assert body["service_tier"] == "ultrafast"
+            assert body.service_tier == "ultrafast"
         if scenario == "retry":
-            _wait_for_turn_provenance(
+            _typed_wait_for_turn_provenance(
                 server_url=azents_public_server_url,
                 token=token,
                 session_id=session_id,
@@ -1284,11 +1360,11 @@ class TestPerPromptInferenceProfile:
             )
         else:
 
-            def failed_history() -> list[dict[str, object]] | None:
-                history = _history(azents_public_server_url, token, session_id)
+            def failed_history() -> list[ChatEventResponse] | None:
+                history = _typed_history(azents_public_server_url, token, session_id)
                 return (
                     history
-                    if any(item.get("kind") == "system_error" for item in history)
+                    if any(item.kind == "system_error" for item in history)
                     else None
                 )
 
@@ -1299,22 +1375,21 @@ class TestPerPromptInferenceProfile:
                 message="Provider entitlement rejection did not become visible",
             )
             assert history is not None
-            assert "INFERENCE_PROFILE_COMPLETED" not in json.dumps(history)
-        journal = _objects(
+            assert "INFERENCE_PROFILE_COMPLETED" not in _serialized_history(history)
+        journal = decode_profile_provider_journal(
             requests.get(
                 f"{openai_proxy_url}/v1/_image_generation_requests", timeout=10
             ).json(),
-            label="provider journal",
         )
         matching = [
             body
             for body in journal
-            if message in json.dumps(body)
-            and "Create a brief title from the request" not in json.dumps(body)
+            if message in body.serialized()
+            and "Create a brief title from the request" not in body.serialized()
         ]
         assert matching
-        assert all(body.get("model") == "gpt-6-astra" for body in matching)
-        assert all(body.get("service_tier") == "ultrafast" for body in matching)
+        assert all(body.model == "gpt-6-astra" for body in matching)
+        assert all(body.service_tier == "ultrafast" for body in matching)
 
     def test_prepared_ultrafast_is_immutable_while_standard_input_queues(
         self,
@@ -1345,7 +1420,11 @@ class TestPerPromptInferenceProfile:
                 enabled_execution_options=["ultrafast"],
             )
             wait_until(
-                lambda: requests.get(barrier_url, timeout=10).json()["reached"],
+                lambda: (
+                    _response_model(
+                        requests.get(barrier_url, timeout=10), ProfileBarrierObservation
+                    ).reached
+                ),
                 timeout=30,
                 interval=0.1,
                 message="Prepared provider request did not reach the barrier",
@@ -1369,7 +1448,7 @@ class TestPerPromptInferenceProfile:
         finally:
             requests.post(f"{barrier_url}/release", timeout=10).raise_for_status()
         for options in (["ultrafast"], []):
-            _wait_for_turn_provenance(
+            _typed_wait_for_turn_provenance(
                 server_url=azents_public_server_url,
                 token=token,
                 session_id=session_id,
@@ -1385,49 +1464,6 @@ class TestPerPromptInferenceProfile:
             model_id="gpt-6-astra",
             expected_tier="default",
         )
-
-    @pytest.mark.parametrize(
-        "options",
-        [
-            ["fast", "ultrafast"],
-            ["ultrafast", "fast"],
-            ["ultrafast", "ultrafast"],
-            ["unknown-speed"],
-        ],
-    )
-    def test_invalid_speed_submit_is_atomic(
-        self,
-        azents_public_server_url: str,
-        openai_proxy_url: str,
-        profile_agent_setup: ProfileAgentSetup,
-        options: list[str],
-    ) -> None:
-        """Reject forged option lists before input persistence or provider dispatch."""
-        token, agent_id, _ = profile_agent_setup
-        session_id = _create_profile_session(
-            server_url=azents_public_server_url, token=token, agent_id=agent_id
-        )
-        journal_url = f"{openai_proxy_url}/v1/_image_generation_requests"
-        before_journal = requests.get(journal_url, timeout=10).json()
-        before_history = _history(azents_public_server_url, token, session_id)
-        response = requests.post(
-            f"{azents_public_server_url}/chat/v1/sessions/{session_id}/inputs",
-            headers=_headers(token),
-            json={
-                "agent_id": agent_id,
-                "client_request_id": unique(),
-                "message": f"Ultrafast E2E served-ultrafast invalid {unique()}",
-                "inference_profile": {
-                    "model_target_label": "Astra",
-                    "reasoning_effort": "high",
-                    "enabled_execution_options": options,
-                },
-            },
-            timeout=10,
-        )
-        assert response.status_code == 422, response.text
-        assert _history(azents_public_server_url, token, session_id) == before_history
-        assert requests.get(journal_url, timeout=10).json() == before_journal
 
     def test_subagent_spawn_override_continuation(
         self,
@@ -1459,16 +1495,16 @@ class TestPerPromptInferenceProfile:
             root_session_id=root_session_id,
             name="profile_child",
         )
-        child_session_id = child.get("agent_session_id")
+        child_session_id = child.agent_session_id
         if not isinstance(child_session_id, str):
             raise AssertionError(f"Child node has no AgentSession ID: {child!r}")
-        _wait_for_input_event(
+        _typed_wait_for_input_event(
             server_url=azents_public_server_url,
             token=token,
             session_id=child_session_id,
             message=_SPAWN_OVERRIDE_TASK,
         )
-        _wait_for_session_profile(
+        _typed_wait_for_session_profile(
             server_url=azents_public_server_url,
             token=token,
             agent_id=agent_id,
@@ -1477,7 +1513,7 @@ class TestPerPromptInferenceProfile:
             effort=None,
             enabled_execution_options=[],
         )
-        _wait_for_input_event(
+        _typed_wait_for_input_event(
             server_url=azents_public_server_url,
             token=token,
             session_id=root_session_id,
@@ -1500,13 +1536,13 @@ class TestPerPromptInferenceProfile:
             effort="high",
             enabled_execution_options=[],
         )
-        _wait_for_input_event(
+        _typed_wait_for_input_event(
             server_url=azents_public_server_url,
             token=token,
             session_id=child_session_id,
             message=_FOLLOWUP_TASK,
         )
-        _wait_for_session_profile(
+        _typed_wait_for_session_profile(
             server_url=azents_public_server_url,
             token=token,
             agent_id=agent_id,
@@ -1574,7 +1610,7 @@ class TestPerPromptInferenceProfile:
             session_id=root_session_id,
             call_id=call_id,
         )
-        assert tool_result.get("status") == "completed", tool_result
+        assert tool_result.status == "completed", tool_result
         child = _wait_for_tree_node(
             server_url=azents_public_server_url,
             token=token,
@@ -1582,16 +1618,16 @@ class TestPerPromptInferenceProfile:
             root_session_id=root_session_id,
             name=child_name,
         )
-        child_session_id = child.get("agent_session_id")
+        child_session_id = child.agent_session_id
         if not isinstance(child_session_id, str):
             raise AssertionError(f"Child node has no AgentSession ID: {child!r}")
-        _wait_for_input_event(
+        _typed_wait_for_input_event(
             server_url=azents_public_server_url,
             token=token,
             session_id=child_session_id,
             message=task,
         )
-        _wait_for_session_profile(
+        _typed_wait_for_session_profile(
             server_url=azents_public_server_url,
             token=token,
             agent_id=agent_id,
@@ -1681,7 +1717,7 @@ class TestModelSupportContract:
                 timeout=10,
             )
             control.raise_for_status()
-            assert _response_object(control) == {"variant": variant}
+            assert _response_model(control, CatalogSourceObservation).variant == variant
             refreshed = catalog_api.model_catalog_v1_refresh_system_model_catalog(
                 provider=SystemCatalogProvider.OPENAI,
                 _request_timeout=20,
@@ -1689,30 +1725,24 @@ class TestModelSupportContract:
             assert refreshed.snapshot_id is not None
 
         def primary_selection(
-            response: dict[str, object], *, field: str
-        ) -> dict[str, object]:
-            options = _objects(response.get(field), label=field)
-            quality = next(
-                option for option in options if option.get("label") == "Quality"
-            )
-            candidates = _objects(quality.get("candidates"), label="Quality candidates")
-            return _object(
-                candidates[0].get("model_selection"), label="saved selection"
-            )
+            options: list[SelectableModelOptionResponse]
+            | list[SelectableModelOption]
+            | None,
+        ) -> AgentModelSelection:
+            assert options is not None
+            quality = next(option for option in options if option.label == "Quality")
+            return quality.candidates[0].model_selection
 
-        def contract(capabilities: object) -> dict[str, object]:
-            normalized = _object(capabilities, label="normalized capabilities")
-            descriptor = _object(
-                normalized.get("semantic_contract"), label="saved semantic contract"
-            )
-            assert descriptor.get("version") == 2
+        def contract(capabilities: ModelCapabilities | None) -> ModelCapabilityContract:
+            assert capabilities is not None
+            descriptor = capabilities.semantic_contract
+            assert descriptor is not None and descriptor.version == 2
             return descriptor
 
-        def effort_state(descriptor: dict[str, object], level: str) -> object:
-            reasoning = _object(descriptor.get("reasoning"), label="reasoning evidence")
-            assert reasoning.get("completeness") == "complete"
-            efforts = _objects(reasoning.get("efforts"), label="effort declarations")
-            return next(item["state"] for item in efforts if item.get("level") == level)
+        def effort_state(descriptor: ModelCapabilityContract, level: str) -> str:
+            reasoning = descriptor.reasoning
+            assert reasoning.completeness == "complete"
+            return next(item.state for item in reasoning.efforts if item.level == level)
 
         try:
             refresh_source("baseline")
@@ -1749,22 +1779,18 @@ class TestModelSupportContract:
                 f"{handle}/llm-provider-integrations/{integration.id}/catalog-entries"
             )
 
-            def entries() -> dict[str, dict[str, object]]:
-                payload = _response_object(
-                    requests.get(catalog_url, headers=_headers(token), timeout=10)
+            def entries() -> dict[str, ModelCatalogEntryResponse]:
+                payload = _response_model(
+                    requests.get(catalog_url, headers=_headers(token), timeout=10),
+                    ModelCatalogEntryListResponse,
                 )
-                assert payload.get("catalog_scope") == "system"
+                assert payload.catalog_scope == "system"
                 return {
-                    _string(
-                        entry.get("provider_model_identifier"), label="model ID"
-                    ): entry
-                    for entry in _objects(
-                        payload.get("entries"), label="catalog entries"
-                    )
+                    entry.provider_model_identifier: entry for entry in payload.entries
                 }
 
             baseline_entry = entries()["gpt-5.5"]
-            baseline_contract = contract(baseline_entry.get("normalized_capabilities"))
+            baseline_contract = contract(baseline_entry.normalized_capabilities)
             assert effort_state(baseline_contract, "max") == "supported"
             assert effort_state(baseline_contract, "xhigh") == "supported"
             selection_input = {
@@ -1792,7 +1818,7 @@ class TestModelSupportContract:
                 f"{azents_public_server_url}/workspace-model-settings/v1/"
                 f"workspaces/{handle}"
             )
-            workspace_settings = _response_object(
+            workspace_settings = _response_model(
                 requests.put(
                     workspace_url,
                     headers=_headers(token),
@@ -1802,12 +1828,13 @@ class TestModelSupportContract:
                         "default_lightweight_model_label": "Quality",
                     },
                     timeout=10,
-                )
+                ),
+                WorkspaceModelSettingsResponse,
             )
             workspace_selection = primary_selection(
-                workspace_settings, field="default_selectable_model_options"
+                workspace_settings.default_selectable_model_options
             )
-            assert contract(workspace_selection.get("normalized_capabilities")) == (
+            assert contract(workspace_selection.normalized_capabilities) == (
                 baseline_contract
             )
             runtime_profile_id = create_workspace_runtime_profile(
@@ -1816,7 +1843,7 @@ class TestModelSupportContract:
                 workspace_handle=handle,
                 provider_id="system-docker",
             )
-            created = _response_object(
+            created = _response_model(
                 requests.post(
                     f"{azents_public_server_url}/agent/v1/workspaces/{handle}/agents",
                     headers=_headers(token),
@@ -1827,23 +1854,20 @@ class TestModelSupportContract:
                         "runtime_profile_id": runtime_profile_id,
                     },
                     timeout=10,
-                )
+                ),
+                AgentResponse,
             )
-            agent_id = _string(created.get("id"), label="Agent ID")
+            agent_id = created.id
             agent_url = (
                 f"{azents_public_server_url}/agent/v1/workspaces/"
                 f"{handle}/agents/{agent_id}"
             )
-            agent_selection = primary_selection(
-                created, field="selectable_model_options"
-            )
-            assert contract(agent_selection.get("normalized_capabilities")) == (
+            agent_selection = primary_selection(created.selectable_model_options)
+            assert contract(agent_selection.normalized_capabilities) == (
                 baseline_contract
             )
-            display_name = _string(
-                agent_selection.get("model_display_name"),
-                label="saved model display name",
-            )
+            display_name = agent_selection.model_display_name
+            assert display_name is not None
             start_and_wait_for_agent_runtime(
                 public_api_client,
                 token=token,
@@ -1852,20 +1876,20 @@ class TestModelSupportContract:
             )
 
             def saved_selections_unchanged() -> None:
-                saved_agent = _response_object(
-                    requests.get(agent_url, headers=_headers(token), timeout=10)
+                saved_agent = _response_model(
+                    requests.get(agent_url, headers=_headers(token), timeout=10),
+                    AgentResponse,
                 )
-                saved_workspace = _response_object(
-                    requests.get(workspace_url, headers=_headers(token), timeout=10)
+                saved_workspace = _response_model(
+                    requests.get(workspace_url, headers=_headers(token), timeout=10),
+                    WorkspaceModelSettingsResponse,
                 )
                 assert (
-                    primary_selection(saved_agent, field="selectable_model_options")
+                    primary_selection(saved_agent.selectable_model_options)
                     == agent_selection
                 )
                 assert (
-                    primary_selection(
-                        saved_workspace, field="default_selectable_model_options"
-                    )
+                    primary_selection(saved_workspace.default_selectable_model_options)
                     == workspace_selection
                 )
 
@@ -1886,7 +1910,9 @@ class TestModelSupportContract:
                     enabled_execution_options=[],
                 )
 
-                def matching_main_requests() -> list[dict[str, object]] | None:
+                def matching_main_requests() -> (
+                    list[ProfileProviderRequestObservation] | None
+                ):
                     response = requests.get(
                         f"{openai_proxy_url}/v1/_image_generation_requests",
                         timeout=10,
@@ -1894,12 +1920,12 @@ class TestModelSupportContract:
                     response.raise_for_status()
                     matches = [
                         body
-                        for body in _objects(
-                            response.json(), label="proxy request journal"
+                        for body in decode_profile_provider_journal(response.json())
+                        if body.model == "gpt-5.5"
+                        and message in body.serialized()
+                        and not is_inference_profile_title_request(
+                            body.model_dump(mode="json", exclude_unset=True)
                         )
-                        if body.get("model") == "gpt-5.5"
-                        and message in json.dumps(body, ensure_ascii=False)
-                        and not is_inference_profile_title_request(body)
                     ]
                     # Count only main calls inside the poll: title may arrive first.
                     return matches if matches else None
@@ -1911,14 +1937,10 @@ class TestModelSupportContract:
                     message="Saved-contract main provider request was not observed",
                 )
                 assert raw_requests is not None
-                assert (
-                    _object(
-                        raw_requests[0].get("reasoning"), label="wire reasoning"
-                    ).get("effort")
-                    == effort
-                )
-                assert raw_requests[0].get("max_output_tokens") == 4_000
-                marker = _wait_for_turn_provenance(
+                reasoning = raw_requests[0].reasoning
+                assert reasoning is not None and reasoning.effort == effort
+                assert raw_requests[0].max_output_tokens == 4_000
+                marker = _typed_wait_for_turn_provenance(
                     server_url=azents_public_server_url,
                     token=token,
                     session_id=session_id,
@@ -1928,16 +1950,15 @@ class TestModelSupportContract:
                     display_name=display_name,
                     effective_context_window_tokens=32_000,
                 )
-                usage = _object(
-                    marker.get("usage"), label="captured-source token usage"
-                )
-                assert usage.get("prompt_tokens") == 1
-                assert usage.get("completion_tokens") == 1
+                usage = marker.usage
+                assert usage is not None
+                assert usage.prompt_tokens == 1
+                assert usage.completion_tokens == 1
                 if expected_cost is None:
                     # Unknown exact-model cost remains unavailable.
-                    assert usage.get("cost_usd") is None
+                    assert usage.cost_usd is None
                 else:
-                    assert usage.get("cost_usd") == pytest.approx(
+                    assert usage.cost_usd == pytest.approx(
                         expected_cost, rel=1e-12, abs=1e-12
                     )
                 _wait_for_session_idle(
@@ -1946,34 +1967,37 @@ class TestModelSupportContract:
                     agent_id=agent_id,
                     session_id=session_id,
                 )
-                assert "INFERENCE_PROFILE_COMPLETED served-default" in json.dumps(
-                    _history(azents_public_server_url, token, session_id)
+                assert (
+                    "INFERENCE_PROFILE_COMPLETED served-default"
+                    in _serialized_history(
+                        _typed_history(azents_public_server_url, token, session_id)
+                    )
                 )
 
             dispatch("max", 0.000003)
             refresh_source("refreshed")
-            refreshed_contract = contract(
-                entries()["gpt-5.5"].get("normalized_capabilities")
-            )
+            refreshed_contract = contract(entries()["gpt-5.5"].normalized_capabilities)
             assert effort_state(refreshed_contract, "max") == "unsupported"
             assert effort_state(refreshed_contract, "xhigh") == "supported"
             saved_selections_unchanged()
             # Normal saves without model selections do not enrich existing snapshots.
-            _response_object(
+            _response_model(
                 requests.patch(
                     agent_url,
                     headers=_headers(token),
                     json={"description": "Keep the saved model support contract"},
                     timeout=10,
-                )
+                ),
+                AgentResponse,
             )
-            _response_object(
+            _response_model(
                 requests.put(
                     workspace_url,
                     headers=_headers(token),
                     json={"default_main_model_label": "Quality"},
                     timeout=10,
-                )
+                ),
+                WorkspaceModelSettingsResponse,
             )
             saved_selections_unchanged()
             dispatch("max", 0.000007)
@@ -1985,31 +2009,30 @@ class TestModelSupportContract:
             dispatch("max", None)
 
             refresh_source("refreshed")
-            reselected_workspace = _response_object(
+            reselected_workspace = _response_model(
                 requests.put(
                     workspace_url,
                     headers=_headers(token),
                     json={"default_selectable_model_options": option_inputs},
                     timeout=10,
-                )
+                ),
+                WorkspaceModelSettingsResponse,
             )
-            reselected_agent = _response_object(
+            reselected_agent = _response_model(
                 requests.patch(
                     agent_url,
                     headers=_headers(token),
                     json={"selectable_model_options": option_inputs},
                     timeout=10,
-                )
+                ),
+                AgentResponse,
             )
-            for response, field in (
-                (reselected_workspace, "default_selectable_model_options"),
-                (reselected_agent, "selectable_model_options"),
+            for options in (
+                reselected_workspace.default_selectable_model_options,
+                reselected_agent.selectable_model_options,
             ):
-                selected = primary_selection(response, field=field)
-                assert (
-                    contract(selected.get("normalized_capabilities"))
-                    == refreshed_contract
-                )
+                selected = primary_selection(options)
+                assert contract(selected.normalized_capabilities) == refreshed_contract
             rejected_session = _create_profile_session(
                 server_url=azents_public_server_url, token=token, agent_id=agent_id
             )
@@ -2027,7 +2050,7 @@ class TestModelSupportContract:
             )
             assert (
                 _input_event(
-                    _history(azents_public_server_url, token, rejected_session),
+                    _typed_history(azents_public_server_url, token, rejected_session),
                     rejected_message,
                 )
                 is None

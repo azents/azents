@@ -6,6 +6,22 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: []
 code_paths:
+  - typescript/apps/azents-web/src/features/agents/model-option-editor.ts
+  - typescript/apps/azents-web/src/features/agents/image-generation-config.ts
+  - typescript/apps/azents-web/src/features/toolkits/toolkit-config-projection.ts
+  - python/apps/azents/src/azents/api/public/chat/v1/validation_audit_test.py
+  - python/apps/azents/src/azents/api/public/toolkit/v1/validation_audit_test.py
+  - python/apps/azents/src/azents/repos/toolkit/validation_audit_test.py
+  - testenv/azents/fixtures/mock_mcp_server.py
+  - typescript/apps/azents-web/src/features/agents/components/AgentForm.stories.tsx
+  - typescript/apps/azents-web/src/features/agents/components/AgentMemorySettings.stories.tsx
+  - typescript/apps/azents-web/src/features/agents/components/AgentToolkitManagementSection.stories.tsx
+  - typescript/apps/azents-web/src/features/agents/components/ModelCatalogPicker.stories.tsx
+  - typescript/apps/azents-web/src/features/agents/components/SelectableModelOptionsEditor.stories.tsx
+  - typescript/apps/azents-web/src/features/toolkits/components/ToolkitForm.stories.tsx
+  - typescript/apps/azents-web/src/features/agents/image-generation-config.test.mts
+  - typescript/apps/azents-web/src/features/agents/model-selection.test.mts
+  - typescript/apps/azents-web/src/features/toolkits/toolkit-config-projection.test.mts
   - .claude/skills/e2e-ci-optimization/**
   - .claude/skills/technical-feature-design/SKILL.md
   - .claude/skills/ship-feature/SKILL.md
@@ -51,6 +67,16 @@ This spec defines boundaries connecting azents feature design, E2E location, fix
 | `testenv/azents/support/`   | Promote only helpers confirmed to be repeatedly used in E2E/fixture/prerequisite.                            | Do not preemptively commonize.                                                                      |
 
 Manual-only runbook, blocked placeholder, removed-feature residue check, legacy TC markdown, `run-tc`, verifier, and markdown bash fallback are not part of event azents verification path. Primary evidence for product behavior QA is E2E result, and it is not separated into long-term catalog files.
+
+Representative product journeys remain primary end-to-end evidence. Status-only,
+identifier/default, duplicate-constraint, and pure projection/parser matrices use
+focused API, repository, or unit contracts. Real component/container stories own
+form editing, Cancel, dialog copy, and responsive geometry instead of repeating
+those presentation permutations in server-backed browser journeys. Toolkit
+lifecycle/scope/attachment and owner/member persistence flows remain in E2E,
+along with Runtime Web navigation and service lifecycle evidence. Component
+interaction passes do not establish accessibility conformance; accessibility
+diagnostics remain separate evidence.
 
 ## Direct File Transfer Evidence
 

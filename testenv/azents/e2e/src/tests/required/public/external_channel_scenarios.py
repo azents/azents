@@ -26,13 +26,23 @@ from azentspublicclient.api.llm_provider_integration_v1_api import (
 )
 from azentspublicclient.api.workspace_v1_api import WorkspaceV1Api
 from azentspublicclient.exceptions import ApiException
+from azentspublicclient.models.action_execution_projection_response import (
+    ActionExecutionProjectionResponse,
+)
+from azentspublicclient.models.agent_create_git_worktree_action import (
+    AgentCreateGitWorktreeAction,
+)
 from azentspublicclient.models.agent_create_request import AgentCreateRequest
+from azentspublicclient.models.agent_remove_git_worktree_action import (
+    AgentRemoveGitWorktreeAction,
+)
 from azentspublicclient.models.agent_session_response import AgentSessionResponse
 from azentspublicclient.models.agent_session_title_source import (
     AgentSessionTitleSource,
 )
 from azentspublicclient.models.agent_type import AgentType
 from azentspublicclient.models.api_key_secrets import ApiKeySecrets
+from azentspublicclient.models.chat_event_response import ChatEventResponse
 from azentspublicclient.models.connection_access_policy_request import (
     ConnectionAccessPolicyRequest,
 )
@@ -76,6 +86,7 @@ from azentspublicclient.models.external_channel_work_task_status import (
     ExternalChannelWorkTaskStatus,
 )
 from azentspublicclient.models.generation_fence_request import GenerationFenceRequest
+from azentspublicclient.models.live_event_list_response import LiveEventListResponse
 from azentspublicclient.models.llm_provider import LLMProvider
 from azentspublicclient.models.llm_provider_integration_create_request import (
     LLMProviderIntegrationCreateRequest,
@@ -98,6 +109,17 @@ from azentspublicclient.models.slack_connection_setup_request import (
 )
 from azentspublicclient.models.workspace_user_role import WorkspaceUserRole
 from docker.models.containers import Container
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    JsonValue,
+    StrictBool,
+    StrictInt,
+    StrictStr,
+    TypeAdapter,
+    ValidationError,
+)
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.remote.webdriver import WebDriver
@@ -106,6 +128,12 @@ from selenium.webdriver.support.ui import WebDriverWait
 from testcontainers.core.container import DockerContainer
 from testcontainers.postgres import PostgresContainer
 
+from support.observations import (
+    ToolCallObservation,
+    ToolResultObservation,
+    TurnMarkerObservation,
+    decode_history_page,
+)
 from support.runtime_profiles import create_workspace_runtime_profile
 from support.utils import (
     authenticate_user,
@@ -115,7 +143,9 @@ from support.utils import (
     unique,
     wait_until,
 )
-from tests.required.public.test_agent_execution_persistence import list_live
+from tests.required.public.test_agent_execution_persistence import (
+    list_live as _wire_live,
+)
 
 _APP_ID = "A-E2E"
 _TEAM_ID = "T-E2E"
@@ -139,6 +169,310 @@ _DISCORD_COMMAND_CONTRACTS = {
 _EXTERNAL_CHANNEL_LARGE_FILE_BYTES = 6 * 1024 * 1024
 
 T = TypeVar("T")
+
+
+class _Observation(BaseModel):
+    """Validated fixture projection that tolerates opaque wire extensions."""
+
+    model_config = ConfigDict(extra="allow", frozen=True)
+
+
+class _SlackText(_Observation):
+    type: StrictStr
+    text: StrictStr
+
+
+class _SlackButton(_Observation):
+    type: StrictStr
+    action_id: StrictStr
+    text: _SlackText
+    value: StrictStr | None = None
+
+
+class _SlackTask(_Observation):
+    task_id: StrictStr
+    status: StrictStr
+    details: JsonValue = None
+    sources: JsonValue = None
+    output: JsonValue = None
+
+
+class _SlackBlock(_Observation):
+    type: StrictStr
+    title: StrictStr | None = None
+    tasks: list[_SlackTask] | None = None
+    elements: JsonValue = None
+
+
+class _SlackActionsBlock(_Observation):
+    type: StrictStr
+    elements: list[_SlackButton]
+
+
+class _ProviderDelivery(_Observation):
+    """Sanitized provider mutation and navigation evidence."""
+
+    operation: StrictStr | None = None
+    outcome: StrictStr | None = None
+    safe_category: StrictStr | None = None
+    session_path: StrictStr | None = None
+    message_id: StrictStr | None = None
+    channel_id: StrictStr | None = None
+    approval_request_id: StrictStr | None = None
+    selector_admission_id: StrictStr | None = None
+    suppress_embeds: StrictBool | None = None
+    action_ids: list[StrictStr] | None = None
+    text: StrictStr | None = None
+    blocks: list[_SlackBlock] | None = None
+
+
+class _ProviderView(_Observation):
+    operation: StrictStr
+    outcome: StrictStr
+    control_scope: StrictStr | None = None
+    route_count: StrictInt | None = None
+    has_submit: StrictBool | None = None
+
+
+class _ProviderInteraction(_Observation):
+    interaction_id: StrictStr
+    response_type: StrictInt | None = None
+    completed_response_type: StrictInt | None = None
+    settings_error_kind: StrictStr | None = None
+    settings_controls: list[JsonValue] | None = None
+
+
+class _ProviderPresence(_Observation):
+    """Provider presence lifecycle operation evidence."""
+
+    operation: StrictStr
+    channel: StrictStr | None = None
+    thread_ts: StrictStr | None = None
+    desired_state: StrictStr | None = None
+    has_initiator: StrictBool | None = None
+    event: StrictStr | None = None
+    outcome: StrictStr | None = None
+
+
+class _SocketEvidence(_Observation):
+    """Socket reconnect and acknowledgement counters without credentials."""
+
+    connections: StrictInt = 0
+    configured_sessions: StrictInt = 0
+    envelope_ids: list[StrictStr] = Field(default_factory=list)
+    acknowledgements: list[JsonValue] = Field(default_factory=list)
+
+
+class _GatewayDispatch(_Observation):
+    event_type: StrictStr
+    sequence: StrictInt
+
+
+class _GatewayEvidence(_Observation):
+    connections: StrictInt = 0
+    initial_opcodes: list[StrictInt] = Field(default_factory=list)
+    heartbeats: list[JsonValue] = Field(default_factory=list)
+    dispatches: list[_GatewayDispatch] = Field(default_factory=list)
+    terminal_events: list[JsonValue] = Field(default_factory=list)
+
+
+class _TypingTarget(_Observation):
+    guild_id: StrictStr | None = None
+    channel_id: StrictStr
+    work_cycle_count: StrictInt | None = None
+
+
+class _TypingSnapshot(_Observation):
+    targets: list[_TypingTarget] = Field(default_factory=list)
+
+
+class _TypingEvidence(_Observation):
+    snapshots: list[_TypingSnapshot] = Field(default_factory=list)
+    pulses: list[_TypingTarget] = Field(default_factory=list)
+
+
+class _InteractionConfiguration(_Observation):
+    application_id: StrictStr
+
+
+class _GuildCommand(_Observation):
+    role: StrictStr
+    type: StrictInt
+
+
+class _ProviderOperation(_Observation):
+    operation: StrictStr
+    thread_channel_id: StrictStr | None = None
+    desired_state: StrictStr | None = None
+    event: StrictStr | None = None
+    outcome: StrictStr | None = None
+
+
+class _ProviderState(_Observation):
+    """Declared Slack/Discord state, with absent provider sections unobserved."""
+
+    request_counts: dict[str, StrictInt]
+    deliveries: list[_ProviderDelivery]
+    views: list[_ProviderView] = Field(default_factory=list)
+    interactions: list[_ProviderInteraction] = Field(default_factory=list)
+    presence: list[_ProviderPresence] = Field(default_factory=list)
+    operations: list[_ProviderOperation] = Field(default_factory=list)
+    interaction_configurations: list[_InteractionConfiguration] = Field(
+        default_factory=list
+    )
+    guild_commands: list[_GuildCommand] = Field(default_factory=list)
+    socket: _SocketEvidence | None = None
+    gateway: _GatewayEvidence | None = None
+    typing: _TypingEvidence | None = None
+
+
+class _TransientView(_Observation):
+    """Transient provider handoff required to complete a signed UI operation."""
+
+    private_metadata: StrictStr
+    view_id: StrictStr | None = None
+    view_hash: StrictStr | None = None
+    route_ids: list[StrictStr] | None = None
+
+
+class _TransientCommand(_Observation):
+    command_id: StrictStr | None = None
+
+
+class _TransientComponent(_Observation):
+    custom_id: StrictStr | None = None
+
+
+class _BarrierEvidence(_Observation):
+    armed: StrictBool = False
+    reached: StrictBool = False
+    released: StrictBool = False
+    timed_out: StrictBool = False
+    operation: StrictStr | None = None
+    occurrence: StrictInt | None = None
+    request_count: StrictInt | None = None
+
+
+class _ProgressRequestEvidence(_Observation):
+    """Only the model-request fields that select progress/readiness stages."""
+
+    binding: StrictStr | None = None
+    marker_present: StrictBool = False
+    resolved_user_reference: StrictBool = False
+    resolved_channel_reference: StrictBool = False
+    search_tool_available: StrictBool = False
+    progress_tool_available: StrictBool = False
+    matched: StrictBool = False
+    stage: StrictStr | None = None
+    path: StrictStr | None = None
+    completed_response_type: StrictInt | None = None
+
+
+class _FileToolOutputEvidence(_Observation):
+    """Sanitized per-call output metadata emitted by the file-transfer proxy."""
+
+    present: StrictBool
+    length: StrictInt | None
+    error: StrictStr | None
+
+
+class _FileRequestEvidence(_Observation):
+    binding: StrictStr | None = None
+    stage: StrictStr | None = None
+    path: StrictStr | None = None
+    tool_outputs: dict[str, _FileToolOutputEvidence] = Field(default_factory=dict)
+
+
+class _DynamicWorktreeEvidence(_Observation):
+    operation: StrictStr | None = None
+    binding: StrictStr | None = None
+    stage: StrictStr | None = None
+    create_tool_available: StrictBool = False
+    load_skill_available: StrictBool = False
+    search_tool_available: StrictBool = False
+    remove_tool_available: StrictBool = False
+    channel_action_tool_available: StrictBool = False
+    target_skill_present: StrictBool = False
+
+
+class _ExternalInputPayload(_Observation):
+    provider: StrictStr | None = None
+    external_message_id: StrictStr | None = None
+    prompt_role: StrictStr | None = None
+    body: StrictStr | None = None
+    original_url: StrictStr | None = None
+
+
+class _ExternalInputEvidence(_Observation):
+    """Canonical identity/projection used by promotion and deduplication."""
+
+    model_config = ConfigDict(extra="ignore", frozen=True)
+    provider: StrictStr = Field(min_length=1)
+    external_message_id: StrictStr = Field(min_length=1)
+    prompt_role: StrictStr | None = None
+    body: StrictStr | None = None
+    original_url: StrictStr | None = None
+
+
+class _ToolEvidence(_Observation):
+    kind: StrictStr
+    call_id: StrictStr
+    name: StrictStr | None = None
+    status: StrictStr | None = None
+    output: StrictStr | None = None
+
+
+class _ToolOutputPart(_Observation):
+    text: StrictStr | None = None
+
+
+class _ExternalPresentation(_ExternalInputPayload):
+    type: StrictStr | None = None
+
+
+class _PendingPresentation(_Observation):
+    presentation: _ExternalPresentation | None = None
+
+
+class _PendingEnvelope(_Observation):
+    kind: StrictStr
+    # Other mailbox families retain their own opaque item contracts.
+    items: list[JsonValue] = Field(default_factory=list)
+
+
+class _PendingExternalInputs(_Observation):
+    mailbox_items: list[_PendingEnvelope] = Field(default_factory=list)
+
+
+class _IngressItem(_Observation):
+    id: StrictStr
+    owner_id: StrictStr
+    session_id: StrictStr | None
+    binding_id: StrictStr | None
+    owner_ready: StrictBool
+    preparation_attempt_count: StrictInt
+    lease_generation: StrictInt
+    state: StrictStr
+    attempt_count: StrictInt
+
+
+class _IngressState(_Observation):
+    items: list[_IngressItem]
+
+
+class _SessionProject(_Observation):
+    path: StrictStr
+
+
+class _SessionProjects(_Observation):
+    items: list[_SessionProject]
+
+
+_PROGRESS_OBSERVATIONS = TypeAdapter(list[_ProgressRequestEvidence])
+_FILE_OBSERVATIONS = TypeAdapter(list[_FileRequestEvidence])
+_DYNAMIC_OBSERVATIONS = TypeAdapter(list[_DynamicWorktreeEvidence])
+_OUTPUT_PARTS = TypeAdapter(list[_ToolOutputPart])
+_PENDING_PRESENTATIONS = TypeAdapter(list[_PendingPresentation])
 
 
 class _CreatedAgent(NamedTuple):
@@ -180,58 +514,31 @@ def _required(value: T | None) -> T:
     return value
 
 
+def list_live(*, server_url: str, token: str, session_id: str) -> LiveEventListResponse:
+    """Decode the adjacent scenario's serialized live API at this ingress."""
+    return LiveEventListResponse.model_validate(
+        _wire_live(server_url=server_url, token=token, session_id=session_id)
+    )
+
+
+def _read_barrier(provider_url: str) -> _BarrierEvidence:
+    """Validate synchronization flags before they can establish test ordering."""
+    response = requests.get(f"{provider_url}/__testenv/barrier", timeout=5)
+    response.raise_for_status()
+    return _BarrierEvidence.model_validate(response.json())
+
+
 def _object(value: object) -> dict[str, object]:
-    """Validate one string-keyed object used as provider evidence."""
+    """Validate an opaque JSON object only at a generated-model ingress boundary."""
     if not isinstance(value, dict) or not all(isinstance(key, str) for key in value):
         raise AssertionError("Expected an object with string keys.")
     return value
-
-
-def _list(value: object) -> list[object]:
-    """Validate one provider evidence list."""
-    if not isinstance(value, list):
-        raise AssertionError("Expected a list.")
-    return value
-
-
-def _objects(value: object) -> list[dict[str, object]]:
-    """Validate one list of string-keyed provider evidence objects."""
-    return [_object(item) for item in _list(value)]
-
-
-def _strings(value: object) -> list[str]:
-    """Validate one provider evidence string list."""
-    values = _list(value)
-    if not all(isinstance(item, str) for item in values):
-        raise AssertionError("Expected a list of strings.")
-    return [item for item in values if isinstance(item, str)]
-
-
-def _int_dict(value: object) -> dict[str, int]:
-    """Validate one string-to-integer provider evidence mapping."""
-    values = _object(value)
-    if not all(
-        isinstance(item, int) and not isinstance(item, bool) for item in values.values()
-    ):
-        raise AssertionError("Expected an integer mapping.")
-    return {
-        key: item
-        for key, item in values.items()
-        if isinstance(item, int) and not isinstance(item, bool)
-    }
 
 
 def _string(value: object) -> str:
     """Validate one provider evidence string."""
     if not isinstance(value, str):
         raise AssertionError("Expected a string.")
-    return value
-
-
-def _int(value: object) -> int:
-    """Validate one provider evidence integer."""
-    if not isinstance(value, int) or isinstance(value, bool):
-        raise AssertionError("Expected an integer.")
     return value
 
 
@@ -452,30 +759,37 @@ def _signed_headers(
     }
 
 
-def _provider_state(slack_provider_fake_url: str) -> dict[str, object]:
+def _provider_observation(slack_provider_fake_url: str) -> _ProviderState:
     response = requests.get(
         f"{slack_provider_fake_url}/__testenv/state",
         timeout=5,
     )
     response.raise_for_status()
-    return _object(response.json())
+    return _ProviderState.model_validate(response.json())
 
 
-def _discord_provider_state(discord_provider_fake_url: str) -> dict[str, object]:
+def _provider_state(slack_provider_fake_url: str) -> dict[str, object]:
+    """Serialize validated state for adjacent legacy scenario wire assertions."""
+    return _provider_observation(slack_provider_fake_url).model_dump(
+        mode="json", exclude_unset=True
+    )
+
+
+def _discord_provider_observation(discord_provider_fake_url: str) -> _ProviderState:
     """Return sanitized deterministic Discord fake evidence."""
     response = requests.get(
         f"{discord_provider_fake_url}/__testenv/state",
         timeout=5,
     )
     response.raise_for_status()
-    return _object(response.json())
+    return _ProviderState.model_validate(response.json())
 
 
 def _active_ingress_state(
     postgres_container: PostgresContainer,
     *,
     connection_id: str,
-) -> dict[str, object]:
+) -> _IngressState:
     """Return content-free active ingress owner and item evidence from PostgreSQL."""
     with psycopg.connect(
         host=postgres_container.get_container_host_ip(),
@@ -503,22 +817,24 @@ def _active_ingress_state(
             """,
             (connection_id,),
         ).fetchall()
-    return {
-        "items": [
-            {
-                "id": row[0],
-                "owner_id": row[1],
-                "session_id": row[2],
-                "binding_id": row[3],
-                "owner_ready": row[2] is not None and row[3] is not None,
-                "preparation_attempt_count": row[4],
-                "lease_generation": row[5],
-                "state": row[6],
-                "attempt_count": row[7],
-            }
-            for row in rows
-        ]
-    }
+    return _IngressState.model_validate(
+        {
+            "items": [
+                {
+                    "id": row[0],
+                    "owner_id": row[1],
+                    "session_id": row[2],
+                    "binding_id": row[3],
+                    "owner_ready": row[2] is not None and row[3] is not None,
+                    "preparation_attempt_count": row[4],
+                    "lease_generation": row[5],
+                    "state": row[6],
+                    "attempt_count": row[7],
+                }
+                for row in rows
+            ]
+        }
+    )
 
 
 def _discord_command_id(
@@ -533,8 +849,8 @@ def _discord_command_id(
         timeout=5,
     )
     response.raise_for_status()
-    command_id = response.json().get("command_id")
-    return command_id if isinstance(command_id, str) and command_id else None
+    command_id = _TransientCommand.model_validate(response.json()).command_id
+    return command_id or None
 
 
 def _discord_settings_component_id(
@@ -551,10 +867,10 @@ def _discord_settings_component_id(
             timeout=5,
         )
         response.raise_for_status()
-        custom_id = response.json().get("custom_id")
+        custom_id = _TransientComponent.model_validate(response.json()).custom_id
         if custom_id is None:
             return None
-        if isinstance(custom_id, str) and custom_id.startswith(f"a:{action_code}:"):
+        if custom_id.startswith(f"a:{action_code}:"):
             return custom_id
     raise AssertionError("Discord settings control queue exceeded its bounded size.")
 
@@ -650,16 +966,14 @@ def _select_discord_setting(
         (
             item
             for item in reversed(
-                _objects(
-                    _discord_provider_state(discord_provider_fake_url)["interactions"]
-                )
+                _discord_provider_observation(discord_provider_fake_url).interactions
             )
-            if item.get("interaction_id") == interaction_id
+            if item.interaction_id == interaction_id
         ),
         None,
     )
     assert response_payload == {"status": 200, "response_type": 7}, (
-        None if interaction is None else interaction.get("settings_error_kind")
+        None if interaction is None else interaction.settings_error_kind
     )
 
 
@@ -694,103 +1008,76 @@ def _select_discord_setup_location(
     assert response.json() == {"status": 200, "response_type": 6}
 
 
-def _successful_session_paths(provider_state: dict[str, object]) -> list[str]:
+def _successful_session_paths(provider_state: _ProviderState) -> list[str]:
     """Return sanitized Session routes from successful provider controls."""
-    deliveries = provider_state.get("deliveries")
-    if not isinstance(deliveries, list):
-        return []
     paths: list[str] = []
-    for raw_delivery in _list(deliveries):
-        if not isinstance(raw_delivery, dict):
-            continue
-        delivery = _object(raw_delivery)
-        path = delivery.get("session_path")
-        if delivery.get("outcome") in {
-            "delivered",
-            "created",
-            "duplicate",
-        } and isinstance(path, str):
+    for delivery in provider_state.deliveries:
+        path = delivery.session_path
+        if (
+            delivery.outcome
+            in {
+                "delivered",
+                "created",
+                "duplicate",
+            }
+            and path is not None
+        ):
             paths.append(path)
     return paths
 
 
 def _successful_session_navigation_categories(
-    provider_state: dict[str, object],
+    provider_state: _ProviderState,
 ) -> list[str]:
     """Return sanitized categories for successful Session navigation controls."""
-    deliveries = provider_state.get("deliveries")
-    if not isinstance(deliveries, list):
-        return []
     categories: list[str] = []
-    for raw_delivery in _list(deliveries):
-        if not isinstance(raw_delivery, dict):
-            continue
-        delivery = _object(raw_delivery)
-        category = delivery.get("safe_category")
+    for delivery in provider_state.deliveries:
+        category = delivery.safe_category
         if (
-            delivery.get("outcome") in {"delivered", "created", "duplicate"}
-            and isinstance(delivery.get("session_path"), str)
-            and isinstance(category, str)
+            delivery.outcome in {"delivered", "created", "duplicate"}
+            and delivery.session_path is not None
+            and category is not None
         ):
             categories.append(category)
     return categories
 
 
 def _successful_session_navigation_action_ids(
-    provider_state: dict[str, object],
+    provider_state: _ProviderState,
     *,
     category: str,
 ) -> list[list[str]]:
     """Return sanitized action roles for one successful navigation category."""
-    deliveries = provider_state.get("deliveries")
-    if not isinstance(deliveries, list):
-        return []
     action_ids: list[list[str]] = []
-    for raw_delivery in _list(deliveries):
-        if not isinstance(raw_delivery, dict):
-            continue
-        delivery = _object(raw_delivery)
-        raw_action_ids = delivery.get("action_ids")
+    for delivery in provider_state.deliveries:
         if (
-            delivery.get("outcome") in {"delivered", "created", "duplicate"}
-            and delivery.get("safe_category") == category
-            and isinstance(raw_action_ids, list)
-            and all(isinstance(item, str) for item in raw_action_ids)
+            delivery.outcome in {"delivered", "created", "duplicate"}
+            and delivery.safe_category == category
+            and delivery.action_ids is not None
         ):
-            action_ids.append(_strings(raw_action_ids))
+            action_ids.append(delivery.action_ids)
     return action_ids
 
 
 def _discord_typing_channel_observed(
-    provider_state: dict[str, object],
+    provider_state: _ProviderState,
     *,
     channel_id: str,
 ) -> bool:
     """Return whether one safe typing snapshot includes the exact channel."""
-    typing = provider_state.get("typing")
-    if not isinstance(typing, dict):
+    typing = provider_state.typing
+    if typing is None:
         return False
-    snapshots = typing.get("snapshots")
-    if not isinstance(snapshots, list):
-        return False
-    for raw_snapshot in _list(snapshots):
-        if not isinstance(raw_snapshot, dict):
-            continue
-        targets = raw_snapshot.get("targets")
-        if not isinstance(targets, list):
-            continue
-        if any(
-            isinstance(target, dict) and target.get("channel_id") == channel_id
-            for target in targets
-        ):
+    for snapshot in typing.snapshots:
+        if any(target.channel_id == channel_id for target in snapshot.targets):
             return True
     return False
 
 
 def _joined_session_navigation_state(
-    provider_state: dict[str, object],
+    provider_state: _ProviderState,
     expected_session_path: str,
-) -> dict[str, object] | None:
+) -> _ProviderState | None:
     """Return state after joined presence arrives without an automatic Tracker."""
     if _successful_session_paths(provider_state) != [expected_session_path]:
         return None
@@ -802,19 +1089,13 @@ def _joined_session_navigation_state(
 
 
 def _successful_session_presence_states(
-    provider_state: dict[str, object],
+    provider_state: _ProviderState,
 ) -> list[str]:
     """Return sanitized joined/left evidence from successful provider controls."""
-    deliveries = provider_state.get("deliveries")
-    if not isinstance(deliveries, list):
-        return []
     states: list[str] = []
-    for raw_delivery in _list(deliveries):
-        if not isinstance(raw_delivery, dict):
-            continue
-        delivery = _object(raw_delivery)
-        category = delivery.get("safe_category")
-        if delivery.get("outcome") not in {"delivered", "created", "duplicate"}:
+    for delivery in provider_state.deliveries:
+        category = delivery.safe_category
+        if delivery.outcome not in {"delivered", "created", "duplicate"}:
             continue
         if category == "session_presence_joined":
             states.append("joined")
@@ -828,9 +1109,9 @@ def _bounded_session_history_events(
     public_server_url: str,
     token: str,
     session_id: str,
-) -> list[dict[str, object]]:
+) -> list[ChatEventResponse]:
     """Read one fixed-tail history sample without partial-count evidence."""
-    pages: list[list[dict[str, object]]] = []
+    pages: list[list[ChatEventResponse]] = []
     seen_ids: set[str] = set()
     seen_cursors: set[str] = set()
     before: str | None = None
@@ -845,9 +1126,12 @@ def _bounded_session_history_events(
             timeout=10,
         )
         response.raise_for_status()
-        page = _object(response.json())
-        items = _objects(page.get("items"))
-        ids = [_string(item.get("id")) for item in items]
+        try:
+            page = decode_history_page(response.json())
+        except ValidationError as error:
+            raise AssertionError("History page is malformed") from error
+        items = page.items
+        ids = [item.id for item in items]
         if (
             len(items) > 100
             or len(set(ids)) != len(ids)
@@ -856,12 +1140,9 @@ def _bounded_session_history_events(
             raise AssertionError("History pages overlap or exceed the page bound")
         seen_ids.update(ids)
         pages.append(items)
-        has_more = page.get("has_more")
-        if not isinstance(has_more, bool):
-            raise AssertionError("History page has invalid has_more")
-        if not has_more:
+        if not page.has_more:
             return [event for chunk in reversed(pages) for event in chunk]
-        cursor = page.get("next_cursor")
+        cursor = page.next_cursor
         if (
             not isinstance(cursor, str)
             or not cursor
@@ -881,9 +1162,9 @@ def _external_channel_input_evidence(
     token: str,
     session_id: str,
     include_pending: bool = True,
-) -> list[dict[str, object]]:
+) -> list[_ExternalInputEvidence]:
     """Read logical External Channel input through public live and history APIs."""
-    candidates: list[dict[str, object]] = []
+    candidates: list[_ExternalInputPayload] = []
     if include_pending:
         live_response = requests.get(
             f"{public_server_url}/chat/v1/sessions/{session_id}/live",
@@ -891,28 +1172,17 @@ def _external_channel_input_evidence(
             timeout=10,
         )
         live_response.raise_for_status()
-        live_payload = live_response.json()
-        if isinstance(live_payload, dict):
-            envelopes = _object(live_payload).get("mailbox_items")
-            if isinstance(envelopes, list):
-                for raw_envelope in _list(envelopes):
-                    if not isinstance(raw_envelope, dict):
-                        continue
-                    envelope = _object(raw_envelope)
-                    if envelope.get("kind") != "external_channel_message":
-                        continue
-                    raw_items = envelope.get("items")
-                    if not isinstance(raw_items, list):
-                        continue
-                    for raw_item in _list(raw_items):
-                        if not isinstance(raw_item, dict):
-                            continue
-                        presentation = _object(raw_item).get("presentation")
-                        if not isinstance(presentation, dict):
-                            continue
-                        presentation_item = _object(presentation)
-                        if presentation_item.get("type") == "external_channel_message":
-                            candidates.append(presentation_item)
+        live = _PendingExternalInputs.model_validate(live_response.json())
+        for envelope in live.mailbox_items:
+            if envelope.kind != "external_channel_message":
+                continue
+            for item in _PENDING_PRESENTATIONS.validate_python(envelope.items):
+                presentation = item.presentation
+                if (
+                    presentation is not None
+                    and presentation.type == "external_channel_message"
+                ):
+                    candidates.append(presentation)
 
     # Promotion moves input from the mailbox to history. Read the source first
     # so a move between requests can overlap, but cannot hide the input in both.
@@ -922,29 +1192,23 @@ def _external_channel_input_evidence(
         session_id=session_id,
     )
     for event in history_events:
-        event_payload = event.get("payload")
-        if event.get("kind") == "external_channel_message" and isinstance(
-            event_payload, dict
-        ):
-            candidates.append(_object(event_payload))
+        if event.kind.value == "external_channel_message":
+            candidates.append(_ExternalInputPayload.model_validate(event.payload))
 
-    logical_items: dict[tuple[str, str], dict[str, object]] = {}
+    logical_items: dict[tuple[str, str], _ExternalInputEvidence] = {}
     for candidate in candidates:
-        provider = candidate.get("provider")
-        external_message_id = candidate.get("external_message_id")
-        if not all(
-            isinstance(value, str) and value
-            for value in (provider, external_message_id)
-        ):
+        provider = candidate.provider
+        external_message_id = candidate.external_message_id
+        if not provider or not external_message_id:
             continue
-        key = (_string(provider), _string(external_message_id))
-        evidence = {
-            "provider": provider,
-            "external_message_id": external_message_id,
-            "prompt_role": candidate.get("prompt_role"),
-            "body": candidate.get("body"),
-            "original_url": candidate.get("original_url"),
-        }
+        key = (provider, external_message_id)
+        evidence = _ExternalInputEvidence(
+            provider=provider,
+            external_message_id=external_message_id,
+            prompt_role=candidate.prompt_role,
+            body=candidate.body,
+            original_url=candidate.original_url,
+        )
         previous = logical_items.get(key)
         if previous is not None and previous != evidence:
             raise AssertionError(
@@ -960,9 +1224,9 @@ def _wait_for_single_external_channel_history_input(
     public_server_url: str,
     token: str,
     session_id: str,
-) -> dict[str, object]:
+) -> _ExternalInputEvidence:
     """Wait for durable input, then enforce exact logical message cardinality."""
-    evidence = _objects(
+    evidence = _required(
         wait_until(
             lambda: _external_channel_input_evidence(
                 public_server_url=public_server_url,
@@ -982,37 +1246,34 @@ def _wait_for_single_external_channel_history_input(
 
 
 def _approval_request_id(slack_provider_fake_url: str) -> str:
-    state = _provider_state(slack_provider_fake_url)
-    deliveries = state.get("deliveries")
-    if not isinstance(deliveries, list):
-        return ""
-    for raw_delivery in _list(deliveries):
-        if not isinstance(raw_delivery, dict):
-            continue
-        delivery = _object(raw_delivery)
-        request_id = delivery.get("approval_request_id")
-        if isinstance(request_id, str) and request_id:
+    state = _provider_observation(slack_provider_fake_url)
+    for delivery in state.deliveries:
+        request_id = delivery.approval_request_id
+        if request_id:
             return request_id
     return ""
 
 
 def _selector_admission_id(slack_provider_fake_url: str) -> str:
     """Return the latest opaque admission exposed by a selector control."""
-    deliveries = _provider_state(slack_provider_fake_url).get("deliveries")
-    if not isinstance(deliveries, list):
-        return ""
-    for raw_delivery in reversed(_list(deliveries)):
-        if not isinstance(raw_delivery, dict):
-            continue
-        admission_id = _object(raw_delivery).get("selector_admission_id")
-        if isinstance(admission_id, str) and admission_id:
+    deliveries = _provider_observation(slack_provider_fake_url).deliveries
+    for delivery in reversed(deliveries):
+        admission_id = delivery.selector_admission_id
+        if admission_id:
             return admission_id
     return ""
 
 
+def _decode_transient_view(payload: object) -> _TransientView | None:
+    """Decode the fake's exact absence sentinel before signed handoff validation."""
+    if payload is None or (isinstance(payload, dict) and not payload):
+        return None
+    return _TransientView.model_validate(payload)
+
+
 def _latest_selector_view(
     slack_provider_fake_url: str,
-) -> dict[str, object] | None:
+) -> _TransientView | None:
     """Return the transient selector handoff without exposing it as evidence."""
     response = requests.get(
         f"{slack_provider_fake_url}/__testenv/transient-view",
@@ -1021,12 +1282,12 @@ def _latest_selector_view(
     )
     response.raise_for_status()
     payload = response.json()
-    return _object(payload) if isinstance(payload, dict) else None
+    return _decode_transient_view(payload)
 
 
 def _latest_setup_view(
     slack_provider_fake_url: str,
-) -> dict[str, object] | None:
+) -> _TransientView | None:
     """Return the transient setup handoff without exposing it as evidence."""
     response = requests.get(
         f"{slack_provider_fake_url}/__testenv/transient-view",
@@ -1035,7 +1296,7 @@ def _latest_setup_view(
     )
     response.raise_for_status()
     payload = response.json()
-    return _object(payload) if isinstance(payload, dict) else None
+    return _decode_transient_view(payload)
 
 
 def _open_slack_setup_modal(
@@ -1076,13 +1337,14 @@ def _submit_slack_setup_location(
     app_id: str,
     team_id: str,
     user_id: str,
-    setup_view: dict[str, object],
+    setup_view: _TransientView | dict[str, object],
     location: str = "threads",
 ) -> None:
-    """Commit one signed Slack setup location selection through the real callback."""
-    metadata = setup_view.get("private_metadata")
-    view_id = setup_view.get("view_id")
-    view_hash = setup_view.get("view_hash")
+    """Decode a transient handoff, then submit the signed location selection."""
+    setup_view = _TransientView.model_validate(setup_view)
+    metadata = setup_view.private_metadata
+    view_id = setup_view.view_id
+    view_hash = setup_view.view_hash
     assert isinstance(metadata, str) and metadata
     assert isinstance(view_id, str) and view_id
     assert isinstance(view_hash, str) and view_hash
@@ -1149,52 +1411,38 @@ def _assert_no_pending_slack_participation_lifecycle(
         assert projection.items == []
 
 
-def _plan_delivery(slack_provider_fake_url: str) -> dict[str, object] | None:
+def _plan_delivery(slack_provider_fake_url: str) -> _ProviderDelivery | None:
     """Return the latest captured Slack Plan mutation."""
-    deliveries = _provider_state(slack_provider_fake_url).get("deliveries")
-    if not isinstance(deliveries, list):
-        return None
-    for raw_delivery in reversed(_list(deliveries)):
-        if not isinstance(raw_delivery, dict):
-            continue
-        delivery = _object(raw_delivery)
-        blocks = delivery.get("blocks")
+    deliveries = _provider_observation(slack_provider_fake_url).deliveries
+    for delivery in reversed(deliveries):
+        blocks = delivery.blocks
         if (
-            delivery.get("operation") == "chat.update"
-            and isinstance(blocks, list)
-            and any(
-                isinstance(block, dict) and _object(block).get("type") == "plan"
-                for block in _list(blocks)
-            )
+            delivery.operation == "chat.update"
+            and blocks is not None
+            and any(block.type == "plan" for block in blocks)
         ):
             return delivery
     return None
 
 
-def _progress_request_evidence(openai_proxy_url: str) -> list[dict[str, object]]:
+def _progress_request_evidence(openai_proxy_url: str) -> list[_ProgressRequestEvidence]:
     """Return sanitized model-request evidence for the progress journey."""
     response = requests.get(
         f"{openai_proxy_url}/v1/_external_channel_progress_requests",
         timeout=5,
     )
     response.raise_for_status()
-    payload = response.json()
-    if not isinstance(payload, list):
-        return []
-    return [_object(item) for item in _list(payload) if isinstance(item, dict)]
+    return _PROGRESS_OBSERVATIONS.validate_python(response.json())
 
 
-def _file_request_evidence(openai_proxy_url: str) -> list[dict[str, object]]:
+def _file_request_evidence(openai_proxy_url: str) -> list[_FileRequestEvidence]:
     """Return sanitized model-request evidence for the file-transfer journey."""
     response = requests.get(
         f"{openai_proxy_url}/v1/_external_channel_file_requests",
         timeout=5,
     )
     response.raise_for_status()
-    payload = response.json()
-    if not isinstance(payload, list):
-        return []
-    return [_object(item) for item in _list(payload) if isinstance(item, dict)]
+    return _FILE_OBSERVATIONS.validate_python(response.json())
 
 
 def _channel_action_tool_evidence(
@@ -1203,81 +1451,82 @@ def _channel_action_tool_evidence(
     session_id: str,
     *,
     call_ids: frozenset[str],
-) -> list[dict[str, object]]:
+) -> list[_ToolEvidence]:
     """Return sanitized Channel Action call and result evidence."""
     items = _bounded_session_history_events(
         public_server_url=public_server_url,
         token=token,
         session_id=session_id,
     )
-    evidence: list[dict[str, object]] = []
+    evidence: list[_ToolEvidence] = []
     for event in items:
-        kind = event.get("kind")
-        if kind not in {"client_tool_call", "client_tool_result"}:
+        kind = event.kind.value
+        if kind == "client_tool_call":
+            call = ToolCallObservation.model_validate(event.payload)
+            if call.call_id in call_ids:
+                evidence.append(
+                    _ToolEvidence(kind=kind, call_id=call.call_id, name=call.name)
+                )
             continue
-        raw_payload = event.get("payload")
-        if not isinstance(raw_payload, dict):
+        if kind != "client_tool_result":
             continue
-        event_payload = _object(raw_payload)
-        if event_payload.get("call_id") not in call_ids:
+        result = ToolResultObservation.model_validate(event.payload)
+        if result.call_id not in call_ids:
             continue
-        item: dict[str, object] = {
-            "kind": kind,
-            "call_id": event_payload.get("call_id"),
-            "name": event_payload.get("name"),
-        }
-        status = event_payload.get("status")
-        if isinstance(status, str):
-            item["status"] = status
-        output = event_payload.get("output")
-        if isinstance(output, str):
-            item["output"] = output[:1_000]
-        elif isinstance(output, list):
+        output: str | None = None
+        if isinstance(result.output, str):
+            output = result.output[:1_000]
+        elif isinstance(result.output, list):
             texts = [
-                _object(part).get("text")
-                for part in _list(output)
-                if isinstance(part, dict) and isinstance(_object(part).get("text"), str)
+                part.text
+                for part in _OUTPUT_PARTS.validate_python(result.output)
+                if part.text is not None
             ]
             if texts:
-                item["output"] = " ".join(_strings(texts))[:1_000]
-        evidence.append(item)
+                output = " ".join(texts)[:1_000]
+        evidence.append(
+            _ToolEvidence(
+                kind=kind,
+                call_id=result.call_id,
+                name=result.name,
+                status=result.status,
+                output=output,
+            )
+        )
     return evidence
 
 
 def _matching_progress_request_evidence(
     openai_proxy_url: str,
     binding_id: str,
-) -> list[dict[str, object]]:
+) -> list[_ProgressRequestEvidence]:
     """Return request evidence after direct Channel Action progress is observed."""
-    expected = {
-        "binding": binding_id,
-        "marker_present": True,
-        "resolved_user_reference": True,
-        "resolved_channel_reference": True,
-        "search_tool_available": False,
-        "progress_tool_available": True,
-        "path": "/v1/responses",
-        "matched": True,
-        "stage": "after_progress",
-    }
     evidence = _progress_request_evidence(openai_proxy_url)
     observed = sorted(
         {
             "user={user},channel={channel},search={search},progress={progress},"
             "matched={matched},stage={stage}".format(
-                user=item.get("resolved_user_reference"),
-                channel=item.get("resolved_channel_reference"),
-                search=item.get("search_tool_available"),
-                progress=item.get("progress_tool_available"),
-                matched=item.get("matched"),
-                stage=item.get("stage"),
+                user=item.resolved_user_reference,
+                channel=item.resolved_channel_reference,
+                search=item.search_tool_available,
+                progress=item.progress_tool_available,
+                matched=item.matched,
+                stage=item.stage,
             )
             for item in evidence
-            if item.get("binding") == binding_id
+            if item.binding == binding_id
         }
     )
     assert any(
-        all(item.get(key) == value for key, value in expected.items())
+        item.binding == binding_id
+        and item.marker_present
+        and item.resolved_user_reference
+        and item.resolved_channel_reference
+        and not item.search_tool_available
+        and item.progress_tool_available
+        and item.path == "/v1/responses"
+        and item.matched
+        and item.stage == "after_progress"
         for item in evidence
     ), (
         "expected direct Channel Action progress without Tool Search; "
@@ -1302,36 +1551,21 @@ def _session_project_paths(
     if response.status_code == 403:
         return []
     response.raise_for_status()
-    payload = response.json()
-    if not isinstance(payload, dict):
-        return []
-    items = _object(payload).get("items")
-    if not isinstance(items, list):
-        return []
     return [
-        path
-        for raw_item in _list(items)
-        if isinstance(raw_item, dict)
-        and isinstance(
-            path := _object(raw_item).get("path"),
-            str,
-        )
+        item.path for item in _SessionProjects.model_validate(response.json()).items
     ]
 
 
 def _dynamic_worktree_request_evidence(
     openai_proxy_url: str,
-) -> list[dict[str, object]]:
+) -> list[_DynamicWorktreeEvidence]:
     """Return sanitized dynamic-worktree model request evidence."""
     response = requests.get(
         f"{openai_proxy_url}/v1/_dynamic_worktree_requests",
         timeout=5,
     )
     response.raise_for_status()
-    payload = response.json()
-    if not isinstance(payload, list):
-        return []
-    return [_object(item) for item in _list(payload) if isinstance(item, dict)]
+    return _DYNAMIC_OBSERVATIONS.validate_python(response.json())
 
 
 def _worktree_action_result(
@@ -1341,7 +1575,7 @@ def _worktree_action_result(
     session_id: str,
     call_id: str,
     status: str,
-) -> dict[str, object] | None:
+) -> ActionExecutionProjectionResponse | None:
     """Return one terminal Agent-managed worktree action projection."""
     response = requests.get(
         f"{public_server_url}/chat/v1/sessions/{session_id}/history?limit=100",
@@ -1349,37 +1583,24 @@ def _worktree_action_result(
         timeout=10,
     )
     response.raise_for_status()
-    payload = response.json()
-    if not isinstance(payload, dict):
-        return None
-    items = _object(payload).get("items")
-    if not isinstance(items, list):
-        return None
-    for raw_event in reversed(_list(items)):
-        if not isinstance(raw_event, dict):
+    for event in reversed(decode_history_page(response.json()).items):
+        if event.kind.value != "action_execution_result":
             continue
-        event = _object(raw_event)
-        if event.get("kind") != "action_execution_result":
-            continue
-        raw_payload = event.get("payload")
-        if not isinstance(raw_payload, dict):
-            continue
-        raw_projection = _object(raw_payload).get("action_execution")
-        if not isinstance(raw_projection, dict):
-            continue
-        raw_execution = _object(raw_projection).get("execution")
-        if not isinstance(raw_execution, dict):
-            continue
-        execution = _object(raw_execution)
-        raw_action = execution.get("action")
-        if not isinstance(raw_action, dict):
-            continue
-        action = _object(raw_action)
+        # The generated from_dict path dispatches the Action oneOf variant.
+        projection = _required(
+            ActionExecutionProjectionResponse.from_dict(
+                _object(event.payload["action_execution"])
+            )
+        )
+        action = projection.execution.action.actual_instance
         if (
-            action.get("client_tool_call_id") == call_id
-            and execution.get("status") == status
+            isinstance(
+                action, (AgentCreateGitWorktreeAction, AgentRemoveGitWorktreeAction)
+            )
+            and action.client_tool_call_id == call_id
+            and projection.execution.status == status
         ):
-            return _object(raw_projection)
+            return projection
     return None
 
 
@@ -1388,7 +1609,7 @@ def _session_history(
     public_server_url: str,
     token: str,
     session_id: str,
-) -> list[dict[str, object]]:
+) -> list[ChatEventResponse]:
     """Return durable Session history in canonical order."""
     return _bounded_session_history_events(
         public_server_url=public_server_url,
@@ -1397,42 +1618,34 @@ def _session_history(
     )
 
 
-def _turn_run_ids(history: list[dict[str, object]]) -> list[str]:
+def _turn_run_ids(history: list[ChatEventResponse]) -> list[str]:
     """Return model-turn Run IDs in durable history order."""
     run_ids: list[str] = []
     for event in history:
-        if event.get("kind") != "turn_marker":
+        if event.kind.value != "turn_marker":
             continue
-        payload = event.get("payload")
-        if not isinstance(payload, dict):
-            continue
-        run_id = _object(payload).get("run_id")
-        if isinstance(run_id, str):
+        run_id = TurnMarkerObservation.model_validate(event.payload).run_id
+        if run_id is not None:
             run_ids.append(run_id)
     return run_ids
 
 
 def _tool_call_run_id(
-    history: list[dict[str, object]],
+    history: list[ChatEventResponse],
     *,
     call_id: str,
 ) -> str | None:
     """Return the Run ID of a tool call from its terminating turn marker."""
     target_seen = False
     for event in history:
-        payload = event.get("payload")
-        if not isinstance(payload, dict):
-            continue
-        event_payload = _object(payload)
         if (
-            event.get("kind") == "client_tool_call"
-            and event_payload.get("call_id") == call_id
+            event.kind.value == "client_tool_call"
+            and ToolCallObservation.model_validate(event.payload).call_id == call_id
         ):
             target_seen = True
             continue
-        if target_seen and event.get("kind") == "turn_marker":
-            run_id = event_payload.get("run_id")
-            return run_id if isinstance(run_id, str) else None
+        if target_seen and event.kind.value == "turn_marker":
+            return TurnMarkerObservation.model_validate(event.payload).run_id
     return None
 
 
@@ -1666,7 +1879,7 @@ def test_http_admission_unknown_participant_and_approval_journey(
         channel_id=_CHANNEL_ID,
         user_id="U-EXTERNAL",
     )
-    setup_view = _object(
+    setup_view = _required(
         wait_until(
             lambda: _latest_setup_view(slack_provider_fake_url),
             timeout=15,
@@ -1727,7 +1940,7 @@ def test_http_admission_unknown_participant_and_approval_journey(
     assert len(agent_access.grants) == 1
     assert agent_access.grants[0].scope is ExternalChannelAccessGrantScope.AGENT
     assert agent_access.grants[0].agent_session_id is None
-    input_evidence = _objects(
+    input_evidence = _required(
         wait_until(
             lambda: (
                 evidence
@@ -1749,37 +1962,32 @@ def test_http_admission_unknown_participant_and_approval_journey(
     )
     assert len(input_evidence) == 1
     logical_input = input_evidence[0]
-    assert logical_input["provider"] == "slack"
-    assert logical_input["external_message_id"]
-    assert logical_input["prompt_role"] == "invocation"
-    assert logical_input["body"] == "Please investigate the deterministic incident."
-    assert logical_input["original_url"] == (
+    assert logical_input.provider == "slack"
+    assert logical_input.external_message_id
+    assert logical_input.prompt_role == "invocation"
+    assert logical_input.body == "Please investigate the deterministic incident."
+    assert logical_input.original_url == (
         f"https://example.slack.com/archives/{_CHANNEL_ID}/p"
         f"{root_timestamp.replace('.', '')}"
     )
 
-    def settled_provider_controls() -> dict[str, object] | None:
-        state = _provider_state(slack_provider_fake_url)
-        counts = state.get("request_counts")
-        if not isinstance(counts, dict):
-            return None
-        typed = _object(counts)
-        presence = state.get("presence")
-        has_processing_presence = isinstance(presence, list) and any(
-            isinstance(item, dict)
-            and item.get("operation") == "agents.sessions.setStatus"
-            and item.get("desired_state") == "processing"
-            for item in _list(presence)
+    def settled_provider_controls() -> _ProviderState | None:
+        state = _provider_observation(slack_provider_fake_url)
+        counts = state.request_counts
+        has_processing_presence = any(
+            item.operation == "agents.sessions.setStatus"
+            and item.desired_state == "processing"
+            for item in state.presence
         )
         if (
-            typed.get("chat.postMessage") == 3
-            and typed.get("chat.delete") == 1
+            counts.get("chat.postMessage") == 3
+            and counts.get("chat.delete") == 1
             and has_processing_presence
         ):
             return state
         return None
 
-    provider_state = _object(
+    provider_state = _required(
         wait_until(
             settled_provider_controls,
             timeout=10,
@@ -1787,9 +1995,7 @@ def test_http_admission_unknown_participant_and_approval_journey(
             message="Slack approval and initial progress controls did not settle",
         )
     )
-    request_counts = provider_state.get("request_counts")
-    assert isinstance(request_counts, dict)
-    typed_counts = _object(request_counts)
+    typed_counts = provider_state.request_counts
     assert "conversations.info" not in typed_counts
     # The initial callback, duplicate delivery, and Allow replay each revalidate
     # provider history before one mailbox input wins.
@@ -1808,7 +2014,7 @@ def test_http_admission_unknown_participant_and_approval_journey(
         "activity_tracker",
     ]
     assert _successful_session_presence_states(provider_state) == ["joined"]
-    assert _objects(provider_state["presence"])[-1] == {
+    assert provider_state.presence[-1].model_dump(exclude_unset=True) == {
         "operation": "agents.sessions.setStatus",
         "channel": _CHANNEL_ID,
         "thread_ts": root_timestamp,
@@ -1816,12 +2022,12 @@ def test_http_admission_unknown_participant_and_approval_journey(
         "has_initiator": True,
         "outcome": "delivered",
     }
-    deliveries = _objects(provider_state["deliveries"])
+    deliveries = provider_state.deliveries
     assert any(
-        delivery.get("session_path")
+        delivery.session_path
         == f"/w/{handle}/agents/{agent_id}/sessions/{approved_session_id}"
-        and delivery.get("safe_category") == "session_presence_joined"
-        and delivery.get("action_ids")
+        and delivery.safe_category == "session_presence_joined"
+        and delivery.action_ids
         == ["view_azents_session", "azents_conversation_settings_open"]
         for delivery in deliveries
     )
@@ -1891,17 +2097,11 @@ def test_http_admission_unknown_participant_and_approval_journey(
     )
     assert follow_up.status_code == 200
     assert time.monotonic() - started < _SLACK_HTTP_ACK_DEADLINE_SECONDS
-    barrier_state = _object(
+    barrier_state = _required(
         wait_until(
             lambda: (
                 state
-                if (
-                    state := requests.get(
-                        f"{slack_provider_fake_url}/__testenv/barrier",
-                        timeout=5,
-                    ).json()
-                ).get("reached")
-                is True
+                if (state := _read_barrier(slack_provider_fake_url)).reached is True
                 else None
             ),
             timeout=15,
@@ -1909,7 +2109,7 @@ def test_http_admission_unknown_participant_and_approval_journey(
             message="Slack callback did not reach the blocked provider history read",
         )
     )
-    assert barrier_state == {
+    assert barrier_state.model_dump(exclude_unset=True) == {
         "operation": "conversations.replies",
         "occurrence": 1,
         "request_count": 1,
@@ -1931,7 +2131,7 @@ def test_http_admission_unknown_participant_and_approval_journey(
         f"{slack_provider_fake_url}/__testenv/barrier/release",
         timeout=5,
     ).raise_for_status()
-    follow_up_evidence = _objects(
+    follow_up_evidence = _required(
         wait_until(
             lambda: (
                 evidence
@@ -1951,12 +2151,12 @@ def test_http_admission_unknown_participant_and_approval_journey(
             message="Slack follow-up input was not promoted",
         )
     )
-    assert follow_up_body in {item["body"] for item in follow_up_evidence}
-    follow_up_provider_state = _provider_state(slack_provider_fake_url)
+    assert follow_up_body in {item.body for item in follow_up_evidence}
+    follow_up_provider_state = _provider_observation(slack_provider_fake_url)
     assert "activity_tracker" not in _successful_session_navigation_categories(
         follow_up_provider_state
     )
-    follow_up_counts = _int_dict(follow_up_provider_state["request_counts"])
+    follow_up_counts = follow_up_provider_state.request_counts
     assert follow_up_counts.get("chat.postMessage", 0) == 0
 
     disconnected = external_api.external_channel_v1_disconnect_session_channel(
@@ -1969,21 +2169,20 @@ def test_http_admission_unknown_participant_and_approval_journey(
     assert len(disconnected.items) == 1
     assert disconnected.items[0].disconnected_at is not None
 
-    disconnected_state = _object(
+    disconnected_state = _required(
         wait_until(
             lambda: (
                 state
                 if (
                     _successful_session_presence_states(
-                        state := _provider_state(slack_provider_fake_url)
+                        state := _provider_observation(slack_provider_fake_url)
                     )
                     == ["left"]
-                    and _object(state["request_counts"]).get("chat.delete") == 1
+                    and state.request_counts.get("chat.delete") == 1
                     and any(
-                        isinstance(item, dict)
-                        and item.get("operation") == "agents.sessions.setStatus"
-                        and item.get("desired_state") == "idle"
-                        for item in _list(state.get("presence", []))
+                        item.operation == "agents.sessions.setStatus"
+                        and item.desired_state == "idle"
+                        for item in state.presence
                     )
                 )
                 else None
@@ -1993,7 +2192,7 @@ def test_http_admission_unknown_participant_and_approval_journey(
             message="Manual Slack binding disconnect did not deliver leave presence",
         )
     )
-    disconnected_counts = _object(disconnected_state["request_counts"])
+    disconnected_counts = disconnected_state.request_counts
     assert disconnected_counts["chat.postMessage"] == 1
     assert disconnected_counts["chat.delete"] == 1
     assert _successful_session_paths(disconnected_state) == [
@@ -2259,7 +2458,7 @@ def test_slack_binding_response_modes_gate_and_preserve_context(
         channel_id=_CHANNEL_ID,
         user_id="U-MODE",
     )
-    setup_view = _object(
+    setup_view = _required(
         wait_until(
             lambda: _latest_setup_view(slack_provider_fake_url),
             timeout=15,
@@ -2343,9 +2542,7 @@ def test_slack_binding_response_modes_gate_and_preserve_context(
     assert generated_detail.title
     assert generated_detail.title_source is AgentSessionTitleSource.AUTO_GENERATED
 
-    before_counts = _int_dict(
-        _provider_state(slack_provider_fake_url)["request_counts"]
-    )
+    before_counts = _provider_observation(slack_provider_fake_url).request_counts
     before_history_reads = before_counts.get(
         "conversations.history", 0
     ) + before_counts.get("conversations.replies", 0)
@@ -2362,9 +2559,7 @@ def test_slack_binding_response_modes_gate_and_preserve_context(
             "thread_ts": root_timestamp,
         }
     )
-    after_ignored_counts = _int_dict(
-        _provider_state(slack_provider_fake_url)["request_counts"]
-    )
+    after_ignored_counts = _provider_observation(slack_provider_fake_url).request_counts
     assert (
         after_ignored_counts.get("conversations.history", 0)
         + after_ignored_counts.get("conversations.replies", 0)
@@ -2422,7 +2617,7 @@ def test_slack_binding_response_modes_gate_and_preserve_context(
             "thread_ts": root_timestamp,
         }
     )
-    mention_evidence = _objects(
+    mention_evidence = _required(
         wait_until(
             lambda: (
                 evidence
@@ -2442,9 +2637,9 @@ def test_slack_binding_response_modes_gate_and_preserve_context(
             message="Later Slack mention did not include retained context",
         )
     )
-    mention_by_body = {item["body"]: item for item in mention_evidence}
-    assert mention_by_body[ordinary_body]["prompt_role"] == "context"
-    assert mention_by_body[mention_body]["prompt_role"] == "invocation"
+    mention_by_body = {item.body: item for item in mention_evidence}
+    assert mention_by_body[ordinary_body].prompt_role == "context"
+    assert mention_by_body[mention_body].prompt_role == "invocation"
 
     updated = external_api.external_channel_v1_update_session_channel_response_mode(
         agent_id=agent_id,
@@ -2503,7 +2698,7 @@ def test_slack_binding_response_modes_gate_and_preserve_context(
             "thread_ts": root_timestamp,
         }
     )
-    continuation_evidence = _objects(
+    continuation_evidence = _required(
         wait_until(
             lambda: (
                 evidence
@@ -2523,10 +2718,10 @@ def test_slack_binding_response_modes_gate_and_preserve_context(
             message="All-messages Slack continuation was not admitted",
         )
     )
-    continuation_by_body = {item["body"]: item for item in continuation_evidence}
-    assert continuation_by_body[ordinary_body]["prompt_role"] == "context"
-    assert continuation_by_body[mention_body]["prompt_role"] == "invocation"
-    assert continuation_by_body[continuation_body]["prompt_role"] == "invocation"
+    continuation_by_body = {item.body: item for item in continuation_evidence}
+    assert continuation_by_body[ordinary_body].prompt_role == "context"
+    assert continuation_by_body[mention_body].prompt_role == "invocation"
+    assert continuation_by_body[continuation_body].prompt_role == "invocation"
 
     disconnected = external_api.external_channel_v1_disconnect_session_channel(
         agent_id=agent_id,
@@ -2989,7 +3184,7 @@ def test_multi_app_mention_selector_deduplicates_and_binds_open_access_route(
         )
         assert response.status_code == 200
 
-    selector_view = _object(
+    selector_view = _required(
         wait_until(
             lambda: _latest_selector_view(slack_provider_fake_url),
             timeout=15,
@@ -2997,8 +3192,8 @@ def test_multi_app_mention_selector_deduplicates_and_binds_open_access_route(
             message="Selector interaction did not open a modal",
         )
     )
-    assert selector_view["route_ids"] == [route.id for route in routes]
-    metadata = selector_view.get("private_metadata")
+    assert selector_view.route_ids == [route.id for route in routes]
+    metadata = selector_view.private_metadata
     assert isinstance(metadata, str)
     assert metadata
 
@@ -3009,8 +3204,8 @@ def test_multi_app_mention_selector_deduplicates_and_binds_open_access_route(
         "user": {"id": "U-SELECTOR"},
         "trigger_id": "trigger-selector-submission-e2e",
         "view": {
-            "id": selector_view["view_id"],
-            "hash": selector_view["view_hash"],
+            "id": selector_view.view_id,
+            "hash": selector_view.view_hash,
             "callback_id": "azents_agent_selector",
             "private_metadata": metadata,
             "state": {
@@ -3047,7 +3242,7 @@ def test_multi_app_mention_selector_deduplicates_and_binds_open_access_route(
             headers=headers,
             baseline_session_ids=baseline_session_ids_by_agent[selected_agent_id],
         )
-    setup_view = _object(
+    setup_view = _required(
         wait_until(
             lambda: _latest_setup_view(slack_provider_fake_url),
             timeout=15,
@@ -3089,7 +3284,7 @@ def test_multi_app_mention_selector_deduplicates_and_binds_open_access_route(
     )
     assert selected_session.agent_id == agent_ids[1]
     assert selected_binding.provider.value == "slack"
-    input_evidence = _objects(
+    input_evidence = _required(
         wait_until(
             lambda: (
                 evidence
@@ -3109,29 +3304,28 @@ def test_multi_app_mention_selector_deduplicates_and_binds_open_access_route(
             message="Slack Multi selector did not preserve its source invocation",
         )
     )
-    assert input_evidence[0]["provider"] == "slack"
-    assert input_evidence[0]["external_message_id"]
-    assert input_evidence[0]["prompt_role"] == "invocation"
-    assert input_evidence[0]["body"] == source_text
-    assert input_evidence[0]["original_url"] == (
+    assert input_evidence[0].provider == "slack"
+    assert input_evidence[0].external_message_id
+    assert input_evidence[0].prompt_role == "invocation"
+    assert input_evidence[0].body == source_text
+    assert input_evidence[0].original_url == (
         f"https://example.slack.com/archives/{_CHANNEL_ID}/p"
         f"{root_timestamp.replace('.', '')}"
     )
     assert _approval_request_id(slack_provider_fake_url) == ""
-    provider_state = _provider_state(slack_provider_fake_url)
-    request_counts = _int_dict(provider_state["request_counts"])
-    views = _objects(provider_state["views"])
+    provider_state = _provider_observation(slack_provider_fake_url)
+    request_counts = provider_state.request_counts
+    views = provider_state.views
     assert request_counts["views.open"] == len(views)
-    assert 1 <= sum(view["control_scope"] == "selector" for view in views) <= 2
-    assert sum(view["control_scope"] == "setup" for view in views) == 1
+    assert 1 <= sum(view.control_scope == "selector" for view in views) <= 2
+    assert sum(view.control_scope == "setup" for view in views) == 1
     assert all(
-        view["operation"] == "views.open" and view["outcome"] == "delivered"
-        for view in views
+        view.operation == "views.open" and view.outcome == "delivered" for view in views
     )
     assert any(
-        view["control_scope"] == "selector"
-        and view["route_count"] == len(routes)
-        and view["has_submit"] is True
+        view.control_scope == "selector"
+        and view.route_count == len(routes)
+        and view.has_submit is True
         for view in views
     )
     assert _BOT_TOKEN not in str(provider_state)
@@ -3321,7 +3515,7 @@ def test_provider_native_channel_work_progress_journey(
         channel_id=_CHANNEL_ID,
         user_id="U-EXTERNAL",
     )
-    setup_view = _object(
+    setup_view = _required(
         wait_until(
             lambda: _latest_setup_view(slack_provider_fake_url),
             timeout=15,
@@ -3383,17 +3577,11 @@ def test_provider_native_channel_work_progress_journey(
     )
     binding_id = active_projection.items[0].id
 
-    barrier_state = _object(
+    barrier_state = _required(
         wait_until(
             lambda: (
                 state
-                if (
-                    state := requests.get(
-                        f"{slack_provider_fake_url}/__testenv/barrier",
-                        timeout=5,
-                    ).json()
-                ).get("reached")
-                is True
+                if (state := _read_barrier(slack_provider_fake_url)).reached is True
                 else None
             ),
             timeout=90,
@@ -3401,7 +3589,7 @@ def test_provider_native_channel_work_progress_journey(
             message="Initial Slack Plan update did not reach the provider barrier",
         )
     )
-    assert barrier_state == {
+    assert barrier_state.model_dump(exclude_unset=True) == {
         "operation": "chat.update",
         "occurrence": 1,
         "request_count": 1,
@@ -3460,7 +3648,7 @@ def test_provider_native_channel_work_progress_journey(
         message="Channel Work model request did not reach the expected proxy stage",
     )
 
-    def completed_channel_action() -> list[dict[str, object]]:
+    def completed_channel_action() -> list[_ToolEvidence]:
         evidence = _channel_action_tool_evidence(
             azents_public_server_url,
             token,
@@ -3468,13 +3656,13 @@ def test_provider_native_channel_work_progress_journey(
             call_ids=frozenset({"call_external_channel_progress"}),
         )
         assert any(
-            item.get("kind") == "client_tool_call"
-            and item.get("call_id") == "call_external_channel_progress"
+            item.kind == "client_tool_call"
+            and item.call_id == "call_external_channel_progress"
             for item in evidence
         ), f"Channel Action tool call was not recorded: {evidence!r}"
         assert any(
-            item.get("kind") == "client_tool_result"
-            and item.get("call_id") == "call_external_channel_progress"
+            item.kind == "client_tool_result"
+            and item.call_id == "call_external_channel_progress"
             for item in evidence
         ), f"Channel Action tool result was not recorded: {evidence!r}"
         return evidence
@@ -3488,11 +3676,11 @@ def test_provider_native_channel_work_progress_journey(
     progress_result = next(
         item
         for item in tool_evidence
-        if item.get("kind") == "client_tool_result"
-        and item.get("call_id") == "call_external_channel_progress"
+        if item.kind == "client_tool_result"
+        and item.call_id == "call_external_channel_progress"
     )
-    assert progress_result.get("status") == "completed", tool_evidence
-    result_output = progress_result.get("output")
+    assert progress_result.status == "completed", tool_evidence
+    result_output = progress_result.output
     assert isinstance(result_output, str), tool_evidence
     assert '"outcomes"' in result_output
     assert '"status": "delivered"' in result_output
@@ -3500,14 +3688,14 @@ def test_provider_native_channel_work_progress_journey(
     assert "action_id" not in result_output
     assert "credentials" not in result_output
 
-    provider_state = _provider_state(slack_provider_fake_url)
-    request_counts = _int_dict(provider_state["request_counts"])
+    provider_state = _provider_observation(slack_provider_fake_url)
+    request_counts = provider_state.request_counts
     assert request_counts["users.info"] >= 2
     assert request_counts["conversations.info"] >= 2
     assert _BOT_TOKEN not in str(provider_state)
     assert _SIGNING_SECRET not in str(provider_state)
 
-    plan_delivery = _object(
+    plan_delivery = _required(
         wait_until(
             lambda: _plan_delivery(slack_provider_fake_url),
             timeout=20,
@@ -3522,50 +3710,51 @@ def test_provider_native_channel_work_progress_journey(
         "Failed: Trace the unavailable dependency\n"
         "Pending: Summarize the incident"
     )
-    blocks = _objects(plan_delivery["blocks"])
+    blocks = _required(plan_delivery.blocks)
     assert len(blocks) == 2
-    assert plan_delivery["text"] == expected_fallback
-    assert plan_delivery["safe_category"] == "activity_tracker"
-    assert plan_delivery["session_path"] == (
+    assert plan_delivery.text == expected_fallback
+    assert plan_delivery.safe_category == "activity_tracker"
+    assert plan_delivery.session_path == (
         f"/w/{handle}/agents/{agent_id}/sessions/{session_id}"
     )
     plan = blocks[0]
-    assert plan["type"] == "plan"
-    assert plan["title"] == "Investigating error logs…"
-    assert "plan_id" not in plan
+    assert plan.type == "plan"
+    assert plan.title == "Investigating error logs…"
+    assert "plan_id" not in (plan.model_extra or {})
     actions = blocks[1]
-    assert actions["type"] == "actions"
-    action_elements = _objects(actions["elements"])
+    assert actions.type == "actions"
+    action_elements = _SlackActionsBlock.model_validate(
+        actions.model_dump(mode="json", exclude_unset=True)
+    ).elements
     assert len(action_elements) == 2
-    assert action_elements[0]["type"] == "button"
-    assert action_elements[0]["action_id"] == "view_azents_session"
-    assert action_elements[0]["text"] == {
+    assert action_elements[0].type == "button"
+    assert action_elements[0].action_id == "view_azents_session"
+    assert action_elements[0].text.model_dump(exclude_unset=True) == {
         "type": "plain_text",
         "text": "View session",
     }
-    assert action_elements[1]["type"] == "button"
-    assert action_elements[1]["action_id"] == "azents_conversation_settings_open"
-    assert action_elements[1]["text"] == {
+    assert action_elements[1].type == "button"
+    assert action_elements[1].action_id == "azents_conversation_settings_open"
+    assert action_elements[1].text.model_dump(exclude_unset=True) == {
         "type": "plain_text",
         "text": "Conversation settings",
     }
-    assert isinstance(action_elements[1]["value"], str)
-    assert action_elements[1]["value"]
-    tasks = _objects(plan["tasks"])
-    assert [task["task_id"] for task in tasks] == [
+    assert action_elements[1].value
+    tasks = _required(plan.tasks)
+    assert [task.task_id for task in tasks] == [
         "inspect",
         "verify",
         "trace",
         "summarize",
     ]
-    assert [task["status"] for task in tasks] == [
+    assert [task.status for task in tasks] == [
         "in_progress",
         "complete",
         "error",
         "pending",
     ]
-    assert all("type" not in task for task in tasks)
-    assert tasks[0]["details"] == {
+    assert all("type" not in (task.model_extra or {}) for task in tasks)
+    assert tasks[0].details == {
         "type": "rich_text",
         "elements": [
             {
@@ -3579,14 +3768,14 @@ def test_provider_native_channel_work_progress_journey(
             }
         ],
     }
-    assert tasks[0]["sources"] == [
+    assert tasks[0].sources == [
         {
             "type": "url",
             "url": "https://example.com/logs",
             "text": "Error log dashboard",
         }
     ]
-    assert tasks[1]["output"] == {
+    assert tasks[1].output == {
         "type": "rich_text",
         "elements": [
             {
@@ -3601,13 +3790,13 @@ def test_provider_native_channel_work_progress_journey(
         ],
     }
 
-    provider_state = _provider_state(slack_provider_fake_url)
-    baseline_counts = _int_dict(provider_state["request_counts"])
+    provider_state = _provider_observation(slack_provider_fake_url)
+    baseline_counts = provider_state.request_counts
     baseline_delete_count = baseline_counts.get("chat.delete", 0)
     assert _BOT_TOKEN not in str(provider_state)
     assert _SIGNING_SECRET not in str(provider_state)
 
-    def completed_waiting_actions() -> list[dict[str, object]]:
+    def completed_waiting_actions() -> list[_ToolEvidence]:
         evidence = _channel_action_tool_evidence(
             azents_public_server_url,
             token,
@@ -3621,10 +3810,9 @@ def test_provider_native_channel_work_progress_journey(
             ),
         )
         results = {
-            _string(item["call_id"]): item
+            _string(item.call_id): item
             for item in evidence
-            if item.get("kind") == "client_tool_result"
-            and isinstance(item.get("call_id"), str)
+            if item.kind == "client_tool_result" and isinstance(item.call_id, str)
         }
         assert set(results) == {
             "call_external_channel_outcome_progress",
@@ -3640,23 +3828,16 @@ def test_provider_native_channel_work_progress_journey(
         message="Direct failed, unknown, and request-input actions did not complete",
     )
     outcome_results = {
-        _string(item["call_id"]): item
+        _string(item.call_id): item
         for item in outcome_evidence
-        if item.get("kind") == "client_tool_result"
-        and isinstance(item.get("call_id"), str)
+        if item.kind == "client_tool_result" and isinstance(item.call_id, str)
     }
-    unknown_output = outcome_results["call_external_channel_outcome_progress"].get(
-        "output"
+    unknown_output = outcome_results["call_external_channel_outcome_progress"].output
+    failed_output = outcome_results["call_external_channel_failure_progress"].output
+    request_input_output = outcome_results["call_external_channel_request_input"].output
+    assert all(item.status == "completed" for item in outcome_results.values()), (
+        outcome_evidence
     )
-    failed_output = outcome_results["call_external_channel_failure_progress"].get(
-        "output"
-    )
-    request_input_output = outcome_results["call_external_channel_request_input"].get(
-        "output"
-    )
-    assert all(
-        item.get("status") == "completed" for item in outcome_results.values()
-    ), outcome_evidence
     assert isinstance(failed_output, str), outcome_evidence
     assert isinstance(unknown_output, str), outcome_evidence
     assert isinstance(request_input_output, str), outcome_evidence
@@ -3675,7 +3856,7 @@ def test_provider_native_channel_work_progress_journey(
             token=token,
             session_id=session_id,
         )
-        return live.get("run") is None and live.get("session_run_state") == "idle"
+        return live.run is None and live.session_run_state.value == "idle"
 
     wait_until(
         session_is_idle,
@@ -3690,12 +3871,12 @@ def test_provider_native_channel_work_progress_journey(
         call_ids=frozenset({"call_external_channel_finish"}),
     )
     assert not any(
-        item.get("kind") == "client_tool_result"
-        and item.get("call_id") == "call_external_channel_finish"
+        item.kind == "client_tool_result"
+        and item.call_id == "call_external_channel_finish"
         for item in waiting_evidence
     ), waiting_evidence
-    waiting_state = _provider_state(slack_provider_fake_url)
-    waiting_counts = _int_dict(waiting_state["request_counts"])
+    waiting_state = _provider_observation(slack_provider_fake_url)
+    waiting_counts = waiting_state.request_counts
     assert waiting_counts["chat.update"] == 3
     assert waiting_counts.get("chat.delete", 0) == baseline_delete_count
 
@@ -3722,9 +3903,9 @@ def test_provider_native_channel_work_progress_journey(
         },
         timeout=5,
     ).raise_for_status()
-    resumed_counts_baseline = _int_dict(
-        _provider_state(slack_provider_fake_url)["request_counts"]
-    )
+    resumed_counts_baseline = _provider_observation(
+        slack_provider_fake_url
+    ).request_counts
     resumed_update_baseline = resumed_counts_baseline.get("chat.update", 0)
     resumed_delete_baseline = resumed_counts_baseline.get("chat.delete", 0)
     response_body = json.dumps(
@@ -3754,19 +3935,18 @@ def test_provider_native_channel_work_progress_journey(
     )
     assert response.status_code == 200
 
-    def admitted_resume_input() -> list[dict[str, object]] | None:
+    def admitted_resume_input() -> list[_ExternalInputEvidence] | None:
         evidence = _external_channel_input_evidence(
             public_server_url=azents_public_server_url,
             token=token,
             session_id=session_id,
         )
         assert any(
-            item.get("body") == response_text
-            and item.get("prompt_role") == "invocation"
+            item.body == response_text and item.prompt_role == "invocation"
             for item in evidence
         ), (
             evidence,
-            _provider_state(slack_provider_fake_url),
+            _provider_observation(slack_provider_fake_url),
             list_live(
                 server_url=azents_public_server_url,
                 token=token,
@@ -3775,7 +3955,7 @@ def test_provider_native_channel_work_progress_journey(
         )
         return evidence
 
-    resumed_input = _objects(
+    resumed_input = _required(
         wait_until(
             admitted_resume_input,
             timeout=30,
@@ -3783,9 +3963,9 @@ def test_provider_native_channel_work_progress_journey(
             message="Same-binding participant input was not admitted canonically",
         )
     )
-    assert any(item.get("body") == response_text for item in resumed_input)
+    assert any(item.body == response_text for item in resumed_input)
 
-    def completed_resume_finish() -> list[dict[str, object]]:
+    def completed_resume_finish() -> list[_ToolEvidence]:
         evidence = _channel_action_tool_evidence(
             azents_public_server_url,
             token,
@@ -3793,8 +3973,8 @@ def test_provider_native_channel_work_progress_journey(
             call_ids=frozenset({"call_external_channel_finish"}),
         )
         assert any(
-            item.get("kind") == "client_tool_result"
-            and item.get("call_id") == "call_external_channel_finish"
+            item.kind == "client_tool_result"
+            and item.call_id == "call_external_channel_finish"
             for item in evidence
         ), evidence
         return evidence
@@ -3808,11 +3988,11 @@ def test_provider_native_channel_work_progress_journey(
     finish_result = next(
         item
         for item in finish_evidence
-        if item.get("kind") == "client_tool_result"
-        and item.get("call_id") == "call_external_channel_finish"
+        if item.kind == "client_tool_result"
+        and item.call_id == "call_external_channel_finish"
     )
-    finish_output = finish_result.get("output")
-    assert finish_result.get("status") == "completed", finish_evidence
+    finish_output = finish_result.output
+    assert finish_result.status == "completed", finish_evidence
     assert isinstance(finish_output, str), finish_evidence
     assert '"status": "delivered"' in finish_output
     assert '"awaiting_input": false' in finish_output
@@ -3823,13 +4003,12 @@ def test_provider_native_channel_work_progress_journey(
         interval=0.2,
         message="Resumed Channel Work Session did not reach terminal idle",
     )
-    outcome_state = _provider_state(slack_provider_fake_url)
-    outcome_counts = _int_dict(outcome_state["request_counts"])
+    outcome_state = _provider_observation(slack_provider_fake_url)
+    outcome_counts = outcome_state.request_counts
     assert outcome_counts.get("chat.update", 0) == resumed_update_baseline
     assert outcome_counts.get("chat.delete", 0) == resumed_delete_baseline
     assert (
-        _int_dict(_provider_state(slack_provider_fake_url)["request_counts"])
-        == outcome_counts
+        _provider_observation(slack_provider_fake_url).request_counts == outcome_counts
     )
     assert _BOT_TOKEN not in str(outcome_state)
     assert _SIGNING_SECRET not in str(outcome_state)
@@ -3974,11 +4153,13 @@ def test_socket_mode_recovers_then_acknowledges_and_preserves_route(
         return None
 
     def socket_evidence_contains(field: str) -> bool:
-        socket_state = _provider_state(slack_provider_fake_url).get("socket")
-        if not isinstance(socket_state, dict):
+        socket_state = _provider_observation(slack_provider_fake_url).socket
+        if socket_state is None:
             return False
-        values = _object(socket_state).get(field)
-        return isinstance(values, list) and envelope_id in _list(values)
+        if field == "envelope_ids":
+            return envelope_id in socket_state.envelope_ids
+        assert field == "acknowledgements"
+        return envelope_id in socket_state.acknowledgements
 
     with azents_external_channel_gateway_factory():
         wait_until(
@@ -4026,12 +4207,10 @@ def test_socket_mode_recovers_then_acknowledges_and_preserves_route(
         )
         reconnect_payload = reconnect_required
         assert reconnect_payload.socket_gap_reason == "link_disabled"
-        provider_state = _provider_state(slack_provider_fake_url)
-        socket_state = provider_state["socket"]
-        assert isinstance(socket_state, dict)
-        socket_state_object = _object(socket_state)
-        assert socket_state_object["connections"] == 2
-        assert socket_state_object["configured_sessions"] == 2
+        provider_state = _provider_observation(slack_provider_fake_url)
+        socket_state = _required(provider_state.socket)
+        assert socket_state.connections == 2
+        assert socket_state.configured_sessions == 2
         assert "xapp-e2e-private" not in str(provider_state)
 
     recovered = external_api.external_channel_v1_update_slack_connection(
@@ -4058,7 +4237,7 @@ def test_socket_mode_recovers_then_acknowledges_and_preserves_route(
         channel_id=_CHANNEL_ID,
         user_id="U-SOCKET",
     )
-    setup_view = _object(
+    setup_view = _required(
         wait_until(
             lambda: _latest_setup_view(slack_provider_fake_url),
             timeout=15,
@@ -4096,20 +4275,20 @@ def test_socket_mode_recovers_then_acknowledges_and_preserves_route(
         token=token,
         session_id=socket_session.id,
     )
-    assert input_evidence["provider"] == "slack"
-    assert input_evidence["external_message_id"] == (
+    assert input_evidence.provider == "slack"
+    assert input_evidence.external_message_id == (
         f"slack:{socket_team_id}:{_CHANNEL_ID}:{root_timestamp}"
     )
     expected_session_path = (
         f"/w/{handle}/agents/{agent_id}/sessions/{socket_session.id}"
     )
-    presence_state = _object(
+    presence_state = _required(
         wait_until(
             lambda: (
                 state
                 if expected_session_path
                 in _successful_session_paths(
-                    state := _provider_state(slack_provider_fake_url)
+                    state := _provider_observation(slack_provider_fake_url)
                 )
                 and "joined" in _successful_session_presence_states(state)
                 else None
@@ -4265,8 +4444,8 @@ def run_connection_management_web_surface_uses_redacted_operational_state(
     validate_button.click()
 
     def validation_reached_provider(_: WebDriver) -> bool:
-        counts = _provider_state(slack_provider_fake_url).get("request_counts")
-        return isinstance(counts, dict) and _object(counts).get("auth.test") == 2
+        counts = _provider_observation(slack_provider_fake_url).request_counts
+        return counts.get("auth.test") == 2
 
     wait.until(validation_reached_provider)
     assert connection.is_displayed()
@@ -4346,7 +4525,7 @@ def test_discord_single_activation_and_interaction_journey(
         ),
         _headers=headers,
     )
-    activation_state = _discord_provider_state(discord_provider_fake_url)
+    activation_state = _discord_provider_observation(discord_provider_fake_url)
     assert setup.connection.status is ExternalChannelConnectionStatus.ACTIVE, (
         activation_state
     )
@@ -4354,16 +4533,19 @@ def test_discord_single_activation_and_interaction_journey(
     assert setup.connection.provider_tenant_id == _DISCORD_GUILD_ID
     assert _DISCORD_BOT_TOKEN not in setup.model_dump_json(by_alias=True)
 
-    assert activation_state["interaction_configurations"] == [
-        {"application_id": _DISCORD_APPLICATION_ID}
-    ]
-    assert activation_state["guild_commands"] == [
+    assert [
+        item.model_dump(exclude_unset=True)
+        for item in activation_state.interaction_configurations
+    ] == [{"application_id": _DISCORD_APPLICATION_ID}]
+    assert [
+        item.model_dump(exclude_unset=True) for item in activation_state.guild_commands
+    ] == [
         {"role": "azents_settings", "type": 1},
         {"role": "conversation_settings", "type": 3},
         {"role": "message_action", "type": 3},
         {"role": "unrelated", "type": 2},
     ]
-    activation_request_counts = _int_dict(activation_state["request_counts"])
+    activation_request_counts = activation_state.request_counts
     assert activation_request_counts["list_guild_commands"] == 1
     assert activation_request_counts["create_guild_command"] == 1
     assert activation_request_counts["update_guild_command"] == 1
@@ -4406,8 +4588,8 @@ def test_discord_single_activation_and_interaction_journey(
     discord_oauth = SystemSettingsV1Api(
         admin_api_client
     ).system_settings_v1_get_external_account_oauth_setting("discord")
-    state = _discord_provider_state(discord_provider_fake_url)
-    assert state["interactions"] == [
+    state = _discord_provider_observation(discord_provider_fake_url)
+    assert [item.model_dump(exclude_unset=True) for item in state.interactions] == [
         {
             "interaction_id": "700000000000000001",
             "interaction_type": 1,
@@ -4643,11 +4825,9 @@ def test_discord_gateway_message_waits_for_location_then_binds(
         wait_until(
             lambda: (
                 6
-                in _list(
-                    _object(
-                        _discord_provider_state(discord_provider_fake_url)["gateway"]
-                    )["initial_opcodes"]
-                )
+                in _required(
+                    _discord_provider_observation(discord_provider_fake_url).gateway
+                ).initial_opcodes
             ),
             timeout=45,
             interval=0.2,
@@ -4657,9 +4837,9 @@ def test_discord_gateway_message_waits_for_location_then_binds(
         )
         wait_until(
             lambda: (
-                _int_dict(
-                    _discord_provider_state(discord_provider_fake_url)["request_counts"]
-                ).get("get_message", 0)
+                _discord_provider_observation(
+                    discord_provider_fake_url
+                ).request_counts.get("get_message", 0)
                 >= 1
             ),
             timeout=30,
@@ -4686,8 +4866,8 @@ def test_discord_gateway_message_waits_for_location_then_binds(
                 message="Discord Gateway setup control was not delivered",
             )
         )
-        setup_gate_state = _discord_provider_state(discord_provider_fake_url)
-        setup_gate_counts = _int_dict(setup_gate_state["request_counts"])
+        setup_gate_state = _discord_provider_observation(discord_provider_fake_url)
+        setup_gate_counts = setup_gate_state.request_counts
         assert setup_gate_counts.get("create_thread", 0) == 0
         assert setup_gate_counts.get("create_message", 0) == 1
         engine_worker = azents_engine_worker_container.get_wrapped_container()
@@ -4722,16 +4902,11 @@ def test_discord_gateway_message_waits_for_location_then_binds(
         )
         expected_session_path = f"/w/{handle}/agents/{agent_id}/sessions/{session.id}"
 
-        barrier_state = _object(
+        barrier_state = _required(
             wait_until(
                 lambda: (
                     state
-                    if (
-                        state := requests.get(
-                            f"{discord_provider_fake_url}/__testenv/barrier",
-                            timeout=5,
-                        ).json()
-                    ).get("reached")
+                    if (state := _read_barrier(discord_provider_fake_url)).reached
                     is True
                     else None
                 ),
@@ -4743,31 +4918,31 @@ def test_discord_gateway_message_waits_for_location_then_binds(
                 ),
             )
         )
-        assert barrier_state["operation"] == "create_message"
-        assert barrier_state["occurrence"] == 2
-        assert barrier_state["request_count"] == 2
+        assert barrier_state.operation == "create_message"
+        assert barrier_state.occurrence == 2
+        assert barrier_state.request_count == 2
         requests.post(
             f"{discord_provider_fake_url}/__testenv/barrier/release",
             timeout=5,
         ).raise_for_status()
 
-        def direct_thread_delivery_committed() -> dict[str, object] | None:
-            state = _discord_provider_state(discord_provider_fake_url)
+        def direct_thread_delivery_committed() -> _ProviderState | None:
+            state = _discord_provider_observation(discord_provider_fake_url)
             thread_channel_ids = {
-                operation.get("thread_channel_id")
-                for operation in _objects(state["operations"])
-                if operation.get("event") == "thread_create"
-                and operation.get("outcome") == "delivered"
-                and isinstance(operation.get("thread_channel_id"), str)
+                operation.thread_channel_id
+                for operation in state.operations
+                if operation.event == "thread_create"
+                and operation.outcome == "delivered"
+                and isinstance(operation.thread_channel_id, str)
             }
             if len(thread_channel_ids) != 1:
                 return None
             thread_channel_id = next(iter(thread_channel_ids))
             if not any(
-                delivery.get("operation") == "create_message"
-                and delivery.get("outcome") == "created"
-                and delivery.get("channel_id") == thread_channel_id
-                for delivery in _objects(state["deliveries"])
+                delivery.operation == "create_message"
+                and delivery.outcome == "created"
+                and delivery.channel_id == thread_channel_id
+                for delivery in state.deliveries
             ):
                 return None
             return state
@@ -4791,9 +4966,9 @@ def test_discord_gateway_message_waits_for_location_then_binds(
                 session_id=session.id,
                 _headers=headers,
             )
-            counts = _int_dict(
-                _discord_provider_state(discord_provider_fake_url)["request_counts"]
-            )
+            counts = _discord_provider_observation(
+                discord_provider_fake_url
+            ).request_counts
             if (
                 generated_detail.title
                 and generated_detail.title_source
@@ -4823,9 +4998,9 @@ def test_discord_gateway_message_waits_for_location_then_binds(
                     session_id=session.id,
                     _headers=headers,
                 )
-                final_counts = _int_dict(
-                    _discord_provider_state(discord_provider_fake_url)["request_counts"]
-                )
+                final_counts = _discord_provider_observation(
+                    discord_provider_fake_url
+                ).request_counts
                 worker_stdout, worker_stderr = azents_engine_worker_container.get_logs()
                 title_log_lines = [
                     line
@@ -4851,10 +5026,10 @@ def test_discord_gateway_message_waits_for_location_then_binds(
                     f"title_failure_diagnostics_unavailable={diagnostic_error!r}"
                 )
             pytest.fail(f"{error}; {diagnostic_summary}")
-        state = _object(
+        state = _required(
             wait_until(
                 lambda: _joined_session_navigation_state(
-                    _discord_provider_state(discord_provider_fake_url),
+                    _discord_provider_observation(discord_provider_fake_url),
                     expected_session_path,
                 ),
                 timeout=30,
@@ -4867,18 +5042,18 @@ def test_discord_gateway_message_waits_for_location_then_binds(
         )
         thread_channel_id = _string(
             next(
-                operation["thread_channel_id"]
-                for operation in _objects(state["operations"])
-                if operation.get("event") == "thread_create"
-                and operation.get("outcome") == "delivered"
+                operation.thread_channel_id
+                for operation in state.operations
+                if operation.event == "thread_create"
+                and operation.outcome == "delivered"
             )
         )
-        state = _object(
+        state = _required(
             wait_until(
                 lambda: (
                     provider_state
                     if _discord_typing_channel_observed(
-                        provider_state := _discord_provider_state(
+                        provider_state := _discord_provider_observation(
                             discord_provider_fake_url
                         ),
                         channel_id=thread_channel_id,
@@ -4905,7 +5080,7 @@ def test_discord_gateway_message_waits_for_location_then_binds(
         _headers=headers,
     )
     assert detail.id == session.id
-    input_evidence = _objects(
+    input_evidence = _required(
         wait_until(
             lambda: (
                 evidence
@@ -4927,11 +5102,11 @@ def test_discord_gateway_message_waits_for_location_then_binds(
     )
     assert len(input_evidence) == 1
     logical_input = input_evidence[0]
-    assert logical_input["provider"] == "discord"
-    assert logical_input["external_message_id"]
-    assert logical_input["prompt_role"] == "invocation"
-    assert logical_input["body"] == source_text
-    assert logical_input["original_url"] == (
+    assert logical_input.provider == "discord"
+    assert logical_input.external_message_id
+    assert logical_input.prompt_role == "invocation"
+    assert logical_input.body == source_text
+    assert logical_input.original_url == (
         f"https://discord.com/channels/{guild_id}/{channel_id}/{message_id}"
     )
     assert generated_detail.id == session.id
@@ -4949,16 +5124,16 @@ def test_discord_gateway_message_waits_for_location_then_binds(
         == []
     )
     assert _successful_session_presence_states(state) == ["joined"]
-    request_counts = _int_dict(state["request_counts"])
+    request_counts = state.request_counts
     assert request_counts["create_thread"] >= 1
     assert request_counts["get_channel"] == 1
     assert request_counts["update_channel"] == 1
     # Thread reconciliation runs before create; canonical history runs after create.
     assert request_counts["get_message"] >= 2
     title_operations = [
-        operation["operation"]
-        for operation in _objects(state["operations"])
-        if operation["operation"] in {"create_thread", "get_channel", "update_channel"}
+        operation.operation
+        for operation in state.operations
+        if operation.operation in {"create_thread", "get_channel", "update_channel"}
     ]
     expected_title_operations = [
         "create_thread",
@@ -4973,14 +5148,14 @@ def test_discord_gateway_message_waits_for_location_then_binds(
         if matched_title_operation_count == len(expected_title_operations):
             break
     assert matched_title_operation_count == len(expected_title_operations)
-    gateway = _object(state["gateway"])
-    assert _int(gateway["connections"]) >= 2
-    initial_opcodes = _list(gateway["initial_opcodes"])
+    gateway = _required(state.gateway)
+    assert gateway.connections >= 2
+    initial_opcodes = gateway.initial_opcodes
     resume_index = initial_opcodes.index(6)
     assert 2 in initial_opcodes[:resume_index]
-    dispatches = _list(gateway["dispatches"])
-    assert {"event_type": "GUILD_CREATE", "sequence": 2} in dispatches
-    assert {"event_type": "MESSAGE_CREATE", "sequence": 3} in dispatches
+    dispatches = gateway.dispatches
+    assert _GatewayDispatch(event_type="GUILD_CREATE", sequence=2) in dispatches
+    assert _GatewayDispatch(event_type="MESSAGE_CREATE", sequence=3) in dispatches
     rendered = str(state)
     assert source_text not in rendered
     assert _DISCORD_BOT_TOKEN not in rendered
@@ -4994,12 +5169,14 @@ def test_discord_gateway_message_waits_for_location_then_binds(
     )
     assert disconnected.status is ExternalChannelConnectionStatus.DISCONNECTED
     assert disconnected.credentials_configured is False
-    terminal_state = _object(
+    terminal_state = _required(
         wait_until(
             lambda: (
                 provider_state
                 if _successful_session_presence_states(
-                    provider_state := _discord_provider_state(discord_provider_fake_url)
+                    provider_state := _discord_provider_observation(
+                        discord_provider_fake_url
+                    )
                 )
                 == ["joined", "left"]
                 else None
@@ -5182,32 +5359,25 @@ def test_discord_unmentioned_todo_work_tracks_activity_and_typing_recovers(
             timeout=5,
         ).raise_for_status()
 
-    expected_typing_target = {
-        "guild_id": guild_id,
-        "channel_id": channel_id,
-        "work_cycle_count": 1,
-    }
+    expected_typing_target = _TypingTarget(
+        guild_id=guild_id,
+        channel_id=channel_id,
+        work_cycle_count=1,
+    )
 
     def active_typing_state_after(
         *,
         snapshot_index: int,
         pulse_index: int,
-    ) -> dict[str, object] | None:
-        state = _discord_provider_state(discord_provider_fake_url)
-        typing = state.get("typing")
-        if not isinstance(typing, dict):
+    ) -> _ProviderState | None:
+        state = _discord_provider_observation(discord_provider_fake_url)
+        typing = state.typing
+        if typing is None:
             return None
-        typed_typing = _object(typing)
-        snapshots = typed_typing.get("snapshots")
-        pulses = typed_typing.get("pulses")
-        if not isinstance(snapshots, list) or not isinstance(pulses, list):
-            return None
-        new_snapshots = _list(snapshots)[snapshot_index:]
-        new_pulses = _list(pulses)[pulse_index:]
+        new_snapshots = typing.snapshots[snapshot_index:]
+        new_pulses = typing.pulses[pulse_index:]
         if expected_typing_target not in new_pulses or not any(
-            isinstance(snapshot, dict)
-            and _object(snapshot).get("targets") == [expected_typing_target]
-            for snapshot in new_snapshots
+            snapshot.targets == [expected_typing_target] for snapshot in new_snapshots
         ):
             return None
         return state
@@ -5215,20 +5385,13 @@ def test_discord_unmentioned_todo_work_tracks_activity_and_typing_recovers(
     def empty_typing_state_after(
         *,
         snapshot_index: int,
-    ) -> dict[str, object] | None:
-        state = _discord_provider_state(discord_provider_fake_url)
-        typing = state.get("typing")
-        if not isinstance(typing, dict):
+    ) -> _ProviderState | None:
+        state = _discord_provider_observation(discord_provider_fake_url)
+        typing = state.typing
+        if typing is None:
             return None
-        snapshots = _object(typing).get("snapshots")
-        if not isinstance(snapshots, list):
-            return None
-        new_snapshots = _list(snapshots)[snapshot_index:]
-        if (
-            not new_snapshots
-            or not isinstance(new_snapshots[-1], dict)
-            or _object(new_snapshots[-1]).get("targets") != []
-        ):
+        new_snapshots = typing.snapshots[snapshot_index:]
+        if not new_snapshots or new_snapshots[-1].targets != []:
             return None
         return state
 
@@ -5346,7 +5509,7 @@ def test_discord_unmentioned_todo_work_tracks_activity_and_typing_recovers(
                 message="Discord quiet-work setup did not create one binding",
             )
         )
-        input_evidence = _objects(
+        input_evidence = _required(
             wait_until(
                 lambda: (
                     evidence
@@ -5368,8 +5531,8 @@ def test_discord_unmentioned_todo_work_tracks_activity_and_typing_recovers(
         )
     assert session.agent_id == agent_id
     assert binding.response_mode is ExternalChannelResponseMode.ALL_MESSAGES
-    assert input_evidence[0]["body"] == initial_text
-    assert input_evidence[0]["prompt_role"] == "invocation"
+    assert input_evidence[0].body == initial_text
+    assert input_evidence[0].prompt_role == "invocation"
 
     def session_is_idle() -> bool:
         live = list_live(
@@ -5377,7 +5540,7 @@ def test_discord_unmentioned_todo_work_tracks_activity_and_typing_recovers(
             token=token,
             session_id=session.id,
         )
-        return live.get("run") is None and live.get("session_run_state") == "idle"
+        return live.run is None and live.session_run_state.value == "idle"
 
     wait_until(
         session_is_idle,
@@ -5418,26 +5581,26 @@ def test_discord_unmentioned_todo_work_tracks_activity_and_typing_recovers(
     )
     configure_gateway([quiet_message], sequence=10)
 
-    def quiet_barrier_reached() -> dict[str, object] | None:
+    def quiet_barrier_reached() -> _BarrierEvidence | None:
         response = requests.get(
             f"{openai_proxy_url}/v1/_external_channel_quiet_work_barrier",
             timeout=5,
         )
         response.raise_for_status()
-        payload = response.json()
-        if not isinstance(payload, dict) or payload.get("reached") is not True:
+        payload = _BarrierEvidence.model_validate(response.json())
+        if not payload.reached:
             return None
-        return _object(payload)
+        return payload
 
     with azents_external_channel_gateway_factory():
 
-        def quiet_input_admitted() -> list[dict[str, object]] | None:
+        def quiet_input_admitted() -> list[_ExternalInputEvidence] | None:
             evidence = _external_channel_input_evidence(
                 public_server_url=azents_public_server_url,
                 token=token,
                 session_id=session.id,
             )
-            if {item.get("external_message_id") for item in evidence} != {
+            if {item.external_message_id for item in evidence} != {
                 external_message_id(initial_message_id),
                 external_message_id(quiet_message_id),
             }:
@@ -5452,21 +5615,21 @@ def test_discord_unmentioned_todo_work_tracks_activity_and_typing_recovers(
                 message="Quiet all-messages Discord input was not admitted",
             )
         except TimeoutError as error:
-            state = _discord_provider_state(discord_provider_fake_url)
+            state = _discord_provider_observation(discord_provider_fake_url)
             observed_inputs = _external_channel_input_evidence(
                 public_server_url=azents_public_server_url,
                 token=token,
                 session_id=session.id,
             )
             pytest.fail(
-                f"{error}; gateway={state.get('gateway')!r}; "
-                f"request_counts={state.get('request_counts')!r}; "
-                f"typing={state.get('typing')!r}; "
+                f"{error}; gateway={state.gateway!r}; "
+                f"request_counts={state.request_counts!r}; "
+                f"typing={state.typing!r}; "
                 "observed_input_ids="
-                f"{[item.get('external_message_id') for item in observed_inputs]!r}; "
+                f"{[item.external_message_id for item in observed_inputs]!r}; "
                 f"progress={_progress_request_evidence(openai_proxy_url)!r}"
             )
-        barrier_state = _object(
+        barrier_state = _required(
             wait_until(
                 quiet_barrier_reached,
                 timeout=30,
@@ -5474,13 +5637,15 @@ def test_discord_unmentioned_todo_work_tracks_activity_and_typing_recovers(
                 message="Discord quiet-work proxy barrier was not reached",
             )
         )
-        assert barrier_state.get("armed") is True
-        active_state = _object(
+        assert barrier_state.armed is True
+        active_state = _required(
             wait_until(
                 lambda: (
                     state
                     if _successful_session_navigation_categories(
-                        state := _discord_provider_state(discord_provider_fake_url)
+                        state := _discord_provider_observation(
+                            discord_provider_fake_url
+                        )
                     ).count("activity_tracker")
                     >= 1
                     and active_typing_state_after(
@@ -5507,29 +5672,29 @@ def test_discord_unmentioned_todo_work_tracks_activity_and_typing_recovers(
             action_ids == ["view_azents_session", "azents_conversation_settings_open"]
             for action_ids in quiet_tracker_action_ids
         )
-        quiet_deliveries = _objects(active_state["deliveries"])
+        quiet_deliveries = active_state.deliveries
         quiet_tracker_deliveries = [
             delivery
             for delivery in quiet_deliveries
-            if delivery.get("outcome") in {"delivered", "created", "duplicate"}
-            and delivery.get("safe_category") == "activity_tracker"
+            if delivery.outcome in {"delivered", "created", "duplicate"}
+            and delivery.safe_category == "activity_tracker"
         ]
         quiet_tracker_message_ids = {
-            delivery["message_id"]
+            delivery.message_id
             for delivery in quiet_tracker_deliveries
-            if isinstance(delivery.get("message_id"), str)
+            if isinstance(delivery.message_id, str)
         }
-        assert quiet_tracker_message_ids == {quiet_tracker_deliveries[0]["message_id"]}
-        quiet_tracker_message_id = _string(quiet_tracker_deliveries[0]["message_id"])
+        assert quiet_tracker_message_ids == {quiet_tracker_deliveries[0].message_id}
+        quiet_tracker_message_id = _required(quiet_tracker_deliveries[0].message_id)
         assert (
             sum(
-                delivery.get("operation") == "create_message"
+                delivery.operation == "create_message"
                 for delivery in quiet_tracker_deliveries
             )
             == 1
         )
         quiet_delivery_count = len(quiet_deliveries)
-        quiet_evidence = _objects(
+        quiet_evidence = _required(
             wait_until(
                 lambda: (
                     evidence
@@ -5549,7 +5714,7 @@ def test_discord_unmentioned_todo_work_tracks_activity_and_typing_recovers(
                 message="Quiet all-messages Discord input was not promoted",
             )
         )
-        assert {item["external_message_id"] for item in quiet_evidence} == {
+        assert {item.external_message_id for item in quiet_evidence} == {
             external_message_id(initial_message_id),
             external_message_id(quiet_message_id),
         }
@@ -5566,16 +5731,16 @@ def test_discord_unmentioned_todo_work_tracks_activity_and_typing_recovers(
     # same Work must converge on one replacement Tracker identity if provider history
     # was reset.
     configure_gateway([quiet_message, late_message], sequence=20)
-    restart_state = _discord_provider_state(discord_provider_fake_url)
-    restart_typing = _object(restart_state["typing"])
-    restart_snapshots = _list(restart_typing["snapshots"])
-    restart_pulses = _list(restart_typing["pulses"])
+    restart_state = _discord_provider_observation(discord_provider_fake_url)
+    restart_typing = _required(restart_state.typing)
+    restart_snapshots = restart_typing.snapshots
+    restart_pulses = restart_typing.pulses
     assert restart_snapshots == []
     assert restart_pulses == []
     restart_snapshot_index = len(restart_snapshots)
     restart_pulse_index = len(restart_pulses)
     with azents_external_channel_gateway_factory():
-        recovered_typing = _object(
+        recovered_typing = _required(
             wait_until(
                 lambda: active_typing_state_after(
                     snapshot_index=restart_snapshot_index,
@@ -5589,10 +5754,10 @@ def test_discord_unmentioned_todo_work_tracks_activity_and_typing_recovers(
                 ),
             )
         )
-        recovered_typing_evidence = _object(recovered_typing["typing"])
-        late_snapshot_index = len(_list(recovered_typing_evidence["snapshots"]))
-        late_pulse_index = len(_list(recovered_typing_evidence["pulses"]))
-        late_evidence = _objects(
+        recovered_typing_evidence = _required(recovered_typing.typing)
+        late_snapshot_index = len(recovered_typing_evidence.snapshots)
+        late_pulse_index = len(recovered_typing_evidence.pulses)
+        late_evidence = _required(
             wait_until(
                 lambda: (
                     evidence
@@ -5612,12 +5777,14 @@ def test_discord_unmentioned_todo_work_tracks_activity_and_typing_recovers(
                 message="Late Discord mention was not promoted once",
             )
         )
-        late_activity_state = _object(
+        late_activity_state = _required(
             wait_until(
                 lambda: (
                     state
                     if _successful_session_navigation_categories(
-                        state := _discord_provider_state(discord_provider_fake_url)
+                        state := _discord_provider_observation(
+                            discord_provider_fake_url
+                        )
                     ).count("activity_tracker")
                     >= 1
                     and active_typing_state_after(
@@ -5644,47 +5811,46 @@ def test_discord_unmentioned_todo_work_tracks_activity_and_typing_recovers(
             action_ids == ["view_azents_session", "azents_conversation_settings_open"]
             for action_ids in late_tracker_action_ids
         )
-        late_deliveries = _objects(late_activity_state["deliveries"])
+        late_deliveries = late_activity_state.deliveries
         late_tracker_deliveries = [
             delivery
             for delivery in late_deliveries
-            if delivery.get("outcome") in {"delivered", "created", "duplicate"}
-            and delivery.get("safe_category") == "activity_tracker"
+            if delivery.outcome in {"delivered", "created", "duplicate"}
+            and delivery.safe_category == "activity_tracker"
         ]
         assert {
-            delivery["message_id"]
+            delivery.message_id
             for delivery in late_tracker_deliveries
-            if isinstance(delivery.get("message_id"), str)
-        } == {late_tracker_deliveries[0]["message_id"]}
+            if isinstance(delivery.message_id, str)
+        } == {late_tracker_deliveries[0].message_id}
         assert all(
-            delivery.get("operation") in {"create_message", "update_message"}
+            delivery.operation in {"create_message", "update_message"}
             for delivery in late_tracker_deliveries
         )
         assert all(
-            delivery.get("suppress_embeds") is False
-            for delivery in late_tracker_deliveries
+            delivery.suppress_embeds is False for delivery in late_tracker_deliveries
         )
         assert not any(
-            delivery.get("outcome") in {"delivered", "created", "duplicate"}
-            and delivery.get("safe_category") == "conversation_settings"
+            delivery.outcome in {"delivered", "created", "duplicate"}
+            and delivery.safe_category == "conversation_settings"
             for delivery in late_deliveries
         )
 
-        def late_progress_held() -> list[dict[str, object]] | None:
+        def late_progress_held() -> list[_ProgressRequestEvidence] | None:
             evidence = _progress_request_evidence(openai_proxy_url)[
                 late_progress_index:
             ]
             if not any(
-                item.get("binding") == binding.id
-                and item.get("marker_present") is True
-                and item.get("matched") is True
-                and item.get("stage") == "after_progress"
+                item.binding == binding.id
+                and item.marker_present
+                and item.matched
+                and item.stage == "after_progress"
                 for item in evidence
             ):
                 return None
             return evidence
 
-        late_progress_evidence = _objects(
+        late_progress_evidence = _required(
             wait_until(
                 late_progress_held,
                 timeout=45,
@@ -5695,22 +5861,20 @@ def test_discord_unmentioned_todo_work_tracks_activity_and_typing_recovers(
             )
         )
         assert late_progress_evidence
-        assert recovered_typing["typing"] is not None
-        assert late_activity_state["typing"] is not None
+        assert recovered_typing.typing is not None
+        assert late_activity_state.typing is not None
         promoted_bodies = {
-            _string(item["external_message_id"]): item["body"] for item in late_evidence
+            _string(item.external_message_id): item.body for item in late_evidence
         }
         assert promoted_bodies == {
             external_message_id(initial_message_id): initial_text,
             external_message_id(quiet_message_id): quiet_text,
             external_message_id(late_mention_message_id): late_mention_text,
         }
-        assert (
-            len({_string(item["external_message_id"]) for item in late_evidence}) == 3
-        )
-        late_held_state = _discord_provider_state(discord_provider_fake_url)
-        late_typing = _object(late_held_state["typing"])
-        finish_snapshot_index = len(_list(late_typing["snapshots"]))
+        assert len({_string(item.external_message_id) for item in late_evidence}) == 3
+        late_held_state = _discord_provider_observation(discord_provider_fake_url)
+        late_typing = _required(late_held_state.typing)
+        finish_snapshot_index = len(late_typing.snapshots)
         requests.post(
             f"{openai_proxy_url}/v1/_external_channel_quiet_work_barrier/release",
             timeout=5,
@@ -5741,13 +5905,13 @@ def test_discord_unmentioned_todo_work_tracks_activity_and_typing_recovers(
                     }
                 ),
             )
-            typing = _discord_provider_state(discord_provider_fake_url).get("typing")
+            typing = _discord_provider_observation(discord_provider_fake_url).typing
             pytest.fail(
                 f"{error}; live={live!r}; channel_actions={channel_actions!r}; "
                 f"typing={typing!r}"
             )
         try:
-            terminal_state = _object(
+            terminal_state = _required(
                 wait_until(
                     lambda: empty_typing_state_after(
                         snapshot_index=finish_snapshot_index,
@@ -5760,10 +5924,10 @@ def test_discord_unmentioned_todo_work_tracks_activity_and_typing_recovers(
                 )
             )
         except TimeoutError as error:
-            state = _discord_provider_state(discord_provider_fake_url)
-            typing = _object(state["typing"])
-            observed_snapshots = _list(typing["snapshots"])
-            observed_pulses = _list(typing["pulses"])
+            state = _discord_provider_observation(discord_provider_fake_url)
+            typing = _required(state.typing)
+            observed_snapshots = typing.snapshots
+            observed_pulses = typing.pulses
             terminal_projection = (
                 external_api.external_channel_v1_list_session_channels(
                     agent_id=agent_id,
@@ -5797,15 +5961,15 @@ def test_discord_unmentioned_todo_work_tracks_activity_and_typing_recovers(
                 f"pulse_count={len(observed_pulses)}; "
                 f"latest_snapshots={observed_snapshots[-3:]!r}; "
                 f"typing_requests="
-                f"{_int_dict(state['request_counts']).get('typing', 0)}; "
+                f"{state.request_counts.get('typing', 0)}; "
                 f"terminal_work={terminal_work_evidence!r}; "
                 f"channel_actions={channel_actions!r}"
             )
 
-    terminal_typing = _object(terminal_state["typing"])
-    snapshots = _list(terminal_typing["snapshots"])
-    pulses = _list(terminal_typing["pulses"])
-    assert _object(snapshots[-1]).get("targets") == []
+    terminal_typing = _required(terminal_state.typing)
+    snapshots = terminal_typing.snapshots
+    pulses = terminal_typing.pulses
+    assert snapshots[-1].targets == []
     assert all(pulse == expected_typing_target for pulse in pulses)
     rendered_typing = str(terminal_typing)
     assert quiet_text not in rendered_typing
@@ -5821,61 +5985,59 @@ def test_discord_unmentioned_todo_work_tracks_activity_and_typing_recovers(
     request_input_result = next(
         item
         for item in request_input_evidence
-        if item.get("kind") == "client_tool_result"
-        and item.get("call_id") == "call_external_channel_request_input"
+        if item.kind == "client_tool_result"
+        and item.call_id == "call_external_channel_request_input"
     )
-    request_input_output = request_input_result.get("output")
-    assert request_input_result.get("status") == "completed"
+    request_input_output = request_input_result.output
+    assert request_input_result.status == "completed"
     assert isinstance(request_input_output, str)
     assert '"awaiting_input": true' in request_input_output
 
-    relocated_state = _discord_provider_state(discord_provider_fake_url)
-    relocation_deliveries = _objects(relocated_state["deliveries"])[
-        quiet_delivery_count:
-    ]
+    relocated_state = _discord_provider_observation(discord_provider_fake_url)
+    relocation_deliveries = relocated_state.deliveries[quiet_delivery_count:]
     remove_index = next(
         index
         for index, delivery in enumerate(relocation_deliveries)
-        if delivery.get("operation") == "delete_message"
-        and delivery.get("message_id") == quiet_tracker_message_id
-        and delivery.get("outcome") == "delivered"
+        if delivery.operation == "delete_message"
+        and delivery.message_id == quiet_tracker_message_id
+        and delivery.outcome == "delivered"
     )
     create_index = next(
         index
         for index, delivery in enumerate(relocation_deliveries)
         if index > remove_index
-        and delivery.get("operation") == "create_message"
-        and delivery.get("safe_category") == "activity_tracker"
-        and delivery.get("outcome") in {"delivered", "created", "duplicate"}
+        and delivery.operation == "create_message"
+        and delivery.safe_category == "activity_tracker"
+        and delivery.outcome in {"delivered", "created", "duplicate"}
     )
     reply_index = next(
         index
         for index, delivery in enumerate(relocation_deliveries)
         if index > create_index
-        and delivery.get("operation") == "create_message"
-        and delivery.get("outcome") in {"delivered", "created", "duplicate"}
-        and delivery.get("safe_category") is None
+        and delivery.operation == "create_message"
+        and delivery.outcome in {"delivered", "created", "duplicate"}
+        and delivery.safe_category is None
     )
     recreated_tracker_message_id = _string(
-        relocation_deliveries[create_index]["message_id"]
+        relocation_deliveries[create_index].message_id
     )
     task_only_update_index = next(
         index
         for index, delivery in enumerate(relocation_deliveries)
         if index > create_index
-        and delivery.get("operation") == "update_message"
-        and delivery.get("message_id") == recreated_tracker_message_id
-        and delivery.get("safe_category") == "activity_tracker"
-        and delivery.get("outcome") == "delivered"
+        and delivery.operation == "update_message"
+        and delivery.message_id == recreated_tracker_message_id
+        and delivery.safe_category == "activity_tracker"
+        and delivery.outcome == "delivered"
     )
     assert recreated_tracker_message_id != quiet_tracker_message_id
     assert remove_index < create_index < reply_index < task_only_update_index
-    assert relocation_deliveries[reply_index].get("suppress_embeds") is True
-    assert relocation_deliveries[create_index].get("suppress_embeds") is False
-    assert relocation_deliveries[task_only_update_index].get("suppress_embeds") is False
+    assert relocation_deliveries[reply_index].suppress_embeds is True
+    assert relocation_deliveries[create_index].suppress_embeds is False
+    assert relocation_deliveries[task_only_update_index].suppress_embeds is False
     assert not any(
-        delivery.get("safe_category") == "activity_tracker"
-        and delivery.get("message_id") != recreated_tracker_message_id
+        delivery.safe_category == "activity_tracker"
+        and delivery.message_id != recreated_tracker_message_id
         for delivery in relocation_deliveries[create_index:]
     )
 
@@ -5894,13 +6056,13 @@ def test_discord_unmentioned_todo_work_tracks_activity_and_typing_recovers(
         [quiet_message, late_message, response_message],
         sequence=30,
     )
-    awaiting_state = _discord_provider_state(discord_provider_fake_url)
-    awaiting_typing = _object(awaiting_state["typing"])
-    resume_snapshot_index = len(_list(awaiting_typing["snapshots"]))
-    resume_pulse_index = len(_list(awaiting_typing["pulses"]))
+    awaiting_state = _discord_provider_observation(discord_provider_fake_url)
+    awaiting_typing = _required(awaiting_state.typing)
+    resume_snapshot_index = len(awaiting_typing.snapshots)
+    resume_pulse_index = len(awaiting_typing.pulses)
 
     with azents_external_channel_gateway_factory():
-        resumed_input = _objects(
+        resumed_input = _required(
             wait_until(
                 lambda: (
                     evidence
@@ -5926,7 +6088,7 @@ def test_discord_unmentioned_todo_work_tracks_activity_and_typing_recovers(
             interval=0.2,
             message="Discord request-input resume did not reach the proxy barrier",
         )
-        resumed_typing_state = _object(
+        resumed_typing_state = _required(
             wait_until(
                 lambda: active_typing_state_after(
                     snapshot_index=resume_snapshot_index,
@@ -5937,14 +6099,14 @@ def test_discord_unmentioned_todo_work_tracks_activity_and_typing_recovers(
                 message="Discord typing did not resume after participant input",
             )
         )
-        resumed_typing = _object(resumed_typing_state["typing"])
-        resumed_finish_snapshot_index = len(_list(resumed_typing["snapshots"]))
+        resumed_typing = _required(resumed_typing_state.typing)
+        resumed_finish_snapshot_index = len(resumed_typing.snapshots)
         requests.post(
             f"{openai_proxy_url}/v1/_external_channel_quiet_work_barrier/release",
             timeout=5,
         ).raise_for_status()
 
-        def completed_discord_finish() -> list[dict[str, object]] | None:
+        def completed_discord_finish() -> list[_ToolEvidence] | None:
             evidence = _channel_action_tool_evidence(
                 azents_public_server_url,
                 token,
@@ -5952,14 +6114,14 @@ def test_discord_unmentioned_todo_work_tracks_activity_and_typing_recovers(
                 call_ids=frozenset({"call_external_channel_finish"}),
             )
             if not any(
-                item.get("kind") == "client_tool_result"
-                and item.get("call_id") == "call_external_channel_finish"
+                item.kind == "client_tool_result"
+                and item.call_id == "call_external_channel_finish"
                 for item in evidence
             ):
                 return None
             return evidence
 
-        finish_evidence = _objects(
+        finish_evidence = _required(
             wait_until(
                 completed_discord_finish,
                 timeout=90,
@@ -5973,7 +6135,7 @@ def test_discord_unmentioned_todo_work_tracks_activity_and_typing_recovers(
             interval=0.2,
             message="Discord resumed Work did not return to idle",
         )
-        final_typing_state = _object(
+        final_typing_state = _required(
             wait_until(
                 lambda: empty_typing_state_after(
                     snapshot_index=resumed_finish_snapshot_index,
@@ -5984,24 +6146,19 @@ def test_discord_unmentioned_todo_work_tracks_activity_and_typing_recovers(
             )
         )
 
-    assert {
-        _string(item["external_message_id"]): item["body"] for item in resumed_input
-    }[external_message_id(response_message_id)] == response_text
+    assert {_string(item.external_message_id): item.body for item in resumed_input}[
+        external_message_id(response_message_id)
+    ] == response_text
     finish_result = next(
         item
         for item in finish_evidence
-        if item.get("kind") == "client_tool_result"
-        and item.get("call_id") == "call_external_channel_finish"
+        if item.kind == "client_tool_result"
+        and item.call_id == "call_external_channel_finish"
     )
-    finish_output = finish_result.get("output")
+    finish_output = finish_result.output
     assert isinstance(finish_output, str)
     assert '"awaiting_input": false' in finish_output
-    assert (
-        _object(_list(_object(final_typing_state["typing"])["snapshots"])[-1]).get(
-            "targets"
-        )
-        == []
-    )
+    assert _required(final_typing_state.typing).snapshots[-1].targets == []
 
 
 def test_discord_configured_message_durably_provisions_conversation(
@@ -6344,12 +6501,7 @@ def test_discord_configured_message_durably_provisions_conversation(
                 wait_until(
                     lambda: (
                         state
-                        if (
-                            state := requests.get(
-                                f"{discord_provider_fake_url}/__testenv/barrier",
-                                timeout=5,
-                            ).json()
-                        ).get("reached")
+                        if (state := _read_barrier(discord_provider_fake_url)).reached
                         is True
                         else None
                     ),
@@ -6360,15 +6512,14 @@ def test_discord_configured_message_durably_provisions_conversation(
                     ),
                 )
             except TimeoutError as exc:
-                provider_state = _discord_provider_state(discord_provider_fake_url)
+                provider_state = _discord_provider_observation(
+                    discord_provider_fake_url
+                )
                 active_ingress = _active_ingress_state(
                     postgres_container,
                     connection_id=setup.connection.id,
                 )
-                barrier_state = requests.get(
-                    f"{discord_provider_fake_url}/__testenv/barrier",
-                    timeout=5,
-                ).json()
+                barrier_state = _read_barrier(discord_provider_fake_url)
                 pytest.fail(
                     f"{exc}; barrier_state={barrier_state!r}; "
                     f"provider_state={provider_state!r}; "
@@ -6377,17 +6528,17 @@ def test_discord_configured_message_durably_provisions_conversation(
 
             def blocked_owner(
                 expected_ready: bool = owner_ready_while_blocked,
-            ) -> dict[str, object] | None:
+            ) -> _IngressItem | None:
                 observation = _active_ingress_state(
                     postgres_container,
                     connection_id=setup.connection.id,
                 )
-                matching = _objects(observation["items"])
-                if len(matching) == 1 and matching[0]["owner_ready"] is expected_ready:
+                matching = observation.items
+                if len(matching) == 1 and matching[0].owner_ready is expected_ready:
                     return matching[0]
                 return None
 
-            retained = _object(
+            retained = _required(
                 wait_until(
                     blocked_owner,
                     timeout=15,
@@ -6398,9 +6549,9 @@ def test_discord_configured_message_durably_provisions_conversation(
                 )
             )
             if owner_ready_while_blocked:
-                assert isinstance(retained["session_id"], str)
+                assert retained.session_id is not None
             else:
-                assert retained["session_id"] is None
+                assert retained.session_id is None
                 assert (
                     active_discord_binding(
                         excluded_session_ids=baseline_session_ids,
@@ -6424,7 +6575,7 @@ def test_discord_configured_message_durably_provisions_conversation(
                 )
             )
             second_session_id = second_session.id
-            second_evidence = _objects(
+            second_evidence = _required(
                 wait_until(
                     lambda session_id=second_session_id: (
                         evidence
@@ -6447,9 +6598,9 @@ def test_discord_configured_message_durably_provisions_conversation(
                 )
             )
 
-        assert second_evidence[0]["body"] == second_text
-        state = _discord_provider_state(discord_provider_fake_url)
-        counts = _int_dict(state["request_counts"])
+        assert second_evidence[0].body == second_text
+        state = _discord_provider_observation(discord_provider_fake_url)
+        counts = state.request_counts
         assert counts.get("create_thread", 0) == (1 if setup_action_code == "st" else 0)
         assert second_text not in str(state)
         assert _DISCORD_BOT_TOKEN not in str(state)
@@ -6529,9 +6680,9 @@ def test_discord_message_command_selector_and_component_journey(
     request.addfinalizer(disconnect_connection)
     wait_until(
         lambda: bool(
-            _discord_provider_state(discord_provider_fake_url).get(
-                "interaction_configurations"
-            )
+            _discord_provider_observation(
+                discord_provider_fake_url
+            ).interaction_configurations
         ),
         timeout=15,
         interval=0.2,
@@ -6602,12 +6753,12 @@ def test_discord_message_command_selector_and_component_journey(
     assert interaction.json() == {"status": 200, "response_type": 4}
     selector = wait_until(
         lambda: (
-            requests.get(
-                f"{discord_provider_fake_url}/__testenv/transient-selector",
-                timeout=5,
-            )
-            .json()
-            .get("custom_id")
+            _TransientComponent.model_validate(
+                requests.get(
+                    f"{discord_provider_fake_url}/__testenv/transient-selector",
+                    timeout=5,
+                ).json()
+            ).custom_id
         ),
         timeout=15,
         interval=0.2,
@@ -6615,12 +6766,12 @@ def test_discord_message_command_selector_and_component_journey(
     )
     assert isinstance(selector, str)
     assert selector.startswith("azents-selector:")
-    before_component = _discord_provider_state(discord_provider_fake_url)
-    before_request_counts = _int_dict(before_component["request_counts"])
+    before_component = _discord_provider_observation(discord_provider_fake_url)
+    before_request_counts = before_component.request_counts
     before_thread_count = before_request_counts.get("create_thread", 0)
     before_message_count = before_request_counts.get("create_message", 0)
-    before_operation_count = len(_objects(before_component["operations"]))
-    before_delivery_count = len(_objects(before_component["deliveries"]))
+    before_operation_count = len(before_component.operations)
+    before_delivery_count = len(before_component.deliveries)
     component = requests.post(
         f"{discord_provider_fake_url}/__testenv/interactions",
         json={
@@ -6647,8 +6798,8 @@ def test_discord_message_command_selector_and_component_journey(
             headers=headers,
             baseline_session_ids=baseline_session_ids_by_agent[selected_agent_id],
         )
-    pending_location_state = _discord_provider_state(discord_provider_fake_url)
-    pending_location_counts = _int_dict(pending_location_state["request_counts"])
+    pending_location_state = _discord_provider_observation(discord_provider_fake_url)
+    pending_location_counts = pending_location_state.request_counts
     assert pending_location_counts.get("create_thread", 0) == before_thread_count
     assert pending_location_counts.get("create_message", 0) == before_message_count
     _open_discord_settings(
@@ -6680,25 +6831,23 @@ def test_discord_message_command_selector_and_component_journey(
         user_id="600000000000000002",
         custom_id=setup_threads_custom_id,
     )
-    state = _object(
+    state = _required(
         wait_until(
             lambda: (
                 (
                     provider_state
                     if (
-                        isinstance(
-                            request_counts := provider_state.get("request_counts"),
-                            dict,
-                        )
-                        and _int_dict(request_counts).get("create_thread", 0)
+                        provider_state.request_counts.get("create_thread", 0)
                         > before_thread_count
-                        and _int_dict(request_counts).get("create_message", 0)
+                        and provider_state.request_counts.get("create_message", 0)
                         > before_message_count
                     )
                     else None
                 )
                 if (
-                    provider_state := _discord_provider_state(discord_provider_fake_url)
+                    provider_state := _discord_provider_observation(
+                        discord_provider_fake_url
+                    )
                 )
                 else None
             ),
@@ -6711,28 +6860,27 @@ def test_discord_message_command_selector_and_component_journey(
         )
     )
     rendered = str(state)
-    interactions = _objects(state["interactions"])
-    assert [item["response_type"] for item in interactions] == [4, 7, 4, 6]
-    assert [item.get("completed_response_type") for item in interactions] == [
+    interactions = state.interactions
+    assert [item.response_type for item in interactions] == [4, 7, 4, 6]
+    assert [item.completed_response_type for item in interactions] == [
         None,
         None,
         None,
         7,
     ]
-    operations = _objects(state["operations"])[before_operation_count:]
+    operations = state.operations[before_operation_count:]
     thread_channel_id = _string(
         next(
-            operation["thread_channel_id"]
+            operation.thread_channel_id
             for operation in operations
-            if operation.get("event") == "thread_create"
-            and operation.get("outcome") == "delivered"
+            if operation.event == "thread_create" and operation.outcome == "delivered"
         )
     )
-    deliveries = _objects(state["deliveries"])[before_delivery_count:]
+    deliveries = state.deliveries[before_delivery_count:]
     assert any(
-        delivery.get("operation") == "create_message"
-        and delivery.get("outcome") == "created"
-        and delivery.get("channel_id") == thread_channel_id
+        delivery.operation == "create_message"
+        and delivery.outcome == "created"
+        and delivery.channel_id == thread_channel_id
         for delivery in deliveries
     )
 
@@ -6771,7 +6919,7 @@ def test_discord_message_command_selector_and_component_journey(
         _headers=headers,
     )
     assert detail.id == selected_session.id
-    input_evidence = _objects(
+    input_evidence = _required(
         wait_until(
             lambda: (
                 evidence
@@ -6790,15 +6938,15 @@ def test_discord_message_command_selector_and_component_journey(
             message="Discord HTTP selector replay did not activate one mailbox input",
         )
     )
-    assert input_evidence[0]["provider"] == "discord"
-    assert input_evidence[0]["body"] == source_content
+    assert input_evidence[0].provider == "discord"
+    assert input_evidence[0].body == source_content
     expected_session_path = (
         f"/w/{handle}/agents/{agent_ids[1]}/sessions/{selected_session.id}"
     )
-    activation_state = _object(
+    activation_state = _required(
         wait_until(
             lambda: _joined_session_navigation_state(
-                _discord_provider_state(discord_provider_fake_url),
+                _discord_provider_observation(discord_provider_fake_url),
                 expected_session_path,
             ),
             timeout=15,
@@ -6830,17 +6978,15 @@ def test_discord_message_command_selector_and_component_journey(
         parent_channel_id=_DISCORD_CHANNEL_ID,
         user_id="600000000000000002",
     )
-    opened_settings = _object(
+    opened_settings = _required(
         wait_until(
             lambda: next(
                 (
                     interaction
-                    for interaction in _objects(
-                        _discord_provider_state(discord_provider_fake_url)[
-                            "interactions"
-                        ]
-                    )
-                    if interaction.get("interaction_id") == "700000000000000007"
+                    for interaction in _discord_provider_observation(
+                        discord_provider_fake_url
+                    ).interactions
+                    if interaction.interaction_id == "700000000000000007"
                 ),
                 None,
             ),
@@ -6849,8 +6995,8 @@ def test_discord_message_command_selector_and_component_journey(
             message="Discord connected-thread settings interaction was not recorded",
         )
     )
-    assert "settings_controls" in opened_settings, opened_settings
-    assert opened_settings["settings_controls"] == [
+    assert "settings_controls" in opened_settings.model_fields_set, opened_settings
+    assert opened_settings.settings_controls == [
         {
             "kind": "select",
             "setting": "response_mode",
@@ -6886,7 +7032,7 @@ def test_discord_message_command_selector_and_component_journey(
         value=selected_response_mode.value,
     )
 
-    def updated_thread_settings() -> dict[str, object] | None:
+    def updated_thread_settings() -> _ProviderState | None:
         projection = external_api.external_channel_v1_list_session_channels(
             agent_id=agent_ids[1],
             session_id=selected_session.id,
@@ -6898,13 +7044,13 @@ def test_discord_message_command_selector_and_component_journey(
             or projection.items[0].response_mode is not selected_response_mode
         ):
             return None
-        state = _discord_provider_state(discord_provider_fake_url)
+        state = _discord_provider_observation(discord_provider_fake_url)
         return (
             state
             if any(
-                interaction.get("interaction_id") == "700000000000000008"
-                and interaction.get("response_type") == 7
-                and interaction.get("settings_controls")
+                interaction.interaction_id == "700000000000000008"
+                and interaction.response_type == 7
+                and interaction.settings_controls
                 == [
                     {
                         "kind": "select",
@@ -6917,7 +7063,7 @@ def test_discord_message_command_selector_and_component_journey(
                         "path": expected_session_path,
                     },
                 ]
-                for interaction in _objects(state["interactions"])
+                for interaction in state.interactions
             )
             else None
         )
@@ -7079,5 +7225,5 @@ def test_discord_multi_management_and_lifecycle_journey(
     assert historical.status is ExternalChannelConnectionStatus.DISCONNECTED
     assert historical.credentials_configured is False
     assert _DISCORD_BOT_TOKEN not in str(
-        _discord_provider_state(discord_provider_fake_url)
+        _discord_provider_observation(discord_provider_fake_url)
     )
