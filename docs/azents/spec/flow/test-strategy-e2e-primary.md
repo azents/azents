@@ -45,11 +45,24 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
-last_verified_at: 2026-10-02
-spec_version: 81
+last_verified_at: 2026-10-04
+spec_version: 82
 ---
 
 # E2E Primary Test Strategy
+
+## Typed Runtime Hook and Live Observations
+
+Runtime Hook E2E helpers validate mock journal/request evidence at ingress and
+consume immutable text/tool projections while retaining provider-owned opaque
+extensions for diagnostics. Malformed consumed fields and HTTP failures remain
+failures, not empty readiness observations. Session and Chat-write responses use
+the generated SDK's native wire factory.
+
+External Channel live observations likewise use the native live-response factory
+after primitive wire serialization, preserving nested `JSONValue` conversion,
+explicit nulls and opaque extension fields. Focused deterministic helper tests
+cover these decoding boundaries; they do not replace assembled product E2E.
 
 ## Overview
 
