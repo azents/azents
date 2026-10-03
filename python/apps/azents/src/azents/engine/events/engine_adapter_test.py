@@ -2247,9 +2247,10 @@ async def test_xai_image_generation_is_bound_as_client_function_tool(
     assert [tool.name for tool in prepared_request.parameters.function_tools] == [
         "image_generation"
     ]
-    assert [
-        type(tool).__name__ for tool in prepared_request.parameters.native_tools
-    ] == ["WebSearchTool"]
+    assert prepared_request.parameters.native_tools == []
+    assert prepared_request.settings.get("openai_native_tools") == [
+        {"type": "web_search"}
+    ]
     projection_record = next(
         record
         for record in caplog.records

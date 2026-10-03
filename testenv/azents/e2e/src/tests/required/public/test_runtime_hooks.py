@@ -626,13 +626,13 @@ class TestRuntimeHooks:
             )
 
         for marker in [
-            "Runtime hook QA lifecycle event: on_session_start",
-            "Runtime hook QA lifecycle event: on_run_start",
-            "Runtime hook QA lifecycle event: on_turn_start",
-            "Runtime hook QA lifecycle event: on_before_tool_call",
-            "Runtime hook QA lifecycle event: on_after_tool_call",
-            "Runtime hook QA lifecycle event: on_turn_end",
-            "Runtime hook QA lifecycle event: on_run_end",
+            '"runtime_hook_qa_lifecycle": "on_session_start"',
+            '"runtime_hook_qa_lifecycle": "on_run_start"',
+            '"runtime_hook_qa_lifecycle": "on_turn_start"',
+            '"runtime_hook_qa_lifecycle": "on_before_tool_call"',
+            '"runtime_hook_qa_lifecycle": "on_after_tool_call"',
+            '"runtime_hook_qa_lifecycle": "on_turn_end"',
+            '"runtime_hook_qa_lifecycle": "on_run_end"',
         ]:
             _wait_for_container_log(azents_engine_worker_container, marker)
 

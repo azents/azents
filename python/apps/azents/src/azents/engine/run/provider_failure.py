@@ -301,7 +301,7 @@ def sanitize_provider_message(value: object) -> str | None:
 
 def extract_provider_message_text(value: object) -> str | None:
     """Extract scalar provider text without retaining SDK error serialization."""
-    if not isinstance(value, str):
+    if not isinstance(value, str) or len(value) > _PROVIDER_MESSAGE_MAX_INPUT_CHARS:
         return None
     message = value.strip()
     if not message or _SDK_SERIALIZED_ERROR_PATTERN.search(message):

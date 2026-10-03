@@ -15,7 +15,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     AgentLifecycleStatus,
+    AgentRunStatus,
     AgentSessionKind,
+    AgentSessionRunState,
     AgentSessionStatus,
     ExternalChannelAccessGrantScope,
     ExternalChannelAccessRequestStatus,
@@ -41,6 +43,7 @@ from azents.core.enums import (
 from azents.core.external_channel_progress import checking_progress_title
 from azents.core.external_channel_provider_effect import ProviderEffectPlan
 from azents.rdb.models.agent import RDBAgent
+from azents.rdb.models.agent_run import RDBAgentRun
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.base import RDBModel
 from azents.rdb.models.external_channel import (
@@ -883,7 +886,7 @@ class ExternalChannelRepository:
         lease_generation: int,
         now: datetime.datetime,
     ) -> tuple[DiscordGatewayTypingTarget, ...] | None:
-        """Project active Work onto current Discord Gateway typing targets."""
+        """Project ready Work with running execution onto Gateway typing targets."""
         rows = (
             (
                 await session.execute(
@@ -952,6 +955,11 @@ class ExternalChannelRepository:
                             RDBAgentSession.workspace_id == RDBAgent.workspace_id,
                             RDBAgentSession.status == AgentSessionStatus.ACTIVE,
                             RDBAgentSession.stop_requested_at.is_(None),
+                            RDBAgentSession.run_state == AgentSessionRunState.RUNNING,
+                            sa.exists().where(
+                                RDBAgentRun.session_id == RDBAgentSession.id,
+                                RDBAgentRun.status == AgentRunStatus.RUNNING,
+                            ),
                         ),
                     )
                     .outerjoin(
