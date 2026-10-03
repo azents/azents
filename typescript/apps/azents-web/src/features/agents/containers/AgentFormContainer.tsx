@@ -12,10 +12,18 @@ import {
   selectableModelOptionFormValuesFromStoredOptions,
 } from "../model-selection";
 import { agentFormSchema } from "../schemas";
+import { SelectableModelOptionsEditorContainer } from "./SelectableModelOptionsEditorContainer";
 import { useAgentFormTranslations } from "./useAgentFormTranslations";
 import { useImageGenerationCatalogs } from "./useImageGenerationCatalogs";
 import type { AgentFormProps } from "../components/AgentForm";
+import type { SelectableModelOptionsEditorProps } from "../components/SelectableModelOptionsEditor";
 import type { AgentFormValues } from "../schemas";
+
+function renderModelOptionsEditor(
+  props: SelectableModelOptionsEditorProps,
+): React.ReactNode {
+  return <SelectableModelOptionsEditorContainer {...props} />;
+}
 
 const initialValues: AgentFormValues = {
   name: "",
@@ -161,6 +169,7 @@ export function AgentFormContainer(props: AgentFormProps): React.ReactElement {
   return (
     <AgentForm
       {...props}
+      renderModelOptionsEditor={renderModelOptionsEditor}
       t={t}
       form={form}
       hasSubmitAttempted={hasSubmitAttempted}

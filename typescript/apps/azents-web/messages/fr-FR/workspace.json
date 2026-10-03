@@ -195,7 +195,7 @@
       "pageDescription": "Choisissez les modèles sélectionnables et les valeurs par défaut hérités par les nouveaux agents.",
       "loadError": "Impossible de charger les paramètres de modèle de l’espace de travail.",
       "title": "Modèles par défaut de l'espace de travail",
-      "description": "Configure the ordered model list that new agents copy by default.",
+      "description": "Configurez la liste ordonnée de modèles que les nouveaux agents copient par défaut.",
       "currentMain": "Principal actuel :",
       "currentLightweight": "Léger actuel :",
       "mainProviderLabel": "Provider principal par défaut",
@@ -214,9 +214,9 @@
       "noDefaultModelSelected": "Aucun modèle par défaut sélectionné",
       "useMainModel": "Utiliser le modèle principal",
       "changeModel": "Changer de modèle",
-      "optionsTitle": "Workspace selectable models",
-      "optionsDescription": "Agents copy this ordered list and selected labels when they are created without custom models.",
-      "invalidOptions": "Fix model labels and model selections before saving."
+      "optionsTitle": "Modèles sélectionnables de l’espace de travail",
+      "optionsDescription": "Les agents créés sans modèles personnalisés copient cette liste ordonnée et les libellés sélectionnés.",
+      "invalidOptions": "Corrigez les libellés et les sélections de modèles avant d’enregistrer."
     },
     "modelConfig": {
       "headline": "Configurations de modèle",
@@ -548,20 +548,20 @@
     "toolSearchEnabledLabel": "Activer la recherche d’outils",
     "toolSearchEnabledDescription": "Différer l’affichage des outils de service connectés et permettre au modèle de les rechercher selon les besoins",
     "settingsHub": {
-      "title": "Agent settings",
-      "description": "Choose a settings area to review or update this agent.",
+      "title": "Paramètres de l’agent",
+      "description": "Choisissez une rubrique pour consulter ou modifier les paramètres de cet agent.",
       "sections": {
-        "customization": "Agent customization",
-        "capabilities": "Capabilities",
-        "access": "Access",
-        "danger": "Danger zone"
+        "customization": "Personnalisation de l’agent",
+        "capabilities": "Fonctionnalités",
+        "access": "Accès",
+        "danger": "Actions sensibles"
       },
       "profile": {
         "label": "Profile",
-        "description": "Name, instructions, visibility, avatar, and active state"
+        "description": "Nom, instructions, visibilité, avatar et état d’activation"
       },
       "model": {
-        "label": "Model",
+        "label": "Modèle",
         "description": "Modèle principal, modèle léger, limites de tokens, raisonnement et limite de tours"
       },
       "capabilities": {
@@ -569,12 +569,12 @@
         "description": "Terminal interactif, outils intégrés et toolkits"
       },
       "memory": {
-        "label": "Memory",
-        "description": "Persistent memories for this agent"
+        "label": "Mémoire",
+        "description": "Mémoires persistantes de cet agent"
       },
       "admins": {
-        "label": "Admins",
-        "description": "Members who can manage this agent"
+        "label": "Administrateurs",
+        "description": "Membres autorisés à gérer cet agent"
       },
       "danger": {
         "label": "Supprimer l’agent",
@@ -793,6 +793,10 @@
       "selectIntegrationFirst": "Sélectionnez d’abord une intégration fournisseur.",
       "catalogStatus": "État du catalogue : {status}",
       "statusNeverSynced": "jamais synchronisé",
+      "statusRunning": "Synchronisation en cours",
+      "statusSucceeded": "Synchronisation terminée",
+      "statusFailed": "Échec de la synchronisation",
+      "statusUnknown": "État indisponible",
       "lastSynced": "Dernière synchro : {value}",
       "models": "Modèles : {count}",
       "syncRunning": "Synchronisation en cours",
@@ -862,31 +866,31 @@
     "subagentMaxDepthLabel": "Profondeur maximale",
     "subagentMaxDepthDescription": "Profondeur maximale de l’arbre de sous-agents sous l’agent racine. 1 autorise seulement root → child.",
     "selectableModelOptions": {
-      "title": "Selectable models",
+      "title": "Modèles sélectionnables",
       "description": "Définissez des libellés sémantiques avec des candidats ordonnés. Le premier candidat est Primary ; les suivants ne sont utilisés qu’après une erreur de quota ou de facturation.",
       "addOption": "Ajouter un libellé",
       "emptyList": "Ajoutez au moins un libellé de modèle.",
       "maxOptions": "Vous pouvez ajouter jusqu’à 10 libellés de modèle.",
-      "emptyLabel": "Model label is required.",
-      "duplicateLabel": "Model labels must be unique.",
+      "emptyLabel": "Un libellé de modèle est requis.",
+      "duplicateLabel": "Les libellés de modèle doivent être uniques.",
       "missingModel": "Choisissez un modèle pour chaque candidat.",
       "selectModelTitle": "Sélectionner un candidat pour {label}",
       "newOption": "nouveau libellé",
-      "mainLabel": "Main model",
-      "mainDescription": "Used for normal agent turns.",
-      "lightweightLabel": "Lightweight model",
-      "lightweightDescription": "Used for lightweight work and compaction fallback.",
-      "optionLabel": "Model label",
-      "moveUp": "Move up",
-      "moveDown": "Move down",
-      "remove": "Remove",
-      "noModelSelected": "No model selected",
-      "chooseModel": "Choose a provider integration and model.",
-      "changeModel": "Change model",
-      "modelLabelColumn": "Model label",
-      "selectedModelColumn": "Selected model",
+      "mainLabel": "Modèle principal",
+      "mainDescription": "Utilisé pour les tours habituels de l’agent.",
+      "lightweightLabel": "Modèle léger",
+      "lightweightDescription": "Utilisé pour les tâches légères et comme solution de repli pour la compaction.",
+      "optionLabel": "Libellé du modèle",
+      "moveUp": "Monter",
+      "moveDown": "Descendre",
+      "remove": "Supprimer",
+      "noModelSelected": "Aucun modèle sélectionné",
+      "chooseModel": "Choisissez une intégration fournisseur et un modèle.",
+      "changeModel": "Changer de modèle",
+      "modelLabelColumn": "Libellé du modèle",
+      "selectedModelColumn": "Modèle sélectionné",
       "actionsColumn": "Actions",
-      "dragHandleLabel": "Reorder model",
+      "dragHandleLabel": "Réordonner le modèle",
       "settingsAction": "Paramètres du modèle",
       "settingsTitle": "Réglages de {label} · {model}",
       "contextWindowTokensLabel": "Limite de fenêtre de contexte",
@@ -1681,6 +1685,10 @@
     "addWorkspaceScope": "Ajouter la portée de l’espace de travail",
     "oauthConnection": {
       "title": "Connexion OAuth",
+      "statusNotConnected": "Non connecté",
+      "statusConnected": "Connecté",
+      "statusReconnectRequired": "Reconnexion requise",
+      "statusUnknown": "État de la connexion indisponible",
       "issuer": "Émetteur",
       "resource": "Ressource",
       "scope": "Portée",

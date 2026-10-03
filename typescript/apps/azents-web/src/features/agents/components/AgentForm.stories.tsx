@@ -4,12 +4,14 @@ import { expect, userEvent, within } from "storybook/test";
 import { reasoningEffortLevels } from "@/shared/lib/reasoning-effort";
 import { partialReasoningCapabilities } from "@/shared/storybook/model-capability-fixtures";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
+import { SelectableModelOptionsEditorContainer } from "../containers/SelectableModelOptionsEditorContainer";
 import { useAgentFormTranslations } from "../containers/useAgentFormTranslations";
 import {
   findSelectableModelOptionByLabel,
   selectableModelOptionFormValuesFromStoredOptions,
 } from "../model-selection";
 import { AgentForm } from "./AgentForm";
+import { renderStaticModelPicker } from "./model-option-editor-story-fixtures";
 import type {
   ImageGenerationCatalogState,
   ModelSelectionOption,
@@ -18,6 +20,7 @@ import type {
 import type { AgentFormValues } from "../schemas";
 import type { AgentFormState } from "../types";
 import type { AgentFormProps } from "./AgentForm";
+import type { SelectableModelOptionsEditorProps } from "./SelectableModelOptionsEditor";
 import type {
   AgentModelSelection,
   AgentResponse,
@@ -284,6 +287,7 @@ function AgentFormStory(props: AgentFormProps): React.ReactElement {
   return (
     <AgentForm
       {...props}
+      renderModelOptionsEditor={renderModelOptionsEditor}
       includeToolkitSection={false}
       t={t}
       form={form}
@@ -293,6 +297,17 @@ function AgentFormStory(props: AgentFormProps): React.ReactElement {
       imageGenerationCatalogStates={emptyImageGenerationCatalogStates}
       canSyncImageCatalog={false}
       onSyncImageCatalog={async () => {}}
+    />
+  );
+}
+
+function renderModelOptionsEditor(
+  props: SelectableModelOptionsEditorProps,
+): React.ReactNode {
+  return (
+    <SelectableModelOptionsEditorContainer
+      {...props}
+      renderModelPicker={renderStaticModelPicker}
     />
   );
 }
@@ -333,6 +348,56 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const DefaultPreselected = {} satisfies Story;
+
+export const Loading = {
+  args: { formState: { type: "LOADING" } },
+  play: async ({ canvasElement }) => {
+    await expect(
+      within(canvasElement).queryByRole("textbox", { name: "Name" }),
+    ).not.toBeInTheDocument();
+  },
+} satisfies Story;
+
+export const NotFound = {
+  args: { formState: { type: "NOT_FOUND" } },
+  play: async ({ canvasElement }) => {
+    await expect(
+      within(canvasElement).getByText("Agent not found"),
+    ).toBeVisible();
+  },
+} satisfies Story;
+
+export const MutationError = {
+  args: {
+    mutationState: {
+      type: "IDLE",
+      error: "Agent settings could not be saved.",
+    },
+  },
+  play: async ({ canvasElement }) => {
+    await expect(
+      within(canvasElement).getByText("Agent settings could not be saved."),
+    ).toBeVisible();
+  },
+} satisfies Story;
+
+export const Submitting = {
+  args: { mutationState: { type: "SUBMITTING" } },
+  play: async ({ canvasElement }) => {
+    await expect(
+      within(canvasElement).getByRole("button", { name: "Save" }),
+    ).toHaveAttribute("data-loading", "true");
+  },
+} satisfies Story;
+
+export const RuntimeProfilesLoading = {
+  args: { formState: { type: "CREATE" }, runtimeProfilesLoading: true },
+  play: async ({ canvasElement }) => {
+    await expect(
+      within(canvasElement).getByRole("combobox", { name: "Runtime profile" }),
+    ).toBeDisabled();
+  },
+} satisfies Story;
 
 export const CreateUsesWorkspaceDefault = {
   args: {

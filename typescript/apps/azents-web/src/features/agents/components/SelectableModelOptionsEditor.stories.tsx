@@ -3,15 +3,28 @@ import { useState } from "react";
 import { expect, userEvent, within } from "storybook/test";
 import { partialReasoningCapabilities } from "@/shared/storybook/model-capability-fixtures";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
-import { SelectableModelOptionsEditor } from "./SelectableModelOptionsEditor";
+import { SelectableModelOptionsEditorContainer } from "../containers/SelectableModelOptionsEditorContainer";
+import { renderStaticModelPicker } from "./model-option-editor-story-fixtures";
 import type {
   ImageGenerationCatalogState,
   ProviderIntegrationOption,
   SelectableModelCandidateFormValue,
   SelectableModelOptionFormValue,
 } from "../model-selection";
+import type { SelectableModelOptionsEditorProps } from "./SelectableModelOptionsEditor";
 import type { ModelCapabilities } from "@azents/public-client";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
+
+function SelectableModelOptionsEditor(
+  props: SelectableModelOptionsEditorProps,
+): React.ReactElement {
+  return (
+    <SelectableModelOptionsEditorContainer
+      {...props}
+      renderModelPicker={renderStaticModelPicker}
+    />
+  );
+}
 
 const capabilities: ModelCapabilities = {
   reasoning: { supported: true, effort_levels: ["low", "medium", "high"] },
@@ -222,6 +235,35 @@ type Story = StoryObj<typeof meta>;
 
 export const Default = {} satisfies Story;
 
+export const ReadOnly = {
+  args: { canEdit: false },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      canvas.getByRole("button", { name: "Add label" }),
+    ).toBeDisabled();
+    for (const button of canvas.getAllByRole("button", {
+      name: "Model settings",
+    })) {
+      await expect(button).toBeDisabled();
+    }
+    for (const textbox of canvas.getAllByRole("textbox", {
+      name: "Model label",
+    })) {
+      await expect(textbox).toBeDisabled();
+    }
+  },
+} satisfies Story;
+
+export const EmptyValidation = {
+  args: {
+    options: [],
+    mainModelLabel: null,
+    lightweightModelLabel: null,
+    showValidationErrors: true,
+  },
+} satisfies Story;
+
 export const OrderedFallbackCandidates = {
   args: {
     options: [
@@ -255,7 +297,7 @@ export const AddModelFocusesEmptyLabel = {
   render: () => <SelectableModelOptionsEditorHarness />,
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await userEvent.click(canvas.getByRole("button", { name: "Add model" }));
+    await userEvent.click(canvas.getByRole("button", { name: "Add label" }));
     const labels = canvas.getAllByRole("textbox", { name: "Model label" });
     await expect(labels).toHaveLength(2);
     const newLabel = labels[1];
@@ -264,6 +306,19 @@ export const AddModelFocusesEmptyLabel = {
     }
     await expect(newLabel).toHaveValue("");
     await expect(newLabel).toHaveFocus();
+  },
+} satisfies Story;
+
+export const ModelSelectionWithStaticPicker = {
+  render: () => <SelectableModelOptionsEditorHarness />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(canvas.getByRole("button", { name: "Change model" }));
+    const body = within(canvasElement.ownerDocument.body);
+    await expect(body.getByText("Story model")).toBeVisible();
+    await userEvent.click(body.getByRole("button", { name: "Select" }));
+    await expect(canvas.getByText("Story model")).toBeVisible();
+    await expect(body.queryByRole("dialog")).not.toBeInTheDocument();
   },
 } satisfies Story;
 
@@ -302,9 +357,11 @@ export const ImageGenerationModelSettings = {
       canvas.getByRole("button", { name: "Model settings" }),
     );
     const body = within(document.body);
-    await expect(
-      body.getByRole("combobox", { name: "Image model" }),
-    ).toHaveValue("gpt-image-2.5-flare");
+    const imageModel = body.getByRole("combobox", { name: "Image model" });
+    await expect(imageModel).toHaveValue("GPT Image 2.5 Flare");
+    const rawImageModel = body.getByDisplayValue("gpt-image-2.5-flare");
+    await expect(rawImageModel).toHaveAttribute("type", "hidden");
+    await expect(rawImageModel).toHaveValue("gpt-image-2.5-flare");
   },
 } satisfies Story;
 
@@ -370,6 +427,28 @@ export const ImageGenerationCatalogLoading = {
   },
 } satisfies Story;
 
+export const ImageGenerationCatalogError = {
+  args: {
+    options: [explicitImageOption],
+    lightweightModelLabel: "default",
+    imageGenerationCatalogStates: new Map([
+      ["integration-main", { type: "ERROR", message: "Catalog unavailable." }],
+    ]),
+  },
+  play: async ({ canvasElement }) => {
+    await userEvent.click(
+      within(canvasElement).getByRole("button", { name: "Model settings" }),
+    );
+    const body = within(canvasElement.ownerDocument.body);
+    await expect(
+      body.getByText("Image models could not be loaded"),
+    ).toBeVisible();
+    await expect(
+      body.getByRole("button", { name: "Sync image models" }),
+    ).toBeVisible();
+  },
+} satisfies Story;
+
 export const ImageGenerationLastSyncFailed = {
   args: {
     options: [explicitImageOption],
@@ -408,9 +487,11 @@ export const ImageGenerationLastSyncFailed = {
     await expect(
       body.getByText("Latest image model sync failed"),
     ).toBeVisible();
-    await expect(
-      body.getByRole("combobox", { name: "Image model" }),
-    ).toHaveValue("gpt-image-2.5-flare");
+    const imageModel = body.getByRole("combobox", { name: "Image model" });
+    await expect(imageModel).toHaveValue("GPT Image 2.5 Flare");
+    const rawImageModel = body.getByDisplayValue("gpt-image-2.5-flare");
+    await expect(rawImageModel).toHaveAttribute("type", "hidden");
+    await expect(rawImageModel).toHaveValue("gpt-image-2.5-flare");
   },
 } satisfies Story;
 
@@ -461,8 +542,8 @@ export const SubagentPolicyInteraction = {
       canvas.getByRole("button", { name: "Label settings" }),
     );
     const body = within(document.body);
-    const enabledSwitch = body.getByRole("checkbox", {
-      name: "Available for explicit subagent selection",
+    const enabledSwitch = body.getByRole("switch", {
+      name: "Available for explicit subagent selection Show this label to the parent model as an explicit spawn_agent target.",
     });
     const guidance = body.getByRole("textbox", {
       name: "Subagent selection guidance",
@@ -489,8 +570,8 @@ export const ExplicitSubagentSelectionDisabled = {
     );
     const body = within(document.body);
     await expect(
-      body.getByRole("checkbox", {
-        name: "Available for explicit subagent selection",
+      body.getByRole("switch", {
+        name: "Available for explicit subagent selection Show this label to the parent model as an explicit spawn_agent target.",
       }),
     ).not.toBeChecked();
     await expect(
@@ -509,6 +590,18 @@ export const DuplicateLabel = {
         label: "default",
       },
     ],
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      canvas.getAllByRole("textbox", { name: "Model label" }),
+    ).toHaveLength(2);
+    await expect(
+      canvas.getAllByText("Model labels must be unique."),
+    ).toHaveLength(3);
+    await expect(
+      canvas.getByRole("combobox", { name: "Main model" }),
+    ).toHaveValue("default");
   },
 } satisfies Story;
 

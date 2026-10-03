@@ -22,16 +22,16 @@ import {
   resolveDefaultToolkitSlug,
   trimToolkitWhitespace,
 } from "@/shared/lib/toolkit-identifiers";
-import {
-  getArray,
-  getString,
-  getStringArray,
-  isOneOf,
-  isRecord,
-} from "@/shared/lib/unknown-value";
+import { isRecord } from "@/shared/lib/unknown-value";
 import { trpc } from "@/trpc/client";
 import { toolkitFormSchema } from "../schemas";
+import {
+  hydrateToolkitConfig,
+  projectToolkitConfig,
+  toolkitProjectionUsesOauth,
+} from "../toolkit-config-projection";
 import type { ToolkitFormValues } from "../schemas";
+import type { ToolkitConfigProjection } from "../toolkit-config-projection";
 import type {
   MutationState,
   ScopeListState,
@@ -49,6 +49,7 @@ export interface ToolkitFormContainerProps {
 }
 
 export interface ToolkitFormContainerOutput {
+  configProjection: ToolkitConfigProjection;
   handle: string;
   agentId?: string;
   embedded: boolean;
@@ -138,17 +139,6 @@ const DEFAULT_CREDENTIALS: Record<string, Record<string, unknown> | null> = {
   kubernetes: { clusters: {} },
   envvar: { values: {} },
 };
-
-const MCP_AUTH_TYPES = ["none", "header", "bearer", "oauth2"] as const;
-const GITHUB_AUTH_TYPES = ["pat", "github_app", "github_app_platform"] as const;
-
-function getMcpAuthType(value: unknown): (typeof MCP_AUTH_TYPES)[number] {
-  return isOneOf(value, MCP_AUTH_TYPES) ? value : "none";
-}
-
-function getGithubAuthType(value: unknown): (typeof GITHUB_AUTH_TYPES)[number] {
-  return isOneOf(value, GITHUB_AUTH_TYPES) ? value : "pat";
-}
 
 export function useToolkitFormContainer(
   props: ToolkitFormContainerProps,
@@ -631,54 +621,8 @@ export function useToolkitFormContainer(
     }
 
     const toolkitConfig = formState.config;
-    const rawConfig = toolkitConfig.config;
     const toolSlug = toolkitConfig.toolkit_type;
-    let config: Record<string, unknown>;
-    if (toolSlug === "shell") {
-      config = {
-        allowed_domains: Array.isArray(rawConfig.allowed_domains)
-          ? getStringArray(rawConfig.allowed_domains)
-          : [],
-        denied_domains: getStringArray(rawConfig.denied_domains),
-      };
-    } else if (toolSlug === "mcp") {
-      config = {
-        server_url: getString(rawConfig.server_url),
-        auth_type: getMcpAuthType(rawConfig.auth_type),
-        timeout: typeof rawConfig.timeout === "number" ? rawConfig.timeout : 30,
-        header_name: getString(rawConfig.header_name),
-        token_url: getString(rawConfig.token_url),
-        auth_url: getString(rawConfig.auth_url),
-        scopes: getStringArray(rawConfig.scopes),
-        discovery_url: getString(rawConfig.discovery_url),
-      };
-    } else if (toolSlug === "github") {
-      config = {
-        server_url: getString(
-          rawConfig.server_url,
-          "https://api.githubcopilot.com/mcp/",
-        ),
-        auth_type:
-          rawConfig.auth_type === "bearer" ? rawConfig.auth_type : "bearer",
-        github_auth_type: getGithubAuthType(rawConfig.github_auth_type),
-        toolsets: Array.isArray(rawConfig.toolsets)
-          ? getStringArray(rawConfig.toolsets)
-          : ["repos", "issues", "pull_requests", "users"],
-        timeout: typeof rawConfig.timeout === "number" ? rawConfig.timeout : 30,
-        inject_runtime_environment: Boolean(
-          rawConfig.inject_runtime_environment,
-        ),
-      };
-    } else if (toolSlug === "envvar") {
-      config = {
-        entries: getArray(rawConfig.entries, isRecord).map((entry) => ({
-          name: getString(entry.name),
-          masked: typeof entry.masked === "boolean" ? entry.masked : true,
-        })),
-      };
-    } else {
-      config = rawConfig;
-    }
+    const hydrated = hydrateToolkitConfig(toolSlug, toolkitConfig.config);
 
     form.setValues({
       toolkitType: toolSlug,
@@ -686,15 +630,8 @@ export function useToolkitFormContainer(
       name: toolkitConfig.name,
       description: toolkitConfig.description ?? "",
       prompt: toolkitConfig.prompt ?? "",
-      config,
-      credentials:
-        toolSlug === "mcp"
-          ? { type: getMcpAuthType(rawConfig.auth_type) }
-          : toolSlug === "github"
-            ? { type: getGithubAuthType(rawConfig.github_auth_type) }
-            : toolSlug === "envvar"
-              ? { values: {} }
-              : null,
+      config: hydrated.config,
+      credentials: hydrated.credentials,
       enabled: toolkitConfig.enabled,
       alwaysExposeTools: toolkitConfig.always_expose_tools,
     });
@@ -729,12 +666,12 @@ export function useToolkitFormContainer(
         canonicalName,
       )
     : "";
+  const configProjection = projectToolkitConfig(
+    currentToolSlug,
+    form.getValues().config,
+  );
   const showOauthConnection =
-    formState.type === "EDIT" &&
-    ["mcp", "notion", "sentry"].includes(currentToolSlug) &&
-    (getString(form.getValues().config.auth_type) === "oauth2" ||
-      currentToolSlug === "notion" ||
-      currentToolSlug === "sentry");
+    formState.type === "EDIT" && toolkitProjectionUsesOauth(configProjection);
   const onAddScope = useCallback((): void => {
     if (!toolkitId) {
       return;
@@ -752,6 +689,7 @@ export function useToolkitFormContainer(
   );
 
   return {
+    configProjection,
     handle,
     ...(agentId != null && { agentId }),
     embedded,

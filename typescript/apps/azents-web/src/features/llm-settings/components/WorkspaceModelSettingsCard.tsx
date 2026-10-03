@@ -6,7 +6,7 @@ import { Alert, Button, Card, Group, Stack, Text } from "@mantine/core";
 import { useForm } from "@mantine/form";
 import { useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
-import { SelectableModelOptionsEditor } from "@/features/agents/components/SelectableModelOptionsEditor";
+import { SelectableModelOptionsEditorContainer } from "@/features/agents/containers/SelectableModelOptionsEditorContainer";
 import { useImageGenerationCatalogs } from "@/features/agents/containers/useImageGenerationCatalogs";
 import {
   hasDuplicateSelectableModelCandidates,
@@ -131,7 +131,7 @@ export function WorkspaceModelSettingsCard({
               {t("description")}
             </Text>
           </Stack>
-          <SelectableModelOptionsEditor
+          <SelectableModelOptionsEditorContainer
             handle={handle}
             title={t("optionsTitle")}
             description={t("optionsDescription")}

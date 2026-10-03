@@ -1,5 +1,5 @@
 import { rem } from "@mantine/core";
-import { expect, within } from "storybook/test";
+import { expect, fn, userEvent, within } from "storybook/test";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import { AgentMemorySettings } from "./AgentMemorySettings";
 import type {
@@ -153,6 +153,83 @@ type Story = StoryObj<typeof meta>;
 
 export const SavedLoaded = {} satisfies Story;
 
+export const SavedLoading = {
+  args: { savedListState: { type: "LOADING" } },
+  play: async ({ canvasElement }) => {
+    await expect(
+      within(canvasElement).queryByText("release-checklist"),
+    ).not.toBeInTheDocument();
+  },
+} satisfies Story;
+
+export const SavedError = {
+  args: {
+    savedListState: {
+      type: "ERROR",
+      message: "Saved Memory is temporarily unavailable.",
+    },
+  },
+  play: async ({ canvasElement }) => {
+    await expect(
+      within(canvasElement).getByText(
+        "Saved Memory is temporarily unavailable.",
+      ),
+    ).toBeVisible();
+  },
+} satisfies Story;
+
+export const SavedCreating = {
+  args: {
+    draftState: {
+      type: "create",
+      draft: {
+        type: "project",
+        name: "new-memory",
+        description: "A new workspace convention.",
+        content: "Verify all required checks before release.",
+      },
+    },
+    onSaveDraft: fn(),
+  },
+  play: async ({ canvasElement, args }) => {
+    const body = within(canvasElement.ownerDocument.body);
+    await expect(
+      body.getByRole("dialog", { name: "Add memory" }),
+    ).toBeVisible();
+    await userEvent.click(body.getByRole("button", { name: "Save" }));
+    await expect(args.onSaveDraft).toHaveBeenCalledTimes(1);
+  },
+} satisfies Story;
+
+export const SavedSaving = {
+  args: { ...SavedCreating.args, saving: true },
+  play: async ({ canvasElement }) => {
+    await expect(
+      within(canvasElement.ownerDocument.body).getByRole("button", {
+        name: "Save",
+      }),
+    ).toHaveAttribute("data-loading", "true");
+  },
+} satisfies Story;
+
+export const SavedDeleting = {
+  args: { deletingId: "mem_01" },
+  play: async ({ canvasElement }) => {
+    await expect(
+      within(canvasElement).getAllByRole("button", { name: "Delete" })[0],
+    ).toHaveAttribute("data-loading", "true");
+  },
+} satisfies Story;
+
+export const MemoryTogglePending = {
+  args: { togglingMemory: true },
+  play: async ({ canvasElement }) => {
+    await expect(
+      within(canvasElement).getByRole("switch", { name: "Enable Memory" }),
+    ).toBeDisabled();
+  },
+} satisfies Story;
+
 export const SavedEmpty = {
   args: {
     savedListState: { type: "LOADED", memories: [] },
@@ -225,5 +302,23 @@ export const HistoricalError = {
       type: "ERROR",
       message: "Historical Memory is temporarily unavailable.",
     },
+  },
+} satisfies Story;
+
+export const HistoricalLoadMore = {
+  args: {
+    kind: "historical",
+    historicalListState: {
+      type: "LOADED",
+      memories: historicalMemories,
+      hasMore: true,
+    },
+    onLoadMoreHistorical: fn(),
+  },
+  play: async ({ canvasElement, args }) => {
+    await userEvent.click(
+      within(canvasElement).getByRole("button", { name: "Load more" }),
+    );
+    await expect(args.onLoadMoreHistorical).toHaveBeenCalledTimes(1);
   },
 } satisfies Story;

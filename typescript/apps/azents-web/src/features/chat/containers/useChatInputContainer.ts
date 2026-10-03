@@ -25,6 +25,10 @@ import {
 } from "../executionOptions";
 import { resolveAppliedInferenceProfile } from "../inferenceProfileBaseline";
 import type {
+  ChatExecutionOptionDefinition,
+  ChatExecutionOptionGroup,
+} from "../executionOptions";
+import type {
   ChatAction,
   ChatLiveRunState,
   GoalStateSnapshot,
@@ -208,6 +212,115 @@ type DesktopProfileSection = "model" | "effort" | `execution:${string}`;
 interface DesktopProfileFocusTarget {
   section: DesktopProfileSection;
   optionIndex: number | null;
+}
+
+export interface ChatInputContainer extends Pick<
+  ChatInputProps,
+  | "agentId"
+  | "sessionId"
+  | "isMobile"
+  | "selectableModelOptions"
+  | "defaultInferenceProfile"
+  | "isUploading"
+  | "pendingFiles"
+  | "goal"
+  | "todo"
+  | "removeFile"
+  | "wasCommandBlocked"
+  | "isStopAvailable"
+  | "isStopPending"
+  | "onStopRequest"
+> {
+  onApplyInferenceProfile: ChatInputProps["onApplyInferenceProfile"];
+  onClearGoal: ChatInputProps["onClearGoal"];
+  onUpdateGoal: ChatInputProps["onUpdateGoal"];
+  onPauseGoal: ChatInputProps["onPauseGoal"];
+  onResumeGoal: ChatInputProps["onResumeGoal"];
+  t: ReturnType<typeof useTranslations<"chat">>;
+  inferenceProfileSelectionEnabled: boolean;
+  contextUsageEnabled: boolean;
+  contextUsage: TokenUsageSummary | null;
+  contextUsageActiveRun: ChatLiveRunState | null;
+  selectableExecutionOptions: ChatExecutionOptionDefinition[];
+  selectableExecutionOptionGroups: ChatExecutionOptionGroup[];
+  editingMessageId: string | null;
+  editSendDisabled: boolean;
+  inputDisabled: boolean;
+  disabledPlaceholder: string | null;
+  inputValue: string;
+  inferenceProfile: RequestedInferenceProfile;
+  profilePickerOpened: boolean;
+  setProfilePickerOpened: React.Dispatch<React.SetStateAction<boolean>>;
+  scrollToContextUsageOnOpen: boolean;
+  setScrollToContextUsageOnOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  contextUsageDetailsRef: React.RefObject<HTMLDivElement | null>;
+  desktopProfileSection: DesktopProfileSection | null;
+  setDesktopProfileSection: React.Dispatch<
+    React.SetStateAction<DesktopProfileSection | null>
+  >;
+  sendErrorVisible: boolean;
+  selectedAction: InputActionDefinition | null;
+  setSelectedAction: React.Dispatch<
+    React.SetStateAction<InputActionDefinition | null>
+  >;
+  inputActionListboxId: string;
+  inputActionOptionRefs: React.RefObject<Map<number, HTMLButtonElement>>;
+  desktopProfileDialogId: string;
+  desktopProfileModelPanelId: string;
+  desktopProfileEffortPanelId: string;
+  desktopProfileExecutionPanelId: string;
+  profileTriggerRef: React.RefObject<HTMLButtonElement | null>;
+  desktopProfileSectionRefs: React.RefObject<
+    Map<DesktopProfileSection, HTMLButtonElement>
+  >;
+  desktopModelOptionRefs: React.RefObject<Map<number, HTMLButtonElement>>;
+  desktopEffortOptionRefs: React.RefObject<Map<number, HTMLButtonElement>>;
+  executionOptionRefs: React.RefObject<
+    Map<string, Map<number, HTMLButtonElement>>
+  >;
+  selectableEfforts: ModelReasoningEffort[];
+  selectedModelLabel: string;
+  selectedEffortLabel: string;
+  supportedExecutionOptions: ModelExecutionOptionId[];
+  hasPendingInferenceProfileChange: boolean;
+  fileInputRef: React.RefObject<HTMLInputElement | null>;
+  textareaRef: React.RefObject<HTMLTextAreaElement | null>;
+  inputActionQuery: string | null;
+  visibleInputActions: RankedInputAction[];
+  todoPreviewVisible: boolean;
+  activeInputActionIndex: number;
+  setActiveInputActionIndex: React.Dispatch<React.SetStateAction<number>>;
+  activeInputAction: RankedInputAction | null;
+  activeInputActionOptionId: string;
+  updateInputValue: (value: string) => void;
+  persistDraft: (message: string, action: ChatAction | null) => void;
+  handleCancelEdit: () => void;
+  handleSend: () => void;
+  handleSelectInputAction: (definition: InputActionDefinition) => void;
+  handleInputFocus: () => void;
+  handleInputBlur: () => void;
+  handleKeyDown: (event: React.KeyboardEvent<HTMLTextAreaElement>) => void;
+  handleFileChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
+  handleModelChange: (label: string | null) => void;
+  handleEffortChange: (effort: string | null) => void;
+  handleExecutionOptionToggle: (option: ModelExecutionOptionId) => void;
+  handleExecutionOptionGroupChange: (group: string, selected: string) => void;
+  handleOpenContextUsage: () => void;
+  handleProfilePickerEnterTransitionEnd: () => void;
+  desktopProfileSections: DesktopProfileSection[];
+  closeDesktopProfilePicker: () => void;
+  handleDesktopProfileSectionKeyDown: (
+    section: DesktopProfileSection,
+    event: React.KeyboardEvent<HTMLButtonElement>,
+  ) => void;
+  handleDesktopProfileOptionKeyDown: (
+    section: DesktopProfileSection,
+    index: number,
+    event: React.KeyboardEvent<HTMLButtonElement>,
+  ) => void;
+  handleProfileTriggerKeyDown: (
+    event: React.KeyboardEvent<HTMLButtonElement>,
+  ) => void;
 }
 
 function normalizeStoredAction(value: unknown): ChatAction | null {
@@ -491,7 +604,7 @@ function useChatInputContainerImplementation({
   editSendDisabled = false,
   inputDisabled = false,
   disabledPlaceholder = null,
-}: ChatInputProps) {
+}: ChatInputProps): ChatInputContainer {
   const t = useTranslations("chat");
   const draftStorageKey = useMemo(
     () => getScopedStorageKey(DRAFT_STORAGE_KEY_PREFIX, agentId, sessionId),
@@ -947,7 +1060,7 @@ function useChatInputContainerImplementation({
   }, []);
 
   const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
       if (
         !e.nativeEvent.isComposing &&
         visibleInputActions.length > 0 &&
@@ -1000,7 +1113,7 @@ function useChatInputContainerImplementation({
 
   /** Handle files selected through the hidden input. */
   const handleFileChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
+    (e: React.ChangeEvent<HTMLInputElement>): void => {
       if (e.target.files && e.target.files.length > 0) {
         addFiles(e.target.files);
       }
@@ -1519,10 +1632,6 @@ function useChatInputContainerImplementation({
     handleProfileTriggerKeyDown,
   };
 }
-
-export type ChatInputContainer = ReturnType<
-  typeof useChatInputContainerImplementation
->;
 
 export function useChatInputContainer(
   props: ChatInputProps,

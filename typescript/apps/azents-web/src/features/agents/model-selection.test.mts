@@ -14,6 +14,7 @@ import {
   modelContextBadgeValue,
   resolveModelContextRange,
   type SelectableModelCandidateFormValue,
+  selectableModelLabelSelectData,
   type SelectableModelOptionFormValue,
   selectableModelOptionFormValuesFromStoredOptions,
   selectableModelOptionInputsFromFormValues,
@@ -58,6 +59,21 @@ function capabilities(
     compatibility: {},
   };
 }
+
+void test("label select data keeps first-seen order without duplicate values or row mutation", () => {
+  const rows = [
+    option("first", " default "),
+    option("duplicate", "default"),
+    option("empty", ""),
+    option("light", "lightweight"),
+  ];
+  const before = JSON.stringify(rows);
+  assert.deepEqual(selectableModelLabelSelectData(rows), [
+    { value: "default", label: "default" },
+    { value: "lightweight", label: "lightweight" },
+  ]);
+  assert.equal(JSON.stringify(rows), before);
+});
 
 void test("stored v2 capability evidence and omitted settings survive form loading unchanged", () => {
   const stored: SelectableModelOption[] = [
