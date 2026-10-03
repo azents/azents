@@ -14,6 +14,7 @@ from azents.core.enums import (
     LLMProvider,
 )
 from azents.core.llm_catalog_sync import (
+    CatalogProjectionVersion,
     IntegrationCatalogSyncPolicyDecision,
     IntegrationCatalogSyncTrigger,
 )
@@ -43,6 +44,7 @@ class CatalogReadPage:
 
     page: LLMCatalogEntryList
     latest_workspace_attempt: LLMCatalogSyncAttempt | None
+    current_projection_version: CatalogProjectionVersion | None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -163,8 +165,15 @@ class LLMCatalogOperationsRepository:
                 latest_workspace_attempt = await workspace_attempt(
                     session, workspace_id=workspace_id
                 )
+            repository = self.catalog_repository
             return CatalogReadPage(
-                page=page, latest_workspace_attempt=latest_workspace_attempt
+                page=page,
+                latest_workspace_attempt=latest_workspace_attempt,
+                current_projection_version=(
+                    await repository.get_current_snapshot_projection_version(
+                        session, catalog=page.catalog
+                    )
+                ),
             )
 
     async def read_system_catalogs(
@@ -213,6 +222,7 @@ class LLMCatalogOperationsRepository:
         workspace_id: str,
         started_at: datetime.datetime,
         trigger: IntegrationCatalogSyncTrigger,
+        required_projection_version: CatalogProjectionVersion,
     ) -> CatalogAttemptStart:
         """Create the catalog and claim under the existing workspace/catalog locks."""
         async with self.session_manager() as session:
@@ -229,6 +239,7 @@ class LLMCatalogOperationsRepository:
                 source_key=CATALOG_SOURCE_KEY,
                 started_at=started_at,
                 trigger=trigger,
+                required_projection_version=required_projection_version,
             )
             return CatalogAttemptStart(catalog=catalog, claim=claim)
 

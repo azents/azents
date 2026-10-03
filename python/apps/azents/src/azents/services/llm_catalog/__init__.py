@@ -23,6 +23,7 @@ from azents.core.llm_catalog import (
     model_freshness_rank,
 )
 from azents.core.llm_catalog_sync import (
+    CatalogProjectionVersion,
     CatalogSyncAttemptState,
     IntegrationCatalogSyncDenialReason,
     IntegrationCatalogSyncPolicyDecision,
@@ -455,6 +456,11 @@ class ModelCatalogReadService:
                 trigger=IntegrationCatalogSyncTrigger.EXPLICIT,
                 now=_utcnow(),
                 current_snapshot_created_at=result.current_snapshot_created_at,
+                current_projection_version=snapshot.current_projection_version,
+                required_projection_version=CatalogProjectionVersion(
+                    schema_version=MODEL_METADATA_PROJECTION_SCHEMA_VERSION,
+                    resolver_revision=RUNTIME_MODEL_PROFILE_RESOLVER_REVISION,
+                ),
                 latest_catalog_attempt=_sync_policy_attempt(result.latest_attempt),
                 latest_workspace_attempt=_sync_policy_attempt(latest_workspace_attempt),
             )
@@ -670,6 +676,10 @@ class IntegrationCatalogProjectionService:
             workspace_id=workspace_id,
             started_at=started_at,
             trigger=trigger,
+            required_projection_version=CatalogProjectionVersion(
+                schema_version=MODEL_METADATA_PROJECTION_SCHEMA_VERSION,
+                resolver_revision=RUNTIME_MODEL_PROFILE_RESOLVER_REVISION,
+            ),
         )
         catalog = preparation.catalog
         claim = preparation.claim

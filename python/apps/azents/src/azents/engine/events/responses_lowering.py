@@ -283,7 +283,12 @@ class ResponsesRequestLowerer:
         self._model_capabilities = model_capabilities or ModelCapabilities()
         self._file_part_capabilities = (
             FilePartLoweringCapabilities.from_model_capabilities(
-                self._model_capabilities
+                self._model_capabilities,
+                context=resolve_model_support_context(
+                    self._model_capabilities,
+                    requested_effort=self._reasoning_effort,
+                    function_tools=bool(self._tools),
+                ),
             )
         )
         self.model_file_resolver = model_file_resolver
@@ -313,6 +318,12 @@ class ResponsesRequestLowerer:
             raise ValueError("Lowerer model identity differs from the selected model")
         input_items: list[dict[str, object]] = []
         kwargs = self._lower_model_kwargs()
+        context = self._resolve_support_context(kwargs)
+        self._file_part_capabilities = (
+            FilePartLoweringCapabilities.from_model_capabilities(
+                self._model_capabilities, context=context
+            )
+        )
         default_instructions = kwargs.get("instructions") or _DEFAULT_INSTRUCTIONS
         instructions = system_prompt or str(default_instructions)
         if _uses_input_message_instructions(
@@ -389,45 +400,6 @@ class ResponsesRequestLowerer:
             # remain stable across turns.
             input_items = _omit_response_item_ids_for_unstored_request(input_items)
         input_items = _drop_orphan_tool_outputs(input_items)
-        contract = self._model_capabilities.semantic_contract
-        if contract is not None:
-            decoded_tools = [
-                _ToolSupportOptions.model_validate(tool) for tool in self._tools
-            ]
-            function_tools = any(tool.type == "function" for tool in decoded_tools)
-            options = decode_model_support_options(kwargs)
-            request = model_support_request_from_options(
-                options,
-                selected_effort=self._reasoning_effort,
-                function_tools=function_tools,
-                strict_function_schema=any(
-                    tool.type == "function"
-                    and (
-                        tool.strict is True
-                        or tool.function is not None
-                        and tool.function.strict is True
-                    )
-                    for tool in decoded_tools
-                ),
-            )
-            validate_saved_model_request(self._model_capabilities, request=request)
-            context = resolve_model_support_context(
-                self._model_capabilities,
-                requested_effort=request.reasoning_effort,
-                function_tools=function_tools,
-            )
-            if (
-                "parallel_tool_calls" not in kwargs
-                and model_support_allowed(
-                    contract.parallel_function_calls, context=context
-                )
-                is False
-            ):
-                kwargs["parallel_tool_calls"] = False
-        else:
-            context = ModelSupportContext(
-                reasoning_effort=self._reasoning_effort, function_tools=None
-            )
         hosted = _lower_hosted_tools(
             self._hosted_tools,
             provider=self.provider,
@@ -452,6 +424,47 @@ class ResponsesRequestLowerer:
             tools=tools,
             kwargs=kwargs,
         )
+
+    def _resolve_support_context(
+        self, kwargs: dict[str, object]
+    ) -> ModelSupportContext:
+        """Validate controls and resolve the same context used for rich input."""
+        contract = self._model_capabilities.semantic_contract
+        if contract is None:
+            return ModelSupportContext(
+                reasoning_effort=self._reasoning_effort, function_tools=None
+            )
+        decoded_tools = [
+            _ToolSupportOptions.model_validate(tool) for tool in self._tools
+        ]
+        function_tools = any(tool.type == "function" for tool in decoded_tools)
+        request = model_support_request_from_options(
+            decode_model_support_options(kwargs),
+            selected_effort=self._reasoning_effort,
+            function_tools=function_tools,
+            strict_function_schema=any(
+                tool.type == "function"
+                and (
+                    tool.strict is True
+                    or tool.function is not None
+                    and tool.function.strict is True
+                )
+                for tool in decoded_tools
+            ),
+        )
+        validate_saved_model_request(self._model_capabilities, request=request)
+        context = resolve_model_support_context(
+            self._model_capabilities,
+            requested_effort=request.reasoning_effort,
+            function_tools=function_tools,
+        )
+        if (
+            "parallel_tool_calls" not in kwargs
+            and model_support_allowed(contract.parallel_function_calls, context=context)
+            is False
+        ):
+            kwargs["parallel_tool_calls"] = False
+        return context
 
     def _lower_model_kwargs(self) -> dict[str, object]:
         """Lower RunRequest model options to provider-native Responses kwargs."""

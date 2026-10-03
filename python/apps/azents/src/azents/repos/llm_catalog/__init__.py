@@ -17,6 +17,7 @@ from azents.core.enums import (
 )
 from azents.core.llm_catalog import INTEGRATION_SCOPED_CATALOG_PROVIDERS
 from azents.core.llm_catalog_sync import (
+    CatalogProjectionVersion,
     CatalogSyncAttemptState,
     IntegrationCatalogSyncPolicyDecision,
     IntegrationCatalogSyncPolicyInput,
@@ -164,6 +165,7 @@ class LLMCatalogRepository:
         source_key: str,
         started_at: datetime.datetime,
         trigger: IntegrationCatalogSyncTrigger,
+        required_projection_version: CatalogProjectionVersion | None,
     ) -> IntegrationCatalogSyncClaim | IntegrationCatalogSyncPolicyDecision:
         """Atomically apply sync policy and create an integration attempt."""
         workspace_lock = await session.execute(
@@ -210,6 +212,14 @@ class LLMCatalogRepository:
                 trigger=trigger,
                 now=started_at,
                 current_snapshot_created_at=current_snapshot_created_at,
+                current_projection_version=(
+                    await self.get_current_snapshot_projection_version(
+                        session, catalog=catalog
+                    )
+                    if required_projection_version is not None
+                    else None
+                ),
+                required_projection_version=required_projection_version,
                 latest_catalog_attempt=self._policy_attempt(latest_catalog_attempt),
                 latest_workspace_attempt=self._policy_attempt(latest_workspace_attempt),
             )
@@ -972,6 +982,28 @@ class LLMCatalogRepository:
             )
         )
         return result.scalar_one_or_none()
+
+    async def get_current_snapshot_projection_version(
+        self,
+        session: AsyncSession,
+        *,
+        catalog: LLMCatalog,
+    ) -> CatalogProjectionVersion | None:
+        """Read actual stored versions without introducing a runtime authority."""
+        if catalog.current_snapshot_id is None:
+            return None
+        result = await session.execute(
+            sa.select(RDBLLMCatalogSnapshot).where(
+                RDBLLMCatalogSnapshot.id == catalog.current_snapshot_id
+            )
+        )
+        snapshot = result.scalar_one_or_none()
+        if snapshot is None:
+            return None
+        return CatalogProjectionVersion(
+            schema_version=snapshot.projection_schema_version,
+            resolver_revision=snapshot.runtime_profile_resolver_revision,
+        )
 
     async def get_selectable_entry_by_integration_model(
         self,
