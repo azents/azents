@@ -19,6 +19,32 @@ from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace_user import WorkspaceUserRepository
 
 
+async def evaluate_active_subject(
+    session: AsyncSession,
+    *,
+    user_id: str,
+    session_id: str,
+    user_repository: UserRepository,
+    session_repository: SessionRepository,
+) -> ActiveAccountSubjectStatus:
+    """Evaluate the canonical exact User and Session predicates in an owned scope."""
+    user = await user_repository.get(session, user_id)
+    if user is None:
+        return ActiveAccountSubjectStatus.USER_MISSING
+    if user.access_disabled_at is not None:
+        return ActiveAccountSubjectStatus.USER_DISABLED
+    auth_session = await session_repository.get(session, session_id)
+    if auth_session is None:
+        return ActiveAccountSubjectStatus.SESSION_MISSING
+    if auth_session.user_id != user_id:
+        return ActiveAccountSubjectStatus.SESSION_FOREIGN
+    if auth_session.is_revoked:
+        return ActiveAccountSubjectStatus.SESSION_REVOKED
+    if auth_session.is_expired:
+        return ActiveAccountSubjectStatus.SESSION_EXPIRED
+    return ActiveAccountSubjectStatus.ACTIVE
+
+
 @dataclasses.dataclass(frozen=True)
 class AccountAccessOperationRepository:
     """Own exact subject and membership reads without HTTP or credential policy."""
@@ -38,21 +64,13 @@ class AccountAccessOperationRepository:
     ) -> ActiveAccountSubjectStatus:
         """Return current User and exact Session eligibility after DB closure."""
         async with self.session_manager() as session:
-            user = await self.user_repository.get(session, user_id)
-            if user is None:
-                return ActiveAccountSubjectStatus.USER_MISSING
-            if user.access_disabled_at is not None:
-                return ActiveAccountSubjectStatus.USER_DISABLED
-            auth_session = await self.session_repository.get(session, session_id)
-            if auth_session is None:
-                return ActiveAccountSubjectStatus.SESSION_MISSING
-            if auth_session.user_id != user_id:
-                return ActiveAccountSubjectStatus.SESSION_FOREIGN
-            if auth_session.is_revoked:
-                return ActiveAccountSubjectStatus.SESSION_REVOKED
-            if auth_session.is_expired:
-                return ActiveAccountSubjectStatus.SESSION_EXPIRED
-            return ActiveAccountSubjectStatus.ACTIVE
+            return await evaluate_active_subject(
+                session,
+                user_id=user_id,
+                session_id=session_id,
+                user_repository=self.user_repository,
+                session_repository=self.session_repository,
+            )
 
     async def read_workspace_membership(
         self, *, handle: str, user_id: str

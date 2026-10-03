@@ -16,8 +16,11 @@ code_paths:
   - python/apps/azents/src/azents/core/engine_tool_state.py
   - python/apps/azents/src/azents/repos/toolkit/**
   - python/apps/azents/src/azents/repos/toolkit_operations/**
+  - python/apps/azents/src/azents/repos/toolkit_oauth_operations.py
+  - python/apps/azents/src/azents/repos/toolkit_oauth_data.py
   - python/apps/azents/src/azents/repos/github_user_installation/**
   - python/apps/azents/src/azents/services/toolkit/**
+  - python/apps/azents/src/azents/services/toolkit_oauth/**
   - python/apps/azents/src/azents/services/vfs.py
   - python/apps/azents/src/azents/services/vfs_read.py
   - python/apps/azents/src/azents/services/memory_vfs.py
@@ -85,7 +88,7 @@ code_paths:
 api_routes:
   - /toolkit/v1
 last_verified_at: 2026-10-02
-spec_version: 128
+spec_version: 129
 ---
 
 # Toolkit
@@ -466,7 +469,28 @@ Platform App installation rows and `github_app_platform` Toolkit credentials are
 
 Public install URL generation, OAuth start/callback, installation synchronization, and Worker token issuance resolve one coherent Platform GitHub App snapshot from System Settings at the operation boundary. OAuth state carries the internal effective generation, and callback processing rejects generation drift before code exchange. Token issuance verifies the Toolkit's bound App ID and the User installation's App ID against the current effective App before any external token request. Same-App key or OAuth-secret rotation preserves the binding; an App-ID mismatch fails closed.
 
+Workspace installation synchronization runs through a session-free service:
+exchange and list HTTP precede one completed, ordered User/App upsert/prune
+transaction. That final operation repeats the existing active User/exact Auth
+Session, immutable admitted Workspace, current membership, and `TOOLKITS_WRITE`
+conditions. The captured App identity remains the synchronization scope; no
+second Platform generation fence is added. Temporary-token revocation occurs
+only after successful Workspace synchronization, while Agent setup retains its
+existing `finally` revocation. Persistence keeps duplicate-row order and defaults
+a missing or non-string avatar to an empty string; the Public list separately
+requires a string avatar.
+
 Toolkit list/detail responses expose an optional redacted `authorization_state` with `status=reconnect_required` and the stable reason `app_identity_changed` when a persisted Toolkit belongs to a different Platform App. Main Web uses this Public API projection to block misleading connect/test actions and guide a manager to reconnect; it does not call the Admin API or depend on the Admin client. Persisted Toolkit configuration and Agent attachments are retained across App identity changes.
+
+### Shared Connection Test Boundaries
+
+Saved connection tests use a completed exact shared Toolkit/Workspace read and
+retain strict not-found behavior. Unsaved tests read an eligible saved snapshot
+only when a Toolkit ID is supplied; a missing, foreign, or Agent-owned item uses
+form-only credentials, and a null ID opens no database scope. Provider validation,
+redacted/Kubernetes credential merging, Platform App binding, and provider network
+tests run outside repository transactions. Submitted credential discriminators,
+blank-value retention, and configured Kubernetes-cluster pruning are unchanged.
 
 ### MCP OAuth Connection Flow
 
@@ -1187,6 +1211,10 @@ notification execute only after the operation returns.
 
 ## Changelog
 
+- **2026-10-02** (spec_version 129) — Completed Workspace OAuth installation
+  synchronization and saved/unsaved connection-test persistence boundaries,
+  preserving ordered User/App synchronization, existing callback cleanup, and
+  strict saved versus optional form-only credential behavior.
 - **2026-10-02** (spec_version 128) — Canonicalized AgentMailbox and terminal
   database composition and completed historical result-repair operations while
   preserving parent validation, idempotency, and queue-only scheduling.

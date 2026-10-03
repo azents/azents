@@ -196,6 +196,11 @@ and review request. No next implementation phase before this phase PR exists.
   reviewer covered all 18 paths with no findings, independently passed 183 cases
   without skips, repeated the overlapping 18 contention cases and verified bounded
   OpenAPI plus final frozen checks. Only execution metadata changed afterward.
-  Commit/PR and exact-head CI are pending.
+  Commit d1c3a7d47 is submitted as PR #2067 over #2065. Actual-head workflow
+  attempt 2 succeeded: 33 native successes / two path skips, rollup 34 passed /
+  two skipped includes one inherited base status; OPEN/MERGEABLE/CLEAN.
+  Attempt 1 had one Slack retained-context timeout; same-head local 1/3-case
+  runs and failed-job diagnostic rerun passed without source/fixture/strict-mode/
+  timeout changes. The initial cause remains unproven and recorded, not fixed.
   Design delta None; no new cross-I/O lock, live infrastructure/provider/credential
   change, Agent merge, implemented marker or issue #1718 closure.
