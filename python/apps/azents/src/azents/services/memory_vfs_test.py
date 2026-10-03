@@ -33,6 +33,7 @@ from azents.engine.events.types import (
     build_native_compat_key,
 )
 from azents.repos.memory_vfs.data import (
+    ConsolidatedMemoryVfsRecord,
     HistoricalMemoryVfsRecord,
     MemoryVfsAuthority,
     MemoryVfsRecordPage,
@@ -126,6 +127,16 @@ class _Repository(MemoryVfsRepository):
     async def authorized(self, authority: MemoryVfsAuthority) -> bool:
         del authority
         return self.authorized_result
+
+    async def get_consolidated(
+        self,
+        authority: MemoryVfsAuthority,
+        *,
+        scope: Literal["team", "user"],
+        max_bytes: int,
+    ) -> ConsolidatedMemoryVfsRecord | None:
+        del authority, scope, max_bytes
+        return None
 
     async def get_saved(
         self,

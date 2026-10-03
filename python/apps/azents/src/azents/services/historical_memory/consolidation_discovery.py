@@ -28,6 +28,7 @@ class ConsolidationDiscoverySummary:
     consolidation_dispatched: int
     consolidation_cleanup_drafts: int
     consolidation_expired_owners: int
+    consolidation_cleanup_revisions: int
 
 
 @dataclasses.dataclass
@@ -62,7 +63,10 @@ class HistoricalMemoryConsolidationDiscoveryService:
         cleanup = await ConsolidationCleanupRepository(self.session_manager).sweep(
             limit=50
         )
+        revisions = await ConsolidationCleanupRepository(
+            self.session_manager
+        ).collect_revisions(limit=50)
         dispatched = await self.dispatch_pending(agent_id=None)
         return ConsolidationDiscoverySummary(
-            dispatched, dispatched, cleanup.drafts, cleanup.expired_owners
+            dispatched, dispatched, cleanup.drafts, cleanup.expired_owners, revisions
         )

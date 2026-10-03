@@ -3,13 +3,13 @@
 import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from azents.core.enums import AgentSessionProductMode
+from azents.core.historical_memory_consolidation import ConsolidationUnitKey
 from azents.core.toolkit_state import ToolkitStateModel
 
 SavedMemoryScope = Literal["agent", "user"]
-HistoricalMemorySourceScope = Literal["team", "user"]
 
 
 def _require_aware(value: datetime.datetime) -> datetime.datetime:
@@ -35,42 +35,27 @@ class SavedMemorySnapshotEntry(BaseModel):
     _validate_updated_at = field_validator("updated_at_snapshot")(_require_aware)
 
 
-class HistoricalMemorySnapshotEntry(BaseModel):
-    """One Historical Memory summary frozen at a context boundary."""
+class ConsolidatedMemorySnapshotEntry(BaseModel):
+    """One complete immutable unit revision frozen at a context boundary."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    source_session_id: str = Field(min_length=32, max_length=32)
-    source_scope: HistoricalMemorySourceScope
-    source_title_snapshot: str | None
-    source_activity_through: datetime.datetime
-    prepared_at: datetime.datetime
-    summary_snapshot: str = Field(min_length=1)
-    summary_vfs_path: str = Field(pattern=r"^azents://memory/historical/")
-    source_vfs_path: str = Field(pattern=r"^azents://memory/sources/")
+    unit: ConsolidationUnitKey
+    unit_id: str = Field(min_length=32, max_length=32)
+    revision_id: str = Field(min_length=32, max_length=32)
+    rendered_block: str = Field(min_length=1)
+    published_at: datetime.datetime
 
-    _validate_source_activity = field_validator("source_activity_through")(
-        _require_aware
-    )
-    _validate_prepared_at = field_validator("prepared_at")(_require_aware)
+    _validate_published_at = field_validator("published_at")(_require_aware)
 
-
-class HistoricalMemorySnapshotCandidate(BaseModel):
-    """One currently authorized prepared source available for selection."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    source_session_id: str = Field(min_length=32, max_length=32)
-    source_scope: HistoricalMemorySourceScope
-    source_title: str | None
-    source_activity_through: datetime.datetime
-    prepared_at: datetime.datetime
-    summary: str = Field(min_length=1)
-
-    _validate_source_activity = field_validator("source_activity_through")(
-        _require_aware
-    )
-    _validate_prepared_at = field_validator("prepared_at")(_require_aware)
+    @field_validator("rendered_block")
+    @classmethod
+    def require_whole_budget(cls, value: str) -> str:
+        if len(value.encode("utf-8")) > 10_000:
+            raise ValueError(
+                "Consolidated Memory block exceeds its independent budget."
+            )
+        return value
 
 
 class MemorySnapshotConsumer(BaseModel):
@@ -91,13 +76,31 @@ class MemoryContextSnapshotState(ToolkitStateModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    schema_version: int = Field(default=1, ge=1)
+    kind: Literal["consolidated_memory"]
+    schema_version: Literal[2]
     boundary_head_event_id: str | None = Field(
         min_length=32,
         max_length=32,
     )
     created_at: datetime.datetime
     saved_entries: list[SavedMemorySnapshotEntry]
-    historical_entries: list[HistoricalMemorySnapshotEntry]
+    historical_entries: list[ConsolidatedMemorySnapshotEntry] = Field(max_length=2)
 
     _validate_created_at = field_validator("created_at")(_require_aware)
+
+    @model_validator(mode="after")
+    def require_distinct_units(self) -> "MemoryContextSnapshotState":
+        scopes = [entry.unit.scope for entry in self.historical_entries]
+        if len(scopes) != len(set(scopes)):
+            raise ValueError("Consolidated Memory snapshot repeats a scope.")
+        if self.historical_entries:
+            first = self.historical_entries[0].unit
+            if any(
+                entry.unit.agent_id != first.agent_id
+                or entry.unit.workspace_id != first.workspace_id
+                for entry in self.historical_entries
+            ):
+                raise ValueError(
+                    "Consolidated Memory snapshot crosses an Agent boundary."
+                )
+        return self

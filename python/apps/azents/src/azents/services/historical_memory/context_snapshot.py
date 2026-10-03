@@ -1,40 +1,60 @@
-"""Completed owner-fenced Memory snapshot orchestration and rendering."""
+"""Foreground Memory boundary operations without synchronous generation."""
 
 import dataclasses
+import logging
 from typing import Annotated
 
 from fastapi import Depends
 
-from azents.core.historical_memory_snapshot_policy import render_memory_context_snapshot
 from azents.core.session_resource_authority import SessionExecutionOwner
-from azents.repos.historical_memory.context_snapshot_operations import (
-    MemoryContextSnapshotOperations,
+from azents.repos.historical_memory_consolidation.authority import (
+    ConsolidationAuthorityBusyError,
+    ConsolidationDeadlineError,
 )
+from azents.repos.memory_context_snapshot import MemoryContextSnapshotRepository
+
+logger = logging.getLogger(__name__)
 
 
 @dataclasses.dataclass
 class MemoryContextSnapshotService:
-    """Render detached snapshots without owning live database sessions."""
+    """Delegate complete database operations; ordinary turns only filter authority."""
 
-    operations: Annotated[
-        MemoryContextSnapshotOperations, Depends(MemoryContextSnapshotOperations)
+    repository: Annotated[
+        MemoryContextSnapshotRepository, Depends(MemoryContextSnapshotRepository)
     ]
 
     def with_owner(
         self, owner: SessionExecutionOwner
     ) -> "MemoryContextSnapshotService":
-        """Return an execution-local service with repository-owned fencing."""
-        return dataclasses.replace(self, operations=self.operations.with_owner(owner))
+        """Bind the foreground operation to one immutable execution owner."""
+        return dataclasses.replace(self, repository=self.repository.with_owner(owner))
 
     async def prompt_for_turn(self, *, session_id: str) -> str:
-        """Return filtered Memory only after its database transaction completes."""
-        snapshot = await self.operations.prompt_snapshot(session_id=session_id)
-        return "" if snapshot is None else render_memory_context_snapshot(snapshot)
+        try:
+            return await self.repository.prompt_for_turn(session_id=session_id)
+        except ConsolidationAuthorityBusyError, ConsolidationDeadlineError:
+            logger.warning(
+                "Memory context authority could not be confirmed.",
+                extra={"session_id": session_id},
+            )
+            return ""
 
     async def refresh_snapshot(
-        self, *, session_id: str, after_compaction: bool
+        self,
+        *,
+        session_id: str,
+        after_compaction: bool,
     ) -> bool:
-        """Prepare the explicit boundary through one completed repository operation."""
-        return await self.operations.refresh_snapshot(
-            session_id=session_id, after_compaction=after_compaction
-        )
+        """Refresh only at root Run preparation or successful committed compaction."""
+        try:
+            return await self.repository.refresh_snapshot(
+                session_id=session_id,
+                after_compaction=after_compaction,
+            )
+        except ConsolidationAuthorityBusyError, ConsolidationDeadlineError:
+            logger.warning(
+                "Memory boundary authority could not be confirmed.",
+                extra={"session_id": session_id},
+            )
+            return False
