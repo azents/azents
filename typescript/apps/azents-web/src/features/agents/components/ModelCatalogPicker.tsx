@@ -132,6 +132,28 @@ function failureMessage(attempt: ModelCatalogAttemptState): string {
   return attempt.failure_message ?? "The latest catalog sync failed.";
 }
 
+function catalogStatusTranslationKey(
+  status: string | null,
+):
+  | "statusNeverSynced"
+  | "statusRunning"
+  | "statusSucceeded"
+  | "statusFailed"
+  | "statusUnknown" {
+  switch (status) {
+    case null:
+      return "statusNeverSynced";
+    case "running":
+      return "statusRunning";
+    case "succeeded":
+      return "statusSucceeded";
+    case "failed":
+      return "statusFailed";
+    default:
+      return "statusUnknown";
+  }
+}
+
 export function ModelCatalogPicker({
   opened,
   title,
@@ -185,7 +207,11 @@ export function ModelCatalogPicker({
                   <Text fw={600}>{state.selectedIntegration.label}</Text>
                   <Text size="sm" c="dimmed">
                     {t("catalogStatus", {
-                      status: latestAttempt?.status ?? t("statusNeverSynced"),
+                      status: t(
+                        catalogStatusTranslationKey(
+                          latestAttempt?.status ?? null,
+                        ),
+                      ),
                     })}
                   </Text>
                   <Text size="sm" c="dimmed">

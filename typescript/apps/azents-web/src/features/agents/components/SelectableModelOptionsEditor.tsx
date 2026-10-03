@@ -1,19 +1,9 @@
 "use client";
 
-import {
-  closestCenter,
-  DndContext,
-  KeyboardSensor,
-  MouseSensor,
-  TouchSensor,
-  useSensor,
-  useSensors,
-} from "@dnd-kit/core";
+import { closestCenter, DndContext } from "@dnd-kit/core";
 import {
   arrayMove,
   SortableContext,
-  sortableKeyboardCoordinates,
-  useSortable,
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -47,15 +37,14 @@ import {
   IconTrash,
 } from "@tabler/icons-react";
 import { useFormatter, useTranslations } from "next-intl";
-import { useEffect, useMemo, useRef, useState } from "react";
 import { supportedBuiltinTools } from "@/shared/lib/model-capability-support";
-import { ModelCatalogPickerContainer } from "../containers/ModelCatalogPickerContainer";
 import {
-  copyCompatiblePrimarySettings,
-  createSelectableModelCandidateFormValue,
-  createSelectableModelOptionFormValue,
-  fallbackSelectableModelLabel,
-  hasInvalidImageGenerationSelections,
+  candidateHasDuplicateModel,
+  rowHasDuplicateLabel,
+  updateCandidate,
+  updateOption,
+} from "../model-option-editor";
+import {
   imageGenerationModelAvailability,
   imageGenerationModelIdentifier,
   imageGenerationModelSelectionVisible,
@@ -63,22 +52,19 @@ import {
   MAX_SELECTABLE_MODEL_OPTIONS,
   MAX_SUBAGENT_GUIDANCE_LENGTH,
   resolveModelContextRange,
-  selectableModelLabelSelectData,
-  selectCandidateIntegration,
-  selectCandidateModel,
   withImageGenerationModelIdentifier,
 } from "../model-selection";
 import classes from "./SelectableModelOptionsEditor.module.css";
+import type { SelectableModelOptionsEditorController } from "../containers/useSelectableModelOptionsEditor";
 import type {
   ImageGenerationCatalogState,
-  PrimarySettingsCopyResult,
   ProviderIntegrationOption,
   SelectableModelCandidateFormValue,
   SelectableModelOptionFormValue,
 } from "../model-selection";
 import type { ModelReasoningEffort } from "@azents/public-client";
-import type { DragEndEvent } from "@dnd-kit/core";
-import type { ReactNode } from "react";
+import type { useSortable } from "@dnd-kit/sortable";
+import type { ComponentType, ReactNode } from "react";
 
 export interface SelectableModelOptionsEditorProps {
   handle: string;
@@ -104,87 +90,10 @@ export interface SelectableModelOptionsEditorProps {
   onChangeLightweightModelLabel: (label: string | null) => void;
 }
 
-interface CandidateTarget {
-  optionId: string;
-  candidateId: string;
-}
-
-function createEditorId(prefix: string): string {
-  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-}
-
-function rowHasDuplicateLabel(
-  options: SelectableModelOptionFormValue[],
-  rowIndex: number,
-): boolean {
-  const label = options[rowIndex]?.label.trim() ?? "";
-  if (label.length === 0) {
-    return false;
-  }
-  return options.some(
-    (option, index) => index !== rowIndex && option.label.trim() === label,
-  );
-}
-
-function candidateHasDuplicateModel(
-  option: SelectableModelOptionFormValue,
-  candidateIndex: number,
-): boolean {
-  const value = option.candidates[candidateIndex]?.model_selection_value;
-  if (value == null) {
-    return false;
-  }
-  return option.candidates.some(
-    (candidate, index) =>
-      index !== candidateIndex && candidate.model_selection_value === value,
-  );
-}
-
-function updateOption(
-  options: SelectableModelOptionFormValue[],
-  id: string,
-  update: (
-    option: SelectableModelOptionFormValue,
-  ) => SelectableModelOptionFormValue,
-): SelectableModelOptionFormValue[] {
-  return options.map((option) => (option.id === id ? update(option) : option));
-}
-
-function updateCandidate(
-  options: SelectableModelOptionFormValue[],
-  target: CandidateTarget,
-  update: (
-    candidate: SelectableModelCandidateFormValue,
-  ) => SelectableModelCandidateFormValue,
-): SelectableModelOptionFormValue[] {
-  return updateOption(options, target.optionId, (option) => ({
-    ...option,
-    candidates: option.candidates.map((candidate) =>
-      candidate.id === target.candidateId ? update(candidate) : candidate,
-    ),
-  }));
-}
-
-function findCandidate(
-  options: SelectableModelOptionFormValue[],
-  target: CandidateTarget | null,
-): {
-  option: SelectableModelOptionFormValue;
-  candidate: SelectableModelCandidateFormValue;
-  candidateIndex: number;
-} | null {
-  if (target == null) {
-    return null;
-  }
-  const option = options.find((item) => item.id === target.optionId);
-  if (option == null) {
-    return null;
-  }
-  const candidateIndex = option.candidates.findIndex(
-    (candidate) => candidate.id === target.candidateId,
-  );
-  const candidate = option.candidates[candidateIndex];
-  return candidate == null ? null : { option, candidate, candidateIndex };
+export interface SelectableModelOptionsEditorViewProps extends SelectableModelOptionsEditorProps {
+  controller: SelectableModelOptionsEditorController;
+  modelPicker: ReactNode;
+  OptionCardComponent: ComponentType<OptionCardProps>;
 }
 
 interface CandidateRowProps {
@@ -320,7 +229,7 @@ function CandidateRow({
   );
 }
 
-interface OptionCardProps {
+export interface OptionCardProps {
   option: SelectableModelOptionFormValue;
   duplicateLabel: boolean;
   canEdit: boolean;
@@ -338,7 +247,7 @@ interface OptionCardProps {
   onRemoveOption: () => void;
 }
 
-function OptionCard({
+export function OptionCard({
   option,
   duplicateLabel,
   canEdit,
@@ -354,7 +263,19 @@ function OptionCard({
   onMoveCandidate,
   onRemoveCandidate,
   onRemoveOption,
-}: OptionCardProps): React.ReactElement {
+  sortable,
+}: OptionCardProps & {
+  sortable: Pick<
+    ReturnType<typeof useSortable>,
+    | "attributes"
+    | "isDragging"
+    | "listeners"
+    | "setActivatorNodeRef"
+    | "setNodeRef"
+    | "transform"
+    | "transition"
+  >;
+}): React.ReactElement {
   const t = useTranslations("workspace.agents.selectableModelOptions");
   const {
     attributes,
@@ -364,7 +285,7 @@ function OptionCard({
     setNodeRef,
     transform,
     transition,
-  } = useSortable({ disabled: !canEdit, id: option.id });
+  } = sortable;
   return (
     <Box
       ref={setNodeRef}
@@ -902,174 +823,50 @@ function LabelSettingsModal({
   );
 }
 
-function copyNoticeKey(
-  omitted: PrimarySettingsCopyResult["omitted"],
-): "copyPrimaryComplete" | "copyPrimaryPartial" {
-  return omitted.length === 0 ? "copyPrimaryComplete" : "copyPrimaryPartial";
-}
-
 export function SelectableModelOptionsEditor({
-  handle,
   title,
   description,
   options,
-  mainModelLabel,
-  lightweightModelLabel,
   defaultReasoningEffortControl,
   reasoningEffort = null,
-  providerOptions,
   canEdit,
   showValidationErrors = false,
-  onSyncCatalog,
   imageGenerationCatalogStates,
   canSyncImageCatalog,
   onSyncImageCatalog,
-  onChangeOptions,
   onChangeMainModelLabel,
   onChangeLightweightModelLabel,
-}: SelectableModelOptionsEditorProps): React.ReactElement {
+  controller,
+  modelPicker,
+  OptionCardComponent,
+}: SelectableModelOptionsEditorViewProps): React.ReactElement {
   const t = useTranslations("workspace.agents.selectableModelOptions");
-  const [pickerTarget, setPickerTarget] = useState<CandidateTarget | null>(
-    null,
-  );
-  const [settingsTarget, setSettingsTarget] = useState<CandidateTarget | null>(
-    null,
-  );
-  const [labelSettingsOptionId, setLabelSettingsOptionId] = useState<
-    string | null
-  >(null);
-  const [copyNotice, setCopyNotice] = useState<{
-    key: "copyPrimaryComplete" | "copyPrimaryPartial";
-    omitted: string;
-  } | null>(null);
-  const [pendingFocusOptionId, setPendingFocusOptionId] = useState<
-    string | null
-  >(null);
-  const labelInputRefs = useRef(new Map<string, HTMLInputElement>());
-  const sensors = useSensors(
-    useSensor(MouseSensor),
-    useSensor(TouchSensor),
-    useSensor(KeyboardSensor, {
-      coordinateGetter: sortableKeyboardCoordinates,
-    }),
-  );
-  const enabledProviderOptions = useMemo(
-    () => providerOptions.filter((option) => !option.disabled),
-    [providerOptions],
-  );
-  const labelOptions = useMemo(
-    () => selectableModelLabelSelectData(options),
-    [options],
-  );
-  const optionIds = useMemo(
-    () => options.map((option) => option.id),
-    [options],
-  );
-  const picker = findCandidate(options, pickerTarget);
-  const settings = findCandidate(options, settingsTarget);
-  const labelSettingsOption =
-    options.find((option) => option.id === labelSettingsOptionId) ?? null;
-  const mainLabelValue = fallbackSelectableModelLabel(mainModelLabel, options);
-  const lightweightLabelValue = fallbackSelectableModelLabel(
-    lightweightModelLabel,
-    options,
-  );
-  const hasEmptyLabels = options.some((option) => option.label.trim() === "");
-  const hasMissingModels = options.some(
-    (option) =>
-      option.candidates.length === 0 ||
-      option.candidates.some(
-        (candidate) => candidate.model_selection_value == null,
-      ),
-  );
-  const hasDuplicateLabels = options.some((_, index) =>
-    rowHasDuplicateLabel(options, index),
-  );
-  const hasDuplicateCandidates = options.some((option) =>
-    option.candidates.some((_, index) =>
-      candidateHasDuplicateModel(option, index),
-    ),
-  );
-  const hasInvalidImageGenerationSelection =
-    hasInvalidImageGenerationSelections(options, imageGenerationCatalogStates);
-
-  useEffect(() => {
-    if (pendingFocusOptionId == null) {
-      return;
-    }
-    const input = labelInputRefs.current.get(pendingFocusOptionId);
-    if (input == null) {
-      return;
-    }
-    input.focus();
-    setPendingFocusOptionId(null);
-  }, [options, pendingFocusOptionId]);
-
-  const handleChangeOptions = (
-    nextOptions: SelectableModelOptionFormValue[],
-  ): void => {
-    onChangeOptions(nextOptions);
-    onChangeMainModelLabel(
-      fallbackSelectableModelLabel(mainModelLabel, nextOptions),
-    );
-    onChangeLightweightModelLabel(
-      fallbackSelectableModelLabel(lightweightModelLabel, nextOptions),
-    );
-  };
-
-  const handleAddOption = (): void => {
-    if (options.length >= MAX_SELECTABLE_MODEL_OPTIONS) {
-      return;
-    }
-    const id = createEditorId("option");
-    setPendingFocusOptionId(id);
-    handleChangeOptions([...options, createSelectableModelOptionFormValue(id)]);
-  };
-
-  const handleDragEnd = (event: DragEndEvent): void => {
-    const { active, over } = event;
-    if (over == null || active.id === over.id) {
-      return;
-    }
-    const activeIndex = options.findIndex(
-      (option) => option.id === String(active.id),
-    );
-    const overIndex = options.findIndex(
-      (option) => option.id === String(over.id),
-    );
-    if (activeIndex >= 0 && overIndex >= 0) {
-      handleChangeOptions(arrayMove(options, activeIndex, overIndex));
-    }
-  };
-
-  const handleCopyPrimarySettings = (
-    option: SelectableModelOptionFormValue,
-    candidateId: string,
-  ): void => {
-    const primary = option.candidates[0];
-    const target = option.candidates.find(
-      (candidate) => candidate.id === candidateId,
-    );
-    if (primary == null || target == null || primary.id === target.id) {
-      return;
-    }
-    const copied = copyCompatiblePrimarySettings(primary, target, {
-      reasoningEffort,
-    });
-    handleChangeOptions(
-      updateCandidate(
-        options,
-        { optionId: option.id, candidateId },
-        () => copied.candidate,
-      ),
-    );
-    setCopyNotice({
-      key: copyNoticeKey(copied.omitted),
-      omitted: copied.omitted
-        .map((item) => t(`copyOmitted.${item}`))
-        .join(", "),
-    });
-  };
+  const {
+    settingsTarget,
+    settings,
+    labelSettingsOption,
+    copyNotice,
+    sensors,
+    labelOptions,
+    optionIds,
+    mainLabelValue,
+    lightweightLabelValue,
+    hasEmptyLabels,
+    hasMissingModels,
+    hasDuplicateLabels,
+    hasDuplicateCandidates,
+    hasInvalidImageGenerationSelection,
+    setSettingsTarget,
+    setLabelSettingsOptionId,
+    setPickerTarget,
+    clearCopyNotice,
+    setLabelInputRef,
+    handleChangeOptions,
+    handleAddOption,
+    handleAddCandidate,
+    handleDragEnd,
+    handleCopyPrimarySettings,
+  } = controller;
 
   return (
     <Stack gap="md">
@@ -1100,50 +897,13 @@ export function SelectableModelOptionsEditor({
           <Alert color="red">{t("invalidImageModel")}</Alert>
         ) : null}
         {copyNotice != null ? (
-          <Alert
-            color="blue"
-            withCloseButton
-            onClose={() => setCopyNotice(null)}
-          >
+          <Alert color="blue" withCloseButton onClose={clearCopyNotice}>
             {t(copyNotice.key, { omitted: copyNotice.omitted })}
           </Alert>
         ) : null}
       </Stack>
 
-      {picker != null ? (
-        <ModelCatalogPickerContainer
-          opened={pickerTarget != null}
-          title={t("selectModelTitle", {
-            label: picker.option.label || t("newOption"),
-          })}
-          handle={handle}
-          integrations={enabledProviderOptions}
-          selectedIntegrationId={picker.candidate.model_provider_integration_id}
-          selectedValue={picker.candidate.model_selection_value}
-          onClose={() => setPickerTarget(null)}
-          onSelectIntegration={(integrationId) => {
-            if (pickerTarget == null) {
-              return;
-            }
-            handleChangeOptions(
-              updateCandidate(options, pickerTarget, (candidate) =>
-                selectCandidateIntegration(candidate, integrationId),
-              ),
-            );
-          }}
-          onSelectModel={(model) => {
-            if (pickerTarget == null) {
-              return;
-            }
-            handleChangeOptions(
-              updateCandidate(options, pickerTarget, (candidate) =>
-                selectCandidateModel(candidate, model, { reasoningEffort }),
-              ),
-            );
-          }}
-          onSyncCatalog={onSyncCatalog}
-        />
-      ) : null}
+      {modelPicker}
 
       {settings != null ? (
         <SelectableModelSettingsModal
@@ -1168,7 +928,7 @@ export function SelectableModelOptionsEditor({
 
       {labelSettingsOption != null ? (
         <LabelSettingsModal
-          opened={labelSettingsOptionId != null}
+          opened
           option={labelSettingsOption}
           onClose={() => setLabelSettingsOptionId(null)}
           onChange={(option) =>
@@ -1221,20 +981,14 @@ export function SelectableModelOptionsEditor({
           >
             <Stack gap="sm">
               {options.map((option, index) => (
-                <OptionCard
+                <OptionCardComponent
                   key={option.id}
                   option={option}
                   duplicateLabel={rowHasDuplicateLabel(options, index)}
                   canEdit={canEdit}
                   canRemove={options.length > 1}
                   showValidationErrors={showValidationErrors}
-                  labelInputRef={(node) => {
-                    if (node == null) {
-                      labelInputRefs.current.delete(option.id);
-                    } else {
-                      labelInputRefs.current.set(option.id, node);
-                    }
-                  }}
+                  labelInputRef={(node) => setLabelInputRef(option.id, node)}
                   onChangeLabel={(label) =>
                     handleChangeOptions(
                       updateOption(options, option.id, (current) => ({
@@ -1246,27 +1000,7 @@ export function SelectableModelOptionsEditor({
                   onOpenLabelSettings={() =>
                     setLabelSettingsOptionId(option.id)
                   }
-                  onAddCandidate={() => {
-                    if (
-                      option.candidates.length >=
-                      MAX_SELECTABLE_MODEL_CANDIDATES
-                    ) {
-                      return;
-                    }
-                    const candidate = createSelectableModelCandidateFormValue(
-                      createEditorId(`${option.id}-candidate`),
-                    );
-                    handleChangeOptions(
-                      updateOption(options, option.id, (current) => ({
-                        ...current,
-                        candidates: [...current.candidates, candidate],
-                      })),
-                    );
-                    setPickerTarget({
-                      optionId: option.id,
-                      candidateId: candidate.id,
-                    });
-                  }}
+                  onAddCandidate={() => handleAddCandidate(option)}
                   onChangeCandidateModel={(candidateId) =>
                     setPickerTarget({ optionId: option.id, candidateId })
                   }

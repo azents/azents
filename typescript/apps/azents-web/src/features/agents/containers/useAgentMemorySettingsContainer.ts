@@ -2,6 +2,7 @@
 
 /** Agent Memory settings container. */
 
+import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { trpc } from "@/trpc/client";
 import type {
@@ -104,6 +105,7 @@ export function useAgentMemorySettingsContainer({
   handle,
   agent,
 }: AgentMemorySettingsContainerProps): AgentMemorySettingsContainerOutput {
+  const t = useTranslations("workspace.agents.memorySettings");
   const utils = trpc.useUtils();
   const [kind, setKind] = useState<MemoryKindValue>("saved");
   const [savedScope, setSavedScope] = useState<SavedMemoryScopeValue>("agent");
@@ -152,19 +154,29 @@ export function useAgentMemorySettingsContainer({
   });
 
   const updateMutation = trpc.agent.updateMemory.useMutation({
-    onSuccess: () => {
+    onSuccess: (memory, input) => {
       setDraftState(null);
       setActionError(null);
       void utils.agent.listMemories.invalidate();
+      void utils.agent.getMemory.invalidate({
+        handle: input.handle,
+        agentId: input.agentId,
+        memoryId: memory.id,
+      });
     },
     onError: (error) => setActionError(normalizeError(error)),
   });
 
   const deleteMutation = trpc.agent.deleteMemory.useMutation({
     onMutate: (input) => setDeletingId(input.memoryId),
-    onSuccess: () => {
+    onSuccess: (_data, input) => {
       setActionError(null);
       void utils.agent.listMemories.invalidate();
+      void utils.agent.getMemory.invalidate({
+        handle: input.handle,
+        agentId: input.agentId,
+        memoryId: input.memoryId,
+      });
     },
     onError: (error) => setActionError(normalizeError(error)),
     onSettled: () => setDeletingId(null),
@@ -287,6 +299,9 @@ export function useAgentMemorySettingsContainer({
       });
     },
     onDeleteMemory: (memory) => {
+      if (!window.confirm(t("deleteConfirm", { name: memory.name }))) {
+        return;
+      }
       deleteMutation.mutate({
         handle,
         agentId: agent.id,

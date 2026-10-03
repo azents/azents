@@ -5,6 +5,7 @@ import {
   normalizeExplicitToolkitSlug,
   trimToolkitWhitespace,
 } from "@/shared/lib/toolkit-identifiers";
+import { toolkitConfigWireSchema } from "./toolkit-config-projection";
 
 export const shellConfigSchema = z.object({
   allowed_domains: z.array(z.string()).default([]),
@@ -20,7 +21,7 @@ export const toolkitFormSchema = z
     name: z.string().max(255),
     description: z.string().optional(),
     prompt: z.string().optional(),
-    config: z.record(z.string(), z.unknown()),
+    config: toolkitConfigWireSchema,
     credentials: z.record(z.string(), z.unknown()).nullable().optional(),
     enabled: z.boolean(),
     alwaysExposeTools: z.boolean(),

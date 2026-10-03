@@ -195,7 +195,7 @@
       "pageDescription": "新しいエージェントが継承する選択可能モデルとデフォルト値を設定します。",
       "loadError": "ワークスペースのモデル設定を読み込めませんでした。",
       "title": "ワークスペースのデフォルトモデル",
-      "description": "Configure the ordered model list that new agents copy by default.",
+      "description": "新しいエージェントが既定でコピーするモデルの順序付きリストを設定します。",
       "currentMain": "現在のメイン:",
       "currentLightweight": "現在の軽量:",
       "mainProviderLabel": "デフォルトメイン Provider",
@@ -214,9 +214,9 @@
       "noDefaultModelSelected": "既定モデル未選択",
       "useMainModel": "メインモデルを使用",
       "changeModel": "モデルを変更",
-      "optionsTitle": "Workspace selectable models",
-      "optionsDescription": "Agents copy this ordered list and selected labels when they are created without custom models.",
-      "invalidOptions": "Fix model labels and model selections before saving."
+      "optionsTitle": "ワークスペースの選択可能モデル",
+      "optionsDescription": "カスタムモデルを指定せずに作成したエージェントは、この順序付きリストと選択したラベルをコピーします。",
+      "invalidOptions": "保存する前にモデルラベルとモデルの選択を修正してください。"
     },
     "modelConfig": {
       "headline": "モデル設定",
@@ -548,20 +548,20 @@
     "toolSearchEnabledLabel": "ツール検索を有効化",
     "toolSearchEnabledDescription": "接続されたサービスツールを遅延表示し、必要に応じてモデルが検索できるようにする",
     "settingsHub": {
-      "title": "Agent settings",
-      "description": "Choose a settings area to review or update this agent.",
+      "title": "エージェント設定",
+      "description": "このエージェントの設定を確認・変更する項目を選択してください。",
       "sections": {
-        "customization": "Agent customization",
-        "capabilities": "Capabilities",
-        "access": "Access",
-        "danger": "Danger zone"
+        "customization": "エージェントのカスタマイズ",
+        "capabilities": "機能",
+        "access": "アクセス権",
+        "danger": "重要な操作"
       },
       "profile": {
         "label": "Profile",
-        "description": "Name, instructions, visibility, avatar, and active state"
+        "description": "名前、指示、公開範囲、アバター、有効状態"
       },
       "model": {
-        "label": "Model",
+        "label": "モデル",
         "description": "メインモデル、軽量モデル、トークン上限、推論、最大ターン"
       },
       "capabilities": {
@@ -569,12 +569,12 @@
         "description": "インタラクティブ Terminal、組み込みツール、ツールキット"
       },
       "memory": {
-        "label": "Memory",
-        "description": "Persistent memories for this agent"
+        "label": "メモリ",
+        "description": "このエージェントの永続メモリ"
       },
       "admins": {
-        "label": "Admins",
-        "description": "Members who can manage this agent"
+        "label": "管理者",
+        "description": "このエージェントを管理できるメンバー"
       },
       "danger": {
         "label": "エージェントを削除",
@@ -793,6 +793,10 @@
       "selectIntegrationFirst": "先にプロバイダー連携を選択してください。",
       "catalogStatus": "カタログ状態: {status}",
       "statusNeverSynced": "未同期",
+      "statusRunning": "同期中",
+      "statusSucceeded": "同期完了",
+      "statusFailed": "同期失敗",
+      "statusUnknown": "状態を確認できません",
       "lastSynced": "最終同期: {value}",
       "models": "モデル: {count}",
       "syncRunning": "同期中",
@@ -862,31 +866,31 @@
     "subagentMaxDepthLabel": "最大深さ",
     "subagentMaxDepthDescription": "root agent 配下の subagent tree の最大深さです。1 は root → child のみを許可します。",
     "selectableModelOptions": {
-      "title": "Selectable models",
+      "title": "選択可能なモデル",
       "description": "セマンティックラベルごとに順序付き候補モデルを設定します。最初の候補が Primary で、後続候補はクォータまたは請求エラー時にのみ使用されます。",
       "addOption": "ラベルを追加",
       "emptyList": "モデルラベルを1つ以上追加してください。",
       "maxOptions": "モデルラベルは最大10個まで追加できます。",
-      "emptyLabel": "Model label is required.",
-      "duplicateLabel": "Model labels must be unique.",
+      "emptyLabel": "モデルラベルを入力してください。",
+      "duplicateLabel": "モデルラベルは重複できません。",
       "missingModel": "すべての候補でモデルを選択してください。",
       "selectModelTitle": "{label} の候補を選択",
       "newOption": "新しいラベル",
-      "mainLabel": "Main model",
-      "mainDescription": "Used for normal agent turns.",
-      "lightweightLabel": "Lightweight model",
-      "lightweightDescription": "Used for lightweight work and compaction fallback.",
-      "optionLabel": "Model label",
-      "moveUp": "Move up",
-      "moveDown": "Move down",
-      "remove": "Remove",
-      "noModelSelected": "No model selected",
-      "chooseModel": "Choose a provider integration and model.",
-      "changeModel": "Change model",
-      "modelLabelColumn": "Model label",
-      "selectedModelColumn": "Selected model",
-      "actionsColumn": "Actions",
-      "dragHandleLabel": "Reorder model",
+      "mainLabel": "メインモデル",
+      "mainDescription": "通常のエージェントのターンに使用します。",
+      "lightweightLabel": "軽量モデル",
+      "lightweightDescription": "軽量な作業とコンパクションのフォールバックに使用します。",
+      "optionLabel": "モデルラベル",
+      "moveUp": "上へ移動",
+      "moveDown": "下へ移動",
+      "remove": "削除",
+      "noModelSelected": "モデル未選択",
+      "chooseModel": "プロバイダー連携とモデルを選択してください。",
+      "changeModel": "モデルを変更",
+      "modelLabelColumn": "モデルラベル",
+      "selectedModelColumn": "選択中のモデル",
+      "actionsColumn": "操作",
+      "dragHandleLabel": "モデルの順序を変更",
       "settingsAction": "モデル設定",
       "settingsTitle": "{label} · {model} の設定",
       "contextWindowTokensLabel": "コンテキストウィンドウ上限",
@@ -1681,6 +1685,10 @@
     "addWorkspaceScope": "ワークスペーススコープを追加",
     "oauthConnection": {
       "title": "OAuth 接続",
+      "statusNotConnected": "未接続",
+      "statusConnected": "接続済み",
+      "statusReconnectRequired": "再接続が必要",
+      "statusUnknown": "接続状態を確認できません",
       "issuer": "発行者",
       "resource": "リソース",
       "scope": "スコープ",
