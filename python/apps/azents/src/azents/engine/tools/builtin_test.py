@@ -221,6 +221,57 @@ def test_runtime_toolkit_requires_prompt_selected_authority() -> None:
         toolkit._required_runtime_authority()
 
 
+async def test_file_tool_owner_registers_mutations_once_without_starting_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The generic owner assembles lazy native adapters, not duplicate tools."""
+    monkeypatch.setattr(
+        builtin_module, "_resolve_associated_user_id", AsyncMock(return_value=None)
+    )
+    runtime = _make_toolkit()
+    generic = ReadableStorageToolkit(
+        config=ShellToolkitConfig(memory_enabled=True),
+        agent_id="agent-1",
+        session_id="session-1",
+        session_manager=_make_mock_session_manager(),
+        memory_repo=_make_mock_memory_repo(),
+        vfs_read_router=AsyncMock(),
+    )
+    generic.set_runtime_capability_resolver(
+        RuntimeCapabilityResolver.from_agent(
+            state=AgentRuntimeCapability.MANAGED, version=1
+        )
+    )
+    generic.set_runtime_storage_provider(runtime)
+    authority = SessionResourceAuthority(
+        workspace_id="ws-1",
+        agent_id="agent-1",
+        session_id="session-1",
+        root_session_id="session-1",
+        run_id="run-1",
+        run_index=1,
+        owner_generation=1,
+    )
+    state = await generic.update_context(_make_context(resource_authority=authority))
+    assert {tool.spec.name for tool in state.tools} == {
+        "read",
+        "grep",
+        "glob",
+        "write",
+        "edit",
+        "delete",
+        "apply_patch",
+    }
+    _runtime_repo(runtime).get_by_agent_id.assert_not_awaited()
+    tool = _find_tool(state.tools, "write")
+    with pytest.raises(FunctionToolError, match="VFS mutation mount is unavailable"):
+        await tool.handler('{"path":"azents://skills/global/SKILL.md","content":"no"}')
+    _runtime_repo(runtime).get_by_agent_id.assert_not_awaited()
+    native_state = await runtime.update_context(_make_context())
+    names = [tool.spec.name for tool in [*state.tools, *native_state.tools]]
+    assert len(names) == len(set(names))
+
+
 def test_agents_appendix_supports_filesystem_root_workspace() -> None:
     """Filesystem root can be the Runner-reported Agent Workspace."""
     assert _agents_appendix_candidates_for_path(
@@ -1317,9 +1368,13 @@ class TestRuntimeToolkitUpdateContext:
         assert "exec_command" in names
         assert "write_stdin" in names
         assert "bash" not in names
-        assert "edit" in names
-        assert "apply_patch" in names
-        assert {"write", "delete"} <= names
+        assert {"write", "edit", "delete", "apply_patch"}.isdisjoint(names)
+        assert {tool.spec.name for tool in toolkit.make_mutation_tools()} == {
+            "write",
+            "edit",
+            "delete",
+            "apply_patch",
+        }
         assert {"read", "glob", "grep"}.isdisjoint(names)
         assert names.isdisjoint({"import_file", "present_file", "read_image"})
 
@@ -1328,8 +1383,8 @@ class TestRuntimeToolkitUpdateContext:
         """Capability admission keeps the apply_patch transport adapter intact."""
         toolkit = _make_toolkit()
 
-        state = await toolkit.update_context(_make_context())
-        apply_patch = _find_tool(state.tools, "apply_patch")
+        await toolkit.update_context(_make_context())
+        apply_patch = _find_tool(toolkit.make_mutation_tools(), "apply_patch")
 
         assert isinstance(apply_patch.handler, PlaintextCustomToolHandler)
 
@@ -1358,8 +1413,8 @@ class TestRuntimeToolkitUpdateContext:
             current_snapshot_provider=current_snapshot_provider,
         )
         toolkit = _make_toolkit(runtime_capability_resolver=resolver)
-        state = await toolkit.update_context(_make_context())
-        apply_patch = _find_tool(state.tools, "apply_patch")
+        await toolkit.update_context(_make_context())
+        apply_patch = _find_tool(toolkit.make_mutation_tools(), "apply_patch")
 
         assert isinstance(apply_patch.handler, PlaintextCustomToolHandler)
         with pytest.raises(FunctionToolError) as error:
@@ -1498,9 +1553,10 @@ class TestRuntimeToolkitUpdateContext:
 
         state = await toolkit.update_context(_make_context())
 
-        assert {"exec_command", "write_stdin", "write"} <= {
+        assert {"exec_command", "write_stdin"} <= {
             tool.spec.name for tool in state.tools
         }
+        assert "write" in {tool.spec.name for tool in toolkit.make_mutation_tools()}
         instruction_context = require_instance(
             toolkit._agents_context,
             RuntimeInstructionContext,
@@ -3236,8 +3292,8 @@ class TestEditHandler:
         """File content is replaced by the Runner-native edit operation."""
         files = {"/workspace/agent/config.txt": b"old_value"}
         toolkit = _make_toolkit(storage_files=files)
-        state = await toolkit.update_context(_make_context())
-        tool = _find_tool(state.tools, "edit")
+        await toolkit.update_context(_make_context())
+        tool = _find_tool(toolkit.make_mutation_tools(), "edit")
         runner_operations = _runner_operations(toolkit)
 
         result = await tool.handler(

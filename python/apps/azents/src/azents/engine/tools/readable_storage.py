@@ -38,14 +38,14 @@ class RuntimeReadableStorageProvider(Protocol):
 
 
 @dataclasses.dataclass(frozen=True)
-class RoutedReadableStorage:
+class RoutedReadableStorage[ReadContextT = VfsReadContext]:
     """Route absolute Runtime paths and canonical VFS locations lazily."""
 
     agent_id: str
-    vfs_router: VfsReadRouter
-    vfs_context: VfsReadContext
+    vfs_router: VfsReadRouter[ReadContextT]
+    vfs_context: ReadContextT
     runtime_storage_factory: Callable[[], FileStorage] | None
-    runtime_capability_resolver: RuntimeCapabilityResolver
+    runtime_capability_resolver: RuntimeCapabilityResolver | None
 
     async def get_text(
         self,
@@ -170,6 +170,15 @@ class RoutedReadableStorage:
             raise ValueError(
                 "Storage location must be an absolute Runtime path or canonical "
                 "azents:// URI."
+            )
+        if self.runtime_capability_resolver is None:
+            raise FunctionToolError(
+                "Runtime filesystem is unavailable in this execution.",
+                metadata={
+                    "kind": "runtime_capability_denied",
+                    "capability": RuntimeCapability.RUNTIME_FILESYSTEM.value,
+                    "reason_code": "runtime_capability_context_missing",
+                },
             )
         try:
             await self.runtime_capability_resolver.require(

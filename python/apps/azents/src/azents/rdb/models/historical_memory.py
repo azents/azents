@@ -33,6 +33,14 @@ class RDBHistoricalMemorySource(RDBModel):
         "failure_count >= 0",
         name="ck_historical_memory_sources_failure_count",
     )
+    CK_EVIDENCE_GENERATIONS = sa.CheckConstraint(
+        "summary_generation >= 0 AND availability_generation >= 1",
+        name="ck_historical_memory_sources_evidence_generations",
+    )
+    CK_EVIDENCE_HASH = sa.CheckConstraint(
+        "evidence_hash IS NULL OR evidence_hash ~ '^[0-9a-f]{64}$'",
+        name="ck_historical_memory_sources_evidence_hash",
+    )
     IX_NEXT_RETRY_AT = sa.Index(
         "ix_historical_memory_sources_next_retry_at",
         "next_retry_at",
@@ -118,6 +126,15 @@ class RDBHistoricalMemorySource(RDBModel):
         nullable=True,
         default=None,
     )
+    summary_generation: Mapped[int] = mapped_column(
+        sa.BigInteger, init=False, nullable=False, server_default="0"
+    )
+    evidence_hash: Mapped[str | None] = mapped_column(
+        sa.String(64), init=False, nullable=True, default=None
+    )
+    availability_generation: Mapped[int] = mapped_column(
+        sa.BigInteger, init=False, nullable=False, server_default="1"
+    )
     created_at: Mapped[datetime.datetime] = mapped_column(
         TimeZoneDateTime,
         init=False,
@@ -133,6 +150,8 @@ class RDBHistoricalMemorySource(RDBModel):
     __table_args__ = (
         CK_COMPLETED_RESULT,
         CK_FAILURE_COUNT,
+        CK_EVIDENCE_GENERATIONS,
+        CK_EVIDENCE_HASH,
         IX_NEXT_RETRY_AT,
         IX_PREPARED_AT,
         IX_ADMITTED_UNPREPARED,

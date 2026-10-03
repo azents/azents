@@ -192,9 +192,10 @@ def _seed_ready_cutover(engine: Engine) -> None:
 def test_fresh_upgrade_has_only_generic_source_schema(
     migration_database: _MigrationDatabase,
 ) -> None:
-    """A fresh database reaches the Historical head without legacy objects."""
+    """A fresh database reaches the current linear head without legacy objects."""
     scripts = ScriptDirectory.from_config(migration_database.config)
-    assert scripts.get_heads() == [_HISTORICAL_MEMORY_REVISION]
+    current_revision = (PROJECT_ROOT / "db-schemas/rdb/revision").read_text().strip()
+    assert scripts.get_heads() == [current_revision]
     head = scripts.get_revision(_HISTORICAL_MEMORY_REVISION)
     assert head is not None
     assert head.down_revision == _TOOLKIT_REVISION
@@ -208,7 +209,7 @@ def test_fresh_upgrade_has_only_generic_source_schema(
     assert namespace is not None
     assert namespace.down_revision == _CLEANUP_REVISION
     command.upgrade(migration_database.config, "head")
-    _assert_revision(migration_database.engine, _HISTORICAL_MEMORY_REVISION)
+    _assert_revision(migration_database.engine, current_revision)
     _assert_cleanup_schema(migration_database.engine)
 
 
@@ -217,7 +218,6 @@ def test_historical_memory_revision_extends_toolkit_head(
 ) -> None:
     """Historical Memory preserves the complete canonical Toolkit chain."""
     scripts = ScriptDirectory.from_config(migration_database.config)
-    assert scripts.get_heads() == [_HISTORICAL_MEMORY_REVISION]
     historical_memory = scripts.get_revision(_HISTORICAL_MEMORY_REVISION)
     assert historical_memory is not None
     assert historical_memory.down_revision == _TOOLKIT_REVISION

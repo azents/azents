@@ -16,15 +16,14 @@ from azents_runtime_control.runner import (
     RunnerOperationEvent,
     RuntimeRunnerEventType,
 )
+from azents_runtime_control.v4a import ApplyPatchLimits, PatchOperation
 
 from azents_runtime_runner.apply_patch import (
     PATCH_SCHEMA_VERSION,
     ApplyPatchFailure,
     ApplyPatchFaultInjector,
-    ApplyPatchLimits,
     ApplyPatchResult,
     ApplyPatchSuccess,
-    PatchOperation,
     execute_apply_patch,
 )
 from azents_runtime_runner.execution import DirectExecutionBackend

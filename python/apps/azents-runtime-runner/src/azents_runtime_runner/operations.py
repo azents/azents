@@ -33,11 +33,11 @@ from azents_runtime_control.runner import (
     RunnerOperationEvent,
     RuntimeRunnerEventType,
 )
+from azents_runtime_control.v4a import ApplyPatchLimits
 
 from azents_runtime_runner.apply_patch import (
     ApplyPatchFailure,
     ApplyPatchFaultInjector,
-    ApplyPatchLimits,
     ApplyPatchResult,
     execute_apply_patch,
 )
