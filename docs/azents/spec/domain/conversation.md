@@ -172,7 +172,7 @@ api_routes:
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ticket
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ws
 last_verified_at: 2026-10-03
-spec_version: 178
+spec_version: 179
 ---
 
 # Conversation & Events
@@ -974,7 +974,9 @@ event-list APIs:
 - `GET /chat/v1/agents/{agent_id}/sessions/{session_id}/model-availability` returns the
   PostgreSQL-derived projection for the Session's applied semantic label: exact Primary public
   identity/display, `available | cooldown | probing | primary_next`, deadline, server time, first
-  compatible usable fallback display, and current reservation. Reserve and cancel routes use exact
+  health-available fallback display in configured order, and current reservation. Raw reasoning and
+  execution options do not exclude a fallback from this projection: dispatch normalizes reasoning
+  and drops unsupported execution options for the assigned model. Reserve and cancel routes use exact
   identity plus generation fencing and return the same projection, including user-safe `409`
   convergence state on a stale request.
 
