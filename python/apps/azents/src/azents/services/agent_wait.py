@@ -30,13 +30,13 @@ class WaitObservation:
 
 @dataclasses.dataclass(frozen=True)
 class AgentWaitService:
-    """Evaluate descendant eligibility and durable mailbox activity."""
+    """Evaluate detached descendant state and completed mailbox activity reads."""
 
     repository: Annotated[AgentWaitReadRepository, Depends(AgentWaitReadRepository)]
     mailbox_item_service: Annotated[MailboxService, Depends(MailboxService)]
 
     async def observe(self, session_id: str) -> WaitObservation:
-        """Read all-kind mailbox state and descendant activity."""
+        """Observe mailbox effects only outside the descendant database snapshot."""
         mailbox_updated = (
             await self.mailbox_item_service.has_pending_session_mailbox_items(
                 session_id

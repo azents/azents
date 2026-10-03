@@ -2,6 +2,7 @@
 
 import datetime
 import uuid
+from typing import NamedTuple
 
 from azcommon.result import Success
 from cryptography.fernet import Fernet
@@ -20,9 +21,16 @@ from .repository import KimiOAuthSessionRepository
 _TEST_KEY = Fernet.generate_key().decode()
 
 
+class _OAuthSessionFixture(NamedTuple):
+    """Repository and identity for one created OAuth Session."""
+
+    repository: KimiOAuthSessionRepository
+    session_id: str
+
+
 async def _create_session(
     session: AsyncSession,
-) -> tuple[KimiOAuthSessionRepository, str]:
+) -> _OAuthSessionFixture:
     """Create a pending Kimi OAuth session for tests."""
     suffix = uuid.uuid4().hex[:12]
     workspace_repo = WorkspaceRepository()
@@ -56,7 +64,7 @@ async def _create_session(
             + datetime.timedelta(minutes=5),
         ),
     )
-    return repo, created.id
+    return _OAuthSessionFixture(repository=repo, session_id=created.id)
 
 
 async def test_increase_poll_interval_accumulates_slow_down(

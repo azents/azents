@@ -3,12 +3,13 @@
 import datetime
 
 from azents.core.historical_memory_snapshot import HistoricalMemorySnapshotCandidate
-from azents.repos.memory.data import Memory, MemoryScope
-from azents.services.historical_memory.snapshot import (
+from azents.core.historical_memory_snapshot_policy import (
     build_memory_context_snapshot,
     filter_memory_context_snapshot,
     render_memory_context_snapshot,
 )
+from azents.core.memory_scope import MemoryScope
+from azents.repos.memory.data import Memory
 
 _NOW = datetime.datetime(2026, 10, 1, tzinfo=datetime.UTC)
 

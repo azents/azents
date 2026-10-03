@@ -6,6 +6,7 @@ import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+import httpx
 import pytest
 import sqlalchemy as sa
 from azcommon.result import Result, Success
@@ -29,6 +30,7 @@ from azents.repos.llm_provider_integration.data import (
     LLMProviderIntegrationWithSecrets,
 )
 from azents.repos.workspace import WorkspaceRepository
+from azents.services.chatgpt_oauth.client import ChatGPTOAuthClient
 from azents.services.chatgpt_oauth.data import (
     ProviderRejected,
     ProviderUnavailable,
@@ -39,6 +41,22 @@ from azents.services.chatgpt_oauth.runtime import (
     _persist_refresh_success,
     ensure_runtime_tokens,
 )
+
+
+def _unexpected_http(_request: httpx.Request) -> httpx.Response:
+    """Fail if a freshness regression attempts provider HTTP in a race fixture."""
+    raise AssertionError("OAuth race fixtures must not perform external HTTP")
+
+
+@asynccontextmanager
+async def _client_factory() -> AsyncIterator[ChatGPTOAuthClient]:
+    """Provide a typed client whose transport cannot leave the test process."""
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(_unexpected_http), timeout=20.0
+    ) as client:
+        yield ChatGPTOAuthClient(
+            client, token_url="https://oauth.example.invalid/token"
+        )
 
 
 class _PausedIntegrationRepository(LLMProviderIntegrationRepository):
@@ -406,7 +424,9 @@ async def test_refresh_completions_are_atomically_ordered(
             == original.catalog_configuration_version
         )
         usable = await ensure_runtime_tokens(
-            integration=stored, persistence_repository=success_persistence
+            integration=stored,
+            persistence_repository=success_persistence,
+            client_factory=_client_factory,
         )
         assert isinstance(usable, Success)
         assert usable.value.secrets == stored.secrets

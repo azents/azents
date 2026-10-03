@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import datetime
+import enum
 import hashlib
 import json
 import re
@@ -15,8 +16,16 @@ from pydantic import BaseModel, ConfigDict, model_validator
 
 from azents.core.llm_catalog import ModelReasoningEffort
 
+
+class ModelMetadataSourceKind(enum.StrEnum):
+    """Persisted active and retained historical model-source contracts."""
+
+    GENAI_PRICES = "genai_prices"
+    LITELLM_JSON = "litellm_json"
+
+
 CATALOG_SOURCE_KEY = "litellm_catalog"
-CATALOG_SOURCE_KIND = "litellm_json"
+CATALOG_SOURCE_KIND = ModelMetadataSourceKind.LITELLM_JSON
 CATALOG_SOURCE_SCHEMA_VERSION = "1"
 CATALOG_SOURCE_INTERPRETER_VERSION = "1"
 CATALOG_SOURCE_MAX_BYTES = 12 * 1024 * 1024

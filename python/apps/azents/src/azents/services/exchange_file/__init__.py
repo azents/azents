@@ -11,7 +11,10 @@ import tempfile
 import unicodedata
 from codecs import getincrementaldecoder
 from io import BytesIO
-from typing import Annotated, NamedTuple, assert_never
+from typing import (
+    Annotated,
+    NamedTuple,
+)
 
 from azcommon.infra.s3.service import (
     S3ObjectIdentity,
@@ -35,18 +38,22 @@ from azents.core.enums import (
     ExchangeFileProvenanceKind,
     ExchangeFileStatus,
 )
+from azents.core.exchange_file_errors import (
+    FileAccessDenied,
+    FileExpired,
+    FileNotFound,
+    FileUnavailable,
+    SessionNotFound,
+    exchange_object_key_from_uri,
+)
 from azents.core.exchange_upload import ExchangeUploadError, ExchangeUploadState
 from azents.core.file_transfer import GENERAL_FILE_MAXIMUM_BYTES
 from azents.core.s3.deps import get_s3_service
+from azents.core.session_resource_authority import SessionResourceAuthority
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.exchange_file import ExchangeFileRepository, exchange_file_object_key
 from azents.repos.exchange_file.data import (
     ExchangeFile,
-    ExchangeFileClaimExpired,
-    ExchangeFileClaimNotFound,
-    ExchangeFileClaimOwnerConflict,
-    ExchangeFileClaimUnavailable,
-    ExchangeFileClaimWrongScope,
     ExchangeFileCreate,
 )
 from azents.repos.exchange_file.operations import (
@@ -64,49 +71,9 @@ from azents.services.browser_file_download import (
     BrowserFileDownloadTicket,
 )
 from azents.services.file_lifecycle_policy import exchange_file_expires_at
-from azents.services.session_resource_authority import SessionResourceAuthority
 from azents.utils.logging import sanitized_exception_info
 
 logger = logging.getLogger(__name__)
-
-
-@dataclasses.dataclass(frozen=True)
-class SessionNotFound:
-    """Session not found."""
-
-
-@dataclasses.dataclass(frozen=True)
-class FileNotFound:
-    """Exchange file not found."""
-
-
-@dataclasses.dataclass(frozen=True)
-class FileAccessDenied:
-    """No Exchange file access permission."""
-
-
-@dataclasses.dataclass(frozen=True)
-class FileExpired:
-    """Exchange file expired."""
-
-
-@dataclasses.dataclass(frozen=True)
-class FileUnavailable:
-    """Cannot access original file in object storage."""
-
-
-@dataclasses.dataclass(frozen=True)
-class FileRetentionOwnerConflict:
-    """Exchange file is already bound to another root session."""
-
-
-ExchangeFileInputClaimError = (
-    FileNotFound
-    | FileAccessDenied
-    | FileExpired
-    | FileUnavailable
-    | FileRetentionOwnerConflict
-)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -311,17 +278,6 @@ class _PreparedExchangeFile:
     preview_width: int | None = None
     preview_height: int | None = None
     preview_generated_at: datetime.datetime | None = None
-
-
-def exchange_object_key_from_uri(uri: str) -> str | None:
-    """Return object key from Exchange file-location URI."""
-    prefix = "exchange://"
-    if not uri.startswith(prefix):
-        return None
-    object_key = uri.removeprefix(prefix)
-    if not object_key:
-        return None
-    return object_key
 
 
 def sanitize_exchange_filename(filename: str | None) -> str:
@@ -982,70 +938,6 @@ class ExchangeFileService:
         return await self.operation_repository.validate_authority(
             _repository_authority(authority)
         )
-
-    async def claim_input_attachments(
-        self,
-        session: AsyncSession,
-        *,
-        agent_id: str,
-        session_id: str,
-        user_id: str,
-        attachment_uris: list[str],
-    ) -> Result[None, ExchangeFileInputClaimError]:
-        """Claim input ExchangeFiles inside the caller's acceptance transaction."""
-        if not attachment_uris:
-            return Success(None)
-        object_keys: list[str] = []
-        for uri in attachment_uris:
-            object_key = exchange_object_key_from_uri(uri)
-            if object_key is None:
-                return Failure(FileNotFound())
-            object_keys.append(object_key)
-
-        agent_session = await self.agent_session_repository.get_by_id(
-            session,
-            session_id,
-        )
-        if agent_session is None or agent_session.agent_id != agent_id:
-            return Failure(FileAccessDenied())
-        if not await self._has_workspace_access(
-            session,
-            workspace_id=agent_session.workspace_id,
-            user_id=user_id,
-        ):
-            return Failure(FileAccessDenied())
-        root = await self.agent_session_repository.get_root_session_agent_by_session_id(
-            session,
-            session_id,
-        )
-        if root is None:
-            return Failure(FileAccessDenied())
-
-        claim = await self.exchange_file_repository.claim_for_retention_root(
-            session,
-            object_keys=object_keys,
-            workspace_id=agent_session.workspace_id,
-            agent_id=agent_id,
-            retention_root_session_id=root.agent_session_id,
-            bound_at=datetime.datetime.now(datetime.UTC),
-        )
-        if claim.success:
-            return Success(None)
-        else:
-            error = claim.error
-            match error:
-                case ExchangeFileClaimNotFound():
-                    return Failure(FileNotFound())
-                case ExchangeFileClaimWrongScope():
-                    return Failure(FileAccessDenied())
-                case ExchangeFileClaimExpired():
-                    return Failure(FileExpired())
-                case ExchangeFileClaimUnavailable():
-                    return Failure(FileUnavailable())
-                case ExchangeFileClaimOwnerConflict():
-                    return Failure(FileRetentionOwnerConflict())
-                case _:
-                    assert_never(error)
 
     async def _create_agent_file(
         self,

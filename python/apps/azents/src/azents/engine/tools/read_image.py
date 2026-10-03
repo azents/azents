@@ -8,6 +8,7 @@ from collections.abc import Awaitable, Callable
 
 from pydantic import BaseModel, Field
 
+from azents.core.session_resource_authority import SessionResourceAuthority
 from azents.engine.events.model_file_parts import file_output_part_from_model_file
 from azents.engine.run.types import (
     FunctionTool,
@@ -26,7 +27,6 @@ from azents.runtime.transfer.server_to_runtime import ServerToRuntimeTarget
 from azents.services.file_storage import FileStorage
 from azents.services.model_file import ModelFileService, model_file_size_limit_message
 from azents.services.runtime_storage_error import RuntimeStorageError
-from azents.services.session_resource_authority import SessionResourceAuthority
 
 logger = logging.getLogger(__name__)
 

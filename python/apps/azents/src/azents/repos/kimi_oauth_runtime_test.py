@@ -2,8 +2,11 @@
 
 import asyncio
 import datetime
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import NamedTuple, Never
 
+import httpx
 import pytest
 from azcommon.result import Success
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,6 +24,7 @@ from azents.repos.llm_provider_integration.data import (
 )
 from azents.repos.worker_executor_read_test import _Boundary
 from azents.services.kimi_oauth import runtime as runtime_module
+from azents.services.kimi_oauth.client import KimiOAuthClient
 from azents.services.kimi_oauth.data import TokenSet
 from azents.services.kimi_oauth.runtime_test import _TEST_KEY, _create_integration
 
@@ -61,18 +65,39 @@ def _tokens() -> KimiOAuthRefreshTokens:
     )
 
 
+async def test_integration_capture_finishes_its_database_transaction(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """The added complete read exposes detached data, not a live transaction."""
+    fixture = await _fixture(rdb_session_manager)
+    captured = await fixture.repository.load_integration(
+        integration_id=fixture.original.id
+    )
+    assert captured == fixture.original
+    fixture.boundary.closed()
+    assert len(fixture.boundary.opened) == 1
+    assert await fixture.repository.load_integration(integration_id="0" * 32) is None
+    fixture.boundary.closed()
+
+
 async def test_http_precedes_persistence_and_returns_detached_credentials(
     rdb_session_manager: SessionManager[AsyncSession],
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fixture = await _fixture(rdb_session_manager)
     calls = 0
 
-    class Client:
-        def __init__(self, http_client: object) -> None:
+    class Client(KimiOAuthClient):
+        def __init__(self, http_client: httpx.AsyncClient) -> None:
             fixture.boundary.closed()
+            super().__init__(http_client)
 
-        async def refresh_tokens(self, **kwargs: object) -> Success[TokenSet]:
+        async def refresh_tokens(
+            self,
+            *,
+            refresh_token: str,
+            device_id: str,
+            connection_method: KimiOAuthConnectionMethod,
+        ) -> Success[TokenSet]:
             nonlocal calls
             fixture.boundary.closed()
             assert not fixture.boundary.opened
@@ -86,10 +111,20 @@ async def test_http_precedes_persistence_and_returns_detached_credentials(
                 )
             )
 
-    monkeypatch.setattr(runtime_module, "KimiOAuthClient", Client)
+    def unexpected_http(_request: httpx.Request) -> httpx.Response:
+        raise AssertionError("The controlled Kimi refresh must not perform HTTP")
+
+    @asynccontextmanager
+    async def client_factory() -> AsyncIterator[KimiOAuthClient]:
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(unexpected_http), timeout=20.0
+        ) as http_client:
+            yield Client(http_client)
+
     result = await runtime_module.ensure_runtime_tokens(
         integration=fixture.original,
         persistence_repository=fixture.repository,
+        client_factory=client_factory,
     )
     assert isinstance(result, Success)
     assert isinstance(result.value.secrets, KimiOAuthSecrets)

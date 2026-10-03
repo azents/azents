@@ -23,8 +23,17 @@ from azents.core.enums import (
     ExternalChannelResponseMode,
     ScheduledTaskScheduleType,
 )
+from azents.core.external_channel_ingestion import (
+    ExternalChannelIngestionOutcome,
+    ExternalChannelIngestionOutcomeKind,
+    ExternalChannelIngestionReason,
+)
 from azents.core.external_channel_provider import SlackConnectionCredentials
 from azents.core.external_channel_provider_effect import ProviderEffectPlan
+from azents.core.external_channel_selector_state import (
+    ExternalChannelSelectorState,
+    projection_with_selector_state,
+)
 from azents.core.external_model_settings import ExternalModelActorContext
 from azents.repos.external_channel.data import (
     ExternalChannelConnectionConfiguration,
@@ -34,11 +43,6 @@ from azents.repos.external_channel.data import (
     ExternalChannelSetupClaim,
 )
 from azents.repos.scheduled_task.data import ScheduledTask
-from azents.services.external_channel.ingestion import (
-    ExternalChannelIngestionOutcome,
-    ExternalChannelIngestionOutcomeKind,
-    ExternalChannelIngestionReason,
-)
 from azents.services.external_channel.interaction import (
     ExternalChannelInteractionHandoff,
     ExternalChannelInteractionProcessor,
@@ -55,10 +59,6 @@ from azents.services.external_channel.selector import (
     ExternalChannelSelectorCandidate,
     ExternalChannelSelectorCatalog,
     ExternalChannelSelectorSelection,
-)
-from azents.services.external_channel.selector_state import (
-    ExternalChannelSelectorState,
-    projection_with_selector_state,
 )
 from azents.services.external_channel.slack_events import (
     SlackInteractionView,

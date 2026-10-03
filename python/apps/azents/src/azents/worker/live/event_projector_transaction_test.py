@@ -10,6 +10,7 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.broker.broadcast import WebSocketBroadcast
+from azents.core.chat_data import ChatLiveRunState
 from azents.core.enums import AgentRunPhase, AgentRunStatus
 from azents.core.inference_profile import AppliedInferenceProfile
 from azents.engine.events.engine_events import (
@@ -27,7 +28,6 @@ from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession
 from azents.repos.live_projection_authority import LiveProjectionAuthorityRepository
 from azents.repos.live_projection_authority_test import _create_session
-from azents.services.chat.data import ChatLiveRunState
 from azents.services.chat.live_events import (
     InMemoryLiveEventStore,
     LiveOwnerAdvance,

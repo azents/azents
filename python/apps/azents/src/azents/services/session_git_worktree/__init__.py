@@ -31,6 +31,12 @@ from azents.core.enums import (
     SessionGitWorktreeStatus,
 )
 from azents.core.session_working_folder import validate_session_working_folder_path
+from azents.core.session_workspace_items import NewSessionWorkspaceItem
+from azents.core.session_workspace_paths import (
+    InvalidProjectPath,
+    normalize_agent_workspace_root,
+    normalize_session_workspace_path,
+)
 from azents.engine.events.action_messages import (
     AgentCreateGitWorktreeAction,
     AgentRemoveGitWorktreeAction,
@@ -40,8 +46,7 @@ from azents.engine.events.action_messages import (
 )
 from azents.engine.events.types import Event
 from azents.engine.run.types import SHUTDOWN_CANCEL_MESSAGE, USER_STOP_CANCEL_MESSAGE
-from azents.engine.tools.deps import get_skill_state_store
-from azents.engine.tools.skill import SkillProjectionService, SkillStateStore
+from azents.engine.tools.skill import SkillProjectionService
 from azents.rdb.deps import get_session_manager
 from azents.rdb.models.event import JSONValue
 from azents.rdb.session import SessionManager
@@ -83,6 +88,7 @@ from azents.repos.session_workspace_project.data import (
 from azents.repos.session_workspace_project_operations import (
     SessionWorkspaceProjectOperationsRepository,
 )
+from azents.repos.skill_state_store import SkillStateStore, get_skill_state_store
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.runtime.control_protocol.runner_operations import (
     RuntimeGitRefEntry,
@@ -107,11 +113,6 @@ from azents.services.runtime_storage_error import RuntimeStorageError
 from azents.services.session_working_folder_binding import (
     SessionWorkingFolderBindingError,
     SessionWorkingFolderBindingService,
-)
-from azents.services.session_workspace_project import (
-    InvalidProjectPath,
-    normalize_agent_workspace_root,
-    normalize_session_workspace_path,
 )
 
 _GIT_OPERATION_TIMEOUT_SECONDS = 300
@@ -241,24 +242,6 @@ def _bridge_continuation_payload(
         cancellation_summary=_bounded_terminal_summary(execution.cancellation_summary),
         result=result,
     )
-
-
-@dataclasses.dataclass(frozen=True)
-class ExistingProjectWorkspaceItem:
-    """Existing Project item selected for a new AgentSession."""
-
-    path: str
-
-
-@dataclasses.dataclass(frozen=True)
-class GitWorktreeWorkspaceItem:
-    """Git worktree item selected for a new AgentSession."""
-
-    source_project_path: str
-    starting_ref: str
-
-
-NewSessionWorkspaceItem = ExistingProjectWorkspaceItem | GitWorktreeWorkspaceItem
 
 
 @dataclasses.dataclass(frozen=True)

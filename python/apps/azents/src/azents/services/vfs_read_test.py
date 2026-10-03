@@ -1,14 +1,19 @@
 """Tests for registered bounded VFS read routing and Skills backend."""
 
+import asyncio
 import logging
+import os
 import re
+import signal
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
+from pathlib import Path
 
 import pytest
 
 import azents.services.vfs_read as vfs_read_module
+from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.core.vfs import (
     VfsLocation,
     VfsProjection,
@@ -19,7 +24,6 @@ from azents.core.vfs import (
     parse_vfs_search_uri,
 )
 from azents.services.file_storage import GrepResult, TextReadResult
-from azents.services.session_resource_authority import SessionExecutionOwner
 from azents.services.vfs_read import (
     SkillsVfsReadBackend,
     VfsGlobResult,
@@ -277,12 +281,60 @@ async def test_skills_backend_grep_is_bounded_and_canonical() -> None:
 
 async def test_skills_backend_kills_regex_after_deadline(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
-    """Catastrophic regex work cannot block the application event loop."""
+    """Kill and reap non-cooperative sandbox work without a costly regex fixture."""
+    started_marker = tmp_path / "regex-worker-started"
+    processes: list[asyncio.subprocess.Process] = []
+    create_process = asyncio.create_subprocess_exec
+
+    async def observe_process(
+        program: str,
+        *args: str,
+        stdin: int,
+        stdout: int,
+        stderr: int,
+    ) -> asyncio.subprocess.Process:
+        """Delegate actual creation and retain the child for cleanup evidence."""
+        process = await create_process(
+            program,
+            *args,
+            stdin=stdin,
+            stdout=stdout,
+            stderr=stderr,
+        )
+        processes.append(process)
+        return process
+
+    # The isolated exec cannot inherit a monkeypatched parent callback. This
+    # benign child consumes the real request, signals readiness, then blocks
+    # independently of the parent's deadline. Production timeout/kill/wait stays
+    # unchanged; no costly expression, synthetic TimeoutError, or kill mock is used.
+    monkeypatch.setattr(
+        vfs_read_module,
+        "_REGEX_GREP_WORKER",
+        f"""
+import json
+import os
+import threading
+from pathlib import Path
+import sys
+
+json.load(sys.stdin)
+Path({str(started_marker)!r}).write_text(str(os.getpid()), encoding="utf-8")
+threading.Event().wait()
+""",
+    )
+    monkeypatch.setattr(
+        vfs_read_module.asyncio,
+        "create_subprocess_exec",
+        observe_process,
+    )
+    # Allow interpreter startup while keeping the original one-second outer bound.
     monkeypatch.setattr(
         vfs_read_module,
         "_SKILLS_OPERATION_MAX_SECONDS",
-        0.05,
+        0.4,
     )
     revision = make_vfs_source_revision(
         source_id="release:azents",
@@ -291,7 +343,7 @@ async def test_skills_backend_kills_regex_after_deadline(
         entries=[
             (
                 "azents://skills/azents/slow/SKILL.md",
-                (b"a" * 100_000) + b"!",
+                b"needle\n",
                 "text/markdown",
             )
         ],
@@ -302,7 +354,7 @@ async def test_skills_backend_kills_regex_after_deadline(
     result = await backend.grep(
         _context(),
         location=_search_location("azents://skills/azents/slow"),
-        pattern=re.compile(r"(a+)+$"),
+        pattern=re.compile("needle"),
         recursive=True,
         exclude_patterns=(),
         max_matching_files=10,
@@ -313,6 +365,14 @@ async def test_skills_backend_kills_regex_after_deadline(
 
     assert result.truncated is True
     assert result.stopped_reason == "deadline"
+    assert len(processes) == 1
+    process = processes[0]
+    assert started_marker.read_text(encoding="utf-8") == str(process.pid)
+    return_code = process.returncode
+    assert return_code is not None and return_code != 0
+    if os.name == "posix":
+        assert return_code == -signal.SIGKILL
+    assert await asyncio.wait_for(process.wait(), timeout=0.1) == return_code
     assert time.monotonic() - started_at < 1
 
 

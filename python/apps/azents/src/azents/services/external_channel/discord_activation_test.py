@@ -24,7 +24,9 @@ from azents.core.external_channel_provider import (
     DiscordConnectionCredentials,
     ExternalChannelCapabilitySnapshot,
 )
-from azents.rdb.session import SessionManager
+from azents.repos.discord_connection_operations import (
+    DiscordConnectionOperationRepository,
+)
 from azents.repos.external_channel.data import (
     ExternalChannelConnection,
     ExternalChannelConnectionConfiguration,
@@ -302,8 +304,10 @@ def _service(
             Config,
             SimpleNamespace(external_channel_discord_callback_url=callback_url),
         ),
-        session_manager=cast(SessionManager[AsyncSession], session_manager),
-        repository=cast(ExternalChannelRepository, repository),
+        operations=DiscordConnectionOperationRepository(
+            session_manager=session_manager,
+            external_channel_repository=cast(ExternalChannelRepository, repository),
+        ),
         credentials_codec=codec,
         discord_client=cast(DiscordAPIClient, client),
     )

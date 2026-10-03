@@ -6,6 +6,7 @@ from typing import Protocol
 
 from azcommon.result import Failure, Result
 
+from azents.core.session_resource_authority import SessionResourceAuthority
 from azents.engine.events.file_parts import (
     ModelFileLoweringContent,
     RequestLocalModelFileResolver,
@@ -20,7 +21,6 @@ from azents.services.model_file import (
     ModelFileResolveError,
     ModelFileUnavailable,
 )
-from azents.services.session_resource_authority import SessionResourceAuthority
 
 logger = logging.getLogger(__name__)
 

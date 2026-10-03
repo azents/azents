@@ -2,7 +2,7 @@
 
 import dataclasses
 from collections.abc import AsyncIterator
-from typing import Annotated, Any
+from typing import Annotated
 
 import httpx
 from fastapi import Depends
@@ -41,6 +41,9 @@ from azents.core.system_setting_data import (
     SystemSettingMutation,
     SystemSettingMutationResult,
     SystemSettingState,
+)
+from azents.repos.github_platform_system_setting.data import (
+    PlatformGitHubAppConfirmationImpact,
 )
 from azents.repos.github_platform_system_setting.operations import (
     PlatformGitHubAppImpactRepository,
@@ -270,23 +273,21 @@ class PlatformGitHubAppSystemSettingService:
                 confirmation_required=False,
             )
         validation = await self.validation_client.validate(effective)
-        impact: dict[str, Any] | None = None
+        impact: PlatformGitHubAppConfirmationImpact | None = None
         confirmation_required = False
         if validation.status is SystemSettingValidationStatus.VALID:
             impact = await self.impact_repository.resolve_impact(
                 snapshot.current_resolved,
                 snapshot.candidate_resolved,
             )
-            confirmation_required = bool(
-                impact is not None and impact.get("confirmation_required") is True
-            )
+            confirmation_required = impact is not None and impact.confirmation_required
         return SystemSettingCandidateValidationResult(
             status=validation.status,
             code=validation.code,
             message=validation.message,
             action_hint=validation.action_hint,
             metadata=validation.metadata,
-            impact=impact,
+            impact=impact.model_dump(mode="json") if impact is not None else None,
             confirmation_required=confirmation_required,
         )
 

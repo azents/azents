@@ -1,4 +1,4 @@
-"""Shared root AgentSession creation service."""
+"""Canonical root AgentSession database composition."""
 
 import dataclasses
 from typing import Annotated, assert_never
@@ -6,21 +6,20 @@ from typing import Annotated, assert_never
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.agent_automatic_project import AgentAutomaticProjectPolicy
 from azents.core.enums import AgentRuntimeCapability, AgentSessionKind
-from azents.repos.agent import AgentRepository
-from azents.repos.agent_automatic_project import AgentAutomaticProjectRepository
-from azents.repos.agent_automatic_project.data import AgentAutomaticProjectPolicy
-from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSessionCreate
-from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
-from azents.repos.session_workspace_project.data import SessionWorkspaceProjectCreate
-
-from .data import (
+from azents.core.root_agent_session_creation import (
     AgentDefaultRootWorkspaceIntent,
     ExplicitRootWorkspaceIntent,
     RootAgentSessionCreationResult,
     RootWorkspaceIntent,
 )
+from azents.repos.agent import AgentRepository
+from azents.repos.agent_automatic_project import AgentAutomaticProjectRepository
+from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.agent_session.data import AgentSessionCreate
+from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
+from azents.repos.session_workspace_project.data import SessionWorkspaceProjectCreate
 
 
 @dataclasses.dataclass(frozen=True, kw_only=True)
@@ -32,7 +31,7 @@ class _ResolvedRootWorkspace:
 
 
 @dataclasses.dataclass
-class RootAgentSessionCreationService:
+class RootAgentSessionCreationRepository:
     """Create root Session context Project snapshots without committing."""
 
     agent_session_repository: Annotated[

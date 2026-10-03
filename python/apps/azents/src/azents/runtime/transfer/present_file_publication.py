@@ -8,6 +8,7 @@ from azcommon.infra.s3.service import S3ObjectIdentity
 from azcommon.result import Failure, Success
 
 from azents.core.enums import ExchangeFileProvenanceKind
+from azents.core.session_resource_authority import SessionResourceAuthority
 from azents.repos.exchange_file.data import ExchangeFile
 from azents.runtime.transfer.object_store import runtime_transfer_object_identity
 from azents.runtime.transfer.runtime_to_server import (
@@ -17,7 +18,6 @@ from azents.runtime.transfer.runtime_to_server import (
 )
 from azents.runtime.transfer.server_to_runtime import ServerToRuntimeTarget
 from azents.services.exchange_file import ExchangeFileService
-from azents.services.session_resource_authority import SessionResourceAuthority
 
 
 class RuntimeToServerTransferExecutor(Protocol):

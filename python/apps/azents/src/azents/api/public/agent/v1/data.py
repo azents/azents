@@ -15,16 +15,16 @@ from azents.core.agent import (
     SelectableModelSettings,
     SubagentSettings,
 )
+from azents.core.agent_automatic_project import AgentAutomaticProjectPolicy
 from azents.core.enums import AgentRuntimeCapability, AgentType
+from azents.core.historical_memory_settings import (
+    HistoricalMemorySettingsScope,
+)
+from azents.core.memory_scope import MemoryScope
 from azents.core.model_execution_options import (
     ModelExecutionOptionDefinition,
     list_model_execution_option_definitions,
 )
-from azents.repos.agent_automatic_project.data import AgentAutomaticProjectPolicy
-from azents.repos.historical_memory.settings_data import (
-    HistoricalMemorySettingsScope,
-)
-from azents.repos.memory.data import MemoryScope
 from azents.services.agent.data import (
     AgentAdminOutput,
     AgentDecommissionOutput,
@@ -209,7 +209,7 @@ class AutomaticSessionProjectsResponse(BaseModel):
 
     @classmethod
     def convert_from(cls, data: AgentAutomaticProjectPolicy) -> Self:
-        """Convert a policy repository snapshot to an API response."""
+        """Convert a domain policy snapshot to an API response."""
         return cls(
             revision=data.revision,
             project_paths=list(data.project_paths),

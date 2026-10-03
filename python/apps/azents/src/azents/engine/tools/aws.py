@@ -22,7 +22,6 @@ from botocore.awsrequest import AWSRequest
 from botocore.credentials import Credentials
 from mcp.types import Tool as McpBaseTool
 from pydantic import BaseModel, ValidationError
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.engine_tool_state import (
     McpToolSnapshotItem,
@@ -36,6 +35,10 @@ from azents.core.mcp_transport import (
 )
 from azents.core.mcp_transport import (
     list_tools as mcp_list_tools,
+)
+from azents.core.session_resource_authority import (
+    SessionExecutionOwner,
+    accepts_execution_owner,
 )
 from azents.core.tools import (
     AwsToolkitConfig,
@@ -58,16 +61,11 @@ from azents.engine.tools.mcp_base import (
     _extract_tool_result,  # reuse common MCP result extraction for AWS wrapper.
     build_mcp_artifact_sink,
 )
-from azents.rdb.session import SessionManager
+from azents.repos.engine_tool_repositories import EngineMcpSnapshotFactory
 from azents.repos.session_execution import (
     CanonicalExecutionOwnerGenerationStaleError,
 )
-from azents.repos.toolkit_state.engine import McpToolSnapshotStore
 from azents.services.artifact import ArtifactService
-from azents.services.session_resource_authority import (
-    SessionExecutionOwner,
-    accepts_execution_owner,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -254,7 +252,7 @@ class AwsToolkit(Toolkit[AwsToolkitConfig]):
         timeout: float,
         proxy_url: str | None,
         artifact_service: ArtifactService | None,
-        session_manager: SessionManager[AsyncSession] | None,
+        snapshot_factory: EngineMcpSnapshotFactory | None,
         agent_id: str,
         session_id: str,
         state_name: str,
@@ -266,12 +264,15 @@ class AwsToolkit(Toolkit[AwsToolkitConfig]):
         self._proxy_url = proxy_url
         self.artifact_service = artifact_service
         self._session_id = session_id
-        self.snapshot_store = McpToolSnapshotStore(
-            session_manager=session_manager,
-            agent_id=agent_id,
-            session_id=session_id,
-            toolkit_namespace=_AWS_TOOLKIT_STATE_NAMESPACE,
-            state_name=state_name,
+        self.snapshot_store = (
+            snapshot_factory.create(
+                agent_id=agent_id,
+                session_id=session_id,
+                toolkit_namespace=_AWS_TOOLKIT_STATE_NAMESPACE,
+                state_name=state_name,
+            )
+            if snapshot_factory is not None
+            else None
         )
         self._bg_task: asyncio.Task[None] | None = None
         self._artifact_sink: McpArtifactSink | None = None
@@ -286,7 +287,8 @@ class AwsToolkit(Toolkit[AwsToolkitConfig]):
             owner,
             session_id=self._session_id,
         ):
-            self.snapshot_store = self.snapshot_store.for_execution(owner)
+            if self.snapshot_store is not None:
+                self.snapshot_store = self.snapshot_store.for_execution(owner)
             self._execution_owner = owner
 
     def _current_artifact_sink(self) -> McpArtifactSink | None:
@@ -375,7 +377,10 @@ class AwsToolkit(Toolkit[AwsToolkitConfig]):
 
     async def _load_tool_snapshot(self) -> McpToolSnapshotState | None:
         """Load the latest successful AWS MCP tool snapshot."""
-        snapshot = await self.snapshot_store.load()
+        store = self.snapshot_store
+        if store is None:
+            return None
+        snapshot = await store.load()
         if snapshot is None:
             return None
         if not snapshot.tools or snapshot.server_url != _AWS_MCP_ENDPOINT:
@@ -384,7 +389,8 @@ class AwsToolkit(Toolkit[AwsToolkitConfig]):
 
     async def _save_tool_snapshot(self, snapshot: McpToolSnapshotState) -> None:
         """Atomically save a successful AWS MCP tool snapshot."""
-        await self.snapshot_store.replace(snapshot)
+        if self.snapshot_store is not None:
+            await self.snapshot_store.replace(snapshot)
 
     def _tools_from_snapshot(
         self, snapshot: McpToolSnapshotState
@@ -527,11 +533,11 @@ class AwsToolkitProvider(ToolkitProvider[AwsToolkitConfig]):
         self,
         *,
         artifact_service: ArtifactService | None = None,
-        session_manager: SessionManager[AsyncSession] | None = None,
+        snapshot_factory: EngineMcpSnapshotFactory | None = None,
     ) -> None:
         """Initialize AwsToolkitProvider."""
         self.artifact_service = artifact_service
-        self.session_manager = session_manager
+        self.snapshot_factory = snapshot_factory
 
     async def resolve(
         self,
@@ -560,7 +566,7 @@ class AwsToolkitProvider(ToolkitProvider[AwsToolkitConfig]):
             timeout=config.timeout,
             proxy_url=context.mcp_proxy_url,
             artifact_service=self.artifact_service,
-            session_manager=self.session_manager,
+            snapshot_factory=self.snapshot_factory,
             agent_id=context.agent_id,
             session_id=context.session_id,
             state_name=_aws_snapshot_state_name(

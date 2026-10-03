@@ -1,6 +1,7 @@
 """LLM catalog repository data models."""
 
 import datetime
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -12,6 +13,25 @@ from azents.core.enums import (
     LLMModelLifecycleStatus,
     LLMProvider,
 )
+
+
+@dataclass(frozen=True)
+class CatalogRetryPolicy:
+    """Typed scheduling policy decoded from otherwise opaque diagnostics."""
+
+    automatic_retry_blocked: bool
+
+    @classmethod
+    def from_diagnostics(
+        cls, diagnostics: Mapping[str, object] | None
+    ) -> "CatalogRetryPolicy":
+        """Block only on literal True, preserving absent and legacy marker behavior."""
+        marker = (
+            diagnostics.get("automatic_retry_blocked")
+            if diagnostics is not None
+            else None
+        )
+        return cls(automatic_retry_blocked=marker is True)
 
 
 @dataclass(frozen=True)

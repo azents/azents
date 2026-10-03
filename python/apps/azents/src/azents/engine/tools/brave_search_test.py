@@ -398,7 +398,6 @@ async def test_provider_resolves_only_configured_key_and_exposes_no_key_argument
         credentials_json='{"api_key":"synthetic-key"}',
         agent_id="agent-1",
         session_id="session-1",
-        session=None,
         web_url="https://example.org",
         oauth_secret_key="unused",
         workspace_id="workspace-1",

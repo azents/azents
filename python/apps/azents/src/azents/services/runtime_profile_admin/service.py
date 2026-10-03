@@ -501,7 +501,8 @@ class RuntimeProfileAdminService:
                     code="workspace_profile_not_found",
                     message="Workspace Runtime Profile was not found.",
                 )
-            workspace_id, workspace = workspace_snapshot
+            workspace_id = workspace_snapshot.workspace_id
+            workspace = workspace_snapshot.workspace
             profile = await self.profile_repository.get_workspace_runtime_profile(
                 session,
                 workspace_id=workspace_id,

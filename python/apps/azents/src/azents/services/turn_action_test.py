@@ -24,7 +24,7 @@ from azents.engine.events.action_messages import (
     SkillAction,
     TurnAction,
 )
-from azents.engine.tools.skill import SkillStateStore
+from azents.repos.skill_state_store import SkillStateStore
 
 from .turn_action import (
     TurnActionAdmissionError,

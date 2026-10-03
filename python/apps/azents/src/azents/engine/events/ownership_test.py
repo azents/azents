@@ -9,6 +9,7 @@ from azcommon.uuid import uuid7
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import AgentRunStatus, AgentSessionProductMode, EventKind
+from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.engine.context.compaction import CompactionSummaryBudget
 from azents.engine.events.engine_adapter import _OwnerBoundClientToolInvoker
 from azents.engine.events.execution import AgentRunExecution, AgentRunExecutionRequest
@@ -60,7 +61,10 @@ from azents.repos.engine_tool_result_operation import (
 from azents.repos.model_candidate_health import ModelCandidateHealthRepository
 from azents.repos.model_operation_completion import ModelOperationCompletionRepository
 from azents.repos.session_execution import CanonicalExecutionOwnerGenerationStaleError
-from azents.repos.session_execution.ownership import OwnerBoundSessionManager
+from azents.repos.session_execution.ownership import (
+    OwnerBoundSessionManager,
+    SessionExecutionAuthorityRepository,
+)
 from azents.repos.toolkit_state.engine import ToolWorkingSetStore
 from azents.testing.model_stream import make_test_model_stream_watchdog
 
@@ -281,7 +285,16 @@ async def test_superseded_tool_admission_never_invokes_external_handler(
     """The adapter's actual tool wrapper rejects a revoked owner before I/O."""
     state = await _create_execution(rdb_session_manager)
     inner = _RecordingInvoker()
-    invoker = _OwnerBoundClientToolInvoker(inner=inner, owner=state.owner)
+    invoker = _OwnerBoundClientToolInvoker(
+        inner=inner,
+        owner=SessionExecutionAuthorityRepository(
+            session_manager=rdb_session_manager,
+            owner=SessionExecutionOwner(
+                session_id=state.session_id,
+                owner_generation=state.owner.owner_generation,
+            ),
+        ),
+    )
     await _take_over(rdb_session_manager, state)
     with pytest.raises(CanonicalExecutionOwnerGenerationStaleError):
         await invoker.invoke(
@@ -365,7 +378,7 @@ async def test_old_compaction_summary_cannot_move_new_owner_input_head(
 
     compactor = EventCompactor(
         operation_repository=CompactionOperationRepository(
-            session_manager=rdb_session_manager,
+            session_manager=state.owner,
             transcript_repository=EventTranscriptRepository(),
             agent_session_repository=AgentSessionRepository(),
             model_operation_completion_repository=(
@@ -379,11 +392,9 @@ async def test_old_compaction_summary_cannot_move_new_owner_input_head(
                     ),
                 )
             ),
-            tool_working_set_store=ToolWorkingSetStore(
-                session_manager=rdb_session_manager
-            ),
+            tool_working_set_store=ToolWorkingSetStore(session_manager=state.owner),
         ),
-    ).with_session_manager(state.owner)
+    )
     task = asyncio.create_task(
         compactor.compact(
             session_id=state.session_id,

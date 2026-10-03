@@ -6,14 +6,10 @@ from typing import Annotated, Literal, assert_never
 
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent import AgentModelSelection, SelectableModelSettings
-from azents.core.crypto import CredentialCipher
-from azents.core.deps import get_credential_cipher
 from azents.core.enums import (
     LLMCatalogEntryVisibility,
-    LLMCatalogPurpose,
     LLMProvider,
 )
 from azents.core.image_generation_catalog import (
@@ -36,16 +32,17 @@ from azents.core.llm_catalog_sync import (
     IntegrationCatalogSyncTrigger,
     evaluate_integration_catalog_sync_policy,
 )
-from azents.rdb.deps import get_session_manager
-from azents.rdb.session import SessionManager
-from azents.repos.llm_catalog import LLMCatalogRepository
+from azents.repos.image_generation_catalog_operations import (
+    ImageGenerationCatalogOperationsRepository,
+)
 from azents.repos.llm_catalog.data import (
     CatalogNotFound,
+    CatalogRetryPolicy,
     ImageGenerationCatalogEntryCreate,
     ImageGenerationCatalogEntryList,
     LLMCatalogSyncAttempt,
 )
-from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
+from azents.repos.llm_catalog_operations import CatalogAttemptFailure
 from azents.services.llm_catalog import (
     IntegrationCatalogAutomaticRetryBlocked,
     IntegrationCatalogSyncAlreadyRunning,
@@ -55,7 +52,9 @@ from azents.services.llm_catalog import (
     SystemCatalogProjectionSummary,
 )
 from azents.services.model_listing.providers import (
+    ListingClientFactories,
     ListingProviderError,
+    create_listing_client_factories,
     list_openai_image_generation_models_for_integration,
 )
 
@@ -74,7 +73,6 @@ _DEFAULT_IMAGE_GENERATION_PROVIDERS = frozenset(
     }
 )
 _EXPLICIT_IMAGE_SELECTION_PROVIDERS = frozenset({LLMProvider.OPENAI})
-_IMAGE_GENERATION_SOURCE_KEY = "openai_models_list:image_generation"
 
 
 def image_generation_default_available(
@@ -151,13 +149,6 @@ class ImageGenerationRuntimeConfigurationError:
     model_identifier: str | None
 
 
-def _get_integration_repository(
-    cipher: Annotated[CredentialCipher, Depends(get_credential_cipher)],
-) -> LLMProviderIntegrationRepository:
-    """Build the credential-aware integration repository."""
-    return LLMProviderIntegrationRepository(cipher)
-
-
 def _utcnow() -> datetime.datetime:
     """Return current UTC time."""
     return datetime.datetime.now(datetime.UTC)
@@ -169,13 +160,13 @@ def _sync_policy_attempt(
     """Convert persisted attempt state to shared synchronization policy input."""
     if attempt is None:
         return None
-    diagnostics = attempt.diagnostics or {}
+    retry_policy = CatalogRetryPolicy.from_diagnostics(attempt.diagnostics)
     return CatalogSyncAttemptState(
         id=attempt.id,
         status=attempt.status,
         started_at=attempt.started_at,
         finished_at=attempt.finished_at,
-        automatic_retry_blocked=(diagnostics.get("automatic_retry_blocked") is True),
+        automatic_retry_blocked=retry_policy.automatic_retry_blocked,
     )
 
 
@@ -240,9 +231,9 @@ def _catalog_output(
     policy: IntegrationCatalogSyncPolicyDecision,
 ) -> ImageGenerationModelCatalogOutput:
     """Project stored image catalog state into its public service contract."""
-    diagnostics = (
+    retry_policy = CatalogRetryPolicy.from_diagnostics(
         page.latest_attempt.diagnostics if page.latest_attempt is not None else None
-    ) or {}
+    )
     generation_current = (
         page.snapshot_catalog_configuration_version
         == page.current_integration_catalog_configuration_version
@@ -267,7 +258,7 @@ def _catalog_output(
         stale=policy.stale,
         generation_current=generation_current,
         sync_available_at=policy.retry_at,
-        automatic_retry_blocked=(diagnostics.get("automatic_retry_blocked") is True),
+        automatic_retry_blocked=retry_policy.automatic_retry_blocked,
         entries=[
             ImageGenerationCatalogEntryOutput(
                 id=entry.id,
@@ -291,12 +282,12 @@ def _catalog_output(
 class ImageGenerationCatalogService:
     """Read and synchronize stored image-generation model catalogs."""
 
-    session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+    operations: Annotated[
+        ImageGenerationCatalogOperationsRepository,
+        Depends(ImageGenerationCatalogOperationsRepository),
     ]
-    catalog_repository: Annotated[LLMCatalogRepository, Depends(LLMCatalogRepository)]
-    integration_repository: Annotated[
-        LLMProviderIntegrationRepository, Depends(_get_integration_repository)
+    listing_clients: Annotated[
+        ListingClientFactories, Depends(create_listing_client_factories)
     ]
 
     async def read(
@@ -306,44 +297,24 @@ class ImageGenerationCatalogService:
         workspace_id: str,
     ) -> Result[ImageGenerationModelCatalogOutput, CatalogNotFound]:
         """Read stored image model availability without calling the provider."""
-        async with self.session_manager() as session:
-            integration = await self.integration_repository.get_by_id(
-                session,
-                integration_id,
-            )
-            if integration is None or integration.workspace_id != workspace_id:
-                return Failure(CatalogNotFound(integration_id=integration_id))
-            if not image_generation_explicit_selection_supported(integration.provider):
-                return Success(
-                    default_only_image_generation_catalog(
-                        provider=integration.provider,
-                        integration_enabled=integration.enabled,
-                        current_configuration_version=(
-                            integration.catalog_configuration_version
-                        ),
-                    )
+        snapshot = await self.operations.read(
+            integration_id=integration_id, workspace_id=workspace_id
+        )
+        if snapshot is None:
+            return Failure(CatalogNotFound(integration_id=integration_id))
+        integration = snapshot.integration
+        page = snapshot.page
+        if page is None:
+            return Success(
+                default_only_image_generation_catalog(
+                    provider=integration.provider,
+                    integration_enabled=integration.enabled,
+                    current_configuration_version=(
+                        integration.catalog_configuration_version
+                    ),
                 )
-            await self.catalog_repository.ensure_integration_catalog(
-                session,
-                integration_id=integration.id,
-                provider=integration.provider,
-                purpose=LLMCatalogPurpose.IMAGE_GENERATION,
             )
-            page = await (
-                self.catalog_repository.list_image_generation_entries_by_integration
-            )(
-                session,
-                integration_id=integration.id,
-                workspace_id=workspace_id,
-            )
-            if page is None:
-                raise RuntimeError("Image catalog creation did not become readable.")
-            latest_workspace_attempt = await (
-                self.catalog_repository.get_latest_integration_attempt_for_workspace
-            )(
-                session,
-                workspace_id=workspace_id,
-            )
+        latest_workspace_attempt = snapshot.latest_workspace_attempt
         policy = evaluate_integration_catalog_sync_policy(
             policy_input=IntegrationCatalogSyncPolicyInput(
                 trigger=IntegrationCatalogSyncTrigger.EXPLICIT,
@@ -379,47 +350,32 @@ class ImageGenerationCatalogService:
         | IntegrationCatalogSyncNotStale,
     ]:
         """Synchronize one OpenAI API-key image-generation catalog."""
-        async with self.session_manager() as session:
-            integration = await self.integration_repository.get_by_id(
-                session,
-                integration_id,
-            )
+        integration = await self.operations.load_integration(integration_id)
         if integration is None or integration.workspace_id != workspace_id:
             return Failure(ImageGenerationCatalogSyncNotFound(integration_id))
         if not image_generation_explicit_selection_supported(integration.provider):
             return Failure(
                 IntegrationCatalogSyncUnsupportedProvider(integration.provider)
             )
-        async with self.session_manager() as session:
-            catalog = await self.catalog_repository.ensure_integration_catalog(
-                session,
-                integration_id=integration.id,
-                provider=integration.provider,
-                purpose=LLMCatalogPurpose.IMAGE_GENERATION,
-            )
         started_at = _utcnow()
-        async with self.session_manager() as session:
-            claim = await self.catalog_repository.begin_integration_attempt(
-                session,
-                catalog_id=catalog.id,
-                workspace_id=workspace_id,
-                source_key=_IMAGE_GENERATION_SOURCE_KEY,
-                started_at=started_at,
-                trigger=trigger,
-            )
+        preparation = await self.operations.begin_attempt(
+            integration_id=integration.id,
+            provider=integration.provider,
+            workspace_id=workspace_id,
+            started_at=started_at,
+            trigger=trigger,
+        )
+        catalog = preparation.catalog
+        claim = preparation.claim
         if isinstance(claim, IntegrationCatalogSyncPolicyDecision):
             return Failure(_sync_policy_failure(catalog.id, claim))
         attempt_id = claim.attempt_id
-        async with self.session_manager() as session:
-            integration = await self.integration_repository.get_by_id_with_secrets(
-                session,
-                integration_id,
-            )
+        integration = await self.operations.load_listing_integration(integration_id)
         if integration is None or integration.workspace_id != workspace_id:
             return Failure(ImageGenerationCatalogSyncNotFound(integration_id))
         try:
             listing = await list_openai_image_generation_models_for_integration(
-                integration
+                integration, clients=self.listing_clients
             )
             visible_ids = set(listing.provider_model_identifiers)
             entries = [
@@ -448,63 +404,34 @@ class ImageGenerationCatalogService:
                 )
                 if registry_entry.provider_model_identifier in visible_ids
             ]
-            async with self.session_manager() as session:
-                publication = await (
-                    self.catalog_repository.replace_current_image_generation_snapshot
-                )(
-                    session,
-                    catalog=catalog,
-                    attempt_id=attempt_id,
-                    entries=entries,
-                    diagnostics={
-                        "catalog_purpose": "image_generation",
-                        "integration_id": integration.id,
-                        "registry_revision": (IMAGE_GENERATION_MODEL_REGISTRY_REVISION),
-                    },
-                )
-                if publication.snapshot_id is None:
-                    await self.catalog_repository.mark_attempt_failed(
-                        session,
-                        attempt_id=attempt_id,
-                        finished_at=_utcnow(),
-                        failure_code="CatalogSyncSuperseded",
-                        failure_message=(
-                            "Image catalog synchronization was superseded."
+            publication = await self.operations.publish(
+                catalog=catalog,
+                attempt_id=attempt_id,
+                entries=entries,
+                candidate_diagnostics={
+                    "catalog_purpose": "image_generation",
+                    "integration_id": integration.id,
+                    "registry_revision": IMAGE_GENERATION_MODEL_REGISTRY_REVISION,
+                },
+                attempt_diagnostics={
+                    "catalog_purpose": "image_generation",
+                    "integration_id": integration.id,
+                    "registry_revision": IMAGE_GENERATION_MODEL_REGISTRY_REVISION,
+                    "trigger": trigger.value,
+                },
+                fetched_count=len(listing.provider_model_identifiers),
+                finished_at=_utcnow(),
+                trigger=trigger,
+            )
+            if publication.snapshot_id is None:
+                return Failure(
+                    ImageGenerationCatalogSyncSuperseded(
+                        catalog_id=catalog.id,
+                        superseding_attempt_id=publication.superseding_attempt_id,
+                        current_configuration_version=(
+                            publication.current_catalog_configuration_version
                         ),
-                        action_hint="Use the newer integration configuration.",
-                        diagnostics={
-                            "catalog_purpose": "image_generation",
-                            "failure_category": "configuration_superseded",
-                            "automatic_retry_blocked": False,
-                            "trigger": trigger.value,
-                        },
                     )
-                    return Failure(
-                        ImageGenerationCatalogSyncSuperseded(
-                            catalog_id=catalog.id,
-                            superseding_attempt_id=(publication.superseding_attempt_id),
-                            current_configuration_version=(
-                                publication.current_catalog_configuration_version
-                            ),
-                        )
-                    )
-                await self.catalog_repository.mark_attempt_succeeded(
-                    session,
-                    attempt_id=attempt_id,
-                    finished_at=_utcnow(),
-                    produced_snapshot_id=publication.snapshot_id,
-                    fetched_count=len(listing.provider_model_identifiers),
-                    matched_count=len(entries),
-                    skipped_count=(
-                        len(listing.provider_model_identifiers) - len(entries)
-                    ),
-                    hidden_count=0,
-                    diagnostics={
-                        "catalog_purpose": "image_generation",
-                        "integration_id": integration.id,
-                        "registry_revision": (IMAGE_GENERATION_MODEL_REGISTRY_REVISION),
-                        "trigger": trigger.value,
-                    },
                 )
             return Success(
                 SystemCatalogProjectionSummary(
@@ -523,9 +450,8 @@ class ImageGenerationCatalogService:
                 if exc.automatic_retry_blocked
                 else "Retry after the provider becomes available."
             )
-            async with self.session_manager() as session:
-                await self.catalog_repository.mark_attempt_failed(
-                    session,
+            await self.operations.fail_attempt(
+                CatalogAttemptFailure(
                     attempt_id=attempt_id,
                     finished_at=_utcnow(),
                     failure_code=failure_code,
@@ -543,6 +469,7 @@ class ImageGenerationCatalogService:
                         "trigger": trigger.value,
                     },
                 )
+            )
             return Success(
                 SystemCatalogProjectionSummary(
                     provider=integration.provider,
@@ -557,9 +484,8 @@ class ImageGenerationCatalogService:
                 )
             )
         except Exception as exc:
-            async with self.session_manager() as session:
-                await self.catalog_repository.mark_attempt_failed(
-                    session,
+            await self.operations.fail_attempt(
+                CatalogAttemptFailure(
                     attempt_id=attempt_id,
                     finished_at=_utcnow(),
                     failure_code=type(exc).__name__,
@@ -573,6 +499,7 @@ class ImageGenerationCatalogService:
                         "trigger": trigger.value,
                     },
                 )
+            )
             raise
 
     async def validate_option(
@@ -597,53 +524,50 @@ class ImageGenerationCatalogService:
             image_config = decode_image_generation_model_config(image_tool.config)
         except InvalidImageGenerationModelConfig as exc:
             return [str(exc)]
-        async with self.session_manager() as session:
-            integration = await self.integration_repository.get_by_id(
-                session,
-                selection.llm_provider_integration_id,
-            )
-            if integration is None or integration.workspace_id != workspace_id:
-                return ["The image generation provider integration was not found."]
-            if integration.provider != selection.provider:
-                return [
-                    "The image generation provider does not match the "
-                    "conversation model."
-                ]
-            if not integration.enabled:
-                return [
-                    "Enable the provider integration before using image generation."
-                ]
-            if isinstance(image_config, MaintainedImageGenerationDefault):
-                if image_generation_default_available(
-                    provider=integration.provider,
-                    integration_enabled=integration.enabled,
-                ):
-                    return []
-                return [
-                    "This provider does not support maintained-default "
-                    "image generation."
-                ]
-            if not image_generation_explicit_selection_supported(integration.provider):
-                return [
-                    "This provider supports only the maintained image "
-                    "generation default."
-                ]
+        registry_entry = None
+        lookup_identifier = None
+        if isinstance(image_config, ExplicitImageGenerationModel):
             registry_entry = image_generation_registry_entry(
-                provider=integration.provider,
+                provider=selection.provider,
                 provider_model_identifier=image_config.model_identifier,
             )
-            if registry_entry is None or not image_generation_lifecycle_is_executable(
+            if registry_entry is not None and image_generation_lifecycle_is_executable(
                 registry_entry.lifecycle_status
             ):
-                return [
-                    "Choose an available image generation model or use the default."
-                ]
-            entry = await self.catalog_repository.get_selectable_image_generation_entry(
-                session,
-                integration_id=integration.id,
-                workspace_id=workspace_id,
-                model_identifier=image_config.model_identifier,
-            )
+                lookup_identifier = image_config.model_identifier
+        authority = await self.operations.option_authority(
+            integration_id=selection.llm_provider_integration_id,
+            workspace_id=workspace_id,
+            expected_provider=selection.provider,
+            model_identifier=lookup_identifier,
+        )
+        integration = authority.integration
+        if integration is None or integration.workspace_id != workspace_id:
+            return ["The image generation provider integration was not found."]
+        if integration.provider != selection.provider:
+            return [
+                "The image generation provider does not match the conversation model."
+            ]
+        if not integration.enabled:
+            return ["Enable the provider integration before using image generation."]
+        if isinstance(image_config, MaintainedImageGenerationDefault):
+            if image_generation_default_available(
+                provider=integration.provider,
+                integration_enabled=integration.enabled,
+            ):
+                return []
+            return [
+                "This provider does not support maintained-default image generation."
+            ]
+        if not image_generation_explicit_selection_supported(integration.provider):
+            return [
+                "This provider supports only the maintained image generation default."
+            ]
+        if registry_entry is None or not image_generation_lifecycle_is_executable(
+            registry_entry.lifecycle_status
+        ):
+            return ["Choose an available image generation model or use the default."]
+        entry = authority.entry
         if entry is None:
             return [
                 "Refresh the image model catalog, choose an available model, "
@@ -729,42 +653,35 @@ class ImageGenerationCatalogService:
                 integration_id=integration_id,
                 model_identifier=image_config.model_identifier,
             )
-        async with self.session_manager() as session:
-            page = await (
-                self.catalog_repository.list_image_generation_entries_by_integration
-            )(
-                session,
+        authority = await self.operations.runtime_authority(
+            integration_id=integration_id,
+            workspace_id=workspace_id,
+            model_identifier=image_config.model_identifier,
+        )
+        page = authority.page
+        if page is None or page.catalog.current_snapshot_id is None:
+            return ImageGenerationRuntimeConfigurationError(
+                reason="catalog_unavailable",
                 integration_id=integration_id,
-                workspace_id=workspace_id,
-            )
-            if page is None or page.catalog.current_snapshot_id is None:
-                return ImageGenerationRuntimeConfigurationError(
-                    reason="catalog_unavailable",
-                    integration_id=integration_id,
-                    model_identifier=image_config.model_identifier,
-                )
-            if (
-                page.snapshot_catalog_configuration_version
-                != page.current_integration_catalog_configuration_version
-            ):
-                return ImageGenerationRuntimeConfigurationError(
-                    reason="catalog_generation_mismatch",
-                    integration_id=integration_id,
-                    model_identifier=image_config.model_identifier,
-                )
-            entry = await self.catalog_repository.get_selectable_image_generation_entry(
-                session,
-                integration_id=integration_id,
-                workspace_id=workspace_id,
                 model_identifier=image_config.model_identifier,
             )
+        if (
+            page.snapshot_catalog_configuration_version
+            != page.current_integration_catalog_configuration_version
+        ):
+            return ImageGenerationRuntimeConfigurationError(
+                reason="catalog_generation_mismatch",
+                integration_id=integration_id,
+                model_identifier=image_config.model_identifier,
+            )
+        entry = authority.entry
         if entry is None:
             return ImageGenerationRuntimeConfigurationError(
                 reason="model_unavailable",
                 integration_id=integration_id,
                 model_identifier=image_config.model_identifier,
             )
-        if entry[1].provider != provider:
+        if entry.entry.provider != provider:
             return ImageGenerationRuntimeConfigurationError(
                 reason="provider_model_mismatch",
                 integration_id=integration_id,

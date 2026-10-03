@@ -1,5 +1,6 @@
 """Admin-managed provider OAuth System Settings service."""
 
+from collections.abc import AsyncIterator
 from typing import Annotated
 from urllib.parse import urlsplit
 
@@ -49,6 +50,12 @@ from .data import (
 )
 
 
+async def get_provider_oauth_health_http_client() -> AsyncIterator[httpx.AsyncClient]:
+    """Own the credential-free health transport at the dependency boundary."""
+    async with httpx.AsyncClient(timeout=5.0, follow_redirects=False) as client:
+        yield client
+
+
 class ExternalAccountOAuthSystemSettingService:
     """Resolve and mutate one provider OAuth System Settings Section."""
 
@@ -56,9 +63,13 @@ class ExternalAccountOAuthSystemSettingService:
         self,
         system_settings: Annotated[SystemSettingsService, Depends()],
         config: Annotated[Config, Depends(get_config)],
+        http_client: Annotated[
+            httpx.AsyncClient, Depends(get_provider_oauth_health_http_client)
+        ],
     ) -> None:
         self.system_settings = system_settings
         self.config = config
+        self.http_client = http_client
 
     async def get_detail(self, provider: str) -> ExternalAccountOAuthDetail:
         """Return a redacted provider detail projection."""
@@ -165,6 +176,7 @@ class ExternalAccountOAuthSystemSettingService:
                     ExternalChannelProvider(provider),
                     self.config,
                 ),
+                http_client=self.http_client,
             )
         except ValueError, ValidationError:
             result = SystemSettingHealthResult(
@@ -304,25 +316,26 @@ class _ProviderOAuthUnavailable(Exception):
 
 async def _check_provider_endpoint(
     provider: str,
-    endpoints: ExternalAccountOAuthEndpointConfiguration | None = None,
+    endpoints: ExternalAccountOAuthEndpointConfiguration | None,
+    *,
+    http_client: httpx.AsyncClient,
 ) -> None:
     """Check authorization, token, and identity endpoints without credentials."""
     resolved_endpoints = endpoints or external_account_oauth_endpoints(
         ExternalChannelProvider(provider)
     )
     try:
-        async with httpx.AsyncClient(timeout=5.0, follow_redirects=False) as client:
-            for endpoint in (
-                resolved_endpoints.authorization_url,
-                resolved_endpoints.token_url,
-                resolved_endpoints.userinfo_url,
-            ):
-                response = await client.get(endpoint)
-                if response.status_code >= 500:
-                    raise _ProviderOAuthUnavailable("provider_endpoint_unreachable")
+        for endpoint in (
+            resolved_endpoints.authorization_url,
+            resolved_endpoints.token_url,
+            resolved_endpoints.userinfo_url,
+        ):
+            response = await http_client.get(endpoint)
+            if response.status_code >= 500:
+                raise _ProviderOAuthUnavailable("provider_endpoint_unreachable")
     except _ProviderOAuthUnavailable:
         raise
-    except Exception:
+    except httpx.HTTPError:
         raise _ProviderOAuthUnavailable("provider_endpoint_unreachable") from None
 
 

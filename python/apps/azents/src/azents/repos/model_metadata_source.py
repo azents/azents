@@ -15,6 +15,7 @@ from azents.core.model_catalog_source import (
     CATALOG_SOURCE_KIND,
     CATALOG_SOURCE_SCHEMA_VERSION,
     CatalogSourcePayload,
+    ModelMetadataSourceKind,
 )
 from azents.rdb.models.llm_catalog import RDBLLMCatalogSyncAttempt
 from azents.rdb.models.model_metadata_source import (
@@ -125,7 +126,7 @@ class ModelMetadataSourceRepository:
         *,
         authority: RDBModelMetadataSource,
         attempt_id: str,
-        source_kind: str,
+        source_kind: ModelMetadataSourceKind,
         source_schema_version: str,
         source_url: str,
         source_hash: str,

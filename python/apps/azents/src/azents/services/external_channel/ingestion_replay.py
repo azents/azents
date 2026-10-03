@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.core.enums import (
     ExternalChannelAccessRequestStatus,
     ExternalChannelConnectionStatus,
+    ExternalChannelIngressAuthorityKind,
     ExternalChannelInteractionStatus,
     ExternalChannelParticipationSettingStatus,
     ExternalChannelPrincipalAuthorType,
@@ -17,6 +18,25 @@ from azents.core.enums import (
     ExternalChannelResourceStatus,
     ExternalChannelSetupClaimStatus,
 )
+from azents.core.external_channel_conversation_data import (
+    ExternalChannelConversationScope,
+    ExternalChannelOperationDeadline,
+)
+from azents.core.external_channel_ingestion import (
+    ExternalChannelIngestionOperation,
+    ExternalChannelIngestionOutcome,
+    ExternalChannelIngestionOutcomeKind,
+    ExternalChannelIngestionReason,
+    ExternalChannelIngestionRequest,
+    ExternalChannelIngressAuthority,
+    ExternalChannelReplayBoundary,
+    ExternalChannelTriggerLocator,
+)
+from azents.core.external_channel_participation_state import (
+    build_setup_continuation_request,
+    setup_source_from_projection,
+)
+from azents.core.external_channel_selector_state import selector_state_from_interaction
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.external_channel.data import (
@@ -27,31 +47,11 @@ from azents.repos.external_channel.data import (
     ExternalChannelResource,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
-from azents.services.external_channel.conversation import (
-    ExternalChannelConversationScope,
-    ExternalChannelOperationDeadline,
-)
 from azents.services.external_channel.ingestion import (
     ExternalChannelConversationIngestionService,
-    ExternalChannelIngestionOperation,
-    ExternalChannelIngestionOutcome,
-    ExternalChannelIngestionOutcomeKind,
-    ExternalChannelIngestionReason,
-    ExternalChannelIngestionRequest,
-    ExternalChannelIngressAuthority,
-    ExternalChannelIngressAuthorityKind,
-    ExternalChannelReplayBoundary,
-    ExternalChannelTriggerLocator,
 )
 from azents.services.external_channel.ingestion_deps import (
     get_external_channel_conversation_ingestion_service,
-)
-from azents.services.external_channel.participation_state import (
-    build_setup_continuation_request,
-    setup_source_from_projection,
-)
-from azents.services.external_channel.selector_state import (
-    selector_state_from_interaction,
 )
 
 _REPLAY_OPERATION_BUDGET = datetime.timedelta(seconds=30)

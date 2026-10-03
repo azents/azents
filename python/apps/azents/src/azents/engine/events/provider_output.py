@@ -15,6 +15,7 @@ from azcommon.types import JSONValue
 from PIL import Image, UnidentifiedImageError
 
 from azents.core.enums import ExchangeFileOrigin, ExchangeFileProvenanceKind
+from azents.core.session_resource_authority import SessionResourceAuthority
 from azents.engine.events.generated_files import (
     GeneratedFileOutput,
     PendingGeneratedFileOutput,
@@ -50,7 +51,6 @@ from azents.services.model_file import (
     ModelFileService,
     normalize_model_file_body,
 )
-from azents.services.session_resource_authority import SessionResourceAuthority
 
 _MAX_DECODED_IMAGE_BYTES = 20 * 1024 * 1024
 _MAX_CLIENT_IMAGES_PER_RESULT = 8

@@ -6,11 +6,6 @@ from collections.abc import Sequence
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import AgentRunStatus, EventKind
-from azents.engine.events.protocols import (
-    AgentRunCreateRepository,
-    SessionHeadRepository,
-    TranscriptRepository,
-)
 from azents.engine.events.types import (
     AgentRunState,
     Event,
@@ -20,6 +15,11 @@ from azents.engine.io.user_input import RunUserMessage
 from azents.rdb.session import SessionManager
 from azents.repos.agent_execution.data import EventCreate
 from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.engine_event_contracts import (
+    AgentRunCreateRepository,
+    SessionHeadRepository,
+    TranscriptRepository,
+)
 
 
 @dataclasses.dataclass(frozen=True)

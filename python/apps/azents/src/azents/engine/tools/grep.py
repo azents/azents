@@ -5,7 +5,7 @@ import re
 from typing import ClassVar
 
 import httpx
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from azents.engine.run.types import FunctionTool, FunctionToolError
 from azents.engine.tooling.make_tool import make_tool
@@ -45,6 +45,8 @@ _DEFAULT_EXCLUDE_PATTERNS = (
 
 class GrepInput(BaseModel):
     """grep tool input."""
+
+    model_config = ConfigDict(extra="forbid")
 
     default_exclude_patterns: ClassVar[tuple[str, ...]] = _DEFAULT_EXCLUDE_PATTERNS
 

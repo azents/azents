@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import cast
 
 from azents.core.enums import ExternalChannelConversationScopeKind
-from azents.services.external_channel.conversation import (
+from azents.core.external_channel_conversation_data import (
     ExternalChannelConversationLockLease,
     ExternalChannelConversationScope,
     ExternalChannelOperationDeadline,

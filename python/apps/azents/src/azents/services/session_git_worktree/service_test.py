@@ -32,6 +32,9 @@ from azents.core.enums import (
     WorkspaceUserRole,
 )
 from azents.core.inference_profile import RequestedInferenceProfile
+from azents.core.session_workspace_paths import (
+    InvalidProjectPath,
+)
 from azents.core.skill_projection import SkillProjectionState
 from azents.core.workspace import WorkspaceCreate
 from azents.engine.events.action_messages import (
@@ -44,7 +47,6 @@ from azents.engine.events.action_messages import (
 from azents.engine.events.types import ActionExecutionResultPayload
 from azents.engine.run.input import InputMessage
 from azents.engine.run.types import SHUTDOWN_CANCEL_MESSAGE, USER_STOP_CANCEL_MESSAGE
-from azents.engine.tools.skill import SkillStateStore
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_automatic_project_setting import (
     RDBAgentAutomaticProjectSetting,
@@ -69,13 +71,22 @@ from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime.data import AgentRuntime
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession, AgentSessionCreate
+from azents.repos.agent_session_input_operations import (
+    AgentSessionInputOperationsRepository,
+)
 from azents.repos.chat_write_request import ChatWriteRequestRepository
-from azents.repos.external_channel.repository import ExternalChannelRepository
+from azents.repos.exchange_file import ExchangeFileRepository
+from azents.repos.input_attachment_claim import InputAttachmentClaimRepository
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.mailbox.admission import MailboxAdmissionRepository
 from azents.repos.mailbox.data import (
     AgentRemoveGitWorktreeContinuationResult,
     TurnActionContinuationMailboxPayload,
+)
+from azents.repos.mailbox_database import MailboxDatabaseRepository
+from azents.repos.mailbox_runtime_operations import MailboxRuntimeOperations
+from azents.repos.root_agent_session_creation import (
+    RootAgentSessionCreationRepository,
 )
 from azents.repos.scheduled_task.repository import ScheduledTaskRepository
 from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
@@ -96,6 +107,7 @@ from azents.repos.session_workspace_project_operations import (
     SessionWorkspaceProjectOperationsRepository,
 )
 from azents.repos.skill_state import SkillStateRepository
+from azents.repos.skill_state_store import SkillStateStore
 from azents.repos.toolkit_state import ToolkitStateRepository
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
@@ -130,9 +142,6 @@ from azents.services.agent_session_input import AgentSessionInputService
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.mailbox import MailboxService, PromotedMailboxItems
 from azents.services.model_file import ModelFileService
-from azents.services.root_agent_session_creation import (
-    RootAgentSessionCreationService,
-)
 from azents.services.runtime_storage_error import RuntimeStorageError
 from azents.services.session_git_worktree import (
     GitWorktreeCleanupNotFound,
@@ -142,7 +151,6 @@ from azents.services.session_git_worktree import (
 from azents.services.session_working_folder_binding import (
     SessionWorkingFolderBindingService,
 )
-from azents.services.session_workspace_project import InvalidProjectPath
 from azents.testing.model_selection import (
     make_test_model_selection_dict,
     make_test_selectable_model_option_dicts,
@@ -986,50 +994,44 @@ def _input_service(
 ) -> AgentSessionInputService:
     """Build AgentSessionInputService for setup action enqueue tests."""
     del worktree_service
+    mailbox_repository = MailboxRepository()
+    event_repository = EventTranscriptRepository()
+    action_repository = ActionExecutionRepository()
     return AgentSessionInputService(
-        agent_repository=AgentRepository(),
-        agent_project_preset_repository=AgentProjectPresetRepository(),
-        agent_project_catalog_repository=AgentProjectCatalogRepository(),
-        agent_project_default_repository=AgentProjectDefaultRepository(),
-        agent_runtime_repository=_RuntimeRepository(),
-        agent_session_repository=AgentSessionRepository(),
-        root_agent_session_creation_service=RootAgentSessionCreationService(
-            agent_session_repository=AgentSessionRepository(),
+        operations=AgentSessionInputOperationsRepository(
             agent_repository=AgentRepository(),
-            automatic_project_repository=AgentAutomaticProjectRepository(),
+            agent_project_preset_repository=AgentProjectPresetRepository(),
+            agent_project_catalog_repository=AgentProjectCatalogRepository(),
+            agent_project_default_repository=AgentProjectDefaultRepository(),
+            agent_runtime_repository=_RuntimeRepository(),
+            agent_session_repository=AgentSessionRepository(),
+            root_session_repository=RootAgentSessionCreationRepository(
+                agent_session_repository=AgentSessionRepository(),
+                agent_repository=AgentRepository(),
+                automatic_project_repository=AgentAutomaticProjectRepository(),
+                session_workspace_project_repository=SessionWorkspaceProjectRepository(),
+            ),
+            chat_write_request_repository=ChatWriteRequestRepository(),
             session_workspace_project_repository=SessionWorkspaceProjectRepository(),
-        ),
-        chat_write_request_repository=ChatWriteRequestRepository(),
-        session_workspace_project_repository=SessionWorkspaceProjectRepository(),
-        workspace_user_repository=WorkspaceUserRepository(),
-        exchange_file_service=_ExchangeFileService(),
-        mailbox_admission_repository=MailboxAdmissionRepository(
+            workspace_user_repository=WorkspaceUserRepository(),
+            attachment_claim_repository=InputAttachmentClaimRepository(
+                exchange_file_repository=ExchangeFileRepository(),
+                agent_session_repository=AgentSessionRepository(),
+                workspace_user_repository=WorkspaceUserRepository(),
+            ),
+            mailbox_admission_repository=MailboxAdmissionRepository(
+                session_manager=session_manager,
+                mailbox_item_repository=mailbox_repository,
+                agent_session_repository=AgentSessionRepository(),
+            ),
+            mailbox_repository=mailbox_repository,
+            mailbox_database_repository=MailboxDatabaseRepository(
+                mailbox_item_repository=mailbox_repository,
+                event_transcript_repository=event_repository,
+                action_execution_repository=action_repository,
+            ),
             session_manager=session_manager,
-            mailbox_item_repository=MailboxRepository(),
-            agent_session_repository=AgentSessionRepository(),
-        ),
-        mailbox_item_service=MailboxService(
-            session_manager=session_manager,
-            mailbox_item_repository=MailboxRepository(),
-            exchange_file_service=_ExchangeFileService(),
-            model_file_service=_ModelFileServiceDouble(),
-            agent_session_repository=AgentSessionRepository(),
-            event_transcript_repository=EventTranscriptRepository(),
-            agent_run_repository=AgentRunRepository(),
-            scheduled_task_repository=ScheduledTaskRepository(),
-            scheduled_task_cycle_repository=ScheduledTaskCycleRepository(
-                toolkit_state_repository=ToolkitStateRepository(),
-            ),
-            action_execution_repository=ActionExecutionRepository(),
-            turn_action_capabilities=make_test_turn_action_capabilities(
-                session_manager
-            ),
-            promotion_repository=make_test_mailbox_promotion_repository(
-                session_manager
-            ),
-            external_channel_repository=ExternalChannelRepository(),
-        ),
-        session_manager=session_manager,
+        )
     )
 
 
@@ -1038,21 +1040,22 @@ def _mailbox_service(
 ) -> MailboxService:
     """Build the production MailboxService with test collaborators."""
     return MailboxService(
-        session_manager=session_manager,
-        mailbox_item_repository=MailboxRepository(),
+        runtime_operations=MailboxRuntimeOperations(
+            session_manager=session_manager,
+            mailbox_item_repository=MailboxRepository(),
+            agent_session_repository=AgentSessionRepository(),
+            event_transcript_repository=EventTranscriptRepository(),
+            agent_run_repository=AgentRunRepository(),
+            scheduled_task_repository=ScheduledTaskRepository(),
+            scheduled_task_cycle_repository=ScheduledTaskCycleRepository(
+                toolkit_state_repository=ToolkitStateRepository(),
+            ),
+            action_execution_repository=ActionExecutionRepository(),
+        ),
         exchange_file_service=_ExchangeFileService(),
         model_file_service=_ModelFileServiceDouble(),
-        agent_session_repository=AgentSessionRepository(),
-        event_transcript_repository=EventTranscriptRepository(),
-        agent_run_repository=AgentRunRepository(),
-        scheduled_task_repository=ScheduledTaskRepository(),
-        scheduled_task_cycle_repository=ScheduledTaskCycleRepository(
-            toolkit_state_repository=ToolkitStateRepository(),
-        ),
-        action_execution_repository=ActionExecutionRepository(),
         turn_action_capabilities=make_test_turn_action_capabilities(session_manager),
         promotion_repository=make_test_mailbox_promotion_repository(session_manager),
-        external_channel_repository=ExternalChannelRepository(),
     )
 
 
@@ -1100,25 +1103,26 @@ async def _execute_first_setup_action(
         )
     expected_buffer_id = pending[0].id
     promoted = await MailboxService(
-        session_manager=rdb_session_manager,
-        mailbox_item_repository=MailboxRepository(),
+        runtime_operations=MailboxRuntimeOperations(
+            session_manager=rdb_session_manager,
+            mailbox_item_repository=MailboxRepository(),
+            agent_session_repository=AgentSessionRepository(),
+            event_transcript_repository=EventTranscriptRepository(),
+            agent_run_repository=AgentRunRepository(),
+            scheduled_task_repository=ScheduledTaskRepository(),
+            scheduled_task_cycle_repository=ScheduledTaskCycleRepository(
+                toolkit_state_repository=ToolkitStateRepository(),
+            ),
+            action_execution_repository=ActionExecutionRepository(),
+        ),
         exchange_file_service=_ExchangeFileService(),
         model_file_service=_ModelFileServiceDouble(),
-        agent_session_repository=AgentSessionRepository(),
-        event_transcript_repository=EventTranscriptRepository(),
-        agent_run_repository=AgentRunRepository(),
-        scheduled_task_repository=ScheduledTaskRepository(),
-        scheduled_task_cycle_repository=ScheduledTaskCycleRepository(
-            toolkit_state_repository=ToolkitStateRepository(),
-        ),
-        action_execution_repository=ActionExecutionRepository(),
         turn_action_capabilities=make_test_turn_action_capabilities(
             rdb_session_manager
         ),
         promotion_repository=make_test_mailbox_promotion_repository(
             rdb_session_manager
         ),
-        external_channel_repository=ExternalChannelRepository(),
     ).flush_session_mailbox_items(
         session_id=session_id,
         owner_generation=0,
@@ -1151,25 +1155,26 @@ async def _execute_first_setup_action(
         )
     expected_buffer_id = pending[0].id
     promoted = await MailboxService(
-        session_manager=rdb_session_manager,
-        mailbox_item_repository=MailboxRepository(),
+        runtime_operations=MailboxRuntimeOperations(
+            session_manager=rdb_session_manager,
+            mailbox_item_repository=MailboxRepository(),
+            agent_session_repository=AgentSessionRepository(),
+            event_transcript_repository=EventTranscriptRepository(),
+            agent_run_repository=AgentRunRepository(),
+            scheduled_task_repository=ScheduledTaskRepository(),
+            scheduled_task_cycle_repository=ScheduledTaskCycleRepository(
+                toolkit_state_repository=ToolkitStateRepository(),
+            ),
+            action_execution_repository=ActionExecutionRepository(),
+        ),
         exchange_file_service=_ExchangeFileService(),
         model_file_service=_ModelFileServiceDouble(),
-        agent_session_repository=AgentSessionRepository(),
-        event_transcript_repository=EventTranscriptRepository(),
-        agent_run_repository=AgentRunRepository(),
-        scheduled_task_repository=ScheduledTaskRepository(),
-        scheduled_task_cycle_repository=ScheduledTaskCycleRepository(
-            toolkit_state_repository=ToolkitStateRepository(),
-        ),
-        action_execution_repository=ActionExecutionRepository(),
         turn_action_capabilities=make_test_turn_action_capabilities(
             rdb_session_manager
         ),
         promotion_repository=make_test_mailbox_promotion_repository(
             rdb_session_manager
         ),
-        external_channel_repository=ExternalChannelRepository(),
     ).flush_session_mailbox_items(
         session_id=session_id,
         owner_generation=0,

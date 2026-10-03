@@ -12,7 +12,10 @@ from azents.core.model_catalog_source import (
     CATALOG_SOURCE_KIND,
     CatalogSourcePayload,
 )
+from azents.core.model_metadata_collection_data import FetchedModelMetadataSource
 from azents.rdb.session import SessionManager
+from azents.repos.model_metadata_operations import ModelMetadataSourceOperations
+from azents.repos.model_metadata_read import ModelMetadataReadRepository
 from azents.repos.model_metadata_source import ModelMetadataSourceRepository
 from azents.services.catalog_source_collection import (
     DEFAULT_CATALOG_SOURCE_URL,
@@ -20,7 +23,6 @@ from azents.services.catalog_source_collection import (
 )
 from azents.services.model_metadata_source import (
     CatalogSourceAdapter,
-    FetchedModelMetadataSource,
     ModelMetadataSourceSyncError,
     ModelMetadataSourceSyncService,
     get_catalog_collection_policy,
@@ -108,9 +110,15 @@ async def test_sync_publishes_and_selects_current_source(
 ) -> None:
     adapter = AsyncMock(spec=CatalogSourceAdapter)
     adapter.fetch.return_value = _fetched(_payload(12))
+    repository = ModelMetadataSourceRepository()
     service = ModelMetadataSourceSyncService(
-        session_manager=rdb_session_manager,
-        repository=ModelMetadataSourceRepository(),
+        operations=ModelMetadataSourceOperations(
+            session_manager=rdb_session_manager,
+            repository=repository,
+        ),
+        read_repository=ModelMetadataReadRepository(
+            session_manager=rdb_session_manager, source_snapshot_repository=repository
+        ),
         source_adapter=adapter,
     )
     snapshot = await service.sync_current_source()
@@ -127,8 +135,12 @@ async def test_sync_rejects_material_provider_reduction(
     adapter.fetch.side_effect = [_fetched(_payload(30)), _fetched(_payload(3))]
     repository = ModelMetadataSourceRepository()
     service = ModelMetadataSourceSyncService(
-        session_manager=rdb_session_manager,
-        repository=repository,
+        operations=ModelMetadataSourceOperations(
+            session_manager=rdb_session_manager, repository=repository
+        ),
+        read_repository=ModelMetadataReadRepository(
+            session_manager=rdb_session_manager, source_snapshot_repository=repository
+        ),
         source_adapter=adapter,
     )
     original = await service.sync_current_source()
@@ -164,8 +176,12 @@ async def test_fetch_failure_terminalizes_attempt_and_preserves_source(
     adapter.fetch.side_effect = [_fetched(_payload(12)), failure]
     repository = ModelMetadataSourceRepository()
     service = ModelMetadataSourceSyncService(
-        session_manager=rdb_session_manager,
-        repository=repository,
+        operations=ModelMetadataSourceOperations(
+            session_manager=rdb_session_manager, repository=repository
+        ),
+        read_repository=ModelMetadataReadRepository(
+            session_manager=rdb_session_manager, source_snapshot_repository=repository
+        ),
         source_adapter=adapter,
     )
     original = await service.sync_current_source()

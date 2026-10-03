@@ -32,7 +32,6 @@ from azents.engine.tools.deps import (
 )
 from azents.engine.tools.skill import (
     SkillActionProjectionReader,
-    SkillStateStore,
     load_skill_projection_for_actions,
     skill_action_id,
     skill_actions_from_snapshot,
@@ -43,6 +42,7 @@ from azents.repos.mailbox.promotion import (
     MailboxGoalCreate,
     MailboxSkillRevalidation,
 )
+from azents.repos.skill_state_store import SkillStateStore
 from azents.services.vfs import (
     VfsFileResolutionError,
     VfsResolvedFile,

@@ -4,8 +4,7 @@ import datetime
 import logging
 from contextlib import AbstractAsyncContextManager
 from types import SimpleNamespace
-from typing import Any, cast
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, create_autospec
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,24 +19,90 @@ from azents.core.enums import (
     ExternalChannelResponseMode,
     ExternalChannelSetupClaimStatus,
 )
-from azents.services.external_channel.access import (
-    ExternalChannelAccessDecisionError,
-    ExternalChannelAccessService,
-)
-from azents.services.external_channel.conversation_provisioning import (
+from azents.core.external_channel_access import ExternalChannelAccessDecisionError
+from azents.core.external_channel_conversation_preparation import (
     ExternalChannelConversationPreparation,
     ExternalChannelConversationProvisioningError,
 )
-from azents.services.external_channel.ingestion import (
+from azents.core.external_channel_ingestion import (
     ExternalChannelIngestionOutcome,
     ExternalChannelIngestionOutcomeKind,
     ExternalChannelIngestionReason,
 )
+from azents.repos.agent import AgentRepository
+from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.external_channel.access_operations import (
+    ExternalChannelAccessOperations,
+)
+from azents.repos.external_channel.conversation_provisioning import (
+    ExternalChannelConversationProvisioningRepository,
+)
+from azents.repos.external_channel.repository import ExternalChannelRepository
+from azents.repos.external_channel.work import ExternalChannelWorkRepository
+from azents.repos.root_agent_session_creation import RootAgentSessionCreationRepository
+from azents.services.external_channel.access import ExternalChannelAccessService
+from azents.services.external_channel.conversation_provisioning import (
+    ExternalChannelConversationProvisioningService,
+)
+from azents.services.external_channel.ingestion_replay import (
+    ExternalChannelIngestionReplayService,
+)
+
+
+class _ProviderPreparationFake(ExternalChannelConversationProvisioningService):
+    """Exercise only the declared external preparation boundary."""
+
+    def __init__(self, prepare: AsyncMock) -> None:
+        self.prepare_mock = prepare
+
+    async def prepare(
+        self, *, connection_id: str, target_resource_id: str
+    ) -> ExternalChannelConversationPreparation:
+        result = await self.prepare_mock(
+            connection_id=connection_id, target_resource_id=target_resource_id
+        )
+        assert isinstance(result, ExternalChannelConversationPreparation)
+        return result
+
+
+class _ProviderRetentionFake(ExternalChannelConversationProvisioningRepository):
+    """Record the exact DB-only retention primitive without provider effects."""
+
+    def __init__(self, apply: AsyncMock) -> None:
+        self.apply_mock = apply
+
+    async def apply_in_session(
+        self,
+        session: AsyncSession,
+        *,
+        target_resource_id: str,
+        preparation: ExternalChannelConversationPreparation,
+    ) -> None:
+        await self.apply_mock(
+            session, target_resource_id=target_resource_id, preparation=preparation
+        )
+
+
+def _work_repository(prepare: AsyncMock) -> ExternalChannelWorkRepository:
+    repository: ExternalChannelWorkRepository = create_autospec(
+        ExternalChannelWorkRepository, instance=True
+    )
+    repository.prepare_access_control_delete = prepare
+    return repository
+
+
+class _Session(AsyncSession):
+    def __init__(self) -> None:
+        super().__init__()
+        self.commit_mock = AsyncMock()
+
+    async def commit(self) -> None:
+        await self.commit_mock()
 
 
 class _SessionContext(AbstractAsyncContextManager[AsyncSession]):
     def __init__(self) -> None:
-        self.session = cast(AsyncSession, SimpleNamespace(commit=AsyncMock()))
+        self.session = _Session()
 
     async def __aenter__(self) -> AsyncSession:
         return self.session
@@ -110,7 +175,7 @@ async def test_allow_logs_sanitized_event_only_for_new_session(
     decided.status = ExternalChannelAccessRequestStatus.ALLOWED
     decided.agent_session_id = "session-secret"
 
-    repository = MagicMock()
+    repository = create_autospec(ExternalChannelRepository, instance=True)
     repository.get_access_request = AsyncMock(return_value=request)
     repository.get_agent_route = AsyncMock(return_value=route)
     repository.lock_connection_for_routing = AsyncMock(return_value=connection)
@@ -126,7 +191,7 @@ async def test_allow_logs_sanitized_event_only_for_new_session(
         return_value=None
     )
 
-    agent_repository = MagicMock()
+    agent_repository = create_autospec(AgentRepository, instance=True)
     agent_repository.get_by_id = AsyncMock(
         return_value=SimpleNamespace(
             id="agent-1",
@@ -137,14 +202,14 @@ async def test_allow_logs_sanitized_event_only_for_new_session(
             ),
         )
     )
-    root_creation = MagicMock()
+    root_creation = create_autospec(RootAgentSessionCreationRepository, instance=True)
     root_creation.create_root_session = AsyncMock(
         return_value=SimpleNamespace(
             agent_session=SimpleNamespace(id="session-secret"),
             created=created,
         )
     )
-    replay = MagicMock()
+    replay = create_autospec(ExternalChannelIngestionReplayService, instance=True)
     replay.replay_access_allow = AsyncMock(
         return_value=ExternalChannelIngestionOutcome(
             kind=ExternalChannelIngestionOutcomeKind.ACCEPTED,
@@ -164,19 +229,19 @@ async def test_allow_logs_sanitized_event_only_for_new_session(
     )
     provisioning.apply = AsyncMock()
     service = ExternalChannelAccessService(
-        session_manager=cast(Any, _SessionManager()),
-        repository=cast(Any, repository),
-        work_repository=cast(
-            Any,
-            SimpleNamespace(
-                prepare_access_control_delete=AsyncMock(return_value=None),
+        operations=ExternalChannelAccessOperations(
+            session_manager=_SessionManager(),
+            repository=repository,
+            work_repository=_work_repository(AsyncMock(return_value=None)),
+            agent_repository=agent_repository,
+            agent_session_repository=create_autospec(
+                AgentSessionRepository, instance=True
             ),
+            root_agent_session_creation_repository=root_creation,
+            conversation_provisioning=_ProviderRetentionFake(provisioning.apply),
         ),
-        agent_repository=cast(Any, agent_repository),
-        agent_session_repository=cast(Any, MagicMock()),
-        root_agent_session_creation_service=cast(Any, root_creation),
-        conversation_provisioning=cast(Any, provisioning),
-        ingestion_replay_service=cast(Any, replay),
+        conversation_provisioning=_ProviderPreparationFake(provisioning.prepare),
+        ingestion_replay_service=replay,
     )
 
     with caplog.at_level(
@@ -255,7 +320,7 @@ async def test_setup_allow_grants_access_without_binding_session_or_replay() -> 
     grant = SimpleNamespace(scope=ExternalChannelAccessGrantScope.AGENT)
     decided = SimpleNamespace(**vars(request))
     decided.status = ExternalChannelAccessRequestStatus.ALLOWED
-    repository = MagicMock()
+    repository = create_autospec(ExternalChannelRepository, instance=True)
     repository.get_access_request = AsyncMock(return_value=request)
     repository.get_agent_route = AsyncMock(return_value=route)
     repository.lock_connection_for_routing = AsyncMock(return_value=connection)
@@ -270,27 +335,27 @@ async def test_setup_allow_grants_access_without_binding_session_or_replay() -> 
         return_value=None
     )
     repository.create_binding_idempotent = AsyncMock()
-    root_creation = MagicMock()
+    root_creation = create_autospec(RootAgentSessionCreationRepository, instance=True)
     root_creation.create_root_session = AsyncMock()
-    replay = MagicMock()
+    replay = create_autospec(ExternalChannelIngestionReplayService, instance=True)
     replay.replay_access_allow = AsyncMock()
     provisioning = MagicMock()
     provisioning.prepare = AsyncMock()
     provisioning.apply = AsyncMock()
     service = ExternalChannelAccessService(
-        session_manager=cast(Any, _SessionManager()),
-        repository=cast(Any, repository),
-        work_repository=cast(
-            Any,
-            SimpleNamespace(
-                prepare_access_control_delete=AsyncMock(return_value=None),
+        operations=ExternalChannelAccessOperations(
+            session_manager=_SessionManager(),
+            repository=repository,
+            work_repository=_work_repository(AsyncMock(return_value=None)),
+            agent_repository=create_autospec(AgentRepository, instance=True),
+            agent_session_repository=create_autospec(
+                AgentSessionRepository, instance=True
             ),
+            root_agent_session_creation_repository=root_creation,
+            conversation_provisioning=_ProviderRetentionFake(provisioning.apply),
         ),
-        agent_repository=cast(Any, MagicMock()),
-        agent_session_repository=cast(Any, MagicMock()),
-        root_agent_session_creation_service=cast(Any, root_creation),
-        conversation_provisioning=cast(Any, provisioning),
-        ingestion_replay_service=cast(Any, replay),
+        conversation_provisioning=_ProviderPreparationFake(provisioning.prepare),
+        ingestion_replay_service=replay,
     )
 
     result = await service.allow(
@@ -340,7 +405,7 @@ async def test_allow_preparation_failure_creates_no_session_or_decision() -> Non
         connection_id="connection-1",
         status=ExternalChannelResourceStatus.ACTIVE,
     )
-    repository = MagicMock()
+    repository = create_autospec(ExternalChannelRepository, instance=True)
     repository.get_access_request = AsyncMock(return_value=request)
     repository.get_agent_route = AsyncMock(return_value=route)
     repository.lock_connection_for_routing = AsyncMock(return_value=connection)
@@ -349,14 +414,14 @@ async def test_allow_preparation_failure_creates_no_session_or_decision() -> Non
     repository.lock_connected_binding_by_resource = AsyncMock(return_value=None)
     repository.get_active_block = AsyncMock(return_value=None)
     repository.decide_access_request = AsyncMock()
-    agent_repository = MagicMock()
+    agent_repository = create_autospec(AgentRepository, instance=True)
     agent_repository.get_by_id = AsyncMock(
         return_value=SimpleNamespace(
             id="agent-1",
             lifecycle_status=AgentLifecycleStatus.ACTIVE,
         )
     )
-    root_creation = MagicMock()
+    root_creation = create_autospec(RootAgentSessionCreationRepository, instance=True)
     root_creation.create_root_session = AsyncMock()
     provisioning = MagicMock()
     provisioning.prepare = AsyncMock(
@@ -367,14 +432,23 @@ async def test_allow_preparation_failure_creates_no_session_or_decision() -> Non
     )
     provisioning.apply = AsyncMock()
     service = ExternalChannelAccessService(
-        session_manager=cast(Any, _SessionManager()),
-        repository=cast(Any, repository),
-        work_repository=cast(Any, MagicMock()),
-        agent_repository=cast(Any, agent_repository),
-        agent_session_repository=cast(Any, MagicMock()),
-        root_agent_session_creation_service=cast(Any, root_creation),
-        conversation_provisioning=cast(Any, provisioning),
-        ingestion_replay_service=cast(Any, MagicMock()),
+        operations=ExternalChannelAccessOperations(
+            session_manager=_SessionManager(),
+            repository=repository,
+            work_repository=create_autospec(
+                ExternalChannelWorkRepository, instance=True
+            ),
+            agent_repository=agent_repository,
+            agent_session_repository=create_autospec(
+                AgentSessionRepository, instance=True
+            ),
+            root_agent_session_creation_repository=root_creation,
+            conversation_provisioning=_ProviderRetentionFake(provisioning.apply),
+        ),
+        conversation_provisioning=_ProviderPreparationFake(provisioning.prepare),
+        ingestion_replay_service=create_autospec(
+            ExternalChannelIngestionReplayService, instance=True
+        ),
     )
 
     with pytest.raises(
@@ -423,14 +497,14 @@ async def test_allow_rejects_existing_binding_with_stopping_session() -> None:
         route_id="route-1",
         agent_session_id="session-1",
     )
-    repository = MagicMock()
+    repository = create_autospec(ExternalChannelRepository, instance=True)
     repository.get_access_request = AsyncMock(return_value=request)
     repository.get_agent_route = AsyncMock(return_value=route)
     repository.lock_connection_for_routing = AsyncMock(return_value=connection)
     repository.get_routable_route_by_id = AsyncMock(return_value=route)
     repository.lock_resource = AsyncMock(return_value=resource)
     repository.lock_connected_binding_by_resource = AsyncMock(return_value=binding)
-    agent_session_repository = MagicMock()
+    agent_session_repository = create_autospec(AgentSessionRepository, instance=True)
     agent_session_repository.get_by_id = AsyncMock(
         return_value=SimpleNamespace(
             status=AgentSessionStatus.ACTIVE,
@@ -440,15 +514,25 @@ async def test_allow_rejects_existing_binding_with_stopping_session() -> None:
     agent_session_repository.lock_by_id = AsyncMock()
     provisioning = MagicMock()
     provisioning.prepare = AsyncMock()
+    provisioning.apply = AsyncMock()
     service = ExternalChannelAccessService(
-        session_manager=cast(Any, _SessionManager()),
-        repository=cast(Any, repository),
-        work_repository=cast(Any, MagicMock()),
-        agent_repository=cast(Any, MagicMock()),
-        agent_session_repository=cast(Any, agent_session_repository),
-        root_agent_session_creation_service=cast(Any, MagicMock()),
-        conversation_provisioning=cast(Any, provisioning),
-        ingestion_replay_service=cast(Any, MagicMock()),
+        operations=ExternalChannelAccessOperations(
+            session_manager=_SessionManager(),
+            repository=repository,
+            work_repository=create_autospec(
+                ExternalChannelWorkRepository, instance=True
+            ),
+            agent_repository=create_autospec(AgentRepository, instance=True),
+            agent_session_repository=agent_session_repository,
+            root_agent_session_creation_repository=create_autospec(
+                RootAgentSessionCreationRepository, instance=True
+            ),
+            conversation_provisioning=_ProviderRetentionFake(provisioning.apply),
+        ),
+        conversation_provisioning=_ProviderPreparationFake(provisioning.prepare),
+        ingestion_replay_service=create_autospec(
+            ExternalChannelIngestionReplayService, instance=True
+        ),
     )
 
     with pytest.raises(

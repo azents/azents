@@ -8,14 +8,10 @@ from typing import Annotated, Any, assert_never
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
 from pydantic import BaseModel, Field
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent import AgentModelSelection, AgentModelSelectionInput
-from azents.core.crypto import CredentialCipher
-from azents.core.deps import get_credential_cipher
 from azents.core.enums import (
     LLMCatalogEntryVisibility,
-    LLMCatalogPurpose,
     LLMCatalogScope,
     LLMModelDeveloper,
     LLMModelLifecycleStatus,
@@ -34,24 +30,25 @@ from azents.core.llm_catalog_sync import (
     IntegrationCatalogSyncTrigger,
     evaluate_integration_catalog_sync_policy,
 )
-from azents.core.model_catalog_source import CATALOG_SOURCE_KEY
 from azents.core.model_execution_options import ModelExecutionOptionId
 from azents.engine.providers.model_profiles import (
     RUNTIME_MODEL_PROFILE_RESOLVER_REVISION,
 )
-from azents.rdb.deps import get_session_manager
-from azents.rdb.session import SessionManager
 from azents.repos.chatgpt_oauth_runtime import ChatGPTOAuthRuntimeRepository
 from azents.repos.kimi_oauth_runtime import KimiOAuthRuntimeRepository
-from azents.repos.llm_catalog import LLMCatalogRepository
 from azents.repos.llm_catalog.data import (
     CatalogNotFound,
     CatalogProjectionProvenance,
+    CatalogRetryPolicy,
     LLMCatalogEntry,
     LLMCatalogEntryCreate,
     LLMCatalogSyncAttempt,
 )
-from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
+from azents.repos.llm_catalog_operations import (
+    CatalogAttemptFailure,
+    CatalogPublicationSuperseded,
+    LLMCatalogOperationsRepository,
+)
 from azents.repos.llm_provider_integration.data import LLMProviderIntegrationWithSecrets
 from azents.repos.model_metadata_source_data import ModelMetadataSourceSnapshot
 from azents.repos.xai_oauth_runtime import XaiOAuthRuntimeRepository
@@ -66,8 +63,10 @@ from azents.services.kimi_oauth.runtime import (
 )
 from azents.services.model_listing.data import ModelListingOutput
 from azents.services.model_listing.providers import (
+    ListingClientFactories,
     ListingProviderError,
     XaiListingProviderError,
+    create_listing_client_factories,
     list_bedrock_models_for_integration,
     list_chatgpt_models_for_integration,
     list_kimi_models_for_integration,
@@ -85,6 +84,10 @@ from azents.services.model_metadata_projection import (
 from azents.services.model_metadata_source import (
     ModelMetadataSourceSyncService,
 )
+from azents.services.oauth_runtime_clients import (
+    RuntimeOAuthClientFactories,
+    create_runtime_oauth_client_factories,
+)
 from azents.services.xai_oauth.data import (
     ProviderEntitlementDenied as XaiProviderEntitlementDenied,
 )
@@ -99,14 +102,6 @@ from azents.testing.deterministic_model_listing import (
     build_deterministic_listing,
     parse_deterministic_fixture_variant,
 )
-
-
-def _get_integration_repository(
-    cipher: Annotated[CredentialCipher, Depends(get_credential_cipher)],
-) -> LLMProviderIntegrationRepository:
-    """LLMProviderIntegrationRepository dependency."""
-    return LLMProviderIntegrationRepository(cipher=cipher)
-
 
 _SYSTEM_CATALOG_PROVIDERS = (
     LLMProvider.OPENAI,
@@ -369,13 +364,13 @@ def _sync_policy_attempt(
     """Convert persisted attempt state into synchronization policy input."""
     if attempt is None:
         return None
-    diagnostics = attempt.diagnostics or {}
+    retry_policy = CatalogRetryPolicy.from_diagnostics(attempt.diagnostics)
     return CatalogSyncAttemptState(
         id=attempt.id,
         status=attempt.status,
         started_at=attempt.started_at,
         finished_at=attempt.finished_at,
-        automatic_retry_blocked=(diagnostics.get("automatic_retry_blocked") is True),
+        automatic_retry_blocked=retry_policy.automatic_retry_blocked,
     )
 
 
@@ -383,10 +378,9 @@ def _sync_policy_attempt(
 class ModelCatalogReadService:
     """Read stored model catalog projections."""
 
-    session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+    operations: Annotated[
+        LLMCatalogOperationsRepository, Depends(LLMCatalogOperationsRepository)
     ]
-    catalog_repository: Annotated[LLMCatalogRepository, Depends(LLMCatalogRepository)]
 
     async def resolve_agent_model_selection(
         self,
@@ -395,23 +389,19 @@ class ModelCatalogReadService:
         selection_input: AgentModelSelectionInput,
     ) -> Result[AgentModelSelection, CatalogNotFound]:
         """Resolve submitted selection through stored catalog projection."""
-        async with self.session_manager() as session:
-            result = await (
-                self.catalog_repository.get_selectable_entry_by_integration_model
-            )(
-                session,
-                integration_id=selection_input.llm_provider_integration_id,
-                workspace_id=workspace_id,
-                model_identifier=selection_input.model_identifier,
-                purpose=LLMCatalogPurpose.CONVERSATION,
-            )
+        result = await self.operations.selectable_entry(
+            integration_id=selection_input.llm_provider_integration_id,
+            workspace_id=workspace_id,
+            model_identifier=selection_input.model_identifier,
+        )
         if result is None:
             return Failure(
                 CatalogNotFound(
                     integration_id=selection_input.llm_provider_integration_id
                 )
             )
-        catalog, entry = result
+        catalog = result.catalog
+        entry = result.entry
         return Success(
             AgentModelSelection(
                 llm_provider_integration_id=selection_input.llm_provider_integration_id,
@@ -449,26 +439,17 @@ class ModelCatalogReadService:
         offset: int,
     ) -> Result[ModelCatalogEntryListOutput, CatalogNotFound]:
         """List stored selectable entries for an integration catalog."""
-        async with self.session_manager() as session:
-            result = await self.catalog_repository.list_entries_by_integration(
-                session,
-                integration_id=integration_id,
-                workspace_id=workspace_id,
-                purpose=LLMCatalogPurpose.CONVERSATION,
-                search=search,
-                limit=limit,
-                offset=offset,
-            )
-            if result is None:
-                return Failure(CatalogNotFound(integration_id=integration_id))
-            latest_workspace_attempt = None
-            if result.catalog.scope == LLMCatalogScope.INTEGRATION:
-                latest_workspace_attempt = await (
-                    self.catalog_repository.get_latest_integration_attempt_for_workspace
-                )(
-                    session,
-                    workspace_id=workspace_id,
-                )
+        snapshot = await self.operations.read_page(
+            integration_id=integration_id,
+            workspace_id=workspace_id,
+            search=search,
+            limit=limit,
+            offset=offset,
+        )
+        if snapshot is None:
+            return Failure(CatalogNotFound(integration_id=integration_id))
+        result = snapshot.page
+        latest_workspace_attempt = snapshot.latest_workspace_attempt
         policy = evaluate_integration_catalog_sync_policy(
             IntegrationCatalogSyncPolicyInput(
                 trigger=IntegrationCatalogSyncTrigger.EXPLICIT,
@@ -478,11 +459,11 @@ class ModelCatalogReadService:
                 latest_workspace_attempt=_sync_policy_attempt(latest_workspace_attempt),
             )
         )
-        automatic_retry_blocked = (
-            result.latest_attempt is not None
-            and (result.latest_attempt.diagnostics or {}).get("automatic_retry_blocked")
-            is True
-        )
+        automatic_retry_blocked = CatalogRetryPolicy.from_diagnostics(
+            result.latest_attempt.diagnostics
+            if result.latest_attempt is not None
+            else None
+        ).automatic_retry_blocked
         return Success(
             ModelCatalogEntryListOutput(
                 catalog_id=result.catalog.id,
@@ -512,10 +493,9 @@ class ModelCatalogReadService:
 class SystemCatalogProjectionService:
     """Publish replacement system catalogs from generic metadata authority."""
 
-    session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+    operations: Annotated[
+        LLMCatalogOperationsRepository, Depends(LLMCatalogOperationsRepository)
     ]
-    catalog_repository: Annotated[LLMCatalogRepository, Depends(LLMCatalogRepository)]
     replacement_projection_service: Annotated[
         SystemCatalogReplacementProjectionService,
         Depends(SystemCatalogReplacementProjectionService),
@@ -524,47 +504,39 @@ class SystemCatalogProjectionService:
     async def list_system_catalogs(self) -> list[SystemCatalogListItem]:
         """List supported system catalog states."""
         items: list[SystemCatalogListItem] = []
-        async with self.session_manager() as session:
-            for provider in _SYSTEM_CATALOG_PROVIDERS:
-                catalog = await self.catalog_repository.get_system_catalog(
-                    session,
-                    provider=provider,
-                    purpose=LLMCatalogPurpose.CONVERSATION,
-                )
-                if catalog is None:
-                    items.append(
-                        SystemCatalogListItem(
-                            provider=provider,
-                            catalog_id=None,
-                            snapshot_id=None,
-                            visible_count=0,
-                            hidden_count=0,
-                            latest_attempt=None,
-                        )
-                    )
-                    continue
-                counts = await self.catalog_repository.get_current_snapshot_counts(
-                    session,
-                    catalog=catalog,
-                )
-                latest_attempt = await self.catalog_repository.get_latest_attempt(
-                    session,
-                    catalog=catalog,
-                )
+        snapshots = await self.operations.read_system_catalogs(
+            _SYSTEM_CATALOG_PROVIDERS
+        )
+        for snapshot in snapshots:
+            catalog = snapshot.catalog
+            counts = snapshot.counts
+            latest_attempt = snapshot.latest_attempt
+            if catalog is None:
                 items.append(
                     SystemCatalogListItem(
-                        provider=provider,
-                        catalog_id=catalog.id,
-                        snapshot_id=catalog.current_snapshot_id,
-                        visible_count=counts.visible_count if counts else 0,
-                        hidden_count=counts.hidden_count if counts else 0,
-                        latest_attempt=(
-                            ModelCatalogSyncAttemptOutput.convert_from(latest_attempt)
-                            if latest_attempt is not None
-                            else None
-                        ),
+                        provider=snapshot.provider,
+                        catalog_id=None,
+                        snapshot_id=None,
+                        visible_count=0,
+                        hidden_count=0,
+                        latest_attempt=None,
                     )
                 )
+                continue
+            items.append(
+                SystemCatalogListItem(
+                    provider=snapshot.provider,
+                    catalog_id=catalog.id,
+                    snapshot_id=catalog.current_snapshot_id,
+                    visible_count=counts.visible_count if counts else 0,
+                    hidden_count=counts.hidden_count if counts else 0,
+                    latest_attempt=(
+                        ModelCatalogSyncAttemptOutput.convert_from(latest_attempt)
+                        if latest_attempt is not None
+                        else None
+                    ),
+                )
+            )
         return items
 
     async def sync_system_catalogs(self) -> list[SystemCatalogProjectionSummary]:
@@ -611,15 +583,17 @@ class SystemCatalogProjectionService:
 
 
 type IntegrationModelListing = Callable[
-    [LLMProviderIntegrationWithSecrets], Awaitable[ModelListingOutput]
+    [LLMProviderIntegrationWithSecrets, ListingClientFactories],
+    Awaitable[ModelListingOutput],
 ]
 
 
 async def provider_model_listing(
     integration: LLMProviderIntegrationWithSecrets,
+    clients: ListingClientFactories,
 ) -> ModelListingOutput:
     """Dispatch the existing provider-owned discovery operation."""
-    return await _list_provider_visible_models(integration)
+    return await _list_provider_visible_models(integration, clients=clients)
 
 
 def get_integration_model_listing() -> IntegrationModelListing:
@@ -631,12 +605,8 @@ def get_integration_model_listing() -> IntegrationModelListing:
 class IntegrationCatalogProjectionService:
     """Project integration catalogs from provider visibility and generic metadata."""
 
-    session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
-    ]
-    catalog_repository: Annotated[LLMCatalogRepository, Depends(LLMCatalogRepository)]
-    integration_repository: Annotated[
-        LLMProviderIntegrationRepository, Depends(_get_integration_repository)
+    operations: Annotated[
+        LLMCatalogOperationsRepository, Depends(LLMCatalogOperationsRepository)
     ]
     kimi_oauth_runtime_repository: Annotated[
         KimiOAuthRuntimeRepository, Depends(KimiOAuthRuntimeRepository)
@@ -646,6 +616,12 @@ class IntegrationCatalogProjectionService:
     ]
     xai_oauth_runtime_repository: Annotated[
         XaiOAuthRuntimeRepository, Depends(XaiOAuthRuntimeRepository)
+    ]
+    listing_clients: Annotated[
+        ListingClientFactories, Depends(create_listing_client_factories)
+    ]
+    oauth_clients: Annotated[
+        RuntimeOAuthClientFactories, Depends(create_runtime_oauth_client_factories)
     ]
     source_sync_service: Annotated[
         ModelMetadataSourceSyncService, Depends(ModelMetadataSourceSyncService)
@@ -671,10 +647,7 @@ class IntegrationCatalogProjectionService:
         | IntegrationCatalogSyncNotStale,
     ]:
         """Refresh one integration catalog projection."""
-        async with self.session_manager() as session:
-            integration = await self.integration_repository.get_by_id_with_secrets(
-                session, integration_id
-            )
+        integration = await self.operations.load_integration(integration_id)
         if integration is None or integration.workspace_id != workspace_id:
             return Failure(IntegrationCatalogSyncNotFound(integration_id))
         deterministic_failure = _deterministic_listing_failure(integration)
@@ -690,35 +663,24 @@ class IntegrationCatalogProjectionService:
                 IntegrationCatalogSyncUnsupportedProvider(integration.provider)
             )
 
-        async with self.session_manager() as session:
-            catalog = await self.catalog_repository.ensure_integration_catalog(
-                session,
-                integration_id=integration.id,
-                provider=integration.provider,
-                purpose=LLMCatalogPurpose.CONVERSATION,
-            )
         started_at = _utcnow()
-        async with self.session_manager() as session:
-            claim = await self.catalog_repository.begin_integration_attempt(
-                session,
-                catalog_id=catalog.id,
-                workspace_id=workspace_id,
-                source_key=CATALOG_SOURCE_KEY,
-                started_at=started_at,
-                trigger=trigger,
-            )
+        preparation = await self.operations.begin_attempt(
+            integration_id=integration.id,
+            provider=integration.provider,
+            workspace_id=workspace_id,
+            started_at=started_at,
+            trigger=trigger,
+        )
+        catalog = preparation.catalog
+        claim = preparation.claim
         if isinstance(claim, IntegrationCatalogSyncPolicyDecision):
             return Failure(_sync_policy_failure(catalog.id, claim))
         attempt_id = claim.attempt_id
 
         try:
-            async with self.session_manager() as session:
-                refreshed_integration = (
-                    await self.integration_repository.get_by_id_with_secrets(
-                        session,
-                        integration_id,
-                    )
-                )
+            refreshed_integration = await self.operations.load_integration(
+                integration_id
+            )
             if (
                 refreshed_integration is None
                 or refreshed_integration.workspace_id != workspace_id
@@ -749,6 +711,7 @@ class IntegrationCatalogProjectionService:
                 token_result = await ensure_runtime_tokens(
                     integration=integration,
                     persistence_repository=self.chatgpt_oauth_runtime_repository,
+                    client_factory=self.oauth_clients.chatgpt,
                 )
                 if token_result.success:
                     refreshed_integration = token_result.value
@@ -772,6 +735,7 @@ class IntegrationCatalogProjectionService:
                 kimi_token_result = await ensure_kimi_runtime_tokens(
                     integration=integration,
                     persistence_repository=self.kimi_oauth_runtime_repository,
+                    client_factory=self.oauth_clients.kimi,
                 )
                 if kimi_token_result.success:
                     refreshed_integration = kimi_token_result.value
@@ -795,6 +759,7 @@ class IntegrationCatalogProjectionService:
                 xai_token_result = await ensure_xai_runtime_tokens(
                     integration=integration,
                     persistence_repository=self.xai_oauth_runtime_repository,
+                    client_factory=self.oauth_clients.xai,
                 )
                 if xai_token_result.success:
                     integration = xai_token_result.value
@@ -816,7 +781,9 @@ class IntegrationCatalogProjectionService:
                             )
                         case _:
                             assert_never(error)
-            listing = deterministic_listing or await self.provider_listing(integration)
+            listing = deterministic_listing or await self.provider_listing(
+                integration, self.listing_clients
+            )
             if deterministic_listing is not None:
                 entries = project_deterministic_integration_entries(
                     integration_id=integration.id,
@@ -851,82 +818,45 @@ class IntegrationCatalogProjectionService:
                 genai_prices_version=None,
                 projection_fingerprint=fingerprint,
             )
-            async with self.session_manager() as session:
-                current_attempt_id = await (
-                    self.catalog_repository.lock_catalog_for_attempt_completion
-                )(
-                    session,
-                    catalog_id=catalog.id,
-                )
-                if current_attempt_id is None:
-                    raise RuntimeError(
-                        "Integration catalog has no attempt allowed to publish."
-                    )
-                if current_attempt_id != attempt_id:
-                    return Failure(
-                        IntegrationCatalogSyncSuperseded(
-                            catalog_id=catalog.id,
-                            superseding_attempt_id=current_attempt_id,
-                        )
-                    )
-                candidate_snapshot_id = (
-                    await self.catalog_repository.create_candidate_snapshot(
-                        session,
-                        catalog=catalog,
-                        entries=entries,
-                        diagnostics=_projection_diagnostics(
-                            entries=entries,
-                            listing=listing,
-                            context={
-                                "integration_id": integration.id,
-                                "source_key": (
-                                    source_snapshot.source_key
-                                    if source_snapshot is not None
-                                    else None
-                                ),
-                                "projection_fingerprint": fingerprint,
-                            },
+            publication = await self.operations.publish(
+                catalog=catalog,
+                claim=claim,
+                entries=entries,
+                provenance=provenance,
+                candidate_diagnostics=_projection_diagnostics(
+                    entries=entries,
+                    listing=listing,
+                    context={
+                        "integration_id": integration.id,
+                        "source_key": (
+                            source_snapshot.source_key
+                            if source_snapshot is not None
+                            else None
                         ),
-                        provenance=provenance,
-                        catalog_configuration_version=(
-                            claim.catalog_configuration_version
-                        ),
+                        "projection_fingerprint": fingerprint,
+                    },
+                ),
+                attempt_diagnostics=_projection_diagnostics(
+                    entries=entries,
+                    listing=listing,
+                    context={
+                        "integration_id": integration.id,
+                        "trigger": trigger.value,
+                    },
+                ),
+                fetched_count=listing.summary.returned_count,
+                skipped_count=listing.summary.skipped_count,
+                finished_at=_utcnow(),
+            )
+            if isinstance(publication, CatalogPublicationSuperseded):
+                return Failure(
+                    IntegrationCatalogSyncSuperseded(
+                        catalog_id=catalog.id,
+                        superseding_attempt_id=publication.superseding_attempt_id,
                     )
                 )
-                snapshot_id = await self.catalog_repository.publish_candidate_snapshot(
-                    session,
-                    catalog_id=catalog.id,
-                    candidate_snapshot_id=candidate_snapshot_id,
-                    expected_current_snapshot_id=(claim.expected_current_snapshot_id),
-                    expected_catalog_configuration_version=(
-                        claim.catalog_configuration_version
-                    ),
-                    expected_projection_fingerprint=fingerprint,
-                    fence_latest_attempt=True,
-                    expected_latest_attempt_id=attempt_id,
-                )
-                visible_count = sum(
-                    entry.visibility_status == LLMCatalogEntryVisibility.SELECTABLE
-                    for entry in entries
-                )
-                await self.catalog_repository.mark_attempt_succeeded(
-                    session,
-                    attempt_id=attempt_id,
-                    finished_at=_utcnow(),
-                    produced_snapshot_id=snapshot_id,
-                    fetched_count=listing.summary.returned_count,
-                    matched_count=len(entries),
-                    skipped_count=listing.summary.skipped_count,
-                    hidden_count=len(entries) - visible_count,
-                    diagnostics=_projection_diagnostics(
-                        entries=entries,
-                        listing=listing,
-                        context={
-                            "integration_id": integration.id,
-                            "trigger": trigger.value,
-                        },
-                    ),
-                )
+            snapshot_id = publication.snapshot_id
+            visible_count = publication.visible_count
         except ListingProviderError as exc:
             return Success(
                 await self._record_listing_failure(
@@ -939,9 +869,8 @@ class IntegrationCatalogProjectionService:
                 )
             )
         except Exception as exc:
-            async with self.session_manager() as session:
-                await self.catalog_repository.mark_attempt_failed(
-                    session,
+            await self.operations.fail_attempt(
+                CatalogAttemptFailure(
                     attempt_id=attempt_id,
                     finished_at=_utcnow(),
                     failure_code=type(exc).__name__,
@@ -954,6 +883,7 @@ class IntegrationCatalogProjectionService:
                         "trigger": trigger.value,
                     },
                 )
+            )
             raise
         return Success(
             SystemCatalogProjectionSummary(
@@ -989,9 +919,8 @@ class IntegrationCatalogProjectionService:
             if automatic_retry_blocked
             else "Retry after the provider becomes available."
         )
-        async with self.session_manager() as session:
-            await self.catalog_repository.mark_attempt_failed(
-                session,
+        await self.operations.fail_attempt(
+            CatalogAttemptFailure(
                 attempt_id=attempt_id,
                 finished_at=_utcnow(),
                 failure_code=failure_code,
@@ -1013,6 +942,7 @@ class IntegrationCatalogProjectionService:
                     "trigger": trigger.value,
                 },
             )
+        )
         return SystemCatalogProjectionSummary(
             provider=integration.provider,
             catalog_id=catalog_id,
@@ -1051,19 +981,23 @@ def _deterministic_listing(
 
 async def _list_provider_visible_models(
     integration: LLMProviderIntegrationWithSecrets,
+    *,
+    clients: ListingClientFactories,
 ) -> ModelListingOutput:
     if integration.provider == LLMProvider.AWS_BEDROCK:
-        return await list_bedrock_models_for_integration(integration)
+        return await list_bedrock_models_for_integration(integration, clients=clients)
     if integration.provider == LLMProvider.CHATGPT_OAUTH:
-        return await list_chatgpt_models_for_integration(integration)
+        return await list_chatgpt_models_for_integration(integration, clients=clients)
     if integration.provider == LLMProvider.KIMI_OAUTH:
-        return await list_kimi_models_for_integration(integration)
+        return await list_kimi_models_for_integration(integration, clients=clients)
     if integration.provider == LLMProvider.OPENROUTER:
-        return await list_openrouter_models_for_integration(integration)
+        return await list_openrouter_models_for_integration(
+            integration, clients=clients
+        )
     if integration.provider in {LLMProvider.XAI, LLMProvider.XAI_OAUTH}:
-        return await list_xai_models_for_integration(integration)
+        return await list_xai_models_for_integration(integration, clients=clients)
     if integration.provider == LLMProvider.GOOGLE_VERTEX_AI:
-        return await list_vertex_models_for_integration(integration)
+        return await list_vertex_models_for_integration(integration, clients=clients)
     raise RuntimeError("Unsupported integration catalog provider")
 
 

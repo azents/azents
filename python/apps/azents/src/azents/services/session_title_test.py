@@ -84,6 +84,7 @@ from azents.services.engine_runtime_tokens import EngineRuntimeTokenResolver
 from azents.services.external_channel.thread_title import (
     ExternalChannelThreadTitleService,
 )
+from azents.services.oauth_runtime_clients import create_runtime_oauth_client_factories
 from azents.services.session_title import (
     SessionTitleService,
     TitleOutputContractError,
@@ -831,6 +832,7 @@ class TestSessionTitleHelpers:
                 ).integration_repository,
             ),
             runtime_token_resolver=EngineRuntimeTokenResolver(
+                oauth_clients=create_runtime_oauth_client_factories(),
                 chatgpt_repository=_chatgpt_oauth_runtime_repository(_session_manager),
                 xai_repository=XaiOAuthRuntimeRepository(
                     session_manager=(
@@ -947,6 +949,7 @@ class TestSessionTitleHelpers:
                 ).integration_repository,
             ),
             runtime_token_resolver=EngineRuntimeTokenResolver(
+                oauth_clients=create_runtime_oauth_client_factories(),
                 chatgpt_repository=_chatgpt_oauth_runtime_repository(_session_manager),
                 xai_repository=XaiOAuthRuntimeRepository(
                     session_manager=(
@@ -1051,6 +1054,7 @@ class TestSessionTitleHelpers:
                 ).integration_repository,
             ),
             runtime_token_resolver=EngineRuntimeTokenResolver(
+                oauth_clients=create_runtime_oauth_client_factories(),
                 chatgpt_repository=_chatgpt_oauth_runtime_repository(_session_manager),
                 xai_repository=XaiOAuthRuntimeRepository(
                     session_manager=(
@@ -1188,6 +1192,7 @@ class TestSessionTitleHelpers:
                 ).integration_repository,
             ),
             runtime_token_resolver=EngineRuntimeTokenResolver(
+                oauth_clients=create_runtime_oauth_client_factories(),
                 chatgpt_repository=_chatgpt_oauth_runtime_repository(session_manager),
                 xai_repository=XaiOAuthRuntimeRepository(
                     session_manager=(
@@ -1331,6 +1336,7 @@ class TestSessionTitleHelpers:
                 ).integration_repository,
             ),
             runtime_token_resolver=EngineRuntimeTokenResolver(
+                oauth_clients=create_runtime_oauth_client_factories(),
                 chatgpt_repository=_chatgpt_oauth_runtime_repository(session_manager),
                 xai_repository=XaiOAuthRuntimeRepository(
                     session_manager=(
@@ -1605,6 +1611,7 @@ def _title_service(
             ).integration_repository,
         ),
         runtime_token_resolver=EngineRuntimeTokenResolver(
+            oauth_clients=create_runtime_oauth_client_factories(),
             chatgpt_repository=_chatgpt_oauth_runtime_repository(_session_manager),
             xai_repository=XaiOAuthRuntimeRepository(
                 session_manager=(

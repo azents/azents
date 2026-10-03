@@ -1,5 +1,6 @@
 """Recovery orchestration over typed completed database operations."""
 
+import asyncio
 import datetime
 
 import pytest
@@ -73,6 +74,53 @@ def _recovery(
         limit=7,
         interval=datetime.timedelta(seconds=60),
     )
+
+
+class _FailedRecoveryRepository(_RecoveryRepository):
+    """Expose a completed scan failure without invoking downstream effects."""
+
+    def __init__(self, error: BaseException, trace: list[str]) -> None:
+        super().__init__([], trace)
+        self.error = error
+
+    async def find_stuck_running(
+        self, *, stale_threshold: datetime.timedelta, limit: int
+    ) -> list[StuckWorkerSession]:
+        self.find_calls.append((stale_threshold, limit))
+        self.trace.append("scan-failed")
+        raise self.error
+
+
+@pytest.mark.asyncio
+async def test_read_failure_propagates_before_any_recovery_effect() -> None:
+    """A failed completed scan remains an error instead of empty recovery."""
+    trace: list[str] = []
+    repository = _FailedRecoveryRepository(RuntimeError("scan unavailable"), trace)
+    broker = _Broker(trace)
+    lifecycle = _SessionLifecycle(trace, None)
+
+    with pytest.raises(RuntimeError, match="scan unavailable"):
+        await _recovery(repository, broker, lifecycle).recover_once()
+
+    assert trace == ["scan-failed"]
+    assert broker.sent_messages == []
+    assert lifecycle.running_session_ids == []
+
+
+@pytest.mark.asyncio
+async def test_run_reraises_scan_cancellation() -> None:
+    """Worker shutdown cancellation escapes the scan supervisor unchanged."""
+    trace: list[str] = []
+    repository = _FailedRecoveryRepository(asyncio.CancelledError(), trace)
+    broker = _Broker(trace)
+    lifecycle = _SessionLifecycle(trace, None)
+
+    with pytest.raises(asyncio.CancelledError):
+        await _recovery(repository, broker, lifecycle).run(asyncio.Event())
+
+    assert trace == ["scan-failed"]
+    assert broker.sent_messages == []
+    assert lifecycle.running_session_ids == []
 
 
 @pytest.mark.asyncio

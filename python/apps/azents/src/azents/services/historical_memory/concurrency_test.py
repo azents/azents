@@ -16,10 +16,10 @@ from azents.job_runtime.types import (
     JobRequest,
 )
 from azents.scheduler.executor import SCHEDULER_JOB_HANDLER_KEY
-from azents.services.historical_memory.job import (
-    HISTORICAL_MEMORY_MAX_CONCURRENCY,
+from azents.services.historical_memory.constants import (
     HISTORICAL_MEMORY_PREPARE_HANDLER_KEY,
 )
+from azents.services.historical_memory.job import HISTORICAL_MEMORY_MAX_CONCURRENCY
 
 
 async def test_historical_backlog_preserves_non_memory_runtime_capacity() -> None:

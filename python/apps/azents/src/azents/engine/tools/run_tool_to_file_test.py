@@ -19,6 +19,7 @@ from azents_runtime_control.grpc_transfer_coordinator_client import (
 )
 
 from azents.core.enums import ArtifactStatus, ModelFileStatus
+from azents.core.session_resource_authority import SessionResourceAuthority
 from azents.engine.events.generated_files import PendingGeneratedFileOutput
 from azents.engine.events.tool_invocation import (
     ClientToolInvoker,
@@ -73,7 +74,6 @@ from azents.services.exchange_file import ExchangeFileTransferSource
 from azents.services.file_storage import GlobResult, GrepResult, TextReadResult
 from azents.services.model_file import ModelFileDownload
 from azents.services.runtime_storage_error import RuntimeStorageError
-from azents.services.session_resource_authority import SessionResourceAuthority
 
 
 class _Invoker(ClientToolInvoker):

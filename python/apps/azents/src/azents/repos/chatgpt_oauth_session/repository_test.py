@@ -2,6 +2,7 @@
 
 import datetime
 import uuid
+from typing import NamedTuple
 
 import sqlalchemy as sa
 from azcommon.result import Failure, Success
@@ -62,13 +63,20 @@ async def _create_user(session: AsyncSession) -> str:
     return user.id
 
 
+class _OAuthSessionFixture(NamedTuple):
+    """Repository and identity for one created OAuth Session."""
+
+    repository: ChatGPTOAuthSessionRepository
+    session_id: str
+
+
 async def _create_session(
     session: AsyncSession,
     *,
     method: ChatGPTOAuthConnectionMethod = ChatGPTOAuthConnectionMethod.CALLBACK,
     state: str | None = None,
     expires_at: datetime.datetime | None = None,
-) -> tuple[ChatGPTOAuthSessionRepository, str]:
+) -> _OAuthSessionFixture:
     """Create OAuth session for tests."""
     repo = _make_repo()
     workspace_id = await _create_workspace(session)
@@ -102,7 +110,7 @@ async def _create_session(
             else None,
         ),
     )
-    return repo, created.id
+    return _OAuthSessionFixture(repository=repo, session_id=created.id)
 
 
 class TestChatGPTOAuthSessionRepository:

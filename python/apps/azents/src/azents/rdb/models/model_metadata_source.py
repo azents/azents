@@ -1,14 +1,29 @@
 """Durable model metadata source authority and snapshots."""
 
 import datetime
+import enum
 from typing import Any
 
 import sqlalchemy as sa
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import ENUM, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
+from azents.core.model_catalog_source import ModelMetadataSourceKind
 from azents.rdb.models.base import RDBModel
 from azents.rdb.types.datetime import TimeZoneDateTime
+
+
+def _enum_values(enum_cls: type[enum.StrEnum]) -> list[str]:
+    """Return the stable string values stored by the source-kind ENUM."""
+    return [value.value for value in enum_cls]
+
+
+source_kind_enum = ENUM(
+    ModelMetadataSourceKind,
+    name="model_metadata_source_kind",
+    create_type=False,
+    values_callable=_enum_values,
+)
 
 
 class RDBModelMetadataSource(RDBModel):
@@ -53,7 +68,7 @@ class RDBModelMetadataSourceSnapshot(RDBModel):
         name="uq_model_metadata_source_snapshots_content",
     )
     IX_SOURCE_CREATED = sa.Index(
-        "ix_model_metadata_source_snapshots_source_created",
+        "ix_model_metadata_source_snapshots_source_key_created_at",
         "source_key",
         "created_at",
     )
@@ -64,7 +79,9 @@ class RDBModelMetadataSourceSnapshot(RDBModel):
         sa.ForeignKey("model_metadata_sources.source_key", ondelete="CASCADE"),
         nullable=False,
     )
-    source_kind: Mapped[str] = mapped_column(sa.String(40), nullable=False)
+    source_kind: Mapped[ModelMetadataSourceKind] = mapped_column(
+        source_kind_enum, nullable=False
+    )
     source_schema_version: Mapped[str] = mapped_column(sa.String(20), nullable=False)
     source_url: Mapped[str] = mapped_column(sa.Text, nullable=False)
     source_hash: Mapped[str] = mapped_column(sa.String(64), nullable=False)

@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock
 from azcommon.result import Failure, Success
 
 from azents.core.enums import WorkspaceUserRole
+from azents.core.historical_memory_settings import HistoricalMemorySettingsScope
 from azents.repos.historical_memory.settings import (
     HistoricalMemorySettingsRepository,
 )
@@ -14,7 +15,6 @@ from azents.repos.historical_memory.settings_data import (
     HistoricalMemorySettingsCursorError,
     HistoricalMemorySettingsPage,
     HistoricalMemorySettingsRecord,
-    HistoricalMemorySettingsScope,
 )
 from azents.services.agent.data import PrivateAgentAccessDenied
 from azents.services.historical_memory.settings import (

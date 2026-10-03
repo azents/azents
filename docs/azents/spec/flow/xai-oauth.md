@@ -6,6 +6,9 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [agent, workspace, model-catalog]
 code_paths:
+  - python/apps/azents/src/azents/repos/engine_event_repositories.py
+  - python/apps/azents/src/azents/repos/engine_resolve.py
+  - python/apps/azents/src/azents/repos/llm_catalog_operations.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/097a97177350_create_operational_schema_baseline.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/841e7188d527_bind_oauth_reauthentication_targets.py
   - python/apps/azents/src/azents/core/xai.py

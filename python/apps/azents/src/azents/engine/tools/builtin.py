@@ -18,8 +18,7 @@ from textwrap import dedent
 from typing import List, NoReturn, Protocol
 
 from azcommon.types import JSONObject
-from pydantic import BaseModel, Field, ValidationError, model_validator
-from sqlalchemy.ext.asyncio import AsyncSession
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from azents.core.enums import (
     RuntimeDesiredState,
@@ -34,6 +33,11 @@ from azents.core.runtime_capabilities import (
 from azents.core.runtime_profile import (
     RuntimeConfigurationStateStatus,
     parse_runtime_infrastructure_profile_spec,
+)
+from azents.core.session_resource_authority import (
+    SessionExecutionOwner,
+    SessionResourceAuthority,
+    accepts_execution_owner,
 )
 from azents.core.tools import (
     ResolveContext,
@@ -112,14 +116,9 @@ from azents.engine.tools.runtime_io import (
     RuntimeRunnerOperationUnavailable,
 )
 from azents.engine.tools.write import make_write_tool
-from azents.rdb.session import SessionManager
-from azents.repos.agent_runtime import AgentRuntimeRepository
-from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.engine_runtime_tool_read import EngineRuntimeToolReadRepository
-from azents.repos.memory import MemoryRepository
+from azents.repos.engine_tool_repositories import EngineToolRepositories
 from azents.repos.memory.operations import MemoryOperationRepository
-from azents.repos.session_execution.ownership import OwnerBoundSessionManager
-from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 from azents.repos.session_workspace_project.data import SessionWorkspaceProject
 from azents.repos.toolkit_state.engine import (
     ToolkitAgentsAppendixDedupeStateStore,
@@ -151,11 +150,6 @@ from azents.services.historical_memory.context_snapshot import (
 from azents.services.model_file import ModelFileService
 from azents.services.runtime_storage_error import (
     RuntimeStorageError,
-)
-from azents.services.session_resource_authority import (
-    SessionExecutionOwner,
-    SessionResourceAuthority,
-    accepts_execution_owner,
 )
 from azents.services.session_storage import guess_media_type
 from azents.services.session_working_folder_binding import (
@@ -259,6 +253,8 @@ _MAX_PROCESS_MAX_OUTPUT_BYTES = 4 * 1024 * 1024
 class ExecCommandInput(BaseModel):
     """exec_command tool input."""
 
+    model_config = ConfigDict(extra="forbid")
+
     command: str = Field(description="Shell command to execute")
     workdir: str | None = Field(
         default=None,
@@ -283,6 +279,8 @@ class ExecCommandInput(BaseModel):
 
 class WriteStdinInput(BaseModel):
     """write_stdin tool input."""
+
+    model_config = ConfigDict(extra="forbid")
 
     process_id: str = Field(description="Process ID returned by exec_command")
     chars: str = Field(
@@ -338,19 +336,6 @@ async def _resolve_associated_user_id(
     return await operations.resolve_associated_user_id(session_id=session_id)
 
 
-def _memory_operations(
-    *,
-    session_manager: SessionManager[AsyncSession],
-    memory_repository: MemoryRepository,
-) -> MemoryOperationRepository:
-    """Create completed Memory operations for one Toolkit binding."""
-    return MemoryOperationRepository(
-        session_manager=session_manager,
-        memory_repository=memory_repository,
-        agent_session_repository=AgentSessionRepository(),
-    )
-
-
 class MemoryContextToolkit(Toolkit[ShellToolkitConfig]):
     """Auto-bound boundary snapshot and live Memory VFS guidance."""
 
@@ -358,14 +343,12 @@ class MemoryContextToolkit(Toolkit[ShellToolkitConfig]):
         self,
         config: ShellToolkitConfig,
         agent_id: str,
-        session_manager: SessionManager[AsyncSession],
         memory_context_snapshot_service: MemoryContextSnapshotService,
     ) -> None:
         self._config = config
         self._agent_id = agent_id
         self._session_id = ""
         self._root_session_id = ""
-        self.session_manager = session_manager
         self.memory_context_snapshot_service = memory_context_snapshot_service
         self._execution_owner: SessionExecutionOwner | None = None
         self._snapshot_available = True
@@ -391,7 +374,6 @@ class MemoryContextToolkit(Toolkit[ShellToolkitConfig]):
             await self.memory_context_snapshot_service.refresh_snapshot(
                 session_id=self._root_session_id,
                 after_compaction=False,
-                session_manager=self.session_manager,
             )
         )
 
@@ -408,10 +390,8 @@ class MemoryContextToolkit(Toolkit[ShellToolkitConfig]):
             owner,
             session_id=self._session_id,
         ):
-            self.session_manager = OwnerBoundSessionManager(
-                session_manager=self.session_manager,
-                session_id=owner.session_id,
-                owner_generation=owner.owner_generation,
+            self.memory_context_snapshot_service = (
+                self.memory_context_snapshot_service.with_owner(owner)
             )
             self._execution_owner = owner
 
@@ -457,13 +437,11 @@ class MemoryContextToolkit(Toolkit[ShellToolkitConfig]):
                 await self.memory_context_snapshot_service.refresh_snapshot(
                     session_id=self._root_session_id,
                     after_compaction=True,
-                    session_manager=self.session_manager,
                 )
             )
         snapshot = (
             await self.memory_context_snapshot_service.prompt_for_turn(
                 session_id=self._root_session_id,
-                session_manager=self.session_manager,
             )
             if self._snapshot_available
             else ""
@@ -480,14 +458,12 @@ class MemoryWriteToolkit(Toolkit[ShellToolkitConfig]):
         self,
         config: ShellToolkitConfig,
         agent_id: str,
-        session_manager: SessionManager[AsyncSession],
-        memory_repo: MemoryRepository,
+        repositories: EngineToolRepositories,
     ) -> None:
         self._config = config
         self._agent_id = agent_id
         self._session_id = ""
-        self.session_manager = session_manager
-        self.memory_repo = memory_repo
+        self.repositories = repositories
         self._execution_owner: SessionExecutionOwner | None = None
 
     def bind_execution_owner(self, owner: SessionExecutionOwner) -> None:
@@ -497,11 +473,7 @@ class MemoryWriteToolkit(Toolkit[ShellToolkitConfig]):
             owner,
             session_id=self._session_id,
         ):
-            self.session_manager = OwnerBoundSessionManager(
-                session_manager=self.session_manager,
-                session_id=owner.session_id,
-                owner_generation=owner.owner_generation,
-            )
+            self.repositories = self.repositories.with_owner(owner)
             self._execution_owner = owner
 
     def bind_execution_authority(
@@ -531,10 +503,7 @@ class MemoryWriteToolkit(Toolkit[ShellToolkitConfig]):
         """Return memory write tools."""
         tools: list[FunctionTool] = []
         if self._config.memory_enabled:
-            operations = _memory_operations(
-                session_manager=self.session_manager,
-                memory_repository=self.memory_repo,
-            )
+            operations = self.repositories.memory
             associated_user_id = await _resolve_associated_user_id(
                 operations=operations,
                 session_id=self._session_id,
@@ -542,15 +511,13 @@ class MemoryWriteToolkit(Toolkit[ShellToolkitConfig]):
             tools.extend(
                 [
                     make_save_memory_tool(
-                        self.memory_repo,
+                        self.repositories.memory,
                         self._agent_id,
-                        self.session_manager,
                         associated_user_id=associated_user_id,
                     ),
                     make_delete_memory_tool(
-                        self.memory_repo,
+                        self.repositories.memory,
                         self._agent_id,
-                        self.session_manager,
                         associated_user_id=associated_user_id,
                     ),
                 ]
@@ -573,15 +540,13 @@ class ReadableStorageToolkit(Toolkit[ShellToolkitConfig]):
         config: ShellToolkitConfig,
         agent_id: str,
         session_id: str,
-        session_manager: SessionManager[AsyncSession],
-        memory_repo: MemoryRepository,
+        repositories: EngineToolRepositories,
         vfs_read_router: VfsReadRouter,
     ) -> None:
         self._config = config
         self._agent_id = agent_id
         self._session_id = session_id
-        self.session_manager = session_manager
-        self.memory_repo = memory_repo
+        self.repositories = repositories
         self.vfs_read_router = vfs_read_router
         self.runtime_capability_resolver: RuntimeCapabilityResolver | None = None
         self.runtime_storage_provider: RuntimeReadableStorageProvider | None = None
@@ -595,11 +560,7 @@ class ReadableStorageToolkit(Toolkit[ShellToolkitConfig]):
             owner,
             session_id=self._session_id,
         ):
-            self.session_manager = OwnerBoundSessionManager(
-                session_manager=self.session_manager,
-                session_id=owner.session_id,
-                owner_generation=owner.owner_generation,
-            )
+            self.repositories = self.repositories.with_owner(owner)
             self._execution_owner = owner
 
     def bind_execution_authority(
@@ -636,10 +597,7 @@ class ReadableStorageToolkit(Toolkit[ShellToolkitConfig]):
         resolver = self.runtime_capability_resolver
         if authority is None or resolver is None:
             return ToolkitState(status=ToolkitStatus.DISABLED, tools=[])
-        operations = _memory_operations(
-            session_manager=self.session_manager,
-            memory_repository=self.memory_repo,
-        )
+        operations = self.repositories.memory
         associated_user_id = await _resolve_associated_user_id(
             operations=operations,
             session_id=authority.root_session_id,
@@ -695,14 +653,12 @@ class BuiltinToolkit(Toolkit[ShellToolkitConfig]):
         self,
         config: ShellToolkitConfig,
         agent_id: str,
-        session_manager: SessionManager[AsyncSession],
-        memory_repo: MemoryRepository,
+        repositories: EngineToolRepositories,
     ) -> None:
         self._config = config
         self._agent_id = agent_id
         self._session_id = ""
-        self.session_manager = session_manager
-        self.memory_repo = memory_repo
+        self.repositories = repositories
         self._execution_owner: SessionExecutionOwner | None = None
 
     def bind_execution_owner(self, owner: SessionExecutionOwner) -> None:
@@ -712,11 +668,7 @@ class BuiltinToolkit(Toolkit[ShellToolkitConfig]):
             owner,
             session_id=self._session_id,
         ):
-            self.session_manager = OwnerBoundSessionManager(
-                session_manager=self.session_manager,
-                session_id=owner.session_id,
-                owner_generation=owner.owner_generation,
-            )
+            self.repositories = self.repositories.with_owner(owner)
             self._execution_owner = owner
 
     def bind_execution_authority(
@@ -752,14 +704,12 @@ class BuiltinToolkit(Toolkit[ShellToolkitConfig]):
             tools.extend(
                 [
                     make_save_memory_tool(
-                        self.memory_repo,
+                        self.repositories.memory,
                         agent_id,
-                        self.session_manager,
                     ),
                     make_delete_memory_tool(
-                        self.memory_repo,
+                        self.repositories.memory,
                         agent_id,
-                        self.session_manager,
                     ),
                 ]
             )
@@ -826,16 +776,13 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         exchange_file_service: ExchangeFileService,
         artifact_service: ArtifactService,
         model_file_service: ModelFileService,
-        vfs_projection_service: VfsProjectionService[AsyncSession] | None,
+        vfs_projection_service: VfsProjectionService | None,
         agent_id: str,
         agents_store: AgentsAppendixDedupeStateStore,
         runner_operations: RuntimeRunnerOperationClient,
-        session_manager: SessionManager[AsyncSession],
-        agent_runtime_repo: AgentRuntimeRepository,
+        repositories: EngineToolRepositories,
         agent_runtime_service: AgentRuntimeService,
-        agent_session_repository: AgentSessionRepository,
         session_working_folder_binding_service: SessionWorkingFolderBindingService,
-        project_repo: SessionWorkspaceProjectRepository,
         server_to_runtime_transfer_service: ServerToRuntimeTransferExecutor,
         runtime_image_read_service: RuntimeImageReadService | None,
         runtime_to_server_publication_service: PresentFilePublicationExecutor,
@@ -855,14 +802,11 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         self._runtime_session_id: str = ""
         self._excluded_tools: AbstractSet[str] = frozenset()
         self._peer_toolkits: Sequence[RuntimeEnvProvider] = ()
-        self.session_manager = session_manager
-        self.agent_runtime_repo = agent_runtime_repo
+        self.repositories = repositories
         self.agent_runtime_service = agent_runtime_service
-        self.agent_session_repository = agent_session_repository
         self.session_working_folder_binding_service = (
             session_working_folder_binding_service
         )
-        self.project_repo = project_repo
         self.agents_store = agents_store
         self.server_to_runtime_transfer_service = server_to_runtime_transfer_service
         self.runtime_image_read_service = runtime_image_read_service
@@ -888,11 +832,7 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
             owner,
             session_id=self._session_id,
         ):
-            self.session_manager = OwnerBoundSessionManager(
-                session_manager=self.session_manager,
-                session_id=owner.session_id,
-                owner_generation=owner.owner_generation,
-            )
+            self.repositories = self.repositories.with_owner(owner)
             if isinstance(
                 self.agents_store,
                 ToolkitAgentsAppendixDedupeStateStore,
@@ -928,9 +868,7 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
             return self._readable_file_storage
         return RuntimeRunnerFileStorage(
             runner_operations=self.runner_operations,
-            agent_runtime_repo=self.agent_runtime_repo,
             agent_runtime_service=self.agent_runtime_service,
-            session_manager=self.session_manager,
             runtime_agent_id=self._runtime_agent_id,
             owner_session_id=self._runtime_session_id,
             expected_authority_provider=self._required_runtime_authority,
@@ -1107,9 +1045,7 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
 
         file_ss = RuntimeRunnerFileStorage(
             runner_operations=self.runner_operations,
-            agent_runtime_repo=self.agent_runtime_repo,
             agent_runtime_service=(self.agent_runtime_service),
-            session_manager=self.session_manager,
             runtime_agent_id=runtime_agent_id,
             owner_session_id=self._runtime_session_id,
             expected_authority_provider=self._required_runtime_authority,
@@ -1118,9 +1054,7 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
 
         async def resolve_exact_runtime_target() -> RuntimeOperationTarget:
             return await _ready_runtime_for_agent(
-                agent_runtime_repo=self.agent_runtime_repo,
                 agent_runtime_service=(self.agent_runtime_service),
-                session_manager=self.session_manager,
                 agent_id=runtime_agent_id,
                 expected_authority=self._required_runtime_authority(),
             )
@@ -1225,9 +1159,7 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         tools = [
             make_exec_command_tool(
                 self.runner_operations,
-                agent_runtime_repo=self.agent_runtime_repo,
                 agent_runtime_service=(self.agent_runtime_service),
-                session_manager=self.session_manager,
                 agent_id=runtime_agent_id,
                 publish_event=context.publish_event,
                 owner_session_id=self._session_id,
@@ -1240,9 +1172,7 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
             ),
             make_write_stdin_tool(
                 self.runner_operations,
-                agent_runtime_repo=self.agent_runtime_repo,
                 agent_runtime_service=(self.agent_runtime_service),
-                session_manager=self.session_manager,
                 agent_id=runtime_agent_id,
                 publish_event=context.publish_event,
                 owner_session_id=self._session_id,
@@ -1448,15 +1378,8 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         )
 
     def _runtime_read_repository(self) -> EngineRuntimeToolReadRepository:
-        """Create completed Runtime Toolkit reads for this bound execution."""
-        return EngineRuntimeToolReadRepository(
-            session_manager=self.session_manager,
-            agent_runtime_repository=self.agent_runtime_repo,
-            runtime_profile_repository=(
-                self.agent_runtime_service.runtime_profile_repository
-            ),
-            project_repository=self.project_repo,
-        )
+        """Return completed Runtime reads bound to this execution owner."""
+        return self.repositories.runtime
 
     async def _resolve_projection_runtime_target(
         self,
@@ -1464,9 +1387,7 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         """Return current qualified Runtime evidence without starting compute."""
         try:
             return await _ready_runtime_for_agent(
-                agent_runtime_repo=self.agent_runtime_repo,
                 agent_runtime_service=self.agent_runtime_service,
-                session_manager=self.session_manager,
                 agent_id=self._runtime_agent_id,
                 wait_timeout_seconds=0.0,
                 poll_interval_seconds=0.0,
@@ -1623,18 +1544,14 @@ class BuiltinToolkitProvider(ToolkitProvider[ShellToolkitConfig]):
         exchange_file_service: ExchangeFileService,
         artifact_service: ArtifactService,
         model_file_service: ModelFileService,
-        vfs_projection_service: VfsProjectionService[AsyncSession] | None,
+        vfs_projection_service: VfsProjectionService | None,
         vfs_read_router: VfsReadRouter,
         agents_store: AgentsAppendixDedupeStateStore,
-        session_manager: SessionManager[AsyncSession],
-        memory_repo: MemoryRepository,
+        repositories: EngineToolRepositories,
         memory_context_snapshot_service: MemoryContextSnapshotService,
-        agent_runtime_repo: AgentRuntimeRepository,
         agent_runtime_service: AgentRuntimeService,
         runner_operations: RuntimeRunnerOperationClient,
-        agent_session_repository: AgentSessionRepository,
         session_working_folder_binding_service: SessionWorkingFolderBindingService,
-        project_repo: SessionWorkspaceProjectRepository,
         server_to_runtime_transfer_service: ServerToRuntimeTransferExecutor,
         runtime_image_read_service: RuntimeImageReadService | None,
         runtime_to_server_publication_service: PresentFilePublicationExecutor,
@@ -1646,17 +1563,13 @@ class BuiltinToolkitProvider(ToolkitProvider[ShellToolkitConfig]):
         self.model_file_service = model_file_service
         self.vfs_projection_service = vfs_projection_service
         self.vfs_read_router = vfs_read_router
-        self.session_manager = session_manager
-        self.memory_repo = memory_repo
+        self.repositories = repositories
         self.memory_context_snapshot_service = memory_context_snapshot_service
-        self.agent_runtime_repo = agent_runtime_repo
         self.agent_runtime_service = agent_runtime_service
         self.runner_operations = runner_operations
-        self.agent_session_repository = agent_session_repository
         self.session_working_folder_binding_service = (
             session_working_folder_binding_service
         )
-        self.project_repo = project_repo
         self.agents_store = agents_store
         self.server_to_runtime_transfer_service = server_to_runtime_transfer_service
         self.runtime_image_read_service = runtime_image_read_service
@@ -1689,14 +1602,11 @@ class BuiltinToolkitProvider(ToolkitProvider[ShellToolkitConfig]):
             model_file_service=self.model_file_service,
             vfs_projection_service=self.vfs_projection_service,
             agent_id=context.agent_id,
-            session_manager=self.session_manager,
-            agent_runtime_repo=self.agent_runtime_repo,
+            repositories=self.repositories,
             agent_runtime_service=(self.agent_runtime_service),
-            agent_session_repository=self.agent_session_repository,
             session_working_folder_binding_service=(
                 self.session_working_folder_binding_service
             ),
-            project_repo=self.project_repo,
             agents_store=self.agents_store,
             server_to_runtime_transfer_service=self.server_to_runtime_transfer_service,
             runtime_image_read_service=self.runtime_image_read_service,
@@ -1723,8 +1633,7 @@ class BuiltinToolkitProvider(ToolkitProvider[ShellToolkitConfig]):
         return BuiltinToolkit(
             config=config,
             agent_id=context.agent_id,
-            session_manager=self.session_manager,
-            memory_repo=self.memory_repo,
+            repositories=self.repositories,
         )
 
     async def resolve_memory_context(
@@ -1736,7 +1645,6 @@ class BuiltinToolkitProvider(ToolkitProvider[ShellToolkitConfig]):
         return MemoryContextToolkit(
             config=config,
             agent_id=context.agent_id,
-            session_manager=self.session_manager,
             memory_context_snapshot_service=self.memory_context_snapshot_service,
         )
 
@@ -1750,8 +1658,7 @@ class BuiltinToolkitProvider(ToolkitProvider[ShellToolkitConfig]):
             config=config,
             agent_id=context.agent_id,
             session_id=context.session_id,
-            session_manager=self.session_manager,
-            memory_repo=self.memory_repo,
+            repositories=self.repositories,
             vfs_read_router=self.vfs_read_router,
         )
 
@@ -1764,8 +1671,7 @@ class BuiltinToolkitProvider(ToolkitProvider[ShellToolkitConfig]):
         return MemoryWriteToolkit(
             config=config,
             agent_id=context.agent_id,
-            session_manager=self.session_manager,
-            memory_repo=self.memory_repo,
+            repositories=self.repositories,
         )
 
 
@@ -1798,9 +1704,7 @@ async def _collect_secret_env(
 
 async def _ready_runtime_for_agent(
     *,
-    agent_runtime_repo: AgentRuntimeRepository,
     agent_runtime_service: AgentRuntimeService,
-    session_manager: SessionManager[AsyncSession] | None,
     agent_id: str,
     wait_timeout_seconds: float | None = None,
     poll_interval_seconds: float = _RUNTIME_READY_POLL_INTERVAL_SECONDS,
@@ -1808,9 +1712,6 @@ async def _ready_runtime_for_agent(
     start_if_stopped: bool = True,
 ) -> RuntimeOperationTarget:
     """Resolve one exact qualified Runtime operation target."""
-    if session_manager is None:
-        raise RuntimeStorageError("Runtime database session is not configured")
-    del agent_runtime_repo
     wait_timeout_seconds = (
         _RUNTIME_READY_WAIT_TIMEOUT_SECONDS
         if wait_timeout_seconds is None
@@ -1855,18 +1756,14 @@ class RuntimeRunnerFileStorage:
         self,
         *,
         runner_operations: RuntimeRunnerOperationClient,
-        agent_runtime_repo: AgentRuntimeRepository,
         agent_runtime_service: AgentRuntimeService,
-        session_manager: SessionManager[AsyncSession] | None,
         runtime_agent_id: str,
         owner_session_id: str | None,
         expected_authority_provider: Callable[[], RuntimeOperationAuthority | None]
         | None = None,
     ) -> None:
         self.runner_operations = runner_operations
-        self.agent_runtime_repo = agent_runtime_repo
         self.agent_runtime_service = agent_runtime_service
-        self.session_manager = session_manager
         self.runtime_agent_id = runtime_agent_id
         self.owner_session_id = owner_session_id
         self.expected_authority_provider = expected_authority_provider or (lambda: None)
@@ -2216,9 +2113,7 @@ class RuntimeRunnerFileStorage:
             runtime = self._runtime
             if runtime is None:
                 runtime = await _ready_runtime_for_agent(
-                    agent_runtime_repo=self.agent_runtime_repo,
                     agent_runtime_service=(self.agent_runtime_service),
-                    session_manager=self.session_manager,
                     agent_id=self.runtime_agent_id,
                     expected_authority=self.expected_authority_provider(),
                 )
@@ -2360,9 +2255,7 @@ def _grep_line_match(line_match: RuntimeGrepLineMatch) -> GrepLineMatch:
 def make_exec_command_tool(
     runner_operations: RuntimeRunnerOperationClient,
     *,
-    agent_runtime_repo: AgentRuntimeRepository,
     agent_runtime_service: AgentRuntimeService,
-    session_manager: SessionManager[AsyncSession] | None,
     agent_id: str,
     publish_event: Callable[[EngineEvent], Awaitable[None]],
     owner_session_id: str,
@@ -2379,9 +2272,7 @@ def make_exec_command_tool(
     async def handler(args: ExecCommandInput) -> FunctionToolResult:
         try:
             runtime = await _ready_runtime_for_agent(
-                agent_runtime_repo=agent_runtime_repo,
                 agent_runtime_service=(agent_runtime_service),
-                session_manager=session_manager,
                 agent_id=agent_id,
                 expected_authority=expected_authority_provider(),
             )
@@ -2449,9 +2340,7 @@ def make_exec_command_tool(
         tool,
         cancel_handler=_make_process_cancel_handler(
             runner_operations=runner_operations,
-            agent_runtime_repo=agent_runtime_repo,
             agent_runtime_service=agent_runtime_service,
-            session_manager=session_manager,
             agent_id=agent_id,
             owner_session_id=owner_session_id,
         ),
@@ -2461,9 +2350,7 @@ def make_exec_command_tool(
 def make_write_stdin_tool(
     runner_operations: RuntimeRunnerOperationClient,
     *,
-    agent_runtime_repo: AgentRuntimeRepository,
     agent_runtime_service: AgentRuntimeService,
-    session_manager: SessionManager[AsyncSession] | None,
     agent_id: str,
     publish_event: Callable[[EngineEvent], Awaitable[None]],
     owner_session_id: str,
@@ -2474,9 +2361,7 @@ def make_write_stdin_tool(
     async def handler(args: WriteStdinInput) -> FunctionToolResult:
         try:
             runtime = await _ready_runtime_for_agent(
-                agent_runtime_repo=agent_runtime_repo,
                 agent_runtime_service=(agent_runtime_service),
-                session_manager=session_manager,
                 agent_id=agent_id,
                 expected_authority=expected_authority_provider(),
             )
@@ -2526,9 +2411,7 @@ def make_write_stdin_tool(
         tool,
         cancel_handler=_make_process_cancel_handler(
             runner_operations=runner_operations,
-            agent_runtime_repo=agent_runtime_repo,
             agent_runtime_service=agent_runtime_service,
-            session_manager=session_manager,
             agent_id=agent_id,
             owner_session_id=owner_session_id,
         ),
@@ -2538,9 +2421,7 @@ def make_write_stdin_tool(
 def _make_process_cancel_handler(
     *,
     runner_operations: RuntimeRunnerOperationClient,
-    agent_runtime_repo: AgentRuntimeRepository,
     agent_runtime_service: AgentRuntimeService,
-    session_manager: SessionManager[AsyncSession] | None,
     agent_id: str,
     owner_session_id: str,
 ) -> Callable[[FunctionToolCancelRequest], Awaitable[None]]:
@@ -2550,9 +2431,7 @@ def _make_process_cancel_handler(
         del request
         try:
             runtime = await _ready_runtime_for_agent(
-                agent_runtime_repo=agent_runtime_repo,
                 agent_runtime_service=(agent_runtime_service),
-                session_manager=session_manager,
                 agent_id=agent_id,
             )
             await runner_operations.terminate_session_processes(

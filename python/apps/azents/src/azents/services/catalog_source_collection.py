@@ -12,6 +12,7 @@ from azents.core.model_catalog_source import (
     CATALOG_SOURCE_KEY,
     CATALOG_SOURCE_KIND,
     CatalogSourcePayload,
+    ModelMetadataSourceKind,
     decode_catalog_source,
 )
 
@@ -51,7 +52,7 @@ class CollectedCatalogSource:
     """Typed source with independent raw and canonical content identities."""
 
     source_key: str
-    source_kind: str
+    source_kind: ModelMetadataSourceKind
     source_url: str
     source_hash: str
     raw_document_hash: str

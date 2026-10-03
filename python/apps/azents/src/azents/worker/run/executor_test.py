@@ -16,12 +16,13 @@ from azcommon.uuid import uuid7
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import azents.worker.run.executor as run_executor_module
-from azents.broker.types import PublishedEvent, SessionWakeUp
+from azents.broker.types import SessionWakeUp
 from azents.core.agent import (
     AgentModelSelection,
     SelectableModelCandidate,
     SelectableModelOption,
 )
+from azents.core.chat_data import ChatLiveRunState
 from azents.core.enums import (
     ActionExecutionStatus,
     AgentLifecycleStatus,
@@ -41,6 +42,9 @@ from azents.core.enums import (
     ExternalChannelResponseMode,
     MailboxItemKind,
     MailboxSchedulingMode,
+)
+from azents.core.external_channel_mailbox_payload import (
+    build_external_channel_mailbox_payload,
 )
 from azents.core.inference_profile import (
     AppliedInferenceProfile,
@@ -72,6 +76,7 @@ from azents.core.runtime_capabilities import (
     RuntimeCapability,
     RuntimeCapabilityResolver,
 )
+from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.core.tools import ToolkitContext, ToolkitExecutionMode
 from azents.core.vfs import VfsProjection, make_vfs_projection
 from azents.core.worker_model_profile import (
@@ -115,7 +120,7 @@ from azents.engine.run.contracts import (
     RunRequest,
     ToolkitBinding,
 )
-from azents.engine.run.emit import Emit, durable, ephemeral
+from azents.engine.run.emit import Emit, PublishedEvent, durable, ephemeral
 from azents.engine.run.errors import (
     CompactionModelStreamTimeoutError,
     ModelCallError,
@@ -148,18 +153,25 @@ from azents.engine.tools.dynamic_worktree import (
     DynamicWorktreeToolkit,
 )
 from azents.rdb.session import SessionManager
+from azents.repos.action_execution import ActionExecutionRepository
 from azents.repos.action_execution.data import (
     ActionExecution,
     ActionExecutionProjection,
 )
+from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
+from azents.repos.agent_execution import EventTranscriptRepository
+from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession, PendingSessionCommand
+from azents.repos.chatgpt_oauth_runtime import ChatGPTOAuthRuntimeRepository
 from azents.repos.engine_read import (
     EngineInvokeReadRepository,
     EngineModelReadRepository,
     EngineToolkitReadRepository,
 )
+from azents.repos.engine_resolve import EngineResolveRepositories
 from azents.repos.external_channel.data import ExternalChannelMailboxProjectionItem
+from azents.repos.kimi_oauth_runtime import KimiOAuthRuntimeRepository
 from azents.repos.mailbox.data import MailboxItem
 from azents.repos.model_candidate_selection import ModelCandidateSelection
 from azents.repos.session_execution import (
@@ -182,8 +194,8 @@ from azents.repos.worker_executor_read_data import (
     WorkerSessionTreeChangeRouting,
 )
 from azents.repos.worker_session_data import CanonicalExecutionWorkDriftError
+from azents.repos.xai_oauth_runtime import XaiOAuthRuntimeRepository
 from azents.services.agent_wait import AgentWaitService
-from azents.services.chat.data import ChatLiveRunState
 from azents.services.engine_runtime_tokens import EngineRuntimeTokenResolver
 from azents.services.mailbox import (
     ExternalChannelMessageMailboxProcessor,
@@ -193,13 +205,12 @@ from azents.services.mailbox import (
     PromotedMailboxItems,
     ScheduledMailboxAdmission,
     TurnEffect,
-    build_external_channel_mailbox_payload,
 )
+from azents.services.oauth_runtime_clients import create_runtime_oauth_client_factories
 from azents.services.session_git_worktree import (
     GitWorktreeActionExecutionResult,
     SessionGitWorktreeService,
 )
-from azents.services.session_resource_authority import SessionExecutionOwner
 from azents.services.turn_action import TurnActionCapabilityRegistry
 from azents.testing.model_metadata import make_test_model_metadata_service
 from azents.testing.model_selection import (
@@ -2088,9 +2099,16 @@ def _executor(
         broker=Mock(spec=run_executor_module.SessionBroker),
         read_repository=read_repository,
         model_operation_repository=model_repository,
-        invoke_read_repository=Mock(spec=EngineInvokeReadRepository),
+        resolve_repositories=EngineResolveRepositories(
+            invoke_read=Mock(spec=EngineInvokeReadRepository),
+            model_read=Mock(spec=EngineModelReadRepository),
+            toolkit_read=Mock(spec=EngineToolkitReadRepository),
+            chatgpt_oauth=Mock(spec=ChatGPTOAuthRuntimeRepository),
+            xai_oauth=Mock(spec=XaiOAuthRuntimeRepository),
+            kimi_oauth=Mock(spec=KimiOAuthRuntimeRepository),
+        ),
+        oauth_clients=create_runtime_oauth_client_factories(),
         model_read_repository=Mock(spec=EngineModelReadRepository),
-        toolkit_read_repository=Mock(spec=EngineToolkitReadRepository),
         runtime_token_resolver=Mock(spec=EngineRuntimeTokenResolver),
         agent_wait_service=Mock(spec=AgentWaitService),
         test_agent_state=agent_state,
@@ -8040,3 +8058,25 @@ async def test_real_fresh_executor_materializers_observe_closed_postgres_phases(
         assert fixture.manager.commits == len(fixture.manager.sessions) == 2
         assert rows.session.inference_state is None
     fixture.manager.assert_closed()
+
+
+@pytest.mark.asyncio
+async def test_empty_worker_tree_changes_do_not_open_a_transaction() -> None:
+    """An empty committed-change set neither reads SQL nor publishes a change."""
+    manager = Mock(spec=SessionManager)
+    reads = WorkerExecutorReadRepository(
+        session_manager=manager,
+        agent_repository=Mock(spec=AgentRepository),
+        agent_session_repository=Mock(spec=AgentSessionRepository),
+        event_transcript_repository=Mock(spec=EventTranscriptRepository),
+        action_execution_repository=Mock(spec=ActionExecutionRepository),
+    )
+    executor = _executor()
+    executor.read_repository = reads
+    publish = AsyncMock()
+
+    assert await reads.tree_change_routes([]) == ()
+    await executor._publish_session_agent_tree_changes([], dispatch_event=publish)
+
+    manager.assert_not_called()
+    publish.assert_not_awaited()

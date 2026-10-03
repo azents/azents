@@ -61,6 +61,7 @@ class TerminalRunFinalizationRepository:
             return TerminalFinalizationOutcome(
                 run_id=run_id,
                 disposition=TerminalDeliveryDisposition.INELIGIBLE,
+                mailbox_item_id=None,
             )
         user_stop_requested = await self.agent_session_repository.has_stop_request(
             session,
@@ -74,6 +75,7 @@ class TerminalRunFinalizationRepository:
             return TerminalFinalizationOutcome(
                 run_id=run_id,
                 disposition=TerminalDeliveryDisposition.INELIGIBLE,
+                mailbox_item_id=None,
             )
         locked_root = await self.agent_session_repository.lock_session_agent_by_id(
             session,
@@ -83,12 +85,14 @@ class TerminalRunFinalizationRepository:
             return TerminalFinalizationOutcome(
                 run_id=run_id,
                 disposition=TerminalDeliveryDisposition.INELIGIBLE,
+                mailbox_item_id=None,
             )
         run = await self.agent_run_repository.lock_by_id(session, run_id)
         if run is None or run.session_id != source.agent_session_id:
             return TerminalFinalizationOutcome(
                 run_id=run_id,
                 disposition=TerminalDeliveryDisposition.INELIGIBLE,
+                mailbox_item_id=None,
             )
         if user_stop_requested and run.status is AgentRunStatus.INTERRUPTED:
             stopped = await self.agent_run_repository.mark_stopped_for_user_stop(
@@ -100,6 +104,7 @@ class TerminalRunFinalizationRepository:
                 return TerminalFinalizationOutcome(
                     run_id=run_id,
                     disposition=TerminalDeliveryDisposition.INELIGIBLE,
+                    mailbox_item_id=None,
                 )
             run = stopped
         if run.parent_result_delivery_state is not None:
@@ -112,6 +117,7 @@ class TerminalRunFinalizationRepository:
             return TerminalFinalizationOutcome(
                 run_id=run_id,
                 disposition=TerminalDeliveryDisposition.INELIGIBLE,
+                mailbox_item_id=None,
             )
         if source.kind is not SessionAgentKind.SUBAGENT:
             return await self._suppress(session, run_id=run_id)

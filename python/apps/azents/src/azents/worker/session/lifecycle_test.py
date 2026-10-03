@@ -71,6 +71,7 @@ async def test_failed_heartbeat_does_not_renew_broker_lease() -> None:
 @pytest.mark.asyncio
 async def test_idle_consumes_completed_repository_outcome(
     disposition: WorkerIdleDisposition,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     """DB predicates belong to repository tests; service maps detached outcomes."""
     fixture = lifecycle_fixture()
@@ -81,12 +82,27 @@ async def test_idle_consumes_completed_repository_outcome(
         else None,
         run_id="run" if disposition is WorkerIdleDisposition.RUN_ACTIVE else None,
     )
-    result = await fixture.service.mark_session_idle("session", owner_generation=3)
+    with caplog.at_level("INFO", logger="azents.worker.session.lifecycle"):
+        result = await fixture.service.mark_session_idle("session", owner_generation=3)
     assert result is (disposition is WorkerIdleDisposition.IDLE)
     fixture.repository.mark_session_idle.assert_awaited_once_with(
         "session", owner_generation=3
     )
     fixture.broker.renew_session_ttl.assert_not_awaited()
+    records = [
+        record
+        for record in caplog.records
+        if record.name == "azents.worker.session.lifecycle"
+    ]
+    if disposition is WorkerIdleDisposition.IDLE:
+        assert records == []
+    else:
+        assert len(records) == 1
+        assert records[0].__dict__["session_id"] == "session"
+        if disposition is WorkerIdleDisposition.COMMAND_PENDING:
+            assert records[0].__dict__["command_id"] == "command"
+        if disposition is WorkerIdleDisposition.RUN_ACTIVE:
+            assert records[0].__dict__["run_id"] == "run"
 
 
 @pytest.mark.asyncio

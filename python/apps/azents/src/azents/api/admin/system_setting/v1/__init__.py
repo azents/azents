@@ -34,6 +34,7 @@ from azents.utils.fastapi.route import RouteMounter
 from .data import (
     ExternalAccountOAuthDetailResponse,
     ExternalAccountOAuthPatchRequest,
+    ExternalAccountOAuthSecretActionRequest,
     ExternalChannelFilesDetailResponse,
     ExternalChannelFilesPatchRequest,
     PlatformGitHubAppConfirmRequest,
@@ -43,15 +44,43 @@ from .data import (
     SystemSettingAuditEventResponse,
     SystemSettingInventoryItemResponse,
     SystemSettingInventoryResponse,
+    SystemSettingSecretActionRequest,
     SystemSettingVersionConflictResponse,
 )
 
 router = APIRouter()
 
-_EXTERNAL_CHANNEL_FILE_LIMIT_FIELDS = (
-    "outbound_max_file_bytes",
-    "outbound_max_action_bytes",
-)
+
+def _non_null_file_limit(value: int | None) -> int:
+    """Reject an explicit null file limit after typed request decoding."""
+    if value is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={
+                "code": "invalid_system_setting_payload",
+                "message": "External Channel file limits cannot be null.",
+            },
+        )
+    return value
+
+
+def _secret_action(
+    request: (
+        SystemSettingSecretActionRequest
+        | ExternalAccountOAuthSecretActionRequest
+        | None
+    ),
+) -> SystemSettingSecretAction:
+    """Require an explicit validated replacement or clearing action."""
+    if request is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={
+                "code": "invalid_system_setting_secret_action",
+                "message": "Secret fields require an explicit action object.",
+            },
+        )
+    return SystemSettingSecretAction(action=request.action, value=request.value)
 
 
 def _raise_system_setting_error(error: Exception) -> Never:
@@ -165,19 +194,14 @@ async def patch_external_channel_files_setting(
 ) -> ExternalChannelFilesDetailResponse:
     """Directly activate an optimistic External Channel file policy patch."""
     config_patch: dict[str, int] = {}
-    for field_name in _EXTERNAL_CHANNEL_FILE_LIMIT_FIELDS:
-        if field_name not in request.model_fields_set:
-            continue
-        value = getattr(request, field_name)
-        if value is None:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail={
-                    "code": "invalid_system_setting_payload",
-                    "message": "External Channel file limits cannot be null.",
-                },
-            )
-        config_patch[field_name] = value
+    if "outbound_max_file_bytes" in request:
+        config_patch["outbound_max_file_bytes"] = _non_null_file_limit(
+            request["outbound_max_file_bytes"]
+        )
+    if "outbound_max_action_bytes" in request:
+        config_patch["outbound_max_action_bytes"] = _non_null_file_limit(
+            request["outbound_max_action_bytes"]
+        )
     if not config_patch:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -190,7 +214,7 @@ async def patch_external_channel_files_setting(
         result = await service.mutate(
             SystemSettingMutation(
                 section=SystemSettingSection.EXTERNAL_CHANNEL_FILES,
-                expected_version=request.expected_version,
+                expected_version=request["expected_version"],
                 config_patch=config_patch,
                 secret_actions={},
                 actor_user_id=system_admin.user_id,
@@ -237,29 +261,17 @@ async def patch_external_account_oauth_setting(
 ) -> ExternalAccountOAuthDetailResponse:
     """Patch one provider OAuth Section with optimistic concurrency."""
     config_patch: dict[str, object] = {}
-    if "client_id" in request.model_fields_set:
-        config_patch["client_id"] = request.client_id
-    if "application_id" in request.model_fields_set:
-        config_patch["application_id"] = request.application_id
+    if "client_id" in request:
+        config_patch["client_id"] = request["client_id"]
+    if "application_id" in request:
+        config_patch["application_id"] = request["application_id"]
     secret_action = None
-    if "client_secret" in request.model_fields_set:
-        action = request.client_secret
-        if action is None:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail={
-                    "code": "invalid_system_setting_secret_action",
-                    "message": "Secret fields require an explicit action object.",
-                },
-            )
-        secret_action = SystemSettingSecretAction(
-            action=action.action,
-            value=action.value,
-        )
+    if "client_secret" in request:
+        secret_action = _secret_action(request["client_secret"])
     try:
         await service.patch(
             provider=provider,
-            expected_version=request.expected_version,
+            expected_version=request["expected_version"],
             config_patch=config_patch,
             client_secret_action=secret_action,
             actor_user_id=system_admin.user_id,
@@ -311,33 +323,21 @@ async def patch_platform_github_app_setting(
     service: Annotated[PlatformGitHubAppSystemSettingService, Depends()],
 ) -> PlatformGitHubAppDetailResponse:
     """Patch the Admin base and validate the resulting candidate."""
-    config_patch = {
-        field_name: getattr(request, field_name)
-        for field_name in ("app_id", "client_id")
-        if field_name in request.model_fields_set
-    }
+    config_patch: dict[str, object] = {}
+    if "app_id" in request:
+        config_patch["app_id"] = request["app_id"]
+    if "client_id" in request:
+        config_patch["client_id"] = request["client_id"]
     secret_actions: dict[str, SystemSettingSecretAction] = {}
-    for field_name in ("private_key", "client_secret"):
-        if field_name not in request.model_fields_set:
-            continue
-        action = getattr(request, field_name)
-        if action is None:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail={
-                    "code": "invalid_system_setting_secret_action",
-                    "message": "Secret fields require an explicit action object.",
-                },
-            )
-        secret_actions[field_name] = SystemSettingSecretAction(
-            action=action.action,
-            value=action.value,
-        )
+    if "private_key" in request:
+        secret_actions["private_key"] = _secret_action(request["private_key"])
+    if "client_secret" in request:
+        secret_actions["client_secret"] = _secret_action(request["client_secret"])
     try:
         await service.patch(
             SystemSettingMutation(
                 section=SystemSettingSection.PLATFORM_GITHUB_APP,
-                expected_version=request.expected_version,
+                expected_version=request["expected_version"],
                 config_patch=config_patch,
                 secret_actions=secret_actions,
                 actor_user_id=system_admin.user_id,

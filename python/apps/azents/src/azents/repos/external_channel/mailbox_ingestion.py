@@ -23,6 +23,7 @@ from azents.core.enums import (
     ExternalChannelConversationLocation,
     ExternalChannelConversationScopeKind,
     ExternalChannelDeliveryOperation,
+    ExternalChannelIngressAuthorityKind,
     ExternalChannelIngressProfile,
     ExternalChannelInteractionStatus,
     ExternalChannelInteractionType,
@@ -35,17 +36,57 @@ from azents.core.enums import (
     MailboxItemKind,
     MailboxSchedulingMode,
 )
+from azents.core.external_channel_conversation_data import ExternalChannelHistoryRange
+from azents.core.external_channel_conversation_preparation import (
+    ExternalChannelConversationPreparation,
+)
+from azents.core.external_channel_discord_selector_scope import (
+    build_discord_selector_custom_id,
+)
+from azents.core.external_channel_ingestion import (
+    ExternalChannelCanonicalHistoryMessage,
+    ExternalChannelIngestionAcceptance,
+    ExternalChannelIngestionOperation,
+    ExternalChannelIngestionOutcome,
+    ExternalChannelIngestionOutcomeKind,
+    ExternalChannelIngestionPreparation,
+    ExternalChannelIngestionReason,
+    ExternalChannelIngestionRequest,
+    ExternalChannelReplayBoundary,
+    ExternalChannelSetupReplayBoundary,
+)
+from azents.core.external_channel_mailbox_payload import (
+    build_external_channel_mailbox_payload,
+)
+from azents.core.external_channel_participation_state import (
+    ExternalChannelSetupSourceProjection,
+    build_setup_continuation_request,
+    projection_with_setup_source,
+    setup_source_from_projection,
+)
 from azents.core.external_channel_progress import checking_progress
 from azents.core.external_channel_provider_effect import ProviderEffectPlan
+from azents.core.external_channel_selector_state import (
+    ExternalChannelSelectorState,
+    projection_with_selector_state,
+    selector_provider_interaction_key,
+    selector_state_from_interaction,
+)
 from azents.core.external_channel_session_presence import (
     session_presence_payload,
     setup_required_payload,
+)
+from azents.core.root_agent_session_creation import (
+    AgentDefaultRootWorkspaceIntent,
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSessionCreate
+from azents.repos.external_channel.conversation_provisioning import (
+    ExternalChannelConversationProvisioningRepository,
+)
 from azents.repos.external_channel.data import (
     ExternalChannelAccessRequestCreate,
     ExternalChannelAgentRoute,
@@ -67,48 +108,11 @@ from azents.repos.external_channel.data import (
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.external_channel.work import ExternalChannelWorkRepository
 from azents.repos.external_channel.work_state import ChannelWorkState
+from azents.repos.mailbox import MailboxRepository
 from azents.repos.mailbox.admission import MailboxAdmissionRepository
 from azents.repos.mailbox.admission_data import MailboxEnqueue
-from azents.services.external_channel.conversation import ExternalChannelHistoryRange
-from azents.services.external_channel.conversation_provisioning import (
-    ExternalChannelConversationPreparation,
-    ExternalChannelConversationProvisioningService,
-)
-from azents.services.external_channel.discord_selector_scope import (
-    build_discord_selector_custom_id,
-)
-from azents.services.external_channel.ingestion import (
-    ExternalChannelCanonicalHistoryMessage,
-    ExternalChannelIngestionAcceptance,
-    ExternalChannelIngestionOperation,
-    ExternalChannelIngestionOutcome,
-    ExternalChannelIngestionOutcomeKind,
-    ExternalChannelIngestionPreparation,
-    ExternalChannelIngestionReason,
-    ExternalChannelIngestionRequest,
-    ExternalChannelIngressAuthorityKind,
-    ExternalChannelReplayBoundary,
-    ExternalChannelSetupReplayBoundary,
-)
-from azents.services.external_channel.participation_state import (
-    ExternalChannelSetupSourceProjection,
-    build_setup_continuation_request,
-    projection_with_setup_source,
-    setup_source_from_projection,
-)
-from azents.services.external_channel.selector_state import (
-    ExternalChannelSelectorState,
-    projection_with_selector_state,
-    selector_provider_interaction_key,
-    selector_state_from_interaction,
-)
-from azents.services.mailbox import (
-    MailboxService,
-    build_external_channel_mailbox_payload,
-)
-from azents.services.root_agent_session_creation import RootAgentSessionCreationService
-from azents.services.root_agent_session_creation.data import (
-    AgentDefaultRootWorkspaceIntent,
+from azents.repos.root_agent_session_creation import (
+    RootAgentSessionCreationRepository,
 )
 
 _ACCESS_REQUEST_AGE = datetime.timedelta(days=7)
@@ -148,7 +152,7 @@ class ExternalChannelConfiguredBindingResult:
 
 
 @dataclasses.dataclass
-class ExternalChannelMailboxIngestionStore:
+class ExternalChannelMailboxIngestionRepository:
     """Accept provider history directly into one canonical mailbox item."""
 
     session_manager: Annotated[
@@ -164,19 +168,19 @@ class ExternalChannelMailboxIngestionStore:
         Depends(ExternalChannelWorkRepository.create),
     ]
     conversation_provisioning: Annotated[
-        ExternalChannelConversationProvisioningService,
-        Depends(ExternalChannelConversationProvisioningService),
+        ExternalChannelConversationProvisioningRepository,
+        Depends(ExternalChannelConversationProvisioningRepository),
     ]
     agent_repository: Annotated[AgentRepository, Depends(AgentRepository)]
     agent_session_repository: Annotated[
         AgentSessionRepository,
         Depends(AgentSessionRepository),
     ]
-    root_agent_session_creation_service: Annotated[
-        RootAgentSessionCreationService,
-        Depends(RootAgentSessionCreationService),
+    root_agent_session_creation_repository: Annotated[
+        RootAgentSessionCreationRepository,
+        Depends(RootAgentSessionCreationRepository),
     ]
-    mailbox_service: Annotated[MailboxService, Depends(MailboxService)]
+    mailbox_repository: Annotated[MailboxRepository, Depends(MailboxRepository)]
     mailbox_admission_repository: Annotated[
         MailboxAdmissionRepository, Depends(MailboxAdmissionRepository)
     ]
@@ -374,7 +378,7 @@ class ExternalChannelMailboxIngestionStore:
                 wake_item_id = None
                 wake_session_id = None
                 if binding is not None:
-                    existing = await self.mailbox_service.get_by_idempotency_key(
+                    existing = await self.mailbox_repository.get_by_idempotency_key(
                         session,
                         session_id=binding.agent_session_id,
                         kind=MailboxItemKind.EXTERNAL_CHANNEL_MESSAGE,
@@ -625,7 +629,7 @@ class ExternalChannelMailboxIngestionStore:
                         raise ValueError(
                             "External Channel provider preparation is unavailable."
                         )
-                    await self.conversation_provisioning.apply(
+                    await self.conversation_provisioning.apply_in_session(
                         session,
                         target_resource_id=conversation.resource.id,
                         preparation=provider_preparation,
@@ -1622,7 +1626,7 @@ class ExternalChannelMailboxIngestionStore:
         agent = await self.agent_repository.get_by_id(session, agent_id)
         if agent is None or agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE:
             raise ValueError("External Channel Agent is unavailable.")
-        root = await self.root_agent_session_creation_service.create_root_session(
+        root = await self.root_agent_session_creation_repository.create_root_session(
             session,
             create=AgentSessionCreate(
                 workspace_id=agent.workspace_id,

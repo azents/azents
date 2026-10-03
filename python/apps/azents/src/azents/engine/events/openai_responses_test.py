@@ -114,7 +114,10 @@ from azents.engine.run.provider_failure import (
 )
 from azents.engine.run.types import BuiltinToolSpec
 from azents.services.model_listing.data import NormalizedModelCandidate
-from azents.services.model_listing.providers import _candidate_from_chatgpt_model
+from azents.services.model_listing.providers import (
+    _candidate_from_chatgpt_model,
+    _ChatGPTModelPayload,
+)
 from azents.services.model_metadata_projection import (
     project_integration_replacement_entries,
 )
@@ -2333,7 +2336,9 @@ async def test_official_sdk_wire_request_preserves_presence_and_stop() -> None:
 async def test_projected_chatgpt_search_reaches_official_sdk_wire(model: str) -> None:
     """A final saved account catalog permits search without source-price facts."""
     candidate = _candidate_from_chatgpt_model(
-        {"slug": model, "visibility": "list", "supported_in_api": True},
+        _ChatGPTModelPayload.model_validate(
+            {"slug": model, "visibility": "list", "supported_in_api": True}
+        ),
         fetched_at=datetime.datetime(2026, 10, 3, tzinfo=datetime.UTC),
     )
     assert candidate is not None

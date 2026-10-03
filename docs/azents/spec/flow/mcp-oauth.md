@@ -6,6 +6,8 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [toolkit, user-auth, agent]
 code_paths:
+  - python/apps/azents/src/azents/core/toolkit_errors.py
+  - python/apps/azents/src/azents/repos/engine_tool_repositories.py
   - python/apps/azents/src/azents/services/toolkit/**
   - python/apps/azents/src/azents/services/toolkit_oauth/**
   - python/apps/azents/src/azents/repos/toolkit_oauth_operations.py

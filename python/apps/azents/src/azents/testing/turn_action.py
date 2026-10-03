@@ -2,7 +2,6 @@
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.engine.tools.skill import SkillStateStore
 from azents.rdb.session import SessionManager
 from azents.repos.action_execution import ActionExecutionRepository
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
@@ -11,6 +10,7 @@ from azents.repos.goal.store import GoalStateStore
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.mailbox.promotion import MailboxPromotionRepository
 from azents.repos.skill_state import SkillStateRepository
+from azents.repos.skill_state_store import SkillStateStore
 from azents.services.turn_action import TurnActionCapabilityRegistry
 
 

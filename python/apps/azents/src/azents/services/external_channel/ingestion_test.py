@@ -10,13 +10,14 @@ import pytest
 from azents.core.enums import (
     ExternalChannelConversationLocation,
     ExternalChannelConversationScopeKind,
+    ExternalChannelIngressAuthorityKind,
     ExternalChannelIngressProfile,
     ExternalChannelMessageLifecycle,
     ExternalChannelMessageRevisionKind,
     ExternalChannelPrincipalAuthorType,
     ExternalChannelProvider,
 )
-from azents.services.external_channel.conversation import (
+from azents.core.external_channel_conversation_data import (
     ExternalChannelConversationLockLease,
     ExternalChannelConversationScope,
     ExternalChannelHistoryRange,
@@ -24,12 +25,11 @@ from azents.services.external_channel.conversation import (
     ExternalChannelOperationDeadline,
     ExternalChannelParticipationScope,
 )
-from azents.services.external_channel.conversation_provisioning import (
+from azents.core.external_channel_conversation_preparation import (
     ExternalChannelConversationPreparation,
 )
-from azents.services.external_channel.ingestion import (
+from azents.core.external_channel_ingestion import (
     ExternalChannelCanonicalHistoryMessage,
-    ExternalChannelConversationIngestionService,
     ExternalChannelIngestionAcceptance,
     ExternalChannelIngestionOperation,
     ExternalChannelIngestionOutcome,
@@ -38,11 +38,13 @@ from azents.services.external_channel.ingestion import (
     ExternalChannelIngestionReason,
     ExternalChannelIngestionRequest,
     ExternalChannelIngressAuthority,
-    ExternalChannelIngressAuthorityKind,
     ExternalChannelReplayBoundary,
     ExternalChannelSetupReplayBoundary,
     ExternalChannelTriggerLocator,
     ExternalChannelWakeDispatchResult,
+)
+from azents.services.external_channel.ingestion import (
+    ExternalChannelConversationIngestionService,
 )
 from azents.testing.external_channel import make_provider_effect_plan
 

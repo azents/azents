@@ -25,6 +25,7 @@ from azents.repos.llm_provider_integration.data import (
     LLMProviderIntegrationWithSecrets,
 )
 from azents.repos.workspace import WorkspaceRepository
+from azents.services.oauth_runtime_clients import create_runtime_oauth_client_factories
 
 from .client import ChatGPTOAuthClient
 from .data import ProviderRejected, ProviderUnavailable, TokenSet
@@ -175,10 +176,12 @@ class TestEnsureRuntimeTokens:
         ensured = await ensure_runtime_tokens(
             integration=integration,
             persistence_repository=repository,
+            client_factory=create_runtime_oauth_client_factories().chatgpt,
         )
         refreshed = await refresh_runtime_tokens(
             integration=integration,
             persistence_repository=repository,
+            client_factory=create_runtime_oauth_client_factories().chatgpt,
         )
 
         if ensure_succeeds:
@@ -205,6 +208,7 @@ class TestEnsureRuntimeTokens:
         result = await ensure_runtime_tokens(
             integration=integration,
             persistence_repository=_persistence_repository(repo, rdb_session),
+            client_factory=create_runtime_oauth_client_factories().chatgpt,
         )
 
         assert isinstance(result, Success)
@@ -244,6 +248,7 @@ class TestEnsureRuntimeTokens:
         result = await refresh_runtime_tokens(
             integration=integration,
             persistence_repository=_persistence_repository(repo, rdb_session),
+            client_factory=create_runtime_oauth_client_factories().chatgpt,
         )
 
         assert isinstance(result, Success)
@@ -284,6 +289,7 @@ class TestEnsureRuntimeTokens:
         result = await ensure_runtime_tokens(
             integration=integration,
             persistence_repository=_persistence_repository(repo, rdb_session),
+            client_factory=create_runtime_oauth_client_factories().chatgpt,
         )
 
         assert isinstance(result, Success)
@@ -316,6 +322,7 @@ class TestEnsureRuntimeTokens:
         result = await ensure_runtime_tokens(
             integration=integration,
             persistence_repository=_persistence_repository(repo, rdb_session),
+            client_factory=create_runtime_oauth_client_factories().chatgpt,
         )
         updated = await repo.get_by_id(rdb_session, integration_id)
 
@@ -350,6 +357,7 @@ class TestEnsureRuntimeTokens:
         first = await ensure_runtime_tokens(
             integration=integration,
             persistence_repository=_persistence_repository(repo, rdb_session),
+            client_factory=create_runtime_oauth_client_factories().chatgpt,
         )
         after_failure = await repo.get_by_id_with_secrets(rdb_session, integration_id)
         assert isinstance(first, Failure)
@@ -380,6 +388,7 @@ class TestEnsureRuntimeTokens:
         second = await ensure_runtime_tokens(
             integration=after_failure,
             persistence_repository=_persistence_repository(repo, rdb_session),
+            client_factory=create_runtime_oauth_client_factories().chatgpt,
         )
 
         assert isinstance(second, Success)
@@ -435,6 +444,7 @@ class TestEnsureRuntimeTokens:
         result = await ensure_runtime_tokens(
             integration=stale_integration,
             persistence_repository=_persistence_repository(repo, rdb_session),
+            client_factory=create_runtime_oauth_client_factories().chatgpt,
         )
 
         assert isinstance(result, Success)

@@ -5,7 +5,8 @@ import datetime
 import pytest
 from pydantic import ValidationError
 
-from azents.core.agent import AgentModelSelection
+from azents.core.agent import AgentModelSelection, ModelParameters
+from azents.core.chat_projection import _session_profile_fallback
 from azents.core.enums import LLMModelDeveloper, LLMProvider
 from azents.core.inference_profile import (
     AppliedInferenceProfile,
@@ -20,6 +21,7 @@ from azents.core.model_capability_evidence import ProviderCapabilityEvidence
 from azents.core.model_capability_projection import project_capabilities
 from azents.core.model_catalog_source import CatalogFact
 from azents.core.model_execution_options import ModelExecutionOptionId
+from azents.repos.agent.data import Agent
 from azents.testing.model_selection import (
     make_test_model_settings,
     make_test_selectable_model_options,
@@ -311,6 +313,23 @@ def test_profile_selection_keeps_conditional_effort_potential() -> None:
     )
     assert caps.configurable_reasoning_efforts() == [ModelReasoningEffort.HIGH]
     assert validate_requested_profile_against_options(options, profile) == options[0]
+    parameters = ModelParameters(
+        temperature=0.0,
+        top_p=0.0,
+        top_k=7,
+        stop_sequences=[],
+        reasoning_effort=ModelReasoningEffort.HIGH,
+    )
+    agent = Agent.model_construct(
+        selectable_model_options=options,
+        main_model_label="Quality",
+        model_parameters=parameters,
+    )
+    parameters_before = parameters.model_dump_json()
+    fallback = _session_profile_fallback(agent)
+    assert fallback.label == "Quality"
+    assert fallback.reasoning_effort is ModelReasoningEffort.HIGH
+    assert parameters.model_dump_json() == parameters_before
     with pytest.raises(ValueError, match="Reasoning effort"):
         validate_requested_profile_against_options(
             options,

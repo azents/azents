@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.engine_tool_state import TodoItem, TodoState
 from azents.core.enums import AgentSessionProductMode
+from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.rdb.session import SessionManager
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSessionCreate
@@ -13,7 +14,6 @@ from azents.repos.session_execution import (
     CanonicalExecutionOwnerGenerationStaleError,
 )
 from azents.repos.toolkit_state.engine import TodoStateStore
-from azents.services.session_resource_authority import SessionExecutionOwner
 
 
 async def test_toolkit_state_store_rejects_superseded_execution_owner(

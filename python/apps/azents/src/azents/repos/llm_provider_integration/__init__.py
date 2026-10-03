@@ -55,7 +55,7 @@ class LLMProviderIntegrationRepository:
         """
         :param cipher: Credential encryption/decryption object
         """
-        self._cipher = cipher
+        self.cipher = cipher
 
     async def create(
         self,
@@ -68,7 +68,7 @@ class LLMProviderIntegrationRepository:
         :param create: Create data
         :return: Created LLMProviderIntegration
         """
-        encrypted = self._cipher.encrypt(create.secrets.model_dump_json())
+        encrypted = self.cipher.encrypt(create.secrets.model_dump_json())
         config_dict = (
             create.config.model_dump(mode="json") if create.config is not None else None
         )
@@ -178,7 +178,7 @@ class LLMProviderIntegrationRepository:
         if "enabled" in update:
             db_values["enabled"] = update["enabled"]
         if "secrets" in update:
-            db_values["encrypted_credentials"] = self._cipher.encrypt(
+            db_values["encrypted_credentials"] = self.cipher.encrypt(
                 update["secrets"].model_dump_json()
             )
         if "config" in update:
@@ -224,7 +224,7 @@ class LLMProviderIntegrationRepository:
             )
         db_values: dict[str, object] = {}
         if "secrets" in update:
-            db_values["encrypted_credentials"] = self._cipher.encrypt(
+            db_values["encrypted_credentials"] = self.cipher.encrypt(
                 update["secrets"].model_dump_json()
             )
         if "config" in update:
@@ -312,7 +312,7 @@ class LLMProviderIntegrationRepository:
     ) -> LLMProviderIntegrationWithSecrets:
         """Convert RDB model to domain model, including secrets."""
         secrets = _secrets_adapter.validate_json(
-            self._cipher.decrypt(rdb.encrypted_credentials)
+            self.cipher.decrypt(rdb.encrypted_credentials)
         )
         config = (
             _config_adapter.validate_python(rdb.config)

@@ -14,6 +14,9 @@ from azents.core.enums import (
     RuntimeRunnerState,
     WorkspaceUserRole,
 )
+from azents.core.session_workspace_paths import (
+    InvalidProjectPath,
+)
 from azents.core.workspace import WorkspaceCreate
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_automatic_project_setting import (
@@ -43,7 +46,6 @@ from azents.services.agent_runtime.lifecycle_data import (
     RuntimeOperationTarget,
     RuntimeOperationTargetResolver,
 )
-from azents.services.session_workspace_project import InvalidProjectPath
 from azents.testing.model_selection import (
     make_test_model_selection_dict,
     make_test_selectable_model_option_dicts,

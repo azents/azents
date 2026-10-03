@@ -8,7 +8,6 @@ from dataclasses import dataclass
 from typing import Annotated, Literal, NamedTuple
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.config import Config
 from azents.core.deps import get_config
@@ -24,13 +23,13 @@ from azents.core.external_channel_provider import (
     ExternalChannelCredentialSnapshot,
     ExternalChannelProviderIdentity,
 )
-from azents.rdb.deps import get_session_manager
-from azents.rdb.session import SessionManager
+from azents.repos.discord_connection_dependencies import (
+    get_discord_connection_operations,
+)
 from azents.repos.discord_connection_operations import (
     DiscordConnectionOperationRepository,
 )
 from azents.repos.external_channel.data import ExternalChannelConnectionConfiguration
-from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.services.external_channel.connection import (
     external_channel_capabilities_from_storage,
     get_external_channel_credentials_codec,
@@ -168,13 +167,9 @@ class DiscordConnectionActivationService:
     """Configure a Discord callback and activate its durable authority fences."""
 
     config: Annotated[Config, Depends(get_config)]
-    session_manager: Annotated[
-        SessionManager[AsyncSession],
-        Depends(get_session_manager),
-    ]
-    repository: Annotated[
-        ExternalChannelRepository,
-        Depends(ExternalChannelRepository.create),
+    operations: Annotated[
+        DiscordConnectionOperationRepository,
+        Depends(get_discord_connection_operations),
     ]
     credentials_codec: Annotated[
         ExternalChannelCredentialsCodec,
@@ -188,7 +183,7 @@ class DiscordConnectionActivationService:
         connection_id: str,
     ) -> ExternalChannelConnectionStatusSnapshot:
         """Activate or persist a safe reason for one Discord connection failure."""
-        connection = await self._operations().get_configuration(connection_id)
+        connection = await self.operations.get_configuration(connection_id)
         if connection is None or connection.encrypted_credentials is None:
             raise ValueError("Discord connection is not configured.")
         try:
@@ -240,7 +235,7 @@ class DiscordConnectionActivationService:
                 callback_base_url=self.config.external_channel_discord_callback_url,
                 selector=selector,
             )
-            prepared = await self._operations().prepare_callback(
+            prepared = await self.operations.prepare_callback(
                 connection_id=connection_id,
                 expected_encrypted_credentials=encrypted_credentials,
                 expected_configuration_generation=configuration_generation,
@@ -285,7 +280,7 @@ class DiscordConnectionActivationService:
                     failure_stage=failure_stage,
                 )
         capabilities = _discord_capabilities()
-        activated = await self._operations().activate(
+        activated = await self.operations.activate(
             connection_id=connection_id,
             expected_encrypted_credentials=encrypted_credentials,
             expected_configuration_generation=configuration_generation,
@@ -343,7 +338,7 @@ class DiscordConnectionActivationService:
         """Fence and retain a safe failure code without retaining exception text."""
         failure_code = discord_activation_failure_code(error)
         checked_at = datetime.datetime.now(datetime.UTC)
-        failed = await self._operations().record_activation_failure(
+        failed = await self.operations.record_activation_failure(
             connection_id=connection_id,
             expected_encrypted_credentials=expected_encrypted_credentials,
             expected_configuration_generation=expected_configuration_generation,
@@ -391,19 +386,12 @@ class DiscordConnectionActivationService:
         callback_selector_hash: str,
     ) -> bool:
         """Clear one fenced provisional callback without retaining its selector."""
-        return await self._operations().clear_prepared_callback(
+        return await self.operations.clear_prepared_callback(
             connection_id=connection_id,
             expected_encrypted_credentials=expected_encrypted_credentials,
             expected_configuration_generation=expected_configuration_generation,
             callback_selector_hash=callback_selector_hash,
             checked_at=datetime.datetime.now(datetime.UTC),
-        )
-
-    def _operations(self) -> DiscordConnectionOperationRepository:
-        """Bind completed Discord operations to current dependencies."""
-        return DiscordConnectionOperationRepository(
-            session_manager=self.session_manager,
-            external_channel_repository=self.repository,
         )
 
 

@@ -22,8 +22,10 @@ from azents.core.enums import (
     ExternalChannelResponseMode,
 )
 from azents.core.external_account_link import VerifiedExternalAccountActor
+from azents.core.external_channel_ingestion import ExternalChannelIngestionOutcomeKind
 from azents.core.external_channel_provider import SlackConnectionCredentials
 from azents.core.external_channel_provider_effect import ProviderEffectPlan
+from azents.core.external_channel_selector_state import selector_state_from_interaction
 from azents.core.external_model_settings import ExternalModelActorContext
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
@@ -39,9 +41,6 @@ from azents.services.external_channel.connection import (
     get_external_channel_credentials_codec,
 )
 from azents.services.external_channel.credentials import ExternalChannelCredentialsCodec
-from azents.services.external_channel.ingestion import (
-    ExternalChannelIngestionOutcomeKind,
-)
 from azents.services.external_channel.ingestion_replay import (
     ExternalChannelIngestionReplayService,
     external_channel_replay_deadline,
@@ -58,9 +57,6 @@ from azents.services.external_channel.provider_control import (
 from azents.services.external_channel.selector import (
     ExternalChannelSelectorCatalog,
     ExternalChannelSelectorService,
-)
-from azents.services.external_channel.selector_state import (
-    selector_state_from_interaction,
 )
 from azents.services.external_channel.slack_events import (
     SlackConversationClient,

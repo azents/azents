@@ -6,6 +6,19 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [conversation, agent, external-channel]
 code_paths:
+  - python/apps/azents/src/azents/core/agent_session_input_data.py
+  - python/apps/azents/src/azents/core/chat_data.py
+  - python/apps/azents/src/azents/core/chat_operation_data.py
+  - python/apps/azents/src/azents/core/chat_projection.py
+  - python/apps/azents/src/azents/core/exchange_file_errors.py
+  - python/apps/azents/src/azents/core/mailbox_errors.py
+  - python/apps/azents/src/azents/core/session_resource_authority.py
+  - python/apps/azents/src/azents/core/session_workspace_paths.py
+  - python/apps/azents/src/azents/repos/chat_operations.py
+  - python/apps/azents/src/azents/repos/engine_tool_repositories.py
+  - python/apps/azents/src/azents/repos/mailbox_runtime_operations.py
+  - python/apps/azents/src/azents/repos/skill_state_store.py
+  - python/apps/azents/src/azents/repos/worker_toolkit_repositories.py
   - python/apps/azents/src/azents/api/public/chat/v1/**
   - python/apps/azents/src/azents/services/chat/**
   - python/apps/azents/src/azents/services/mailbox.py

@@ -11,6 +11,12 @@ from pydantic import TypeAdapter, ValidationError
 from azents.core.enums import MCPOAuthConnectionStatus, WorkspaceUserRole
 from azents.core.github_credentials import GitHubSecrets, GitHubSecretsAppPlatform
 from azents.core.mcp_credentials import McpSecrets
+from azents.core.toolkit_errors import (
+    DuplicateAgentToolkit,
+    DuplicateScope,
+    NotFound,
+    ScopeNotFound,
+)
 from azents.core.toolkit_identifiers import (
     IdentifierValidationError,
     ResolvedToolkitIdentifiers,
@@ -22,15 +28,7 @@ from azents.core.tools import McpToolkitConfig, ToolkitProvider, ToolkitType
 from azents.engine.tools.deps import get_toolkit_registry
 from azents.engine.tools.envvar import EnvVarToolkitSecrets
 from azents.engine.tools.kubernetes_auth import KubernetesCredentials
-from azents.repos.toolkit.data import (
-    DuplicateAgentToolkit,
-    DuplicateScope,
-    NotFound,
-    ScopeNotFound,
-    ToolkitConfig,
-    ToolkitCreate,
-    ToolkitUpdate,
-)
+from azents.repos.toolkit.data import ToolkitConfig, ToolkitCreate, ToolkitUpdate
 from azents.repos.toolkit_operations import ToolkitOperationsRepository
 from azents.repos.toolkit_operations.data import (
     AgentToolkitMismatch,
@@ -119,6 +117,28 @@ def _resolve_mcp_config(
         return None
 
 
+@dataclasses.dataclass(frozen=True)
+class _EnvVarCredentialConfig:
+    """Validated membership identities relevant to an EnvVar credential edit."""
+
+    entry_names: frozenset[str]
+
+
+def _decode_envvar_credential_config(config: dict[str, Any]) -> _EnvVarCredentialConfig:
+    """Retain the historical entry-skip and irrelevant-metadata compatibility."""
+    entries = config.get("entries")
+    names = (
+        frozenset(
+            entry["name"]
+            for entry in entries
+            if isinstance(entry, dict) and isinstance(entry.get("name"), str)
+        )
+        if isinstance(entries, list)
+        else frozenset()
+    )
+    return _EnvVarCredentialConfig(entry_names=names)
+
+
 def merge_envvar_credentials(
     existing_credentials: str | None,
     submitted_credentials: dict[str, object],
@@ -139,19 +159,12 @@ def merge_envvar_credentials(
     merged_values.update(
         {name: value for name, value in submitted.values.items() if value != ""}
     )
-    raw_entries = config.get("entries")
-    entry_names = (
-        {
-            entry["name"]
-            for entry in raw_entries
-            if isinstance(entry, dict) and isinstance(entry.get("name"), str)
-        }
-        if isinstance(raw_entries, list)
-        else set()
-    )
+    typed_config = _decode_envvar_credential_config(config)
     return {
         "values": {
-            name: value for name, value in merged_values.items() if name in entry_names
+            name: value
+            for name, value in merged_values.items()
+            if name in typed_config.entry_names
         }
     }
 

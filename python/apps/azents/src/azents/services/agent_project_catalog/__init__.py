@@ -9,6 +9,12 @@ from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import AgentProjectCatalogStatus
+from azents.core.session_workspace_paths import (
+    InvalidProjectPath,
+    normalize_agent_workspace_root,
+    normalize_session_workspace_path,
+    normalize_session_workspace_project_paths,
+)
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
@@ -31,12 +37,6 @@ from azents.services.agent_runtime.lifecycle_data import (
 )
 from azents.services.agent_runtime.service import AgentRuntimeService
 from azents.services.runtime_storage_error import RuntimeStorageError
-from azents.services.session_workspace_project import (
-    InvalidProjectPath,
-    normalize_agent_workspace_root,
-    normalize_session_workspace_path,
-    normalize_session_workspace_project_paths,
-)
 
 _PROJECT_STATUS_SYNC_TIMEOUT_SECONDS = 120
 

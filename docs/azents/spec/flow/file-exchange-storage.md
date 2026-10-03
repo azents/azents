@@ -6,6 +6,17 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [agent, conversation, workspace, toolkit, memory]
 code_paths:
+  - python/apps/azents/src/azents/core/agent_session_input_data.py
+  - python/apps/azents/src/azents/core/chat_data.py
+  - python/apps/azents/src/azents/core/exchange_file_errors.py
+  - python/apps/azents/src/azents/core/session_resource_authority.py
+  - python/apps/azents/src/azents/core/session_workspace_paths.py
+  - python/apps/azents/src/azents/repos/agent_session_input_operations.py
+  - python/apps/azents/src/azents/repos/chat_write_operations.py
+  - python/apps/azents/src/azents/repos/input_attachment_claim.py
+  - python/apps/azents/src/azents/repos/engine_resolve.py
+  - python/apps/azents/src/azents/repos/vfs_projection_operations.py
+  - python/apps/azents/src/azents/repos/vfs_read_authority.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/097a97177350_create_operational_schema_baseline.py
   - python/apps/azents/src/azents/core/vfs.py
   - python/apps/azents/src/azents/core/config.py
@@ -17,7 +28,7 @@ code_paths:
   - python/apps/azents/src/azents/services/file_storage.py
   - python/apps/azents/src/azents/services/artifact.py
   - python/apps/azents/src/azents/services/model_file.py
-  - python/apps/azents/src/azents/services/session_resource_authority.py
+  - python/apps/azents/src/azents/repos/session_resource_authority.py
   - python/apps/azents/src/azents/services/agent_session_input.py
   - python/apps/azents/src/azents/services/vfs.py
   - python/apps/azents/src/azents/services/vfs_read.py

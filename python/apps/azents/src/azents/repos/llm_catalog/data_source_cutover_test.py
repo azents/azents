@@ -393,8 +393,11 @@ def _preserved_rows(engine: Engine) -> dict[str, object]:
         }
 
 
+@pytest.mark.parametrize("upgrade_target", [_CUTOVER, "head"])
 def test_old_only_upgrade_is_sql_only_and_preserves_history(
-    database: _Database, monkeypatch: pytest.MonkeyPatch
+    database: _Database,
+    monkeypatch: pytest.MonkeyPatch,
+    upgrade_target: str,
 ) -> None:
     """First-fetch failure cannot be a prerequisite for a valid schema upgrade."""
     before = _preserved_rows(database.engine)
@@ -407,7 +410,7 @@ def test_old_only_upgrade_is_sql_only_and_preserves_history(
     monkeypatch.setattr(
         "azents.core.model_catalog_source.decode_catalog_source", forbidden
     )
-    command.upgrade(database.config, _CUTOVER)
+    command.upgrade(database.config, upgrade_target)
     assert _preserved_rows(database.engine) == before
     with database.engine.connect() as connection:
         authorities = {
@@ -665,8 +668,13 @@ def test_catalog_pointer_change_cannot_bypass_admission(
         )
 
 
-def test_unchanged_old_pointer_allows_operational_updates(cutover: _Database) -> None:
+@pytest.mark.parametrize("upgrade_to_head", [False, True])
+def test_unchanged_old_pointer_allows_operational_updates(
+    cutover: _Database, upgrade_to_head: bool
+) -> None:
     """Old historical pointers do not block lease and diagnostic operations."""
+    if upgrade_to_head:
+        command.upgrade(cutover.config, "head")
     with cutover.engine.begin() as connection:
         connection.execute(
             sa.text(

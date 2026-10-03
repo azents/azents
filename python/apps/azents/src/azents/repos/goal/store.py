@@ -13,6 +13,7 @@ from azents.core.goal import (
     GoalState,
     GoalUpdateStatus,
 )
+from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.core.toolkit_state import ToolkitStateIdentity
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
@@ -20,7 +21,6 @@ from azents.repos.agent_execution import EventTranscriptRepository
 from azents.repos.agent_execution.data import EventCreate
 from azents.repos.session_execution.ownership import OwnerBoundSessionManager
 from azents.repos.toolkit_state.store import ToolkitStateHandle, ToolkitStateStore
-from azents.services.session_resource_authority import SessionExecutionOwner
 
 
 class GoalAlreadyExistsError(ValueError):

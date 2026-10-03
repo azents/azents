@@ -17,6 +17,14 @@ from azents.core.agent import (
     SelectableModelCandidate,
     SelectableModelOption,
 )
+from azents.core.agent_session_input_data import (
+    AgentSessionInputError,
+    AgentSessionInputIdempotencyConflict,
+    AgentSessionInputInactiveSession,
+    AgentSessionInputInvalidInferenceProfile,
+    AgentSessionInputSubagentReadOnly,
+    CreatedAgentSessionInputResult,
+)
 from azents.core.enums import (
     AgentLifecycleStatus,
     AgentRuntimeCapability,
@@ -33,6 +41,10 @@ from azents.core.enums import (
     SessionWorkingFolderBindingState,
     SessionWorkingFolderCleanupStatus,
     WorkspaceUserRole,
+)
+from azents.core.exchange_file_errors import (
+    ExchangeFileInputClaimError,
+    FileRetentionOwnerConflict,
 )
 from azents.core.inference_profile import (
     RequestedInferenceProfile,
@@ -60,7 +72,7 @@ from azents.repos.action_execution import ActionExecutionRepository
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
 from azents.repos.agent_automatic_project import AgentAutomaticProjectRepository
-from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
+from azents.repos.agent_execution import EventTranscriptRepository
 from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
 from azents.repos.agent_project_default import AgentProjectDefaultRepository
 from azents.repos.agent_project_preset import AgentProjectPresetRepository
@@ -72,30 +84,28 @@ from azents.repos.agent_session.data import (
     AgentSessionCreate,
     SessionWorkingFolderContext,
 )
+from azents.repos.agent_session_input_operations import (
+    AgentSessionInputOperationsRepository,
+)
 from azents.repos.chat_write_request import ChatWriteRequestRepository
-from azents.repos.external_channel.repository import ExternalChannelRepository
+from azents.repos.input_attachment_claim import InputAttachmentClaimRepository
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.mailbox.admission import MailboxAdmissionRepository
 from azents.repos.mailbox.admission_data import MailboxAdmissionResult, MailboxEnqueue
 from azents.repos.mailbox.data import MailboxItem
-from azents.repos.scheduled_task.repository import ScheduledTaskRepository
-from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
+from azents.repos.mailbox_database import MailboxDatabaseRepository
+from azents.repos.root_agent_session_creation import (
+    RootAgentSessionCreationRepository,
+)
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 from azents.repos.session_workspace_project.data import SessionWorkspaceProjectCreate
-from azents.repos.toolkit_state import ToolkitStateRepository
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.repos.workspace_user.data import WorkspaceUser, WorkspaceUserCreate
-from azents.services.exchange_file import (
-    ExchangeFileInputClaimError,
-    ExchangeFileService,
-    FileRetentionOwnerConflict,
-)
-from azents.services.model_file import ModelFileService
-from azents.services.root_agent_session_creation import (
-    RootAgentSessionCreationService,
+from azents.services.agent_session_input import (
+    AgentSessionInputService,
 )
 from azents.testing.model_selection import (
     make_test_model_selection,
@@ -103,24 +113,7 @@ from azents.testing.model_selection import (
     make_test_model_settings,
     make_test_selectable_model_option_dicts,
 )
-from azents.testing.turn_action import (
-    make_test_mailbox_promotion_repository,
-    make_test_turn_action_capabilities,
-)
 from azents.testing.types import require_instance
-
-from .agent_session_input import (
-    AgentSessionInputError,
-    AgentSessionInputIdempotencyConflict,
-    AgentSessionInputInactiveSession,
-    AgentSessionInputInvalidInferenceProfile,
-    AgentSessionInputService,
-    AgentSessionInputSubagentReadOnly,
-    CreatedAgentSessionInputResult,
-)
-from .mailbox import (
-    MailboxService,
-)
 
 _TEST_INFERENCE_PROFILE = RequestedInferenceProfile(
     model_target_label="default",
@@ -352,7 +345,7 @@ class _MailboxAdmissionRepositoryDouble(MailboxAdmissionRepository):
         return MailboxAdmissionResult(mailbox_item=mailbox_item, created=True)
 
 
-class _MailboxServiceDouble(MailboxService):
+class _MailboxServiceDouble(MailboxDatabaseRepository):
     """Provide only non-admission Mailbox service queries."""
 
     def __init__(self, calls: list[str]) -> None:
@@ -370,7 +363,7 @@ class _MailboxServiceDouble(MailboxService):
         return True
 
 
-class _ExchangeFileService(ExchangeFileService):
+class _ExchangeFileService(InputAttachmentClaimRepository):
     """ExchangeFileService for tests."""
 
     def __init__(self) -> None:
@@ -407,9 +400,9 @@ class _RejectingExchangeFileService(_ExchangeFileService):
         return Failure(FileRetentionOwnerConflict())
 
 
-def _root_agent_session_creation_service() -> RootAgentSessionCreationService:
+def _root_agent_session_creation_service() -> RootAgentSessionCreationRepository:
     """Build root Session creation service for tests."""
-    return RootAgentSessionCreationService(
+    return RootAgentSessionCreationRepository(
         agent_session_repository=AgentSessionRepository(),
         agent_repository=AgentRepository(),
         automatic_project_repository=AgentAutomaticProjectRepository(),
@@ -430,32 +423,10 @@ def _mailbox_admission_repository(
 
 def _mailbox_item_service(
     rdb_session_manager: SessionManager[AsyncSession],
-) -> MailboxService:
-    """Create MailboxService for integration tests."""
-    return MailboxService(
-        session_manager=rdb_session_manager,
-        mailbox_item_repository=MailboxRepository(),
-        exchange_file_service=_ExchangeFileService(),
-        model_file_service=require_instance(
-            MagicMock(spec=ModelFileService),
-            ModelFileService,
-        ),
-        agent_session_repository=AgentSessionRepository(),
-        event_transcript_repository=EventTranscriptRepository(),
-        agent_run_repository=AgentRunRepository(),
-        scheduled_task_repository=ScheduledTaskRepository(),
-        scheduled_task_cycle_repository=ScheduledTaskCycleRepository(
-            toolkit_state_repository=ToolkitStateRepository(),
-        ),
-        action_execution_repository=ActionExecutionRepository(),
-        turn_action_capabilities=make_test_turn_action_capabilities(
-            rdb_session_manager
-        ),
-        promotion_repository=make_test_mailbox_promotion_repository(
-            rdb_session_manager
-        ),
-        external_channel_repository=ExternalChannelRepository(),
-    )
+) -> MailboxRepository:
+    """Provide the canonical mailbox primitive for atomic input composition."""
+    del rdb_session_manager
+    return MailboxRepository()
 
 
 async def _create_workspace(session: AsyncSession, handle: str) -> str:
@@ -629,20 +600,23 @@ class TestAgentSessionInputService:
         mailbox_item_service = _MailboxServiceDouble(calls)
         mailbox_admission_repository = _MailboxAdmissionRepositoryDouble(calls)
         service = AgentSessionInputService(
-            agent_repository=_ActiveAgentRepositoryDouble(),
-            agent_project_preset_repository=AgentProjectPresetRepository(),
-            agent_project_catalog_repository=AgentProjectCatalogRepository(),
-            agent_project_default_repository=AgentProjectDefaultRepository(),
-            agent_runtime_repository=runtime_repository,
-            agent_session_repository=session_repository,
-            root_agent_session_creation_service=_root_agent_session_creation_service(),
-            chat_write_request_repository=ChatWriteRequestRepository(),
-            session_workspace_project_repository=SessionWorkspaceProjectRepository(),
-            workspace_user_repository=_WorkspaceUserRepositoryDouble(),
-            exchange_file_service=_ExchangeFileService(),
-            mailbox_item_service=mailbox_item_service,
-            mailbox_admission_repository=mailbox_admission_repository,
-            session_manager=rdb_session_manager,
+            operations=AgentSessionInputOperationsRepository(
+                agent_repository=_ActiveAgentRepositoryDouble(),
+                agent_project_preset_repository=AgentProjectPresetRepository(),
+                agent_project_catalog_repository=AgentProjectCatalogRepository(),
+                agent_project_default_repository=AgentProjectDefaultRepository(),
+                agent_runtime_repository=runtime_repository,
+                agent_session_repository=session_repository,
+                root_session_repository=_root_agent_session_creation_service(),
+                chat_write_request_repository=ChatWriteRequestRepository(),
+                session_workspace_project_repository=SessionWorkspaceProjectRepository(),
+                workspace_user_repository=_WorkspaceUserRepositoryDouble(),
+                attachment_claim_repository=_ExchangeFileService(),
+                mailbox_repository=MailboxRepository(),
+                mailbox_admission_repository=mailbox_admission_repository,
+                session_manager=rdb_session_manager,
+                mailbox_database_repository=mailbox_item_service,
+            )
         )
 
         result = await service.create_buffered_agent_input(
@@ -730,22 +704,29 @@ class TestAgentSessionInputService:
         assert initial_context.binding_state is SessionWorkingFolderBindingState.PENDING
 
         service = AgentSessionInputService(
-            agent_repository=AgentRepository(),
-            agent_project_preset_repository=AgentProjectPresetRepository(),
-            agent_project_catalog_repository=AgentProjectCatalogRepository(),
-            agent_project_default_repository=AgentProjectDefaultRepository(),
-            agent_runtime_repository=AgentRuntimeRepository(),
-            agent_session_repository=AgentSessionRepository(),
-            root_agent_session_creation_service=_root_agent_session_creation_service(),
-            chat_write_request_repository=ChatWriteRequestRepository(),
-            session_workspace_project_repository=SessionWorkspaceProjectRepository(),
-            workspace_user_repository=WorkspaceUserRepository(),
-            exchange_file_service=_ExchangeFileService(),
-            mailbox_item_service=_mailbox_item_service(rdb_session_manager),
-            mailbox_admission_repository=_mailbox_admission_repository(
-                rdb_session_manager
-            ),
-            session_manager=rdb_session_manager,
+            operations=AgentSessionInputOperationsRepository(
+                agent_repository=AgentRepository(),
+                agent_project_preset_repository=AgentProjectPresetRepository(),
+                agent_project_catalog_repository=AgentProjectCatalogRepository(),
+                agent_project_default_repository=AgentProjectDefaultRepository(),
+                agent_runtime_repository=AgentRuntimeRepository(),
+                agent_session_repository=AgentSessionRepository(),
+                root_session_repository=_root_agent_session_creation_service(),
+                chat_write_request_repository=ChatWriteRequestRepository(),
+                session_workspace_project_repository=SessionWorkspaceProjectRepository(),
+                workspace_user_repository=WorkspaceUserRepository(),
+                attachment_claim_repository=_ExchangeFileService(),
+                mailbox_repository=_mailbox_item_service(rdb_session_manager),
+                mailbox_admission_repository=_mailbox_admission_repository(
+                    rdb_session_manager
+                ),
+                session_manager=rdb_session_manager,
+                mailbox_database_repository=MailboxDatabaseRepository(
+                    mailbox_item_repository=_mailbox_item_service(rdb_session_manager),
+                    event_transcript_repository=EventTranscriptRepository(),
+                    action_execution_repository=ActionExecutionRepository(),
+                ),
+            )
         )
 
         result = await service.create_buffered_agent_input(
@@ -818,20 +799,23 @@ class TestAgentSessionInputService:
         mailbox_item_service = _MailboxServiceDouble(calls)
         mailbox_admission_repository = _MailboxAdmissionRepositoryDouble(calls)
         service = AgentSessionInputService(
-            agent_repository=_ActiveAgentRepositoryDouble(),
-            agent_project_preset_repository=AgentProjectPresetRepository(),
-            agent_project_catalog_repository=AgentProjectCatalogRepository(),
-            agent_project_default_repository=AgentProjectDefaultRepository(),
-            agent_runtime_repository=_RuntimeRepositoryDouble(calls),
-            agent_session_repository=_AgentSessionRepositoryDouble(calls),
-            root_agent_session_creation_service=_root_agent_session_creation_service(),
-            chat_write_request_repository=ChatWriteRequestRepository(),
-            session_workspace_project_repository=SessionWorkspaceProjectRepository(),
-            workspace_user_repository=_WorkspaceUserRepositoryDouble(),
-            exchange_file_service=_RejectingExchangeFileService(),
-            mailbox_item_service=mailbox_item_service,
-            mailbox_admission_repository=mailbox_admission_repository,
-            session_manager=session_manager,
+            operations=AgentSessionInputOperationsRepository(
+                agent_repository=_ActiveAgentRepositoryDouble(),
+                agent_project_preset_repository=AgentProjectPresetRepository(),
+                agent_project_catalog_repository=AgentProjectCatalogRepository(),
+                agent_project_default_repository=AgentProjectDefaultRepository(),
+                agent_runtime_repository=_RuntimeRepositoryDouble(calls),
+                agent_session_repository=_AgentSessionRepositoryDouble(calls),
+                root_session_repository=_root_agent_session_creation_service(),
+                chat_write_request_repository=ChatWriteRequestRepository(),
+                session_workspace_project_repository=SessionWorkspaceProjectRepository(),
+                workspace_user_repository=_WorkspaceUserRepositoryDouble(),
+                attachment_claim_repository=_RejectingExchangeFileService(),
+                mailbox_repository=MailboxRepository(),
+                mailbox_admission_repository=mailbox_admission_repository,
+                session_manager=session_manager,
+                mailbox_database_repository=mailbox_item_service,
+            )
         )
 
         result = await service.create_buffered_agent_input(
@@ -871,20 +855,23 @@ class TestAgentSessionInputService:
         mailbox_item_service = _MailboxServiceDouble(calls)
         mailbox_admission_repository = _MailboxAdmissionRepositoryDouble(calls)
         service = AgentSessionInputService(
-            agent_repository=AgentRepository(),
-            agent_project_preset_repository=AgentProjectPresetRepository(),
-            agent_project_catalog_repository=AgentProjectCatalogRepository(),
-            agent_project_default_repository=AgentProjectDefaultRepository(),
-            agent_runtime_repository=runtime_repository,
-            agent_session_repository=session_repository,
-            root_agent_session_creation_service=_root_agent_session_creation_service(),
-            chat_write_request_repository=ChatWriteRequestRepository(),
-            session_workspace_project_repository=SessionWorkspaceProjectRepository(),
-            workspace_user_repository=_WorkspaceUserRepositoryDouble(),
-            exchange_file_service=_ExchangeFileService(),
-            mailbox_item_service=mailbox_item_service,
-            mailbox_admission_repository=mailbox_admission_repository,
-            session_manager=_session_manager_double,
+            operations=AgentSessionInputOperationsRepository(
+                agent_repository=AgentRepository(),
+                agent_project_preset_repository=AgentProjectPresetRepository(),
+                agent_project_catalog_repository=AgentProjectCatalogRepository(),
+                agent_project_default_repository=AgentProjectDefaultRepository(),
+                agent_runtime_repository=runtime_repository,
+                agent_session_repository=session_repository,
+                root_session_repository=_root_agent_session_creation_service(),
+                chat_write_request_repository=ChatWriteRequestRepository(),
+                session_workspace_project_repository=SessionWorkspaceProjectRepository(),
+                workspace_user_repository=_WorkspaceUserRepositoryDouble(),
+                attachment_claim_repository=_ExchangeFileService(),
+                mailbox_repository=MailboxRepository(),
+                mailbox_admission_repository=mailbox_admission_repository,
+                session_manager=_session_manager_double,
+                mailbox_database_repository=mailbox_item_service,
+            )
         )
 
         result = await service.create_buffered_agent_input(
@@ -936,22 +923,29 @@ class TestAgentSessionInputService:
             )
 
         service = AgentSessionInputService(
-            agent_repository=AgentRepository(),
-            agent_project_preset_repository=AgentProjectPresetRepository(),
-            agent_project_catalog_repository=AgentProjectCatalogRepository(),
-            agent_project_default_repository=AgentProjectDefaultRepository(),
-            agent_runtime_repository=AgentRuntimeRepository(),
-            agent_session_repository=AgentSessionRepository(),
-            root_agent_session_creation_service=_root_agent_session_creation_service(),
-            chat_write_request_repository=ChatWriteRequestRepository(),
-            session_workspace_project_repository=SessionWorkspaceProjectRepository(),
-            workspace_user_repository=WorkspaceUserRepository(),
-            exchange_file_service=_ExchangeFileService(),
-            mailbox_item_service=_mailbox_item_service(rdb_session_manager),
-            mailbox_admission_repository=_mailbox_admission_repository(
-                rdb_session_manager
-            ),
-            session_manager=rdb_session_manager,
+            operations=AgentSessionInputOperationsRepository(
+                agent_repository=AgentRepository(),
+                agent_project_preset_repository=AgentProjectPresetRepository(),
+                agent_project_catalog_repository=AgentProjectCatalogRepository(),
+                agent_project_default_repository=AgentProjectDefaultRepository(),
+                agent_runtime_repository=AgentRuntimeRepository(),
+                agent_session_repository=AgentSessionRepository(),
+                root_session_repository=_root_agent_session_creation_service(),
+                chat_write_request_repository=ChatWriteRequestRepository(),
+                session_workspace_project_repository=SessionWorkspaceProjectRepository(),
+                workspace_user_repository=WorkspaceUserRepository(),
+                attachment_claim_repository=_ExchangeFileService(),
+                mailbox_repository=_mailbox_item_service(rdb_session_manager),
+                mailbox_admission_repository=_mailbox_admission_repository(
+                    rdb_session_manager
+                ),
+                session_manager=rdb_session_manager,
+                mailbox_database_repository=MailboxDatabaseRepository(
+                    mailbox_item_repository=_mailbox_item_service(rdb_session_manager),
+                    event_transcript_repository=EventTranscriptRepository(),
+                    action_execution_repository=ActionExecutionRepository(),
+                ),
+            )
         )
 
         result = await service.create_team_session_with_buffered_input(
@@ -1038,22 +1032,29 @@ class TestAgentSessionInputService:
             )
 
         service = AgentSessionInputService(
-            agent_repository=AgentRepository(),
-            agent_project_preset_repository=AgentProjectPresetRepository(),
-            agent_project_catalog_repository=AgentProjectCatalogRepository(),
-            agent_project_default_repository=AgentProjectDefaultRepository(),
-            agent_runtime_repository=AgentRuntimeRepository(),
-            agent_session_repository=AgentSessionRepository(),
-            root_agent_session_creation_service=_root_agent_session_creation_service(),
-            chat_write_request_repository=ChatWriteRequestRepository(),
-            session_workspace_project_repository=SessionWorkspaceProjectRepository(),
-            workspace_user_repository=WorkspaceUserRepository(),
-            exchange_file_service=_ExchangeFileService(),
-            mailbox_item_service=_mailbox_item_service(rdb_session_manager),
-            mailbox_admission_repository=_mailbox_admission_repository(
-                rdb_session_manager
-            ),
-            session_manager=rdb_session_manager,
+            operations=AgentSessionInputOperationsRepository(
+                agent_repository=AgentRepository(),
+                agent_project_preset_repository=AgentProjectPresetRepository(),
+                agent_project_catalog_repository=AgentProjectCatalogRepository(),
+                agent_project_default_repository=AgentProjectDefaultRepository(),
+                agent_runtime_repository=AgentRuntimeRepository(),
+                agent_session_repository=AgentSessionRepository(),
+                root_session_repository=_root_agent_session_creation_service(),
+                chat_write_request_repository=ChatWriteRequestRepository(),
+                session_workspace_project_repository=SessionWorkspaceProjectRepository(),
+                workspace_user_repository=WorkspaceUserRepository(),
+                attachment_claim_repository=_ExchangeFileService(),
+                mailbox_repository=_mailbox_item_service(rdb_session_manager),
+                mailbox_admission_repository=_mailbox_admission_repository(
+                    rdb_session_manager
+                ),
+                session_manager=rdb_session_manager,
+                mailbox_database_repository=MailboxDatabaseRepository(
+                    mailbox_item_repository=_mailbox_item_service(rdb_session_manager),
+                    event_transcript_repository=EventTranscriptRepository(),
+                    action_execution_repository=ActionExecutionRepository(),
+                ),
+            )
         )
 
         first = await service.create_user_session_with_buffered_input(
@@ -1135,22 +1136,29 @@ class TestAgentSessionInputService:
             )
 
         service = AgentSessionInputService(
-            agent_repository=AgentRepository(),
-            agent_project_preset_repository=AgentProjectPresetRepository(),
-            agent_project_catalog_repository=AgentProjectCatalogRepository(),
-            agent_project_default_repository=AgentProjectDefaultRepository(),
-            agent_runtime_repository=AgentRuntimeRepository(),
-            agent_session_repository=AgentSessionRepository(),
-            root_agent_session_creation_service=_root_agent_session_creation_service(),
-            chat_write_request_repository=ChatWriteRequestRepository(),
-            session_workspace_project_repository=SessionWorkspaceProjectRepository(),
-            workspace_user_repository=WorkspaceUserRepository(),
-            exchange_file_service=_ExchangeFileService(),
-            mailbox_item_service=_mailbox_item_service(rdb_session_manager),
-            mailbox_admission_repository=_mailbox_admission_repository(
-                rdb_session_manager
-            ),
-            session_manager=rdb_session_manager,
+            operations=AgentSessionInputOperationsRepository(
+                agent_repository=AgentRepository(),
+                agent_project_preset_repository=AgentProjectPresetRepository(),
+                agent_project_catalog_repository=AgentProjectCatalogRepository(),
+                agent_project_default_repository=AgentProjectDefaultRepository(),
+                agent_runtime_repository=AgentRuntimeRepository(),
+                agent_session_repository=AgentSessionRepository(),
+                root_session_repository=_root_agent_session_creation_service(),
+                chat_write_request_repository=ChatWriteRequestRepository(),
+                session_workspace_project_repository=SessionWorkspaceProjectRepository(),
+                workspace_user_repository=WorkspaceUserRepository(),
+                attachment_claim_repository=_ExchangeFileService(),
+                mailbox_repository=_mailbox_item_service(rdb_session_manager),
+                mailbox_admission_repository=_mailbox_admission_repository(
+                    rdb_session_manager
+                ),
+                session_manager=rdb_session_manager,
+                mailbox_database_repository=MailboxDatabaseRepository(
+                    mailbox_item_repository=_mailbox_item_service(rdb_session_manager),
+                    event_transcript_repository=EventTranscriptRepository(),
+                    action_execution_repository=ActionExecutionRepository(),
+                ),
+            )
         )
 
         result = await service.create_user_session_with_buffered_input(
@@ -1206,22 +1214,29 @@ class TestAgentSessionInputService:
             )
 
         service = AgentSessionInputService(
-            agent_repository=AgentRepository(),
-            agent_project_preset_repository=AgentProjectPresetRepository(),
-            agent_project_catalog_repository=AgentProjectCatalogRepository(),
-            agent_project_default_repository=AgentProjectDefaultRepository(),
-            agent_runtime_repository=AgentRuntimeRepository(),
-            agent_session_repository=AgentSessionRepository(),
-            root_agent_session_creation_service=_root_agent_session_creation_service(),
-            chat_write_request_repository=ChatWriteRequestRepository(),
-            session_workspace_project_repository=SessionWorkspaceProjectRepository(),
-            workspace_user_repository=WorkspaceUserRepository(),
-            exchange_file_service=_ExchangeFileService(),
-            mailbox_item_service=_mailbox_item_service(rdb_session_manager),
-            mailbox_admission_repository=_mailbox_admission_repository(
-                rdb_session_manager
-            ),
-            session_manager=rdb_session_manager,
+            operations=AgentSessionInputOperationsRepository(
+                agent_repository=AgentRepository(),
+                agent_project_preset_repository=AgentProjectPresetRepository(),
+                agent_project_catalog_repository=AgentProjectCatalogRepository(),
+                agent_project_default_repository=AgentProjectDefaultRepository(),
+                agent_runtime_repository=AgentRuntimeRepository(),
+                agent_session_repository=AgentSessionRepository(),
+                root_session_repository=_root_agent_session_creation_service(),
+                chat_write_request_repository=ChatWriteRequestRepository(),
+                session_workspace_project_repository=SessionWorkspaceProjectRepository(),
+                workspace_user_repository=WorkspaceUserRepository(),
+                attachment_claim_repository=_ExchangeFileService(),
+                mailbox_repository=_mailbox_item_service(rdb_session_manager),
+                mailbox_admission_repository=_mailbox_admission_repository(
+                    rdb_session_manager
+                ),
+                session_manager=rdb_session_manager,
+                mailbox_database_repository=MailboxDatabaseRepository(
+                    mailbox_item_repository=_mailbox_item_service(rdb_session_manager),
+                    event_transcript_repository=EventTranscriptRepository(),
+                    action_execution_repository=ActionExecutionRepository(),
+                ),
+            )
         )
         message = InputMessage(
             text="one durable first message",
@@ -1333,28 +1348,33 @@ class TestAgentSessionInputService:
 
             def _service() -> AgentSessionInputService:
                 return AgentSessionInputService(
-                    agent_repository=AgentRepository(),
-                    agent_project_preset_repository=AgentProjectPresetRepository(),
-                    agent_project_catalog_repository=AgentProjectCatalogRepository(),
-                    agent_project_default_repository=AgentProjectDefaultRepository(),
-                    agent_runtime_repository=AgentRuntimeRepository(),
-                    agent_session_repository=AgentSessionRepository(),
-                    root_agent_session_creation_service=(
-                        _root_agent_session_creation_service()
-                    ),
-                    chat_write_request_repository=ChatWriteRequestRepository(),
-                    session_workspace_project_repository=(
-                        SessionWorkspaceProjectRepository()
-                    ),
-                    workspace_user_repository=WorkspaceUserRepository(),
-                    exchange_file_service=_ExchangeFileService(),
-                    mailbox_item_service=_mailbox_item_service(
-                        independent_session_manager
-                    ),
-                    mailbox_admission_repository=_mailbox_admission_repository(
-                        independent_session_manager
-                    ),
-                    session_manager=independent_session_manager,
+                    operations=AgentSessionInputOperationsRepository(
+                        agent_repository=AgentRepository(),
+                        agent_project_preset_repository=AgentProjectPresetRepository(),
+                        agent_project_catalog_repository=AgentProjectCatalogRepository(),
+                        agent_project_default_repository=AgentProjectDefaultRepository(),
+                        agent_runtime_repository=AgentRuntimeRepository(),
+                        agent_session_repository=AgentSessionRepository(),
+                        root_session_repository=_root_agent_session_creation_service(),
+                        chat_write_request_repository=ChatWriteRequestRepository(),
+                        session_workspace_project_repository=SessionWorkspaceProjectRepository(),
+                        workspace_user_repository=WorkspaceUserRepository(),
+                        attachment_claim_repository=_ExchangeFileService(),
+                        mailbox_repository=_mailbox_item_service(
+                            independent_session_manager
+                        ),
+                        mailbox_admission_repository=_mailbox_admission_repository(
+                            independent_session_manager
+                        ),
+                        session_manager=independent_session_manager,
+                        mailbox_database_repository=MailboxDatabaseRepository(
+                            mailbox_item_repository=_mailbox_item_service(
+                                independent_session_manager
+                            ),
+                            event_transcript_repository=EventTranscriptRepository(),
+                            action_execution_repository=ActionExecutionRepository(),
+                        ),
+                    )
                 )
 
             message = InputMessage(
@@ -1458,22 +1478,29 @@ class TestAgentSessionInputService:
             )
 
         service = AgentSessionInputService(
-            agent_repository=AgentRepository(),
-            agent_project_preset_repository=AgentProjectPresetRepository(),
-            agent_project_catalog_repository=AgentProjectCatalogRepository(),
-            agent_project_default_repository=AgentProjectDefaultRepository(),
-            agent_runtime_repository=AgentRuntimeRepository(),
-            agent_session_repository=AgentSessionRepository(),
-            root_agent_session_creation_service=_root_agent_session_creation_service(),
-            chat_write_request_repository=ChatWriteRequestRepository(),
-            session_workspace_project_repository=SessionWorkspaceProjectRepository(),
-            workspace_user_repository=WorkspaceUserRepository(),
-            exchange_file_service=_ExchangeFileService(),
-            mailbox_item_service=_mailbox_item_service(rdb_session_manager),
-            mailbox_admission_repository=_mailbox_admission_repository(
-                rdb_session_manager
-            ),
-            session_manager=rdb_session_manager,
+            operations=AgentSessionInputOperationsRepository(
+                agent_repository=AgentRepository(),
+                agent_project_preset_repository=AgentProjectPresetRepository(),
+                agent_project_catalog_repository=AgentProjectCatalogRepository(),
+                agent_project_default_repository=AgentProjectDefaultRepository(),
+                agent_runtime_repository=AgentRuntimeRepository(),
+                agent_session_repository=AgentSessionRepository(),
+                root_session_repository=_root_agent_session_creation_service(),
+                chat_write_request_repository=ChatWriteRequestRepository(),
+                session_workspace_project_repository=SessionWorkspaceProjectRepository(),
+                workspace_user_repository=WorkspaceUserRepository(),
+                attachment_claim_repository=_ExchangeFileService(),
+                mailbox_repository=_mailbox_item_service(rdb_session_manager),
+                mailbox_admission_repository=_mailbox_admission_repository(
+                    rdb_session_manager
+                ),
+                session_manager=rdb_session_manager,
+                mailbox_database_repository=MailboxDatabaseRepository(
+                    mailbox_item_repository=_mailbox_item_service(rdb_session_manager),
+                    event_transcript_repository=EventTranscriptRepository(),
+                    action_execution_repository=ActionExecutionRepository(),
+                ),
+            )
         )
         message = InputMessage(
             text="original",
@@ -1545,22 +1572,29 @@ class TestAgentSessionInputService:
             ).session
 
         service = AgentSessionInputService(
-            agent_repository=AgentRepository(),
-            agent_project_preset_repository=AgentProjectPresetRepository(),
-            agent_project_catalog_repository=AgentProjectCatalogRepository(),
-            agent_project_default_repository=AgentProjectDefaultRepository(),
-            agent_runtime_repository=AgentRuntimeRepository(),
-            agent_session_repository=AgentSessionRepository(),
-            root_agent_session_creation_service=_root_agent_session_creation_service(),
-            chat_write_request_repository=ChatWriteRequestRepository(),
-            session_workspace_project_repository=SessionWorkspaceProjectRepository(),
-            workspace_user_repository=WorkspaceUserRepository(),
-            exchange_file_service=_RejectingExchangeFileService(),
-            mailbox_item_service=_mailbox_item_service(rdb_session_manager),
-            mailbox_admission_repository=_mailbox_admission_repository(
-                rdb_session_manager
-            ),
-            session_manager=rdb_session_manager,
+            operations=AgentSessionInputOperationsRepository(
+                agent_repository=AgentRepository(),
+                agent_project_preset_repository=AgentProjectPresetRepository(),
+                agent_project_catalog_repository=AgentProjectCatalogRepository(),
+                agent_project_default_repository=AgentProjectDefaultRepository(),
+                agent_runtime_repository=AgentRuntimeRepository(),
+                agent_session_repository=AgentSessionRepository(),
+                root_session_repository=_root_agent_session_creation_service(),
+                chat_write_request_repository=ChatWriteRequestRepository(),
+                session_workspace_project_repository=SessionWorkspaceProjectRepository(),
+                workspace_user_repository=WorkspaceUserRepository(),
+                attachment_claim_repository=_RejectingExchangeFileService(),
+                mailbox_repository=_mailbox_item_service(rdb_session_manager),
+                mailbox_admission_repository=_mailbox_admission_repository(
+                    rdb_session_manager
+                ),
+                session_manager=rdb_session_manager,
+                mailbox_database_repository=MailboxDatabaseRepository(
+                    mailbox_item_repository=_mailbox_item_service(rdb_session_manager),
+                    event_transcript_repository=EventTranscriptRepository(),
+                    action_execution_repository=ActionExecutionRepository(),
+                ),
+            )
         )
 
         result = await service.create_team_session_with_buffered_input(
@@ -1621,22 +1655,29 @@ class TestAgentSessionInputService:
             )
 
         service = AgentSessionInputService(
-            agent_repository=AgentRepository(),
-            agent_project_preset_repository=AgentProjectPresetRepository(),
-            agent_project_catalog_repository=AgentProjectCatalogRepository(),
-            agent_project_default_repository=AgentProjectDefaultRepository(),
-            agent_runtime_repository=AgentRuntimeRepository(),
-            agent_session_repository=AgentSessionRepository(),
-            root_agent_session_creation_service=_root_agent_session_creation_service(),
-            chat_write_request_repository=ChatWriteRequestRepository(),
-            session_workspace_project_repository=SessionWorkspaceProjectRepository(),
-            workspace_user_repository=WorkspaceUserRepository(),
-            exchange_file_service=_ExchangeFileService(),
-            mailbox_item_service=_mailbox_item_service(rdb_session_manager),
-            mailbox_admission_repository=_mailbox_admission_repository(
-                rdb_session_manager
-            ),
-            session_manager=rdb_session_manager,
+            operations=AgentSessionInputOperationsRepository(
+                agent_repository=AgentRepository(),
+                agent_project_preset_repository=AgentProjectPresetRepository(),
+                agent_project_catalog_repository=AgentProjectCatalogRepository(),
+                agent_project_default_repository=AgentProjectDefaultRepository(),
+                agent_runtime_repository=AgentRuntimeRepository(),
+                agent_session_repository=AgentSessionRepository(),
+                root_session_repository=_root_agent_session_creation_service(),
+                chat_write_request_repository=ChatWriteRequestRepository(),
+                session_workspace_project_repository=SessionWorkspaceProjectRepository(),
+                workspace_user_repository=WorkspaceUserRepository(),
+                attachment_claim_repository=_ExchangeFileService(),
+                mailbox_repository=_mailbox_item_service(rdb_session_manager),
+                mailbox_admission_repository=_mailbox_admission_repository(
+                    rdb_session_manager
+                ),
+                session_manager=rdb_session_manager,
+                mailbox_database_repository=MailboxDatabaseRepository(
+                    mailbox_item_repository=_mailbox_item_service(rdb_session_manager),
+                    event_transcript_repository=EventTranscriptRepository(),
+                    action_execution_repository=ActionExecutionRepository(),
+                ),
+            )
         )
 
         result = await service.create_buffered_agent_input(
@@ -1693,22 +1734,29 @@ class TestAgentSessionInputService:
             )
 
         service = AgentSessionInputService(
-            agent_repository=AgentRepository(),
-            agent_project_preset_repository=AgentProjectPresetRepository(),
-            agent_project_catalog_repository=AgentProjectCatalogRepository(),
-            agent_project_default_repository=AgentProjectDefaultRepository(),
-            agent_runtime_repository=AgentRuntimeRepository(),
-            agent_session_repository=AgentSessionRepository(),
-            root_agent_session_creation_service=_root_agent_session_creation_service(),
-            chat_write_request_repository=ChatWriteRequestRepository(),
-            session_workspace_project_repository=SessionWorkspaceProjectRepository(),
-            workspace_user_repository=WorkspaceUserRepository(),
-            exchange_file_service=_ExchangeFileService(),
-            mailbox_item_service=_mailbox_item_service(rdb_session_manager),
-            mailbox_admission_repository=_mailbox_admission_repository(
-                rdb_session_manager
-            ),
-            session_manager=rdb_session_manager,
+            operations=AgentSessionInputOperationsRepository(
+                agent_repository=AgentRepository(),
+                agent_project_preset_repository=AgentProjectPresetRepository(),
+                agent_project_catalog_repository=AgentProjectCatalogRepository(),
+                agent_project_default_repository=AgentProjectDefaultRepository(),
+                agent_runtime_repository=AgentRuntimeRepository(),
+                agent_session_repository=AgentSessionRepository(),
+                root_session_repository=_root_agent_session_creation_service(),
+                chat_write_request_repository=ChatWriteRequestRepository(),
+                session_workspace_project_repository=SessionWorkspaceProjectRepository(),
+                workspace_user_repository=WorkspaceUserRepository(),
+                attachment_claim_repository=_ExchangeFileService(),
+                mailbox_repository=_mailbox_item_service(rdb_session_manager),
+                mailbox_admission_repository=_mailbox_admission_repository(
+                    rdb_session_manager
+                ),
+                session_manager=rdb_session_manager,
+                mailbox_database_repository=MailboxDatabaseRepository(
+                    mailbox_item_repository=_mailbox_item_service(rdb_session_manager),
+                    event_transcript_repository=EventTranscriptRepository(),
+                    action_execution_repository=ActionExecutionRepository(),
+                ),
+            )
         )
 
         result = await service.create_buffered_agent_input(
@@ -1760,22 +1808,29 @@ class TestAgentSessionInputService:
             ).session
 
         service = AgentSessionInputService(
-            agent_repository=AgentRepository(),
-            agent_project_preset_repository=AgentProjectPresetRepository(),
-            agent_project_catalog_repository=AgentProjectCatalogRepository(),
-            agent_project_default_repository=AgentProjectDefaultRepository(),
-            agent_runtime_repository=AgentRuntimeRepository(),
-            agent_session_repository=AgentSessionRepository(),
-            root_agent_session_creation_service=_root_agent_session_creation_service(),
-            chat_write_request_repository=ChatWriteRequestRepository(),
-            session_workspace_project_repository=SessionWorkspaceProjectRepository(),
-            workspace_user_repository=WorkspaceUserRepository(),
-            exchange_file_service=_ExchangeFileService(),
-            mailbox_item_service=_mailbox_item_service(rdb_session_manager),
-            mailbox_admission_repository=_mailbox_admission_repository(
-                rdb_session_manager
-            ),
-            session_manager=rdb_session_manager,
+            operations=AgentSessionInputOperationsRepository(
+                agent_repository=AgentRepository(),
+                agent_project_preset_repository=AgentProjectPresetRepository(),
+                agent_project_catalog_repository=AgentProjectCatalogRepository(),
+                agent_project_default_repository=AgentProjectDefaultRepository(),
+                agent_runtime_repository=AgentRuntimeRepository(),
+                agent_session_repository=AgentSessionRepository(),
+                root_session_repository=_root_agent_session_creation_service(),
+                chat_write_request_repository=ChatWriteRequestRepository(),
+                session_workspace_project_repository=SessionWorkspaceProjectRepository(),
+                workspace_user_repository=WorkspaceUserRepository(),
+                attachment_claim_repository=_ExchangeFileService(),
+                mailbox_repository=_mailbox_item_service(rdb_session_manager),
+                mailbox_admission_repository=_mailbox_admission_repository(
+                    rdb_session_manager
+                ),
+                session_manager=rdb_session_manager,
+                mailbox_database_repository=MailboxDatabaseRepository(
+                    mailbox_item_repository=_mailbox_item_service(rdb_session_manager),
+                    event_transcript_repository=EventTranscriptRepository(),
+                    action_execution_repository=ActionExecutionRepository(),
+                ),
+            )
         )
 
         result = await service.create_buffered_agent_input(
@@ -1829,22 +1884,29 @@ class TestAgentSessionInputService:
             )
 
         service = AgentSessionInputService(
-            agent_repository=AgentRepository(),
-            agent_project_preset_repository=AgentProjectPresetRepository(),
-            agent_project_catalog_repository=AgentProjectCatalogRepository(),
-            agent_project_default_repository=AgentProjectDefaultRepository(),
-            agent_runtime_repository=AgentRuntimeRepository(),
-            agent_session_repository=AgentSessionRepository(),
-            root_agent_session_creation_service=_root_agent_session_creation_service(),
-            chat_write_request_repository=ChatWriteRequestRepository(),
-            session_workspace_project_repository=SessionWorkspaceProjectRepository(),
-            workspace_user_repository=WorkspaceUserRepository(),
-            exchange_file_service=_ExchangeFileService(),
-            mailbox_item_service=_mailbox_item_service(rdb_session_manager),
-            mailbox_admission_repository=_mailbox_admission_repository(
-                rdb_session_manager
-            ),
-            session_manager=rdb_session_manager,
+            operations=AgentSessionInputOperationsRepository(
+                agent_repository=AgentRepository(),
+                agent_project_preset_repository=AgentProjectPresetRepository(),
+                agent_project_catalog_repository=AgentProjectCatalogRepository(),
+                agent_project_default_repository=AgentProjectDefaultRepository(),
+                agent_runtime_repository=AgentRuntimeRepository(),
+                agent_session_repository=AgentSessionRepository(),
+                root_session_repository=_root_agent_session_creation_service(),
+                chat_write_request_repository=ChatWriteRequestRepository(),
+                session_workspace_project_repository=SessionWorkspaceProjectRepository(),
+                workspace_user_repository=WorkspaceUserRepository(),
+                attachment_claim_repository=_ExchangeFileService(),
+                mailbox_repository=_mailbox_item_service(rdb_session_manager),
+                mailbox_admission_repository=_mailbox_admission_repository(
+                    rdb_session_manager
+                ),
+                session_manager=rdb_session_manager,
+                mailbox_database_repository=MailboxDatabaseRepository(
+                    mailbox_item_repository=_mailbox_item_service(rdb_session_manager),
+                    event_transcript_repository=EventTranscriptRepository(),
+                    action_execution_repository=ActionExecutionRepository(),
+                ),
+            )
         )
 
         first = await service.create_buffered_agent_input(
@@ -1956,22 +2018,29 @@ class TestAgentSessionInputService:
                 await setup_session.commit()
 
             service = AgentSessionInputService(
-                agent_repository=AgentRepository(),
-                agent_project_preset_repository=AgentProjectPresetRepository(),
-                agent_project_catalog_repository=AgentProjectCatalogRepository(),
-                agent_project_default_repository=AgentProjectDefaultRepository(),
-                agent_runtime_repository=AgentRuntimeRepository(),
-                agent_session_repository=AgentSessionRepository(),
-                root_agent_session_creation_service=_root_agent_session_creation_service(),
-                chat_write_request_repository=ChatWriteRequestRepository(),
-                session_workspace_project_repository=SessionWorkspaceProjectRepository(),
-                workspace_user_repository=WorkspaceUserRepository(),
-                exchange_file_service=_ExchangeFileService(),
-                mailbox_item_service=_mailbox_item_service(session_manager),
-                mailbox_admission_repository=_mailbox_admission_repository(
-                    session_manager
-                ),
-                session_manager=session_manager,
+                operations=AgentSessionInputOperationsRepository(
+                    agent_repository=AgentRepository(),
+                    agent_project_preset_repository=AgentProjectPresetRepository(),
+                    agent_project_catalog_repository=AgentProjectCatalogRepository(),
+                    agent_project_default_repository=AgentProjectDefaultRepository(),
+                    agent_runtime_repository=AgentRuntimeRepository(),
+                    agent_session_repository=AgentSessionRepository(),
+                    root_session_repository=_root_agent_session_creation_service(),
+                    chat_write_request_repository=ChatWriteRequestRepository(),
+                    session_workspace_project_repository=SessionWorkspaceProjectRepository(),
+                    workspace_user_repository=WorkspaceUserRepository(),
+                    attachment_claim_repository=_ExchangeFileService(),
+                    mailbox_repository=_mailbox_item_service(session_manager),
+                    mailbox_admission_repository=_mailbox_admission_repository(
+                        session_manager
+                    ),
+                    session_manager=session_manager,
+                    mailbox_database_repository=MailboxDatabaseRepository(
+                        mailbox_item_repository=_mailbox_item_service(session_manager),
+                        event_transcript_repository=EventTranscriptRepository(),
+                        action_execution_repository=ActionExecutionRepository(),
+                    ),
+                )
             )
 
             async with AsyncSession(
@@ -2065,22 +2134,29 @@ class TestAgentSessionInputService:
             ).session
 
         service = AgentSessionInputService(
-            agent_repository=AgentRepository(),
-            agent_project_preset_repository=AgentProjectPresetRepository(),
-            agent_project_catalog_repository=AgentProjectCatalogRepository(),
-            agent_project_default_repository=AgentProjectDefaultRepository(),
-            agent_runtime_repository=AgentRuntimeRepository(),
-            agent_session_repository=AgentSessionRepository(),
-            root_agent_session_creation_service=_root_agent_session_creation_service(),
-            chat_write_request_repository=ChatWriteRequestRepository(),
-            session_workspace_project_repository=SessionWorkspaceProjectRepository(),
-            workspace_user_repository=WorkspaceUserRepository(),
-            exchange_file_service=_ExchangeFileService(),
-            mailbox_item_service=_mailbox_item_service(rdb_session_manager),
-            mailbox_admission_repository=_mailbox_admission_repository(
-                rdb_session_manager
-            ),
-            session_manager=rdb_session_manager,
+            operations=AgentSessionInputOperationsRepository(
+                agent_repository=AgentRepository(),
+                agent_project_preset_repository=AgentProjectPresetRepository(),
+                agent_project_catalog_repository=AgentProjectCatalogRepository(),
+                agent_project_default_repository=AgentProjectDefaultRepository(),
+                agent_runtime_repository=AgentRuntimeRepository(),
+                agent_session_repository=AgentSessionRepository(),
+                root_session_repository=_root_agent_session_creation_service(),
+                chat_write_request_repository=ChatWriteRequestRepository(),
+                session_workspace_project_repository=SessionWorkspaceProjectRepository(),
+                workspace_user_repository=WorkspaceUserRepository(),
+                attachment_claim_repository=_ExchangeFileService(),
+                mailbox_repository=_mailbox_item_service(rdb_session_manager),
+                mailbox_admission_repository=_mailbox_admission_repository(
+                    rdb_session_manager
+                ),
+                session_manager=rdb_session_manager,
+                mailbox_database_repository=MailboxDatabaseRepository(
+                    mailbox_item_repository=_mailbox_item_service(rdb_session_manager),
+                    event_transcript_repository=EventTranscriptRepository(),
+                    action_execution_repository=ActionExecutionRepository(),
+                ),
+            )
         )
 
         request_payload: dict[str, object] = {
@@ -2206,22 +2282,29 @@ class TestAgentSessionInputService:
             ).session
 
         service = AgentSessionInputService(
-            agent_repository=AgentRepository(),
-            agent_project_preset_repository=AgentProjectPresetRepository(),
-            agent_project_catalog_repository=AgentProjectCatalogRepository(),
-            agent_project_default_repository=AgentProjectDefaultRepository(),
-            agent_runtime_repository=AgentRuntimeRepository(),
-            agent_session_repository=AgentSessionRepository(),
-            root_agent_session_creation_service=_root_agent_session_creation_service(),
-            chat_write_request_repository=ChatWriteRequestRepository(),
-            session_workspace_project_repository=SessionWorkspaceProjectRepository(),
-            workspace_user_repository=WorkspaceUserRepository(),
-            exchange_file_service=_ExchangeFileService(),
-            mailbox_item_service=_mailbox_item_service(rdb_session_manager),
-            mailbox_admission_repository=_mailbox_admission_repository(
-                rdb_session_manager
-            ),
-            session_manager=rdb_session_manager,
+            operations=AgentSessionInputOperationsRepository(
+                agent_repository=AgentRepository(),
+                agent_project_preset_repository=AgentProjectPresetRepository(),
+                agent_project_catalog_repository=AgentProjectCatalogRepository(),
+                agent_project_default_repository=AgentProjectDefaultRepository(),
+                agent_runtime_repository=AgentRuntimeRepository(),
+                agent_session_repository=AgentSessionRepository(),
+                root_session_repository=_root_agent_session_creation_service(),
+                chat_write_request_repository=ChatWriteRequestRepository(),
+                session_workspace_project_repository=SessionWorkspaceProjectRepository(),
+                workspace_user_repository=WorkspaceUserRepository(),
+                attachment_claim_repository=_ExchangeFileService(),
+                mailbox_repository=_mailbox_item_service(rdb_session_manager),
+                mailbox_admission_repository=_mailbox_admission_repository(
+                    rdb_session_manager
+                ),
+                session_manager=rdb_session_manager,
+                mailbox_database_repository=MailboxDatabaseRepository(
+                    mailbox_item_repository=_mailbox_item_service(rdb_session_manager),
+                    event_transcript_repository=EventTranscriptRepository(),
+                    action_execution_repository=ActionExecutionRepository(),
+                ),
+            )
         )
 
         shared_client_request_id = "shared-client-request"

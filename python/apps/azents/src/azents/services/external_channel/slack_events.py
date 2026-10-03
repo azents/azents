@@ -23,15 +23,7 @@ from azents.core.enums import (
     ExternalChannelPrincipalAuthorType,
     ExternalChannelProvider,
 )
-from azents.core.external_channel_file import (
-    MAX_EXTERNAL_CHANNEL_FILE_TEXT_LENGTH,
-    MAX_EXTERNAL_CHANNEL_FILES,
-    ExternalChannelFileMetadata,
-    ExternalChannelFileUnsupportedReason,
-)
-from azents.core.external_channel_projection import is_external_channel_projection
-from azents.runtime.transfer.provider_source import ProviderByteStreamResponse
-from azents.services.external_channel.conversation import (
+from azents.core.external_channel_conversation_data import (
     ExternalChannelHistoryCredentialsInvalid,
     ExternalChannelHistoryDeadlineExceeded,
     ExternalChannelHistoryMalformed,
@@ -45,6 +37,14 @@ from azents.services.external_channel.conversation import (
     ExternalChannelHistoryTriggerMissing,
     ExternalChannelOperationDeadline,
 )
+from azents.core.external_channel_file import (
+    MAX_EXTERNAL_CHANNEL_FILE_TEXT_LENGTH,
+    MAX_EXTERNAL_CHANNEL_FILES,
+    ExternalChannelFileMetadata,
+    ExternalChannelFileUnsupportedReason,
+)
+from azents.core.external_channel_projection import is_external_channel_projection
+from azents.runtime.transfer.provider_source import ProviderByteStreamResponse
 from azents.services.external_channel.slack_blocks import (
     projected_slack_blocks_text,
     slack_blocks_text,

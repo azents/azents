@@ -14,6 +14,7 @@ from azents.core.enums import LLMModelDeveloper, LLMProvider
 from azents.core.inference_profile import SessionInferenceState
 from azents.core.llm_catalog import ModelCapabilities
 from azents.core.model_execution_options import ModelExecutionOptionId
+from azents.core.session_resource_authority import SessionResourceAuthority
 from azents.core.tools import PublishEventFn, Toolkit
 from azents.engine.context.window import compute_effective_context_window_tokens
 from azents.engine.events.types import Event
@@ -28,7 +29,6 @@ from azents.engine.run.types import (
     PollMessages,
 )
 from azents.repos.model_operation_completion import ModelOperationCompletion
-from azents.services.session_resource_authority import SessionResourceAuthority
 
 logger = logging.getLogger(__name__)
 

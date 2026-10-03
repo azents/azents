@@ -6,14 +6,14 @@ from typing import Annotated, assert_never
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
 
+from azents.core.agent_errors import NotFound
 from azents.core.enums import WorkspaceUserRole
-from azents.repos.agent.data import NotFound
+from azents.core.historical_memory_settings import HistoricalMemorySettingsScope
 from azents.repos.historical_memory.settings import (
     HistoricalMemorySettingsRepository,
 )
 from azents.repos.historical_memory.settings_data import (
     HistoricalMemorySettingsCursorError,
-    HistoricalMemorySettingsScope,
 )
 from azents.services.agent.data import (
     NotBelongToWorkspace,

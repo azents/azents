@@ -25,6 +25,12 @@ from azents.core.external_channel_progress import (
 from azents.core.external_channel_progress import (
     ExternalChannelWorkSource as ChannelWorkSource,
 )
+from azents.core.session_resource_authority import (
+    SessionExecutionOwner,
+    SessionResourceAuthority,
+    accepts_execution_authority,
+    accepts_execution_owner,
+)
 from azents.core.tools import (
     ResolveContext,
     Toolkit,
@@ -68,12 +74,6 @@ from azents.services.external_channel.slack_events import (
 )
 from azents.services.runtime_storage_error import RuntimeStorageError
 from azents.services.scheduled_task.channel import ScheduledTaskChannelService
-from azents.services.session_resource_authority import (
-    SessionExecutionOwner,
-    SessionResourceAuthority,
-    accepts_execution_authority,
-    accepts_execution_owner,
-)
 
 EXTERNAL_CHANNEL_TOOLKIT_SLUG = "external_channel"
 _LOGGER = logging.getLogger(__name__)

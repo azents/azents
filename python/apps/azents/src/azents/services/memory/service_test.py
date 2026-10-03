@@ -15,8 +15,10 @@ from azents.core.enums import (
     ExternalChannelResponseMode,
     WorkspaceUserRole,
 )
+from azents.core.memory_scope import MemoryScope
 from azents.repos.agent.data import Agent
-from azents.repos.memory.data import Memory, MemoryScope
+from azents.repos.memory.data import Memory
+from azents.repos.memory.ui_operations import MemoryUIOperations
 from azents.testing.model_selection import (
     make_test_model_selection,
     make_test_selectable_model_options,
@@ -97,10 +99,12 @@ def _make_service() -> MemoryService:
         yield AsyncMock(spec=AsyncSession)
 
     return MemoryService(
-        repository=repository,
-        agent_repository=agent_repository,
-        admin_repository=admin_repository,
-        session_manager=session_manager,
+        operations=MemoryUIOperations(
+            repository=repository,
+            agent_repository=agent_repository,
+            admin_repository=admin_repository,
+            session_manager=session_manager,
+        ),
     )
 
 
@@ -110,8 +114,8 @@ class TestMemoryService:
     async def test_create_rejects_duplicate_name_in_scope(self) -> None:
         """Human create uses strict conflict semantics instead of upsert."""
         service = _make_service()
-        agent_repo = require_instance(service.agent_repository, AsyncMock)
-        memory_repo = require_instance(service.repository, AsyncMock)
+        agent_repo = require_instance(service.operations.agent_repository, AsyncMock)
+        memory_repo = require_instance(service.operations.repository, AsyncMock)
         agent_repo.get_by_id.return_value = _make_agent()
         memory_repo.get_by_name.return_value = _make_memory(name="dupe")
 
@@ -137,9 +141,9 @@ class TestMemoryService:
     async def test_member_cannot_update_agent_scope_memory(self) -> None:
         """Agent-scope writes require Agent admin or workspace owner."""
         service = _make_service()
-        agent_repo = require_instance(service.agent_repository, AsyncMock)
-        memory_repo = require_instance(service.repository, AsyncMock)
-        admin_repo = require_instance(service.admin_repository, AsyncMock)
+        agent_repo = require_instance(service.operations.agent_repository, AsyncMock)
+        memory_repo = require_instance(service.operations.repository, AsyncMock)
+        admin_repo = require_instance(service.operations.admin_repository, AsyncMock)
         agent_repo.get_by_id.return_value = _make_agent()
         memory_repo.get_by_id.return_value = _make_memory(scope=MemoryScope.AGENT)
         admin_repo.is_admin.return_value = False
@@ -160,8 +164,8 @@ class TestMemoryService:
     async def test_member_updates_own_user_scope_memory(self) -> None:
         """User-scope writes are allowed for the current authenticated user."""
         service = _make_service()
-        agent_repo = require_instance(service.agent_repository, AsyncMock)
-        memory_repo = require_instance(service.repository, AsyncMock)
+        agent_repo = require_instance(service.operations.agent_repository, AsyncMock)
+        memory_repo = require_instance(service.operations.repository, AsyncMock)
         existing = _make_memory(
             scope=MemoryScope.USER,
             user_id="user-1",
@@ -189,8 +193,8 @@ class TestMemoryService:
     async def test_list_user_scope_uses_current_user_id(self) -> None:
         """User-scope list never exposes another user's Memory rows."""
         service = _make_service()
-        agent_repo = require_instance(service.agent_repository, AsyncMock)
-        memory_repo = require_instance(service.repository, AsyncMock)
+        agent_repo = require_instance(service.operations.agent_repository, AsyncMock)
+        memory_repo = require_instance(service.operations.repository, AsyncMock)
         agent_repo.get_by_id.return_value = _make_agent()
         memory_repo.list.return_value = []
 

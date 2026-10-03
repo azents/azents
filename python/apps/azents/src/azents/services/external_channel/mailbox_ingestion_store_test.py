@@ -17,6 +17,7 @@ from azents.core.enums import (
     ExternalChannelAppMode,
     ExternalChannelConnectionStatus,
     ExternalChannelConversationScopeKind,
+    ExternalChannelIngressAuthorityKind,
     ExternalChannelIngressProfile,
     ExternalChannelMessageLifecycle,
     ExternalChannelMessageRevisionKind,
@@ -31,11 +32,34 @@ from azents.core.enums import (
     ExternalChannelTransport,
     ExternalChannelWorkStatus,
 )
+from azents.core.external_channel_conversation_data import (
+    ExternalChannelConversationScope,
+    ExternalChannelHistoryRange,
+    ExternalChannelOperationDeadline,
+)
+from azents.core.external_channel_ingestion import (
+    ExternalChannelCanonicalHistoryMessage,
+    ExternalChannelIngestionAcceptance,
+    ExternalChannelIngestionOperation,
+    ExternalChannelIngestionPreparation,
+    ExternalChannelIngestionReason,
+    ExternalChannelIngestionRequest,
+    ExternalChannelIngressAuthority,
+    ExternalChannelTriggerLocator,
+)
+from azents.core.external_channel_participation_state import (
+    ExternalChannelSetupSourceProjection,
+    projection_with_setup_source,
+    setup_source_from_projection,
+)
 from azents.core.external_channel_session_presence import (
     build_external_channel_session_url,
 )
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
+from azents.repos.external_channel.conversation_provisioning import (
+    ExternalChannelConversationProvisioningRepository,
+)
 from azents.repos.external_channel.data import (
     ExternalChannelAgentRoute,
     ExternalChannelBinding,
@@ -44,42 +68,18 @@ from azents.repos.external_channel.data import (
     ExternalChannelResource,
     ExternalChannelSetupClaim,
 )
-from azents.repos.external_channel.repository import ExternalChannelRepository
-from azents.repos.external_channel.work import ExternalChannelWorkRepository
-from azents.repos.external_channel.work_state import ChannelWorkState
-from azents.repos.mailbox.admission import MailboxAdmissionRepository
-from azents.services.external_channel.conversation import (
-    ExternalChannelConversationScope,
-    ExternalChannelHistoryRange,
-    ExternalChannelOperationDeadline,
-)
-from azents.services.external_channel.conversation_provisioning import (
-    ExternalChannelConversationProvisioningService,
-)
-from azents.services.external_channel.ingestion import (
-    ExternalChannelCanonicalHistoryMessage,
-    ExternalChannelIngestionAcceptance,
-    ExternalChannelIngestionOperation,
-    ExternalChannelIngestionPreparation,
-    ExternalChannelIngestionReason,
-    ExternalChannelIngestionRequest,
-    ExternalChannelIngressAuthority,
-    ExternalChannelIngressAuthorityKind,
-    ExternalChannelTriggerLocator,
-)
-from azents.services.external_channel.mailbox_ingestion_store import (
-    ExternalChannelMailboxIngestionStore,
+from azents.repos.external_channel.mailbox_ingestion import (
+    ExternalChannelMailboxIngestionRepository,
     _Conversation,
     _response_mode_ignored_reason,
 )
-from azents.services.external_channel.participation_state import (
-    ExternalChannelSetupSourceProjection,
-    projection_with_setup_source,
-    setup_source_from_projection,
-)
-from azents.services.mailbox import MailboxService
-from azents.services.root_agent_session_creation import (
-    RootAgentSessionCreationService,
+from azents.repos.external_channel.repository import ExternalChannelRepository
+from azents.repos.external_channel.work import ExternalChannelWorkRepository
+from azents.repos.external_channel.work_state import ChannelWorkState
+from azents.repos.mailbox import MailboxRepository
+from azents.repos.mailbox.admission import MailboxAdmissionRepository
+from azents.repos.root_agent_session_creation import (
+    RootAgentSessionCreationRepository,
 )
 from azents.testing.external_channel import make_provider_effect_plan
 
@@ -259,26 +259,26 @@ def _store(
     repository: ExternalChannelRepository,
     work_repository: ExternalChannelWorkRepository | None = None,
     agent_repository: AgentRepository | None = None,
-    root_creation_service: RootAgentSessionCreationService | None = None,
-) -> ExternalChannelMailboxIngestionStore:
-    return ExternalChannelMailboxIngestionStore(
+    root_creation_service: RootAgentSessionCreationRepository | None = None,
+) -> ExternalChannelMailboxIngestionRepository:
+    return ExternalChannelMailboxIngestionRepository(
         session_manager=MagicMock(),
         repository=repository,
         work_repository=work_repository
         or create_autospec(ExternalChannelWorkRepository, instance=True),
         conversation_provisioning=create_autospec(
-            ExternalChannelConversationProvisioningService,
+            ExternalChannelConversationProvisioningRepository,
             instance=True,
         ),
         agent_repository=agent_repository
         or create_autospec(AgentRepository, instance=True),
         agent_session_repository=MagicMock(),
-        root_agent_session_creation_service=root_creation_service
-        or create_autospec(RootAgentSessionCreationService, instance=True),
+        root_agent_session_creation_repository=root_creation_service
+        or create_autospec(RootAgentSessionCreationRepository, instance=True),
         mailbox_admission_repository=create_autospec(
             MailboxAdmissionRepository, instance=True
         ),
-        mailbox_service=create_autospec(MailboxService, instance=True),
+        mailbox_repository=create_autospec(MailboxRepository, instance=True),
         config=Config.model_construct(
             web_url="https://azents.example/base",
         ),

@@ -8,7 +8,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import EventKind
 from azents.core.inference_profile import SessionInferenceState
-from azents.engine.events.protocols import TranscriptRepository
 from azents.engine.events.tool_calls import tool_call_external_id
 from azents.engine.events.types import (
     ClientToolCallPayload,
@@ -18,6 +17,7 @@ from azents.engine.events.types import (
     TurnMarkerPayload,
 )
 from azents.repos.agent_execution.data import EventCreate
+from azents.repos.engine_event_contracts import TranscriptRepository
 
 
 @dataclasses.dataclass(frozen=True)

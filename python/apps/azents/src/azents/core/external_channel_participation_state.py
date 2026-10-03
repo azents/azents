@@ -6,7 +6,19 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from azents.core.enums import (
     ExternalChannelConversationScopeKind,
+    ExternalChannelIngressAuthorityKind,
     ExternalChannelProvider,
+)
+from azents.core.external_channel_conversation_data import (
+    ExternalChannelConversationScope,
+    ExternalChannelOperationDeadline,
+)
+from azents.core.external_channel_ingestion import (
+    ExternalChannelIngestionOperation,
+    ExternalChannelIngestionRequest,
+    ExternalChannelIngressAuthority,
+    ExternalChannelSetupReplayBoundary,
+    ExternalChannelTriggerLocator,
 )
 from azents.repos.external_channel.data import (
     ExternalChannelConnectionConfiguration,
@@ -14,18 +26,6 @@ from azents.repos.external_channel.data import (
     ExternalChannelPrincipal,
     ExternalChannelResource,
     ExternalChannelSetupClaim,
-)
-from azents.services.external_channel.conversation import (
-    ExternalChannelConversationScope,
-    ExternalChannelOperationDeadline,
-)
-from azents.services.external_channel.ingestion import (
-    ExternalChannelIngestionOperation,
-    ExternalChannelIngestionRequest,
-    ExternalChannelIngressAuthority,
-    ExternalChannelIngressAuthorityKind,
-    ExternalChannelSetupReplayBoundary,
-    ExternalChannelTriggerLocator,
 )
 
 

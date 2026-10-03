@@ -23,6 +23,10 @@ from azents.core.enums import (
     RuntimeProviderBootstrapAdapterKind,
     RuntimeProviderKind,
 )
+from azents.core.runtime_provider_bootstrap import (
+    RuntimeProviderBootstrapDeclarationInput,
+    RuntimeProviderBootstrapSnapshot,
+)
 from azents.core.runtime_provider_credential import RuntimeProviderCredentialVerifier
 from azents.rdb.session import SessionManager
 from azents.repos.runtime_provider.data import RuntimeProviderBootstrapSourceCreate
@@ -33,14 +37,13 @@ from azents.repos.runtime_provider_binding.data import (
 from azents.repos.runtime_provider_binding.repository import (
     RuntimeProviderAuthBindingRepository,
 )
+from azents.repos.runtime_provider_bootstrap_operations import (
+    RuntimeProviderBootstrapOperations,
+)
 from azents.repos.runtime_provider_control.repository import (
     RuntimeProviderControlRepository,
 )
 from azents.repos.system_setting.repository import SystemSettingRepository
-from azents.services.runtime_provider_bootstrap.data import (
-    RuntimeProviderBootstrapDeclarationInput,
-    RuntimeProviderBootstrapSnapshot,
-)
 from azents.services.runtime_provider_bootstrap.service import (
     RuntimeProviderBootstrapService,
 )
@@ -122,10 +125,12 @@ class TestRuntimeProviderEnrollmentService:
         provider_repository = RuntimeProviderRepository()
         binding_repository = RuntimeProviderAuthBindingRepository()
         bootstrap_result = await RuntimeProviderBootstrapService(
-            session_manager=session_manager,
-            repository=provider_repository,
-            system_setting_repository=SystemSettingRepository(),
-            binding_repository=binding_repository,
+            operations=RuntimeProviderBootstrapOperations(
+                session_manager=session_manager,
+                repository=provider_repository,
+                system_setting_repository=SystemSettingRepository(),
+                binding_repository=binding_repository,
+            ),
         ).reconcile(
             RuntimeProviderBootstrapSnapshot(
                 source_key="helm/default/azents",
@@ -202,10 +207,12 @@ class TestRuntimeProviderEnrollmentService:
         provider_repository = RuntimeProviderRepository()
         binding_repository = RuntimeProviderAuthBindingRepository()
         bootstrap_result = await RuntimeProviderBootstrapService(
-            session_manager=session_manager,
-            repository=provider_repository,
-            system_setting_repository=SystemSettingRepository(),
-            binding_repository=binding_repository,
+            operations=RuntimeProviderBootstrapOperations(
+                session_manager=session_manager,
+                repository=provider_repository,
+                system_setting_repository=SystemSettingRepository(),
+                binding_repository=binding_repository,
+            ),
         ).reconcile(
             RuntimeProviderBootstrapSnapshot(
                 source_key="helm/default/azents",
@@ -322,10 +329,12 @@ class TestRuntimeProviderEnrollmentService:
         provider_repository = RuntimeProviderRepository()
         binding_repository = RuntimeProviderAuthBindingRepository()
         bootstrap_result = await RuntimeProviderBootstrapService(
-            session_manager=session_manager,
-            repository=provider_repository,
-            system_setting_repository=SystemSettingRepository(),
-            binding_repository=binding_repository,
+            operations=RuntimeProviderBootstrapOperations(
+                session_manager=session_manager,
+                repository=provider_repository,
+                system_setting_repository=SystemSettingRepository(),
+                binding_repository=binding_repository,
+            ),
         ).reconcile(
             RuntimeProviderBootstrapSnapshot(
                 source_key="helm/redis-reset/azents",

@@ -5,10 +5,11 @@ import datetime
 from collections.abc import AsyncGenerator, Sequence
 from contextlib import asynccontextmanager
 from typing import ClassVar, Literal
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from azcommon.result import Failure, Success
+from cryptography.fernet import Fernet
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,6 +19,7 @@ from azents.core.agent import (
     SelectableModelSettings,
 )
 from azents.core.credentials import ApiKeySecrets
+from azents.core.crypto import CredentialCipher
 from azents.core.engine_tool_state import (
     AgentsAppendixDedupeState,
     ClaudeRulesAppendixDedupeState,
@@ -67,26 +69,37 @@ from azents.engine.tools.runtime_web import RuntimeWebToolkit, RuntimeWebToolkit
 from azents.engine.tools.scheduled import ScheduledToolkit, ScheduledToolkitProvider
 from azents.engine.tools.subagent import SubagentToolkitProvider
 from azents.rdb.session import SessionManager
+from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
-from azents.repos.chatgpt_oauth_runtime import ChatGPTOAuthRuntimeRepository
-from azents.repos.engine_read import (
-    EngineInvokeReadRepository,
-    EngineToolkitReadRepository,
+from azents.repos.agent_runtime import AgentRuntimeRepository
+from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.engine_resolve import (
+    get_engine_resolve_repositories,
 )
+from azents.repos.engine_tool_repositories import get_engine_tool_repositories
 from azents.repos.exchange_file.data import ExchangeFile
-from azents.repos.kimi_oauth_runtime import KimiOAuthRuntimeRepository
+from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.llm_provider_integration.data import LLMProviderIntegrationWithSecrets
+from azents.repos.memory import MemoryRepository
+from azents.repos.runtime_profile.repository import RuntimeProfileRepository
+from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
+from azents.repos.toolkit import ToolkitRepository
 from azents.repos.toolkit.data import (
     EffectiveToolkitConfig,
     EffectiveToolkitNamespaceMissing,
     EffectiveToolkitSource,
     ToolkitConfig,
 )
-from azents.repos.xai_oauth_runtime import XaiOAuthRuntimeRepository
 from azents.runtime.types import RuntimeDomainConfig
 from azents.services.engine_runtime_tokens import EngineRuntimeTokenResolver
+from azents.services.historical_memory.context_snapshot import (
+    MemoryContextSnapshotService,
+)
 from azents.services.image_generation_catalog import (
     ImageGenerationRuntimeConfigurationError,
+)
+from azents.services.oauth_runtime_clients import (
+    create_runtime_oauth_client_factories,
 )
 from azents.services.runtime_web.service import RuntimeWebService
 from azents.testing.model_metadata import make_test_model_metadata_service
@@ -94,6 +107,7 @@ from azents.testing.model_selection import (
     make_test_model_selection,
     make_test_selectable_model_options,
 )
+from azents.testing.types import require_instance
 
 from . import resolve as resolve_module
 from .resolve import (
@@ -438,10 +452,13 @@ async def _resolve_failing_registered_toolkit(
         ),
         memory_enabled=False,
         runtime_capability_resolver=_runtime_capability_resolver(enabled=False),
-        toolkit_read_repository=EngineToolkitReadRepository(
-            toolkit_repository=toolkit_repository,
+        repositories=get_engine_resolve_repositories(
             session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
+            agent_repository=AgentRepository(),
+            integration_repository=AsyncMock(spec=LLMProviderIntegrationRepository),
+            toolkit_repository=toolkit_repository,
         ),
+        workspace_handle=None,
     )
 
 
@@ -484,10 +501,13 @@ async def test_registered_toolkit_missing_namespace_fails_before_resolution() ->
             ),
             memory_enabled=False,
             runtime_capability_resolver=_runtime_capability_resolver(enabled=False),
-            toolkit_read_repository=EngineToolkitReadRepository(
-                toolkit_repository=toolkit_repository,
+            repositories=get_engine_resolve_repositories(
                 session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
+                agent_repository=AgentRepository(),
+                integration_repository=AsyncMock(spec=LLMProviderIntegrationRepository),
+                toolkit_repository=toolkit_repository,
             ),
+            workspace_handle=None,
         )
 
     assert exc_info.value is conflict
@@ -509,6 +529,17 @@ def _make_builtin_provider() -> BuiltinToolkitProvider:
     """Create BuiltinToolkitProvider for resolve_agent_tools tests."""
     session = AsyncMock(spec=AsyncSession)
     session.get = AsyncMock(return_value=None)
+    memory = AsyncMock(spec=MemoryRepository)
+    memory.list_summaries.return_value = []
+    runtimes = AsyncMock(spec=AgentRuntimeRepository)
+    runtimes.get_by_agent_id.return_value = None
+    sessions = AsyncMock(spec=AgentSessionRepository)
+    sessions.get_by_id.return_value = None
+    projects = AsyncMock(spec=SessionWorkspaceProjectRepository)
+    snapshots = Mock(spec=MemoryContextSnapshotService)
+    snapshots.with_owner.return_value = snapshots
+    snapshots.prompt_for_turn.return_value = ""
+    snapshots.refresh_snapshot.return_value = False
     return BuiltinToolkitProvider(
         exchange_file_service=AsyncMock(),
         artifact_service=AsyncMock(),
@@ -516,15 +547,23 @@ def _make_builtin_provider() -> BuiltinToolkitProvider:
         vfs_projection_service=None,
         vfs_read_router=AsyncMock(),
         agents_store=_FakeAgentsAppendixDedupeStateStore(),
-        session_manager=_session_manager_for(session),
-        memory_repo=AsyncMock(),
-        memory_context_snapshot_service=AsyncMock(),
-        agent_runtime_repo=AsyncMock(),
+        repositories=get_engine_tool_repositories(
+            session_manager=_session_manager_for(session),
+            cipher=CredentialCipher(Fernet.generate_key().decode()),
+            memory_repository=require_instance(memory, MemoryRepository),
+            agent_runtime_repository=require_instance(runtimes, AgentRuntimeRepository),
+            agent_session_repository=require_instance(sessions, AgentSessionRepository),
+            runtime_profile_repository=RuntimeProfileRepository(),
+            project_repository=require_instance(
+                projects, SessionWorkspaceProjectRepository
+            ),
+        ),
+        memory_context_snapshot_service=require_instance(
+            snapshots, MemoryContextSnapshotService
+        ),
         agent_runtime_service=AsyncMock(),
         runner_operations=AsyncMock(),
-        agent_session_repository=AsyncMock(),
         session_working_folder_binding_service=AsyncMock(),
-        project_repo=AsyncMock(),
         server_to_runtime_transfer_service=AsyncMock(),
         runtime_image_read_service=None,
         runtime_to_server_publication_service=AsyncMock(),
@@ -608,35 +647,19 @@ class TestResolveInvokeInput:
         integration_repository.get_by_id_with_secrets.return_value = _make_integration()
         result = await resolve_invoke_input(
             InvokeInput(agent_id="agent-1", session_id="session-1", messages=[]),
-            invoke_read_repository=EngineInvokeReadRepository(
-                agent_repository=agent_repository,
-                integration_repository=integration_repository,
-                session_manager=(
-                    session_manager := _session_manager_for(
-                        AsyncMock(spec=AsyncSession)
-                    )
-                ),
-            ),
-            runtime_token_resolver=EngineRuntimeTokenResolver(
-                chatgpt_repository=ChatGPTOAuthRuntimeRepository(
-                    integration_repository=integration_repository,
-                    session_manager=session_manager,
-                ),
-                xai_repository=XaiOAuthRuntimeRepository(
-                    integration_repository=integration_repository,
-                    session_manager=session_manager,
-                ),
-                kimi_repository=KimiOAuthRuntimeRepository(
-                    integration_repository=integration_repository,
-                    session_manager=session_manager,
-                ),
-            ),
             exchange_file_service=AsyncMock(),
             model_file_service=AsyncMock(),
             image_generation_catalog_service=(
                 image_catalog_service := _make_image_generation_catalog_service()
             ),
             model_metadata_service=make_test_model_metadata_service(snapshot=None),
+            repositories=get_engine_resolve_repositories(
+                session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
+                agent_repository=agent_repository,
+                integration_repository=integration_repository,
+                toolkit_repository=ToolkitRepository(cipher=None),
+            ),
+            oauth_clients=create_runtime_oauth_client_factories(),
         )
         assert isinstance(result, Success)
         assert result.value.reasoning_effort == ModelReasoningEffort.HIGH
@@ -695,33 +718,17 @@ class TestResolveInvokeInput:
         integration_repository.get_by_id_with_secrets.return_value = _make_integration()
         result = await resolve_invoke_input(
             InvokeInput(agent_id="agent-1", session_id="session-1", messages=[]),
-            invoke_read_repository=EngineInvokeReadRepository(
-                agent_repository=agent_repository,
-                integration_repository=integration_repository,
-                session_manager=(
-                    session_manager := _session_manager_for(
-                        AsyncMock(spec=AsyncSession)
-                    )
-                ),
-            ),
-            runtime_token_resolver=EngineRuntimeTokenResolver(
-                chatgpt_repository=ChatGPTOAuthRuntimeRepository(
-                    integration_repository=integration_repository,
-                    session_manager=session_manager,
-                ),
-                xai_repository=XaiOAuthRuntimeRepository(
-                    integration_repository=integration_repository,
-                    session_manager=session_manager,
-                ),
-                kimi_repository=KimiOAuthRuntimeRepository(
-                    integration_repository=integration_repository,
-                    session_manager=session_manager,
-                ),
-            ),
             exchange_file_service=AsyncMock(),
             model_file_service=AsyncMock(),
             image_generation_catalog_service=_make_image_generation_catalog_service(),
             model_metadata_service=make_test_model_metadata_service(snapshot=None),
+            repositories=get_engine_resolve_repositories(
+                session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
+                agent_repository=agent_repository,
+                integration_repository=integration_repository,
+                toolkit_repository=ToolkitRepository(cipher=None),
+            ),
+            oauth_clients=create_runtime_oauth_client_factories(),
         )
         assert result == Failure(
             ReasoningEffortUnsupported(
@@ -781,33 +788,17 @@ class TestResolveInvokeInput:
                 reasoning_effort=ModelReasoningEffort.HIGH,
                 enabled_execution_options=[],
             ),
-            invoke_read_repository=EngineInvokeReadRepository(
-                agent_repository=agent_repository,
-                integration_repository=integration_repository,
-                session_manager=(
-                    session_manager := _session_manager_for(
-                        AsyncMock(spec=AsyncSession)
-                    )
-                ),
-            ),
-            runtime_token_resolver=EngineRuntimeTokenResolver(
-                chatgpt_repository=ChatGPTOAuthRuntimeRepository(
-                    integration_repository=integration_repository,
-                    session_manager=session_manager,
-                ),
-                xai_repository=XaiOAuthRuntimeRepository(
-                    integration_repository=integration_repository,
-                    session_manager=session_manager,
-                ),
-                kimi_repository=KimiOAuthRuntimeRepository(
-                    integration_repository=integration_repository,
-                    session_manager=session_manager,
-                ),
-            ),
             exchange_file_service=AsyncMock(),
             model_file_service=AsyncMock(),
             image_generation_catalog_service=_make_image_generation_catalog_service(),
             model_metadata_service=make_test_model_metadata_service(snapshot=None),
+            repositories=get_engine_resolve_repositories(
+                session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
+                agent_repository=agent_repository,
+                integration_repository=integration_repository,
+                toolkit_repository=ToolkitRepository(cipher=None),
+            ),
+            oauth_clients=create_runtime_oauth_client_factories(),
         )
         assert result == Failure(
             InvalidModelParameters(
@@ -846,25 +837,13 @@ class TestResolveInvokeInput:
             model_file_service=AsyncMock(),
             image_generation_catalog_service=_make_image_generation_catalog_service(),
             model_metadata_service=make_test_model_metadata_service(snapshot=None),
-            invoke_read_repository=EngineInvokeReadRepository(
+            repositories=get_engine_resolve_repositories(
+                session_manager=session_manager,
                 agent_repository=agent_repository,
                 integration_repository=integration_repository,
-                session_manager=session_manager,
+                toolkit_repository=ToolkitRepository(cipher=None),
             ),
-            runtime_token_resolver=EngineRuntimeTokenResolver(
-                chatgpt_repository=ChatGPTOAuthRuntimeRepository(
-                    integration_repository=integration_repository,
-                    session_manager=session_manager,
-                ),
-                xai_repository=XaiOAuthRuntimeRepository(
-                    integration_repository=integration_repository,
-                    session_manager=session_manager,
-                ),
-                kimi_repository=KimiOAuthRuntimeRepository(
-                    integration_repository=integration_repository,
-                    session_manager=session_manager,
-                ),
-            ),
+            oauth_clients=create_runtime_oauth_client_factories(),
         )
 
         assert isinstance(result, Success)
@@ -910,25 +889,13 @@ class TestResolveInvokeInput:
             model_file_service=AsyncMock(),
             image_generation_catalog_service=image_service,
             model_metadata_service=make_test_model_metadata_service(snapshot=None),
-            invoke_read_repository=EngineInvokeReadRepository(
+            repositories=get_engine_resolve_repositories(
+                session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
                 agent_repository=agent_repository,
                 integration_repository=integration_repository,
-                session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
+                toolkit_repository=ToolkitRepository(cipher=None),
             ),
-            runtime_token_resolver=EngineRuntimeTokenResolver(
-                chatgpt_repository=ChatGPTOAuthRuntimeRepository(
-                    integration_repository=integration_repository,
-                    session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
-                ),
-                xai_repository=XaiOAuthRuntimeRepository(
-                    integration_repository=integration_repository,
-                    session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
-                ),
-                kimi_repository=KimiOAuthRuntimeRepository(
-                    integration_repository=integration_repository,
-                    session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
-                ),
-            ),
+            oauth_clients=create_runtime_oauth_client_factories(),
         )
 
         assert isinstance(result, Success)
@@ -984,25 +951,13 @@ class TestResolveInvokeInput:
             model_file_service=AsyncMock(),
             image_generation_catalog_service=image_service,
             model_metadata_service=make_test_model_metadata_service(snapshot=None),
-            invoke_read_repository=EngineInvokeReadRepository(
+            repositories=get_engine_resolve_repositories(
+                session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
                 agent_repository=agent_repository,
                 integration_repository=integration_repository,
-                session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
+                toolkit_repository=ToolkitRepository(cipher=None),
             ),
-            runtime_token_resolver=EngineRuntimeTokenResolver(
-                chatgpt_repository=ChatGPTOAuthRuntimeRepository(
-                    integration_repository=integration_repository,
-                    session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
-                ),
-                xai_repository=XaiOAuthRuntimeRepository(
-                    integration_repository=integration_repository,
-                    session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
-                ),
-                kimi_repository=KimiOAuthRuntimeRepository(
-                    integration_repository=integration_repository,
-                    session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
-                ),
-            ),
+            oauth_clients=create_runtime_oauth_client_factories(),
         )
 
         assert result == Failure(error)
@@ -1065,25 +1020,13 @@ class TestResolveInvokeInput:
             model_file_service=AsyncMock(),
             image_generation_catalog_service=image_service,
             model_metadata_service=make_test_model_metadata_service(snapshot=None),
-            invoke_read_repository=EngineInvokeReadRepository(
+            repositories=get_engine_resolve_repositories(
+                session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
                 agent_repository=agent_repository,
                 integration_repository=integration_repository,
-                session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
+                toolkit_repository=ToolkitRepository(cipher=None),
             ),
-            runtime_token_resolver=EngineRuntimeTokenResolver(
-                chatgpt_repository=ChatGPTOAuthRuntimeRepository(
-                    integration_repository=integration_repository,
-                    session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
-                ),
-                xai_repository=XaiOAuthRuntimeRepository(
-                    integration_repository=integration_repository,
-                    session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
-                ),
-                kimi_repository=KimiOAuthRuntimeRepository(
-                    integration_repository=integration_repository,
-                    session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
-                ),
-            ),
+            oauth_clients=create_runtime_oauth_client_factories(),
         )
 
         assert result == Failure(error)
@@ -1135,25 +1078,13 @@ class TestResolveInvokeInput:
             model_file_service=AsyncMock(),
             image_generation_catalog_service=image_service,
             model_metadata_service=make_test_model_metadata_service(snapshot=None),
-            invoke_read_repository=EngineInvokeReadRepository(
+            repositories=get_engine_resolve_repositories(
+                session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
                 agent_repository=agent_repository,
                 integration_repository=integration_repository,
-                session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
+                toolkit_repository=ToolkitRepository(cipher=None),
             ),
-            runtime_token_resolver=EngineRuntimeTokenResolver(
-                chatgpt_repository=ChatGPTOAuthRuntimeRepository(
-                    integration_repository=integration_repository,
-                    session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
-                ),
-                xai_repository=XaiOAuthRuntimeRepository(
-                    integration_repository=integration_repository,
-                    session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
-                ),
-                kimi_repository=KimiOAuthRuntimeRepository(
-                    integration_repository=integration_repository,
-                    session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
-                ),
-            ),
+            oauth_clients=create_runtime_oauth_client_factories(),
         )
 
         assert result == Failure(error)
@@ -1210,25 +1141,13 @@ class TestResolveInvokeInput:
             model_file_service=AsyncMock(),
             image_generation_catalog_service=image_service,
             model_metadata_service=make_test_model_metadata_service(snapshot=None),
-            invoke_read_repository=EngineInvokeReadRepository(
+            repositories=get_engine_resolve_repositories(
+                session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
                 agent_repository=agent_repository,
                 integration_repository=integration_repository,
-                session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
+                toolkit_repository=ToolkitRepository(cipher=None),
             ),
-            runtime_token_resolver=EngineRuntimeTokenResolver(
-                chatgpt_repository=ChatGPTOAuthRuntimeRepository(
-                    integration_repository=integration_repository,
-                    session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
-                ),
-                xai_repository=XaiOAuthRuntimeRepository(
-                    integration_repository=integration_repository,
-                    session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
-                ),
-                kimi_repository=KimiOAuthRuntimeRepository(
-                    integration_repository=integration_repository,
-                    session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
-                ),
-            ),
+            oauth_clients=create_runtime_oauth_client_factories(),
         )
 
         assert result == Failure(error)
@@ -1286,25 +1205,13 @@ class TestResolveInvokeInput:
             model_file_service=AsyncMock(),
             image_generation_catalog_service=_make_image_generation_catalog_service(),
             model_metadata_service=make_test_model_metadata_service(snapshot=None),
-            invoke_read_repository=EngineInvokeReadRepository(
+            repositories=get_engine_resolve_repositories(
+                session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
                 agent_repository=agent_repository,
                 integration_repository=integration_repository,
-                session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
+                toolkit_repository=ToolkitRepository(cipher=None),
             ),
-            runtime_token_resolver=EngineRuntimeTokenResolver(
-                chatgpt_repository=ChatGPTOAuthRuntimeRepository(
-                    integration_repository=integration_repository,
-                    session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
-                ),
-                xai_repository=XaiOAuthRuntimeRepository(
-                    integration_repository=integration_repository,
-                    session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
-                ),
-                kimi_repository=KimiOAuthRuntimeRepository(
-                    integration_repository=integration_repository,
-                    session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
-                ),
-            ),
+            oauth_clients=create_runtime_oauth_client_factories(),
         )
 
         assert isinstance(result, Success)
@@ -1339,25 +1246,13 @@ class TestResolveInvokeInput:
             model_file_service=AsyncMock(),
             image_generation_catalog_service=_make_image_generation_catalog_service(),
             model_metadata_service=make_test_model_metadata_service(snapshot=None),
-            invoke_read_repository=EngineInvokeReadRepository(
+            repositories=get_engine_resolve_repositories(
+                session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
                 agent_repository=agent_repository,
                 integration_repository=integration_repository,
-                session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
+                toolkit_repository=ToolkitRepository(cipher=None),
             ),
-            runtime_token_resolver=EngineRuntimeTokenResolver(
-                chatgpt_repository=ChatGPTOAuthRuntimeRepository(
-                    integration_repository=integration_repository,
-                    session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
-                ),
-                xai_repository=XaiOAuthRuntimeRepository(
-                    integration_repository=integration_repository,
-                    session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
-                ),
-                kimi_repository=KimiOAuthRuntimeRepository(
-                    integration_repository=integration_repository,
-                    session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
-                ),
-            ),
+            oauth_clients=create_runtime_oauth_client_factories(),
         )
 
         assert result == Failure(
@@ -1404,6 +1299,7 @@ class TestResolveInvokeInput:
             self: EngineRuntimeTokenResolver,
             integration: LLMProviderIntegrationWithSecrets,
         ) -> Success[LLMProviderIntegrationWithSecrets]:
+            del self
             assert active_sessions == 0
             return Success(integration)
 
@@ -1423,25 +1319,13 @@ class TestResolveInvokeInput:
             model_file_service=AsyncMock(),
             image_generation_catalog_service=_make_image_generation_catalog_service(),
             model_metadata_service=make_test_model_metadata_service(snapshot=None),
-            invoke_read_repository=EngineInvokeReadRepository(
+            repositories=get_engine_resolve_repositories(
+                session_manager=session_manager,
                 agent_repository=agent_repository,
                 integration_repository=integration_repository,
-                session_manager=session_manager,
+                toolkit_repository=ToolkitRepository(cipher=None),
             ),
-            runtime_token_resolver=EngineRuntimeTokenResolver(
-                chatgpt_repository=ChatGPTOAuthRuntimeRepository(
-                    integration_repository=integration_repository,
-                    session_manager=session_manager,
-                ),
-                xai_repository=XaiOAuthRuntimeRepository(
-                    integration_repository=integration_repository,
-                    session_manager=session_manager,
-                ),
-                kimi_repository=KimiOAuthRuntimeRepository(
-                    integration_repository=integration_repository,
-                    session_manager=session_manager,
-                ),
-            ),
+            oauth_clients=create_runtime_oauth_client_factories(),
         )
 
         assert isinstance(result, Success)
@@ -1476,25 +1360,13 @@ class TestResolveInvokeInput:
             model_file_service=AsyncMock(),
             image_generation_catalog_service=_make_image_generation_catalog_service(),
             model_metadata_service=make_test_model_metadata_service(snapshot=None),
-            invoke_read_repository=EngineInvokeReadRepository(
+            repositories=get_engine_resolve_repositories(
+                session_manager=session_manager,
                 agent_repository=agent_repository,
                 integration_repository=integration_repository,
-                session_manager=session_manager,
+                toolkit_repository=ToolkitRepository(cipher=None),
             ),
-            runtime_token_resolver=EngineRuntimeTokenResolver(
-                chatgpt_repository=ChatGPTOAuthRuntimeRepository(
-                    integration_repository=integration_repository,
-                    session_manager=session_manager,
-                ),
-                xai_repository=XaiOAuthRuntimeRepository(
-                    integration_repository=integration_repository,
-                    session_manager=session_manager,
-                ),
-                kimi_repository=KimiOAuthRuntimeRepository(
-                    integration_repository=integration_repository,
-                    session_manager=session_manager,
-                ),
-            ),
+            oauth_clients=create_runtime_oauth_client_factories(),
         )
 
         assert isinstance(result, Success)
@@ -1526,25 +1398,13 @@ class TestResolveInvokeInput:
             model_file_service=AsyncMock(),
             image_generation_catalog_service=_make_image_generation_catalog_service(),
             model_metadata_service=make_test_model_metadata_service(snapshot=None),
-            invoke_read_repository=EngineInvokeReadRepository(
+            repositories=get_engine_resolve_repositories(
+                session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
                 agent_repository=agent_repository,
                 integration_repository=integration_repository,
-                session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
+                toolkit_repository=ToolkitRepository(cipher=None),
             ),
-            runtime_token_resolver=EngineRuntimeTokenResolver(
-                chatgpt_repository=ChatGPTOAuthRuntimeRepository(
-                    integration_repository=integration_repository,
-                    session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
-                ),
-                xai_repository=XaiOAuthRuntimeRepository(
-                    integration_repository=integration_repository,
-                    session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
-                ),
-                kimi_repository=KimiOAuthRuntimeRepository(
-                    integration_repository=integration_repository,
-                    session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
-                ),
-            ),
+            oauth_clients=create_runtime_oauth_client_factories(),
         )
 
         assert isinstance(result, Success)
@@ -1575,25 +1435,13 @@ class TestResolveInvokeInput:
             model_file_service=AsyncMock(),
             image_generation_catalog_service=_make_image_generation_catalog_service(),
             model_metadata_service=make_test_model_metadata_service(snapshot=None),
-            invoke_read_repository=EngineInvokeReadRepository(
+            repositories=get_engine_resolve_repositories(
+                session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
                 agent_repository=agent_repository,
                 integration_repository=integration_repository,
-                session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
+                toolkit_repository=ToolkitRepository(cipher=None),
             ),
-            runtime_token_resolver=EngineRuntimeTokenResolver(
-                chatgpt_repository=ChatGPTOAuthRuntimeRepository(
-                    integration_repository=integration_repository,
-                    session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
-                ),
-                xai_repository=XaiOAuthRuntimeRepository(
-                    integration_repository=integration_repository,
-                    session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
-                ),
-                kimi_repository=KimiOAuthRuntimeRepository(
-                    integration_repository=integration_repository,
-                    session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
-                ),
-            ),
+            oauth_clients=create_runtime_oauth_client_factories(),
         )
 
         assert result == Failure(
@@ -1628,22 +1476,13 @@ class TestResolveInvokeInput:
             model_file_service=AsyncMock(),
             image_generation_catalog_service=_make_image_generation_catalog_service(),
             model_metadata_service=make_test_model_metadata_service(snapshot=None),
-            invoke_read_repository=EngineInvokeReadRepository(
+            repositories=get_engine_resolve_repositories(
+                session_manager=session_manager,
                 agent_repository=agent_repository,
                 integration_repository=AsyncMock(),
-                session_manager=session_manager,
+                toolkit_repository=ToolkitRepository(cipher=None),
             ),
-            runtime_token_resolver=EngineRuntimeTokenResolver(
-                chatgpt_repository=ChatGPTOAuthRuntimeRepository(
-                    integration_repository=AsyncMock(), session_manager=session_manager
-                ),
-                xai_repository=XaiOAuthRuntimeRepository(
-                    integration_repository=AsyncMock(), session_manager=session_manager
-                ),
-                kimi_repository=KimiOAuthRuntimeRepository(
-                    integration_repository=AsyncMock(), session_manager=session_manager
-                ),
-            ),
+            oauth_clients=create_runtime_oauth_client_factories(),
         )
 
         assert result == Failure(ModelTargetNotFound(model_target_label="deleted"))
@@ -1679,25 +1518,13 @@ class TestResolveInvokeInput:
             model_file_service=AsyncMock(),
             image_generation_catalog_service=_make_image_generation_catalog_service(),
             model_metadata_service=make_test_model_metadata_service(snapshot=None),
-            invoke_read_repository=EngineInvokeReadRepository(
+            repositories=get_engine_resolve_repositories(
+                session_manager=session_manager,
                 agent_repository=agent_repository,
                 integration_repository=integration_repository,
-                session_manager=session_manager,
+                toolkit_repository=ToolkitRepository(cipher=None),
             ),
-            runtime_token_resolver=EngineRuntimeTokenResolver(
-                chatgpt_repository=ChatGPTOAuthRuntimeRepository(
-                    integration_repository=integration_repository,
-                    session_manager=session_manager,
-                ),
-                xai_repository=XaiOAuthRuntimeRepository(
-                    integration_repository=integration_repository,
-                    session_manager=session_manager,
-                ),
-                kimi_repository=KimiOAuthRuntimeRepository(
-                    integration_repository=integration_repository,
-                    session_manager=session_manager,
-                ),
-            ),
+            oauth_clients=create_runtime_oauth_client_factories(),
         )
 
         assert result == Failure(
@@ -1734,22 +1561,13 @@ class TestResolveInvokeInput:
             model_file_service=AsyncMock(),
             image_generation_catalog_service=_make_image_generation_catalog_service(),
             model_metadata_service=make_test_model_metadata_service(snapshot=None),
-            invoke_read_repository=EngineInvokeReadRepository(
+            repositories=get_engine_resolve_repositories(
+                session_manager=session_manager,
                 agent_repository=agent_repository,
                 integration_repository=AsyncMock(),
-                session_manager=session_manager,
+                toolkit_repository=ToolkitRepository(cipher=None),
             ),
-            runtime_token_resolver=EngineRuntimeTokenResolver(
-                chatgpt_repository=ChatGPTOAuthRuntimeRepository(
-                    integration_repository=AsyncMock(), session_manager=session_manager
-                ),
-                xai_repository=XaiOAuthRuntimeRepository(
-                    integration_repository=AsyncMock(), session_manager=session_manager
-                ),
-                kimi_repository=KimiOAuthRuntimeRepository(
-                    integration_repository=AsyncMock(), session_manager=session_manager
-                ),
-            ),
+            oauth_clients=create_runtime_oauth_client_factories(),
         )
 
         assert result == Failure(
@@ -1787,22 +1605,13 @@ class TestResolveInvokeInput:
             model_file_service=AsyncMock(),
             image_generation_catalog_service=_make_image_generation_catalog_service(),
             model_metadata_service=make_test_model_metadata_service(snapshot=None),
-            invoke_read_repository=EngineInvokeReadRepository(
+            repositories=get_engine_resolve_repositories(
+                session_manager=session_manager,
                 agent_repository=agent_repository,
                 integration_repository=AsyncMock(),
-                session_manager=session_manager,
+                toolkit_repository=ToolkitRepository(cipher=None),
             ),
-            runtime_token_resolver=EngineRuntimeTokenResolver(
-                chatgpt_repository=ChatGPTOAuthRuntimeRepository(
-                    integration_repository=AsyncMock(), session_manager=session_manager
-                ),
-                xai_repository=XaiOAuthRuntimeRepository(
-                    integration_repository=AsyncMock(), session_manager=session_manager
-                ),
-                kimi_repository=KimiOAuthRuntimeRepository(
-                    integration_repository=AsyncMock(), session_manager=session_manager
-                ),
-            ),
+            oauth_clients=create_runtime_oauth_client_factories(),
         )
 
         assert result == Failure(
@@ -1846,10 +1655,13 @@ class TestResolveAgentTools:
             runtime_web_toolkit_provider=provider,
             memory_enabled=False,
             runtime_capability_resolver=_runtime_capability_resolver(enabled=False),
-            toolkit_read_repository=EngineToolkitReadRepository(
-                toolkit_repository=_empty_toolkit_repository(),
+            repositories=get_engine_resolve_repositories(
                 session_manager=_session_manager_for(session),
+                agent_repository=AgentRepository(),
+                integration_repository=AsyncMock(spec=LLMProviderIntegrationRepository),
+                toolkit_repository=_empty_toolkit_repository(),
             ),
+            workspace_handle=None,
         )
 
         assert [binding.slug for binding in bindings] == ["runtime_web"]
@@ -1882,10 +1694,13 @@ class TestResolveAgentTools:
             dynamic_worktree_toolkit_provider=_make_dynamic_worktree_provider(),
             memory_enabled=False,
             runtime_capability_resolver=_runtime_capability_resolver(enabled=False),
-            toolkit_read_repository=EngineToolkitReadRepository(
-                toolkit_repository=_empty_toolkit_repository(),
+            repositories=get_engine_resolve_repositories(
                 session_manager=_session_manager_for(session),
+                agent_repository=AgentRepository(),
+                integration_repository=AsyncMock(spec=LLMProviderIntegrationRepository),
+                toolkit_repository=_empty_toolkit_repository(),
             ),
+            workspace_handle=None,
         )
 
         assert [binding.slug for binding in bindings] == ["dynamic_worktree"]
@@ -1942,10 +1757,13 @@ class TestResolveAgentTools:
             ),
             memory_enabled=True,
             runtime_capability_resolver=_runtime_capability_resolver(enabled=True),
-            toolkit_read_repository=EngineToolkitReadRepository(
-                toolkit_repository=_empty_toolkit_repository(),
+            repositories=get_engine_resolve_repositories(
                 session_manager=_session_manager_for(session),
+                agent_repository=AgentRepository(),
+                integration_repository=AsyncMock(spec=LLMProviderIntegrationRepository),
+                toolkit_repository=_empty_toolkit_repository(),
             ),
+            workspace_handle=None,
         )
 
         assert [binding.slug for binding in bindings] == [
@@ -1990,10 +1808,13 @@ class TestResolveAgentTools:
             ),
             memory_enabled=True,
             runtime_capability_resolver=_runtime_capability_resolver(enabled=False),
-            toolkit_read_repository=EngineToolkitReadRepository(
-                toolkit_repository=_empty_toolkit_repository(),
+            repositories=get_engine_resolve_repositories(
                 session_manager=_session_manager_for(session),
+                agent_repository=AgentRepository(),
+                integration_repository=AsyncMock(spec=LLMProviderIntegrationRepository),
+                toolkit_repository=_empty_toolkit_repository(),
             ),
+            workspace_handle=None,
         )
 
         assert [binding.slug for binding in bindings] == [
@@ -2022,10 +1843,13 @@ class TestResolveAgentTools:
             subagent_toolkit_provider=_make_subagent_provider(),
             memory_enabled=False,
             runtime_capability_resolver=_runtime_capability_resolver(enabled=False),
-            toolkit_read_repository=EngineToolkitReadRepository(
-                toolkit_repository=_empty_toolkit_repository(),
+            repositories=get_engine_resolve_repositories(
                 session_manager=_session_manager_for(session),
+                agent_repository=AgentRepository(),
+                integration_repository=AsyncMock(spec=LLMProviderIntegrationRepository),
+                toolkit_repository=_empty_toolkit_repository(),
             ),
+            workspace_handle=None,
         )
 
         assert [binding.slug for binding in bindings] == ["subagent"]
@@ -2069,10 +1893,13 @@ class TestResolveAgentTools:
             scheduled_toolkit_provider=_make_scheduled_provider(),
             memory_enabled=True,
             runtime_capability_resolver=_runtime_capability_resolver(enabled=True),
-            toolkit_read_repository=EngineToolkitReadRepository(
-                toolkit_repository=_empty_toolkit_repository(),
+            repositories=get_engine_resolve_repositories(
                 session_manager=_session_manager_for(session),
+                agent_repository=AgentRepository(),
+                integration_repository=AsyncMock(spec=LLMProviderIntegrationRepository),
+                toolkit_repository=_empty_toolkit_repository(),
             ),
+            workspace_handle=None,
         )
 
         assert [binding.slug for binding in bindings] == [
@@ -2104,10 +1931,13 @@ class TestResolveAgentTools:
             scheduled_toolkit_provider=provider,
             memory_enabled=False,
             runtime_capability_resolver=_runtime_capability_resolver(enabled=True),
-            toolkit_read_repository=EngineToolkitReadRepository(
-                toolkit_repository=_empty_toolkit_repository(),
+            repositories=get_engine_resolve_repositories(
                 session_manager=_session_manager_for(session),
+                agent_repository=AgentRepository(),
+                integration_repository=AsyncMock(spec=LLMProviderIntegrationRepository),
+                toolkit_repository=_empty_toolkit_repository(),
             ),
+            workspace_handle=None,
         )
         subagent = await resolve_agent_tools(
             "agent-1",
@@ -2124,10 +1954,13 @@ class TestResolveAgentTools:
             scheduled_toolkit_provider=provider,
             memory_enabled=False,
             runtime_capability_resolver=_runtime_capability_resolver(enabled=False),
-            toolkit_read_repository=EngineToolkitReadRepository(
-                toolkit_repository=_empty_toolkit_repository(),
+            repositories=get_engine_resolve_repositories(
                 session_manager=_session_manager_for(session),
+                agent_repository=AgentRepository(),
+                integration_repository=AsyncMock(spec=LLMProviderIntegrationRepository),
+                toolkit_repository=_empty_toolkit_repository(),
             ),
+            workspace_handle=None,
         )
 
         assert [binding.slug for binding in root] == [
@@ -2158,25 +1991,13 @@ async def test_existing_agent_top_k_reaches_run_and_retry_carrier(
     session_manager = _session_manager_for(AsyncMock(spec=AsyncSession))
     result = await resolve_invoke_input(
         InvokeInput(agent_id="agent-1", session_id="session-1", messages=[]),
-        invoke_read_repository=EngineInvokeReadRepository(
+        repositories=get_engine_resolve_repositories(
             agent_repository=agent_repository,
             integration_repository=integration_repository,
             session_manager=session_manager,
+            toolkit_repository=ToolkitRepository(cipher=None),
         ),
-        runtime_token_resolver=EngineRuntimeTokenResolver(
-            chatgpt_repository=ChatGPTOAuthRuntimeRepository(
-                integration_repository=integration_repository,
-                session_manager=session_manager,
-            ),
-            xai_repository=XaiOAuthRuntimeRepository(
-                integration_repository=integration_repository,
-                session_manager=session_manager,
-            ),
-            kimi_repository=KimiOAuthRuntimeRepository(
-                integration_repository=integration_repository,
-                session_manager=session_manager,
-            ),
-        ),
+        oauth_clients=create_runtime_oauth_client_factories(),
         exchange_file_service=AsyncMock(),
         model_file_service=AsyncMock(),
         image_generation_catalog_service=_make_image_generation_catalog_service(),

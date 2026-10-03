@@ -20,6 +20,7 @@ from azents.core.config import Config
 from azents.core.deps import get_config
 from azents.core.enums import ModelFileStatus
 from azents.core.s3.deps import get_s3_service
+from azents.core.session_resource_authority import SessionResourceAuthority
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent_execution import AgentRunRepository
@@ -30,7 +31,6 @@ from azents.repos.model_file.operations import (
     ModelFileMetadataFailure,
     ModelFileOperationRepository,
 )
-from azents.services.session_resource_authority import SessionResourceAuthority
 
 _IMAGE_MEDIA_PREFIX = "image/"
 _TEXT_MEDIA_PREFIX = "text/"

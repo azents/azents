@@ -36,9 +36,9 @@ from azents.core.oauth2 import (
     verify_agent_github_platform_oauth_state,
     verify_agent_toolkit_oauth_state,
 )
+from azents.core.toolkit_errors import NotFound
 from azents.core.tools import ToolkitProvider
 from azents.engine.tools.deps import get_toolkit_registry
-from azents.repos.toolkit.data import NotFound
 from azents.services.agent.data import NotAdmin
 from azents.services.github_platform_system_setting.runtime import (
     PlatformGitHubAppRuntimeService,

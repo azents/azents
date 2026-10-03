@@ -6,6 +6,20 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [external-channel, agent, conversation]
 code_paths:
+  - python/apps/azents/src/azents/core/agent_automatic_project.py
+  - python/apps/azents/src/azents/core/external_channel_access.py
+  - python/apps/azents/src/azents/core/external_channel_conversation_data.py
+  - python/apps/azents/src/azents/core/external_channel_conversation_preparation.py
+  - python/apps/azents/src/azents/core/external_channel_discord_selector_scope.py
+  - python/apps/azents/src/azents/core/external_channel_ingestion.py
+  - python/apps/azents/src/azents/core/external_channel_participation_state.py
+  - python/apps/azents/src/azents/core/external_channel_selector_state.py
+  - python/apps/azents/src/azents/core/mailbox_errors.py
+  - python/apps/azents/src/azents/repos/discord_connection_dependencies.py
+  - python/apps/azents/src/azents/repos/external_channel/access_operations.py
+  - python/apps/azents/src/azents/repos/external_channel/conversation_provisioning.py
+  - python/apps/azents/src/azents/repos/external_channel/ingress_drain.py
+  - python/apps/azents/src/azents/repos/mailbox_runtime_operations.py
   - python/apps/azents/src/azents/api/public/external_channel/v1/route.py
   - python/apps/azents/src/azents/services/external_channel/admission.py
   - python/apps/azents/src/azents/services/external_channel/http_admission.py
@@ -42,7 +56,6 @@ code_paths:
   - python/apps/azents/src/azents/services/external_channel/discord_selector.py
   - python/apps/azents/src/azents/services/external_channel/access.py
   - python/apps/azents/src/azents/core/external_channel_file.py
-  - python/apps/azents/src/azents/services/external_channel/conversation.py
   - python/apps/azents/src/azents/services/external_channel/ingestion.py
   - python/apps/azents/src/azents/services/external_channel/ingestion_history.py
   - python/apps/azents/src/azents/services/external_channel/ingress_admission.py
@@ -54,14 +67,13 @@ code_paths:
   - python/apps/azents/src/azents/services/external_channel/ingress_observability.py
   - python/apps/azents/src/azents/services/external_channel/ingress_release.py
   - python/apps/azents/src/azents/services/external_channel/ingestion_replay.py
-  - python/apps/azents/src/azents/services/external_channel/mailbox_ingestion_store.py
+  - python/apps/azents/src/azents/repos/external_channel/mailbox_ingestion.py
   - python/apps/azents/src/azents/services/external_channel/mailbox_wake.py
   - python/apps/azents/src/azents/repos/external_channel/ingress_queue.py
   - python/apps/azents/src/azents/repos/external_channel/ingress_control_read.py
   - python/apps/azents/src/azents/rdb/models/external_channel_ingress.py
   - python/apps/azents/src/azents/api/testenv/external_channel_ingress/**
   - python/apps/azents/src/azents/cli/external_channel_ingress.py
-  - python/apps/azents/src/azents/services/external_channel/selector_state.py
   - python/apps/azents/src/azents/services/external_channel/transport_ingestion.py
   - python/apps/azents/src/azents/services/external_channel/connection_revocation.py
   - python/apps/azents/src/azents/services/external_channel/provider_control.py

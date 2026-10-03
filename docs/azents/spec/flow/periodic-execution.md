@@ -4,6 +4,18 @@ created: 2026-06-20
 tags: [backend, engine, infra]
 spec_type: flow
 code_paths:
+  - python/apps/azents/src/azents/core/agent_errors.py
+  - python/apps/azents/src/azents/core/chat_data.py
+  - python/apps/azents/src/azents/core/chat_projection.py
+  - python/apps/azents/src/azents/core/historical_memory_settings.py
+  - python/apps/azents/src/azents/core/historical_memory_snapshot_policy.py
+  - python/apps/azents/src/azents/core/model_metadata_projection_data.py
+  - python/apps/azents/src/azents/core/session_resource_authority.py
+  - python/apps/azents/src/azents/core/session_workspace_paths.py
+  - python/apps/azents/src/azents/repos/chat_operations.py
+  - python/apps/azents/src/azents/repos/engine_resolve.py
+  - python/apps/azents/src/azents/repos/llm_catalog_operations.py
+  - python/apps/azents/src/azents/repos/model_metadata_operations.py
   - python/apps/azents/src/azents/scheduler/types.py
   - python/apps/azents/src/azents/scheduler/registry.py
   - python/apps/azents/src/azents/scheduler/executor.py

@@ -6,15 +6,25 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [external-channel, agent, conversation]
 code_paths:
+  - python/apps/azents/src/azents/core/agent_automatic_project.py
+  - python/apps/azents/src/azents/core/external_channel_access.py
+  - python/apps/azents/src/azents/core/external_channel_conversation_data.py
+  - python/apps/azents/src/azents/core/external_channel_conversation_preparation.py
+  - python/apps/azents/src/azents/core/external_channel_ingestion.py
+  - python/apps/azents/src/azents/core/external_channel_participation_state.py
+  - python/apps/azents/src/azents/core/external_channel_selector_state.py
+  - python/apps/azents/src/azents/core/mailbox_errors.py
+  - python/apps/azents/src/azents/repos/external_channel/access_operations.py
+  - python/apps/azents/src/azents/repos/mailbox_runtime_operations.py
+  - python/apps/azents/src/azents/repos/worker_session_lifecycle.py
   - python/apps/azents/src/azents/services/external_channel/access.py
   - python/apps/azents/src/azents/services/external_channel/ingestion.py
   - python/apps/azents/src/azents/services/external_channel/ingestion_replay.py
-  - python/apps/azents/src/azents/services/external_channel/mailbox_ingestion_store.py
+  - python/apps/azents/src/azents/repos/external_channel/mailbox_ingestion.py
   - python/apps/azents/src/azents/services/external_channel/mailbox_wake.py
   - python/apps/azents/src/azents/services/external_channel/transport_ingestion.py
   - python/apps/azents/src/azents/services/external_channel/interaction.py
   - python/apps/azents/src/azents/services/external_channel/selector.py
-  - python/apps/azents/src/azents/services/external_channel/selector_state.py
   - python/apps/azents/src/azents/services/external_channel/shortcut_source.py
   - python/apps/azents/src/azents/services/external_channel/discord_events.py
   - python/apps/azents/src/azents/services/external_channel/discord_http.py

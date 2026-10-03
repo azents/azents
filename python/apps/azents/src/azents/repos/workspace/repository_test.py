@@ -94,9 +94,8 @@ class TestWorkspaceRepository:
         snapshot = await repo.get_with_id_by_handle(rdb_session, "atomic-handle")
 
         assert snapshot is not None
-        workspace_id, workspace = snapshot
-        assert workspace_id
-        assert workspace == create_result.value
+        assert snapshot.workspace_id
+        assert snapshot.workspace == create_result.value
 
     async def test_list_all(self, rdb_session: AsyncSession) -> None:
         """Fetch all Workspace list."""

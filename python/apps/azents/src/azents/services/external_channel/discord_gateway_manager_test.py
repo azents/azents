@@ -19,9 +19,18 @@ from azents.core.config import (
     ExternalChannelIngressQuiesceConfig,
 )
 from azents.core.deps import get_config
+from azents.core.external_channel_ingestion import (
+    ExternalChannelIngestionOutcome,
+    ExternalChannelIngestionOutcomeKind,
+    ExternalChannelIngestionReason,
+    ExternalChannelIngressAuthority,
+)
 from azents.core.external_channel_provider import DiscordConnectionCredentials
 from azents.core.external_channel_provider_effect import ProviderEffectPlan
 from azents.rdb.deps import get_session_manager
+from azents.repos.discord_connection_operations import (
+    DiscordConnectionOperationRepository,
+)
 from azents.repos.external_channel.data import (
     DiscordGatewayTypingTarget,
     ExternalChannelIngressLease,
@@ -47,12 +56,6 @@ from azents.services.external_channel.discord_gateway import (
 from azents.services.external_channel.discord_gateway_manager import (
     DiscordGatewayLeaseLost,
     DiscordGatewayManagerService,
-)
-from azents.services.external_channel.ingestion import (
-    ExternalChannelIngestionOutcome,
-    ExternalChannelIngestionOutcomeKind,
-    ExternalChannelIngestionReason,
-    ExternalChannelIngressAuthority,
 )
 from azents.services.external_channel.provider_control import (
     get_external_channel_provider_control_service,
@@ -520,8 +523,10 @@ def _service(
             testenv_external_channel_gateway_lease=None,
         )
     return DiscordGatewayManagerService(
-        session_manager=sessions,
-        repository=repository,  # ty: ignore[invalid-argument-type] — test fake exposes only the lease-fenced repository surface exercised by this manager.
+        operations=DiscordConnectionOperationRepository(
+            session_manager=sessions,
+            external_channel_repository=repository,  # ty: ignore[invalid-argument-type]  # Test fake exposes only the lease-fenced repository methods.
+        ),
         credentials_codec=(
             credentials_codec if credentials_codec is not None else MagicMock()
         ),  # ty: ignore[invalid-argument-type] — test fake supplies only the codec calls exercised by this manager.

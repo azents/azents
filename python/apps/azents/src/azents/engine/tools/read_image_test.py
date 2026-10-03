@@ -8,6 +8,7 @@ from typing import cast
 import pytest
 
 from azents.core.enums import ModelFileStatus
+from azents.core.session_resource_authority import SessionResourceAuthority
 from azents.engine.run.types import (
     FunctionTool,
     FunctionToolError,
@@ -24,7 +25,6 @@ from azents.runtime.transfer.runtime_image_read import (
 )
 from azents.runtime.transfer.server_to_runtime import ServerToRuntimeTarget
 from azents.services.model_file import ModelFileOversized, ModelFileService
-from azents.services.session_resource_authority import SessionResourceAuthority
 
 _MODEL_FILE = ModelFile(
     id="m" * 32,

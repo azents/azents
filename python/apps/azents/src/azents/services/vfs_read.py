@@ -12,11 +12,11 @@ import sys
 import time
 from collections.abc import Sequence
 from functools import lru_cache
-from typing import Literal, Protocol, runtime_checkable
+from typing import Literal, NamedTuple, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, ValidationError
-from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.core.vfs import (
     AZENTS_VFS_SKILLS_MOUNT,
     VfsFileEntry,
@@ -26,15 +26,13 @@ from azents.core.vfs import (
     parse_vfs_glob_pattern,
     parse_vfs_search_uri,
 )
-from azents.rdb.session import SessionManager
-from azents.repos.session_execution.ownership import OwnerBoundSessionManager
+from azents.repos.vfs_read_authority import VfsReadAuthorityRepository
 from azents.services.file_storage import (
     GrepFileMatch,
     GrepLineMatch,
     GrepResult,
     TextReadResult,
 )
-from azents.services.session_resource_authority import SessionExecutionOwner
 
 _SKILLS_GLOB_MAX_RESULTS = 1_000
 _SKILLS_OPERATION_MAX_SECONDS = 2.0
@@ -178,16 +176,14 @@ class VfsReadAuthorityValidator(Protocol):
 class OwnerBoundVfsReadAuthorityValidator:
     """Validate one VFS operation against current durable Session ownership."""
 
-    session_manager: SessionManager[AsyncSession]
+    repository: VfsReadAuthorityRepository
 
     async def validate(self, context: VfsReadContext) -> None:
         """Check owner generation without retaining a transaction over backend I/O."""
-        manager = OwnerBoundSessionManager(
-            session_manager=self.session_manager,
+        await self.repository.assert_current(
             session_id=context.session_id,
             owner_generation=context.owner_generation,
         )
-        await manager.assert_current()
 
 
 @runtime_checkable
@@ -814,11 +810,11 @@ def _expand_braces(pattern: str) -> tuple[str, ...]:
         if expandable is None:
             expansions.append(candidate)
             continue
-        opening, closing, alternatives = expandable
-        prefix = candidate[:opening]
-        suffix = candidate[closing + 1 :]
+        prefix = candidate[: expandable.opening]
+        suffix = candidate[expandable.closing + 1 :]
         pending.extend(
-            f"{prefix}{alternative}{suffix}" for alternative in reversed(alternatives)
+            f"{prefix}{alternative}{suffix}"
+            for alternative in reversed(expandable.alternatives)
         )
         if len(expansions) + len(pending) > _MAX_BRACE_EXPANSIONS:
             raise VfsReadError(
@@ -828,9 +824,15 @@ def _expand_braces(pattern: str) -> tuple[str, ...]:
     return tuple(expansions)
 
 
-def _find_expandable_brace(
-    pattern: str,
-) -> tuple[int, int, tuple[str, ...]] | None:
+class _ExpandableBrace(NamedTuple):
+    """One expandable span and its ordered alternatives."""
+
+    opening: int
+    closing: int
+    alternatives: tuple[str, ...]
+
+
+def _find_expandable_brace(pattern: str) -> _ExpandableBrace | None:
     for opening, opening_char in enumerate(pattern):
         if opening_char != "{":
             continue
@@ -846,7 +848,7 @@ def _find_expandable_brace(
                         pattern[opening + 1 : closing]
                     )
                     if len(alternatives) >= 2:
-                        return opening, closing, alternatives
+                        return _ExpandableBrace(opening, closing, alternatives)
                     break
     return None
 

@@ -18,6 +18,10 @@ from azents.core.enums import (
     ExternalChannelSetupClaimStatus,
     ExternalChannelTransport,
 )
+from azents.core.external_channel_selector_state import (
+    projection_with_selector_state,
+    selector_state_from_interaction,
+)
 from azents.repos.external_channel.data import (
     ExternalChannelConversationPositionCreate,
     ExternalChannelInteraction,
@@ -28,10 +32,6 @@ from azents.repos.external_channel.data import (
     ExternalChannelTrigger,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
-from azents.services.external_channel.selector_state import (
-    projection_with_selector_state,
-    selector_state_from_interaction,
-)
 from azents.services.external_channel.shortcut_source import (
     ExternalChannelShortcutSourceService,
 )

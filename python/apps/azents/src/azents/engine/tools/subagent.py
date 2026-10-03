@@ -9,7 +9,7 @@ import logging
 from textwrap import dedent
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from azents.broker.types import SessionBroker, SessionStopSignal, SessionWakeUp
 from azents.core.agent import SelectableModelOption, SubagentSettings
@@ -17,6 +17,10 @@ from azents.core.enums import AgentRunStatus, AgentSessionRunState, SessionAgent
 from azents.core.inference_profile import SessionInferenceState
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.core.model_execution_options import validate_execution_options
+from azents.core.session_resource_authority import (
+    SessionExecutionOwner,
+    accepts_execution_owner,
+)
 from azents.core.tools import (
     PublishEventFn,
     ResolveContext,
@@ -49,10 +53,6 @@ from azents.repos.subagent_tool_operations import (
     SubagentToolOperationRepository,
 )
 from azents.services.model_metadata import ModelMetadataService
-from azents.services.session_resource_authority import (
-    SessionExecutionOwner,
-    accepts_execution_owner,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -113,6 +113,8 @@ class SubagentToolkitConfig(BaseModel):
 class SpawnAgentInput(BaseModel):
     """spawn_agent tool input."""
 
+    model_config = ConfigDict(extra="forbid")
+
     name: str = Field(description="Child agent name within the current agent")
     task: str = Field(description="Initial task for the child agent")
     agent_type: Literal["default"] = Field(
@@ -146,6 +148,8 @@ class SpawnAgentInput(BaseModel):
 class SendMessageInput(BaseModel):
     """send_message tool input."""
 
+    model_config = ConfigDict(extra="forbid")
+
     agent_name: str = Field(description="Target agent path or name")
     message: str = Field(description="Message to queue for the target agent")
 
@@ -153,12 +157,16 @@ class SendMessageInput(BaseModel):
 class FollowupTaskInput(BaseModel):
     """followup_task tool input."""
 
+    model_config = ConfigDict(extra="forbid")
+
     agent_name: str = Field(description="Target agent path or name")
     task: str = Field(description="Follow-up task to assign and wake")
 
 
 class InterruptAgentInput(BaseModel):
     """interrupt_agent tool input."""
+
+    model_config = ConfigDict(extra="forbid")
 
     agent_name: str = Field(description="Target agent path or name")
 

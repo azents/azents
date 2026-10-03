@@ -62,6 +62,10 @@ from azents.services.kimi_oauth.runtime import (
 from azents.services.kimi_oauth.runtime import (
     refresh_runtime_tokens as refresh_kimi_runtime_tokens,
 )
+from azents.services.oauth_runtime_clients import (
+    RuntimeOAuthClientFactories,
+    create_runtime_oauth_client_factories,
+)
 from azents.services.xai_oauth.data import (
     ProviderEntitlementDenied as XaiProviderEntitlementDenied,
 )
@@ -159,6 +163,9 @@ class SubscriptionUsageService:
     ]
     xai_oauth_runtime_repository: Annotated[
         XaiOAuthRuntimeRepository, Depends(XaiOAuthRuntimeRepository)
+    ]
+    runtime_oauth_clients: Annotated[
+        RuntimeOAuthClientFactories, Depends(create_runtime_oauth_client_factories)
     ]
     session_manager: Annotated[
         SessionManager[AsyncSession], Depends(get_session_manager)
@@ -282,6 +289,7 @@ class SubscriptionUsageService:
         fresh_result = await ensure_runtime_tokens(
             integration=integration,
             persistence_repository=self.chatgpt_oauth_runtime_repository,
+            client_factory=self.runtime_oauth_clients.chatgpt,
         )
         match fresh_result:
             case Success(fresh_integration):
@@ -348,6 +356,7 @@ class SubscriptionUsageService:
         refresh_result = await refresh_runtime_tokens(
             integration=integration,
             persistence_repository=self.chatgpt_oauth_runtime_repository,
+            client_factory=self.runtime_oauth_clients.chatgpt,
         )
         match refresh_result:
             case Failure(error):
@@ -442,6 +451,7 @@ class SubscriptionUsageService:
         fresh_result = await ensure_xai_runtime_tokens(
             integration=integration,
             persistence_repository=self.xai_oauth_runtime_repository,
+            client_factory=self.runtime_oauth_clients.xai,
         )
         match fresh_result:
             case Success(fresh_integration):
@@ -510,6 +520,7 @@ class SubscriptionUsageService:
         refresh_result = await refresh_xai_runtime_tokens(
             integration=integration,
             persistence_repository=self.xai_oauth_runtime_repository,
+            client_factory=self.runtime_oauth_clients.xai,
         )
         match refresh_result:
             case Failure(error):
@@ -644,6 +655,7 @@ class SubscriptionUsageService:
         fresh_result = await ensure_kimi_runtime_tokens(
             integration=integration,
             persistence_repository=self.kimi_oauth_runtime_repository,
+            client_factory=self.runtime_oauth_clients.kimi,
         )
         match fresh_result:
             case Success(fresh_integration):
@@ -701,6 +713,7 @@ class SubscriptionUsageService:
         refresh_result = await refresh_kimi_runtime_tokens(
             integration=integration,
             persistence_repository=self.kimi_oauth_runtime_repository,
+            client_factory=self.runtime_oauth_clients.kimi,
         )
         match refresh_result:
             case Failure(error):

@@ -14,6 +14,11 @@ from azents.core.enums import (
     AgentSessionStatus,
     SessionGitWorktreeStatus,
 )
+from azents.core.session_workspace_paths import (
+    InvalidProjectPath,
+    normalize_agent_workspace_root,
+    normalize_session_workspace_project_paths,
+)
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
@@ -30,11 +35,6 @@ from azents.services.runtime_storage_error import RuntimeStorageError
 from azents.services.session_working_folder_binding import (
     SessionWorkingFolderBindingError,
     SessionWorkingFolderBindingService,
-)
-from azents.services.session_workspace_project import (
-    InvalidProjectPath,
-    normalize_agent_workspace_root,
-    normalize_session_workspace_project_paths,
 )
 
 ProjectBrowserModeId = Literal["projects", "all_files"]

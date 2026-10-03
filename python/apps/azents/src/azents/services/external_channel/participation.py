@@ -21,6 +21,21 @@ from azents.core.enums import (
     ExternalChannelResponseMode,
     ExternalChannelSetupClaimStatus,
 )
+from azents.core.external_channel_conversation_data import (
+    ExternalChannelConversationLock,
+    ExternalChannelConversationScope,
+    ExternalChannelOperationDeadline,
+    ExternalChannelParticipationLock,
+    ExternalChannelParticipationScope,
+)
+from azents.core.external_channel_ingestion import (
+    ExternalChannelIngestionOutcome,
+    ExternalChannelIngestionOutcomeKind,
+)
+from azents.core.external_channel_participation_state import (
+    ExternalChannelSetupSourceProjection,
+    setup_source_from_projection,
+)
 from azents.core.external_channel_provider_effect import ProviderEffectPlan
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
@@ -39,27 +54,12 @@ from azents.repos.external_channel.management import (
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.workspace import WorkspaceRepository
-from azents.services.external_channel.conversation import (
-    ExternalChannelConversationLock,
-    ExternalChannelConversationScope,
-    ExternalChannelOperationDeadline,
-    ExternalChannelParticipationLock,
-    ExternalChannelParticipationScope,
-)
 from azents.services.external_channel.deps import (
     get_external_channel_conversation_lock,
     get_external_channel_participation_lock,
 )
-from azents.services.external_channel.ingestion import (
-    ExternalChannelIngestionOutcome,
-    ExternalChannelIngestionOutcomeKind,
-)
 from azents.services.external_channel.ingestion_replay import (
     ExternalChannelIngestionReplayService,
-)
-from azents.services.external_channel.participation_state import (
-    ExternalChannelSetupSourceProjection,
-    setup_source_from_projection,
 )
 
 

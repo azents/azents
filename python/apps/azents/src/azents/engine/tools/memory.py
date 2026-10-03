@@ -2,20 +2,19 @@
 
 import json
 
-from pydantic import BaseModel, Field
-from sqlalchemy.ext.asyncio import AsyncSession
+from pydantic import BaseModel, ConfigDict, Field
 
+from azents.core.memory_scope import MemoryScope
 from azents.engine.run.types import FunctionTool, FunctionToolError
 from azents.engine.tooling.make_tool import make_tool
-from azents.rdb.session import SessionManager
-from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.memory import MemoryRepository
-from azents.repos.memory.data import MemoryCreate, MemoryScope
+from azents.repos.memory.data import MemoryCreate
 from azents.repos.memory.operations import MemoryOperationRepository
 
 
 class SaveMemoryInput(BaseModel):
     """save_memory tool input."""
+
+    model_config = ConfigDict(extra="forbid")
 
     scope: MemoryScope = Field(
         description="Memory scope. Team Sessions support agent only."
@@ -33,6 +32,8 @@ class SaveMemoryInput(BaseModel):
 
 class DeleteMemoryInput(BaseModel):
     """delete_memory tool input."""
+
+    model_config = ConfigDict(extra="forbid")
 
     scope: MemoryScope = Field(
         description="Memory scope. Team Sessions support agent only."
@@ -58,14 +59,12 @@ def _resolve_scope_user_id(
 
 
 def make_save_memory_tool(
-    repo: MemoryRepository,
+    operations: MemoryOperationRepository,
     agent_id: str,
-    session_manager: SessionManager[AsyncSession],
     *,
     associated_user_id: str | None = None,
 ) -> FunctionTool:
     """Create the Saved Memory upsert tool for authorized scopes."""
-    operations = _operations(repo, session_manager)
 
     async def save_memory(args: SaveMemoryInput) -> str:
         """Save or update one Saved Memory entry for the allowed scope."""
@@ -112,14 +111,12 @@ def make_save_memory_tool(
 
 
 def make_delete_memory_tool(
-    repo: MemoryRepository,
+    operations: MemoryOperationRepository,
     agent_id: str,
-    session_manager: SessionManager[AsyncSession],
     *,
     associated_user_id: str | None = None,
 ) -> FunctionTool:
     """Create the Saved Memory delete tool for authorized scopes."""
-    operations = _operations(repo, session_manager)
 
     async def delete_memory(args: DeleteMemoryInput) -> str:
         """Delete one Saved Memory entry for the allowed scope."""
@@ -150,16 +147,4 @@ def make_delete_memory_tool(
         delete_memory,
         name="delete_memory",
         description="Delete one Saved Memory entry by exact name.",
-    )
-
-
-def _operations(
-    repository: MemoryRepository,
-    session_manager: SessionManager[AsyncSession],
-) -> MemoryOperationRepository:
-    """Create completed Memory operations for one tool binding."""
-    return MemoryOperationRepository(
-        session_manager=session_manager,
-        memory_repository=repository,
-        agent_session_repository=AgentSessionRepository(),
     )

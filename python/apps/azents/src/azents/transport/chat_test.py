@@ -2,15 +2,15 @@
 
 import datetime
 
-from azents.core.enums import AgentRunPhase, AgentRunStatus
-from azents.core.inference_profile import AppliedInferenceProfile
-from azents.services.chat.data import (
+from azents.core.chat_data import (
     ChatLiveRunOperation,
     ChatLiveRunState,
     PendingMailboxEnvelope,
     PendingMailboxItem,
     PendingMailboxUserMessagePresentation,
 )
+from azents.core.enums import AgentRunPhase, AgentRunStatus
+from azents.core.inference_profile import AppliedInferenceProfile
 from azents.testing.types import is_string_object_dict
 from azents.transport.chat import (
     chat_live_projection_reset_dump,

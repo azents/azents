@@ -6,6 +6,7 @@ from typing import cast
 import pytest
 
 from azents.broker.types import BrokerMessage, SessionBroker, SessionWakeUp
+from azents.core.session_resource_authority import SessionResourceAuthority
 from azents.core.tools import ToolkitStatus, TurnContext
 from azents.engine.run.turn_action_bridge import TurnActionBridgeBoundary
 from azents.engine.run.types import FunctionToolError
@@ -15,7 +16,6 @@ from azents.services.session_git_worktree import (
     AgentRemoveGitWorktreeAdmission,
     SessionGitWorktreeService,
 )
-from azents.services.session_resource_authority import SessionResourceAuthority
 
 from .dynamic_worktree import DynamicWorktreeToolkit
 

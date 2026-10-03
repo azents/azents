@@ -6,6 +6,24 @@ spec_type: domain
 domain: external-channel
 owner: "@Hardtack"
 code_paths:
+  - python/apps/azents/src/azents/core/agent_automatic_project.py
+  - python/apps/azents/src/azents/core/exchange_file_errors.py
+  - python/apps/azents/src/azents/core/external_channel_access.py
+  - python/apps/azents/src/azents/core/external_channel_conversation_data.py
+  - python/apps/azents/src/azents/core/external_channel_conversation_preparation.py
+  - python/apps/azents/src/azents/core/external_channel_discord_selector_scope.py
+  - python/apps/azents/src/azents/core/external_channel_ingestion.py
+  - python/apps/azents/src/azents/core/external_channel_mailbox_payload.py
+  - python/apps/azents/src/azents/core/external_channel_participation_state.py
+  - python/apps/azents/src/azents/core/external_channel_selector_state.py
+  - python/apps/azents/src/azents/core/root_agent_session_creation.py
+  - python/apps/azents/src/azents/core/session_resource_authority.py
+  - python/apps/azents/src/azents/repos/discord_connection_dependencies.py
+  - python/apps/azents/src/azents/repos/engine_resolve.py
+  - python/apps/azents/src/azents/repos/root_agent_session_creation.py
+  - python/apps/azents/src/azents/repos/scheduled_task_terminal_operations.py
+  - python/apps/azents/src/azents/repos/worker_session_lifecycle.py
+  - python/apps/azents/src/azents/repos/worker_user_stop.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/097a97177350_create_operational_schema_baseline.py
   - python/apps/azents/src/azents/core/external_account_link.py
   - python/apps/azents/src/azents/core/external_account_oauth.py

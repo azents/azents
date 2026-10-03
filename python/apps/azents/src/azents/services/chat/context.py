@@ -9,6 +9,10 @@ from fastapi import Depends
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.chat_data import (
+    NotWorkspaceMember,
+    SessionNotFound,
+)
 from azents.core.enums import AgentSessionStatus, EventKind
 from azents.engine.events.external_channel_rendering import (
     render_external_channel_message,
@@ -43,7 +47,6 @@ from azents.repos.agent_session_system_prompt_snapshot import (
     AgentSessionSystemPromptSnapshotRepository,
 )
 from azents.repos.workspace_user import WorkspaceUserRepository
-from azents.services.chat.data import NotWorkspaceMember, SessionNotFound
 
 ContextBreakdownKey = Literal["system", "user", "assistant", "tool", "other"]
 

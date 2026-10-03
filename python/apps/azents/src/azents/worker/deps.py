@@ -12,7 +12,6 @@ from azents_runtime_control.grpc_transfer_coordinator_client import (
 )
 from fastapi import Depends
 from redis.asyncio import Redis
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.broker.broadcast import WebSocketBroadcast
 from azents.broker.redis import RedisBroker
@@ -41,36 +40,31 @@ from azents.engine.tools.runtime_io import (
 )
 from azents.engine.tools.skill import (
     SkillProjectionService,
-    SkillStateStore,
     SkillToolkitProvider,
 )
 from azents.engine.tools.subagent import SubagentToolkitProvider
-from azents.rdb.deps import get_session_manager
-from azents.rdb.session import SessionManager
-from azents.repos.agent import AgentRepository
-from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
-from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.engine_tool_repositories import (
+    EngineToolRepositories,
+    get_engine_tool_repositories,
+)
 from azents.repos.exchange_file import ExchangeFileRepository
 from azents.repos.exchange_file.operations import ExchangeFileOperationRepository
 from azents.repos.external_channel.file_access import (
     ExternalChannelFileAccessRepository,
 )
-from azents.repos.mailbox import MailboxRepository
-from azents.repos.memory import MemoryRepository
-from azents.repos.model_metadata_source import ModelMetadataSourceRepository
-from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 from azents.repos.session_workspace_project_operations import (
     SessionWorkspaceProjectOperationsRepository,
 )
-from azents.repos.subagent_coordination.repository import (
-    SubagentCoordinationRepository,
-)
+from azents.repos.skill_state_store import SkillStateStore, get_skill_state_store
 from azents.repos.subagent_tool_operations import SubagentToolOperationRepository
 from azents.repos.toolkit import ToolkitRepository
 from azents.repos.toolkit_state.engine import (
-    ToolkitAgentsAppendixDedupeStateStore,
     ToolkitClaudeRulesAppendixDedupeStateStore,
+)
+from azents.repos.worker_toolkit_repositories import (
+    get_worker_claude_rules_store,
+    get_worker_subagent_operations,
 )
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.runtime.control_protocol.runner_operations import (
@@ -182,12 +176,10 @@ def get_skill_toolkit_provider(
         EngineRuntimeRunnerOperationClient,
         Depends(get_runtime_tool_operation_client),
     ],
-    session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
-    ],
+    store: Annotated[SkillStateStore, Depends(get_skill_state_store)],
     broadcast: Annotated[WebSocketBroadcast, Depends(get_broadcast)],
     vfs_projection_service: Annotated[
-        VfsProjectionService[AsyncSession],
+        VfsProjectionService,
         Depends(get_vfs_projection_service),
     ],
     agent_runtime_service: Annotated[
@@ -204,7 +196,6 @@ def get_skill_toolkit_provider(
     ],
 ) -> SkillToolkitProvider:
     """SkillToolkitProvider dependency for Worker with runtime sync support."""
-    store = SkillStateStore(session_manager=session_manager)
     return SkillToolkitProvider(
         store=store,
         projection_service=SkillProjectionService(
@@ -222,16 +213,13 @@ def get_skill_toolkit_provider(
 
 
 def get_claude_rules_toolkit_provider(
-    session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+    store: Annotated[
+        ToolkitClaudeRulesAppendixDedupeStateStore,
+        Depends(get_worker_claude_rules_store),
     ],
 ) -> ClaudeRulesToolkitProvider:
     """ClaudeRulesToolkitProvider dependency for Worker."""
-    return ClaudeRulesToolkitProvider(
-        store=ToolkitClaudeRulesAppendixDedupeStateStore(
-            session_manager=session_manager,
-        )
-    )
+    return ClaudeRulesToolkitProvider(store=store)
 
 
 def get_builtin_toolkit_provider(
@@ -239,14 +227,14 @@ def get_builtin_toolkit_provider(
         EngineRuntimeRunnerOperationClient,
         Depends(get_runtime_tool_operation_client),
     ],
-    session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+    repositories: Annotated[
+        EngineToolRepositories, Depends(get_engine_tool_repositories)
     ],
     exchange_file_service: Annotated[ExchangeFileService, Depends(ExchangeFileService)],
     artifact_service: Annotated[ArtifactService, Depends(ArtifactService)],
     model_file_service: Annotated[ModelFileService, Depends(ModelFileService)],
     vfs_projection_service: Annotated[
-        VfsProjectionService[AsyncSession],
+        VfsProjectionService,
         Depends(get_vfs_projection_service),
     ],
     vfs_read_router: Annotated[
@@ -256,10 +244,6 @@ def get_builtin_toolkit_provider(
     agent_runtime_service: Annotated[
         AgentRuntimeService,
         Depends(),
-    ],
-    agent_session_repository: Annotated[
-        AgentSessionRepository,
-        Depends(AgentSessionRepository),
     ],
     memory_context_snapshot_service: Annotated[
         MemoryContextSnapshotService,
@@ -290,18 +274,12 @@ def get_builtin_toolkit_provider(
         model_file_service=model_file_service,
         vfs_projection_service=vfs_projection_service,
         vfs_read_router=vfs_read_router,
-        agents_store=ToolkitAgentsAppendixDedupeStateStore(
-            session_manager=session_manager,
-        ),
-        session_manager=session_manager,
-        memory_repo=MemoryRepository(),
+        agents_store=repositories.appendix,
+        repositories=repositories,
         memory_context_snapshot_service=memory_context_snapshot_service,
-        agent_runtime_repo=AgentRuntimeRepository(),
         agent_runtime_service=agent_runtime_service,
         runner_operations=runner_operations,
-        agent_session_repository=agent_session_repository,
         session_working_folder_binding_service=(session_working_folder_binding_service),
-        project_repo=SessionWorkspaceProjectRepository(),
         server_to_runtime_transfer_service=transfer.server_to_runtime,
         runtime_image_read_service=transfer.runtime_image_read,
         runtime_to_server_publication_service=transfer.present_file_publication,
@@ -532,24 +510,14 @@ async def get_worker_broker(
 
 
 def get_subagent_toolkit_provider(
-    session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+    operations: Annotated[
+        SubagentToolOperationRepository, Depends(get_worker_subagent_operations)
     ],
     broker: Annotated[SessionBroker, Depends(get_worker_broker)],
-    agent_repository: Annotated[AgentRepository, Depends(AgentRepository)],
 ) -> SubagentToolkitProvider:
     """SubagentToolkitProvider dependency for Worker."""
     return SubagentToolkitProvider(
-        operations=SubagentToolOperationRepository(
-            session_manager=session_manager,
-            agent_repository=agent_repository,
-            agent_session_repository=AgentSessionRepository(),
-            agent_run_repository=AgentRunRepository(),
-            event_transcript_repository=EventTranscriptRepository(),
-            mailbox_repository=MailboxRepository(),
-            source_snapshot_repository=ModelMetadataSourceRepository(),
-            coordination_repository=SubagentCoordinationRepository(),
-        ),
+        operations=operations,
         broker=broker,
     )
 

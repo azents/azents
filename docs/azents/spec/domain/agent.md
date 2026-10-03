@@ -6,6 +6,24 @@ spec_type: domain
 domain: agent
 owner: "@Hardtack"
 code_paths:
+  - python/apps/azents/src/azents/core/agent_automatic_project.py
+  - python/apps/azents/src/azents/core/agent_errors.py
+  - python/apps/azents/src/azents/core/chat_data.py
+  - python/apps/azents/src/azents/core/exchange_file_errors.py
+  - python/apps/azents/src/azents/core/external_channel_access.py
+  - python/apps/azents/src/azents/core/external_channel_conversation_data.py
+  - python/apps/azents/src/azents/core/historical_memory_settings.py
+  - python/apps/azents/src/azents/core/mailbox_errors.py
+  - python/apps/azents/src/azents/core/memory_scope.py
+  - python/apps/azents/src/azents/core/session_resource_authority.py
+  - python/apps/azents/src/azents/core/session_workspace_paths.py
+  - python/apps/azents/src/azents/repos/engine_resolve.py
+  - python/apps/azents/src/azents/repos/engine_tool_repositories.py
+  - python/apps/azents/src/azents/repos/model_metadata_operations.py
+  - python/apps/azents/src/azents/repos/skill_state_store.py
+  - python/apps/azents/src/azents/repos/vfs_projection_operations.py
+  - python/apps/azents/src/azents/repos/vfs_read_authority.py
+  - python/apps/azents/src/azents/repos/worker_run_operations.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/097a97177350_create_operational_schema_baseline.py
   - python/apps/azents/src/azents/core/agent.py
   - python/apps/azents/src/azents/core/builtin_tools.py
