@@ -84,7 +84,7 @@ code_paths:
   - typescript/apps/azents-web/src/trpc/routers/workspace-model-settings.ts
   - typescript/apps/azents-admin-web/src/features/model-catalog/containers/useModelCatalogPageContainer.ts
 last_verified_at: 2026-10-03
-spec_version: 38
+spec_version: 39
 ---
 
 # Model Catalog Domain Spec
@@ -151,6 +151,22 @@ when default, maximum and source maximum are all missing, the resolved limit is 
 Saved maximums win over source data and no SDK profile changes a saved capability. A paired
 foreground/lightweight budget shares one source capture; an Agent list shares a capture across
 all displayed Agents needing fallback instead of fetching one payload per candidate.
+
+### ChatGPT web-search support
+
+Every account-visible ChatGPT OAuth conversation model retains the reviewed Codex
+route's native web-search capability. When the account listing has no web-search
+declaration, the final v2 contract records this support as `contract_derived`;
+optional descriptive source absence, a native OpenAI record with the same name,
+source tool prices or weaker generic source flags do not own this route policy.
+Explicit account web-search evidence, including denial or null, is preserved.
+This policy does not enable unknown web-search support for other provider routes.
+
+The final stored entry, not the listing's intermediate normalized tool list,
+supplies the semantic and effective built-in views. Explicit selection copies that
+contract into the saved selection used by configuration validation and native
+request lowering. Corrected catalog publication does not rewrite existing saved
+Agent or Workspace selections; ordinary explicit reselection adopts the correction.
 
 ### Image-generation entries
 
@@ -515,6 +531,7 @@ Only Workspace Owners receive the explicit image sync action.
 
 | Date | Version | Change |
 |---|---:|---|
+| 2026-10-03 | 39 | Restored contract-derived ChatGPT web-search support through final v2 catalog entries and saved native requests without generic source or price dependence. |
 | 2026-10-03 | 38 | Replaced active genai authority with inert exact-scoped JSON, self-contained v2 support and typed pricing; preserved historical selections and added SQL writer/pointer fences. |
 | 2026-10-02 | 37 | Moved Workspace model default reads/get-or-create/writes into completed repository operations while preserving detached normalization, current policies and atomic downgrade marking. |
 | 2026-10-02 | 36 | Fenced ChatGPT and xAI refresh success and failure against original generation and credential identity under one row lock. |

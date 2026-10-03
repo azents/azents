@@ -52,19 +52,27 @@ def migration_database_url() -> Generator[str, None, None]:
         yield postgres.get_connection_url()
 
 
+def _reset_migration_test_schema(engine: sa.Engine) -> None:
+    """Reset the dedicated test schema before and after each migration test."""
+    with engine.begin() as connection:
+        connection.execute(sa.text("DROP SCHEMA IF EXISTS public CASCADE"))
+        connection.execute(sa.text("CREATE SCHEMA public"))
+
+
 @pytest.fixture()
 def alembic_engine(
     migration_database_url: str,
 ) -> Generator[sa.Engine, None, None]:
-    """Reset and expose the PostgreSQL engine used by one Alembic test."""
+    """Own an isolated schema and dispose its engine after guaranteed cleanup."""
     engine = sa.create_engine(migration_database_url)
     try:
-        with engine.begin() as connection:
-            connection.execute(sa.text("DROP SCHEMA IF EXISTS public CASCADE"))
-            connection.execute(sa.text("CREATE SCHEMA public"))
+        _reset_migration_test_schema(engine)
         yield engine
     finally:
-        engine.dispose()
+        try:
+            _reset_migration_test_schema(engine)
+        finally:
+            engine.dispose()
 
 
 @pytest.fixture()

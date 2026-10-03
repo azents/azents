@@ -372,6 +372,39 @@ gates. Only execution metadata changes; source/Spec review remains valid.
 The Phase 35 PR now targets main; parent and new exact-head CI are still checked
 separately, not inferred from externally merged state. No Agent merge.
 
+Phase 35 is delivered as main-base PR #2073 at `8c949fbff`. Latest actual
+CI37079167588 attempt1 succeeded with native37success/two path-condition skips,
+including four external CodeQL checks; actual CI jobs33success/two skips.
+Required E2E4shards/web1/aggregate passed; OPEN/MERGEABLE/CLEAN. All four repaired
+parent exact-head latest runs also succeeded; older cancelled duplicate-workflow
+placeholder checks remain separate evidence, not current test failures.
+No Agent merge or issue closure. Completed clean repair worktree was removed
+without force/discard after restoring its allocation branch; exact owned Phase35
+stash was dropped only after reviewed source, commit, remote and CI preservation.
+
+Phase 36 starts the bounded Credential projection read slice: two application
+contexts, six Session-taking provider declarations, four default query factories
+and actual Auth/Security constructor closure. Completed ordered facts retain User
+and address guards/redundant reads/duplicates, while SMTP/environment validity and
+last-valid-credential projection stay session-free. There is no post-external-I/O
+final mutation; no new disabled-user/auth/lock/isolation/TTL policy is authorized.
+Actual password deletion authority and adjacent Auth/Security writes are unchanged.
+The same reviewer, unchanged schema/test/caller/removal gates and genuine closure
+proof apply. Implementation begins only after the tracked Phase36 plan is reported.
+Design delta None; the overall478/85 lexical checkpoint is not complete coverage.
+
+Phase 36 implementation and the same retained all-14-path review are complete
+with No findings. Original root QA passed 252 focused and 8,550 full cases;
+source-identical rebase onto main `48aaa5464` after external #2073/#2072 merges
+preserved the entire phase diff and all reviewed hashes. The seven unrelated
+Model Catalog/web-search changes have no phase overlap or dependency change.
+Fresh root QA passed 252 focused and 8,563 full cases with the same three
+Redis-only skips and all nine gates. Completed reads preserve exact query/order/
+duplicate/absence/SMTP/projection contracts and separate deletion authority.
+Submission and exact-head required CI/E2E remain pending; metadata-only plan
+updates do not change reviewed source or Design authority. No Agent merge,
+implementation marking, live action or #1718 closure.
+
 ## Delivery Boundaries
 
 1. Correct the title-generation and ChatGPT OAuth persistence boundary as one

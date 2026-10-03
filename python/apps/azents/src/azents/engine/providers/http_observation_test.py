@@ -183,3 +183,55 @@ async def test_thread_backpressure_is_released_when_caller_closes() -> None:
     state.begin_close()
     assert await operation
     assert not state.thread_emissions
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected"),
+    [
+        (
+            b"Argument not supported: search_context_size",
+            "Argument not supported: search_context_size",
+        ),
+        (b"Rejected api_key=sk-supersecret123", "Rejected api_key=[REDACTED]"),
+        (b'"Unsupported option"', "Unsupported option"),
+        (
+            b"Service unavailable: Authorization: Bearer secret-token",
+            "Service unavailable: Authorization=[REDACTED] [REDACTED]",
+        ),
+        (b"<html>" + b"private upstream debug " * 50 + b"</html>", None),
+        (b"x" * 8193, None),
+        (b"\xff\xfe", None),
+        (b'["opaque body"]', None),
+        (b"null", None),
+    ],
+)
+async def test_http_error_scalar_body_reaches_safe_failure_once(
+    payload: bytes, expected: str | None
+) -> None:
+    state = state_for_test()
+    body = CountedBody([payload[:8], payload[8:]])
+
+    def respond(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(
+            400,
+            headers={"content-type": "text/plain"},
+            stream=body,
+            request=request,
+        )
+
+    transport = ObservedHTTPX2Transport(
+        delegate=httpx2.MockTransport(respond), state=state
+    )
+    async with httpx2.AsyncClient(transport=transport) as client:
+        response = await client.post("https://synthetic.invalid/responses")
+        assert response.content == payload
+        failure = state.original_failure
+        assert isinstance(failure, ModelProviderFailure)
+        assert failure.status_code == 400
+        assert failure.provider_message == expected
+        assert "sk-supersecret123" not in str(failure)
+        assert "secret-token" not in str(failure)
+        assert state.queue.empty()
+        assert state.dispatch_count == 1
+    assert body.iterations == 1
+    assert body.close_count >= 1
