@@ -106,8 +106,8 @@ code_paths:
   - typescript/apps/azents-web/src/trpc/routers/toolkit.ts
 api_routes:
   - /toolkit/v1
-last_verified_at: 2026-10-02
-spec_version: 129
+last_verified_at: 2026-10-03
+spec_version: 130
 ---
 
 # Toolkit
@@ -676,7 +676,7 @@ still read other authorized backends.
   configuration envelope. Kubernetes Profile and Workspace policy may select direct,
   proxy-required, or no-network authority; Docker remains direct-only under its supported Profile
   contract. ([`core/runtime_profile.py`](../../../../python/apps/azents/src/azents/core/runtime_profile.py), [`services/agent_runtime`](../../../../python/apps/azents/src/azents/services/agent_runtime))
-- Runtime file tools guide the LLM-facing path surface for durable working files under the current Runner-reported Agent Workspace and temporary files under `/tmp/**`. Static tool schemas name the Agent Workspace generically, while the dynamic Runtime prompt renders the exact current root. User upload is copied to Runtime by `import_file` using `exchange://{object_key}` file-location URI, and internal artifact is copied with `artifact://{storage_key}` file-location URI. `/tmp/**` destination import warns that result can disappear after Runtime restart and returns original URI for reimport. `present_file` exports only files under the current durable Agent Workspace as user-visible `exchange://{object_key}` attachment.
+- Runtime file tools guide the LLM-facing path surface for durable working files under the current Runner-reported Agent Workspace and temporary files under `/tmp/**`. Static tool schemas name the Agent Workspace generically, while the dynamic Runtime prompt renders the exact current root. User upload is copied to Runtime by `import_file` using `exchange://{object_key}` file-location URI, and internal artifact is copied with `artifact://{storage_key}` file-location URI. `/tmp/**` destination import warns that result can disappear after Runtime restart and returns original URI for reimport. `present_file` exports files from any absolute Runtime path, including `/tmp/**` and paths outside the Agent Workspace, as user-visible `exchange://{object_key}` attachments, subject to filesystem permissions and transfer verification.
 - Runtime transfer, publication, and provider-delivery services are required parts of the Runtime Toolkit rather than optional capabilities. Toolkit context construction never waits for Runner readiness. The Runtime static prompt selects the applied configuration when a ready current-generation Runner is already serving it; otherwise it selects the desired configuration used for a permitted start/wait path. A blocked or malformed future desired slot does not replace the authority of an already-ready applied Runtime. When neither path supplies a usable configuration document, the prompt leaves Runtime operations unavailable.
 - General Runtime file movement uses shared 128 MiB eligibility: `import_file`,
   `run_tool_to_file` parts, and `download_external_file` receive exact-attempt direct
@@ -708,8 +708,9 @@ Shell and managed process execution runs directly through the Runner process ser
 edit, patch, search, Git, import, image, publication, provider-delivery, and transfer operations
 also execute directly in the Runner without a helper subprocess. Relative paths resolve from the
 Agent Workspace; absolute paths are governed by the Runtime operating-system user's ordinary
-filesystem permissions. Product-level boundaries such as `present_file` exporting only an Agent
-Workspace subfile remain enforced by their owning service. None of these behaviors is represented
+filesystem permissions. `present_file` requires absolute Runtime paths, while Session authority,
+regular-file verification, source stability, size, and checksum checks remain enforced by the
+publication and transfer services. None of these behaviors is represented
 as Azents-owned process or infrastructure isolation.
 
 Structured logs separate visible file-tool duration and Runtime operation count from appendix processing. They include tool status, Session identity, phase duration, candidate/discovery/cache/dedupe counts, and internal list/stat/read counts as applicable. Raw file content, rendered appendix content, and model-visible output are not logged.
@@ -976,7 +977,7 @@ tool branches, prompts, hooks, filesystem projection, and credential injection.
 - `[credentials-not-in-response]` ToolkitConfigResponse does not include plaintext credentials and exposes only `has_credentials: bool`.
 - `[runtime-network-authority]` Outbound network authority comes from the exact current Workspace
   Runtime Profile and Provider-owned infrastructure Profile.
-- `[agent-workspace-file-tool-boundary]` Shell file tools guide current Runner-reported Agent Workspace subpaths and `/tmp/**` paths. External Exchange files and internal Artifacts enter Runtime through `import_file`; `/tmp/**` import result includes transient warning and original file-location URI. User-downloadable file is exported by `present_file` only from an Agent Workspace subfile as `exchange://{object_key}` attachment. Runner-native operations otherwise rely on the Runtime operating-system user's ordinary filesystem permissions.
+- `[agent-workspace-file-tool-boundary]` Shell file tools guide current Runner-reported Agent Workspace subpaths and `/tmp/**` paths. External Exchange files and internal Artifacts enter Runtime through `import_file`; `/tmp/**` import result includes transient warning and original file-location URI. User-downloadable files are exported by `present_file` from any absolute Runtime file path as `exchange://{object_key}` attachments, with publication authority and transfer verification retained. Runner-native operations rely on the Runtime operating-system user's ordinary filesystem permissions.
 - `[agents-md-project-boundary]` Project-scoped `AGENTS.md` auto-load works only inside registered Project. Agent Workspace root instruction is separate root scope, and Agent Workspace root itself is not treated as Project.
 - `[toolkit-hook-effects]` Toolkit tool-call hook may perform `on_before_tool_call` deny and `on_after_tool_call` text output replacement within [hook-260518/ADR](../../adr/hook-260518-hook.md) scope. Arbitrary input mutation, retry/continuation wrapper, credential trace storage are not allowed.
 - `[toolkit-session-lifecycle]` Executable Toolkit instance is managed by session-scoped lifecycle registry tied to `_SessionRunner` active lifetime. Each actionable wake-up resolves a fresh desired toolkit snapshot. A binding with the same stable identity and source revision retains its entered instance; a changed revision enters a replacement before the previous instance is closed. New or replacement toolkit `__aenter__()` must complete before engine `update_context()` call. Removed and replaced toolkits are `__aexit__()` only after successful reconciliation.
@@ -1230,6 +1231,9 @@ notification execute only after the operation returns.
 
 ## Changelog
 
+- **2026-10-03** (spec_version 130) — Allowed `present_file` to publish files from
+  absolute Runtime paths outside the Agent Workspace while preserving filesystem
+  permissions, publication authority, and transfer verification.
 - **2026-10-02** (spec_version 129) — Completed Workspace OAuth installation
   synchronization and saved/unsaved connection-test persistence boundaries,
   preserving ordered User/App synchronization, existing callback cleanup, and
