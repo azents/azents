@@ -14,7 +14,10 @@ from pydantic import BaseModel, ConfigDict, Field
 from azents.broker.types import SessionBroker, SessionStopSignal, SessionWakeUp
 from azents.core.agent import SelectableModelOption, SubagentSettings
 from azents.core.enums import AgentRunStatus, AgentSessionRunState, SessionAgentKind
-from azents.core.inference_profile import SessionInferenceState
+from azents.core.inference_profile import (
+    SessionInferenceState,
+    normalize_inherited_reasoning_effort,
+)
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.core.model_execution_options import validate_execution_options
 from azents.core.session_resource_authority import (
@@ -722,17 +725,7 @@ def normalize_spawn_reasoning_effort(
     supported: list[ModelReasoningEffort],
 ) -> ModelReasoningEffort | None:
     """Normalize an inherited effort against a target's canonical levels."""
-    if not supported:
-        return None
-    effective_baseline = baseline or ModelReasoningEffort.MEDIUM
-    if effective_baseline in supported:
-        return effective_baseline
-    ordering = list(ModelReasoningEffort)
-    baseline_index = ordering.index(effective_baseline)
-    lower = [level for level in supported if ordering.index(level) < baseline_index]
-    if lower:
-        return max(lower, key=ordering.index)
-    return min(supported, key=ordering.index)
+    return normalize_inherited_reasoning_effort(baseline, supported)
 
 
 def _coordination_status(

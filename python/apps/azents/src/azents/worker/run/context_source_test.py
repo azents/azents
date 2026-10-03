@@ -36,7 +36,6 @@ from azents.engine.run.input import InvokeInput
 from azents.engine.run.model_transport import InMemoryModelTransportState
 from azents.engine.run.provider_failure import model_provider_failure
 from azents.engine.run.resolve import (
-    ResolvedInvokeInputProfile,
     ResolvedModelCandidateRuntime,
 )
 from azents.engine.run.types import PollMessages
@@ -221,7 +220,6 @@ def _input_limit(
 
 @dataclasses.dataclass(frozen=True)
 class _ResolverCalls:
-    profile: list[CapturedContextSource]
     frozen: list[CapturedContextSource]
     runtime: list[CapturedContextSource]
 
@@ -233,8 +231,7 @@ def _install_resolvers(
     *,
     concurrent_primary_edit: bool,
 ) -> _ResolverCalls:
-    main_candidate = agent.selectable_model_options[0].candidates[0]
-    calls = _ResolverCalls(profile=[], frozen=[], runtime=[])
+    calls = _ResolverCalls(frozen=[], runtime=[])
 
     async def request_for(
         selection: AgentModelSelection,
@@ -242,9 +239,9 @@ def _install_resolvers(
     ) -> RunRequest:
         initial = await fixtures._resolve_success()
         assert isinstance(initial, Success)
-        assert isinstance(initial.value, ResolvedInvokeInputProfile)
+        assert isinstance(initial.value, RunRequest)
         return dataclasses.replace(
-            initial.value.run_request,
+            initial.value,
             model=selection.model_identifier,
             provider=selection.provider,
             model_capabilities=selection.normalized_capabilities,
@@ -259,28 +256,6 @@ def _install_resolvers(
             context_window_tokens=None,
         )
 
-    async def profile(
-        *args: object,
-        context_source: CapturedContextSource | None,
-        **kwargs: object,
-    ) -> Success[ResolvedInvokeInputProfile]:
-        del args, kwargs
-        assert context_source is not None
-        calls.profile.append(context_source)
-        selection = (
-            make_test_model_selection(model_identifier="concurrent-main-edit")
-            if concurrent_primary_edit
-            else main_candidate.model_selection
-        )
-        return Success(
-            ResolvedInvokeInputProfile(
-                run_request=await request_for(selection, context_source),
-                model_selection=selection,
-                model_settings=main_candidate.settings,
-                reasoning_effort=None,
-            )
-        )
-
     async def frozen(
         *args: object,
         context_source: CapturedContextSource | None,
@@ -289,6 +264,17 @@ def _install_resolvers(
     ) -> Success[RunRequest]:
         del args, kwargs
         assert context_source is not None
+        if concurrent_primary_edit:
+            live_selection = make_test_model_selection(
+                model_identifier="concurrent-main-edit"
+            )
+            agent.model_selection = live_selection
+            agent.selectable_model_options[0].candidates[
+                0
+            ].model_selection = live_selection
+            assert resolved_model_selection.model_identifier != (
+                live_selection.model_identifier
+            )
         calls.frozen.append(context_source)
         return Success(await request_for(resolved_model_selection, context_source))
 
@@ -316,7 +302,6 @@ def _install_resolvers(
             )
         )
 
-    monkeypatch.setattr(executor_module, "resolve_invoke_input_with_profile", profile)
     monkeypatch.setattr(
         executor_module, "resolve_invoke_input_with_resolved_profile", frozen
     )
@@ -373,7 +358,7 @@ async def test_fresh_pair_does_not_recapture_after_source_publication(
     assert isinstance(prepared, Success)
     assert repository.captures == 1
     assert len(calls.runtime) == 1
-    received = calls.profile + calls.frozen + calls.runtime
+    received = calls.frozen + calls.runtime
     assert all(source is received[0] for source in received)
     assert received[0].snapshot is initial
     expected_main, expected_compaction = (
@@ -390,13 +375,15 @@ async def test_fresh_pair_does_not_recapture_after_source_publication(
         == int(expected_compaction * 0.9)
     )
     if branch == "fallback":
-        assert calls.profile == []
         assert len(calls.frozen) == 1
         assert prepared.value.run_request.model == "gpt-main-fallback"
     elif branch == "frozen":
-        assert len(calls.profile) == len(calls.frozen) == 1
+        assert len(calls.frozen) == 1
+        assert agent.model_selection.model_identifier == "concurrent-main-edit"
+        assert prepared.value.run_request.model == "gpt-main"
     else:
-        assert len(calls.profile) == 1 and calls.frozen == []
+        assert len(calls.frozen) == 1
+        assert prepared.value.run_request.model == "gpt-main"
 
 
 async def test_fresh_known_pair_never_reads_fallback_authority(
@@ -435,8 +422,8 @@ async def test_fresh_known_pair_never_reads_fallback_authority(
     )
     assert isinstance(prepared, Success)
     assert repository.captures == 0
-    assert calls.profile[0].snapshot is None
-    assert calls.runtime[0] is calls.profile[0]
+    assert calls.frozen[0].snapshot is None
+    assert calls.runtime[0] is calls.frozen[0]
     assert prepared.value.run_request.max_input_tokens == 100_000
     assert prepared.value.run_request.compaction_max_input_tokens == 64_000
 
@@ -463,7 +450,7 @@ async def test_prepare_compaction_refreshes_the_pair_without_a_derived_user_cap(
     main = agent.selectable_model_options[0].candidates[0]
     previous = await fixtures._resolve_success()
     assert isinstance(previous, Success)
-    assert isinstance(previous.value, ResolvedInvokeInputProfile)
+    assert isinstance(previous.value, RunRequest)
     old_state = SessionInferenceState(
         model_target_label="default",
         model_selection=main.model_selection,
@@ -492,7 +479,7 @@ async def test_prepare_compaction_refreshes_the_pair_without_a_derived_user_cap(
     )
     original_state = old_state.model_dump(mode="json")
     current = dataclasses.replace(
-        previous.value.run_request,
+        previous.value,
         model=main.model_selection.model_identifier,
         model_capabilities=main.model_selection.normalized_capabilities,
         max_input_tokens=20_000,
@@ -562,9 +549,9 @@ async def test_prepare_compaction_preserves_explicit_no_state_cap_and_threshold(
     _install_resolvers(monkeypatch, executor, agent, concurrent_primary_edit=False)
     previous = await fixtures._resolve_success()
     assert isinstance(previous, Success)
-    assert isinstance(previous.value, ResolvedInvokeInputProfile)
+    assert isinstance(previous.value, RunRequest)
     current = dataclasses.replace(
-        previous.value.run_request,
+        previous.value,
         model="gpt-main",
         max_input_tokens=20_000,
         context_window_tokens=50_000,
@@ -726,7 +713,7 @@ async def test_successive_prepare_transitions_keep_threshold_provenance(
     )
     previous = await fixtures._resolve_success()
     assert isinstance(previous, Success)
-    assert isinstance(previous.value, ResolvedInvokeInputProfile)
+    assert isinstance(previous.value, RunRequest)
     main = agent.selectable_model_options[0].candidates[0]
     original_state = SessionInferenceState(
         model_target_label="default",
@@ -740,7 +727,7 @@ async def test_successive_prepare_transitions_keep_threshold_provenance(
     )
     original_values = original_state.model_dump(mode="json")
     current = dataclasses.replace(
-        previous.value.run_request,
+        previous.value,
         model="gpt-main",
         max_input_tokens=20_000,
         compaction_max_input_tokens=20_000,
@@ -802,9 +789,9 @@ async def test_no_state_automatic_threshold_keeps_derive_at_use_marker(
     _install_resolvers(monkeypatch, executor, agent, concurrent_primary_edit=False)
     previous = await fixtures._resolve_success()
     assert isinstance(previous, Success)
-    assert isinstance(previous.value, ResolvedInvokeInputProfile)
+    assert isinstance(previous.value, RunRequest)
     current = dataclasses.replace(
-        previous.value.run_request,
+        previous.value,
         model="gpt-main",
         inference_state=None,
         context_window_tokens=None,
@@ -936,7 +923,7 @@ async def test_compaction_context_uses_saved_semantic_model_not_dispatch_encodin
     )
     previous = await fixtures._resolve_success()
     assert isinstance(previous, Success)
-    assert isinstance(previous.value, ResolvedInvokeInputProfile)
+    assert isinstance(previous.value, RunRequest)
     settings = _pair_agent().selectable_model_options[0].candidates[0].settings
     state = SessionInferenceState(
         model_target_label="default",
@@ -964,7 +951,7 @@ async def test_compaction_context_uses_saved_semantic_model_not_dispatch_encodin
         payload=payload,
     )
     request = dataclasses.replace(
-        previous.value.run_request,
+        previous.value,
         provider=selection.provider,
         model="bedrock/converse/anthropic.claude-fixture-v1:0",
         model_capabilities=selection.normalized_capabilities,

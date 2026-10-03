@@ -18,7 +18,6 @@ from azents.core.model_availability import (
     PrimaryModelReservation,
     SessionModelAvailability,
 )
-from azents.core.model_execution_options import validate_execution_options
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
@@ -354,25 +353,8 @@ class SessionModelAvailabilityService:
             for item in context.agent.selectable_model_options
             if item.label == context.semantic_label
         )
-        profile = context.session.applied_inference_profile
-        reasoning_effort = profile.reasoning_effort if profile is not None else None
-        execution_options = (
-            profile.enabled_execution_options if profile is not None else []
-        )
         for candidate in option.candidates[1:]:
             selection = candidate.model_selection
-            if reasoning_effort is not None and reasoning_effort not in (
-                selection.normalized_capabilities.configurable_reasoning_efforts()
-            ):
-                continue
-            try:
-                validate_execution_options(
-                    provider=selection.provider,
-                    supported=selection.supported_execution_options,
-                    enabled=execution_options,
-                )
-            except ValueError:
-                continue
             observation = await self.health_repository.snapshot_for_background(
                 ModelCandidateIdentity(
                     workspace_id=context.agent.workspace_id,

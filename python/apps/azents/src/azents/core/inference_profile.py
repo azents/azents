@@ -24,6 +24,7 @@ from azents.core.model_execution_options import (
     ModelExecutionOptionId,
     validate_enabled_execution_options,
     validate_execution_options,
+    validate_supported_execution_options,
 )
 
 PublicReasoningEffort = Annotated[
@@ -173,6 +174,54 @@ class AppliedModelRoute(BaseModel):
     model_display_name: str = Field(min_length=1)
     effective_context_window_tokens: int = Field(gt=0)
     effective_auto_compaction_threshold_tokens: int = Field(gt=0)
+
+
+def normalize_inherited_reasoning_effort(
+    baseline: ModelReasoningEffort | None,
+    supported: list[ModelReasoningEffort],
+) -> ModelReasoningEffort | None:
+    """Apply the canonical inherited effort order to one assigned model."""
+    if not supported:
+        return None
+    effective_baseline = baseline or ModelReasoningEffort.MEDIUM
+    if effective_baseline in supported:
+        return effective_baseline
+    ordering = list(ModelReasoningEffort)
+    baseline_index = ordering.index(effective_baseline)
+    lower = [level for level in supported if ordering.index(level) < baseline_index]
+    if lower:
+        return max(lower, key=ordering.index)
+    return min(supported, key=ordering.index)
+
+
+def adapt_inference_profile_to_model(
+    profile: RequestedInferenceProfile, selection: AgentModelSelection
+) -> RequestedInferenceProfile:
+    """Keep the assigned model and adapt only its effective request controls."""
+    effort = profile.reasoning_effort
+    if effort is not None:
+        capabilities = selection.normalized_capabilities
+        supported_efforts = capabilities.configurable_reasoning_efforts()
+        if (
+            capabilities.semantic_contract is None
+            and not capabilities.reasoning.supported
+        ):
+            supported_efforts = []
+        effort = normalize_inherited_reasoning_effort(effort, supported_efforts)
+    supported_options = validate_supported_execution_options(
+        provider=selection.provider,
+        supported=selection.supported_execution_options,
+    )
+    return profile.model_copy(
+        update={
+            "reasoning_effort": effort,
+            "enabled_execution_options": [
+                option
+                for option in profile.enabled_execution_options
+                if option in supported_options
+            ],
+        }
+    )
 
 
 def validate_requested_profile_against_options(

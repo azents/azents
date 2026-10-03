@@ -7,7 +7,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import ModelCandidateClaimKind
 from azents.core.model_availability import PrimaryModelReservation
-from azents.core.model_execution_options import validate_execution_options
 from azents.core.model_operation import (
     ModelOperationCandidateOutcomeReason,
     ModelOperationCandidateOutcomeStatus,
@@ -57,16 +56,6 @@ async def select_model_operation_candidate(
                 candidate=candidate,
                 reservation_consumed=False,
             )
-        incompatibility = _candidate_incompatibility(current, candidate)
-        if incompatibility is not None:
-            current = mark_current_candidate_skipped_and_advance(
-                current,
-                status=ModelOperationCandidateOutcomeStatus.INCOMPATIBLE,
-                reason=incompatibility,
-                recorded_at=recorded_at,
-            )
-            continue
-
         identity = _health_identity(workspace_id, candidate)
         transferred = await _transfer_primary_reservation(
             session,
@@ -217,29 +206,6 @@ async def _transfer_primary_reservation(
         claim_until=health.claim_until,
         transferred_at=transferred.server_time,
     )
-
-
-def _candidate_incompatibility(
-    operation: ModelOperationSnapshot,
-    candidate: ModelOperationCandidateSnapshot,
-) -> ModelOperationCandidateOutcomeReason | None:
-    selection = candidate.model_selection
-    requested_effort = operation.requested_reasoning_effort
-    if (
-        requested_effort is not None
-        and requested_effort
-        not in selection.normalized_capabilities.configurable_reasoning_efforts()
-    ):
-        return ModelOperationCandidateOutcomeReason.REASONING_EFFORT_UNSUPPORTED
-    try:
-        validate_execution_options(
-            provider=selection.provider,
-            supported=selection.supported_execution_options,
-            enabled=operation.requested_execution_options,
-        )
-    except ValueError:
-        return ModelOperationCandidateOutcomeReason.EXECUTION_OPTION_UNSUPPORTED
-    return None
 
 
 def _health_identity(
