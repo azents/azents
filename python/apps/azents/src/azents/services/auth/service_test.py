@@ -20,6 +20,7 @@ from azents.core.config import (
 from azents.core.email.service import EmailService
 from azents.rdb.session import SessionManager
 from azents.repos.auth_operation import AuthOperationRepository
+from azents.repos.credential_read_operations import CredentialReadOperationRepository
 from azents.repos.email_verification import EmailVerificationRepository
 from azents.repos.email_verification_operation import (
     EmailVerificationOperationRepository,
@@ -96,12 +97,16 @@ def _make_auth_service(
             session_manager=session_manager,
         ),
         credential_service=CredentialService(
-            session_manager=session_manager,
+            repository=CredentialReadOperationRepository(
+                session_manager=session_manager,
+                user_repository=UserRepository(),
+                user_email_repository=UserEmailRepository(),
+                password_login_repository=PasswordLoginRepository(),
+            ),
             providers=[
                 PasswordCredentialProvider(),
                 EmailCredentialProvider(email_service=resolved_email_service),
             ],
-            user_repo=UserRepository(),
         ),
         terminal_invalidation_publisher=NoopRuntimeTerminalInvalidationPublisher(),
         auth_config=_TEST_AUTH_CONFIG,

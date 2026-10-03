@@ -9,6 +9,7 @@ tags: [backend, security, api]
 code_paths:
   - python/apps/azents/src/azents/core/auth/**
   - python/apps/azents/src/azents/core/account_access.py
+  - python/apps/azents/src/azents/core/credential_read.py
   - python/apps/azents/src/azents/core/user.py
   - python/apps/azents/src/azents/core/user_email.py
   - python/apps/azents/src/azents/core/system_user_role.py
@@ -35,6 +36,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/user_email/**
   - python/apps/azents/src/azents/repos/auth_operation/**
   - python/apps/azents/src/azents/repos/account_access.py
+  - python/apps/azents/src/azents/repos/credential_read_operations.py
   - python/apps/azents/src/azents/repos/security_operation/**
   - python/apps/azents/src/azents/repos/session/**
   - python/apps/azents/src/azents/repos/password_login/**
@@ -120,7 +122,7 @@ api_routes:
   - /system-setting/v1
   - /debug/v1
 last_verified_at: 2026-10-02
-spec_version: 23
+spec_version: 24
 ---
 
 # User & Authentication
@@ -140,7 +142,7 @@ Core characteristics:
 - **Independent Admin Web session** — Admin Web signs in through the Public API but stores separately named HTTP-only cookies and forwards the current user access token to the Admin API.
 - **Explicit existing-install promotion** — Existing users gain initial or recovery access only through the exact-email operator CLI. One invocation may repeat `--email` to grant multiple existing users sequentially; startup and migrations never auto-promote a user.
 - **Credential provider projection** — email/password are summarized by credential provider abstraction and exposed differently for public login projection and authenticated security projection.
-- **SMTP-gated email credential** — email credential is valid login/elevation credential only when SMTP is configured, even if verified primary email exists. When SMTP disabled, other valid credential such as password is needed.
+- **SMTP-gated email credential** — email credential is valid login/elevation credential only when SMTP is configured, even if a verified linked email exists. When SMTP disabled, other valid credential such as password is needed.
 - **Password is one login method** — password login is stored as bcrypt hash. Security setting changes require elevated access token.
 - **Admin-issued password reset** — password recovery is not self-service email flow; it uses admin-issued user_id-bound, hash-only, single-use reset token.
 - **Refresh token rotation + grace** — refresh token has rotation period and grace period to mitigate simultaneous request race.
@@ -314,11 +316,30 @@ Main Web post-authentication redirects accept only same-origin path references t
 
 Credential providers produce an internal credential summary with `configured`, `valid`, `can_login`, `can_elevate`, `can_remove`, and optional `unavailable_reason`.
 
-- Email credential is configured when the user has a verified primary email.
+- Email credential is configured when any linked email is verified; it is not
+  restricted to the primary address.
 - Email credential is valid only when email delivery/SMTP is configured.
 - Password credential is configured and valid when a `PasswordLogin` row exists.
 - `GET /auth/v1/login/methods?email=` returns only no-leak public projection: `has_password` for the specific user email and `email_available` for instance-level SMTP availability. Unknown email returns `has_password=false`; `email_available` is not user-specific.
 - `GET /security/v1/auth-methods` and `/elevation-methods` return authenticated diagnostic projection including `configured`, `valid`, capabilities, and `unavailable_reason`.
+
+Credential read groups complete in repository-owned scopes and return ordered
+configuration facts. Application providers build SMTP-dependent summaries and
+public/security/elevation/removal projections only after those scopes close.
+The User group retains its initial User lookup, ordered provider queries and
+redundant Email-provider User lookup; a missing initial User returns absence,
+while late Email-provider absence only marks that Email fact unconfigured.
+Login lookup retains exact supplied-email reads, including any linked address
+for password presence. Existing disabled-user and unverified-address read behavior
+does not gain a new filter.
+
+Provider order and duplicate entries remain significant: public login uses the
+last Password summary, removal projection selects the first matching target, and
+all valid entries count toward the last-valid-credential invariant. Environment
+availability remains a pure application projection, not a database callback or
+SMTP effect. These are read snapshots with no post-provider final mutation or
+new authorization/isolation guarantee; actual password removal keeps its separate
+conditional database authority.
 
 ### 3.6 Admin-issued password reset
 
@@ -633,6 +654,10 @@ Admin-issued signup/password-reset token management and other instance-wide oper
 
 ## 9. Changelog
 
+- **2026-10-02** (v24) — Completed Credential grouped-read transaction ownership
+  and session-free provider projection while preserving query/order/duplicate
+  behavior, public/admission contracts and separate password deletion authority.
+  Clarified existing any-verified-linked-email configuration semantics.
 - **2026-10-02** (v23) — Moved User, UserEmail, system-role and authentication
   admission lifetimes into completed repository operations. Preserved shared
   role/deletion locking, final-admin protection, atomic access-disable and purge
