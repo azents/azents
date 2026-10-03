@@ -70,7 +70,7 @@ code_paths:
   - typescript/apps/azents-web/src/trpc/routers/workspace-model-settings.ts
   - typescript/apps/azents-admin-web/src/features/model-catalog/containers/useModelCatalogPageContainer.ts
 last_verified_at: 2026-10-03
-spec_version: 40
+spec_version: 41
 ---
 
 # Model Catalog Domain Spec
@@ -548,6 +548,7 @@ Only Workspace Owners receive the explicit image sync action.
 
 | Date | Version | Change |
 |---|---:|---|
+| 2026-10-03 | 41 | Completed existing top-k request transport and sampling codec preservation without changing model support authority. |
 | 2026-10-03 | 40 | Preserved route-bounded image/effort/refinement support, complete Google directed billing and truthful codec dependency provenance through audited correction paths. |
 | 2026-10-03 | 39 | Restored contract-derived ChatGPT web-search support through final v2 catalog entries and saved native requests without generic source or price dependence. |
 | 2026-10-03 | 38 | Replaced active genai authority with inert exact-scoped JSON, self-contained v2 support and typed pricing; preserved historical selections and added SQL writer/pointer fences. |
@@ -596,6 +597,11 @@ evidence and implemented route bounds. SDK codecs retain protocol formatting,
 not native model capability authority. No direct genai/LiteLLM execution import,
 process-local price map, package-bundled pricing fallback or request-time remote
 fetch supplies catalog, context or estimated-pricing authority.
+
+Selected sampling controls remain requests governed by their saved support
+contract. Google/Anthropic/Bedrock top-k encoding is a transport bound, not a
+positive model capability fact. Runtime profiles preserve accepted controls
+through the actual codec; missing canonical top-k mappings fail before dispatch.
 
 ChatGPT OAuth, OpenRouter, xAI API key, and xAI OAuth have no system catalog; their
 authenticated integration catalogs remain authoritative for conversation-model

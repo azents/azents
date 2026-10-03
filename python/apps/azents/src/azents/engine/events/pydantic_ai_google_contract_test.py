@@ -68,6 +68,7 @@ def _request(
         ),
     )
     return PydanticAILowerer(
+        top_k=None,
         provider=provider.value,
         provider_id=provider,
         model=model,
@@ -364,6 +365,7 @@ async def test_exact_source_image_support_reaches_google_sdk_without_name_profil
     caps = ModelCapabilities.model_validate_json(caps.model_dump_json())
     assert "image_generation" in caps.built_in_tools.supported
     request = PydanticAILowerer(
+        top_k=None,
         provider=provider.value,
         provider_id=provider,
         model=model,
@@ -425,6 +427,7 @@ async def test_saved_google_image_denial_is_not_reenabled_by_codec_defaults(
     )
     assert "image_generation" not in caps.built_in_tools.supported
     lowerer = PydanticAILowerer(
+        top_k=None,
         provider=provider.value,
         provider_id=provider,
         model=model,
@@ -438,6 +441,7 @@ async def test_saved_google_image_denial_is_not_reenabled_by_codec_defaults(
     with pytest.raises(ValueError):
         lowerer.lower([], model=model)
     lowerer = PydanticAILowerer(
+        top_k=None,
         provider=provider.value,
         provider_id=provider,
         model=model,
@@ -499,6 +503,7 @@ async def test_explicit_source_effort_survives_sparse_google_codec_on_wire(
     caps = ModelCapabilities.model_validate_json(caps.model_dump_json())
     assert effort in caps.reasoning.effort_levels
     request = PydanticAILowerer(
+        top_k=None,
         provider=provider.value,
         provider_id=provider,
         model=model,

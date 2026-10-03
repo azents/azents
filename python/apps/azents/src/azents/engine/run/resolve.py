@@ -836,6 +836,7 @@ async def resolve_invoke_input_with_model_source(
                     main_settings,
                 ),
                 top_p=params.top_p if params else None,
+                top_k=params.top_k if params else None,
                 stop=params.stop_sequences if params else None,
                 reasoning_effort=reasoning_effort,
                 builtin_tools=builtin_tools,

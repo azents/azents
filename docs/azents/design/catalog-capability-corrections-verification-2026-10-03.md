@@ -158,6 +158,57 @@ Session under `catalog-hotfix-*`, `catalog-omissions-*` and
 
 ## Evidence and limitations
 
+### Phase 3 validation
+
+- Existing Agent-local top-k now reaches the required nullable RunRequest and
+  lowerer carriers. Resolve and actual EngineAdapter regressions demonstrate
+  preservation and explicit native rejection rather than silent omission.
+- Actual ProviderModelFactory plus SDK MockTransport tests cover Google/Gemini,
+  both Vertex codecs, Anthropic, Bedrock Anthropic/Nova and opaque saved-family
+  resources. Temperature zero, top-p and top-k survive artificial stock
+  sampling-denial flags; null top-k remains absent. Historical and v2 contracts
+  remain distinct, and Bedrock raw-field precedence is preserved.
+- Native/compatible codecs without canonical top-k syntax and a Bedrock codec
+  without an actual family variant fail before HTTP. Saved supported/unknown
+  and satisfied conditional requests retain exact values; explicit denial and
+  unmet predicates still fail.
+- Product E2E uses the existing required per-prompt/model-selection fixtures as
+  regression coverage. These fixtures are OpenAI-route oriented and do not
+  certify a live top-k-capable account; the specific top-k transport proof uses
+  the installed public SDKs and actual factory/wrapper with credential-free
+  native protocol fixtures, not guessed endpoints or replacement encoders.
+- Root whole-backend Ruff/format/ty passed; final full backend passed 8,721 tests
+  with 3 skips and 94 existing/JUnit fixture warnings in 339.85 seconds. Fresh
+  required deployed E2E passed 29 tests in 145.03 seconds. The final guard suite
+  passed 44 tests, including actual-codec rejection of a historical developer
+  hint mismatch, and the SDK sampling matrix contains 40 cases.
+  An earlier final run ended without a completion summary or JUnit at 95%;
+  it is not counted as passing. The complete rerun has `EXIT_CODE=0` and JUnit.
+  The same independent reviewer cleared the complete stable phase-3 diff with
+  486 independent tests, 84 explicit nullable constructor checks, four
+  JSON-validated saved-predicate cases, and lifecycle/binding cleanup checks.
+  All four temporary catalog correction plans are removed after that clearance;
+  current Specs, immutable authority and this verification record remain.
+
+### Latest-main stack integration
+
+- Both follow-ups were rebased front-to-back onto main `e9fad839e`, including
+  its xAI native-search/error correction. The phase-2 sampling bridge remains
+  before final typed settings and xAI native-search assembly; phase-3 production
+  changes remain identical and the execution Spec advances sequentially to v207.
+- The new main SDK test explicitly supplies nullable top-k and verifies v2
+  sampling `0.2` / `0.7` alongside native search, function tools, metadata and
+  output cap for both xAI authentication routes. OpenRouter retains its separate
+  generic search options; historical search behavior remains unchanged.
+- Root whole Ruff/format/ty passed. Affected integration suites passed 201 tests;
+  updated full integrated backend passed 8,763 tests with 3 skips in 352.16
+  seconds, and fresh deployed required E2E passed 29 tests in 129.70 seconds.
+  Both complete runs have JUnit and exit code zero.
+- The same independent reviewer cleared the composed boundary with 236 tests,
+  docs/diff checks and 85 explicit nullable constructor checks. Previous review
+  clearance remains valid. Old-SHA CI success is retained as historical evidence,
+  not certification of the rewritten heads; new-SHA CI is checked separately.
+
 Independent Session reports: `catalog-provider-omissions-audit.md`,
 `catalog-consumer-omissions-audit.md`, `catalog-source-pricing-persistence-audit.md`
 and `catalog-top-k-execution-discovery.md`. They include exact baseline anchors,
@@ -176,5 +227,6 @@ or rollback has been performed. Corrections become available through ordinary
 catalog refresh after an authorized release. Existing saved Agent/Workspace
 capabilities and recorded costs are not silently rewritten; changed capabilities
 are adopted through explicit reselection. The original source fence/backup/rollback
-procedure remains unchanged. Final phase 3 removes temporary execution plans after
-validated implementation and Spec promotion.
+procedure remains unchanged. Phase 3 removes temporary execution plans after
+validated implementation, independent clearance and Spec promotion. Stack CI is
+verified separately after the final correction PR is created.

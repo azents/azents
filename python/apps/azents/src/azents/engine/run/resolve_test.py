@@ -654,6 +654,7 @@ class TestResolveInvokeInput:
             # client-owned dispatch rejection without routing it as hosted.
             return
         lowerer = OpenAIResponsesLowerer(
+            top_k=None,
             provider=LLMProvider.OPENAI,
             model=result.value.model,
             credential_kwargs={},
@@ -2141,3 +2142,47 @@ class TestResolveAgentTools:
         assert isinstance(root[2].toolkit, ScheduledToolkit)
         assert root[2].toolkit.runtime_context_store is not None
         assert subagent == []
+
+
+@pytest.mark.parametrize("top_k", [None, 37])
+async def test_existing_agent_top_k_reaches_run_and_retry_carrier(
+    top_k: int | None,
+) -> None:
+    agent = _make_agent()
+    agent.model_parameters = ModelParameters(top_k=top_k)
+    before = agent.model_parameters.model_dump_json()
+    agent_repository = AsyncMock()
+    agent_repository.get_by_id.return_value = agent
+    integration_repository = AsyncMock()
+    integration_repository.get_by_id_with_secrets.return_value = _make_integration()
+    session_manager = _session_manager_for(AsyncMock(spec=AsyncSession))
+    result = await resolve_invoke_input(
+        InvokeInput(agent_id="agent-1", session_id="session-1", messages=[]),
+        invoke_read_repository=EngineInvokeReadRepository(
+            agent_repository=agent_repository,
+            integration_repository=integration_repository,
+            session_manager=session_manager,
+        ),
+        runtime_token_resolver=EngineRuntimeTokenResolver(
+            chatgpt_repository=ChatGPTOAuthRuntimeRepository(
+                integration_repository=integration_repository,
+                session_manager=session_manager,
+            ),
+            xai_repository=XaiOAuthRuntimeRepository(
+                integration_repository=integration_repository,
+                session_manager=session_manager,
+            ),
+            kimi_repository=KimiOAuthRuntimeRepository(
+                integration_repository=integration_repository,
+                session_manager=session_manager,
+            ),
+        ),
+        exchange_file_service=AsyncMock(),
+        model_file_service=AsyncMock(),
+        image_generation_catalog_service=_make_image_generation_catalog_service(),
+        model_metadata_service=make_test_model_metadata_service(snapshot=None),
+    )
+    assert isinstance(result, Success)
+    assert result.value.top_k == top_k
+    assert dataclasses.replace(result.value, user_messages=[]).top_k == top_k
+    assert agent.model_parameters.model_dump_json() == before

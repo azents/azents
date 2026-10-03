@@ -121,7 +121,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack
 last_verified_at: 2026-10-03
-spec_version: 89
+spec_version: 90
 ---
 
 # Agent Domain Spec
@@ -441,6 +441,12 @@ Create/update requests accept selectable model options as the current model cont
 - `main_model_label` / `lightweight_model_label` omitted, null, or absent from the final list: fallback to the first ordered option label.
 - Internal effective `model_selection` and `lightweight_model_selection` mirrors are recomputed from each final label's Primary candidate. Public requests and responses expose only the nested chains and selected labels.
 - `model_parameters` is whole-object replace for the remaining Agent-global inference parameters such as temperature and default reasoning effort. Unknown keys are rejected; context, output, and built-in tool settings do not exist at Agent scope.
+- Existing `top_k` is an Agent-local positive integer, not a per-prompt or preset
+  override. Its exact nullable value is carried through Run resolution and model
+  preparation. The installed Google, Anthropic and applicable Bedrock codecs
+  transmit it; a codec without an adopted mapping fails before provider dispatch.
+  Saved support predicates and denials remain authoritative, and saved selections
+  are not rewritten to make the parameter available.
 - `subagent_settings` is a whole-object replace when supplied. Omitted create requests use the default `{ "max_subagents": 3, "max_depth": 1 }`; omitted update requests leave the stored settings unchanged.
 - `runtime_profile_id` omitted or null on create produces a Runtime-free Agent and does not copy the
   Workspace default. An explicit available Profile produces a managed Agent.
@@ -754,6 +760,8 @@ Following contracts do not exist in current system.
 
 ## 8. Change History
 
+- **2026-10-03** (spec_version 90) — Carried existing Agent-local top-k to
+  model preparation with exact SDK encoding or explicit incompatibility.
 - **2026-10-03** (spec_version 89) — Preserved conditional reasoning-effort
   potential across profile/default/candidate/subagent preparation without weakening
   actual saved-predicate dispatch validation or historical guards.

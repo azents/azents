@@ -294,6 +294,7 @@ def test_opaque_signatures_never_become_visible_reasoning_delta() -> None:
     assert payload.text is None
     assert "opaque-new" in json.dumps(payload.native_artifact.item)
     lowerer = PydanticAILowerer(
+        top_k=None,
         provider="anthropic",
         provider_id=LLMProvider.ANTHROPIC,
         model="selected-model",

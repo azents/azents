@@ -447,6 +447,7 @@ async def test_saved_conditions_reach_real_sdk_wire_without_codec_clamping(
     """Met conditions preserve exact intent; failed ones never reach HTTP."""
     caps = _codec_snapshot(feature, state)
     lowerer = PydanticAILowerer(
+        top_k=None,
         provider=LLMProvider.OPENROUTER.value,
         provider_id=LLMProvider.OPENROUTER,
         model=_WIRE_MODEL,
@@ -530,6 +531,7 @@ async def test_saved_conditions_reach_real_sdk_wire_without_codec_clamping(
 def test_sampling_bridge_keeps_existing_typed_settings_normalization() -> None:
     caps = _codec_snapshot("strict", "unknown")
     request = PydanticAILowerer(
+        top_k=None,
         provider=LLMProvider.OPENROUTER.value,
         provider_id=LLMProvider.OPENROUTER,
         model=_WIRE_MODEL,
@@ -671,6 +673,7 @@ async def test_saved_sampling_survives_compatible_sdk_reasoning_filter(
     ).profile
     assert profile.get("openai_supports_reasoning") is True
     lowerer = PydanticAILowerer(
+        top_k=None,
         provider=provider.value,
         provider_id=provider,
         model=model_id,

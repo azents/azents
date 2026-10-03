@@ -217,6 +217,7 @@ async def test_real_main_lowerer_default_cache_ttl_survives_boto_validation(
         ),
     ]
     request = PydanticAILowerer(
+        top_k=None,
         provider="aws_bedrock",
         provider_id=LLMProvider.AWS_BEDROCK,
         model=model,

@@ -418,6 +418,7 @@ async def test_artifact_output_import_and_expiration_e2e_path() -> None:
     artifact = created.value
 
     lowerer = OpenAIResponsesLowerer(
+        top_k=None,
         supported_execution_options=[],
         enabled_execution_options=[],
         provider="openai",
@@ -506,6 +507,7 @@ async def test_artifact_output_import_and_expiration_e2e_path() -> None:
 async def test_attachment_output_lowers_as_metadata_only() -> None:
     """Attachment lowers to bounded metadata text, not rich input."""
     lowerer = OpenAIResponsesLowerer(
+        top_k=None,
         supported_execution_options=[],
         enabled_execution_options=[],
         provider="openai",
@@ -587,6 +589,7 @@ async def test_file_part_capability_branch_e2e_path() -> None:
     ]
 
     image_request = OpenAIResponsesLowerer(
+        top_k=None,
         supported_execution_options=[],
         enabled_execution_options=[],
         provider="openai",
@@ -605,6 +608,7 @@ async def test_file_part_capability_branch_e2e_path() -> None:
     ]
 
     text_only_request = OpenAIResponsesLowerer(
+        top_k=None,
         supported_execution_options=[],
         enabled_execution_options=[],
         provider="openai",
