@@ -74,8 +74,46 @@ No stale image substitution, source reset, revision stamping, database initializ
 
 Therefore local assembled API/browser/Runtime E2E, Runtime file/Shell checks, and stop/restart data-preservation QA are **not verified**. Required product E2E must be evaluated by the PR CI. Snapshot implementation dates and temporary-plan cleanup must wait for completion of the remaining validation rather than treat this prerequisite failure as a pass.
 
+## PR CI Corrections
+
+PR #2090's initial commit `aa7a87c84` exposed two additional integration gaps:
+
+- A valid OpenAI-only source failed with HTTP 500 because aggregate preprojection
+  treated absent unrelated providers as a global source failure. Expected
+  provider-local projection failures now preserve that provider's successful
+  current rows, prices, counts, and last-success time; source data, successful
+  provider replacements, and failed-provider current status commit in the same
+  fenced transaction. Summaries use each provider's actual status/failure facts.
+  Global validation/reduction/unexpected-write failures retain the existing
+  rollback boundary. This is a scoped-failure restoration within M1/M2/M9, not an
+  empty-success reinterpretation or new operational mode.
+- The root testenv package still passed a discarded ModelConfig extra field and
+  called removed ModelConfig APIs. The actual seed/setup path now uses explicit
+  canonical model options for the exact current integration/model identifier,
+  without inheriting unrelated Workspace defaults or supplying pricing authority.
+  Eleven regressions cover the corrected current seed contract and asynchronous
+  initial publication readiness.
+
+The targeted review accepted the backend scoped-failure boundary and identified
+one remaining seed readiness race: integration POST completion precedes its
+background catalog publication. Deterministic fixture preparation now waits for
+integration scope, terminal successful sync, and actual entries. Initial 404,
+system fallback, queued, and running observations are polled within a monotonic
+deadline; terminal failure, successful-empty, and unexpected API failures propagate
+without fallback. Production stale-selection predicates are unchanged.
+
+Root backend Ruff/format/typing and the complete 9,130 passed/3 skipped matrix
+passed, including single-provider initial publication, retained failed-provider
+data, truthful explicit failure/recovery, and unexpected-write rollback
+regressions. Root testenv Ruff/format/typing and 142 tests passed; E2E
+Ruff/format/typing and 555 support tests passed. The same sole reviewer accepted
+the backend correction and the seed-readiness re-review with no remaining
+findings; an independent 11-case seed regression run also passed. No required CI
+failure is treated as a pass.
+
 ## Remaining Gates
 
-- Root-integrated checks and sole read-only review/re-review are complete.
+- Root-integrated checks and sole review/re-review, including the CI corrections,
+  are complete.
 - Required PR CI, especially the updated saved-support/embedded-price catalog-refresh product E2E.
 - Verified snapshot promotion and temporary-plan cleanup only after the remaining validation completes.

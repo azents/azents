@@ -455,11 +455,10 @@ class SystemCatalogProjectionService:
 
     async def sync_system_catalogs(self) -> list[SystemCatalogProjectionSummary]:
         """Publish changed source and every affected system catalog together."""
-        completed = True
         try:
             await self.source_sync_service.sync_current_source()
         except ModelMetadataSourceSyncBusy:
-            completed = False
+            pass
         states = await self.list_system_catalogs()
         return [
             SystemCatalogProjectionSummary(
@@ -468,11 +467,18 @@ class SystemCatalogProjectionService:
                 last_success_at=state.last_success_at,
                 visible_count=state.visible_count,
                 hidden_count=state.hidden_count,
-                status="succeeded"
-                if completed
-                else state.latest_sync.status
+                status=state.latest_sync.status
                 if state.latest_sync is not None
                 else "running",
+                failure_code=state.latest_sync.failure_code
+                if state.latest_sync is not None
+                else None,
+                failure_message=state.latest_sync.failure_message
+                if state.latest_sync is not None
+                else None,
+                action_hint=state.latest_sync.action_hint
+                if state.latest_sync is not None
+                else None,
             )
             for state in states
             if state.catalog_id is not None

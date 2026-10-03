@@ -3,7 +3,8 @@
 import dataclasses
 import datetime
 from collections import Counter
-from typing import Annotated, Any
+from collections.abc import Sequence
+from typing import Annotated, Any, assert_never
 
 import sqlalchemy as sa
 from fastapi import Depends
@@ -56,6 +57,15 @@ class SystemCatalogReplacement:
 
     provider: LLMProvider
     entries: list[LLMCatalogEntryCreate]
+    diagnostics: dict[str, Any] | None
+
+
+@dataclasses.dataclass(frozen=True)
+class SystemCatalogProjectionFailure:
+    """A prepared provider failure that preserves its successful current rows."""
+
+    provider: LLMProvider
+    failure_message: str
     diagnostics: dict[str, Any] | None
 
 
@@ -157,7 +167,9 @@ class ModelMetadataSourceOperations:
         work_token: str,
         fetched: FetchedModelMetadataSource,
         expected_source: ModelMetadataSource | None,
-        replacements: list[SystemCatalogReplacement],
+        replacements: Sequence[
+            SystemCatalogReplacement | SystemCatalogProjectionFailure
+        ],
         finished_at: datetime.datetime,
     ) -> SourcePublicationResult:
         """Compare prepared source inputs and replace source/system rows atomically."""
@@ -237,26 +249,40 @@ class ModelMetadataSourceOperations:
             )
             for owner in owners:
                 replacement = by_provider[owner.provider]
-                await self.catalog_repository.replace_current_entries(
-                    session,
-                    owner=owner,
-                    entries=replacement.entries,
-                    diagnostics=replacement.diagnostics,
-                    finished_at=finished_at,
-                )
-                succeed_sync(
-                    owner,
-                    work_token=work_token,
-                    finished_at=finished_at,
-                    fetched_count=fetched.model_count,
-                    matched_count=owner.entry_count,
-                    skipped_count=0,
-                    hidden_count=owner.hidden_count,
-                    diagnostics={
-                        "provider": owner.provider.value,
-                        "source_key": CATALOG_SOURCE_KEY,
-                    },
-                )
+                match replacement:
+                    case SystemCatalogProjectionFailure():
+                        fail_sync(
+                            owner,
+                            work_token=work_token,
+                            finished_at=finished_at,
+                            failure_code="ModelMetadataProjectionError",
+                            failure_message=replacement.failure_message,
+                            action_hint="Check source data and provider inventory.",
+                            diagnostics=replacement.diagnostics,
+                        )
+                    case SystemCatalogReplacement():
+                        await self.catalog_repository.replace_current_entries(
+                            session,
+                            owner=owner,
+                            entries=replacement.entries,
+                            diagnostics=replacement.diagnostics,
+                            finished_at=finished_at,
+                        )
+                        succeed_sync(
+                            owner,
+                            work_token=work_token,
+                            finished_at=finished_at,
+                            fetched_count=fetched.model_count,
+                            matched_count=owner.entry_count,
+                            skipped_count=0,
+                            hidden_count=owner.hidden_count,
+                            diagnostics={
+                                "provider": owner.provider.value,
+                                "source_key": CATALOG_SOURCE_KEY,
+                            },
+                        )
+                    case _:
+                        assert_never(replacement)
             await session.flush()
             source = await self.repository.get_current(
                 session, source_key=CATALOG_SOURCE_KEY

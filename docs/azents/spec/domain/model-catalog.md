@@ -351,6 +351,14 @@ work is running and is cleared at terminal completion; it is not a model-data ID
 Failures preserve current source models, catalog entries, normalized prices, and
 last-success time. Conversation synchronization/freshness does not add a selection gate.
 
+A valid source can contain only a subset of system providers. Expected
+provider-local projection failure preserves that provider's successful rows,
+prices, counts, and last-success time and records its current failure facts.
+Source data, successful provider replacements, and failed-provider status changes
+commit in the same fenced transaction. Global collection, normalization, shrink,
+or unexpected publication failure does not partially publish new data. Refresh
+summaries report each provider's actual status and failure facts.
+
 The integration's positive `catalog_configuration_version` is credential/configuration
 authority, not a catalog data revision. User credential/configuration changes advance
 it. Runtime OAuth token rotation and connection-status persistence use the separate

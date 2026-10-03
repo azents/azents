@@ -46,9 +46,18 @@ Use explicit barriers/current state for races, isolated prerequisites and masked
 
 ## Scope and Context Checkpoints
 
+CI correction scope: preserve expected provider-local projection failures within
+the existing one-transaction source/system publication and truthful per-provider
+summaries; update the actually used testenv seed/setup to canonical exact model
+options. Global validation/shrink/unexpected failures retain the old preservation
+boundary. These are M1/M2/M9 behavior-preservation and M8 contract corrections,
+not new authority. Design delta: None. Root owns source publication and integrated
+validation; `/root/catalog-service-implementation` owns the bounded seed/setup
+correction; `/root/catalog-design-owner` remains the sole reviewer.
+
 - Scope-drift check at each integration boundary: every approved behavior/removal covered; no new authority/history/hash/cache/fallback/mode, no conversation predicate strengthening.
 - Latest-base checkpoint: `359bc0ff9`, with existing model transition adaptation retained; approved design delta none.
 - Shared contract checkpoint: current source/model/status DTOs, embedded normalized price definitions, purpose-specific image usability, exact context batches, and generated clients integrated.
 - Integrated behavior/interface/removal evidence: root post-review full backend 9,127 passed/3 skipped; separate migration matrix 20 passed including metadata/DDL alignment; affected catalog/migration/service rerun 151 passed and final current-data regression 22 passed; corrected E2E support 555 passed; fresh cache-bypassed TypeScript types/lint/format and both app builds passed, main-web unit tests 347 passed. Active-path scans include required E2E/support and confirm obsolete catalog graph/hash/candidate contracts and full-source dispatch reads removed. See the supporting validation report.
 - Stable independent review target and final root QA: implementation owner writes complete; current Specs updated; sole read-only review by `/root/catalog-design-owner` found R1-R3, root corrections and invalidated checks passed, and targeted re-review accepted all three with no remaining grounded findings. Local assembled-product QA is unverified because the pinned MinIO client image cannot be pulled during source environment preparation; no stale source fallback was used.
-- PR/CI and cleanup: one feature PR; required product E2E must complete in CI. Implementation date promotion and plan cleanup remain pending until validation completes.
+- PR/CI and cleanup: PR #2090, initial commit `aa7a87c84`; initial CI identified a scoped provider failure and root testenv seed-contract/readiness gaps. Root backend 9,130 passed/3 skipped, root testenv 142 passed, E2E support 555 passed, and sole targeted review/re-review accepted all corrections. Required product E2E, implementation date promotion and plan cleanup remain pending the next normal push and CI.

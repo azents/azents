@@ -25,6 +25,7 @@ from azents.core.model_pricing import normalize_model_pricing
 from azents.repos.model_metadata_operations import (
     ModelMetadataSourceOperations,
     SourceSyncAlreadyRunning,
+    SystemCatalogProjectionFailure,
     SystemCatalogReplacement,
 )
 from azents.repos.model_metadata_source_data import ModelMetadataSource
@@ -35,7 +36,10 @@ from azents.services.catalog_source_collection import (
     CatalogCollectionPolicy,
     CatalogSourceCollector,
 )
-from azents.services.model_metadata_projection import project_system_entries
+from azents.services.model_metadata_projection import (
+    ModelMetadataProjectionError,
+    project_system_entries,
+)
 
 _SYSTEM_PROVIDERS = (
     LLMProvider.OPENAI,
@@ -146,19 +150,34 @@ class ModelMetadataSourceSyncService:
                 payload=fetched.payload,
                 models=fetched.models,
             )
-            replacements = [
-                SystemCatalogReplacement(
-                    provider=provider,
-                    entries=project_system_entries(
+            replacements: list[
+                SystemCatalogReplacement | SystemCatalogProjectionFailure
+            ] = []
+            for provider in _SYSTEM_PROVIDERS:
+                diagnostics = {
+                    "source_kind": source.source_kind,
+                    "effective_date": effective_date.isoformat(),
+                }
+                try:
+                    entries = project_system_entries(
                         provider=provider, source=source, effective_date=effective_date
-                    ),
-                    diagnostics={
-                        "source_kind": source.source_kind,
-                        "effective_date": effective_date.isoformat(),
-                    },
-                )
-                for provider in _SYSTEM_PROVIDERS
-            ]
+                    )
+                except ModelMetadataProjectionError as error:
+                    replacements.append(
+                        SystemCatalogProjectionFailure(
+                            provider=provider,
+                            failure_message=str(error),
+                            diagnostics=diagnostics,
+                        )
+                    )
+                else:
+                    replacements.append(
+                        SystemCatalogReplacement(
+                            provider=provider,
+                            entries=entries,
+                            diagnostics=diagnostics,
+                        )
+                    )
             for retry in range(2):
                 result = await self.operations.publish(
                     work_token=work_token,
