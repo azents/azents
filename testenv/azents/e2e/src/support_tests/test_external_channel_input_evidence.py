@@ -11,6 +11,7 @@ from urllib.parse import parse_qs, urlsplit
 
 import pytest
 import requests
+from pydantic import ValidationError
 
 from tests.required.public import external_channel_scenarios as scenarios
 
@@ -67,6 +68,7 @@ def _input_event(index: int) -> dict[str, object]:
     """Create one public-projection input with stable provider identity."""
     return {
         "id": f"{index:032x}",
+        "session_id": _SESSION_ID,
         "kind": "external_channel_message",
         "payload": {
             "provider": "discord",
@@ -75,14 +77,19 @@ def _input_event(index: int) -> dict[str, object]:
             "body": f"participant input {index}",
             "original_url": f"https://discord.com/channels/guild/channel/{index}",
         },
+        "schema_version": "1",
+        "created_at": "2026-10-03T00:00:00Z",
     }
 
 
 def _held_event(index: int) -> dict[str, object]:
     return {
         "id": f"{index:032x}",
+        "session_id": _SESSION_ID,
         "kind": "client_tool_result",
         "payload": {"call_id": f"held-progress-{index}", "output": "Work is held"},
+        "schema_version": "1",
+        "created_at": "2026-10-03T00:00:00Z",
     }
 
 
@@ -94,7 +101,7 @@ def _page(events: list[dict[str, object]], *, has_more: bool) -> dict[str, objec
     }
 
 
-def _read_inputs(*, include_pending: bool) -> list[dict[str, object]]:
+def _read_inputs(*, include_pending: bool) -> list[scenarios._ExternalInputEvidence]:
     return scenarios._external_channel_input_evidence(
         public_server_url=_SERVER,
         token=_TOKEN,
@@ -128,10 +135,10 @@ def test_old_inputs_survive_more_than_one_page_of_held_events(
     evidence = _read_inputs(include_pending=False)
 
     assert len(evidence) == input_count
-    assert {item["external_message_id"] for item in evidence} == {
+    assert {item.external_message_id for item in evidence} == {
         f"discord:guild:{index}" for index in range(1, input_count + 1)
     }
-    assert {item["body"] for item in evidence} == {
+    assert {item.body for item in evidence} == {
         f"participant input {index}" for index in range(1, input_count + 1)
     }
     assert len(calls) == 3
@@ -175,7 +182,7 @@ def test_live_and_paged_history_retain_consistency_check(
     else:
         evidence = _read_inputs(include_pending=True)
         assert len(evidence) == 1
-        assert evidence[0]["external_message_id"] == "discord:guild:1"
+        assert evidence[0].external_message_id == "discord:guild:1"
     assert sum(call.path.endswith("/live") for call in calls) == 1
 
 
@@ -251,3 +258,159 @@ def test_twenty_page_cap_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
         _read_inputs(include_pending=False)
     assert len(calls) == 20
     assert all(call.path.endswith("/history") for call in calls)
+
+
+@pytest.mark.parametrize("counter", [True, "1", None])
+def test_provider_counters_reject_coercible_and_null_evidence(
+    monkeypatch: pytest.MonkeyPatch, counter: object
+) -> None:
+    """Provider polling must never mistake malformed counters for readiness."""
+    payload: dict[str, object] = {
+        "request_counts": {"chat.update": counter},
+        "deliveries": [],
+    }
+
+    def get(url: str, *, timeout: int) -> requests.Response:
+        assert timeout == 5
+        return _response(payload, url=url)
+
+    monkeypatch.setattr(scenarios.requests, "get", get)
+    with pytest.raises(ValidationError):
+        scenarios._provider_observation(_SERVER)
+
+
+def test_provider_extensions_and_declared_nulls_survive_wire_egress(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Adjacent wire assertions retain extensions, omissions, and explicit null."""
+    payload: dict[str, object] = {
+        "request_counts": {"chat.update": 1},
+        "deliveries": [{"outcome": "delivered", "session_path": None}],
+        "future_provider_section": {"revision": 2},
+    }
+
+    def get(url: str, *, timeout: int) -> requests.Response:
+        assert timeout == 5
+        return _response(payload, url=url)
+
+    monkeypatch.setattr(scenarios.requests, "get", get)
+    observation = scenarios._provider_observation(_SERVER)
+    assert observation.request_counts == {"chat.update": 1}
+    assert observation.deliveries[0].session_path is None
+    assert "session_path" in observation.deliveries[0].model_fields_set
+    assert "safe_category" not in observation.deliveries[0].model_fields_set
+    assert scenarios._provider_state(_SERVER) == payload
+
+
+@pytest.mark.parametrize("flag", ["true", 1, None])
+def test_barrier_reached_requires_a_boolean(
+    monkeypatch: pytest.MonkeyPatch, flag: object
+) -> None:
+    """A malformed synchronization response cannot release an ordering poll."""
+
+    def get(url: str, *, timeout: int) -> requests.Response:
+        assert timeout == 5
+        return _response({"reached": flag}, url=url)
+
+    monkeypatch.setattr(scenarios.requests, "get", get)
+    with pytest.raises(ValidationError):
+        scenarios._read_barrier(_SERVER)
+
+
+@pytest.mark.parametrize("body", [123, True, ["text"], {"text": "opaque"}])
+def test_external_input_text_rejects_malformed_history_payload(
+    monkeypatch: pytest.MonkeyPatch, body: object
+) -> None:
+    """Interpret external text strictly while the event envelope stays generated."""
+    event = _input_event(1)
+    payload = event["payload"]
+    assert isinstance(payload, dict)
+    payload["body"] = body
+    _install_get(monkeypatch, lambda _: _page([event], has_more=False))
+    with pytest.raises(ValidationError):
+        _read_inputs(include_pending=False)
+
+
+def test_unrelated_mailbox_payload_remains_opaque(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unknown mailbox item families must not acquire external-input invariants."""
+
+    def payload_for(call: _Call) -> dict[str, object]:
+        if call.path.endswith("/history"):
+            event = _input_event(1)
+            event["future_event_field"] = {"opaque": [1, None]}
+            return _page([event], has_more=False)
+        return {
+            "mailbox_items": [
+                {"kind": "command", "items": [{"presentation": {"body": [1, 2]}}]},
+            ],
+            "future_live_extension": True,
+        }
+
+    _install_get(monkeypatch, payload_for)
+    evidence = _read_inputs(include_pending=True)
+    assert [item.external_message_id for item in evidence] == ["discord:guild:1"]
+
+
+def test_external_input_null_and_omitted_optional_text_have_same_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Canonical deduplication preserves nullable optional presentation semantics."""
+    event = _input_event(1)
+    payload = event["payload"]
+    assert isinstance(payload, dict)
+    payload.pop("original_url")
+    presentation = {**payload, "type": "external_channel_message", "original_url": None}
+
+    def payload_for(call: _Call) -> dict[str, object]:
+        if call.path.endswith("/history"):
+            return _page([event], has_more=False)
+        return {
+            "mailbox_items": [
+                {
+                    "kind": "external_channel_message",
+                    "items": [{"presentation": presentation}],
+                }
+            ]
+        }
+
+    _install_get(monkeypatch, payload_for)
+    evidence = _read_inputs(include_pending=True)
+    assert len(evidence) == 1
+    assert evidence[0].original_url is None
+
+
+def test_progress_journal_tolerates_extensions_but_validates_decision_fields() -> None:
+    """The provider stage decoder checks fields used by the assembled journey."""
+    decoded = scenarios._PROGRESS_OBSERVATIONS.validate_python(
+        [
+            {"binding": "b", "matched": True, "stage": None, "future_field": [1]},
+        ]
+    )
+    assert decoded[0].matched is True
+    assert decoded[0].stage is None
+    with pytest.raises(ValidationError):
+        scenarios._PROGRESS_OBSERVATIONS.validate_python([{"matched": "true"}])
+
+
+def test_file_journal_decodes_per_call_output_metadata() -> None:
+    """The file proxy emits a call-keyed mapping, with nullable diagnostic values."""
+    decoded = scenarios._FILE_OBSERVATIONS.validate_python(
+        [
+            {
+                "binding": "b",
+                "stage": "after_process",
+                "tool_outputs": {
+                    "call-download": {"present": True, "length": None, "error": None},
+                },
+                "future_metadata": {"revision": 2},
+            },
+        ]
+    )
+    output = decoded[0].tool_outputs["call-download"]
+    assert output.present is True
+    assert output.length is None
+    assert output.error is None
+    with pytest.raises(ValidationError):
+        scenarios._FILE_OBSERVATIONS.validate_python([{"tool_outputs": []}])

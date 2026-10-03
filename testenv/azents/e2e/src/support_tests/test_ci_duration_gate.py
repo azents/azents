@@ -1,16 +1,27 @@
 """Focused tests for the compact E2E duration gate."""
 
 import json
+import subprocess
+import sys
 from collections.abc import Sequence
 from decimal import Decimal
 from pathlib import Path
 
 import pytest
 
+from support import ci_duration_gate
 from support.ci_duration_gate import (
+    CandidateTiming,
+    DurationReport,
     EvidenceError,
+    InvalidCandidateTiming,
     Sample,
     _candidate_report,
+    _decode_candidate,
+    _decode_comments,
+    _decode_pull_text,
+    _decode_runs,
+    _decode_test_phase,
     affected_pull_numbers,
     compare,
     evaluate,
@@ -507,7 +518,7 @@ def test_regression_and_unavailable_are_explained_in_plain_language() -> None:
         _HEAD,
         _BASE,
     )
-    unavailable_report = {
+    unavailable_report: DurationReport = {
         **regression,
         "outcome": "comparison_unavailable",
         "reason": "compatible_base_run_unavailable",
@@ -743,3 +754,157 @@ def test_recheck_drops_stale_head_before_publication(
     )
     assert expected in summary
     assert len(posts) == int(change_after_status)
+
+
+def test_phase_decoder_projects_only_gate_fields() -> None:
+    record = _decode_test_phase(
+        '{"record_type":"test_phase","node_id":"test::example",'
+        '"phase":"call","duration_seconds":"1.25","outcome":"passed"}'
+    )
+    assert record is not None
+    assert record.node_id == "test::example"
+    assert record.phase == "call"
+    assert record.duration_seconds == Decimal("1.25")
+    assert _decode_test_phase('{"record_type":"fixture","fixture":"server"}') is None
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"node_id": ""},
+        {"node_id": True},
+        {"phase": "unknown"},
+        {"duration_seconds": True},
+        {"duration_seconds": None},
+        {"duration_seconds": "NaN"},
+        {"outcome": None},
+        {"unknown": "value"},
+    ],
+)
+def test_phase_decoder_rejects_invalid_contract_fields(
+    changes: dict[str, object],
+) -> None:
+    payload = {
+        "record_type": "test_phase",
+        "node_id": "test::example",
+        "phase": "call",
+        "duration_seconds": 1.25,
+        "outcome": "passed",
+        **changes,
+    }
+    with pytest.raises(EvidenceError):
+        _decode_test_phase(json.dumps(payload))
+
+
+def test_current_and_compact_reports_decode_to_candidate_measurements() -> None:
+    current = compare(
+        {"web-1": Decimal("90")},
+        Sample(7, {"web-1": Decimal("100")}),
+        _HEAD,
+        _BASE,
+        diagnostics={"web-1": {"call": Decimal("90"), "wall": Decimal("110")}},
+    )
+    decoded = _decode_candidate(json.dumps(current))
+    assert decoded.head_sha == _HEAD
+    assert isinstance(decoded.timing, CandidateTiming)
+    assert decoded.timing.lanes == {"web-1": Decimal("90")}
+    assert decoded.timing.diagnostics["web-1"] == {
+        "call": Decimal("90"),
+        "wall": Decimal("110"),
+    }
+    compact = _decode_candidate(
+        json.dumps({"head_sha": _HEAD, "lanes": {"web-1": "90"}})
+    )
+    assert isinstance(compact.timing, CandidateTiming)
+    assert compact.timing.diagnostics == {}
+    # Historic explicit null diagnostics and null diagnostic cells are absence.
+    nullable = _decode_candidate(
+        json.dumps(
+            {"head_sha": _HEAD, "lanes": {"web-1": "90"}, "lane_diagnostics": None}
+        )
+    )
+    assert isinstance(nullable.timing, CandidateTiming)
+    assert nullable.timing.diagnostics == {}
+    assert set(current) == set(DurationReport.__annotations__)
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"lanes": {}},
+        {"lanes": {"web-1": True}},
+        {"lanes": {"web-1": "-1"}},
+        {"lanes": {"not-a-lane": "90"}},
+        {"schema_version": True},
+        {"schema_version": 1.0},
+        {"schema_version": 2},
+        {"metric": "other-metric"},
+        {"unknown": True},
+        {"lane_diagnostics": {"web-1": {"unexpected": 1}}},
+    ],
+)
+def test_invalid_candidate_is_typed_failure_not_absent_evidence(
+    changes: dict[str, object],
+) -> None:
+    decoded = _decode_candidate(
+        json.dumps({"head_sha": _HEAD, "lanes": {"web-1": "90"}, **changes})
+    )
+    assert decoded.head_sha == _HEAD
+    assert isinstance(decoded.timing, InvalidCandidateTiming)
+
+
+@pytest.mark.parametrize("status", [None, False, 17, ""])
+def test_run_decoder_does_not_turn_malformed_status_into_completed(
+    status: object,
+) -> None:
+    with pytest.raises(EvidenceError, match="invalid_run_status"):
+        _decode_runs(
+            json.dumps({"workflow_runs": [{"id": 7, "status": status}]}),
+            "azents/azents",
+        )
+
+
+def test_github_ingress_projects_extensible_fields_without_raw_payloads() -> None:
+    runs = _decode_runs(
+        '{"workflow_runs":[{"id":7,"extra":"GitHub-owned field"},{"id":true}]}',
+        "azents/azents",
+    )
+    assert len(runs) == 1
+    assert runs[0].status == "completed"
+    assert runs[0].url == "https://github.com/azents/azents/actions/runs/7"
+    pull = _decode_pull_text(_pull())
+    assert pull.head_sha == _HEAD
+    assert pull.base_sha == _BASE
+    assert pull.head_repository == "azents/azents"
+    comments = _decode_comments(
+        '[[{"id":42,"body":"sticky","extra":true}],'
+        '[{"id":true,"body":"invalid"},{"id":43,"body":null}]]'
+    )
+    assert len(comments) == 1
+    assert comments[0].comment_id == 42
+    assert comments[0].body == "sticky"
+
+
+def test_gate_still_imports_without_site_packages_on_python312_syntax(
+    tmp_path: Path,
+) -> None:
+    """The trusted workflow helper has no dependency on the E2E environment."""
+    script = """
+import ast
+import pathlib
+import runpy
+import sys
+path = pathlib.Path(sys.argv[1])
+ast.parse(path.read_text(), feature_version=(3, 12))
+namespace = runpy.run_path(str(path), run_name="duration_gate_stdlib_import")
+assert "pydantic" not in sys.modules
+assert namespace["METRIC"] == "pytest-call-total-v1"
+"""
+    subprocess.run(
+        [sys.executable, "-I", "-S", "-c", script, ci_duration_gate.__file__],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
