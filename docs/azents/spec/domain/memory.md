@@ -51,8 +51,8 @@ api_routes:
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/memories/{memory_id}
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/historical-memories
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/historical-memories/{source_session_id}
-last_verified_at: 2026-10-02
-spec_version: 11
+last_verified_at: 2026-10-04
+spec_version: 12
 ---
 
 # Memory
@@ -192,6 +192,12 @@ text, or admit newly prepared summaries. Missing/corrupt state is initialized
 only by explicit lifecycle refresh, not ordinary prompt reads. A failed refresh
 or snapshot CAS conflict contributes no automatic Memory to that execution.
 
+Consumer authority checks hold FK-compatible `FOR NO KEY UPDATE` locks on the
+selected root Session and Agent. These locks exclude authority writers while
+allowing the `KEY SHARE` parent protection used by Session/event FK operations.
+Current User membership is locked separately and the existing enablement,
+root lifecycle, Workspace, and product-scope checks remain unchanged.
+
 Saved index entries are type/name/ID sorted. Historical candidates are bounded to
 200 and ranked deterministically. New Sessions rank by source activity,
 preparation time, and source ID; after compaction lexical matches against known
@@ -313,6 +319,7 @@ per-answer usage claim. The inventory is not the exact set used by a response.
 
 | Date | Version | Change |
 |---|---:|---|
+| 2026-10-04 | 12 | Use FK-compatible Memory consumer authority locks while retaining writer exclusion and current scope checks |
 | 2026-10-02 | 11 | Refresh Memory during root Run preparation and hook-driven post-compaction context reconstruction, reuse unchanged content, and preserve read-only per-turn filtering and child inheritance |
 | 2026-10-02 | 10 | Promoted Historical preparation, boundary snapshots, live Memory VFS, generic-read cutover, Saved-only mutation, and retained read-only Historical settings |
 | 2026-10-01 | 9 | Moved runtime Memory, prompt-scope, and Session-history transactions into completed repository operations |

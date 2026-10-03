@@ -77,7 +77,9 @@ class HistoricalMemoryRepository:
                     RDBAgent.memory_enabled.is_(True),
                     self._authorized_source(),
                 )
-                .with_for_update(of=(RDBAgentSession, RDBAgent))
+                # NO KEY UPDATE fences authority writers while permitting
+                # the FK KEY SHARE protection used by Session event writes.
+                .with_for_update(of=(RDBAgentSession, RDBAgent), key_share=True)
             )
         ).one_or_none()
         if locked is None:
