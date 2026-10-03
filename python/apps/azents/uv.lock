@@ -422,7 +422,7 @@ requires-dist = [
     { name = "azents-runtime-control", editable = "../../libs/azents-runtime-control" },
     { name = "bcrypt", specifier = "==5.0.0" },
     { name = "boto3", specifier = "==1.40.61" },
-    { name = "boto3-stubs", extras = ["rds"], specifier = "==1.43.102" },
+    { name = "boto3-stubs", extras = ["rds"], specifier = "==1.43.103" },
     { name = "croniter", specifier = "==6.2.4" },
     { name = "cryptography", specifier = "==50.0.1" },
     { name = "discord-py", specifier = "==2.7.1" },
@@ -566,15 +566,15 @@ wheels = [
 
 [[package]]
 name = "boto3-stubs"
-version = "1.43.102"
+version = "1.43.103"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "botocore-stubs" },
     { name = "types-s3transfer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/33/26/f5f1607d3fe02457b015fe2c655de7694bd60c80d04a3b08e0599b15954f/boto3_stubs-1.43.102.tar.gz", hash = "sha256:a0852df63ebf0aff33ad4f7e4928f25d61703bf1065b46a6db7fe6f7a284d83c", size = 105223, upload-time = "2026-09-24T20:44:41.026Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/dc/81/6234082dbb0695035b2152b430bd522c9c39cf994cc8f2f7f91af35463b2/boto3_stubs-1.43.103.tar.gz", hash = "sha256:76f99b13ca2bf2dd3dcfc6b46fbf051a9da0ec3fa0cceadfc328233750e2a1e0", size = 105222, upload-time = "2026-09-25T20:44:13.767Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/d6/78/2f7bcf04fcf11609e035754217bcbd54a433574e537b977d80ea83cd0a35/boto3_stubs-1.43.102-py3-none-any.whl", hash = "sha256:dcc0699a04c75e90484c3ba4f98d85ab05f3f325df7c03acdf66654bf161ea28", size = 71851, upload-time = "2026-09-24T20:44:37.808Z" },
+    { url = "https://files.pythonhosted.org/packages/6f/36/a9faa75f61d7b4f77b60cc28eaf649d8912c9834c42457c792a55a1d17b4/boto3_stubs-1.43.103-py3-none-any.whl", hash = "sha256:c2cf91503f29f71d25129853ad76124db5996c28dfe5a573b6789f8ffee71014", size = 71851, upload-time = "2026-09-25T20:44:09.597Z" },
 ]
 
 [package.optional-dependencies]
