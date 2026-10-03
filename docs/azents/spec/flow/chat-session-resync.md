@@ -36,8 +36,8 @@ code_paths:
   - typescript/apps/azents-web/src/shared/agent-session/**
   - typescript/apps/azents-web/src/shared/subagent-tree/**
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
-last_verified_at: 2026-09-15
-spec_version: 52
+last_verified_at: 2026-10-03
+spec_version: 53
 ---
 
 # Chat Session Resync
@@ -289,6 +289,12 @@ it does not use the direct human user-message bubble treatment. Subagent navigat
 internal-message surfaces use a robot icon as their representative symbol.
 
 ## 5.3 Composer Profile State
+
+Composer profile edits and both settings-only apply and ordinary input submission
+drop execution options unsupported by the currently selected target's primary
+candidate. Supported options and the explicitly selected effort remain intact.
+A settings-only apply failure renders a localized model-settings error rather
+than a message-send error; retry still uses settings-only apply and creates no message.
 
 The Composer presents separate desktop Model and effort controls and a combined mobile control. Model choices come only from the Agent's selectable target labels. Effort options come from the selected target's normalized reasoning capabilities, but stored, decoded, and rendered effort values are opaque nullable strings. The frontend does not normalize or reject an unknown read-side string; backend submission and preparation remain authoritative for supported values. Switching to a target that does not support the current explicit effort visibly resets effort to Default.
 

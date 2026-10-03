@@ -207,6 +207,8 @@ interface RankedInputAction {
   ranges: number[];
 }
 
+type ComposerWriteError = { type: "input" } | { type: "profile" };
+
 type DesktopProfileSection = "model" | "effort" | `execution:${string}`;
 
 interface DesktopProfileFocusTarget {
@@ -258,7 +260,7 @@ export interface ChatInputContainer extends Pick<
   setDesktopProfileSection: React.Dispatch<
     React.SetStateAction<DesktopProfileSection | null>
   >;
-  sendErrorVisible: boolean;
+  writeError: ComposerWriteError | null;
   selectedAction: InputActionDefinition | null;
   setSelectedAction: React.Dispatch<
     React.SetStateAction<InputActionDefinition | null>
@@ -652,7 +654,7 @@ function useChatInputContainerImplementation({
     useState<DesktopProfileSection | null>(null);
   const [desktopProfileFocusTarget, setDesktopProfileFocusTarget] =
     useState<DesktopProfileFocusTarget | null>(null);
-  const [sendErrorVisible, setSendErrorVisible] = useState(false);
+  const [writeError, setWriteError] = useState<ComposerWriteError | null>(null);
   const [selectedAction, setSelectedAction] =
     useState<InputActionDefinition | null>(() =>
       resolveActionDefinition(parsedDraft.action, inputActions),
@@ -850,7 +852,7 @@ function useChatInputContainerImplementation({
 
   const updateInputValue = useCallback(
     (nextValue: string): void => {
-      setSendErrorVisible(false);
+      setWriteError(null);
       setInputActionSuggestionsDismissed(false);
       setInputValue(nextValue);
       persistDraft(
@@ -901,7 +903,7 @@ function useChatInputContainerImplementation({
   }, [onCancelEdit, restorePersistedDraft]);
 
   const clearInputAfterSend = useCallback((): void => {
-    setSendErrorVisible(false);
+    setWriteError(null);
     if (editingMessageId !== null) {
       restorePersistedDraft();
     } else {
@@ -928,6 +930,17 @@ function useChatInputContainerImplementation({
         return;
       }
 
+      const profileForWrite = normalizeComposerProfile(
+        inferenceProfile,
+        supportedExecutionOptions,
+      );
+      if (
+        profileForWrite.enabled_execution_options.join(",") !==
+        inferenceProfile.enabled_execution_options.join(",")
+      ) {
+        profileDirtyRef.current = true;
+      }
+      setInferenceProfile(profileForWrite);
       const hasAttachedFiles = pendingFiles.length > 0;
       if (
         editingMessageId === null &&
@@ -937,10 +950,8 @@ function useChatInputContainerImplementation({
         selectedAction === null &&
         onApplyInferenceProfile != null
       ) {
-        const applied = await onApplyInferenceProfile(inferenceProfile);
-        if (!applied) {
-          setSendErrorVisible(true);
-        }
+        const applied = await onApplyInferenceProfile(profileForWrite);
+        setWriteError(applied ? null : { type: "profile" });
         return;
       }
       const messagePolicy = selectedAction?.message.policy ?? "required";
@@ -949,11 +960,11 @@ function useChatInputContainerImplementation({
         return;
       }
       if (hasAttachedFiles && attachmentPolicy === "unsupported") {
-        setSendErrorVisible(true);
+        setWriteError({ type: "input" });
         return;
       }
       if (!hasAttachedFiles && attachmentPolicy === "required") {
-        setSendErrorVisible(true);
+        setWriteError({ type: "input" });
         return;
       }
 
@@ -966,7 +977,7 @@ function useChatInputContainerImplementation({
           const uploaded = await uploadAll(agentId);
           if (uploaded.length === 0) {
             if (!trimmed || attachmentPolicy === "required") {
-              setSendErrorVisible(true);
+              setWriteError({ type: "input" });
               resetDoneFiles();
               return;
             }
@@ -974,29 +985,29 @@ function useChatInputContainerImplementation({
             const sentWithoutAttachments = await onSendInput(
               trimmed,
               normalizedAction,
-              inferenceProfile,
+              profileForWrite,
             );
             if (sentWithoutAttachments) {
               clearInputAfterSend();
             } else {
-              setSendErrorVisible(true);
+              setWriteError({ type: "input" });
             }
             return;
           }
           const sent = await onSendInput(
             trimmed,
             normalizedAction,
-            inferenceProfile,
+            profileForWrite,
             uploaded,
           );
           if (sent) {
             clearInputAfterSend();
           } else {
-            setSendErrorVisible(true);
+            setWriteError({ type: "input" });
             resetDoneFiles();
           }
         } catch {
-          setSendErrorVisible(true);
+          setWriteError({ type: "input" });
           resetDoneFiles();
         }
         return;
@@ -1005,12 +1016,12 @@ function useChatInputContainerImplementation({
       const sent = await onSendInput(
         trimmed,
         normalizedAction,
-        inferenceProfile,
+        profileForWrite,
       );
       if (sent) {
         clearInputAfterSend();
       } else {
-        setSendErrorVisible(true);
+        setWriteError({ type: "input" });
       }
     };
     void send();
@@ -1018,6 +1029,7 @@ function useChatInputContainerImplementation({
     inputValue,
     selectedAction,
     inferenceProfile,
+    supportedExecutionOptions,
     isUploading,
     editingMessageId,
     editSendDisabled,
@@ -1126,9 +1138,19 @@ function useChatInputContainerImplementation({
   const updateInferenceProfile = useCallback(
     (nextProfile: RequestedInferenceProfile): void => {
       profileDirtyRef.current = true;
-      setInferenceProfile(nextProfile);
+      const option = modelOptionForTarget(
+        selectableModelOptions,
+        nextProfile.model_target_label,
+      );
+      setInferenceProfile(
+        normalizeComposerProfile(
+          nextProfile,
+          supportedExecutionOptionIds(option),
+        ),
+      );
+      setWriteError(null);
     },
-    [],
+    [selectableModelOptions],
   );
 
   const handleModelChange = useCallback(
@@ -1582,7 +1604,7 @@ function useChatInputContainerImplementation({
     contextUsageDetailsRef,
     desktopProfileSection,
     setDesktopProfileSection,
-    sendErrorVisible,
+    writeError,
     selectedAction,
     setSelectedAction,
     inputActionListboxId,

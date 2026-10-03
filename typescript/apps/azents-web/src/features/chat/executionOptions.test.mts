@@ -36,6 +36,20 @@ const profile: RequestedInferenceProfile = {
   enabled_execution_options: ["fast"],
 };
 
+void test("effort-only profile edits discard stale speed without changing the choice", () => {
+  const edited: RequestedInferenceProfile = {
+    ...profile,
+    reasoning_effort: "medium",
+  };
+  assert.deepEqual(normalizeComposerProfile(edited, []), {
+    model_target_label: "Default",
+    reasoning_effort: "medium",
+    enabled_execution_options: [],
+  });
+  assert.deepEqual(normalizeComposerProfile(edited, ["fast"]), edited);
+  assert.deepEqual(profile.enabled_execution_options, ["fast"]);
+});
+
 void test("supported members enumerate together without treating support as enabled", () => {
   assert.deepEqual(executionOptionGroups(definitions), [
     { id: "processing_speed", definitions },
