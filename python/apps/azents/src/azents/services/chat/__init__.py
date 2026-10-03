@@ -371,9 +371,11 @@ def _session_profile_fallback(
         if agent.model_parameters is not None
         else None
     )
-    reasoning = option.candidates[0].model_selection.normalized_capabilities.reasoning
+    capabilities = option.candidates[0].model_selection.normalized_capabilities
     if reasoning_effort is not None and (
-        not reasoning.supported or reasoning_effort not in reasoning.effort_levels
+        capabilities.semantic_contract is None
+        and not capabilities.reasoning.supported
+        or reasoning_effort not in capabilities.configurable_reasoning_efforts()
     ):
         reasoning_effort = None
     return _SessionProfileFallback(

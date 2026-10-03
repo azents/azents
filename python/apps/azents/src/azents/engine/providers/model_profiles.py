@@ -360,6 +360,12 @@ def _apply_saved_support(
             supports_json_schema_output=(
                 structured or (protocol == "anthropic" and strict)
             ),
+            supports_image_output=protocol == "google"
+            and any(
+                output.modality == "image"
+                and output.support.state in {"supported", "conditional"}
+                for output in contract.output_modalities
+            ),
             supported_native_tools=frozenset(native_tools),
         ),
     )

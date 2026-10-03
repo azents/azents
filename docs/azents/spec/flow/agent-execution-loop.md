@@ -150,7 +150,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
   - typescript/apps/azents-web/messages/*/chat.json
 last_verified_at: 2026-10-03
-spec_version: 205
+spec_version: 206
 ---
 
 # Agent Execution Loop
@@ -807,6 +807,16 @@ ChatGPT use saved semantics directly without Pydantic capability lookup; other
 routes keep actual protocol codecs. Historical descriptor absence preserves
 prior behavior, and no operation reads the retired genai source as fallback.
 Stock Pydantic usage-counter extraction remains transitive, not cost authority.
+
+For v2 compatible xAI, xAI OAuth, OpenRouter and Kimi routes, explicit sampling
+values authorized by the saved contract are carried through the public SDK body
+extension instead of being removed by generic OpenAI reasoning codec policy.
+Body-over-option presence/null precedence and zero values are preserved, along
+with reasoning and unrelated options. Support validation reads the effective
+support-relevant scalar/format body envelope; explicit effort conflicts still fail.
+Native Responses supplies `parallel_tool_calls=false` when the caller omits it
+and the actual saved condition denies parallel calls. Supported/unknown omissions,
+historical behavior and explicit accepted options retain their existing meaning.
 
 Both `xai` and `xai_oauth` use the xAI transport target in this lowerer. For either identity, system instructions become the first `system` input item instead of top-level `instructions`, hosted `web_search` uses the xAI Responses tool target, and Anthropic cache-control hints are omitted. Credential refresh is resolved before the adapter pipeline and remains exclusive to `xai_oauth`; the lowerer does not own OAuth lifecycle state.
 
@@ -1794,6 +1804,9 @@ icon.
 
 ## Changelog
 
+- **2026-10-03** (spec_version 206) — Preserved saved-authorized compatible
+  sampling through SDK encoding, validated effective body controls and carried
+  native parallel denial without changing saved predicates or historical defaults.
 - **2026-10-03** (spec_version 205) — Omitted OpenAI-only search context size
   from xAI native search declarations and retained bounded, redacted scalar HTTP
   error messages without changing retry or user-visible error policy.

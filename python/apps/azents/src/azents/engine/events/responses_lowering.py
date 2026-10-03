@@ -414,6 +414,14 @@ class ResponsesRequestLowerer:
                 requested_effort=request.reasoning_effort,
                 function_tools=function_tools,
             )
+            if (
+                "parallel_tool_calls" not in kwargs
+                and model_support_allowed(
+                    contract.parallel_function_calls, context=context
+                )
+                is False
+            ):
+                kwargs["parallel_tool_calls"] = False
         else:
             context = ModelSupportContext(
                 reasoning_effort=self._reasoning_effort, function_tools=None

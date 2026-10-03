@@ -949,6 +949,26 @@ class PydanticAILowerer:
         if self.provider_id == LLMProvider.OPENROUTER:
             values["openai_include_raw_annotations"] = True
             values["openai_include_web_search_sources"] = True
+        if contract is not None and self.provider_id in {
+            LLMProvider.XAI,
+            LLMProvider.XAI_OAUTH,
+            LLMProvider.OPENROUTER,
+            LLMProvider.KIMI_OAUTH,
+        }:
+            # Preserve the existing typed settings normalization before moving
+            # scalar fields into the public raw-body extension.
+            values = dict(_OpenAISettings.model_validate({"value": values}).value)
+            extra_body = values.get("extra_body")
+            if extra_body is not None and not is_string_object_dict(extra_body):
+                raise ValueError("Model extra_body must be an object")
+            body = dict(extra_body if extra_body is not None else {})
+            # Saved validation owns compatibility. The SDK's generic reasoning
+            # filter must not remove explicit authorized sampling wire values.
+            for key in ("temperature", "top_p"):
+                if key in values:
+                    body.setdefault(key, values.pop(key))
+            if body:
+                values["extra_body"] = body
         settings = _OpenAISettings.model_validate({"value": values}).value
         if self.provider_id in {LLMProvider.XAI, LLMProvider.XAI_OAUTH}:
             searches = [

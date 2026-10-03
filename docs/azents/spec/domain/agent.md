@@ -121,7 +121,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack
 last_verified_at: 2026-10-03
-spec_version: 88
+spec_version: 89
 ---
 
 # Agent Domain Spec
@@ -291,6 +291,13 @@ Conditional built-ins can be configured as potential choices, but actual request
 effort and published function declarations govern dispatch. Strict functions and
 structured responses are separate. Existing optional controls use saved conditions
 conservatively and preserve exact xhigh/max values without nearest-level remapping.
+
+Profile preparation, candidate compatibility, defaults, subagent choices and
+external model editors use individually justified reasoning-effort potential,
+including a conditional descriptor, rather than the unconditional display list.
+Known effort predicates narrow that potential; actual function-tool predicates
+remain enforced at dispatch. The saved descriptor and its flat views are not
+rewritten, and historical consumer-specific support guards remain intact.
 
 ### 1.2 WorkspaceModelSettings
 
@@ -747,6 +754,9 @@ Following contracts do not exist in current system.
 
 ## 8. Change History
 
+- **2026-10-03** (spec_version 89) — Preserved conditional reasoning-effort
+  potential across profile/default/candidate/subagent preparation without weakening
+  actual saved-predicate dispatch validation or historical guards.
 - **2026-10-03** (spec_version 88) — Preserved complete saved v2 support,
   conditional configuration/dispatch separation and historical descriptor absence
   across explicit reselection, ordinary saves and catalog refresh.

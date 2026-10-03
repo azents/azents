@@ -1033,7 +1033,7 @@ class ExternalModelSettingsRepository:
                 for value in (
                     option.candidates[
                         0
-                    ].model_selection.normalized_capabilities.reasoning.effort_levels
+                    ].model_selection.normalized_capabilities.configurable_reasoning_efforts()
                 )
             ],
             "execution_options": [

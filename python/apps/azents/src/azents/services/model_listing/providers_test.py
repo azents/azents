@@ -1577,3 +1577,39 @@ def test_xai_oauth_ambiguous_default_is_unknown_not_arbitrarily_selected() -> No
     )
     assert evidence.default_reasoning_effort.state == "null"
     assert "unsafe" not in candidate.model_dump_json()
+
+
+def test_xai_oauth_disabled_controls_win_over_conflicting_presets() -> None:
+    candidate = providers._candidate_from_xai_oauth_model(
+        providers._XaiOAuthModelPayload.model_validate(
+            {
+                "id": "grok-new",
+                "supports_reasoning_effort": False,
+                "reasoning_efforts": [
+                    {"id": "low", "default": True},
+                    {"id": "high"},
+                ],
+            }
+        ),
+        fetched_at=datetime.datetime(2026, 10, 3, tzinfo=datetime.UTC),
+    )
+    assert candidate is not None
+    evidence = _replayed_evidence(candidate)
+    assert evidence.reasoning_efforts == CatalogFact(state="value", value=())
+    assert evidence.default_reasoning_effort.value is None
+    assert candidate.source_metadata is not None
+    assert candidate.source_metadata["capability_conflicts"] == [
+        "reasoning_effort_controls_disabled_with_presets"
+    ]
+    [entry] = project_integration_replacement_entries(
+        integration_id="integration-xai",
+        provider=LLMProvider.XAI_OAUTH,
+        candidates=[candidate],
+        source=None,
+        provider_listing_source="xai_oauth:grok_models",
+    )
+    caps = ModelCapabilities.model_validate(entry.normalized_capabilities)
+    assert caps.reasoning.effort_levels == []
+    assert caps.semantic_contract is not None
+    assert caps.semantic_contract.reasoning.completeness == "complete"
+    assert caps.semantic_contract.reasoning.default_effort is None

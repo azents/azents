@@ -5,8 +5,8 @@ created: 2026-05-30
 spec_type: flow
 owner: "@Hardtack"
 touches_domains: [agent, conversation]
-last_verified_at: 2026-10-01
-spec_version: 25
+last_verified_at: 2026-10-03
+spec_version: 26
 code_paths:
   - python/apps/azents/src/azents/services/agent/**
   - python/apps/azents/src/azents/api/public/agent/**
@@ -82,13 +82,17 @@ Latest usage comes from event `TurnMarkerPayload.usage`. Usage is value returned
 
 For OpenAI API-key and ChatGPT OAuth turns, token fields and raw usage come directly from the official
 OpenAI SDK completed `ResponseUsage`; raw usage does not contain synthetic adapter-private hidden parameters.
-Their `cost_usd` is a content-free Azents estimate from the operation's captured generic
-`genai_prices` pricing view, with optional typed method/source/tier provenance.
+Their `cost_usd` is a content-free Azents estimate from the operation's captured
+exact-scoped data-only `litellm_catalog` pricing view, with optional typed
+method/source/tier provenance.
 Actual Ultrafast and unknown premium tiers leave cost unavailable; an Ultrafast request with
 missing, empty, or `auto` actual tier also cannot be priced as Standard. This does not fail
 successful output or remove provider token usage. REST history omits unavailable cost fields,
-while live transport may retain an explicit null. Unsupported pricing or a
-pricing-calculator `ValueError` leaves cost absent while preserving provider token usage. Unexpected
+while live transport may retain an explicit null. Missing, invalid or unsupported
+required price/quantity evidence leaves the whole cost absent while preserving
+provider token usage. Google native IMAGE/AUDIO receipts are directed billing
+quantities, not ordinary-token subtotals; uncertain or unadopted cache/media/tool
+partitions remain unavailable. Unexpected
 calculator defects remain visible through the ordinary internal-error path. ChatGPT OAuth cost is an
 API-pricing estimate rather than subscription billing. Usage details show Normal, Fast, or
 Ultrafast from the immutable applied profile as processing-speed intent, not a verified served
@@ -166,6 +170,8 @@ cd typescript && corepack pnpm --filter @azents/web typecheck
 
 ## Changelog
 
+- **2026-10-03** — v26. Reflected captured data-only pricing authority and
+  complete directed Google usage accounting without recalculating historical costs.
 - **2026-10-01** — v25. Made the captured generic `genai_prices` snapshot the
   sole local estimate authority after removal of the former source schema.
 - **2026-09-30** — v24. Documented captured-source cost estimation and truthful usage provenance

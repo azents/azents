@@ -7,8 +7,9 @@ tags: [model-catalog, backend, engine, frontend, testing]
 # Phase Execution Plan
 
 - Phase: 2 — comprehensive omission audit and grounded corrections.
-- Branch/base: `fix/catalog-261003-2-capability-omissions` →
-  `fix/catalog-261003-1-chatgpt-web-search`.
+- Branch/base: `fix/catalog-261003-2-capability-omissions` → `main` after the
+  requester independently merged phase 1 (#2072). The original dependency was
+  `fix/catalog-261003-1-chatgpt-web-search`; its corrections remain included.
 - PR boundary: evidence-backed fixes, full coverage ledger, integrated QA and current
   Spec updates. The separate third phase owns existing top-k interface propagation
   and final temporary-plan cleanup.

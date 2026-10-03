@@ -362,7 +362,7 @@ class SessionModelAvailabilityService:
         for candidate in option.candidates[1:]:
             selection = candidate.model_selection
             if reasoning_effort is not None and reasoning_effort not in (
-                selection.normalized_capabilities.reasoning.effort_levels
+                selection.normalized_capabilities.configurable_reasoning_efforts()
             ):
                 continue
             try:

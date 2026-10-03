@@ -13,10 +13,17 @@ from azents.core.inference_profile import (
     RequestedInferenceProfile,
     SessionAppliedInferenceProfile,
     SessionInferenceState,
+    validate_requested_profile_against_options,
 )
 from azents.core.llm_catalog import ModelCapabilities, ModelReasoningEffort
+from azents.core.model_capability_evidence import ProviderCapabilityEvidence
+from azents.core.model_capability_projection import project_capabilities
+from azents.core.model_catalog_source import CatalogFact
 from azents.core.model_execution_options import ModelExecutionOptionId
-from azents.testing.model_selection import make_test_model_settings
+from azents.testing.model_selection import (
+    make_test_model_settings,
+    make_test_selectable_model_options,
+)
 
 
 def _selection() -> AgentModelSelection:
@@ -267,3 +274,46 @@ def test_nonhistorical_profiles_require_explicit_enabled_options(
     del payload["enabled_execution_options"]
     with pytest.raises(ValidationError, match="enabled_execution_options"):
         profile_type.model_validate(payload)
+
+
+def test_profile_selection_keeps_conditional_effort_potential() -> None:
+    caps = project_capabilities(
+        provider=LLMProvider.OPENAI,
+        exact_model="gpt-5.4",
+        source_model=None,
+        evidence=ProviderCapabilityEvidence(
+            reasoning=CatalogFact(state="value", value=True),
+            reasoning_efforts=CatalogFact(
+                state="value",
+                value=(ModelReasoningEffort.NONE, ModelReasoningEffort.HIGH),
+            ),
+        ),
+        model_developer=LLMModelDeveloper.OPENAI,
+    )
+    payload = caps.model_dump(mode="json")
+    payload["semantic_contract"]["reasoning"]["support"] = {
+        "state": "conditional",
+        "origin": "explicit",
+        "predicate": {"reasoning_efforts": ["high"], "function_tools": True},
+    }
+    payload["reasoning"]["supported"] = False
+    payload["reasoning"]["effort_levels"] = []
+    caps = ModelCapabilities.model_validate(payload)
+    before = caps.model_dump_json()
+    options = make_test_selectable_model_options(
+        _selection().model_copy(update={"normalized_capabilities": caps}),
+        label="Quality",
+    )
+    profile = RequestedInferenceProfile(
+        model_target_label="Quality",
+        reasoning_effort=ModelReasoningEffort.HIGH,
+        enabled_execution_options=[],
+    )
+    assert caps.configurable_reasoning_efforts() == [ModelReasoningEffort.HIGH]
+    assert validate_requested_profile_against_options(options, profile) == options[0]
+    with pytest.raises(ValueError, match="Reasoning effort"):
+        validate_requested_profile_against_options(
+            options,
+            profile.model_copy(update={"reasoning_effort": ModelReasoningEffort.NONE}),
+        )
+    assert caps.model_dump_json() == before
