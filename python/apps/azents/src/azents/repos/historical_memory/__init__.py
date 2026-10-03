@@ -23,6 +23,10 @@ from azents.core.historical_memory import (
     HistoricalMemoryFailure,
     HistoricalMemorySource,
 )
+from azents.core.historical_memory_consolidation import (
+    ConsolidationWorkKind,
+    prepared_source_evidence_hash,
+)
 from azents.core.historical_memory_snapshot import (
     HistoricalMemorySnapshotCandidate,
     MemorySnapshotConsumer,
@@ -35,6 +39,9 @@ from azents.rdb.models.event import RDBEvent
 from azents.rdb.models.historical_memory import RDBHistoricalMemorySource
 from azents.rdb.models.workspace_user import RDBWorkspaceUser
 from azents.rdb.session import SessionManager
+from azents.repos.historical_memory_consolidation.enrollment import (
+    enroll_source_in_session,
+)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -705,6 +712,14 @@ class HistoricalMemoryRepository:
         row.prepared_at = completion.prepared_at
         row.source_title_snapshot = completion.source_title_snapshot
         row.summary = completion.summary or None
+        row.summary_generation += 1
+        row.evidence_hash = prepared_source_evidence_hash(completion)
+        await enroll_source_in_session(
+            session,
+            source=row,
+            root=source,
+            kind=ConsolidationWorkKind.PREPARED,
+        )
         await session.flush()
         await session.refresh(row)
         return self._build(row)

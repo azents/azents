@@ -23,6 +23,9 @@ from azents.rdb.models.agent_automatic_project_setting import (
     RDBAgentAutomaticProjectSetting,
 )
 from azents.rdb.models.agent_avatar_cleanup import RDBAgentAvatarCleanupJob
+from azents.repos.historical_memory_consolidation.lifecycle import (
+    agent_memory_availability_in_session,
+)
 from azents.repos.model_candidate_chain_cutover import (
     mark_model_candidate_chain_write,
 )
@@ -304,12 +307,26 @@ class AgentRepository:
 
         if "selectable_model_options" in db_values:
             await mark_model_candidate_chain_write(session)
+        previous_memory_enabled: bool | None = None
+        if "memory_enabled" in update:
+            previous_memory_enabled = await session.scalar(
+                sa.select(RDBAgent.memory_enabled)
+                .where(RDBAgent.id == agent_id)
+                .with_for_update()
+            )
         await session.execute(
             sa.update(RDBAgent).where(RDBAgent.id == agent_id).values(**db_values)
         )
         rdb_agent = await session.get(RDBAgent, agent_id)
         if rdb_agent is None:
             return Failure(NotFound(agent_id=agent_id))
+        if (
+            previous_memory_enabled is not None
+            and previous_memory_enabled != rdb_agent.memory_enabled
+        ):
+            await agent_memory_availability_in_session(
+                session, agent_id=agent_id, denied=not rdb_agent.memory_enabled
+            )
         return Success(self._build_row(rdb_agent))
 
     async def replace_runtime_profile_selection(
