@@ -113,7 +113,7 @@ function ChatInputView({
     contextUsageDetailsRef,
     desktopProfileSection,
     setDesktopProfileSection,
-    sendErrorVisible,
+    writeError,
     selectedAction,
     setSelectedAction,
     inputActionListboxId,
@@ -888,11 +888,13 @@ function ChatInputView({
         </Text>
       )}
       <Stack gap="xs">
-        {sendErrorVisible && (
+        {writeError !== null && (
           <Text size="xs" c="red">
-            {selectedAction
-              ? `${selectedAction.label} action failed. Edit it or try again.`
-              : "Message failed to send. Try again."}
+            {writeError.type === "profile"
+              ? t("composerProfile.applyError")
+              : selectedAction
+                ? `${selectedAction.label} action failed. Edit it or try again.`
+                : "Message failed to send. Try again."}
           </Text>
         )}
         {editingMessageId && (
