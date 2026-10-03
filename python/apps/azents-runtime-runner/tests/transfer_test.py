@@ -2180,13 +2180,17 @@ async def test_post_publication_cancellation_waits_for_successful_result_enqueue
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("response_body_bytes", [0, 4097])
+@pytest.mark.parametrize("outside_workspace", [False, True])
 async def test_direct_upload_puts_snapshot_without_control_byte_relay(
     tmpfs_path: Path,
     response_body_bytes: int,
+    outside_workspace: bool,
 ) -> None:
-    """Original-file mutation during PUT cannot alter the bounded snapshot."""
+    """Snapshot verification applies to sources inside and outside the Workspace."""
+    workspace = Workspace(str(tmpfs_path / "workspace"))
     data = b"direct upload snapshot"
-    source = tmpfs_path / "source.bin"
+    source_parent = tmpfs_path if outside_workspace else workspace.root
+    source = source_parent / "source.bin"
     source.write_bytes(data)
     digest = hashlib.sha256(data).hexdigest()
     observed: list[bytes] = []
@@ -2256,7 +2260,7 @@ async def test_direct_upload_puts_snapshot_without_control_byte_relay(
             control=control,
             transfer=transfer,
             accepted_generation=lambda: 1,
-            workspace=_UNRESTRICTED_WORKSPACE,
+            workspace=workspace,
             http_proxy=None,
         )
         await manager.handle_intent(

@@ -82,8 +82,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ToolActivityGroup.tsx
   - typescript/apps/azents-web/src/features/chat/components/ToolCallCard.tsx
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
-last_verified_at: 2026-10-02
-spec_version: 55
+last_verified_at: 2026-10-03
+spec_version: 56
 ---
 
 # File Exchange Storage
@@ -366,8 +366,11 @@ database cascade erase the last cleanup reference before external deletion succe
 
 ### Agent presents sandbox file
 
-`present_file` publishes only files under the current Runner-reported Agent Workspace as a
-public Exchange attachment. Files outside the allowed path are rejected. It uses one
+`present_file` publishes files from any absolute Runtime path, including `/tmp` and
+paths outside the Agent Workspace, as a public Exchange attachment. Relative paths
+and file-location URIs are rejected before Runtime access. Sources remain subject to
+the Runtime operating-system user's filesystem permissions and the Runner's regular-file,
+stable-source verification. Workspace containment is not a publication requirement. It uses one
 Runtime-to-server direct PUT transfer, then publishes the verified immutable transfer
 object through a native object-store copy. Product metadata is committed only after
 that copy succeeds; a failed, cancelled, changed, oversized, or unverified Runtime
@@ -484,6 +487,9 @@ later `import_file` must explicitly copy them into the new Runtime.
 
 ## Changelog
 
+- **2026-10-03** (spec_version 56) — Removed the Workspace publication allowlist
+  from `present_file`; retained absolute Runtime paths, filesystem permissions,
+  Session authority, and verified direct-transfer requirements.
 - **2026-10-02** (spec_version 55) — Distinguished generic read-only live
   Memory VFS access from immutable managed Skills import; Memory creates no
   transferable file-exchange object and has no import/transfer capability.

@@ -4,7 +4,6 @@ Export runtime file as Exchange artifact and share with user.
 """
 
 import logging
-import posixpath
 import uuid
 from pathlib import PurePosixPath
 
@@ -44,15 +43,6 @@ _PUBLICATION_ID_NAMESPACE = uuid.uuid5(
 )
 
 
-def _is_presentable_path(path: str, workspace_root: str | None) -> bool:
-    """Check whether path is durable runtime path shareable with user."""
-    if workspace_root is None:
-        return False
-    normalized = PurePosixPath(posixpath.normpath(path))
-    root = PurePosixPath(posixpath.normpath(workspace_root))
-    return normalized.is_relative_to(root)
-
-
 def _publication_id(*, run_id: str, call_id: str, runtime_path: str) -> str:
     """Derive a stable verified-object publication ID for one Runtime path."""
     return uuid.uuid5(
@@ -75,7 +65,6 @@ def make_present_file_tool(
     publication_service: PresentFilePublicationExecutor,
     resolve_runtime_target: RuntimeTargetResolver,
     authority: SessionResourceAuthority,
-    workspace_root: str | None,
 ) -> FunctionTool:
     """Create present_file tool.
 
@@ -90,8 +79,6 @@ def make_present_file_tool(
         """Export runtime file as Exchange artifact."""
         if not input.paths:
             raise FunctionToolError("No paths provided.")
-        if workspace_root is None:
-            raise FunctionToolError("Runtime file transfer is unavailable.")
         execution = get_client_tool_execution_context()
 
         attachments: list[RuntimeAttachment] = []
@@ -99,9 +86,9 @@ def make_present_file_tool(
         runtime_target = None
 
         for abs_path in input.paths:
-            if not _is_presentable_path(abs_path, workspace_root):
+            if not PurePosixPath(abs_path).is_absolute():
                 errors.append(
-                    f"Only files under the Agent Workspace can be presented: {abs_path}"
+                    f"Only absolute Runtime file paths can be presented: {abs_path}"
                 )
                 continue
 
@@ -264,7 +251,9 @@ def make_present_file_tool(
         name="present_file",
         description=(
             "Present files to the user. "
-            "Provide a list of absolute paths under the Agent Workspace. "
+            "Provide a list of absolute Runtime file paths. "
+            "Files may be outside the Agent Workspace, including /tmp, "
+            "subject to Runtime filesystem permissions and transfer verification. "
             f"{RUNTIME_ACCESSIBLE_PATHS_MSG} "
             "The files will be exported as exchange:// file-location attachments that "
             "the user can preview and download."

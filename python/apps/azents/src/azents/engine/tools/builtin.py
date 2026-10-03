@@ -1145,7 +1145,6 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
                         publication_service=self.runtime_to_server_publication_service,
                         resolve_runtime_target=resolve_runtime_target,
                         authority=authority,
-                        workspace_root=workspace_root,
                     ),
                     make_read_image_tool(
                         session_storage=file_ss,
