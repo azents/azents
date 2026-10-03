@@ -5,7 +5,7 @@ created: 2026-05-30
 spec_type: flow
 owner: "@Hardtack"
 touches_domains: [agent, conversation]
-last_verified_at: 2026-10-03
+last_verified_at: 2026-10-04
 spec_version: 27
 code_paths:
   - python/apps/azents/src/azents/core/chat_data.py

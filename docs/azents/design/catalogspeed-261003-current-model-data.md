@@ -1,6 +1,7 @@
 ---
 title: "Current Model Catalog and Embedded Pricing Design"
 created: 2026-10-03
+implemented: 2026-10-04
 tags: [model-catalog, pricing, performance, architecture, backend]
 document_role: primary
 document_type: design

@@ -41,7 +41,7 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/agent_session.py
   - python/apps/azents/src/azents/rdb/models/agent_run.py
   - python/apps/azents/src/azents/rdb/models/agent.py
-last_verified_at: 2026-10-03
+last_verified_at: 2026-10-04
 spec_version: 48
 ---
 

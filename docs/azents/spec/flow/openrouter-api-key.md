@@ -27,7 +27,7 @@ code_paths:
   - typescript/apps/azents-web/src/shared/subscription-usage/**
   - testenv/azents/e2e/src/tests/required/public/test_llm_provider_integration.py
   - testenv/azents/e2e/src/tests/required/public/test_model_selection.py
-last_verified_at: 2026-10-03
+last_verified_at: 2026-10-04
 spec_version: 7
 ---
 

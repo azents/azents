@@ -27,7 +27,7 @@ code_paths:
   - python/apps/azents/src/azents/engine/run/resolve.py
   - typescript/apps/azents-web/src/features/llm-settings/**
   - testenv/azents/e2e/src/tests/required/public/test_llm_provider_integration.py
-last_verified_at: 2026-10-03
+last_verified_at: 2026-10-04
 spec_version: 6
 ---
 

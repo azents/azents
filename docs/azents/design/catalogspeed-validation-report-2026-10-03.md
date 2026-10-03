@@ -130,9 +130,21 @@ serialization modes. The same sole reviewer accepted the targeted correction
 with no remaining findings and independently executed all six SDK and twelve
 core schema cases. Prior review acceptances remain intact.
 
-## Remaining Gates
+## Product CI and Snapshot Completion
 
-- Root-integrated checks and sole review/re-review, including the Decimal wire
-  correction, are complete.
-- Required PR CI, especially the updated saved-support/embedded-price catalog-refresh product E2E.
-- Verified snapshot promotion and temporary-plan cleanup only after the remaining validation completes.
+Implementation commit `917dbe912` passed the complete
+[PR CI run](https://github.com/azents/azents/actions/runs/37142158723): all four
+required product E2E lanes, web E2E, backend, migration, testenv, TypeScript,
+pre-commit, and analysis gates completed without failure. The lane-3 JUnit
+artifact explicitly records the saved-support/embedded-price catalog-refresh
+test as passed, not skipped (12.890 seconds).
+
+Requirements and Design are marked implemented on 2026-10-04 (KST), current Spec
+verification dates are refreshed, and the two temporary implementation plans are
+removed in the same feature PR. The final documentation-only commit still
+receives its own CI check; implementation evidence above remains tied to its
+verified SHA.
+
+No production migration, merge, or deployment is performed. The local environment
+prerequisite failure and unverified local stop/restart QA remain explicitly
+separate from the successful credential-free product CI evidence.
