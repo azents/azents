@@ -7,8 +7,13 @@ import httpx2
 
 from azents.core.type_guards import is_string_object_dict
 from azents.engine.providers.observation_state import NativeObservationState
+from azents.engine.run.provider_failure import (
+    extract_provider_message_text,
+    sanitize_provider_message,
+)
 
 _MAX_FRAME_BYTES = 32 * 1024 * 1024
+_MAX_ERROR_TEXT_BYTES = 8 * 1024
 
 
 class NativeStreamFramingError(RuntimeError):
@@ -69,11 +74,29 @@ class NativeBodyFramer:
             payload = json.loads(data)
         except json.JSONDecodeError, UnicodeDecodeError:
             if self.status_code >= 400:
-                self.state.retain_http_failure(status_code=self.status_code, body=None)
+                message = None
+                if len(data) <= _MAX_ERROR_TEXT_BYTES:
+                    try:
+                        text = data.decode("utf-8")
+                    except UnicodeDecodeError:
+                        pass
+                    else:
+                        message = sanitize_provider_message(
+                            extract_provider_message_text(text)
+                        )
+                self.state.retain_http_failure(
+                    status_code=self.status_code, body=message
+                )
                 return
             raise NativeStreamFramingError(
                 "The provider stream contains invalid JSON."
             ) from None
+        if self.status_code >= 400 and not is_string_object_dict(payload):
+            self.state.retain_http_failure(
+                status_code=self.status_code,
+                body=sanitize_provider_message(extract_provider_message_text(payload)),
+            )
+            return
         if not is_string_object_dict(payload):
             raise NativeStreamFramingError(
                 "The provider stream event is not an object."

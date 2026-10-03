@@ -16,6 +16,7 @@ from azents.core.config import (
 )
 from azents.core.email.service import EmailService
 from azents.rdb.session import SessionManager
+from azents.repos.credential_read_operations import CredentialReadOperationRepository
 from azents.repos.email_verification import EmailVerificationRepository
 from azents.repos.email_verification_operation import (
     EmailVerificationOperationRepository,
@@ -24,6 +25,7 @@ from azents.repos.password_login import PasswordLoginRepository
 from azents.repos.security_operation import SecurityOperationRepository
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
+from azents.repos.user_email import UserEmailRepository
 from azents.services.credential.providers import (
     EmailCredentialProvider,
     PasswordCredentialProvider,
@@ -91,12 +93,16 @@ def _make_service(
             session_manager=rdb_session_manager,
         ),
         credential_service=CredentialService(
-            session_manager=rdb_session_manager,
+            repository=CredentialReadOperationRepository(
+                session_manager=rdb_session_manager,
+                user_repository=UserRepository(),
+                user_email_repository=UserEmailRepository(),
+                password_login_repository=PasswordLoginRepository(),
+            ),
             providers=[
                 PasswordCredentialProvider(),
                 EmailCredentialProvider(email_service=email_service),
             ],
-            user_repo=UserRepository(),
         ),
         auth_config=_TEST_AUTH_CONFIG,
         email_config=email_service.config,

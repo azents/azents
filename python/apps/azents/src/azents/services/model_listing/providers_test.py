@@ -4,6 +4,7 @@ import datetime
 import json
 from dataclasses import replace
 from types import SimpleNamespace
+from typing import Literal
 
 import boto3
 import httpx
@@ -736,6 +737,65 @@ async def test_list_chatgpt_models_uses_backend_capability_metadata(
         is None
     )
     assert empty_modalities_candidate.normalized_capabilities.modalities.input == []
+
+
+@pytest.mark.parametrize("source_kind", ["absent", "unmatched", "sparse", "denial"])
+async def test_chatgpt_web_search_survives_final_catalog_projection(
+    monkeypatch: pytest.MonkeyPatch,
+    source_kind: Literal["absent", "unmatched", "sparse", "denial"],
+) -> None:
+    """Account-visible ChatGPT tools survive the actual replacement producer."""
+    monkeypatch.setattr(httpx, "AsyncClient", _FakeAsyncClient)
+    result = await providers.list_chatgpt_models_for_integration(
+        _chatgpt_integration(), clients=providers.create_listing_client_factories()
+    )
+    candidates = [
+        NormalizedModelCandidate.model_validate_json(candidate.model_dump_json())
+        for candidate in result.models
+    ]
+    rows: dict[str, object] = {
+        f"chatgpt/{candidate.model_identifier}": {
+            "litellm_provider": "chatgpt",
+            "mode": "responses",
+            **({"supports_web_search": False} if source_kind == "denial" else {}),
+        }
+        for candidate in candidates
+    }
+    if source_kind == "unmatched":
+        rows = {
+            "gpt-6-astra": {
+                "litellm_provider": "openai",
+                "mode": "responses",
+                "supports_web_search": True,
+            }
+        }
+    source = (
+        None
+        if source_kind == "absent"
+        else make_test_source_snapshot(make_test_source_payload(rows))
+    )
+    entries = project_integration_replacement_entries(
+        integration_id="integration-id",
+        provider=LLMProvider.CHATGPT_OAUTH,
+        candidates=candidates,
+        source=source,
+        provider_listing_source=result.summary.source,
+    )
+    assert len(entries) == 4
+    for entry in entries:
+        capabilities = ModelCapabilities.model_validate_json(
+            json.dumps(entry.normalized_capabilities)
+        )
+        assert "web_search" in capabilities.built_in_tools.supported
+        assert capabilities.semantic_contract is not None
+        [web] = [
+            declaration
+            for declaration in capabilities.semantic_contract.built_in_tools
+            if declaration.tool == "web_search"
+        ]
+        assert web.support.state == "supported"
+        assert web.support.origin == "contract_derived"
+        assert web.support.predicate is None
 
 
 class _FakeKimiAsyncClient:

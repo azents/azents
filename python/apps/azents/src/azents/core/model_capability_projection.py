@@ -40,7 +40,7 @@ from azents.core.model_catalog_source import (
     CatalogSourceModel,
 )
 
-CAPABILITY_PROJECTION_REVISION = "1"
+CAPABILITY_PROJECTION_REVISION = "2"
 type ProjectionProtocol = Literal[
     "native_responses", "responses", "chat", "anthropic", "google", "bedrock"
 ]
@@ -449,7 +449,11 @@ def project_capabilities(
         else _support(listing.max_output_parameter)
     )
     web = _support(_prefer(listing.web_search, facts.web_search if facts else None))
-    if route in {"bedrock", "chat"}:
+    if provider == LLMProvider.CHATGPT_OAUTH and listing.web_search.state == "absent":
+        # Codex route policy supports search for every account-visible model.
+        # Optional generic source metadata does not own that provider contract.
+        web = _derived(True)
+    elif route in {"bedrock", "chat"}:
         web = _derived(False)
     client_image = provider in {
         LLMProvider.OPENAI,

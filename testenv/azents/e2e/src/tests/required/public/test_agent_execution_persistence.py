@@ -1110,8 +1110,8 @@ def _wait_for_runtime_hook_source(
             if not isinstance(value, dict):
                 continue
             if (
-                value.get("message")
-                == "Runtime hook QA lifecycle event: on_before_tool_call"
+                value.get("message") == "Runtime hook QA lifecycle event"
+                and value.get("runtime_hook_qa_lifecycle") == "on_before_tool_call"
                 and value.get("tool_name") == tool_name
                 and value.get("toolkit_slug") == toolkit_namespace
             ):
