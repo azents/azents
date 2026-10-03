@@ -1,6 +1,6 @@
 {
   "change_checkpoint": {
-    "checked_at": "2026-10-01T22:30:04Z",
+    "checked_at": "2026-10-03T03:37:48Z",
     "checked_ruleset_revisions": [
       "193cd524af5bf589eeab7744b06e813623015ce64d6d503b684ddbbbf9bbced2",
       "54a25573d8ff81ac5a2cd2a5b3f3d59e4a86f7305779185adc9154bb8d474d52",
@@ -8,7 +8,7 @@
       "753224fe20ed069ad162c506972f515615951fedb74fa83a1f6ae81a77bd43f2",
       "766c579c22206f1c77dfac6c9675c6619b9762929affa695b77bebf505e3f15b"
     ],
-    "checked_through_commit": "1622d02e1eff14ecc18514e2416ba740956a67fd"
+    "checked_through_commit": "83fc6e43a41896e5478b1086d5a1fead1b722b35"
   },
   "ranges": {
     ".::bucket-1-of-8": {
@@ -397,19 +397,19 @@
       "checked_through_commit": "1622d02e1eff14ecc18514e2416ba740956a67fd"
     },
     "python/apps/azents-runtime-runner/**::bucket-3-of-8": {
-      "checked_at": "2026-09-02T04:08:33Z",
-      "checked_ruleset_revision": "1e4953945f6a9596a55bdba94be8ebe2866574df610eeb8c3a2c34a5076db388",
-      "checked_through_commit": "ed5227f98c8b3a39c1a6a7fa325ce9708a22b1bd"
+      "checked_at": "2026-10-03T03:37:48Z",
+      "checked_ruleset_revision": "54a25573d8ff81ac5a2cd2a5b3f3d59e4a86f7305779185adc9154bb8d474d52",
+      "checked_through_commit": "83fc6e43a41896e5478b1086d5a1fead1b722b35"
     },
     "python/apps/azents-runtime-runner/**::bucket-4-of-8": {
-      "checked_at": "2026-09-02T04:08:33Z",
-      "checked_ruleset_revision": "1e4953945f6a9596a55bdba94be8ebe2866574df610eeb8c3a2c34a5076db388",
-      "checked_through_commit": "ed5227f98c8b3a39c1a6a7fa325ce9708a22b1bd"
+      "checked_at": "2026-10-03T03:37:48Z",
+      "checked_ruleset_revision": "54a25573d8ff81ac5a2cd2a5b3f3d59e4a86f7305779185adc9154bb8d474d52",
+      "checked_through_commit": "83fc6e43a41896e5478b1086d5a1fead1b722b35"
     },
     "python/apps/azents-runtime-runner/**::bucket-5-of-8": {
-      "checked_at": "2026-09-02T04:08:33Z",
-      "checked_ruleset_revision": "1e4953945f6a9596a55bdba94be8ebe2866574df610eeb8c3a2c34a5076db388",
-      "checked_through_commit": "ed5227f98c8b3a39c1a6a7fa325ce9708a22b1bd"
+      "checked_at": "2026-10-03T03:37:48Z",
+      "checked_ruleset_revision": "54a25573d8ff81ac5a2cd2a5b3f3d59e4a86f7305779185adc9154bb8d474d52",
+      "checked_through_commit": "83fc6e43a41896e5478b1086d5a1fead1b722b35"
     },
     "python/apps/azents-runtime-runner/**::bucket-6-of-8": {
       "checked_at": "2026-09-03T05:23:52Z",
@@ -626,10 +626,15 @@
       "checked_ruleset_revision": "6204b9e87f95a5f2c8ff3bed113739fecfa37ee6cde3bbfd6202e25e72b9799c",
       "checked_through_commit": "ee98d09836a537bb7e006df742c6d440bee60685"
     },
-    "scripts/**::bucket-1-of-8": {
-      "checked_at": "2026-09-09T22:27:17Z",
-      "checked_ruleset_revision": "2b591f0165b54d8002a93e0d82e87962d74f05a0099ea778ee9b4c1c9a786cce",
-      "checked_through_commit": "ee98d09836a537bb7e006df742c6d440bee60685"
+    "scripts/**::bucket-3-of-8": {
+      "checked_at": "2026-10-03T03:37:48Z",
+      "checked_ruleset_revision": "62f8502dfaead68e71a6667c5d096e57071fa99d0d528840ea2505268d711835",
+      "checked_through_commit": "83fc6e43a41896e5478b1086d5a1fead1b722b35"
+    },
+    "scripts/**::bucket-4-of-8": {
+      "checked_at": "2026-10-03T03:37:48Z",
+      "checked_ruleset_revision": "62f8502dfaead68e71a6667c5d096e57071fa99d0d528840ea2505268d711835",
+      "checked_through_commit": "83fc6e43a41896e5478b1086d5a1fead1b722b35"
     },
     "scripts/**::bucket-5-of-8": {
       "checked_at": "2026-09-09T22:27:17Z",
@@ -645,6 +650,11 @@
       "checked_at": "2026-09-09T22:27:17Z",
       "checked_ruleset_revision": "2b591f0165b54d8002a93e0d82e87962d74f05a0099ea778ee9b4c1c9a786cce",
       "checked_through_commit": "ee98d09836a537bb7e006df742c6d440bee60685"
+    },
+    "testdata/**::bucket-7-of-8": {
+      "checked_at": "2026-10-03T03:37:48Z",
+      "checked_ruleset_revision": "62f8502dfaead68e71a6667c5d096e57071fa99d0d528840ea2505268d711835",
+      "checked_through_commit": "83fc6e43a41896e5478b1086d5a1fead1b722b35"
     },
     "testenv/**::bucket-1-of-8": {
       "checked_at": "2026-09-09T22:27:17Z",
