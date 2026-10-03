@@ -6,6 +6,7 @@ import pytest
 
 from azents.core.enums import LLMCatalogAttemptStatus
 from azents.core.llm_catalog_sync import (
+    CatalogProjectionVersion,
     CatalogSyncAttemptState,
     IntegrationCatalogSyncDenialReason,
     IntegrationCatalogSyncPolicyDecision,
@@ -40,12 +41,16 @@ def _evaluate(
     snapshot_created_at: datetime.datetime | None = None,
     latest: CatalogSyncAttemptState | None = None,
     workspace_latest: CatalogSyncAttemptState | None = None,
+    current_version: CatalogProjectionVersion | None = None,
+    required_version: CatalogProjectionVersion | None = None,
 ) -> IntegrationCatalogSyncPolicyDecision:
     return evaluate_integration_catalog_sync_policy(
         IntegrationCatalogSyncPolicyInput(
             trigger=trigger,
             now=_NOW,
             current_snapshot_created_at=snapshot_created_at,
+            current_projection_version=current_version,
+            required_projection_version=required_version,
             latest_catalog_attempt=latest,
             latest_workspace_attempt=workspace_latest,
         )
@@ -188,3 +193,94 @@ def test_expired_running_attempt_can_be_recovered() -> None:
 
     assert decision.allowed
     assert decision.expired_running_attempt_id == running.id
+
+
+@pytest.mark.parametrize(
+    "current_version",
+    [
+        None,
+        CatalogProjectionVersion(schema_version=None, resolver_revision=None),
+        CatalogProjectionVersion(schema_version="1", resolver_revision="5"),
+        CatalogProjectionVersion(schema_version="2", resolver_revision="4"),
+    ],
+)
+def test_new_snapshot_with_old_projection_versions_is_stale(
+    current_version: CatalogProjectionVersion | None,
+) -> None:
+    decision = _evaluate(
+        trigger=IntegrationCatalogSyncTrigger.STALE_REFRESH,
+        snapshot_created_at=_NOW,
+        current_version=current_version,
+        required_version=CatalogProjectionVersion("2", "5"),
+    )
+    assert decision.stale
+    assert decision.allowed
+
+
+def test_matching_new_projection_and_age_only_image_policy_are_not_stale() -> None:
+    version = CatalogProjectionVersion("2", "5")
+    for required in (version, None):
+        decision = _evaluate(
+            trigger=IntegrationCatalogSyncTrigger.STALE_REFRESH,
+            snapshot_created_at=_NOW,
+            current_version=version,
+            required_version=required,
+        )
+        assert not decision.stale
+        assert not decision.allowed
+        assert decision.denial_reason is IntegrationCatalogSyncDenialReason.NOT_STALE
+
+
+@pytest.mark.parametrize(
+    ("latest", "workspace_latest", "reason"),
+    [
+        (
+            _attempt(status=LLMCatalogAttemptStatus.RUNNING, started_at=_NOW),
+            None,
+            IntegrationCatalogSyncDenialReason.ALREADY_RUNNING,
+        ),
+        (
+            _attempt(started_at=_NOW - datetime.timedelta(seconds=1)),
+            None,
+            IntegrationCatalogSyncDenialReason.THROTTLED,
+        ),
+        (
+            None,
+            _attempt(started_at=_NOW - datetime.timedelta(seconds=1)),
+            IntegrationCatalogSyncDenialReason.THROTTLED,
+        ),
+        (
+            _attempt(
+                status=LLMCatalogAttemptStatus.FAILED,
+                started_at=_NOW - datetime.timedelta(minutes=1),
+                finished_at=_NOW - datetime.timedelta(seconds=30),
+            ),
+            None,
+            IntegrationCatalogSyncDenialReason.THROTTLED,
+        ),
+        (
+            _attempt(
+                status=LLMCatalogAttemptStatus.FAILED,
+                automatic_retry_blocked=True,
+            ),
+            None,
+            IntegrationCatalogSyncDenialReason.AUTOMATIC_RETRY_BLOCKED,
+        ),
+    ],
+)
+def test_version_staleness_preserves_existing_refresh_guards(
+    latest: CatalogSyncAttemptState | None,
+    workspace_latest: CatalogSyncAttemptState | None,
+    reason: IntegrationCatalogSyncDenialReason,
+) -> None:
+    decision = _evaluate(
+        trigger=IntegrationCatalogSyncTrigger.STALE_REFRESH,
+        snapshot_created_at=_NOW,
+        current_version=CatalogProjectionVersion("1", "4"),
+        required_version=CatalogProjectionVersion("2", "5"),
+        latest=latest,
+        workspace_latest=workspace_latest,
+    )
+    assert decision.stale
+    assert not decision.allowed
+    assert decision.denial_reason is reason

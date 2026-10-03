@@ -84,8 +84,8 @@ code_paths:
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
   - typescript/apps/azents-web/src/trpc/routers/workspace-model-settings.ts
   - typescript/apps/azents-admin-web/src/features/model-catalog/containers/useModelCatalogPageContainer.ts
-last_verified_at: 2026-10-03
-spec_version: 41
+last_verified_at: 2026-10-04
+spec_version: 42
 ---
 
 # Model Catalog Domain Spec
@@ -145,6 +145,18 @@ maximum is the hard ceiling for an explicit Agent option cap. A maximum-only
 capability, including historical catalog and Agent snapshots, resolves that maximum
 as its default. The capability remains additive JSON and requires no relational
 migration.
+
+xAI OAuth consumes its own account-model response. `context_window` supplies the
+default input window; a supplied `context_windows` list supplies its maximum.
+Absent maximum-list metadata retains the single-window declaration, while null
+or empty declarations are preserved instead of inventing a maximum. A default
+above an advertised maximum is an invalid provider response eligible for retry,
+not a credential/configuration failure that permanently blocks automatic retry.
+Supplied xAI input/output modalities and the OAuth top-level `reasoning_effort`
+are captured with omission/null/empty distinctions. A conflicting advertised
+default and preset declaration leaves the effective default unknown and records
+bounded diagnostics. Typed fields are retained in provider provenance; opaque
+provider instructions and unknown preset extensions are not adopted.
 
 Runtime and Agent context displays supplement only a missing maximum from an exact model match in
 the locally captured validated source. A known provider default is a floor for this fallback;
@@ -466,7 +478,7 @@ Integration catalog synchronization has four triggers:
 
 Name-only updates and disable operations do not trigger synchronization. Create/configuration-change triggers bypass cooldown and failure backoff because they represent new provider state, but they do not replace an active attempt. Explicit sync bypasses the credential-failure automatic block while respecting cooldown and transient backoff. Stale refresh respects all policy guards.
 
-Explicit and stale requests use a 30-second integration cooldown and a 5-second workspace cooldown. Retryable provider failures use a 5-minute backoff. A snapshot becomes stale after 15 minutes. A running attempt older than 15 minutes is marked failed and recovered by the next eligible request.
+Explicit and stale requests use a 30-second integration cooldown and a 5-second workspace cooldown. Retryable provider failures use a 5-minute backoff. A conversation snapshot becomes stale after 15 minutes or when its stored projection schema/resolver revision differs from the current required pair. Read eligibility and the locked attempt claim compare the same pair, including missing historical revisions. This is not a check for every arbitrary fingerprint change. Image-purpose catalogs retain age-only staleness. A running attempt older than 15 minutes is marked failed and recovered by the next eligible request.
 
 Attempt claim locks the workspace and catalog rows before it evaluates policy and creates the running attempt. This makes duplicate-running and workspace/integration throttle decisions atomic. Attempt completion locks the catalog again and publishes only when the completing attempt is still the catalog's latest attempt, fencing work that was superseded after running-lease recovery. A current running attempt or superseded completion returns conflict; a cooldown or backoff denial returns HTTP 429 with `Retry-After` for explicit requests.
 

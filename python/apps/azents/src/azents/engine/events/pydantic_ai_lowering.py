@@ -1,6 +1,7 @@
 """Lower canonical Azents history to the public Pydantic model message layer."""
 
 import base64
+import dataclasses
 import json
 from collections.abc import Mapping, Sequence
 from typing import Any, Literal
@@ -207,7 +208,12 @@ class PydanticAILowerer:
             schema_version=self.schema_version,
         )
         self.file_capabilities = FilePartLoweringCapabilities.from_model_capabilities(
-            self.model_capabilities
+            self.model_capabilities,
+            context=resolve_model_support_context(
+                self.model_capabilities,
+                requested_effort=self.reasoning_effort,
+                function_tools=bool(self.tools),
+            ),
         )
 
     def lower(
@@ -220,6 +226,8 @@ class PydanticAILowerer:
         """Build explicit model messages without another execution graph."""
         if model != self.model:
             raise ValueError("Lowerer model identity differs from the selected model")
+        settings = self._settings()
+        parameters = self._parameters(settings)
         messages: list[ModelMessage] = [
             ModelRequest(
                 parts=[SystemPromptPart(system_prompt or _DEFAULT_INSTRUCTIONS)]
@@ -358,8 +366,6 @@ class PydanticAILowerer:
             if message is not None:
                 messages.append(message)
 
-        parameters = self._parameters()
-        settings = self._settings()
         if self._anthropic_cache_route():
             remaining = 2
             for message in messages:
@@ -636,7 +642,7 @@ class PydanticAILowerer:
             declarations.append(_DeclaredTool.model_validate(selected))
         return declarations
 
-    def _parameters(self) -> ModelRequestParameters:
+    def _parameters(self, settings: ModelSettings) -> ModelRequestParameters:
         definitions: list[ToolDefinition] = []
         declarations = self._declared_tools()
         function_tools = any(tool.type == "function" for tool in declarations)
@@ -658,15 +664,52 @@ class PydanticAILowerer:
                 ),
             )
             validate_saved_model_request(self.model_capabilities, request=request)
+            actual_request = model_support_request_from_options(
+                decode_model_support_options(settings),
+                selected_effort=self.reasoning_effort,
+                function_tools=function_tools,
+                strict_function_schema=any(
+                    tool.type == "function" and tool.strict is True
+                    for tool in declarations
+                ),
+            )
+            actual_options = decode_model_support_options(settings)
+            if (
+                self.provider_id
+                in {
+                    LLMProvider.OPENAI,
+                    LLMProvider.CHATGPT_OAUTH,
+                    LLMProvider.XAI,
+                    LLMProvider.XAI_OAUTH,
+                    LLMProvider.OPENROUTER,
+                }
+                and actual_options.extra_body is not None
+                and "reasoning" in actual_options.extra_body.model_fields_set
+            ):
+                # The SDK merges extra_body by top-level key, replacing the
+                # entire reasoning object even for null or an empty object.
+                body_reasoning = actual_options.extra_body.reasoning
+                actual_request = dataclasses.replace(
+                    actual_request,
+                    reasoning_effort=(
+                        body_reasoning.effort if body_reasoning is not None else None
+                    ),
+                )
+            validate_saved_model_request(
+                self.model_capabilities, request=actual_request
+            )
             context = resolve_model_support_context(
                 self.model_capabilities,
-                requested_effort=request.reasoning_effort,
+                requested_effort=actual_request.reasoning_effort,
                 function_tools=function_tools,
             )
             strict_supported = model_support_allowed(
                 contract.strict_function_schema,
                 context=context,
             )
+        self.file_capabilities = FilePartLoweringCapabilities.from_model_capabilities(
+            self.model_capabilities, context=context
+        )
         for raw, tool in zip(self.tools, declarations, strict=True):
             nested = raw.get("function")
             selected = (

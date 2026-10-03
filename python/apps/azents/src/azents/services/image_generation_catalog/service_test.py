@@ -173,6 +173,7 @@ async def _publish_flare(
         source_key="openai_models_list:image_generation",
         started_at=started_at,
         trigger=IntegrationCatalogSyncTrigger.CREATE,
+        required_projection_version=None,
     )
     assert isinstance(claim, IntegrationCatalogSyncClaim)
     repository = service.operations.catalog_repository
@@ -238,6 +239,7 @@ async def test_sync_uses_credential_snapshot_loaded_after_attempt_claim(
         source_key: str,
         started_at: datetime.datetime,
         trigger: IntegrationCatalogSyncTrigger,
+        required_projection_version: None,
     ) -> IntegrationCatalogSyncClaim | IntegrationCatalogSyncPolicyDecision:
         update_result = await integration_repository.update_by_id(
             rdb_session,
@@ -254,6 +256,7 @@ async def test_sync_uses_credential_snapshot_loaded_after_attempt_claim(
             source_key=source_key,
             started_at=started_at,
             trigger=trigger,
+            required_projection_version=required_projection_version,
         )
 
     async def list_models_from_claimed_credentials(

@@ -5,6 +5,10 @@ import dataclasses
 from typing import Protocol
 
 from azents.core.llm_catalog import ModelCapabilities, ModelModality
+from azents.engine.events.model_support_contract import (
+    ModelSupportContext,
+    model_support_allowed,
+)
 from azents.engine.events.types import FileOutputPart
 
 _IMAGE_MEDIA_PREFIX = "image/"
@@ -75,13 +79,32 @@ class FilePartLoweringCapabilities:
     def from_model_capabilities(
         cls,
         capabilities: ModelCapabilities | None,
+        *,
+        context: ModelSupportContext,
     ) -> "FilePartLoweringCapabilities":
-        """Extract FilePart lowering capability from ModelCapabilities."""
+        """Resolve rich-input admission without turning unknown into a denial."""
         if capabilities is None:
             return cls()
         input_modalities = set(capabilities.modalities.input)
-        supports_image = ModelModality.IMAGE in input_modalities
-        supports_pdf = ModelModality.PDF in input_modalities
+        contract = capabilities.semantic_contract
+
+        def permitted(modality: ModelModality) -> bool:
+            if contract is None:
+                return modality in input_modalities
+            declaration = next(
+                (
+                    item
+                    for item in contract.input_modalities
+                    if item.modality == modality.value
+                ),
+                None,
+            )
+            return declaration is not None and (
+                model_support_allowed(declaration.support, context=context) is not False
+            )
+
+        supports_image = permitted(ModelModality.IMAGE)
+        supports_pdf = permitted(ModelModality.PDF)
         # Current TEXT modality in ModelCapabilities means general text prompt support.
         # Disable text file native input until separate capability exists.
         supports_text = False

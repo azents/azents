@@ -13,7 +13,10 @@ from azents.core.enums import (
     LLMCatalogScope,
     LLMProvider,
 )
-from azents.core.llm_catalog_sync import IntegrationCatalogSyncTrigger
+from azents.core.llm_catalog_sync import (
+    CatalogProjectionVersion,
+    IntegrationCatalogSyncTrigger,
+)
 from azents.repos.image_generation_catalog_operations import (
     ImageGenerationCatalogOperationsRepository,
 )
@@ -121,13 +124,24 @@ async def test_claim_composes_catalog_creation_and_attempt_in_one_transaction(
         if image
         else LLMCatalogOperationsRepository(manager, catalogs, integrations)
     )
-    result = await operations.begin_attempt(
-        integration_id="integration",
-        provider=LLMProvider.OPENAI,
-        workspace_id="workspace",
-        started_at=_NOW,
-        trigger=IntegrationCatalogSyncTrigger.CREATE,
-    )
+    version = CatalogProjectionVersion("2", "5")
+    if isinstance(operations, LLMCatalogOperationsRepository):
+        result = await operations.begin_attempt(
+            integration_id="integration",
+            provider=LLMProvider.OPENAI,
+            workspace_id="workspace",
+            started_at=_NOW,
+            trigger=IntegrationCatalogSyncTrigger.CREATE,
+            required_projection_version=version,
+        )
+    else:
+        result = await operations.begin_attempt(
+            integration_id="integration",
+            provider=LLMProvider.OPENAI,
+            workspace_id="workspace",
+            started_at=_NOW,
+            trigger=IntegrationCatalogSyncTrigger.CREATE,
+        )
     assert result.claim == _claim()
     assert result.catalog.purpose is purpose
     assert manager.commits == 1
@@ -139,6 +153,7 @@ async def test_claim_composes_catalog_creation_and_attempt_in_one_transaction(
     assert creation.args[0] is attempt.args[0] is manager.session
     assert creation.kwargs["purpose"] is purpose
     assert attempt.kwargs["source_key"] == source_key
+    assert attempt.kwargs["required_projection_version"] == (None if image else version)
 
 
 async def test_conversation_publication_keeps_all_writes_inside_one_transaction() -> (
