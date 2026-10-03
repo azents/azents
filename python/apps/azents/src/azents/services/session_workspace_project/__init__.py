@@ -1,15 +1,17 @@
 """Session Workspace Project service."""
 
 import dataclasses
-import posixpath
-from pathlib import PurePosixPath
 from typing import Annotated, assert_never
 
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
 
+from azents.core.session_workspace_paths import (
+    InvalidProjectPath,
+    normalize_session_workspace_path,
+)
 from azents.engine.tools.deps import get_skill_state_store
-from azents.engine.tools.skill import SkillProjectionService, SkillStateStore
+from azents.engine.tools.skill import SkillProjectionService
 from azents.repos.session_working_folder_binding.data import (
     SessionWorkingFolderTarget,
 )
@@ -28,6 +30,7 @@ from azents.repos.session_workspace_project_operations.data import (
     ProjectMissing,
     ProjectMutationResult,
 )
+from azents.repos.skill_state_store import SkillStateStore
 from azents.runtime.control_protocol.runner_operations import (
     RuntimeRunnerOperationClient,
 )
@@ -49,14 +52,6 @@ from azents.services.session_working_folder_binding import (
     SessionWorkingFolderBindingError,
     SessionWorkingFolderBindingService,
 )
-
-
-@dataclasses.dataclass(frozen=True)
-class InvalidProjectPath:
-    """Project path does not satisfy Session Workspace contract."""
-
-    path: str
-    reason: str
 
 
 @dataclasses.dataclass(frozen=True)
@@ -102,62 +97,6 @@ ProjectCreateError = (
 )
 ProjectAccessError = AgentNotFound | ProjectAccessDenied
 ProjectFolderRegistrationError = ProjectAccessError | ProjectCreateError
-
-
-def normalize_agent_workspace_root(workspace_root: str | None) -> PurePosixPath:
-    """Normalize the Runner-reported Agent Workspace root."""
-    if workspace_root is None or not workspace_root.strip():
-        raise ValueError("Agent Workspace path is unavailable")
-    normalized = PurePosixPath(posixpath.normpath(workspace_root.strip()))
-    if not normalized.is_absolute():
-        raise ValueError("Agent Workspace path must be absolute")
-    return normalized
-
-
-def normalize_session_workspace_path(
-    path: str,
-    *,
-    workspace_root: str,
-) -> str:
-    """Normalize absolute path inside Session Workspace.
-
-    :param path: Path to validate
-    :return: Normalized POSIX absolute path
-    :raises ValueError: When path is empty, relative, root, or outside prefix
-    """
-    stripped = path.strip()
-    if not stripped:
-        raise ValueError("Project path is required")
-    pure = PurePosixPath(posixpath.normpath(stripped))
-    if not pure.is_absolute():
-        raise ValueError("Project path must be absolute")
-    normalized = PurePosixPath("/") / pure.relative_to("/")
-    root = normalize_agent_workspace_root(workspace_root)
-    if normalized == root:
-        raise ValueError("Session Workspace root cannot be a Project")
-    if not normalized.is_relative_to(root):
-        raise ValueError("Project path must be under Agent Workspace root")
-    return normalized.as_posix()
-
-
-def normalize_session_workspace_project_paths(
-    paths: list[str],
-    *,
-    workspace_root: str,
-) -> list[str]:
-    """Normalize Project paths and remove exact duplicates while preserving order."""
-    normalized_paths: list[str] = []
-    seen: set[str] = set()
-    for path in paths:
-        normalized = normalize_session_workspace_path(
-            path,
-            workspace_root=workspace_root,
-        )
-        if normalized in seen:
-            continue
-        seen.add(normalized)
-        normalized_paths.append(normalized)
-    return normalized_paths
 
 
 @dataclasses.dataclass

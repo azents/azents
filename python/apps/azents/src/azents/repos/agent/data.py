@@ -1,6 +1,5 @@
 """Agent repository data models."""
 
-import dataclasses
 import datetime
 from typing import Annotated, TypeAlias
 
@@ -194,10 +193,3 @@ class AgentList(BaseModel):
     """Agent list."""
 
     items: list[Agent] = Field(description="Agent list")
-
-
-@dataclasses.dataclass(frozen=True)
-class NotFound:
-    """Agent not found."""
-
-    agent_id: str

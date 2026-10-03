@@ -2,12 +2,13 @@
 
 import json
 import os
+import select
 import socket
 import subprocess
 import sys
 import time
 from collections.abc import Generator
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -37,7 +38,11 @@ from azentspublicclient.models.agent_toolkit_config_update_request import (
 )
 from azentspublicclient.models.agent_type import AgentType
 from azentspublicclient.models.api_key_secrets import ApiKeySecrets
+from azentspublicclient.models.chat_event_page_response import ChatEventPageResponse
+from azentspublicclient.models.chat_event_response import ChatEventResponse
+from azentspublicclient.models.chat_write_response import ChatWriteResponse
 from azentspublicclient.models.create_workspace_request import CreateWorkspaceRequest
+from azentspublicclient.models.live_event_list_response import LiveEventListResponse
 from azentspublicclient.models.llm_provider import LLMProvider
 from azentspublicclient.models.llm_provider_integration_create_request import (
     LLMProviderIntegrationCreateRequest,
@@ -54,6 +59,23 @@ from testcontainers.core.container import DockerContainer
 from websockets.sync.client import connect as ws_connect
 from websockets.sync.connection import Connection
 
+from support.observations import (
+    ChatActionObservation,
+    DockerNetworkObservation,
+    FailedRunObservation,
+    InputMessageObservation,
+    RunMarkerObservation,
+    SystemErrorObservation,
+    ToolCallObservation,
+    ToolkitSourceObservation,
+    ToolResultObservation,
+    TurnMarkerObservation,
+    UsageObservation,
+    decode_chat_write,
+    decode_history_page,
+    decode_runtime_hook,
+    decode_session,
+)
 from support.runtime_profiles import (
     create_workspace_runtime_profile,
     start_and_wait_for_agent_runtime,
@@ -152,14 +174,38 @@ def _headers(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
+@dataclass(frozen=True)
+class _MockMcpInstance:
+    """A subprocess URL and its optional first-call control channels."""
+
+    url: str
+    reached_fd: int | None
+    release_fd: int | None
+
+    def wait_until_reached(self, timeout: float = 15) -> None:
+        """Observe the held call without depending on its wall-clock duration."""
+        if self.reached_fd is None:
+            raise AssertionError("This MCP fixture does not have a call barrier.")
+        readable, _, _ = select.select([self.reached_fd], [], [], timeout)
+        if not readable:
+            raise TimeoutError("MCP instance call did not reach its barrier.")
+        if os.read(self.reached_fd, 1) != b"R":
+            raise AssertionError("MCP instance reached channel was closed.")
+
+    def release(self) -> None:
+        """Release a held call before its process/control channels are cleaned up."""
+        if self.release_fd is not None:
+            os.write(self.release_fd, b"R")
+
+
 @contextmanager
 def _mock_mcp_instance(
     identity: str,
     *,
     docker_gateway: str,
-    delay_once_seconds: float = 0,
-) -> Generator[str, None, None]:
-    """Run one distinguishable mock MCP server on an ephemeral host port."""
+    hold_first_instance: bool,
+) -> Generator[_MockMcpInstance, None, None]:
+    """Run one distinguishable MCP subprocess with explicit one-shot ordering."""
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
         port = listener.getsockname()[1]
@@ -168,33 +214,51 @@ def _mock_mcp_instance(
         "MOCK_MCP_HOST": "0.0.0.0",
         "MOCK_MCP_PORT": str(port),
         "MOCK_MCP_INSTANCE": identity,
-        "MOCK_MCP_INSTANCE_DELAY_ONCE_SECONDS": str(delay_once_seconds),
     }
-    process = subprocess.Popen(
-        [sys.executable, str(_MOCK_MCP_SCRIPT)],
-        cwd=_TESTENV_ROOT,
-        env=environment,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    try:
-        deadline = time.monotonic() + 15
-        while time.monotonic() < deadline:
-            try:
-                with socket.create_connection(("127.0.0.1", port), timeout=0.2):
-                    break
-            except OSError:
-                time.sleep(0.1)
-        else:
-            raise TimeoutError(f"Mock MCP instance {identity!r} did not start.")
-        yield f"http://{docker_gateway}:{port}/mcp"
-    finally:
-        process.terminate()
+    with ExitStack() as controls:
+        reached_fd: int | None = None
+        release_fd: int | None = None
+        child_fds: tuple[int, ...] = ()
+        if hold_first_instance:
+            reached_fd, reached_writer = os.pipe()
+            release_reader, release_fd = os.pipe()
+            for descriptor in (reached_fd, reached_writer, release_reader, release_fd):
+                controls.callback(os.close, descriptor)
+            environment["MOCK_MCP_INSTANCE_REACHED_FD"] = str(reached_writer)
+            environment["MOCK_MCP_INSTANCE_RELEASE_FD"] = str(release_reader)
+            child_fds = (reached_writer, release_reader)
+        process = subprocess.Popen(
+            [sys.executable, str(_MOCK_MCP_SCRIPT)],
+            cwd=_TESTENV_ROOT,
+            env=environment,
+            pass_fds=child_fds,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        instance = _MockMcpInstance(
+            url=f"http://{docker_gateway}:{port}/mcp",
+            reached_fd=reached_fd,
+            release_fd=release_fd,
+        )
         try:
-            process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait(timeout=5)
+            deadline = time.monotonic() + 15
+            while time.monotonic() < deadline:
+                try:
+                    with socket.create_connection(("127.0.0.1", port), timeout=0.2):
+                        break
+                except OSError:
+                    time.sleep(0.1)
+            else:
+                raise TimeoutError(f"Mock MCP instance {identity!r} did not start.")
+            yield instance
+        finally:
+            instance.release()
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=5)
 
 
 def _docker_gateway(container: DockerContainer) -> str:
@@ -203,9 +267,9 @@ def _docker_gateway(container: DockerContainer) -> str:
     wrapped.reload()
     networks = wrapped.attrs["NetworkSettings"]["Networks"]
     for network in networks.values():
-        gateway = network.get("Gateway")
-        if isinstance(gateway, str) and gateway:
-            return gateway
+        observation = DockerNetworkObservation.model_validate(network)
+        if observation.gateway:
+            return observation.gateway
     raise AssertionError("E2E container network did not expose a Docker gateway.")
 
 
@@ -256,11 +320,7 @@ def _team_primary_session_id(
         timeout=10,
     )
     response.raise_for_status()
-    payload = _json_object(response)
-    session_id = payload.get("id")
-    if not isinstance(session_id, str):
-        raise AssertionError(f"Team primary response did not include id: {payload!r}")
-    return session_id
+    return decode_session(response.json()).id
 
 
 def _create_execution_session(
@@ -277,11 +337,7 @@ def _create_execution_session(
         timeout=10,
     )
     response.raise_for_status()
-    payload = _json_object(response)
-    session_id = payload.get("id")
-    if not isinstance(session_id, str):
-        raise AssertionError(f"Session response did not include id: {payload!r}")
-    return session_id
+    return decode_session(response.json()).id
 
 
 def _connect_chat(
@@ -302,14 +358,12 @@ def _connect_chat(
     )
 
 
-def _receive_ws_action(ws: Connection, *, timeout: float) -> dict[str, object]:
+def _receive_ws_action(ws: Connection, *, timeout: float) -> ChatActionObservation:
     """Receive and validate one canonical public Chat WebSocket action."""
     raw = ws.recv(timeout=timeout)
-    action = _json_object_payload(json.loads(raw), label="Chat WebSocket action")
-    action_type = action.get("type")
-    assert isinstance(action_type, str), action
-    assert action_type in _CANONICAL_WS_ACTION_TYPES, action
-    assert "kind" not in action, action
+    action = ChatActionObservation.model_validate_json(raw)
+    assert action.type in _CANONICAL_WS_ACTION_TYPES, action
+    assert "kind" not in (action.model_extra or {}), action
     return action
 
 
@@ -319,7 +373,7 @@ def _wait_for_ws_action(
     action_type: str,
     mailbox_item_id: str | None = None,
     timeout: float = 10,
-) -> dict[str, object]:
+) -> ChatActionObservation:
     """Wait for a canonical WebSocket action of the requested type."""
     deadline = time.monotonic() + timeout
     observed: list[object] = []
@@ -328,11 +382,11 @@ def _wait_for_ws_action(
             action = _receive_ws_action(ws, timeout=1)
         except TimeoutError:
             continue
-        observed.append(action.get("type"))
-        if action.get("type") != action_type:
+        observed.append(action.type)
+        if action.type != action_type:
             continue
         if mailbox_item_id is not None:
-            if action.get("mailbox_item_id") != mailbox_item_id:
+            if action.mailbox_item_id != mailbox_item_id:
                 continue
         return action
     raise TimeoutError(f"WebSocket action was not observed: {action_type}, {observed}")
@@ -346,58 +400,49 @@ def _wait_for_ws_turn(
     reasoning_summary: str,
     assistant_message: str,
     timeout: float = 120,
-) -> list[dict[str, object]]:
+) -> list[ChatEventResponse]:
     """Collect canonical durable append actions through one completed turn."""
     deadline = time.monotonic() + timeout
-    events: list[dict[str, object]] = []
+    events: list[ChatEventResponse] = []
     event_ids: set[str] = set()
     while time.monotonic() < deadline:
         try:
             action = _receive_ws_action(ws, timeout=5)
         except TimeoutError:
             continue
-        if "session_id" in action:
-            assert action.get("session_id") == session_id, action
+        if "session_id" in action.model_fields_set:
+            assert action.session_id == session_id, action
         else:
-            assert action.get("type") in {
+            assert action.type in {
                 "subagent_tree_changed",
                 "todo_state_changed",
             }, action
-        if action.get("type") != "history_event_appended":
+        if action.type != "history_event_appended":
             continue
-        event = _json_object_payload(
-            action.get("event"),
-            label="history_event_appended event",
-        )
-        assert event.get("session_id") == session_id, event
-        event_id = event.get("id")
-        if not isinstance(event_id, str):
-            raise AssertionError(f"History event did not include id: {event!r}")
+        event = action.event
+        assert event is not None, action
+        assert event.session_id == session_id, event
+        event_id = event.id
         assert event_id not in event_ids, event
         event_ids.add(event_id)
         events.append(event)
 
-        kinds = [item.get("kind") for item in events]
+        kinds = [item.kind for item in events]
         contents: list[str] = []
         reasoning: list[str] = []
         for item in events:
-            payload = _json_object_payload(
-                item.get("payload"),
-                label="history event payload",
-            )
-            content = payload.get("content")
+            if item.kind not in {"user_message", "assistant_message", "reasoning"}:
+                continue
+            payload = InputMessageObservation.model_validate(item.payload)
+            content = payload.content
             if isinstance(content, str):
                 contents.append(content)
-            summary = payload.get("summary")
+            summary = payload.summary
             if isinstance(summary, str):
                 reasoning.append(summary)
         terminal = (
-            event.get("kind") == "run_marker"
-            and _json_object_payload(
-                event.get("payload"),
-                label="run marker payload",
-            ).get("status")
-            == "completed"
+            event.kind == "run_marker"
+            and RunMarkerObservation.model_validate(event.payload).status == "completed"
         )
         if (
             terminal
@@ -410,7 +455,7 @@ def _wait_for_ws_turn(
         ):
             return events
     raise TimeoutError(
-        "Completed canonical WebSocket turn was not observed: "
+        f"Completed canonical WebSocket turn was not observed: "
         f"{user_message!r}, {events!r}"
     )
 
@@ -542,12 +587,7 @@ def _run_message(
             timeout=10,
         )
         session_response.raise_for_status()
-        session_payload = _json_object(session_response)
-        session_id_value = session_payload.get("id")
-        if not isinstance(session_id_value, str):
-            raise AssertionError(
-                f"Team primary response did not include id: {session_payload!r}"
-            )
+        session_id_value = decode_session(session_response.json()).id
     else:
         session_id_value = session_id
     path = f"/chat/v1/sessions/{session_id_value}/inputs"
@@ -567,13 +607,7 @@ def _run_message(
         timeout=10,
     )
     response.raise_for_status()
-    payload = _json_object(response)
-    observed_session_id = payload.get("session_id")
-    if not isinstance(observed_session_id, str):
-        raise AssertionError(
-            f"REST write response did not include session_id: {payload!r}"
-        )
-    return _RunResult(session_id=observed_session_id)
+    return _RunResult(session_id=decode_chat_write(response.json()).session_id)
 
 
 def _run_command(
@@ -649,7 +683,7 @@ def _list_history(
     server_url: str,
     token: str,
     session_id: str,
-) -> dict[str, object]:
+) -> ChatEventPageResponse:
     """REST history event page t fetcht."""
     response = requests.get(
         f"{server_url}/chat/v1/sessions/{session_id}/history?limit=100",
@@ -657,7 +691,7 @@ def _list_history(
         timeout=10,
     )
     response.raise_for_status()
-    return _json_object(response)
+    return decode_history_page(response.json())
 
 
 def _history_page(
@@ -668,7 +702,7 @@ def _history_page(
     limit: int,
     before: str | None,
     after: str | None,
-) -> dict[str, object]:
+) -> ChatEventPageResponse:
     """Fetch one raw durable history page with explicit cursor direction."""
     params: dict[str, int | str] = {"limit": limit}
     if before is not None:
@@ -682,7 +716,7 @@ def _history_page(
         timeout=10,
     )
     response.raise_for_status()
-    return _json_object(response)
+    return decode_history_page(response.json())
 
 
 def _list_live(
@@ -690,7 +724,7 @@ def _list_live(
     server_url: str,
     token: str,
     session_id: str,
-) -> dict[str, object]:
+) -> LiveEventListResponse:
     """Fetch the REST live projection."""
     response = requests.get(
         f"{server_url}/chat/v1/sessions/{session_id}/live",
@@ -698,7 +732,10 @@ def _list_live(
         timeout=10,
     )
     response.raise_for_status()
-    return _json_object(response)
+    live = LiveEventListResponse.from_dict(response.json())
+    if live is None:
+        raise ValueError("Expected a REST live projection object.")
+    return live
 
 
 def _wait_for_session_idle(
@@ -710,49 +747,46 @@ def _wait_for_session_idle(
 ) -> None:
     """Wait until the authoritative live projection reports an idle Session."""
     deadline = time.monotonic() + timeout
-    last_payload: dict[str, object] | None = None
+    last_payload: LiveEventListResponse | None = None
     while time.monotonic() < deadline:
         last_payload = _list_live(
             server_url=server_url,
             token=token,
             session_id=session_id,
         )
-        if last_payload.get("session_run_state") == "idle":
+        if last_payload.session_run_state == "idle":
             return
         time.sleep(0.5)
     raise TimeoutError(f"Session did not become idle: {last_payload!r}")
 
 
-def _history_events(payload: dict[str, object]) -> list[dict[str, object]]:
-    """Validate and return raw REST history events."""
-    return _json_object_list_payload(payload.get("items"), label="REST history events")
+def _history_events(
+    payload: ChatEventPageResponse | dict[str, object],
+) -> list[ChatEventResponse]:
+    """Return typed events, validating legacy callers at their boundary."""
+    page = (
+        payload
+        if isinstance(payload, ChatEventPageResponse)
+        else decode_history_page(payload)
+    )
+    return page.items
 
 
-def _system_error_events(payload: dict[str, object]) -> list[dict[str, object]]:
-    """Return raw REST history system_error events."""
-    return [
-        event
-        for event in _history_events(payload)
-        if event.get("kind") == "system_error"
-    ]
+def _system_error_events(
+    payload: ChatEventPageResponse | dict[str, object],
+) -> list[ChatEventResponse]:
+    """Return durable system-error observations."""
+    return [event for event in _history_events(payload) if event.kind == "system_error"]
 
 
-def _failed_run_error_events(payload: dict[str, object]) -> list[dict[str, object]]:
-    """Return raw REST history failed-run system_error events."""
-    failed_events: list[dict[str, object]] = []
+def _failed_run_error_events(
+    payload: ChatEventPageResponse | dict[str, object],
+) -> list[ChatEventResponse]:
+    """Return terminal failed-run errors from typed failure controls."""
+    failed_events: list[ChatEventResponse] = []
     for event in _system_error_events(payload):
-        event_payload = _json_object_payload(
-            event.get("payload"),
-            label="system_error payload",
-        )
-        failure_payload = event_payload.get("failure")
-        if failure_payload is None:
-            continue
-        failure = _json_object_payload(
-            failure_payload,
-            label="system_error failure",
-        )
-        if failure.get("kind") == "failed_run":
+        failure = SystemErrorObservation.model_validate(event.payload).failure
+        if failure is not None and failure.kind == "failed_run":
             failed_events.append(event)
     return failed_events
 
@@ -764,7 +798,7 @@ def _retry_failed_run(
     agent_id: str,
     session_id: str,
     failed_event_id: str,
-) -> dict[str, object]:
+) -> ChatWriteResponse:
     """Post a manual failed-run retry and return the response."""
     response = requests.post(
         f"{public_url}/chat/v1/sessions/{session_id}/retry-failed-run",
@@ -777,7 +811,7 @@ def _retry_failed_run(
         timeout=10,
     )
     response.raise_for_status()
-    return _json_object(response)
+    return decode_chat_write(response.json())
 
 
 def _wait_for_live_retry(
@@ -787,10 +821,10 @@ def _wait_for_live_retry(
     session_id: str,
     failed_attempt_count: int,
     timeout: float = 20,
-) -> dict[str, object]:
+) -> LiveEventListResponse:
     """Wait until /live exposes a failed-run retry state."""
     deadline = time.monotonic() + timeout
-    last_payload: dict[str, object] | None = None
+    last_payload: LiveEventListResponse | None = None
     while time.monotonic() < deadline:
         payload = _list_live(
             server_url=server_url,
@@ -798,18 +832,9 @@ def _wait_for_live_retry(
             session_id=session_id,
         )
         last_payload = payload
-        run_payload = payload.get("run")
-        if run_payload is not None:
-            run = _json_object_payload(run_payload, label="live run")
-            retry_payload = run.get("retry")
-            if retry_payload is not None:
-                retry = _json_object_payload(retry_payload, label="live run retry")
-                observed_attempt_count = retry.get("failed_attempt_count")
-                if (
-                    isinstance(observed_attempt_count, int)
-                    and observed_attempt_count >= failed_attempt_count
-                ):
-                    return payload
+        if payload.run is not None and payload.run.retry is not None:
+            if payload.run.retry.failed_attempt_count >= failed_attempt_count:
+                return payload
         time.sleep(0.1)
     raise TimeoutError(f"live retry was not observed: {last_payload!r}")
 
@@ -821,11 +846,11 @@ def _wait_for_failed_run_error(
     session_id: str,
     expected_attempts: int,
     timeout: float = 30,
-) -> dict[str, object]:
+) -> ChatEventPageResponse:
     """Wait until a terminal failed-run error is eligible for idle-only controls."""
     deadline = time.monotonic() + timeout
-    last_payload: dict[str, object] | None = None
-    last_live_payload: dict[str, object] | None = None
+    last_payload: ChatEventPageResponse | None = None
+    last_live_payload: LiveEventListResponse | None = None
     while time.monotonic() < deadline:
         payload = _list_history(
             server_url=server_url,
@@ -835,18 +860,9 @@ def _wait_for_failed_run_error(
         last_payload = payload
         failed_events = _failed_run_error_events(payload)
         if failed_events:
-            event_payload = _json_object_payload(
-                failed_events[-1].get("payload"),
-                label="failed-run payload",
-            )
-            failure = _json_object_payload(
-                event_payload.get("failure"),
-                label="failed-run failure",
-            )
-            attempts = _json_object_list_payload(
-                failure.get("attempts"),
-                label="failed-run attempts",
-            )
+            failure = _failed_run(failed_events[-1])
+            attempts = failure.attempts
+            assert attempts is not None
             if len(attempts) == expected_attempts:
                 live_payload = _list_live(
                     server_url=server_url,
@@ -854,7 +870,7 @@ def _wait_for_failed_run_error(
                     session_id=session_id,
                 )
                 last_live_payload = live_payload
-                if live_payload.get("session_run_state") == "idle":
+                if live_payload.session_run_state == "idle":
                     return payload
         time.sleep(0.5)
     raise TimeoutError(
@@ -863,122 +879,84 @@ def _wait_for_failed_run_error(
     )
 
 
-def _message_item_from_event(event: dict[str, object]) -> dict[str, object]:
-    """History event t t assertion t t message-like dict t t."""
-    payload = _json_object_payload(event.get("payload"), label="history event payload")
-    kind = event.get("kind")
-    item: dict[str, object] = {
-        "id": event.get("id"),
-        "external_id": event.get("external_id"),
-        "role": kind,
-    }
-    match kind:
-        case "user_message":
-            item["role"] = "user"
-            item["content"] = payload.get("content")
-        case "assistant_message":
-            item["role"] = "assistant"
-            item["content"] = payload.get("content")
-        case "client_tool_call":
-            item["role"] = "assistant"
-            item["tool_calls"] = [
-                {
-                    "id": payload.get("call_id"),
-                    "name": payload.get("name"),
-                    "arguments": payload.get("arguments"),
-                }
-            ]
-        case "client_tool_result":
-            item["role"] = "tool"
-            item["tool_call_id"] = payload.get("call_id")
-            item["content"] = payload.get("output")
-        case "turn_marker":
-            item["role"] = "turn_complete"
-            item["usage"] = payload.get("usage")
-        case "run_marker":
-            item["role"] = "run_complete"
-            item["status"] = payload.get("status")
-        case "compaction_marker" | "compaction_summary":
-            item["role"] = kind
-        case _:
-            item["role"] = kind
-    return item
+def _failed_run(event: ChatEventResponse) -> FailedRunObservation:
+    """Decode controls of an already-selected failed-run event."""
+    failure = SystemErrorObservation.model_validate(event.payload).failure
+    assert failure is not None and failure.kind == "failed_run"
+    return failure
 
 
-def _message_items(payload: dict[str, object]) -> list[dict[str, object]]:
-    """REST history item listt verifyt returnt."""
-    events = _json_object_list_payload(payload.get("items"), label="REST history items")
-    return [_message_item_from_event(event) for event in events]
+def _event_content(event: ChatEventResponse) -> object:
+    """Interpret content only for message/result event families."""
+    if event.kind in {"user_message", "assistant_message"}:
+        return InputMessageObservation.model_validate(event.payload).content
+    if event.kind == "client_tool_result":
+        return ToolResultObservation.model_validate(event.payload).output
+    return None
 
 
-def _message_contents(payload: dict[str, object]) -> list[str]:
-    """REST history content listt returnt."""
+def _message_contents(payload: ChatEventPageResponse | dict[str, object]) -> list[str]:
+    """Return durable message and tool-result text content."""
     contents: list[str] = []
-    for item in _message_items(payload):
-        content = item.get("content")
+    for event in _history_events(payload):
+        content = _event_content(event)
         if isinstance(content, str):
             contents.append(content)
     return contents
 
 
-def _message_roles(payload: dict[str, object]) -> list[str]:
-    """REST history role listt returnt."""
-    roles: list[str] = []
-    for item in _message_items(payload):
-        role = item.get("role")
-        if isinstance(role, str):
-            roles.append(role)
-    return roles
+def _message_roles(payload: ChatEventPageResponse | dict[str, object]) -> list[str]:
+    """Project historical compatibility role labels from declared event kinds."""
+    roles = {
+        "user_message": "user",
+        "assistant_message": "assistant",
+        "client_tool_call": "assistant",
+        "client_tool_result": "tool",
+        "turn_marker": "turn_complete",
+        "run_marker": "run_complete",
+    }
+    return [roles.get(event.kind, event.kind) for event in _history_events(payload)]
 
 
-def _message_id_for_content(payload: dict[str, object], content: str) -> str:
+def _message_id_for_content(payload: ChatEventPageResponse, content: str) -> str:
     """REST history t content t t message id t returnt."""
-    for item in _message_items(payload):
-        if item.get("content") != content:
-            continue
-        message_id = item.get("id")
-        if isinstance(message_id, str):
-            return message_id
+    for event in _history_events(payload):
+        if _event_content(event) == content:
+            return event.id
     raise AssertionError(f"message not found for content: {content!r}")
 
 
-def _tool_call_names(payload: dict[str, object]) -> list[str]:
+def _tool_call_names(payload: ChatEventPageResponse) -> list[str]:
     """REST history tool call name listt returnt."""
-    names: list[str] = []
-    for item in _message_items(payload):
-        if item.get("tool_calls") is None:
-            continue
-        raw_tool_calls: object = item["tool_calls"]
-        for tool_call in _json_object_list_payload(
-            raw_tool_calls,
-            label="REST tool calls",
-        ):
-            name = tool_call.get("name")
-            if isinstance(name, str):
-                names.append(name)
-    return names
+    return [
+        ToolCallObservation.model_validate(event.payload).name
+        for event in _history_events(payload)
+        if event.kind == "client_tool_call"
+    ]
 
 
-def _tool_result_call_ids(payload: dict[str, object]) -> list[str]:
+def _tool_result_call_ids(payload: ChatEventPageResponse) -> list[str]:
     """REST history tool result call_id listt returnt."""
-    call_ids: list[str] = []
-    for item in _message_items(payload):
-        tool_call_id = item.get("tool_call_id")
-        if isinstance(tool_call_id, str) and tool_call_id:
-            call_ids.append(tool_call_id)
-    return call_ids
+    return [
+        ToolResultObservation.model_validate(event.payload).call_id
+        for event in _history_events(payload)
+        if event.kind == "client_tool_result"
+    ]
 
 
-def _tool_result_content(payload: dict[str, object], call_id: str) -> object:
+def _tool_result_content(payload: ChatEventPageResponse, call_id: str) -> object:
     """Return one durable client-tool result payload by call ID."""
-    for item in _message_items(payload):
-        if item.get("tool_call_id") == call_id:
-            return item.get("content")
+    for event in _history_events(payload):
+        if event.kind != "client_tool_result":
+            continue
+        result = ToolResultObservation.model_validate(event.payload)
+        if result.call_id == call_id:
+            return result.output
     raise AssertionError(f"tool result not found for call: {call_id!r}")
 
 
 def _assert_toolkit_call_source(
-    payload: dict[str, object],
+    payload: ChatEventPageResponse,
     call_id: str,
     *,
     toolkit_config_id: str,
@@ -988,20 +966,14 @@ def _assert_toolkit_call_source(
     source_identity: dict[str, str],
 ) -> None:
     """Require one durable call to retain its exact Toolkit source identity."""
-    events = _json_object_list_payload(payload.get("items"), label="REST history items")
-    for event in events:
-        if event.get("kind") != "client_tool_call":
+    for event in _history_events(payload):
+        if event.kind != "client_tool_call":
             continue
-        event_payload = _json_object_payload(
-            event.get("payload"),
-            label="client tool call payload",
-        )
-        if event_payload.get("call_id") != call_id:
+        call = ToolCallObservation.model_validate(event.payload)
+        if call.call_id != call_id:
             continue
-        source = _json_object_payload(
-            event_payload.get("toolkit_source"),
-            label="Toolkit source",
-        )
+        source = call.toolkit_source
+        assert source is not None
         _assert_toolkit_source(
             source,
             toolkit_config_id=toolkit_config_id,
@@ -1015,7 +987,7 @@ def _assert_toolkit_call_source(
 
 
 def _assert_toolkit_source(
-    source: dict[str, object],
+    source: ToolkitSourceObservation,
     *,
     toolkit_config_id: str,
     toolkit_name: str,
@@ -1024,11 +996,11 @@ def _assert_toolkit_source(
     source_identity: dict[str, str],
 ) -> None:
     """Require one public Toolkit source projection to match its catalog identity."""
-    assert source.get("toolkit_config_id") == toolkit_config_id
-    assert source.get("toolkit_name") == toolkit_name
-    assert source.get("toolkit_slug") == toolkit_slug
-    assert source.get("toolkit_namespace") == toolkit_namespace
-    assert source.get("source_identity") == source_identity
+    assert source.toolkit_config_id == toolkit_config_id
+    assert source.toolkit_name == toolkit_name
+    assert source.toolkit_slug == toolkit_slug
+    assert source.toolkit_namespace == toolkit_namespace
+    assert source.source_identity == source_identity
 
 
 def _wait_for_live_toolkit_source(
@@ -1046,34 +1018,21 @@ def _wait_for_live_toolkit_source(
 ) -> None:
     """Require user-visible live activity to retain the selected Toolkit source."""
     deadline = time.monotonic() + timeout
-    latest: dict[str, object] | None = None
+    latest: LiveEventListResponse | None = None
     while time.monotonic() < deadline:
         latest = _list_live(
             server_url=server_url,
             token=token,
             session_id=session_id,
         )
-        partial_history = _json_object_payload(
-            latest.get("partial_history"),
-            label="live partial history",
-        )
-        events = _json_object_list_payload(
-            partial_history.get("items"),
-            label="live partial history items",
-        )
-        for event in events:
-            if event.get("kind") != "client_tool_call":
+        for event in latest.partial_history.items:
+            if event.kind != "client_tool_call":
                 continue
-            event_payload = _json_object_payload(
-                event.get("payload"),
-                label="live client tool call payload",
-            )
-            if event_payload.get("call_id") != call_id:
+            call = ToolCallObservation.model_validate(event.payload)
+            if call.call_id != call_id:
                 continue
-            source = _json_object_payload(
-                event_payload.get("toolkit_source"),
-                label="live Toolkit source",
-            )
+            source = call.toolkit_source
+            assert source is not None
             _assert_toolkit_source(
                 source,
                 toolkit_config_id=toolkit_config_id,
@@ -1107,13 +1066,13 @@ def _wait_for_runtime_hook_source(
                 value = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            if not isinstance(value, dict):
+            observation = decode_runtime_hook(value)
+            if observation is None:
                 continue
             if (
-                value.get("message")
-                == "Runtime hook QA lifecycle event: on_before_tool_call"
-                and value.get("tool_name") == tool_name
-                and value.get("toolkit_slug") == toolkit_namespace
+                observation.runtime_hook_qa_lifecycle == "on_before_tool_call"
+                and observation.tool_name == tool_name
+                and observation.toolkit_slug == toolkit_namespace
             ):
                 return
         time.sleep(0.1)
@@ -1124,27 +1083,22 @@ def _wait_for_runtime_hook_source(
     )
 
 
-def _run_complete_ids(payload: dict[str, object]) -> list[str]:
-    """REST history run_complete message id listt returnt."""
-    ids: list[str] = []
-    for item in _message_items(payload):
-        if item.get("role") != "run_complete":
-            continue
-        message_id = item.get("id")
-        if isinstance(message_id, str):
-            ids.append(message_id)
-    return ids
+def _run_complete_ids(payload: ChatEventPageResponse) -> list[str]:
+    """Return durable run boundary identities."""
+    return [
+        event.id for event in _history_events(payload) if event.kind == "run_marker"
+    ]
 
 
-def _turn_usage_items(payload: dict[str, object]) -> list[dict[str, object]]:
-    """REST history turn_complete usage listt returnt."""
-    usages: list[dict[str, object]] = []
-    for item in _message_items(payload):
-        if item.get("role") != "turn_complete":
+def _turn_usage_items(payload: ChatEventPageResponse) -> list[UsageObservation]:
+    """Return validated token evidence from durable turn boundaries."""
+    usages: list[UsageObservation] = []
+    for event in _history_events(payload):
+        if event.kind != "turn_marker":
             continue
-        usage = item.get("usage")
+        usage = TurnMarkerObservation.model_validate(event.payload).usage
         if usage is not None:
-            usages.append(_json_object_payload(usage, label="turn_complete usage"))
+            usages.append(usage)
     return usages
 
 
@@ -1155,10 +1109,10 @@ def _wait_for_rest_contents(
     session_id: str,
     expected: list[str],
     timeout: float = 90,
-) -> dict[str, object]:
+) -> ChatEventPageResponse:
     """REST history t expected content t t t t t."""
     deadline = time.monotonic() + timeout
-    last_payload: dict[str, object] | None = None
+    last_payload: ChatEventPageResponse | None = None
     while time.monotonic() < deadline:
         payload = _list_history(
             server_url=server_url,
@@ -1181,10 +1135,10 @@ def _wait_for_completed_rest_contents(
     expected: list[str],
     minimum_completed_runs: int = 1,
     timeout: float = 90,
-) -> dict[str, object]:
+) -> ChatEventPageResponse:
     """Wait for expected content and the required completed run boundaries."""
     deadline = time.monotonic() + timeout
-    last_payload: dict[str, object] | None = None
+    last_payload: ChatEventPageResponse | None = None
     while time.monotonic() < deadline:
         payload = _list_history(
             server_url=server_url,
@@ -1192,17 +1146,16 @@ def _wait_for_completed_rest_contents(
             session_id=session_id,
         )
         last_payload = payload
-        items = _message_items(payload)
-        contents = [
-            content for item in items if isinstance(content := item.get("content"), str)
-        ]
+        events = _history_events(payload)
+        contents = _message_contents(payload)
         completed_run_count = sum(
-            item.get("role") == "run_complete" and item.get("status") == "completed"
-            for item in items
+            event.kind == "run_marker"
+            and RunMarkerObservation.model_validate(event.payload).status == "completed"
+            for event in events
         )
         if (
             all(item in contents for item in expected)
-            and any(item.get("role") == "turn_complete" for item in items)
+            and any(event.kind == "turn_marker" for event in events)
             and completed_run_count >= minimum_completed_runs
         ):
             return payload
@@ -1213,25 +1166,108 @@ def _wait_for_completed_rest_contents(
 
 
 # Shared public-path helpers used by focused execution reliability E2E modules.
+# These JSON egress adapters preserve the existing helpers used by scenarios
+# outside this module. All decisions in this module use decoded observations.
 auth_headers = _headers
 connect_chat = _connect_chat
 create_agent = _create_agent
-failed_run_error_events = _failed_run_error_events
-history_events = _history_events
 json_object = _json_object
 json_object_list_payload = _json_object_list_payload
 json_object_payload = _json_object_payload
-list_history = _list_history
-list_live = _list_live
 message_contents = _message_contents
 message_roles = _message_roles
 run_message = _run_message
 setup_workspace = _setup_workspace
-system_error_events = _system_error_events
 team_primary_session_id = _team_primary_session_id
-wait_for_failed_run_error = _wait_for_failed_run_error
-wait_for_rest_contents = _wait_for_rest_contents
-wait_for_ws_action = _wait_for_ws_action
+
+
+def list_history(*, server_url: str, token: str, session_id: str) -> dict[str, object]:
+    """Serialize decoded history at the legacy scenario helper boundary."""
+    return _list_history(
+        server_url=server_url, token=token, session_id=session_id
+    ).model_dump(mode="json", exclude_unset=True)
+
+
+def list_live(*, server_url: str, token: str, session_id: str) -> dict[str, object]:
+    """Serialize decoded live state at the legacy scenario helper boundary."""
+    live = _list_live(server_url=server_url, token=token, session_id=session_id)
+    return _JSON_OBJECT.dump_python(live.to_dict(), mode="json")
+
+
+def history_events(payload: dict[str, object]) -> list[dict[str, object]]:
+    """Serialize event observations for existing adjacent scenario consumers."""
+    return [
+        event.model_dump(mode="json", exclude_unset=True)
+        for event in _history_events(payload)
+    ]
+
+
+def system_error_events(payload: dict[str, object]) -> list[dict[str, object]]:
+    """Serialize selected error observations at the legacy helper boundary."""
+    return [
+        event.model_dump(mode="json", exclude_unset=True)
+        for event in _system_error_events(payload)
+    ]
+
+
+def failed_run_error_events(payload: dict[str, object]) -> list[dict[str, object]]:
+    """Serialize selected failure observations at the legacy helper boundary."""
+    return [
+        event.model_dump(mode="json", exclude_unset=True)
+        for event in _failed_run_error_events(payload)
+    ]
+
+
+def wait_for_failed_run_error(
+    *,
+    server_url: str,
+    token: str,
+    session_id: str,
+    expected_attempts: int,
+    timeout: float = 30,
+) -> dict[str, object]:
+    """Preserve the JSON result of the shared terminal-error polling helper."""
+    return _wait_for_failed_run_error(
+        server_url=server_url,
+        token=token,
+        session_id=session_id,
+        expected_attempts=expected_attempts,
+        timeout=timeout,
+    ).model_dump(mode="json", exclude_unset=True)
+
+
+def wait_for_rest_contents(
+    *,
+    server_url: str,
+    token: str,
+    session_id: str,
+    expected: list[str],
+    timeout: float = 90,
+) -> dict[str, object]:
+    """Preserve the JSON result of the shared durable-content polling helper."""
+    return _wait_for_rest_contents(
+        server_url=server_url,
+        token=token,
+        session_id=session_id,
+        expected=expected,
+        timeout=timeout,
+    ).model_dump(mode="json", exclude_unset=True)
+
+
+def wait_for_ws_action(
+    ws: Connection,
+    *,
+    action_type: str,
+    mailbox_item_id: str | None = None,
+    timeout: float = 10,
+) -> dict[str, object]:
+    """Serialize a canonical action for existing adjacent scenario consumers."""
+    return _wait_for_ws_action(
+        ws,
+        action_type=action_type,
+        mailbox_item_id=mailbox_item_id,
+        timeout=timeout,
+    ).model_dump(mode="json", exclude_unset=True)
 
 
 @pytest.fixture(scope="class")
@@ -1296,10 +1332,10 @@ class TestAgentExecutionPersistence:
         assert _run_complete_ids(payload)
         turn_usages = _turn_usage_items(payload)
         assert turn_usages
-        assert isinstance(turn_usages[-1].get("total_tokens"), int)
-        assert isinstance(turn_usages[-1].get("prompt_tokens"), int)
-        assert isinstance(turn_usages[-1].get("completion_tokens"), int)
-        assert isinstance(turn_usages[-1].get("raw"), dict)
+        assert turn_usages[-1].total_tokens is not None
+        assert turn_usages[-1].prompt_tokens is not None
+        assert turn_usages[-1].completion_tokens is not None
+        assert turn_usages[-1].raw is not None
 
     def test_canonical_ws_history_pagination_and_intent_converge(
         self,
@@ -1323,7 +1359,7 @@ class TestAgentExecutionPersistence:
             session_id=session_id,
         ) as ws:
             subscribed = _wait_for_ws_action(ws, action_type="subscribed")
-            assert subscribed.get("session_id") == session_id
+            assert subscribed.session_id == session_id
             ws.send(
                 json.dumps(
                     {
@@ -1336,7 +1372,7 @@ class TestAgentExecutionPersistence:
                 ws,
                 action_type="subscription_health_check_ack",
             )
-            assert health_ack.get("request_id") == "timeline-reliability"
+            assert health_ack.request_id == "timeline-reliability"
 
             _run_message(
                 public_api_client=public_api_client,
@@ -1376,23 +1412,18 @@ class TestAgentExecutionPersistence:
             "enabled_execution_options": [],
         }
         ws_events = [*first_ws_events, *second_ws_events]
-        ws_event_ids: list[str] = []
-        for event in ws_events:
-            event_id = event.get("id")
-            if not isinstance(event_id, str):
-                raise AssertionError(f"WebSocket event did not include id: {event!r}")
-            ws_event_ids.append(event_id)
+        ws_event_ids = [event.id for event in ws_events]
         assert len(ws_event_ids) == len(set(ws_event_ids))
         ws_user_profiles: list[object] = []
         for event in ws_events:
-            if event.get("kind") != "user_message":
+            if event.kind != "user_message":
                 continue
-            payload = _json_object_payload(
-                event.get("payload"),
-                label="WebSocket user message payload",
-            )
-            if payload.get("content") in {_TIMELINE_FIRST, _TIMELINE_SECOND}:
-                ws_user_profiles.append(payload.get("requested_inference_profile"))
+            payload = InputMessageObservation.model_validate(event.payload)
+            if payload.content in [_TIMELINE_FIRST, _TIMELINE_SECOND]:
+                assert payload.requested_inference_profile is not None
+                ws_user_profiles.append(
+                    payload.requested_inference_profile.model_dump(exclude_unset=True)
+                )
         assert ws_user_profiles == [expected_profile, expected_profile]
 
         full_history = _wait_for_rest_contents(
@@ -1410,29 +1441,24 @@ class TestAgentExecutionPersistence:
         reasoning_summaries: list[object] = []
         rest_user_profiles: list[object] = []
         for event in full_events:
-            payload = _json_object_payload(
-                event.get("payload"),
-                label="REST history event payload",
-            )
-            if event.get("kind") == "reasoning":
-                reasoning_summaries.append(payload.get("summary"))
-            if event.get("kind") == "user_message" and payload.get("content") in {
+            if event.kind not in {"reasoning", "user_message"}:
+                continue
+            payload = InputMessageObservation.model_validate(event.payload)
+            if event.kind == "reasoning":
+                reasoning_summaries.append(payload.summary)
+            if event.kind == "user_message" and payload.content in [
                 _TIMELINE_FIRST,
                 _TIMELINE_SECOND,
-            }:
-                rest_user_profiles.append(payload.get("requested_inference_profile"))
+            ]:
+                assert payload.requested_inference_profile is not None
+                rest_user_profiles.append(
+                    payload.requested_inference_profile.model_dump(exclude_unset=True)
+                )
         assert reasoning_summaries.count(_TIMELINE_FIRST_REASONING) == 1
         assert reasoning_summaries.count(_TIMELINE_SECOND_REASONING) == 1
         assert rest_user_profiles == [expected_profile, expected_profile]
 
-        full_ids: list[str] = []
-        for event in full_events:
-            event_id = event.get("id")
-            if not isinstance(event_id, str):
-                raise AssertionError(
-                    f"REST history event did not include id: {event!r}"
-                )
-            full_ids.append(event_id)
+        full_ids = [event.id for event in full_events]
         latest_page = _history_page(
             server_url=azents_public_server_url,
             token=workspace.token,
@@ -1443,32 +1469,25 @@ class TestAgentExecutionPersistence:
         )
         latest_items = _history_events(latest_page)
         assert len(latest_items) == 2
-        assert latest_page.get("has_more") is True
-        assert latest_page.get("has_newer") is False
-        assert latest_page.get("next_cursor") == latest_items[0].get("id")
-        assert latest_page.get("previous_cursor") == latest_items[-1].get("id")
+        assert latest_page.has_more is True
+        assert latest_page.has_newer is False
+        assert latest_page.next_cursor == latest_items[0].id
+        assert latest_page.previous_cursor == latest_items[-1].id
 
         collected_ids: set[str] = set()
         page = latest_page
         oldest_page = latest_page
         while True:
             page_items = _history_events(page)
-            page_ids: set[str] = set()
-            for item in page_items:
-                event_id = item.get("id")
-                if not isinstance(event_id, str):
-                    raise AssertionError(
-                        f"History page event did not include id: {item!r}"
-                    )
-                page_ids.add(event_id)
+            page_ids = {item.id for item in page_items}
             assert page_ids
             assert collected_ids.isdisjoint(page_ids)
             collected_ids.update(page_ids)
             oldest_page = page
-            if page.get("has_more") is False:
+            if page.has_more is False:
                 break
-            cursor = page.get("next_cursor")
-            if not isinstance(cursor, str):
+            cursor = page.next_cursor
+            if cursor is None:
                 raise AssertionError(f"History page did not include cursor: {page!r}")
             page = _history_page(
                 server_url=azents_public_server_url,
@@ -1478,11 +1497,11 @@ class TestAgentExecutionPersistence:
                 before=cursor,
                 after=None,
             )
-            assert page.get("has_newer") is True
+            assert page.has_newer is True
 
         assert collected_ids == set(full_ids)
-        forward_cursor = oldest_page.get("previous_cursor")
-        if not isinstance(forward_cursor, str):
+        forward_cursor = oldest_page.previous_cursor
+        if forward_cursor is None:
             raise AssertionError(
                 f"Oldest history page did not include cursor: {oldest_page!r}"
             )
@@ -1495,8 +1514,8 @@ class TestAgentExecutionPersistence:
             after=forward_cursor,
         )
         assert _history_events(forward_page)
-        assert forward_page.get("has_more") is True
-        assert forward_page.get("has_newer") is True
+        assert forward_page.has_more is True
+        assert forward_page.has_newer is True
 
     def test_ws_mailbox_upsert_and_remove_use_native_identity(
         self,
@@ -1521,7 +1540,7 @@ class TestAgentExecutionPersistence:
             session_id=session_id,
         ) as ws:
             subscribed = _wait_for_ws_action(ws, action_type="subscribed")
-            assert subscribed.get("session_id") == session_id
+            assert subscribed.session_id == session_id
 
             response = requests.post(
                 f"{azents_public_server_url}/chat/v1/sessions/{session_id}/inputs",
@@ -1542,47 +1561,30 @@ class TestAgentExecutionPersistence:
                 timeout=10,
             )
             response.raise_for_status()
-            write_payload = _json_object(response)
-            snapshot = _json_object_payload(
-                write_payload.get("snapshot"),
-                label="chat write snapshot",
-            )
-            _json_object_list_payload(
-                snapshot.get("mailbox_items"),
-                label="chat write snapshot mailbox_items",
-            )
+            write_payload = decode_chat_write(response.json())
+            snapshot = write_payload.snapshot
+            assert snapshot is not None
 
             upsert_action = _wait_for_ws_action(
                 ws,
                 action_type="mailbox_item_upserted",
                 timeout=30,
             )
-            mailbox_item = _json_object_payload(
-                upsert_action.get("mailbox_item"),
-                label="mailbox_item_upserted mailbox_item",
-            )
-            assert upsert_action.get("session_id") == session_id
-            assert mailbox_item.get("session_id") == session_id
-            assert mailbox_item.get("kind") == "user_message"
-            items = _json_object_list_payload(
-                mailbox_item.get("items"),
-                label="mailbox envelope items",
-            )
+            mailbox_item = upsert_action.mailbox_item
+            assert mailbox_item is not None
+            assert upsert_action.session_id == session_id
+            assert mailbox_item.session_id == session_id
+            assert mailbox_item.kind == "user_message"
+            items = mailbox_item.items
             assert len(items) == 1
             item = items[0]
-            mailbox_item_id = mailbox_item.get("mailbox_item_id")
-            item_id = item.get("id")
-            item_key = item.get("item_key")
-            assert isinstance(mailbox_item_id, str)
-            assert isinstance(item_id, str)
-            assert isinstance(item_key, str)
+            mailbox_item_id = mailbox_item.mailbox_item_id
+            item_id = item.id
+            item_key = item.item_key
             assert item_id == f"{mailbox_item_id}:{item_key}"
-            presentation = _json_object_payload(
-                item.get("presentation"),
-                label="mailbox item presentation",
-            )
-            assert presentation.get("type") == "user_message"
-            assert presentation.get("content") == message
+            presentation = item.presentation
+            assert presentation.type == "user_message"
+            assert presentation.content == message
 
             removal_action = _wait_for_ws_action(
                 ws,
@@ -1590,7 +1592,7 @@ class TestAgentExecutionPersistence:
                 mailbox_item_id=mailbox_item_id,
                 timeout=120,
             )
-            assert removal_action == {
+            assert removal_action.model_dump(exclude_unset=True) == {
                 "type": "mailbox_item_removed",
                 "session_id": session_id,
                 "mailbox_item_id": mailbox_item_id,
@@ -1633,16 +1635,14 @@ class TestAgentExecutionPersistence:
             session_id=result.session_id,
             failed_attempt_count=1,
         )
-        run = _json_object_payload(live_payload.get("run"), label="live run")
-        retry = _json_object_payload(run.get("retry"), label="live run retry")
-        attempts = _json_object_list_payload(
-            retry.get("attempts"),
-            label="live retry attempts",
-        )
-        assert retry.get("status") == "waiting"
-        assert retry.get("failed_attempt_count") == 1
-        assert retry.get("max_retries") == 3
-        latest_error = attempts[-1].get("user_message")
+        run = live_payload.run
+        assert run is not None and run.retry is not None
+        retry = run.retry
+        attempts = retry.attempts
+        assert retry.status == "waiting"
+        assert retry.failed_attempt_count == 1
+        assert retry.max_retries == 3
+        latest_error = attempts[-1].user_message
         assert latest_error == _SANITIZED_PROVIDER_RETRY_MESSAGE
         assert "dummy-provider-secret-value" not in str(latest_error)
         assert "dummy-provider-token-value" not in str(latest_error)
@@ -1692,28 +1692,19 @@ class TestAgentExecutionPersistence:
             expected_attempts=4,
         )
         failed_event = _failed_run_error_events(failed_payload)[-1]
-        event_payload = _json_object_payload(
-            failed_event.get("payload"),
-            label="failed-run payload",
-        )
-        failure = _json_object_payload(
-            event_payload.get("failure"),
-            label="failed-run failure",
-        )
-        attempts = _json_object_list_payload(
-            failure.get("attempts"),
-            label="failed-run attempts",
-        )
+        failure = _failed_run(failed_event)
+        attempts = failure.attempts
+        assert attempts is not None
 
-        attempt_messages = [attempt.get("user_message") for attempt in attempts]
-        assert failure.get("error_kind") == "model_provider"
-        assert failure.get("retryability") == "unknown"
-        assert failure.get("failure_code") is None
-        assert failure.get("failed_attempt_count") == 4
-        assert failure.get("max_retries") == 3
-        assert [attempt.get("attempt_number") for attempt in attempts] == [1, 2, 3, 4]
-        assert all(attempt.get("retryability") == "unknown" for attempt in attempts)
-        assert all(attempt.get("failure_code") is None for attempt in attempts)
+        attempt_messages = [attempt.user_message for attempt in attempts]
+        assert failure.error_kind == "model_provider"
+        assert failure.retryability == "unknown"
+        assert failure.failure_code is None
+        assert failure.failed_attempt_count == 4
+        assert failure.max_retries == 3
+        assert [attempt.attempt_number for attempt in attempts] == [1, 2, 3, 4]
+        assert all(attempt.retryability == "unknown" for attempt in attempts)
+        assert all(attempt.failure_code is None for attempt in attempts)
         assert attempt_messages == [
             f"Model provider error: Deterministic model turn 2 attempt {number} failed."
             for number in range(1, 5)
@@ -1750,8 +1741,7 @@ class TestAgentExecutionPersistence:
             expected_attempts=4,
         )
         failed_event = _failed_run_error_events(failed_payload)[-1]
-        failed_event_id = failed_event.get("id")
-        assert isinstance(failed_event_id, str)
+        failed_event_id = failed_event.id
 
         retry_response = _retry_failed_run(
             public_url=azents_public_server_url,
@@ -1760,12 +1750,8 @@ class TestAgentExecutionPersistence:
             session_id=result.session_id,
             failed_event_id=failed_event_id,
         )
-        accepted = _json_object_payload(
-            retry_response.get("accepted"),
-            label="retry accepted",
-        )
-        assert accepted.get("type") == "failed_run_retry"
-        assert retry_response.get("history_reload_required") is True
+        assert retry_response.accepted.type == "failed_run_retry"
+        assert retry_response.history_reload_required is True
 
         final_payload = _wait_for_rest_contents(
             server_url=azents_public_server_url,
@@ -1805,8 +1791,7 @@ class TestAgentExecutionPersistence:
             expected_attempts=4,
         )
         failed_event = _failed_run_error_events(failed_payload)[-1]
-        failed_event_id = failed_event.get("id")
-        assert isinstance(failed_event_id, str)
+        failed_event_id = failed_event.id
 
         _run_message(
             public_api_client=public_api_client,
@@ -1848,13 +1833,16 @@ class TestAgentExecutionPersistence:
             _mock_mcp_instance(
                 "shared",
                 docker_gateway=docker_gateway,
-                delay_once_seconds=5,
-            ) as shared_server_url,
+                hold_first_instance=True,
+            ) as shared_instance,
             _mock_mcp_instance(
                 "owned",
                 docker_gateway=docker_gateway,
-            ) as owned_server_url,
+                hold_first_instance=False,
+            ) as owned_instance,
         ):
+            shared_server_url = shared_instance.url
+            owned_server_url = owned_instance.url
             shared_source_identity = {"server": shared_server_url.removesuffix("/mcp")}
             owned_source_identity = {"server": owned_server_url.removesuffix("/mcp")}
             workspace = _setup_workspace(
@@ -1935,17 +1923,21 @@ class TestAgentExecutionPersistence:
                 agent_id=agent_id,
                 message="Invoke duplicate MCP routes initial",
             )
-            _wait_for_live_toolkit_source(
-                server_url=azents_public_server_url,
-                token=workspace.token,
-                session_id=first.session_id,
-                call_id="call_duplicate_mcp_initial_shared",
-                toolkit_config_id=shared.id,
-                toolkit_name="Shared duplicate MCP",
-                toolkit_slug="dupmcp",
-                toolkit_namespace="dupmcp",
-                source_identity=shared_source_identity,
-            )
+            try:
+                shared_instance.wait_until_reached()
+                _wait_for_live_toolkit_source(
+                    server_url=azents_public_server_url,
+                    token=workspace.token,
+                    session_id=first.session_id,
+                    call_id="call_duplicate_mcp_initial_shared",
+                    toolkit_config_id=shared.id,
+                    toolkit_name="Shared duplicate MCP",
+                    toolkit_slug="dupmcp",
+                    toolkit_namespace="dupmcp",
+                    source_identity=shared_source_identity,
+                )
+            finally:
+                shared_instance.release()
             initial = _wait_for_completed_rest_contents(
                 server_url=azents_public_server_url,
                 token=workspace.token,

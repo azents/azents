@@ -13,6 +13,7 @@ from azents_runtime_control.grpc_transfer_coordinator_client import (
 from azents_runtime_control.transfer import CoordinatorTransferIdentity
 
 from azents.core.enums import ModelFileStatus
+from azents.core.session_resource_authority import SessionResourceAuthority
 from azents.repos.model_file.data import ModelFile
 from azents.runtime.transfer.runtime_image_read import (
     RuntimeImageReadError,
@@ -27,7 +28,6 @@ from azents.runtime.transfer.runtime_to_server import (
 )
 from azents.runtime.transfer.server_to_runtime import ServerToRuntimeTarget
 from azents.services.model_file import ModelFileOversized
-from azents.services.session_resource_authority import SessionResourceAuthority
 
 
 class _Resolver:

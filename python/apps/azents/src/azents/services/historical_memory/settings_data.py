@@ -6,10 +6,10 @@ import datetime
 from pydantic import BaseModel, ConfigDict
 from typing_extensions import Self
 
+from azents.core.historical_memory_settings import HistoricalMemorySettingsScope
 from azents.repos.historical_memory.settings_data import (
     HistoricalMemorySettingsPage,
     HistoricalMemorySettingsRecord,
-    HistoricalMemorySettingsScope,
 )
 
 

@@ -13,6 +13,7 @@ from azcommon.result import Failure, Success
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from azents.core.enums import AgentLifecycleStatus, WorkspaceUserRole
+from azents.core.toolkit_errors import NotFound
 from azents.engine.tools.mcp import McpToolkitProvider
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.session import SessionManager
@@ -26,7 +27,7 @@ from azents.repos.toolkit import (
     ToolkitRepository,
     ToolkitScopeRepository,
 )
-from azents.repos.toolkit.data import AgentToolkit, NotFound, ToolkitConfig
+from azents.repos.toolkit.data import AgentToolkit, ToolkitConfig
 from azents.repos.toolkit_namespace import ToolkitNamespaceRepository
 from azents.repos.toolkit_operations import ToolkitOperationsRepository
 from azents.repos.toolkit_operations.owned import AgentToolkitOperationsRepository

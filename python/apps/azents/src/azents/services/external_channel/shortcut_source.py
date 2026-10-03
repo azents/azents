@@ -17,6 +17,16 @@ from azents.core.enums import (
     ExternalChannelResourceType,
     ExternalChannelSetupClaimStatus,
 )
+from azents.core.external_channel_participation_state import (
+    ExternalChannelSetupSourceProjection,
+    projection_with_setup_source,
+)
+from azents.core.external_channel_selector_state import (
+    ExternalChannelSelectorState,
+    projection_with_selector_state,
+    selector_provider_interaction_key,
+    selector_state_from_interaction,
+)
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.external_channel.data import (
@@ -34,16 +44,6 @@ from azents.repos.external_channel.data import (
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.services.external_channel.discord_events import (
     normalize_projected_discord_event,
-)
-from azents.services.external_channel.participation_state import (
-    ExternalChannelSetupSourceProjection,
-    projection_with_setup_source,
-)
-from azents.services.external_channel.selector_state import (
-    ExternalChannelSelectorState,
-    projection_with_selector_state,
-    selector_provider_interaction_key,
-    selector_state_from_interaction,
 )
 from azents.services.external_channel.slack_events import (
     SlackConnectionRevocation,

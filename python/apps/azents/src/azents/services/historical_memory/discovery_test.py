@@ -6,10 +6,10 @@ from unittest.mock import AsyncMock
 import pytest
 
 from azents.job_runtime.types import JobRequest
-from azents.services.historical_memory.discovery import (
+from azents.services.historical_memory.constants import (
     HISTORICAL_MEMORY_PREPARE_HANDLER_KEY,
-    HistoricalMemoryDiscoveryService,
 )
+from azents.services.historical_memory.discovery import HistoricalMemoryDiscoveryService
 
 
 async def test_discovery_uses_fresh_window_and_dispatches_agent_keys(

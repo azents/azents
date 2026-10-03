@@ -47,7 +47,6 @@ def _context() -> ResolveContext:
         ),
         agent_id="agent-1",
         session_id="session-1",
-        session=None,
         web_url="",
         oauth_secret_key="",
         workspace_id="workspace-1",

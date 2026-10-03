@@ -241,7 +241,7 @@ class RDBAgentToolkitNamespaceReservation(RDBModel):
         name="ck_agent_toolkit_namespace_reservations_ordinal_positive",
     )
     UQ_ACTIVE_AGENT_TOOLKIT = sa.Index(
-        "uq_agent_toolkit_namespace_reservations_active_agent_toolkit",
+        "ix_agent_toolkit_namespace_reservations_agent_id_toolkit_id",
         "agent_id",
         "toolkit_id",
         unique=True,

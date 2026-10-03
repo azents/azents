@@ -2,6 +2,7 @@
 
 import dataclasses
 import datetime
+from typing import NamedTuple
 
 from pydantic import BaseModel, Field
 from typing_extensions import Self
@@ -25,6 +26,13 @@ class Workspace(BaseModel):
     @classmethod
     def convert_from(cls, data: "Workspace") -> Self:
         return cls.model_validate(data, from_attributes=True)
+
+
+class WorkspaceSnapshot(NamedTuple):
+    """Workspace identity and projection captured from one row."""
+
+    workspace_id: str
+    workspace: Workspace
 
 
 class WorkspaceList(BaseModel):

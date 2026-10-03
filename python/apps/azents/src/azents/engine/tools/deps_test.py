@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock
 
 from azents.engine.tools.deps import get_vfs_read_router
 from azents.repos.memory_vfs.repository import MemoryVfsRepository
+from azents.repos.vfs_read_authority import VfsReadAuthorityRepository
 from azents.services.memory_vfs import MemoryVfsReadBackend
 from azents.services.vfs_read import SkillsVfsReadBackend
 
@@ -15,7 +16,9 @@ def test_vfs_read_router_registers_skills_and_memory_backends() -> None:
     memory_repository = MemoryVfsRepository(session_manager=session_manager)
 
     router = get_vfs_read_router(
-        session_manager=session_manager,
+        authority_repository=VfsReadAuthorityRepository(
+            session_manager=session_manager
+        ),
         projection_service=projection_service,
         memory_repository=memory_repository,
     )

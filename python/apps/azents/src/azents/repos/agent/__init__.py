@@ -11,6 +11,7 @@ from azents.core.agent import (
     SelectableModelOption,
     SubagentSettings,
 )
+from azents.core.agent_errors import NotFound
 from azents.core.enums import (
     AgentLifecycleStatus,
     AgentRuntimeCapability,
@@ -33,7 +34,6 @@ from .data import (
     AgentCreate,
     AgentList,
     AgentUpdate,
-    NotFound,
 )
 
 _params_adapter = TypeAdapter[ModelParameters](ModelParameters)

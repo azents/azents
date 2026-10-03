@@ -1,7 +1,6 @@
 """xAI OAuth connection service tests."""
 
 import uuid
-from typing import cast
 
 import httpx
 from azcommon.result import Failure, Success
@@ -11,7 +10,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.core.crypto import CredentialCipher
 from azents.core.enums import LLMCatalogPurpose
 from azents.core.workspace import WorkspaceCreate
-from azents.rdb.session import SessionManager
 from azents.repos.llm_catalog import LLMCatalogRepository
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.user import UserRepository
@@ -85,7 +83,7 @@ async def test_slow_down_increases_and_returns_poll_interval(
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
         service = XaiOAuthService(
             XaiOAuthOperations(
-                cast(SessionManager[AsyncSession], _SessionManager(rdb_session)),
+                _SessionManager(rdb_session),
                 XaiOAuthSessionRepository(cipher),
                 LLMProviderIntegrationRepository(cipher),
                 LLMCatalogRepository(),
@@ -166,7 +164,7 @@ async def test_connected_device_flow_creates_integration_catalog(
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
         service = XaiOAuthService(
             XaiOAuthOperations(
-                cast(SessionManager[AsyncSession], _SessionManager(rdb_session)),
+                _SessionManager(rdb_session),
                 XaiOAuthSessionRepository(cipher),
                 LLMProviderIntegrationRepository(cipher),
                 catalog_repo,
@@ -212,7 +210,7 @@ async def test_connected_device_flow_creates_integration_catalog(
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
         reconnect_service = XaiOAuthService(
             XaiOAuthOperations(
-                cast(SessionManager[AsyncSession], _SessionManager(rdb_session)),
+                _SessionManager(rdb_session),
                 XaiOAuthSessionRepository(cipher),
                 repo,
                 catalog_repo,

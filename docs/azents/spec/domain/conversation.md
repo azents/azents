@@ -6,6 +6,33 @@ spec_type: domain
 domain: conversation
 owner: "@Hardtack"
 code_paths:
+  - python/apps/azents/src/azents/core/agent_automatic_project.py
+  - python/apps/azents/src/azents/core/agent_session_input_data.py
+  - python/apps/azents/src/azents/core/chat_data.py
+  - python/apps/azents/src/azents/core/chat_operation_data.py
+  - python/apps/azents/src/azents/core/chat_projection.py
+  - python/apps/azents/src/azents/core/chat_write_data.py
+  - python/apps/azents/src/azents/core/exchange_file_errors.py
+  - python/apps/azents/src/azents/core/mailbox_errors.py
+  - python/apps/azents/src/azents/core/root_agent_session_creation.py
+  - python/apps/azents/src/azents/core/session_resource_authority.py
+  - python/apps/azents/src/azents/core/session_workspace_items.py
+  - python/apps/azents/src/azents/core/session_workspace_paths.py
+  - python/apps/azents/src/azents/core/session_lifecycle_registry.py
+  - python/apps/azents/src/azents/repos/agent_session_input_operations.py
+  - python/apps/azents/src/azents/repos/chat_operations.py
+  - python/apps/azents/src/azents/repos/chat_write_operations.py
+  - python/apps/azents/src/azents/repos/input_attachment_claim.py
+  - python/apps/azents/src/azents/repos/root_agent_session_creation.py
+  - python/apps/azents/src/azents/repos/session_lifecycle_operations.py
+  - python/apps/azents/src/azents/repos/engine_event_repositories.py
+  - python/apps/azents/src/azents/repos/engine_resolve.py
+  - python/apps/azents/src/azents/repos/engine_tool_repositories.py
+  - python/apps/azents/src/azents/repos/mailbox_runtime_operations.py
+  - python/apps/azents/src/azents/repos/skill_state_store.py
+  - python/apps/azents/src/azents/repos/worker_session_lifecycle.py
+  - python/apps/azents/src/azents/repos/worker_toolkit_repositories.py
+  - python/apps/azents/src/azents/repos/worker_user_stop.py
   - python/apps/azents/src/azents/services/chat/**
   - python/apps/azents/src/azents/core/config.py
   - python/apps/azents/src/azents/core/model_availability.py
@@ -65,7 +92,7 @@ code_paths:
   - python/apps/azents/src/azents/services/turn_action.py
   - python/apps/azents/src/azents/services/session_title.py
   - python/apps/azents/src/azents/services/model_availability.py
-  - python/apps/azents/src/azents/services/session_resource_authority.py
+  - python/apps/azents/src/azents/repos/session_resource_authority.py
   - python/apps/azents/src/azents/services/runtime_terminal/**
   - python/apps/azents/src/azents/services/runtime_web/**
   - python/apps/azents/src/azents/rdb/models/runtime_web.py
@@ -1158,7 +1185,10 @@ Mailbox items are session-bound. The `mailbox_items` table stores `session_id`, 
 reasoning effort. If the head has no explicit profile, preparation uses the current Session requested
 profile, then the Agent default when the Session has no snapshot.
 
-`MailboxService` owns mailbox reads and writes. Enqueue commits only the pending row;
+Mailbox repositories own durable reads, writes, and promotion transactions;
+`MailboxService` sequences completed operations with external preparation and delivery.
+INPUT and Chat writes compose attachment claims, admission, and Session transitions
+inside their repository-owned atomic operation. Enqueue commits only the pending row;
 producers own wake-up and run-state transitions. User, Goal, action, spawn, and follow-up inputs use
 `wake_session`; ordinary `send_message` and terminal `agent_result` inputs use `queue_only` and do not
 mark or wake the target session. Queue-only rows remain in FIFO order and are promoted with a later

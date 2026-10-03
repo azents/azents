@@ -15,8 +15,6 @@ from azents.engine.model_assembly import ModelAssemblyMetadata
 from azents.engine.model_factory_types import ModelSDKFactories
 from azents.engine.model_text import ProviderTextResult
 from azents.repos.engine_read import EngineModelReadRepository
-from azents.repos.kimi_oauth_runtime import KimiOAuthRuntimeRepository
-from azents.repos.xai_oauth_runtime import XaiOAuthRuntimeRepository
 from azents.services.engine_runtime_tokens import EngineRuntimeTokenResolver
 from azents.services.historical_memory.preparation import (
     HistoricalMemoryOutputError,
@@ -69,26 +67,12 @@ async def test_prepare_agent_publishes_bounded_batch_result(
     service = HistoricalMemoryPreparationService(
         preparation_repository=preparation_repository,
         historical_repository=historical_repository,
-        message_repository=AsyncMock(),
+        source_events_repository=AsyncMock(),
+        model_read_repository=AsyncMock(spec=EngineModelReadRepository),
+        runtime_token_resolver=AsyncMock(spec=EngineRuntimeTokenResolver),
         model_stream_watchdog=AsyncMock(),
         model_metadata_service=AsyncMock(),
         sdk_factories=_SDK_FACTORIES,
-        session_manager=AsyncMock(),
-        model_read_repository=EngineModelReadRepository(
-            session_manager=(AsyncMock()).session_manager,
-            integration_repository=(AsyncMock()).integration_repository,
-        ),
-        runtime_token_resolver=EngineRuntimeTokenResolver(
-            chatgpt_repository=AsyncMock(),
-            xai_repository=XaiOAuthRuntimeRepository(
-                session_manager=(AsyncMock()).session_manager,
-                integration_repository=(AsyncMock()).integration_repository,
-            ),
-            kimi_repository=KimiOAuthRuntimeRepository(
-                session_manager=(AsyncMock()).session_manager,
-                integration_repository=(AsyncMock()).integration_repository,
-            ),
-        ),
     )
     prepare_source = AsyncMock(return_value="Useful summary")
     monkeypatch.setattr(service, "_prepare_source", prepare_source)
@@ -124,26 +108,12 @@ async def test_explicit_sampling_does_not_extend_real_execution_deadline() -> No
     service = HistoricalMemoryPreparationService(
         preparation_repository=repository,
         historical_repository=AsyncMock(),
-        message_repository=AsyncMock(),
+        source_events_repository=AsyncMock(),
+        model_read_repository=AsyncMock(spec=EngineModelReadRepository),
+        runtime_token_resolver=AsyncMock(spec=EngineRuntimeTokenResolver),
         model_stream_watchdog=AsyncMock(),
         model_metadata_service=AsyncMock(),
         sdk_factories=_SDK_FACTORIES,
-        session_manager=AsyncMock(),
-        model_read_repository=EngineModelReadRepository(
-            session_manager=(AsyncMock()).session_manager,
-            integration_repository=(AsyncMock()).integration_repository,
-        ),
-        runtime_token_resolver=EngineRuntimeTokenResolver(
-            chatgpt_repository=AsyncMock(),
-            xai_repository=XaiOAuthRuntimeRepository(
-                session_manager=(AsyncMock()).session_manager,
-                integration_repository=(AsyncMock()).integration_repository,
-            ),
-            kimi_repository=KimiOAuthRuntimeRepository(
-                session_manager=(AsyncMock()).session_manager,
-                integration_repository=(AsyncMock()).integration_repository,
-            ),
-        ),
     )
     summary = await service.prepare_agent(
         agent_id="a" * 32,

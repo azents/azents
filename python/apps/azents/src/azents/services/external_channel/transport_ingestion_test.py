@@ -11,9 +11,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     ExternalChannelConversationScopeKind,
+    ExternalChannelIngressAuthorityKind,
     ExternalChannelIngressProfile,
     ExternalChannelProvider,
     ExternalChannelResourceType,
+)
+from azents.core.external_channel_ingestion import (
+    ExternalChannelIngestionOutcome,
+    ExternalChannelIngestionOutcomeKind,
+    ExternalChannelIngestionReason,
+    ExternalChannelIngestionRequest,
+    ExternalChannelIngressAuthority,
 )
 from azents.rdb.session import SessionManager
 from azents.repos.external_channel.data import (
@@ -23,12 +31,6 @@ from azents.repos.external_channel.data import (
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.services.external_channel.ingestion import (
     ExternalChannelConversationIngestionService,
-    ExternalChannelIngestionOutcome,
-    ExternalChannelIngestionOutcomeKind,
-    ExternalChannelIngestionReason,
-    ExternalChannelIngestionRequest,
-    ExternalChannelIngressAuthority,
-    ExternalChannelIngressAuthorityKind,
 )
 from azents.services.external_channel.ingress_admission import (
     ExternalChannelIngressAdmissionService,

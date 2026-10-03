@@ -8,9 +8,10 @@ from unittest.mock import AsyncMock
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import AgentSessionKind, AgentSessionProductMode
+from azents.core.memory_scope import MemoryScope
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.memory import MemoryRepository
-from azents.repos.memory.data import MemoryCreate, MemoryScope, MemorySummary
+from azents.repos.memory.data import MemoryCreate, MemorySummary
 from azents.repos.memory.operations import MemoryOperationRepository
 
 

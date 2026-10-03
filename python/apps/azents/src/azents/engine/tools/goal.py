@@ -6,6 +6,11 @@ import json
 from pydantic import BaseModel, Field
 
 from azents.core.goal import GOAL_TOOLKIT_NAMESPACE, GoalState, GoalUpdateStatus
+from azents.core.session_resource_authority import (
+    SessionExecutionOwner,
+    SessionResourceAuthority,
+    accepts_execution_owner,
+)
 from azents.core.tools import (
     ResolveContext,
     Toolkit,
@@ -28,11 +33,6 @@ from azents.repos.goal.store import (
     GoalAlreadyExistsError,
     GoalNotActiveError,
     GoalStateStore,
-)
-from azents.services.session_resource_authority import (
-    SessionExecutionOwner,
-    SessionResourceAuthority,
-    accepts_execution_owner,
 )
 
 _GOAL_PROMPT = """### Goal

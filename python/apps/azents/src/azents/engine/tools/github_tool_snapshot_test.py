@@ -18,6 +18,7 @@ from azents.core.toolkit_state import ToolkitStateIdentity
 from azents.core.tools import GitHubToolkitConfig, McpToolkitConfig, TurnContext
 from azents.engine.run.types import FunctionTool
 from azents.engine.tools.github import GitHubInstallationBinding, GitHubToolkit
+from azents.repos.engine_tool_repositories import EngineMcpSnapshotFactory
 from azents.repos.toolkit_state.engine import McpToolSnapshotStore
 from azents.testing.types import is_object_factory
 
@@ -214,12 +215,13 @@ def _binding(
         mcp_toolkit=None,
         token_provider=token_provider,
         lazy_mcp_config=McpToolkitConfig(
-            server_url=_GITHUB_MCP_URL,
-            auth_type="bearer",
+            server_url=_GITHUB_MCP_URL, auth_type="bearer"
         ),
         lazy_mcp_secret_provider=token_provider,
         lazy_mcp_proxy_url=None,
-        session_manager=_FakeSessionManager(),
+        snapshot_factory=EngineMcpSnapshotFactory(
+            session_manager=_FakeSessionManager()
+        ),
         agent_id="agent-1",
         session_id="session-1",
         state_name=state_name,

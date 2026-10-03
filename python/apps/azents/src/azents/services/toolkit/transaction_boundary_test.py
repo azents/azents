@@ -2,13 +2,13 @@
 
 import datetime
 import json
-from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
 
 from azcommon.result import Failure, Success
+from pydantic import BaseModel, ConfigDict
 
 from azents.core.system_setting import SystemSettingFieldSource
-from azents.core.tools import McpToolkitConfig
+from azents.core.tools import McpToolkitConfig, ResolveContext, Toolkit, ToolkitProvider
 from azents.repos.toolkit.data import ToolkitConfig
 from azents.repos.toolkit_operations.data import (
     PlatformAuthorityRejected,
@@ -72,22 +72,36 @@ def _github_toolkit() -> ToolkitConfig:
     )
 
 
-class _DatabaseFreeProvider:
+class _DatabaseFreeConfig(BaseModel):
+    """Typed provider configuration retaining irrelevant test metadata."""
+
+    model_config = ConfigDict(extra="allow")
+
+
+class _DatabaseFreeProvider(ToolkitProvider[_DatabaseFreeConfig]):
     """Provider double that observes the transaction boundary."""
 
     name = "GitHub"
+    config_model = _DatabaseFreeConfig
+
+    async def resolve(
+        self, config: _DatabaseFreeConfig, context: ResolveContext
+    ) -> Toolkit[_DatabaseFreeConfig]:
+        """Fail if boundary tests accidentally execute a runtime Toolkit."""
+        raise AssertionError(
+            "Runtime Toolkit resolution is not part of credential validation"
+        )
 
     def __init__(self, active: list[bool], events: list[str]) -> None:
         self.active = active
         self.events = events
 
     @classmethod
-    def validate_config(cls, config: dict[str, object]) -> dict[str, object]:
+    def validate_config(cls, data: dict[str, object]) -> _DatabaseFreeConfig:
         """Accept the test configuration."""
-        return config
+        return _DatabaseFreeConfig.model_validate(data)
 
-    @staticmethod
-    def to_mcp_config(config: dict[str, object]) -> McpToolkitConfig:
+    def to_mcp_config(self, config: _DatabaseFreeConfig) -> McpToolkitConfig:
         """Return a non-OAuth projection for the boundary test."""
         del config
         return McpToolkitConfig(
@@ -105,6 +119,19 @@ class _DatabaseFreeProvider:
         assert credentials["app_id"] == "123"
         self.events.append("provider")
         return None
+
+
+def test_envvar_merge_retains_historical_malformed_entry_skip_policy() -> None:
+    """Decode only valid name identities without rejecting irrelevant metadata."""
+    merged = merge_envvar_credentials(
+        None,
+        {"values": {"VALID": "secret", "REMOVED": "discard"}},
+        {
+            "entries": [{"name": "VALID", "masked": "historic"}, {"name": 1}, {}, None],
+            "unknown_historical_metadata": {"unchanged": True},
+        },
+    )
+    assert merged == {"values": {"VALID": "secret"}}
 
 
 class TestMergeEnvVarCredentials:
@@ -240,7 +267,7 @@ async def test_create_external_validation_sees_no_repository_transaction() -> No
     service = ToolkitService(
         owned_operations=AsyncMock(spec=AgentToolkitOperationsRepository),
         operations_repository=operations,
-        toolkit_registry=cast(dict[str, Any], {"github": provider}),
+        toolkit_registry={"github": provider},
         github_runtime=runtime,
     )
 
@@ -287,7 +314,7 @@ async def test_update_maps_final_platform_revalidation_failure() -> None:
     service = ToolkitService(
         owned_operations=AsyncMock(spec=AgentToolkitOperationsRepository),
         operations_repository=operations,
-        toolkit_registry=cast(dict[str, Any], {"github": provider}),
+        toolkit_registry={"github": provider},
         github_runtime=runtime,
     )
 

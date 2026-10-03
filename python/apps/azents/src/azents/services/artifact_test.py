@@ -21,6 +21,7 @@ from azents.core.enums import (
     ArtifactStatus,
     WorkspaceUserRole,
 )
+from azents.core.session_resource_authority import SessionResourceAuthority
 from azents.repos.agent_session.data import AgentSession
 from azents.repos.artifact.data import Artifact, ArtifactCreate
 from azents.repos.artifact.operations import (
@@ -28,7 +29,6 @@ from azents.repos.artifact.operations import (
     ArtifactOperationRepository,
 )
 from azents.repos.workspace_user.data import WorkspaceUser
-from azents.services.session_resource_authority import SessionResourceAuthority
 
 from .artifact import (
     ArtifactAccessDenied,

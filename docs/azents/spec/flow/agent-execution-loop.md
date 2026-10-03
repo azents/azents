@@ -6,6 +6,37 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [agent, conversation, toolkit, external-channel, memory]
 code_paths:
+  - python/apps/azents/src/azents/core/agent_errors.py
+  - python/apps/azents/src/azents/core/agent_session_input_data.py
+  - python/apps/azents/src/azents/core/chat_data.py
+  - python/apps/azents/src/azents/core/chat_write_data.py
+  - python/apps/azents/src/azents/core/exchange_file_errors.py
+  - python/apps/azents/src/azents/core/historical_memory_settings.py
+  - python/apps/azents/src/azents/core/historical_memory_snapshot_policy.py
+  - python/apps/azents/src/azents/core/mailbox_errors.py
+  - python/apps/azents/src/azents/core/memory_scope.py
+  - python/apps/azents/src/azents/core/session_resource_authority.py
+  - python/apps/azents/src/azents/core/session_workspace_items.py
+  - python/apps/azents/src/azents/core/session_workspace_paths.py
+  - python/apps/azents/src/azents/core/toolkit_errors.py
+  - python/apps/azents/src/azents/repos/agent_session_input_operations.py
+  - python/apps/azents/src/azents/repos/chat_write_operations.py
+  - python/apps/azents/src/azents/repos/engine_event_contracts.py
+  - python/apps/azents/src/azents/repos/engine_event_repositories.py
+  - python/apps/azents/src/azents/repos/engine_resolve.py
+  - python/apps/azents/src/azents/repos/engine_tool_repositories.py
+  - python/apps/azents/src/azents/repos/image_generation_catalog_operations.py
+  - python/apps/azents/src/azents/repos/kimi_oauth_runtime/**
+  - python/apps/azents/src/azents/repos/llm_catalog_operations.py
+  - python/apps/azents/src/azents/repos/mailbox_runtime_operations.py
+  - python/apps/azents/src/azents/repos/model_metadata_operations.py
+  - python/apps/azents/src/azents/repos/skill_state_store.py
+  - python/apps/azents/src/azents/repos/vfs_projection_operations.py
+  - python/apps/azents/src/azents/repos/vfs_read_authority.py
+  - python/apps/azents/src/azents/repos/worker_run_operations.py
+  - python/apps/azents/src/azents/repos/worker_session_lifecycle.py
+  - python/apps/azents/src/azents/repos/worker_toolkit_repositories.py
+  - python/apps/azents/src/azents/repos/worker_user_stop.py
   - python/apps/azents/src/azents/broker/types.py
   - python/apps/azents/src/azents/broker/redis.py
   - python/apps/azents/src/azents/core/vfs.py
@@ -32,7 +63,7 @@ code_paths:
   - python/apps/azents/src/azents/engine/tools/**
   - python/apps/azents/src/azents/runtime/transfer/runtime_to_provider.py
   - python/apps/azents/src/azents/services/external_channel/channel_action.py
-  - python/apps/azents/src/azents/services/external_channel/mailbox_ingestion_store.py
+  - python/apps/azents/src/azents/repos/external_channel/mailbox_ingestion.py
   - python/apps/azents/src/azents/services/mailbox.py
   - python/apps/azents/src/azents/repos/terminal_finalization.py
   - python/apps/azents/src/azents/repos/terminal_finalization_data.py
@@ -89,7 +120,7 @@ code_paths:
   - python/apps/azents/src/azents/services/xai_oauth/runtime.py
   - python/apps/azents/src/azents/services/kimi_oauth/runtime.py
   - python/apps/azents/src/azents/services/session_title.py
-  - python/apps/azents/src/azents/services/session_resource_authority.py
+  - python/apps/azents/src/azents/repos/session_resource_authority.py
   - python/apps/azents/src/azents/repos/mailbox/**
   - python/apps/azents/src/azents/repos/goal/**
   - python/apps/azents/src/azents/repos/skill_state/**

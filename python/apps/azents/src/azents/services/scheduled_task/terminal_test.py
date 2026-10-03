@@ -4,8 +4,10 @@ import datetime
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from typing import cast
+from typing import NamedTuple
+from unittest.mock import AsyncMock, MagicMock
 
+import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
@@ -15,7 +17,6 @@ from azents.core.enums import (
     ScheduledTaskScheduleType,
 )
 from azents.engine.events.types import Event, ScheduledTaskResultPayload
-from azents.rdb.session import SessionManager
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import AgentRunPatch, EventCreate
 from azents.repos.scheduled_task.data import ScheduledTask
@@ -26,11 +27,13 @@ from azents.repos.scheduled_task_cycle.data import (
     ScheduledTaskCycleState,
     ScheduledTrackerProjectionPart,
 )
-
-from .terminal import (
+from azents.repos.scheduled_task_terminal_operations import (
     ScheduledTaskTerminalEffectSnapshot,
-    ScheduledTaskTerminalService,
+    ScheduledTaskTerminalOperations,
 )
+from azents.testing.types import require_instance
+
+from .terminal import ScheduledTaskTerminalService
 
 _NOW = datetime.datetime(2026, 8, 16, 12, 0, tzinfo=datetime.UTC)
 _RUN_ID = "r" * 32
@@ -40,7 +43,7 @@ _CYCLE_ID = "c" * 32
 @asynccontextmanager
 async def _session_manager() -> AsyncIterator[AsyncSession]:
     """Yield one transaction-shaped session double."""
-    yield cast(AsyncSession, object())
+    yield require_instance(AsyncMock(spec=AsyncSession), AsyncSession)
 
 
 def _cycle(*, binding_id: str | None = None) -> ScheduledTaskCycleRecord:
@@ -270,37 +273,60 @@ class _TaskRepository:
         return True
 
 
+class _TerminalFixture(NamedTuple):
+    """Terminal validation and observable repository collaborators."""
+
+    service: ScheduledTaskTerminalService
+    run_repository: _RunRepository
+    event_repository: _EventRepository
+    cycle_repository: _CycleRepository
+    task_repository: _TaskRepository
+
+
 def _service(
     *,
     order: list[str],
     task: ScheduledTask | None,
     existing_event: Event | None = None,
     binding_id: str | None = None,
-) -> tuple[
-    ScheduledTaskTerminalService,
-    _RunRepository,
-    _EventRepository,
-    _CycleRepository,
-    _TaskRepository,
-]:
-    """Compose the terminal service from assertion-visible doubles."""
+) -> _TerminalFixture:
+    """Compose complete operations from runtime-validated repository spec doubles."""
     run_repository = _RunRepository(order)
     event_repository = _EventRepository(order, existing_event)
     cycle_repository = _CycleRepository(order, binding_id=binding_id)
     task_repository = _TaskRepository(order, task)
-    service = ScheduledTaskTerminalService(
-        session_manager=cast(SessionManager[AsyncSession], _session_manager),
-        run_repository=cast(AgentRunRepository, run_repository),
-        event_repository=cast(EventTranscriptRepository, event_repository),
-        task_repository=cast(ScheduledTaskRepository, task_repository),
-        cycle_repository=cast(ScheduledTaskCycleRepository, cycle_repository),
+    run_proxy = MagicMock(spec=AgentRunRepository)
+    run_proxy.lock_by_id = AsyncMock(side_effect=run_repository.lock_by_id)
+    run_proxy.update = AsyncMock(side_effect=run_repository.update)
+    event_proxy = MagicMock(spec=EventTranscriptRepository)
+    event_proxy.get_by_external_id = AsyncMock(
+        side_effect=event_repository.get_by_external_id
     )
-    return (
-        service,
-        run_repository,
-        event_repository,
-        cycle_repository,
-        task_repository,
+    event_proxy.append = AsyncMock(side_effect=event_repository.append)
+    cycle_proxy = MagicMock(spec=ScheduledTaskCycleRepository)
+    cycle_proxy.lock = AsyncMock(side_effect=cycle_repository.lock)
+    cycle_proxy.delete_started = AsyncMock(side_effect=cycle_repository.delete_started)
+    task_proxy = MagicMock(spec=ScheduledTaskRepository)
+    task_proxy.lock_by_id = AsyncMock(side_effect=task_repository.lock_by_id)
+    task_proxy.delete_completed_once = AsyncMock(
+        side_effect=task_repository.delete_completed_once
+    )
+    task_proxy.release_completed_recurring = AsyncMock(
+        side_effect=task_repository.release_completed_recurring
+    )
+    service = ScheduledTaskTerminalService(
+        operations=ScheduledTaskTerminalOperations(
+            session_manager=_session_manager,
+            run_repository=require_instance(run_proxy, AgentRunRepository),
+            event_repository=require_instance(event_proxy, EventTranscriptRepository),
+            task_repository=require_instance(task_proxy, ScheduledTaskRepository),
+            cycle_repository=require_instance(
+                cycle_proxy, ScheduledTaskCycleRepository
+            ),
+        )
+    )
+    return _TerminalFixture(
+        service, run_repository, event_repository, cycle_repository, task_repository
     )
 
 
@@ -449,3 +475,46 @@ async def test_submit_recovers_existing_canonical_event_without_retransition() -
     assert task_repository.released is False
     assert run_repository.run.terminal_result_event_id == existing.id
     assert run_repository.run.terminal_result_message == "Canonical result."
+
+
+@pytest.mark.parametrize("result", ["", "  ", "\n\t"])
+async def test_empty_result_does_not_enter_terminal_transaction(result: str) -> None:
+    """Text validation completes before any terminal persistence operation."""
+    order: list[str] = []
+    fixture = _service(order=order, task=_task())
+    with pytest.raises(ValueError, match="result must not be empty"):
+        await fixture.service.submit(
+            workspace_id="w" * 32,
+            agent_id="a" * 32,
+            session_id="s" * 32,
+            run_id=_RUN_ID,
+            status="finished",
+            result=result,
+        )
+    assert order == []
+
+
+async def test_transaction_completion_precedes_caller_dispatch() -> None:
+    """Canonical terminal mutation completes before outward caller publication."""
+    order: list[str] = []
+    fixture = _service(order=order, task=_task())
+
+    @asynccontextmanager
+    async def manager() -> AsyncIterator[AsyncSession]:
+        order.append("begin")
+        yield require_instance(AsyncMock(spec=AsyncSession), AsyncSession)
+        order.append("commit")
+
+    fixture.service.operations.session_manager = manager
+    outcome = await fixture.service.submit(
+        workspace_id="w" * 32,
+        agent_id="a" * 32,
+        session_id="s" * 32,
+        run_id=_RUN_ID,
+        status="finished",
+        result="Finished",
+    )
+    assert outcome.created
+    order.append("provider_dispatch")
+    assert order[0] == "begin"
+    assert order[-2:] == ["commit", "provider_dispatch"]

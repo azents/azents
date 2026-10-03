@@ -10,11 +10,11 @@ from fastapi.testclient import TestClient
 
 from azents.core.auth.deps import WorkspaceMember, get_workspace_member
 from azents.core.enums import WorkspaceUserRole
+from azents.core.historical_memory_settings import (
+    HistoricalMemorySettingsScope,
+)
 from azents.repos.historical_memory.settings import (
     HistoricalMemorySettingsRepository,
-)
-from azents.repos.historical_memory.settings_data import (
-    HistoricalMemorySettingsScope,
 )
 from azents.services.historical_memory.settings import (
     HistoricalMemorySettingsService,

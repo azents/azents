@@ -15,7 +15,7 @@ from slack_sdk.web.async_slack_response import AsyncSlackResponse
 from azents.core.enums import (
     ExternalChannelPrincipalAuthorType,
 )
-from azents.services.external_channel.conversation import (
+from azents.core.external_channel_conversation_data import (
     ExternalChannelHistoryDeadlineExceeded,
     ExternalChannelHistoryMalformed,
     ExternalChannelHistoryPositionInvalid,

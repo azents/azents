@@ -14,6 +14,7 @@ from azents.core.enums import (
     ExternalChannelAppMode,
     ExternalChannelConnectionStatus,
     ExternalChannelConversationScopeKind,
+    ExternalChannelIngressAuthorityKind,
     ExternalChannelIngressProfile,
     ExternalChannelInteractionStatus,
     ExternalChannelPrincipalAuthorType,
@@ -21,15 +22,14 @@ from azents.core.enums import (
     ExternalChannelResourceStatus,
     ExternalChannelTransport,
 )
-from azents.services.external_channel.conversation import (
+from azents.core.external_channel_conversation_data import (
     ExternalChannelOperationDeadline,
 )
-from azents.services.external_channel.ingestion import (
+from azents.core.external_channel_ingestion import (
     ExternalChannelIngestionOperation,
     ExternalChannelIngestionOutcome,
     ExternalChannelIngestionOutcomeKind,
     ExternalChannelIngestionReason,
-    ExternalChannelIngressAuthorityKind,
 )
 from azents.services.external_channel.ingestion_replay import (
     ExternalChannelIngestionReplayService,

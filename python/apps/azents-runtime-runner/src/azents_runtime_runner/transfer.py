@@ -47,6 +47,11 @@ from azents_runtime_control.transfer import (
     STREAM_OWNER_RENEWAL_SECONDS,
 )
 
+from azents_runtime_runner.diagnostics import (
+    RunnerDiagnosticReason,
+    RunnerExceptionDiagnostic,
+    runner_exception_diagnostic,
+)
 from azents_runtime_runner.workspace import Workspace
 
 _BUFFER_BYTES = MAX_TRANSFER_CHUNK_BYTES
@@ -291,6 +296,7 @@ class RunnerTransferManager:
                     source="intent_admission",
                     reason=failure_reason,
                     grpc_status=None,
+                    diagnostic=None,
                 )
             await self._enqueue_result(result)
 
@@ -355,8 +361,9 @@ class RunnerTransferManager:
                     intent,
                     result,
                     source="grpc",
-                    reason=exc.details() or "gRPC error without details",
+                    reason=_bounded_grpc_failure_reason(exc),
                     grpc_status=exc.code().name,
+                    diagnostic=None,
                 )
             except aiohttp.ClientError:
                 result = _failed(intent, RunnerTransferFailure.STREAM_FAILED)
@@ -366,6 +373,7 @@ class RunnerTransferManager:
                     source="direct_http",
                     reason="http_request_failed",
                     grpc_status=None,
+                    diagnostic=None,
                 )
             except TimeoutError:
                 result = _failed(
@@ -382,6 +390,7 @@ class RunnerTransferManager:
                     source="direct_http",
                     reason="http_request_timeout",
                     grpc_status=None,
+                    diagnostic=None,
                 )
             except _TransferFailure as exc:
                 result = _failed(
@@ -396,6 +405,11 @@ class RunnerTransferManager:
                     source="runner",
                     reason=exc.reason,
                     grpc_status=None,
+                    diagnostic=(
+                        exc.diagnostic
+                        if isinstance(exc, _TransferDiagnosticFailure)
+                        else None
+                    ),
                 )
             except OSError:
                 result = _failed(intent, _local_io_failure(intent))
@@ -405,6 +419,7 @@ class RunnerTransferManager:
                     source="local_io",
                     reason="os_error",
                     grpc_status=None,
+                    diagnostic=None,
                 )
             except ValueError:
                 result = _failed(intent, RunnerTransferFailure.PROTOCOL_VIOLATION)
@@ -414,6 +429,7 @@ class RunnerTransferManager:
                     source="runner",
                     reason="unexpected_value_error",
                     grpc_status=None,
+                    diagnostic=None,
                 )
             self._remember(intent, result)
             if not await self._enqueue_terminal_result(result):
@@ -916,20 +932,24 @@ class RunnerTransferManager:
             )
             failed.set()
         except ValueError as exc:
-            del exc
             error.append(
-                _TransferFailure(
+                _TransferDiagnosticFailure(
                     RunnerTransferFailure.PROTOCOL_VIOLATION,
                     reason="direct_claim_renewal_response_invalid",
+                    diagnostic=runner_exception_diagnostic(
+                        exc, RunnerDiagnosticReason.TRANSFER_RESPONSE_INVALID
+                    ),
                 )
             )
             failed.set()
         except Exception as exc:
-            del exc
             error.append(
-                _TransferFailure(
+                _TransferDiagnosticFailure(
                     RunnerTransferFailure.STREAM_FAILED,
                     reason="direct_claim_renewal_failed",
+                    diagnostic=runner_exception_diagnostic(
+                        exc, RunnerDiagnosticReason.TRANSFER_RENEWAL_FAILED
+                    ),
                 )
             )
             failed.set()
@@ -1411,6 +1431,20 @@ class _TransferFailure(Exception):
         self.reason = reason
         self.conflict_precondition = conflict_precondition
         self.destination_conflict = destination_conflict
+
+
+class _TransferDiagnosticFailure(_TransferFailure):
+    """Carry bounded original provenance to the single final failure log."""
+
+    def __init__(
+        self,
+        failure: RunnerTransferFailure,
+        *,
+        reason: str,
+        diagnostic: RunnerExceptionDiagnostic,
+    ) -> None:
+        super().__init__(failure, reason=reason)
+        self.diagnostic = diagnostic
 
 
 class _DirectClaimLease:
@@ -1900,6 +1934,18 @@ def _local_io_failure(intent: RunnerTransferIntent) -> RunnerTransferFailure:
     return RunnerTransferFailure.INTEGRITY_FAILED
 
 
+def _bounded_grpc_failure_reason(error: grpc.aio.AioRpcError) -> str:
+    """Retain known server-owned labels without exposing arbitrary RPC details."""
+    details = error.details()
+    if isinstance(details, str) and details in {
+        "Transfer is unavailable",
+        "Upload failed",
+        "Download failed",
+    }:
+        return details
+    return "grpc_request_failed"
+
+
 def _log_failure(
     intent: RunnerTransferIntent,
     result: RunnerTransferResult,
@@ -1907,23 +1953,27 @@ def _log_failure(
     source: str,
     reason: str,
     grpc_status: str | None,
+    diagnostic: RunnerExceptionDiagnostic | None,
 ) -> None:
+    """Log one terminal classification and its optional safe origin evidence."""
+    fields: dict[str, object] = {
+        "transfer_id": intent.identity.transfer_id,
+        "attempt_id": intent.identity.attempt_id,
+        "runtime_id": intent.identity.runtime_id,
+        "runner_generation": intent.identity.runner_generation,
+        "operation_id": intent.operation_id,
+        "dispatch_id": intent.dispatch_id,
+        "direction": intent.direction.value,
+        "runner_outcome": result.outcome.value,
+        "runner_failure": (None if result.failure is None else result.failure.value),
+        "failure_source": source,
+        "failure_reason": reason,
+        "grpc_status": grpc_status,
+    }
+    if diagnostic is not None:
+        fields.update(diagnostic.log_fields())
     _LOGGER.warning(
         "Runtime Runner transfer failed",
-        extra={
-            "transfer_id": intent.identity.transfer_id,
-            "attempt_id": intent.identity.attempt_id,
-            "runtime_id": intent.identity.runtime_id,
-            "runner_generation": intent.identity.runner_generation,
-            "operation_id": intent.operation_id,
-            "dispatch_id": intent.dispatch_id,
-            "direction": intent.direction.value,
-            "runner_outcome": result.outcome.value,
-            "runner_failure": (
-                None if result.failure is None else result.failure.value
-            ),
-            "failure_source": source,
-            "failure_reason": reason,
-            "grpc_status": grpc_status,
-        },
+        exc_info=diagnostic.exc_info if diagnostic is not None else None,
+        extra=fields,
     )

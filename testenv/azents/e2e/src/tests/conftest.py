@@ -48,6 +48,14 @@ from support.container_logs import (
     read_container_logs,
 )
 from support.model_stream_fixture_policy import ordinary_model_stream_environment
+from support.observations import (
+    DockerNetworkObservation,
+    InfrastructureProfileObservation,
+    SeleniumStatusObservation,
+    decode_bootstrap_session,
+    decode_bootstrap_status,
+    decode_runtime_providers,
+)
 from support.runtime_provider_auth import (
     RuntimeProviderAuthenticationError,
     issue_runtime_provider_credential,
@@ -106,8 +114,7 @@ _ADMIN_WEB_UPSTREAM_URL = "http://azents-admin-web:3000"
 _MAIN_WEB_BROWSER_URL = "https://azents-web-gateway:8443"
 _ADMIN_WEB_GATEWAY_URL = "https://azents-web-gateway:8444/console"
 _ADMIN_WEB_BROWSER_URL = "https://azents-web-gateway:8445"
-_JSON_OBJECT_ADAPTER = TypeAdapter(dict[str, object])
-_JSON_OBJECT_LIST_ADAPTER = TypeAdapter(list[dict[str, object]])
+_DOCKER_NETWORKS_ADAPTER = TypeAdapter(dict[str, DockerNetworkObservation])
 _STRING_MAPPING_ADAPTER = TypeAdapter(dict[str, str])
 _BROWSER_CALL_REPORT = pytest.StashKey[pytest.TestReport]()
 _IMAGE_BUILD_OBSERVABILITY_LOCK = threading.Lock()
@@ -1701,6 +1708,8 @@ def azents_core_service_containers(
             "ro",
         )
     )
+    for key, value in ordinary_model_stream_environment().items():
+        admin_container.with_env(key, value)
     engine_container = _create_engine_worker_container(
         image=azents_server_image,
         network=container_network,
@@ -2236,18 +2245,17 @@ def _wait_for_runtime_provider_contract(
             )
             time.sleep(1)
             continue
-        payload = _JSON_OBJECT_ADAPTER.validate_python(providers_response.json())
-        items = _JSON_OBJECT_LIST_ADAPTER.validate_python(payload.get("items"))
+        items = decode_runtime_providers(providers_response.json()).items
         provider = next(
-            (item for item in items if item.get("provider_id") == provider_id),
+            (item for item in items if item.provider_id == provider_id),
             None,
         )
         if provider is None:
             last_error = f"provider {provider_id} was not present in inventory"
             time.sleep(1)
             continue
-        current_revision = provider.get("current_contract_revision_id")
-        if isinstance(current_revision, str) and current_revision:
+        current_revision = provider.current_contract_revision_id
+        if current_revision:
             return
         last_error = f"provider {provider_id} has no current capability contract"
         time.sleep(1)
@@ -2285,11 +2293,11 @@ def _create_e2e_docker_infrastructure_profile(
             "failed to create E2E Docker infrastructure Profile: "
             f"HTTP {response.status_code}: {response.text}"
         )
-    payload = _JSON_OBJECT_ADAPTER.validate_python(response.json())
-    if payload.get("compatible") is not True:
+    payload = InfrastructureProfileObservation.model_validate(response.json())
+    if not payload.compatible:
         pytest.fail(
             "E2E Docker infrastructure Profile is not compatible: "
-            f"{payload.get('compatibility_reason_code')!r}"
+            f"{payload.compatibility_reason_code!r}"
         )
 
 
@@ -2408,13 +2416,10 @@ def _provider_resource_id(
             )
             time.sleep(0.5)
             continue
-        payload = _JSON_OBJECT_ADAPTER.validate_python(response.json())
-        items = _JSON_OBJECT_LIST_ADAPTER.validate_python(payload.get("items"))
-        matches = [item for item in items if item.get("provider_id") == provider_id]
+        items = decode_runtime_providers(response.json()).items
+        matches = [item for item in items if item.provider_id == provider_id]
         if len(matches) == 1:
-            provider_resource_id = matches[0].get("id")
-            if isinstance(provider_resource_id, str):
-                return provider_resource_id
+            return matches[0].id
         last_error = f"inventory contained {len(matches)} matching Providers"
         time.sleep(0.5)
     pytest.fail(
@@ -2491,11 +2496,11 @@ def _create_e2e_strict_network_infrastructure_profile(
             "failed to create strict-network infrastructure Profile: "
             f"HTTP {response.status_code}: {response.text}"
         )
-    payload = _JSON_OBJECT_ADAPTER.validate_python(response.json())
-    if payload.get("compatible") is not True:
+    payload = InfrastructureProfileObservation.model_validate(response.json())
+    if not payload.compatible:
         pytest.fail(
             "strict-network infrastructure Profile is not compatible: "
-            f"{payload.get('compatibility_reason_code')!r}"
+            f"{payload.compatibility_reason_code!r}"
         )
 
 
@@ -2552,7 +2557,7 @@ def system_bootstrap_evidence(
             f"bootstrap status failed with HTTP {status_response.status_code}\n"
             f"Admin API logs:\n{admin_logs[-12000:]}"
         )
-    initial_available = status_response.json().get("available") is True
+    initial_available = decode_bootstrap_status(status_response.json()).available
 
     invalid_response = requests.post(
         f"{azents_admin_server_url}/system/v1/bootstrap/first-admin",
@@ -2584,11 +2589,9 @@ def system_bootstrap_evidence(
     success_response = next(
         response for response in responses if response.status_code == 201
     )
-    success_payload = success_response.json()
-    access_token = success_payload.get("access_token")
-    refresh_token = success_payload.get("refresh_token")
-    if not isinstance(access_token, str) or not isinstance(refresh_token, str):
-        pytest.fail("successful bootstrap did not return a complete session")
+    success_payload = decode_bootstrap_session(success_response.json())
+    access_token = success_payload.access_token
+    refresh_token = success_payload.refresh_token
 
     final_status_response = requests.get(
         f"{azents_admin_server_url}/system/v1/bootstrap/status",
@@ -2599,7 +2602,7 @@ def system_bootstrap_evidence(
             "post-bootstrap status failed with HTTP "
             f"{final_status_response.status_code}"
         )
-    final_available = final_status_response.json().get("available") is True
+    final_available = decode_bootstrap_status(final_status_response.json()).available
 
     for container in (
         azents_public_server_container,
@@ -2640,24 +2643,16 @@ def runtime_provider_resource_id(
             "Runtime Provider inventory request failed with HTTP "
             f"{providers_response.status_code}"
         )
-    providers_payload = _JSON_OBJECT_ADAPTER.validate_python(providers_response.json())
-    provider_items = _JSON_OBJECT_LIST_ADAPTER.validate_python(
-        providers_payload.get("items")
-    )
+    provider_items = decode_runtime_providers(providers_response.json()).items
     matching_providers = [
-        item
-        for item in provider_items
-        if item.get("provider_id") == _RUNTIME_PROVIDER_ID
+        item for item in provider_items if item.provider_id == _RUNTIME_PROVIDER_ID
     ]
     if len(matching_providers) != 1:
         pytest.fail(
             "Runtime Provider bootstrap did not create exactly one "
             f"{_RUNTIME_PROVIDER_ID} Provider"
         )
-    provider_id = matching_providers[0].get("id")
-    if not isinstance(provider_id, str):
-        pytest.fail("Runtime Provider inventory item did not contain an ID")
-    return provider_id
+    return matching_providers[0].id
 
 
 @pytest.fixture(scope="session")
@@ -3076,14 +3071,11 @@ def _start_selenium_container(container: DockerContainer) -> DockerContainer:
         status_url = f"http://{host}:{port}/status"
         for _ in range(60):
             try:
-                payload = _JSON_OBJECT_ADAPTER.validate_python(
+                payload = SeleniumStatusObservation.model_validate(
                     requests.get(status_url, timeout=2).json()
                 )
-                value = payload.get("value")
-                if isinstance(value, dict):
-                    status = _JSON_OBJECT_ADAPTER.validate_python(value)
-                    if status.get("ready") is True:
-                        return container
+                if payload.value.ready:
+                    return container
             except requests.exceptions.RequestException:
                 pass
             except ValueError:
@@ -3312,15 +3304,12 @@ def azents_browser_s3_endpoint_url(
     Published ports bind the Docker host. Its network gateway, unlike localhost,
     is also reachable from Chromium inside the fixture network.
     """
-    networks = _JSON_OBJECT_ADAPTER.validate_python(
+    networks = _DOCKER_NETWORKS_ADAPTER.validate_python(
         azents_workspace_upload_gateway_container.get_wrapped_container().attrs[
             "NetworkSettings"
         ]["Networks"]
     )
-    gateways = {
-        str(_JSON_OBJECT_ADAPTER.validate_python(network)["Gateway"])
-        for network in networks.values()
-    }
+    gateways = {network.gateway for network in networks.values()}
     if len(gateways) != 1 or not next(iter(gateways)):
         pytest.fail("Browser S3 endpoint requires one observed Docker host gateway.")
     host = next(iter(gateways))

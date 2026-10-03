@@ -4,6 +4,7 @@ import sqlalchemy as sa
 from azcommon.result import Failure, Result, Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.agent_automatic_project import AgentAutomaticProjectPolicy
 from azents.rdb.models.agent_automatic_project_item import (
     RDBAgentAutomaticProjectItem,
 )
@@ -11,10 +12,7 @@ from azents.rdb.models.agent_automatic_project_setting import (
     RDBAgentAutomaticProjectSetting,
 )
 
-from .data import (
-    AgentAutomaticProjectPolicy,
-    AgentAutomaticProjectPolicyRevisionConflict,
-)
+from .data import AgentAutomaticProjectPolicyRevisionConflict
 
 
 class AgentAutomaticProjectRepository:

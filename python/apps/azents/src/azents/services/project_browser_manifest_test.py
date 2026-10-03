@@ -27,6 +27,9 @@ from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.session_git_worktree import SessionGitWorktreeRepository
 from azents.repos.session_git_worktree.data import SessionGitWorktreeCreate
+from azents.repos.session_working_folder_binding.data import (
+    SessionWorkingFolderAuthority,
+)
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 from azents.repos.session_workspace_project.data import SessionWorkspaceProjectCreate
 from azents.repos.user import UserRepository
@@ -41,7 +44,6 @@ from azents.services.agent_runtime.lifecycle_data import (
     RuntimeOperationTargetResolver,
 )
 from azents.services.session_working_folder_binding import (
-    SessionWorkingFolderAuthority,
     SessionWorkingFolderBindingService,
 )
 from azents.testing.model_selection import (

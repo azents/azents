@@ -13,13 +13,18 @@ from azcommon.logging import bind_extra
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
 
-from azents.broker.broadcast import WebSocketBroadcast
+from azents.broker.broadcast import WebSocketBroadcast, WebSocketBroadcastPublishError
 from azents.broker.types import (
-    PublishedEvent,
     SessionBroker,
     SessionWakeUp,
 )
 from azents.core.agent import AgentModelSelection
+from azents.core.chat_data import (
+    ChatLiveRunOperation,
+    ChatLiveRunRetryAttempt,
+    ChatLiveRunRetryState,
+    ChatLiveRunState,
+)
 from azents.core.enums import (
     ActionExecutionStatus,
     AgentRunPhase,
@@ -35,6 +40,10 @@ from azents.core.inference_profile import (
     RequestedInferenceProfile,
     SessionInferenceState,
 )
+from azents.core.mailbox_errors import (
+    MailboxOwnerGenerationStaleError,
+    MailboxPreparationStaleError,
+)
 from azents.core.model_operation import (
     ModelOperationKind,
     ModelOperationSnapshot,
@@ -43,6 +52,11 @@ from azents.core.runtime_capabilities import (
     RuntimeCapability,
     RuntimeCapabilityResolver,
     RuntimeCapabilitySnapshot,
+)
+from azents.core.session_resource_authority import (
+    SessionExecutionOwner,
+    SessionExecutionOwnerBindable,
+    SessionResourceAuthority,
 )
 from azents.core.tools import (
     ToolkitContext,
@@ -94,7 +108,7 @@ from azents.engine.run.contracts import (
     ToolAdmissionBarrier,
     ToolkitBinding,
 )
-from azents.engine.run.emit import Emit, handle_engine_event
+from azents.engine.run.emit import Emit, PublishedEvent, handle_engine_event
 from azents.engine.run.errors import (
     CompactionModelStreamTimeoutError,
     ModelCallError,
@@ -162,15 +176,11 @@ from azents.repos.action_execution.data import (
 )
 from azents.repos.agent.data import Agent
 from azents.repos.agent_session.data import AgentSession, PendingSessionCommand
-from azents.repos.engine_read import (
-    EngineInvokeReadRepository,
-    EngineModelReadRepository,
-    EngineToolkitReadRepository,
-)
-from azents.repos.engine_read_deps import (
-    get_engine_invoke_read_repository,
-    get_engine_model_read_repository,
-    get_engine_toolkit_read_repository,
+from azents.repos.engine_read import EngineModelReadRepository
+from azents.repos.engine_read_deps import get_engine_model_read_repository
+from azents.repos.engine_resolve import (
+    EngineResolveRepositories,
+    get_engine_resolve_repositories,
 )
 from azents.repos.model_metadata_source_data import CapturedContextSource
 from azents.repos.model_operation_completion import (
@@ -185,12 +195,6 @@ from azents.repos.worker_executor_read import WorkerExecutorReadRepository
 from azents.repos.worker_session_data import CanonicalExecutionWorkDriftError
 from azents.runtime.types import RuntimeDomainConfig
 from azents.services.agent_wait import AgentWaitService
-from azents.services.chat.data import (
-    ChatLiveRunOperation,
-    ChatLiveRunRetryAttempt,
-    ChatLiveRunRetryState,
-    ChatLiveRunState,
-)
 from azents.services.engine_runtime_tokens import EngineRuntimeTokenResolver
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.image_generation_catalog import (
@@ -198,8 +202,6 @@ from azents.services.image_generation_catalog import (
     ImageGenerationRuntimeConfigurationError,
 )
 from azents.services.mailbox import (
-    MailboxOwnerGenerationStaleError,
-    MailboxPreparationStaleError,
     MailboxService,
     OperationActionInput,
     PendingInputInferenceProfile,
@@ -210,14 +212,13 @@ from azents.services.mailbox import (
 )
 from azents.services.model_file import ModelFileService
 from azents.services.model_metadata import ModelMetadataService
+from azents.services.oauth_runtime_clients import (
+    RuntimeOAuthClientFactories,
+    create_runtime_oauth_client_factories,
+)
 from azents.services.session_git_worktree import (
     GitWorktreeActionExecutionResult,
     SessionGitWorktreeService,
-)
-from azents.services.session_resource_authority import (
-    SessionExecutionOwner,
-    SessionExecutionOwnerBindable,
-    SessionResourceAuthority,
 )
 from azents.services.session_title import SessionTitleService
 from azents.services.vfs import VfsProjectionService
@@ -380,17 +381,17 @@ class RunExecutor:
     read_repository: Annotated[
         WorkerExecutorReadRepository, Depends(WorkerExecutorReadRepository)
     ]
-    invoke_read_repository: Annotated[
-        EngineInvokeReadRepository, Depends(get_engine_invoke_read_repository)
+    resolve_repositories: Annotated[
+        EngineResolveRepositories, Depends(get_engine_resolve_repositories)
     ]
     model_read_repository: Annotated[
         EngineModelReadRepository, Depends(get_engine_model_read_repository)
     ]
-    toolkit_read_repository: Annotated[
-        EngineToolkitReadRepository, Depends(get_engine_toolkit_read_repository)
-    ]
     runtime_token_resolver: Annotated[
         EngineRuntimeTokenResolver, Depends(EngineRuntimeTokenResolver)
+    ]
+    oauth_clients: Annotated[
+        RuntimeOAuthClientFactories, Depends(create_runtime_oauth_client_factories)
     ]
     agent_wait_service: Annotated[AgentWaitService, Depends(AgentWaitService)]
     engine: Annotated[AgentEngineProtocol, Depends(AgentEngineAdapter)]
@@ -481,16 +482,18 @@ class RunExecutor:
     ) -> None:
         """Cancel live operations left by a processing boundary."""
 
+        operation_logger = bind_extra(logger, {"session_id": session_id})
+
         async def publish_history_event(event: Event) -> None:
             try:
                 await self.broadcast.publish(
                     session_id,
                     chat_history_event_appended_dump(event),
                 )
-            except Exception:
-                logger.exception(
+            except WebSocketBroadcastPublishError:
+                operation_logger.exception(
                     "Failed to broadcast recovered action execution history event",
-                    extra={"session_id": session_id, "event_id": event.id},
+                    extra={"event_id": event.id},
                 )
 
         async def publish_removal(action_execution_id: str) -> None:
@@ -502,11 +505,10 @@ class RunExecutor:
                         action_execution_id,
                     ),
                 )
-            except Exception:
-                logger.exception(
+            except WebSocketBroadcastPublishError:
+                operation_logger.exception(
                     "Failed to broadcast recovered action execution removal",
                     extra={
-                        "session_id": session_id,
                         "action_execution_id": action_execution_id,
                     },
                 )
@@ -672,7 +674,7 @@ class RunExecutor:
             context,
             execution_mode=execution_mode,
             toolkit_registry=self.toolkit_registry,
-            toolkit_read_repository=self.toolkit_read_repository,
+            repositories=self.resolve_repositories,
             web_url=self.worker_config.web_url,
             oauth_secret_key=self.worker_config.oauth_secret_key,
             mcp_proxy_url=self.worker_config.mcp_proxy_url,
@@ -1181,9 +1183,9 @@ class RunExecutor:
                 resolved_enabled_execution_options=(
                     turn_inference_state.enabled_execution_options
                 ),
-                invoke_read_repository=self.invoke_read_repository,
+                repositories=self.resolve_repositories,
                 model_metadata_service=self.model_metadata_service,
-                runtime_token_resolver=self.runtime_token_resolver,
+                oauth_clients=self.oauth_clients,
                 exchange_file_service=self.exchange_file_service,
                 model_file_service=self.model_file_service,
                 image_generation_catalog_service=(
@@ -1397,7 +1399,7 @@ class RunExecutor:
             context,
             execution_mode=execution_mode,
             toolkit_registry=self.toolkit_registry,
-            toolkit_read_repository=self.toolkit_read_repository,
+            repositories=self.resolve_repositories,
             web_url=self.worker_config.web_url,
             oauth_secret_key=self.worker_config.oauth_secret_key,
             mcp_proxy_url=self.worker_config.mcp_proxy_url,
@@ -2765,9 +2767,9 @@ class RunExecutor:
                     invoke_input,
                     context_source=context_source,
                     requested_profile=selected.profile,
-                    invoke_read_repository=self.invoke_read_repository,
+                    repositories=self.resolve_repositories,
                     model_metadata_service=self.model_metadata_service,
-                    runtime_token_resolver=self.runtime_token_resolver,
+                    oauth_clients=self.oauth_clients,
                     exchange_file_service=self.exchange_file_service,
                     model_file_service=self.model_file_service,
                     image_generation_catalog_service=(
@@ -2791,9 +2793,9 @@ class RunExecutor:
                         resolved_enabled_execution_options=(
                             selected.profile.enabled_execution_options
                         ),
-                        invoke_read_repository=self.invoke_read_repository,
+                        repositories=self.resolve_repositories,
                         model_metadata_service=self.model_metadata_service,
-                        runtime_token_resolver=self.runtime_token_resolver,
+                        oauth_clients=self.oauth_clients,
                         exchange_file_service=self.exchange_file_service,
                         model_file_service=self.model_file_service,
                         image_generation_catalog_service=(
@@ -2813,9 +2815,9 @@ class RunExecutor:
                     resolved_enabled_execution_options=(
                         selected.profile.enabled_execution_options
                     ),
-                    invoke_read_repository=self.invoke_read_repository,
+                    repositories=self.resolve_repositories,
                     model_metadata_service=self.model_metadata_service,
-                    runtime_token_resolver=self.runtime_token_resolver,
+                    oauth_clients=self.oauth_clients,
                     exchange_file_service=self.exchange_file_service,
                     model_file_service=self.model_file_service,
                     image_generation_catalog_service=(
@@ -3350,6 +3352,10 @@ class RunExecutor:
     ) -> GitWorktreeActionExecutionResult:
         """Execute one atomically claimed operation action."""
 
+        operation_logger = bind_extra(
+            logger, {"session_id": session_id, "action_execution_id": execution.id}
+        )
+
         async def publish_projection(
             projection: ActionExecutionProjection,
         ) -> None:
@@ -3362,13 +3368,9 @@ class RunExecutor:
                     session_id,
                     chat_action_execution_updated_dump(projection),
                 )
-            except Exception:
-                logger.exception(
+            except WebSocketBroadcastPublishError:
+                operation_logger.exception(
                     "Failed to broadcast action execution projection",
-                    extra={
-                        "session_id": session_id,
-                        "action_execution_id": projection.execution.id,
-                    },
                 )
 
         async def publish_history_event(event: Event) -> None:
@@ -3381,23 +3383,19 @@ class RunExecutor:
                     session_id,
                     chat_history_event_appended_dump(event),
                 )
-            except Exception:
-                logger.exception(
+            except WebSocketBroadcastPublishError:
+                operation_logger.exception(
                     "Failed to broadcast action execution history event",
-                    extra={"session_id": session_id, "event_id": event.id},
+                    extra={"event_id": event.id},
                 )
             try:
                 await self.broadcast.publish(
                     session_id,
                     chat_action_execution_removed_dump(session_id, execution.id),
                 )
-            except Exception:
-                logger.exception(
+            except WebSocketBroadcastPublishError:
+                operation_logger.exception(
                     "Failed to broadcast action execution removal",
-                    extra={
-                        "session_id": session_id,
-                        "action_execution_id": execution.id,
-                    },
                 )
 
         if execution.owner_generation != owner_generation:
@@ -3524,7 +3522,7 @@ class RunExecutor:
                     session_id,
                     chat_mailbox_item_removed_dump(session_id, buffer_id),
                 )
-        except Exception:
+        except WebSocketBroadcastPublishError:
             logger.exception(
                 "Failed to broadcast promoted input buffer events",
                 extra={"session_id": session_id},

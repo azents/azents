@@ -8,14 +8,14 @@ from unittest.mock import AsyncMock
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import AgentRunStatus, EventKind
-from azents.engine.events.protocols import (
+from azents.engine.events.types import Event
+from azents.repos.agent_execution.data import EventCreate
+from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.engine_event_contracts import (
     AgentRunCreateRepository,
     SessionHeadRepository,
     TranscriptRepository,
 )
-from azents.engine.events.types import Event
-from azents.repos.agent_execution.data import EventCreate
-from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.engine_event_operation import EngineEventOperationRepository
 
 

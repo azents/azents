@@ -18,18 +18,18 @@ from azents.engine.run.resolve import (
     resolve_model_candidate_runtime,
 )
 from azents.repos.chatgpt_oauth_runtime import ChatGPTOAuthRuntimeRepository
-from azents.repos.engine_read import (
-    EngineInvokeReadRepository,
-    EngineModelReadRepository,
-)
+from azents.repos.engine_read import EngineModelReadRepository
+from azents.repos.engine_resolve import get_engine_resolve_repositories
 from azents.repos.kimi_oauth_runtime import KimiOAuthRuntimeRepository
 from azents.repos.model_metadata_source_data import (
     CapturedContextSource,
     ModelMetadataSourceSnapshot,
 )
+from azents.repos.toolkit import ToolkitRepository
 from azents.repos.xai_oauth_runtime import XaiOAuthRuntimeRepository
 from azents.services.engine_runtime_tokens import EngineRuntimeTokenResolver
 from azents.services.model_metadata import ModelMetadataService
+from azents.services.oauth_runtime_clients import create_runtime_oauth_client_factories
 from azents.testing.model_metadata import (
     make_test_model_metadata_service,
     make_test_source_payload,
@@ -93,6 +93,7 @@ async def test_real_resolver_respects_captured_context_even_when_new_source_exis
                 session_manager=session_manager,
             ),
             runtime_token_resolver=EngineRuntimeTokenResolver(
+                oauth_clients=create_runtime_oauth_client_factories(),
                 chatgpt_repository=ChatGPTOAuthRuntimeRepository(
                     integration_repository=integration_repository,
                     session_manager=session_manager,
@@ -124,25 +125,13 @@ async def test_real_resolver_respects_captured_context_even_when_new_source_exis
             model_file_service=AsyncMock(),
             image_generation_catalog_service=fixtures._make_image_generation_catalog_service(),
             model_metadata_service=metadata,
-            invoke_read_repository=EngineInvokeReadRepository(
+            repositories=get_engine_resolve_repositories(
+                session_manager=session_manager,
                 agent_repository=agent_repository,
                 integration_repository=integration_repository,
-                session_manager=session_manager,
+                toolkit_repository=ToolkitRepository(cipher=None),
             ),
-            runtime_token_resolver=EngineRuntimeTokenResolver(
-                chatgpt_repository=ChatGPTOAuthRuntimeRepository(
-                    integration_repository=integration_repository,
-                    session_manager=session_manager,
-                ),
-                xai_repository=XaiOAuthRuntimeRepository(
-                    integration_repository=integration_repository,
-                    session_manager=session_manager,
-                ),
-                kimi_repository=KimiOAuthRuntimeRepository(
-                    integration_repository=integration_repository,
-                    session_manager=session_manager,
-                ),
-            ),
+            oauth_clients=create_runtime_oauth_client_factories(),
         )
         assert isinstance(profile, Success)
         request = profile.value.run_request
@@ -158,25 +147,13 @@ async def test_real_resolver_respects_captured_context_even_when_new_source_exis
             model_file_service=AsyncMock(),
             image_generation_catalog_service=fixtures._make_image_generation_catalog_service(),
             model_metadata_service=metadata,
-            invoke_read_repository=EngineInvokeReadRepository(
+            repositories=get_engine_resolve_repositories(
+                session_manager=session_manager,
                 agent_repository=agent_repository,
                 integration_repository=integration_repository,
-                session_manager=session_manager,
+                toolkit_repository=ToolkitRepository(cipher=None),
             ),
-            runtime_token_resolver=EngineRuntimeTokenResolver(
-                chatgpt_repository=ChatGPTOAuthRuntimeRepository(
-                    integration_repository=integration_repository,
-                    session_manager=session_manager,
-                ),
-                xai_repository=XaiOAuthRuntimeRepository(
-                    integration_repository=integration_repository,
-                    session_manager=session_manager,
-                ),
-                kimi_repository=KimiOAuthRuntimeRepository(
-                    integration_repository=integration_repository,
-                    session_manager=session_manager,
-                ),
-            ),
+            oauth_clients=create_runtime_oauth_client_factories(),
         )
         assert isinstance(frozen, Success)
         request = frozen.value

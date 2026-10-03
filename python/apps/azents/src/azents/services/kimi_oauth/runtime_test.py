@@ -3,8 +3,12 @@
 import asyncio
 import datetime
 import uuid
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from typing import NamedTuple
 from unittest.mock import AsyncMock
 
+import httpx
 import pytest
 from azcommon.result import Failure, Result, Success
 from cryptography.fernet import Fernet
@@ -31,6 +35,20 @@ from .runtime import ensure_runtime_tokens, refresh_runtime_tokens
 _TEST_KEY = Fernet.generate_key().decode()
 
 
+def _unexpected_http(_request: httpx.Request) -> httpx.Response:
+    """Reject transport requests when the configured refresh hook is not used."""
+    raise AssertionError("Kimi runtime tests must use their controlled refresh hook")
+
+
+@asynccontextmanager
+async def _client_factory() -> AsyncIterator[KimiOAuthClient]:
+    """Preserve concrete-client hooks behind a network-denying transport."""
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(_unexpected_http), timeout=20.0
+    ) as client:
+        yield KimiOAuthClient(client)
+
+
 async def _create_workspace(session: AsyncSession) -> str:
     """Create workspace for tests."""
     suffix = uuid.uuid4().hex[:12]
@@ -45,11 +63,18 @@ async def _create_workspace(session: AsyncSession) -> str:
     return workspace_id
 
 
+class _CreatedIntegration(NamedTuple):
+    """Created identity and query collaborator for committed fixture operations."""
+
+    repository: LLMProviderIntegrationRepository
+    integration_id: str
+
+
 async def _create_integration(
     session: AsyncSession,
     *,
     expires_at: datetime.datetime,
-) -> tuple[LLMProviderIntegrationRepository, str]:
+) -> _CreatedIntegration:
     """Create Kimi OAuth integration for tests."""
     repo = LLMProviderIntegrationRepository(CredentialCipher(_TEST_KEY))
     workspace_id = await _create_workspace(session)
@@ -75,7 +100,7 @@ async def _create_integration(
             ),
         ),
     )
-    return repo, integration.id
+    return _CreatedIntegration(repo, integration.id)
 
 
 async def _reconnect_integration(
@@ -194,6 +219,7 @@ class TestEnsureRuntimeTokens:
                 session_manager=rdb_session_manager,
                 integration_repository=repo,
             ),
+            client_factory=_client_factory,
         )
 
         assert isinstance(result, Success)
@@ -227,6 +253,7 @@ class TestEnsureRuntimeTokens:
                 session_manager=rdb_session_manager,
                 integration_repository=repo,
             ),
+            client_factory=_client_factory,
         )
 
         assert isinstance(result, Success)
@@ -259,6 +286,7 @@ class TestEnsureRuntimeTokens:
                 session_manager=rdb_session_manager,
                 integration_repository=repo,
             ),
+            client_factory=_client_factory,
         )
 
         assert isinstance(result, Success)
@@ -309,6 +337,7 @@ class TestEnsureRuntimeTokens:
                 session_manager=rdb_session_manager,
                 integration_repository=repo,
             ),
+            client_factory=_client_factory,
         )
 
         assert isinstance(result, Success)
@@ -362,6 +391,7 @@ class TestEnsureRuntimeTokens:
                 session_manager=rdb_session_manager,
                 integration_repository=repo,
             ),
+            client_factory=_client_factory,
         )
 
         assert isinstance(result, Success)
@@ -405,6 +435,7 @@ class TestEnsureRuntimeTokens:
                 session_manager=rdb_session_manager,
                 integration_repository=repo,
             ),
+            client_factory=_client_factory,
         )
 
         assert isinstance(result, Success)
@@ -463,6 +494,7 @@ class TestEnsureRuntimeTokens:
                 session_manager=rdb_session_manager,
                 integration_repository=repo,
             ),
+            client_factory=_client_factory,
         )
 
         assert isinstance(result, Success)
@@ -507,6 +539,7 @@ class TestEnsureRuntimeTokens:
                 session_manager=rdb_session_manager,
                 integration_repository=repo,
             ),
+            client_factory=_client_factory,
         )
 
         assert isinstance(result, Success)
@@ -557,6 +590,7 @@ class TestEnsureRuntimeTokens:
                 session_manager=rdb_session_manager,
                 integration_repository=repo,
             ),
+            client_factory=_client_factory,
         )
         async with rdb_session_manager() as rdb_session:
             updated = await repo.get_by_id_with_secrets(rdb_session, integration_id)
@@ -614,6 +648,7 @@ class TestEnsureRuntimeTokens:
                 session_manager=rdb_session_manager,
                 integration_repository=repo,
             ),
+            client_factory=_client_factory,
         )
 
         assert isinstance(result, Success)
@@ -714,6 +749,7 @@ class TestEnsureRuntimeTokens:
                 session_manager=rdb_session_manager,
                 integration_repository=repo,
             ),
+            client_factory=_client_factory,
         )
 
         assert isinstance(result, Success)
@@ -755,6 +791,7 @@ class TestEnsureRuntimeTokens:
                 session_manager=rdb_session_manager,
                 integration_repository=repo,
             ),
+            client_factory=_client_factory,
         )
         async with rdb_session_manager() as rdb_session:
             updated = await repo.get_by_id(rdb_session, integration_id)
@@ -800,6 +837,7 @@ class TestEnsureRuntimeTokens:
                 session_manager=rdb_session_manager,
                 integration_repository=repo,
             ),
+            client_factory=_client_factory,
         )
         async with rdb_session_manager() as rdb_session:
             after_failure = await repo.get_by_id_with_secrets(
@@ -840,6 +878,7 @@ class TestEnsureRuntimeTokens:
                 session_manager=rdb_session_manager,
                 integration_repository=repo,
             ),
+            client_factory=_client_factory,
         )
 
         assert isinstance(second, Success)

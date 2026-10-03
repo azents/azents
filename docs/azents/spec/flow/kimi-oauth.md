@@ -6,6 +6,9 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [agent, workspace, model-catalog, conversation]
 code_paths:
+  - python/apps/azents/src/azents/repos/engine_resolve.py
+  - python/apps/azents/src/azents/repos/kimi_oauth_runtime/**
+  - python/apps/azents/src/azents/repos/llm_catalog_operations.py
   - python/apps/azents/src/azents/core/kimi_oauth.py
   - python/apps/azents/src/azents/core/credentials.py
   - python/apps/azents/src/azents/api/public/kimi_oauth/**

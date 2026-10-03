@@ -8,16 +8,18 @@ from azcommon.result import Failure, Success
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from azents.core.agent_automatic_project import AgentAutomaticProjectPolicy
 from azents.core.auth.deps import WorkspaceMember, get_workspace_member
 from azents.core.enums import WorkspaceUserRole
-from azents.repos.agent_automatic_project.data import AgentAutomaticProjectPolicy
+from azents.core.session_workspace_paths import (
+    InvalidProjectPath,
+)
 from azents.services.agent.data import NotAdmin
 from azents.services.agent_automatic_project import AgentAutomaticProjectService
 from azents.services.agent_automatic_project.data import (
     AutomaticSessionProjectsRevisionConflict,
     AutomaticSessionProjectsRuntimeUnavailable,
 )
-from azents.services.session_workspace_project import InvalidProjectPath
 
 from . import router
 

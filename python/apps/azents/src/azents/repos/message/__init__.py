@@ -815,6 +815,8 @@ class MessageRepository:
         valid_rows: list[RDBEvent] = []
         fallback_rows: list[RDBEvent] = []
         linked_results: dict[str, RDBEvent] = {}
+        result_payloads: dict[str, ClientToolResultPayload] = {}
+        valid_call_ids: set[str] = set()
         before_id: str | None = None
         budget = _HistoricalMemoryScanBudget.for_limit(limit)
         result_budget = _HistoricalMemoryScanBudget.for_limit(limit)
@@ -845,10 +847,11 @@ class MessageRepository:
             admitted_calls = budget.admit_page(call_rows)
             if not admitted_calls:
                 break
+            call_events = {row.id: _to_event(row) for row in admitted_calls}
             call_ids = tuple(
-                call_id
-                for row in admitted_calls
-                if isinstance((call_id := row.payload.get("call_id")), str)
+                event.payload.call_id
+                for event in call_events.values()
+                if isinstance(event.payload, ClientToolCallPayload)
             )
             result_rows = await self._historical_memory_tool_results(
                 session,
@@ -857,25 +860,15 @@ class MessageRepository:
                 call_ids=call_ids,
                 budget=result_budget,
             )
-            linked_results.update(
-                (
-                    call_id,
-                    row,
-                )
-                for row in result_rows
-                if isinstance((call_id := row.payload.get("call_id")), str)
-            )
-            result_payloads = {
-                call_id: payload
-                for call_id, row in linked_results.items()
-                if isinstance(
-                    (payload := _to_event(row).payload),
-                    ClientToolResultPayload,
-                )
-            }
+            for row in result_rows:
+                payload = _to_event(row).payload
+                if isinstance(payload, ClientToolResultPayload):
+                    linked_results[payload.call_id] = row
+                    result_payloads[payload.call_id] = payload
             for row in admitted_calls:
+                event = call_events[row.id]
                 evidence = project_historical_memory_event(
-                    _to_event(row),
+                    event,
                     client_results=result_payloads,
                 )
                 if evidence is None:
@@ -887,13 +880,12 @@ class MessageRepository:
                 )
                 if len(target) < limit:
                     target.append(row)
+                    if target is valid_rows and isinstance(
+                        event.payload, ClientToolCallPayload
+                    ):
+                        valid_call_ids.add(event.payload.call_id)
             if len(call_rows) < page_limit:
                 break
-        valid_call_ids = {
-            call_id
-            for row in valid_rows
-            if isinstance((call_id := row.payload.get("call_id")), str)
-        }
         return [
             *valid_rows,
             *fallback_rows,

@@ -5,7 +5,7 @@ import datetime
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, NamedTuple
 from unittest.mock import AsyncMock
 
 import pytest
@@ -297,17 +297,21 @@ def _make_service(**kwargs: Any) -> SubagentTerminalResultService:  # noqa: ANN4
     )
 
 
+class _ServiceFixture(NamedTuple):
+    """Service and stateful collaborators observed by repair regressions."""
+
+    service: SubagentTerminalResultService
+    store: _Store
+    run_repository: _AgentRunRepository
+    mailbox_service: _AgentMailboxRepository
+
+
 def _service(
     run: AgentRunState,
     *,
     fail_list: bool = False,
     fail_finalize: bool = False,
-) -> tuple[
-    SubagentTerminalResultService,
-    _Store,
-    _AgentRunRepository,
-    _AgentMailboxRepository,
-]:
+) -> _ServiceFixture:
     parent = _session_agent(
         id="root-agent",
         session_id="root-session",
@@ -343,7 +347,7 @@ def _service(
         agent_session_repository=_AgentSessionRepository(store),
         agent_mailbox_repository=mailbox_service,
     )
-    return service, store, run_repository, mailbox_service
+    return _ServiceFixture(service, store, run_repository, mailbox_service)
 
 
 @pytest.mark.parametrize(

@@ -12,8 +12,7 @@ from azents.core.enums import (
     RuntimeProviderBootstrapAdapterKind,
     RuntimeProviderKind,
 )
-
-from .data import (
+from azents.core.runtime_provider_bootstrap import (
     RuntimeProviderBootstrapAuthenticationInput,
     RuntimeProviderBootstrapDeclarationInput,
     RuntimeProviderBootstrapSnapshot,

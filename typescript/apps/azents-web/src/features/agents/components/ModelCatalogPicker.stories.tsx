@@ -1,4 +1,5 @@
 import { rem } from "@mantine/core";
+import { expect, fn, userEvent, within } from "storybook/test";
 import { partialReasoningCapabilities } from "@/shared/storybook/model-capability-fixtures";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import { ModelCatalogPicker } from "./ModelCatalogPicker";
@@ -152,6 +153,104 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const ReadyWithContextRange = {} satisfies Story;
+
+export const ReadyEmpty = {
+  args: { state: { ...readyState, models: [], ui: { type: "READY_EMPTY" } } },
+  play: async ({ canvasElement }) => {
+    await expect(
+      within(canvasElement.ownerDocument.body).getByText(
+        "No selectable models match this search.",
+      ),
+    ).toBeVisible();
+  },
+} satisfies Story;
+
+export const ReadyWithFailedAttempt = {
+  args: {
+    state: {
+      ...readyState,
+      catalog: {
+        ...failedCatalog,
+        currentSnapshotId: "previous-success",
+        currentSnapshotCreatedAt: "2026-08-26T09:00:00Z",
+        total: 1,
+        loaded: 1,
+      },
+      ui: { type: "READY_WITH_FAILED_ATTEMPT", attempt: failedAttempt },
+    },
+    onSelectModel: fn(),
+  },
+  play: async ({ canvasElement, args }) => {
+    const body = within(canvasElement.ownerDocument.body);
+    await expect(body.getByText("Catalog status: Sync failed")).toBeVisible();
+    await expect(
+      body.getByText("The provider catalog is temporarily unavailable."),
+    ).toBeVisible();
+    await userEvent.click(body.getByRole("button", { name: "Select" }));
+    await expect(args.onSelectModel).toHaveBeenCalledTimes(1);
+  },
+} satisfies Story;
+
+export const NeverSynced = {
+  args: {
+    state: {
+      ...readyState,
+      models: [],
+      catalog: { ...failedCatalog, latestAttempt: null },
+      ui: { type: "NEVER_SYNCED" },
+    },
+  },
+} satisfies Story;
+
+export const SyncingWithoutSnapshot = {
+  args: {
+    state: {
+      ...readyState,
+      models: [],
+      canSync: false,
+      syncRunning: true,
+      catalog: {
+        ...failedCatalog,
+        latestAttempt: {
+          ...failedAttempt,
+          status: "running",
+          finished_at: null,
+          failure_code: null,
+          failure_message: null,
+          action_hint: null,
+        },
+      },
+      ui: { type: "SYNCING_WITHOUT_SNAPSHOT" },
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const body = within(canvasElement.ownerDocument.body);
+    await expect(body.getByText("Catalog status: Syncing")).toBeVisible();
+    await expect(
+      body.getByRole("button", { name: "Sync running" }),
+    ).toBeDisabled();
+  },
+} satisfies Story;
+
+export const UnknownCatalogStatus = {
+  args: {
+    state: {
+      ...readyState,
+      catalog: {
+        ...failedCatalog,
+        currentSnapshotId: "previous-success",
+        latestAttempt: { ...failedAttempt, status: "future_status" },
+      },
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const body = within(canvasElement.ownerDocument.body);
+    await expect(
+      body.getByText("Catalog status: Status unavailable"),
+    ).toBeVisible();
+    await expect(body.queryByText("future_status")).not.toBeInTheDocument();
+  },
+} satisfies Story;
 
 export const VersionedPartialReasoning = {
   args: {

@@ -8,6 +8,7 @@ from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import AgentLifecycleStatus, WorkspaceUserRole
+from azents.core.toolkit_errors import NotFound
 from azents.core.toolkit_identifiers import resolve_default_toolkit_slug
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
@@ -18,7 +19,6 @@ from azents.repos.github_user_installation import GithubUserInstallationReposito
 from azents.repos.mcp_oauth_connection import MCPOAuthConnectionRepository
 from azents.repos.toolkit import ToolkitRepository
 from azents.repos.toolkit.data import (
-    NotFound,
     ToolkitConfig,
     ToolkitCreate,
     ToolkitUpdate,

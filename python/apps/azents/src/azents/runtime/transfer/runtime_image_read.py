@@ -10,6 +10,7 @@ from azcommon.infra.s3.service import S3Service
 from azcommon.result import Failure
 from azcommon.uuid import uuid7
 
+from azents.core.session_resource_authority import SessionResourceAuthority
 from azents.repos.model_file.data import ModelFile
 from azents.runtime.transfer.present_file_publication import (
     OpaqueTransferObjectResolver,
@@ -26,7 +27,6 @@ from azents.services.model_file import (
     ModelFileOversized,
     ModelFileService,
 )
-from azents.services.session_resource_authority import SessionResourceAuthority
 
 
 class RuntimeImageReadError(RuntimeError):

@@ -1,9 +1,10 @@
 """System Settings Admin API v1 schemas."""
 
 import datetime
-from typing import Any, Literal, Self
+from typing import Annotated, Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator, with_config
+from typing_extensions import Required, TypedDict
 
 from azents.core.external_channel_file import (
     MAX_EXTERNAL_CHANNEL_CONFIGURED_ACTION_BYTES,
@@ -55,22 +56,26 @@ class SystemSettingSecretActionRequest(BaseModel):
         return self
 
 
-class ExternalChannelFilesPatchRequest(BaseModel):
+class ExternalChannelFilesPatchRequest(TypedDict, total=False, closed=True):
     """Optimistic partial update for External Channel file limits."""
 
-    model_config = ConfigDict(extra="forbid")
-
-    expected_version: int = Field(ge=0)
-    outbound_max_file_bytes: int | None = Field(
-        default=None,
-        ge=1,
-        le=MAX_EXTERNAL_CHANNEL_CONFIGURED_FILE_BYTES,
-    )
-    outbound_max_action_bytes: int | None = Field(
-        default=None,
-        ge=1,
-        le=MAX_EXTERNAL_CHANNEL_CONFIGURED_ACTION_BYTES,
-    )
+    expected_version: Required[Annotated[int, Field(ge=0)]]
+    outbound_max_file_bytes: Annotated[
+        int | None,
+        Field(
+            ge=1,
+            le=MAX_EXTERNAL_CHANNEL_CONFIGURED_FILE_BYTES,
+            json_schema_extra={"default": None},
+        ),
+    ]
+    outbound_max_action_bytes: Annotated[
+        int | None,
+        Field(
+            ge=1,
+            le=MAX_EXTERNAL_CHANNEL_CONFIGURED_ACTION_BYTES,
+            json_schema_extra={"default": None},
+        ),
+    ]
 
 
 class ExternalChannelFilesDetailResponse(BaseModel):
@@ -111,14 +116,22 @@ class SystemSettingVersionConflictResponse(BaseModel):
     detail: SystemSettingVersionConflictDetail
 
 
-class PlatformGitHubAppPatchRequest(BaseModel):
+@with_config(ConfigDict(extra="ignore"))
+class PlatformGitHubAppPatchRequest(TypedDict, total=False):
     """Optimistic partial update for the Platform GitHub App Admin base."""
 
-    expected_version: int = Field(ge=0)
-    app_id: str | None = None
-    client_id: str | None = None
-    private_key: SystemSettingSecretActionRequest | None = None
-    client_secret: SystemSettingSecretActionRequest | None = None
+    expected_version: Required[Annotated[int, Field(ge=0)]]
+    # Preserve published schema metadata without inserting omitted runtime keys.
+    app_id: Annotated[str | None, Field(json_schema_extra={"default": None})]
+    client_id: Annotated[str | None, Field(json_schema_extra={"default": None})]
+    private_key: Annotated[
+        SystemSettingSecretActionRequest | None,
+        Field(json_schema_extra={"default": None}),
+    ]
+    client_secret: Annotated[
+        SystemSettingSecretActionRequest | None,
+        Field(json_schema_extra={"default": None}),
+    ]
 
 
 class PlatformGitHubAppConfirmRequest(BaseModel):
@@ -342,13 +355,17 @@ class ExternalAccountOAuthSecretActionRequest(BaseModel):
         return self
 
 
-class ExternalAccountOAuthPatchRequest(BaseModel):
+@with_config(ConfigDict(extra="ignore"))
+class ExternalAccountOAuthPatchRequest(TypedDict, total=False):
     """Optimistic provider OAuth System Settings patch."""
 
-    expected_version: int = Field(ge=0)
-    client_id: str | None = None
-    application_id: str | None = None
-    client_secret: ExternalAccountOAuthSecretActionRequest | None = None
+    expected_version: Required[Annotated[int, Field(ge=0)]]
+    client_id: Annotated[str | None, Field(json_schema_extra={"default": None})]
+    application_id: Annotated[str | None, Field(json_schema_extra={"default": None})]
+    client_secret: Annotated[
+        ExternalAccountOAuthSecretActionRequest | None,
+        Field(json_schema_extra={"default": None}),
+    ]
 
 
 class ExternalAccountOAuthFieldResponse(BaseModel):

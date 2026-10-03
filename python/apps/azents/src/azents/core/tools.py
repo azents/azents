@@ -11,12 +11,11 @@ from collections.abc import Awaitable, Callable
 from typing import Annotated, ClassVar, Generic, Literal, TypeVar
 
 from pydantic import BaseModel, BeforeValidator, Field
-from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.session_resource_authority import SessionResourceAuthority
 from azents.engine.hooks.types import RuntimeHooks
 from azents.engine.run.emit import PublishedEvent
 from azents.engine.run.types import CheckStop, FunctionTool
-from azents.services.session_resource_authority import SessionResourceAuthority
 
 # ---------------------------------------------------------------------------
 # Toolkit State Machine types
@@ -162,8 +161,6 @@ class ResolveContext:
     :param credentials_json: Decrypted credential JSON; None means no authentication
     :param agent_id: Agent ID owning the current AgentSession
     :param session_id: Current AgentSession ID
-    :param session: Optional caller-owned DB session. Run-time Toolkit resolution
-        passes None so providers cannot retain a snapshot transaction across I/O.
     :param web_url: Frontend URL for building OAuth redirect_uri
     :param oauth_secret_key: OAuth HMAC signing key
     :param workspace_id: Workspace ID
@@ -176,11 +173,10 @@ class ResolveContext:
     credentials_json: str | None
     agent_id: str
     session_id: str
-    session: AsyncSession | None
     web_url: str
     oauth_secret_key: str
     workspace_id: str
-    workspace_handle: str
+    workspace_handle: str | None
     mcp_proxy_url: str | None = None
 
 

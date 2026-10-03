@@ -12,7 +12,7 @@ from typing import Any, cast
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
 
-from azents.services.external_channel.conversation import (
+from azents.core.external_channel_conversation_data import (
     ExternalChannelConversationLock,
     ExternalChannelConversationLockLease,
     ExternalChannelConversationLockOwnershipLost,

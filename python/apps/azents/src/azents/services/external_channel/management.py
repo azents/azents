@@ -19,6 +19,13 @@ from azents.core.enums import (
     ExternalChannelResponseMode,
     ExternalChannelTransport,
 )
+from azents.core.external_channel_conversation_data import (
+    ExternalChannelConversationLock,
+    ExternalChannelConversationScope,
+    ExternalChannelOperationDeadline,
+    ExternalChannelParticipationLock,
+    ExternalChannelParticipationScope,
+)
 from azents.core.external_channel_provider import (
     DiscordConnectionConfiguration,
     DiscordConnectionCredentials,
@@ -59,13 +66,6 @@ from azents.services.external_channel.access import ExternalChannelAccessService
 from azents.services.external_channel.channel_action import ExternalChannelActionService
 from azents.services.external_channel.connection import (
     ExternalChannelConnectionService,
-)
-from azents.services.external_channel.conversation import (
-    ExternalChannelConversationLock,
-    ExternalChannelConversationScope,
-    ExternalChannelOperationDeadline,
-    ExternalChannelParticipationLock,
-    ExternalChannelParticipationScope,
 )
 from azents.services.external_channel.deps import (
     get_external_channel_conversation_lock,

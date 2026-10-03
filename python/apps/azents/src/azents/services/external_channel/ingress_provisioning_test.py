@@ -1,5 +1,6 @@
 """Conversation-bound External Channel ingress provisioning tests."""
 
+import dataclasses
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
@@ -18,6 +19,9 @@ from azents.core.enums import (
 )
 from azents.core.external_channel_provider import DiscordConnectionCredentials
 from azents.rdb.session import SessionManager
+from azents.repos.external_channel.conversation_provisioning import (
+    ExternalChannelConversationProvisioningRepository,
+)
 from azents.repos.external_channel.data import (
     ExternalChannelAgentRoute,
     ExternalChannelBinding,
@@ -25,7 +29,14 @@ from azents.repos.external_channel.data import (
     ExternalChannelParticipationSetting,
     ExternalChannelResource,
 )
+from azents.repos.external_channel.ingress_provisioning import (
+    ExternalChannelIngressProvisioningRepository,
+)
 from azents.repos.external_channel.ingress_queue_data import ExternalChannelIngressOwner
+from azents.repos.external_channel.mailbox_ingestion import (
+    ExternalChannelConfiguredBindingResult,
+    ExternalChannelMailboxIngestionRepository,
+)
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.external_channel.work import ExternalChannelWorkRepository
 from azents.services.external_channel.conversation_provisioning import (
@@ -40,10 +51,6 @@ from azents.services.external_channel.ingress_provisioning import (
     ExternalChannelIngressProviderPreparation,
     ExternalChannelIngressProvisioningError,
     ExternalChannelIngressProvisioningService,
-)
-from azents.services.external_channel.mailbox_ingestion_store import (
-    ExternalChannelConfiguredBindingResult,
-    ExternalChannelMailboxIngestionStore,
 )
 from azents.testing.external_channel import make_provider_effect_plan
 
@@ -90,30 +97,43 @@ def _resource(*, delivery_channel_id: str | None = None) -> ExternalChannelResou
     )
 
 
+@dataclasses.dataclass(frozen=True)
+class _ProvisioningFixture:
+    service: ExternalChannelIngressProvisioningService
+    operations: ExternalChannelIngressProvisioningRepository
+
+
 def _service(
     *,
     repository: ExternalChannelRepository,
     work_repository: ExternalChannelWorkRepository | None = None,
     credentials_codec: ExternalChannelCredentialsCodec | None = None,
     discord_client: DiscordDeliveryClient | None = None,
-    mailbox_store: ExternalChannelMailboxIngestionStore | None = None,
-) -> ExternalChannelIngressProvisioningService:
+    mailbox_store: ExternalChannelMailboxIngestionRepository | None = None,
+) -> _ProvisioningFixture:
     repository.get_connected_binding_by_resource = AsyncMock(return_value=None)
-    conversation_provisioning = ExternalChannelConversationProvisioningService(
+    conversation_operations = ExternalChannelConversationProvisioningRepository(
         session_manager=_session_manager(),
         repository=repository,
         work_repository=work_repository
         or MagicMock(spec=ExternalChannelWorkRepository),
+    )
+    conversation_provisioning = ExternalChannelConversationProvisioningService(
+        operations=conversation_operations,
         credentials_codec=credentials_codec
         or MagicMock(spec=ExternalChannelCredentialsCodec),
         discord_client=discord_client or MagicMock(spec=DiscordDeliveryClient),
     )
-    return ExternalChannelIngressProvisioningService(
-        session_manager=_session_manager(),
-        repository=repository,
-        conversation_provisioning=conversation_provisioning,
-        mailbox_store=mailbox_store
-        or MagicMock(spec=ExternalChannelMailboxIngestionStore),
+    return _ProvisioningFixture(
+        service=ExternalChannelIngressProvisioningService(
+            conversation_provisioning=conversation_provisioning
+        ),
+        operations=ExternalChannelIngressProvisioningRepository(
+            repository=repository,
+            conversation_provisioning=conversation_operations,
+            mailbox_store=mailbox_store
+            or MagicMock(spec=ExternalChannelMailboxIngestionRepository),
+        ),
     )
 
 
@@ -146,7 +166,7 @@ async def test_prepare_discord_thread_has_no_db_transition() -> None:
     )
     work_repository = MagicMock(spec=ExternalChannelRepository)
     work_repository.record_discord_delivery_channel = AsyncMock()
-    mailbox_store = MagicMock(spec=ExternalChannelMailboxIngestionStore)
+    mailbox_store = MagicMock(spec=ExternalChannelMailboxIngestionRepository)
     mailbox_store.create_configured_binding = AsyncMock()
     service = _service(
         repository=repository,
@@ -156,7 +176,7 @@ async def test_prepare_discord_thread_has_no_db_transition() -> None:
         mailbox_store=mailbox_store,
     )
 
-    prepared = await service.prepare(owner=_owner())
+    prepared = await service.service.prepare(owner=_owner())
 
     assert prepared == ExternalChannelIngressProviderPreparation(
         target_resource_id="resource-1",
@@ -188,7 +208,7 @@ async def test_prepare_classifies_invalid_encrypted_credentials() -> None:
     service = _service(repository=repository, credentials_codec=codec)
 
     with pytest.raises(ExternalChannelIngressProvisioningError) as error:
-        await service.prepare(owner=_owner())
+        await service.service.prepare(owner=_owner())
 
     assert error.value.category == "credentials_invalid"
     assert error.value.retryable is False
@@ -220,7 +240,7 @@ async def test_prepare_classifies_non_utf8_encrypted_credentials() -> None:
     service = _service(repository=repository, credentials_codec=codec)
 
     with pytest.raises(ExternalChannelIngressProvisioningError) as error:
-        await service.prepare(owner=_owner())
+        await service.service.prepare(owner=_owner())
 
     assert error.value.category == "credentials_invalid"
     assert error.value.retryable is False
@@ -282,7 +302,7 @@ async def test_complete_uses_caller_transaction(
         session_created=True,
         control_plans=(presence_plan, progress_plan),
     )
-    mailbox_store = MagicMock(spec=ExternalChannelMailboxIngestionStore)
+    mailbox_store = MagicMock(spec=ExternalChannelMailboxIngestionRepository)
     mailbox_store.create_configured_binding = AsyncMock(return_value=configured)
     service = _service(
         repository=repository,
@@ -290,7 +310,7 @@ async def test_complete_uses_caller_transaction(
         mailbox_store=mailbox_store,
     )
 
-    completed = await service.complete(
+    completed = await service.operations.complete_in_session(
         transaction,
         owner=_owner(),
         preparation=ExternalChannelIngressProviderPreparation(
@@ -344,12 +364,12 @@ async def test_complete_rejects_changed_participation_generation() -> None:
             settings_generation=4,
         )
     )
-    mailbox_store = MagicMock(spec=ExternalChannelMailboxIngestionStore)
+    mailbox_store = MagicMock(spec=ExternalChannelMailboxIngestionRepository)
     mailbox_store.create_configured_binding = AsyncMock()
     service = _service(repository=repository, mailbox_store=mailbox_store)
 
     with pytest.raises(ExternalChannelIngressProvisioningError) as error:
-        await service.complete(
+        await service.operations.complete_in_session(
             transaction,
             owner=_owner(),
             preparation=ExternalChannelIngressProviderPreparation(

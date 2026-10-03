@@ -2,7 +2,6 @@
 
 import datetime
 import uuid
-from typing import cast
 
 from azcommon.result import Failure, Result, Success
 from cryptography.fernet import Fernet
@@ -16,7 +15,6 @@ from azents.core.credentials import ChatGPTOAuthSecrets
 from azents.core.crypto import CredentialCipher
 from azents.core.enums import LLMCatalogPurpose, LLMCatalogScope, LLMProvider
 from azents.core.workspace import WorkspaceCreate
-from azents.rdb.session import SessionManager
 from azents.repos.chatgpt_oauth_session import ChatGPTOAuthSessionRepository
 from azents.repos.chatgpt_oauth_session.operations import ChatGPTOAuthOperations
 from azents.repos.llm_catalog import LLMCatalogRepository
@@ -56,7 +54,7 @@ class _SessionManager:
         return None
 
 
-class _FakeClient:
+class _FakeClient(ChatGPTOAuthClient):
     """Provider client test double."""
 
     def __init__(self) -> None:
@@ -152,14 +150,12 @@ def _make_service(
     cipher = CredentialCipher(_TEST_KEY)
     return ChatGPTOAuthService(
         operations=ChatGPTOAuthOperations(
-            session_manager=cast(
-                SessionManager[AsyncSession], _SessionManager(rdb_session)
-            ),
+            session_manager=_SessionManager(rdb_session),
             session_repository=ChatGPTOAuthSessionRepository(cipher),
             integration_repository=LLMProviderIntegrationRepository(cipher),
             catalog_repository=LLMCatalogRepository(),
         ),
-        client=cast(ChatGPTOAuthClient, fake_client),
+        client=fake_client,
     )
 
 

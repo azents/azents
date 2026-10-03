@@ -22,6 +22,10 @@ from azents.core.external_channel_provider_effect import (
     ProviderEffectPlan,
     ProviderMutationOutcome,
 )
+from azents.core.session_resource_authority import (
+    SessionExecutionOwner,
+    SessionResourceAuthority,
+)
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.external_channel.work import ExternalChannelWorkRepository
@@ -33,6 +37,9 @@ from azents.repos.scheduled_task_cycle.progress import (
 from azents.repos.scheduled_task_cycle.progress_data import (
     ScheduledTaskProgressPreparation,
     ScheduledTaskTrackerEffect,
+)
+from azents.repos.scheduled_task_terminal_operations import (
+    ScheduledTaskTerminalEffectSnapshot,
 )
 from azents.repos.session_execution.ownership import OwnerBoundSessionManager
 from azents.runtime.transfer.runtime_to_provider import (
@@ -49,13 +56,6 @@ from azents.services.scheduled_task.control import (
     render_scheduled_task_discord_registration,
     render_scheduled_task_slack_deletion,
     render_scheduled_task_slack_registration,
-)
-from azents.services.scheduled_task.terminal import (
-    ScheduledTaskTerminalEffectSnapshot,
-)
-from azents.services.session_resource_authority import (
-    SessionExecutionOwner,
-    SessionResourceAuthority,
 )
 
 

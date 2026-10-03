@@ -9,14 +9,14 @@ import pytest
 from testcontainers.redis import RedisContainer
 
 from azents.core.enums import ExternalChannelConversationScopeKind
-from azents.core.redis import create_redis_client
-from azents.services.external_channel.conversation import (
+from azents.core.external_channel_conversation_data import (
     ExternalChannelConversationLockOwnershipLost,
     ExternalChannelConversationLockTimeout,
     ExternalChannelConversationLockUnavailable,
     ExternalChannelConversationScope,
     ExternalChannelOperationDeadline,
 )
+from azents.core.redis import create_redis_client
 from azents.services.external_channel.conversation_lock import (
     InMemoryExternalChannelConversationLock,
     RedisExternalChannelConversationLock,

@@ -32,8 +32,11 @@ def _history(items: list[dict[str, object]]) -> dict[str, object]:
         "items": [
             {
                 "id": f"{index:032x}",
+                "session_id": _SESSION_ID,
                 "kind": "external_channel_message",
                 "payload": item,
+                "schema_version": "1",
+                "created_at": "2026-10-03T00:00:00Z",
             }
             for index, item in enumerate(items, start=1)
         ],
@@ -53,7 +56,7 @@ def _live(items: list[dict[str, object]]) -> dict[str, object]:
     }
 
 
-def _read_evidence() -> list[dict[str, object]]:
+def _read_evidence() -> list[scenarios._ExternalInputEvidence]:
     return scenarios._external_channel_input_evidence(
         public_server_url=_PUBLIC_URL,
         token="synthetic-token",
@@ -90,7 +93,7 @@ def test_promotion_between_public_reads_does_not_lose_input(
     evidence = _read_evidence()
 
     assert len(evidence) == 1
-    assert evidence[0]["external_message_id"] == _INPUT["external_message_id"]
+    assert evidence[0].external_message_id == _INPUT["external_message_id"]
 
 
 def test_live_and_history_overlap_counts_one_logical_input(
@@ -187,12 +190,12 @@ def test_single_history_input_waits_for_durable_admission(
         return _response(_history([] if reads == 1 else [_INPUT]))
 
     def wait(
-        condition: Callable[[], list[dict[str, object]]],
+        condition: Callable[[], list[scenarios._ExternalInputEvidence]],
         *,
         timeout: float,
         interval: float,
         message: str,
-    ) -> list[dict[str, object]]:
+    ) -> list[scenarios._ExternalInputEvidence]:
         del timeout, interval, message
         assert condition() == []
         result = condition()
@@ -209,7 +212,7 @@ def test_single_history_input_waits_for_durable_admission(
     )
 
     assert reads == 2
-    assert evidence["external_message_id"] == _INPUT["external_message_id"]
+    assert evidence.external_message_id == _INPUT["external_message_id"]
 
 
 def test_single_history_input_rejects_extra_logical_messages(

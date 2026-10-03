@@ -21,6 +21,7 @@ from typing import Generic, NamedTuple, TypeVar
 from urllib.parse import urlparse
 
 import httpx2 as httpx
+from anyio import BrokenResourceError, ClosedResourceError, EndOfStream
 from azcommon.result import Success
 from mcp import MCPError
 from mcp.types import (
@@ -34,7 +35,6 @@ from mcp.types import (
     TextResourceContents,
 )
 from mcp.types import Tool as McpBaseTool
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.engine_tool_state import (
     McpToolSnapshotItem,
@@ -42,6 +42,11 @@ from azents.core.engine_tool_state import (
 )
 from azents.core.mcp_transport import call_tool as mcp_call_tool
 from azents.core.mcp_transport import list_tools as mcp_list_tools
+from azents.core.session_resource_authority import (
+    SessionExecutionOwner,
+    SessionResourceAuthority,
+    accepts_execution_owner,
+)
 from azents.core.tools import (
     McpToolkitConfig,
     Toolkit,
@@ -49,23 +54,19 @@ from azents.core.tools import (
     ToolkitStatus,
     TurnContext,
 )
+from azents.engine.events.sensitive_text import redact_sensitive_text
 from azents.engine.run.types import (
     FunctionTool,
     FunctionToolError,
     FunctionToolResult,
     FunctionToolSpec,
 )
-from azents.rdb.session import SessionManager
+from azents.repos.engine_tool_repositories import EngineMcpSnapshotFactory
 from azents.repos.session_execution import (
     CanonicalExecutionOwnerGenerationStaleError,
 )
 from azents.repos.toolkit_state.engine import McpToolSnapshotStore
 from azents.services.artifact import ArtifactService
-from azents.services.session_resource_authority import (
-    SessionExecutionOwner,
-    SessionResourceAuthority,
-    accepts_execution_owner,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -363,7 +364,7 @@ def _is_http_status(exc: BaseException, codes: set[int]) -> bool:
     Recursively check even when wrapped in ExceptionGroup.
     """
     if isinstance(exc, BaseExceptionGroup):
-        return any(_is_http_status(sub, codes) for sub in exc.exceptions)
+        return all(_is_http_status(sub, codes) for sub in exc.exceptions)
     if isinstance(exc, httpx.HTTPStatusError):
         return exc.response.status_code in codes
     return False
@@ -407,6 +408,10 @@ def _find_mcp_error(exc: BaseException) -> MCPError | None:
 
 def _mcp_transport_tool_error_message(exc: BaseException) -> str | None:
     """Convert MCP transport error to user-visible tool error message."""
+    if isinstance(exc, BaseExceptionGroup):
+        _, remainder = exc.split((httpx.HTTPStatusError, MCPError))
+        if remainder is not None:
+            return None
     status_error = _find_http_status_error(exc)
     if status_error is not None:
         response = status_error.response
@@ -484,7 +489,7 @@ def wrap_mcp_tool(
                 proxy_url=proxy_url,
                 auth=auth,
             )
-        except Exception as exc:
+        except (httpx.HTTPStatusError, MCPError, ExceptionGroup) as exc:
             if on_auth_failure is not None and _is_http_401(exc):
                 new_token = await on_auth_failure()
                 if new_token is not None:
@@ -503,7 +508,11 @@ def wrap_mcp_tool(
                             proxy_url=proxy_url,
                             auth=auth,
                         )
-                    except Exception as retry_exc:
+                    except (
+                        httpx.HTTPStatusError,
+                        MCPError,
+                        ExceptionGroup,
+                    ) as retry_exc:
                         message = _mcp_transport_tool_error_message(retry_exc)
                         if message is not None:
                             raise FunctionToolError(message) from None
@@ -555,12 +564,12 @@ class McpBasedToolkit(Toolkit[McpConfigT], ABC, Generic[McpConfigT]):
     on_auth_failure: Callable[[], Awaitable[str | None]] | None
     _proxy_url: str | None
     artifact_service: ArtifactService | None
-    session_manager: SessionManager[AsyncSession] | None
-    _agent_id: str
-    _session_id: str
+    snapshot_factory: EngineMcpSnapshotFactory | None
+    _agent_id: str | None
+    _session_id: str | None
     _state_namespace: str
     _state_name: str
-    snapshot_store: McpToolSnapshotStore
+    snapshot_store: McpToolSnapshotStore | None
 
     # Background connection status
     _bg_task: asyncio.Task[None] | None
@@ -579,8 +588,13 @@ class McpBasedToolkit(Toolkit[McpConfigT], ABC, Generic[McpConfigT]):
         self._entered = False
         self._execution_owner: SessionExecutionOwner | None = None
         self._owner_stale = False
-        self.snapshot_store = McpToolSnapshotStore(
-            session_manager=self.session_manager,
+        self.snapshot_store = self._make_snapshot_store()
+
+    def _make_snapshot_store(self) -> McpToolSnapshotStore | None:
+        factory = self.snapshot_factory
+        if factory is None:
+            return None
+        return factory.create(
             agent_id=self._agent_id,
             session_id=self._session_id,
             toolkit_namespace=self._state_namespace,
@@ -589,29 +603,24 @@ class McpBasedToolkit(Toolkit[McpConfigT], ABC, Generic[McpConfigT]):
 
     def bind_execution_owner(self, owner: SessionExecutionOwner) -> None:
         """Bind snapshot state before starting background discovery."""
-        if accepts_execution_owner(
-            self._execution_owner,
-            owner,
-            session_id=self._session_id,
-        ):
-            self.snapshot_store = self.snapshot_store.for_execution(owner)
+        session_id = self._session_id
+        if session_id is None:
+            raise ValueError("MCP Session identity must be bound before execution.")
+        if accepts_execution_owner(self._execution_owner, owner, session_id=session_id):
+            if self.snapshot_factory is not None:
+                self.snapshot_factory = self.snapshot_factory.with_owner(owner)
+            self.snapshot_store = self._make_snapshot_store()
             self._execution_owner = owner
 
     def set_agent_id(self, agent_id: str) -> None:
         """Inject agent ID for Toolkit State identity."""
         self._agent_id = agent_id
-        self.snapshot_store = self.snapshot_store.with_identity(
-            agent_id=agent_id,
-            session_id=self._session_id,
-        )
+        self.snapshot_store = self._make_snapshot_store()
 
     def set_session_id(self, session_id: str) -> None:
         """Inject session ID for Toolkit State identity."""
         self._session_id = session_id
-        self.snapshot_store = self.snapshot_store.with_identity(
-            agent_id=self._agent_id,
-            session_id=session_id,
-        )
+        self.snapshot_store = self._make_snapshot_store()
 
     def _current_artifact_sink(self) -> McpArtifactSink | None:
         """Return Artifact sink for current run."""
@@ -665,6 +674,23 @@ class McpBasedToolkit(Toolkit[McpConfigT], ABC, Generic[McpConfigT]):
         if self._bg_task is not None and not self._bg_task.done():
             return
         self._bg_task = asyncio.create_task(self._connect_and_list_tools())
+        self._bg_task.add_done_callback(self._observe_refresh_failure)
+
+    def _observe_refresh_failure(self, task: asyncio.Task[None]) -> None:
+        """Observe unexpected task failures once without changing Run startup."""
+        if task.cancelled():
+            return
+        error = task.exception()
+        if error is not None:
+            diagnostic = RuntimeError("Unexpected MCP discovery failure")
+            logger.error(
+                "Unexpected MCP discovery failure",
+                extra={
+                    "server_url": redact_sensitive_text(self._config.server_url),
+                    "error_type": type(error).__name__,
+                },
+                exc_info=(RuntimeError, diagnostic, error.__traceback__),
+            )
 
     async def _connect_and_list_tools(self) -> None:
         """Connect to MCP server in background and collect tool list.
@@ -679,7 +705,28 @@ class McpBasedToolkit(Toolkit[McpConfigT], ABC, Generic[McpConfigT]):
             mcp_tools, use_streamable_http = await mcp_list_tools(
                 config.server_url, headers, config.timeout, proxy_url=self._proxy_url
             )
-        except Exception as exc:
+        except (
+            httpx.HTTPError,
+            MCPError,
+            OSError,
+            BrokenResourceError,
+            ClosedResourceError,
+            EndOfStream,
+            ExceptionGroup,
+        ) as exc:
+            if isinstance(exc, ExceptionGroup):
+                _, remainder = exc.split(
+                    (
+                        httpx.HTTPError,
+                        MCPError,
+                        OSError,
+                        BrokenResourceError,
+                        ClosedResourceError,
+                        EndOfStream,
+                    )
+                )
+                if remainder is not None:
+                    raise
             if _is_http_auth_error(exc):
                 logger.warning(
                     "MCP server auth failed",
@@ -739,7 +786,10 @@ class McpBasedToolkit(Toolkit[McpConfigT], ABC, Generic[McpConfigT]):
 
     async def _load_tool_snapshot(self) -> McpToolSnapshotState | None:
         """Load the latest successful MCP tool snapshot from Toolkit State."""
-        snapshot = await self.snapshot_store.load()
+        store = self.snapshot_store
+        if store is None:
+            return None
+        snapshot = await store.load()
         if snapshot is None:
             return None
         if not snapshot.tools:
@@ -750,7 +800,8 @@ class McpBasedToolkit(Toolkit[McpConfigT], ABC, Generic[McpConfigT]):
 
     async def _save_tool_snapshot(self, snapshot: McpToolSnapshotState) -> None:
         """Atomically save a successful MCP tool snapshot."""
-        await self.snapshot_store.replace(snapshot)
+        if self.snapshot_store is not None:
+            await self.snapshot_store.replace(snapshot)
 
     def _tools_from_snapshot(
         self, snapshot: McpToolSnapshotState

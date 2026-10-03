@@ -10,14 +10,14 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from azents.core.auth.deps import WorkspaceMember, get_workspace_member
 from azents.core.auth.permissions import Permissions
-from azents.core.tools import ToolkitProvider
-from azents.engine.tools.deps import get_toolkit_registry
-from azents.repos.toolkit.data import (
+from azents.core.toolkit_errors import (
     DuplicateAgentToolkit,
     DuplicateScope,
     NotFound,
     ScopeNotFound,
 )
+from azents.core.tools import ToolkitProvider
+from azents.engine.tools.deps import get_toolkit_registry
 from azents.services.agent.data import NotAdmin
 from azents.services.toolkit import ToolkitService
 from azents.services.toolkit.data import (

@@ -1,4 +1,9 @@
 import { supportedBuiltinTools } from "../../shared/lib/model-capability-support.ts";
+import {
+  builtinToolConfigHasSettings,
+  encodeImageGenerationModel,
+  projectImageGenerationConfig,
+} from "./image-generation-config.ts";
 import type { CapabilityRequestContext } from "../../shared/lib/model-capability-support.ts";
 import type {
   AgentModelSelection,
@@ -151,7 +156,7 @@ export function copyCompatiblePrimarySettings(
   const builtinToolConfigs = Object.fromEntries(
     builtinTools.map((tool) => {
       const config = primary.builtin_tool_configs[tool] ?? {};
-      if (sameIntegration || Object.keys(config).length === 0) {
+      if (sameIntegration || !builtinToolConfigHasSettings(config)) {
         return [tool, { ...config }];
       }
       if (!omitted.includes("builtin_tool_configs")) {
@@ -311,22 +316,19 @@ export function imageGenerationModelSelectionVisible(
 export function imageGenerationModelIdentifier(
   candidate: SelectableModelCandidateFormValue,
 ): string | null {
-  const model = candidate.builtin_tool_configs.image_generation?.model;
-  return typeof model === "string" && model.trim().length > 0 ? model : null;
+  return projectImageGenerationConfig(
+    candidate.builtin_tool_configs.image_generation,
+  ).model;
 }
 
 export function withImageGenerationModelIdentifier(
   candidate: SelectableModelCandidateFormValue,
   modelIdentifier: string | null,
 ): SelectableModelCandidateFormValue {
-  const imageGenerationConfig = {
-    ...(candidate.builtin_tool_configs.image_generation ?? {}),
-  };
-  if (modelIdentifier == null) {
-    delete imageGenerationConfig.model;
-  } else {
-    imageGenerationConfig.model = modelIdentifier;
-  }
+  const imageGenerationConfig = encodeImageGenerationModel(
+    candidate.builtin_tool_configs.image_generation ?? null,
+    modelIdentifier,
+  );
   return {
     ...candidate,
     builtin_tool_configs: {
@@ -612,11 +614,13 @@ export function findSelectableModelOptionByLabel(
 export function selectableModelLabelSelectData(
   options: SelectableModelOptionFormValue[],
 ): Array<{ value: string; label: string }> {
+  const seen = new Set<string>();
   return options.flatMap((option) => {
     const label = option.label.trim();
-    if (label.length === 0) {
+    if (label.length === 0 || seen.has(label)) {
       return [];
     }
+    seen.add(label);
     return [{ value: label, label }];
   });
 }

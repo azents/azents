@@ -8,12 +8,15 @@ from typing import Annotated, NoReturn, assert_never
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
+from azents.core.agent_errors import NotFound
 from azents.core.auth.deps import WorkspaceMember, get_workspace_member
-from azents.repos.agent.data import NotFound
-from azents.repos.historical_memory.settings_data import (
+from azents.core.historical_memory_settings import (
     HistoricalMemorySettingsScope,
 )
-from azents.repos.memory.data import MemoryScope
+from azents.core.memory_scope import MemoryScope
+from azents.core.session_workspace_paths import (
+    InvalidProjectPath,
+)
 from azents.services.agent import AgentService
 from azents.services.agent.data import (
     AdminNotFound,
@@ -55,7 +58,6 @@ from azents.services.memory.data import (
     MemoryNotFound,
     MemoryUpdateInput,
 )
-from azents.services.session_workspace_project import InvalidProjectPath
 from azents.utils.fastapi.route import RouteMounter
 
 from .data import (

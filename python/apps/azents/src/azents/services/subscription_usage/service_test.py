@@ -32,6 +32,7 @@ from azents.services.kimi_oauth.data import ProviderRejected as KimiProviderReje
 from azents.services.kimi_oauth.data import (
     ProviderUnavailable as KimiProviderUnavailable,
 )
+from azents.services.oauth_runtime_clients import create_runtime_oauth_client_factories
 from azents.services.xai_oauth.data import (
     ProviderEntitlementDenied as XaiProviderEntitlementDenied,
 )
@@ -249,6 +250,7 @@ async def _service(
             repository=repository,
             chatgpt_oauth_runtime_repository=AsyncMock(),
             xai_oauth_runtime_repository=AsyncMock(),
+            runtime_oauth_clients=create_runtime_oauth_client_factories(),
             session_manager=_SessionManager(),
             http_client=http_client,
             chatgpt_usage_base_url="https://usage.example.test/backend-api",

@@ -1,7 +1,10 @@
-"""Agent-owned Toolkit management Web Surface E2E journey."""
+"""Agent-owned Toolkit persistence and owner/member Web Surface E2E journey.
+
+Form, Cancel, dialog-copy and responsive geometry contracts belong to the
+ToolkitForm and AgentToolkitManagementSection component stories.
+"""
 
 from dataclasses import dataclass
-from typing import TypedDict
 from urllib.parse import urlsplit
 
 import azentsadminclient
@@ -59,40 +62,6 @@ class _AgentToolkitWebContext:
     member_email: str
     handle: str
     model_selection: AgentModelSelectionInput
-
-
-class _ToolkitLayout(TypedDict):
-    overflow: bool
-    toolkitTop: float
-    ownershipTop: float
-    readinessTop: float
-    actionTop: float
-
-
-def _toolkit_layout(value: object) -> _ToolkitLayout:
-    """Validate the browser layout measurement payload."""
-    if not isinstance(value, dict):
-        raise AssertionError("Expected a Toolkit layout object")
-    overflow = value.get("overflow")
-    toolkit_top = value.get("toolkitTop")
-    ownership_top = value.get("ownershipTop")
-    readiness_top = value.get("readinessTop")
-    action_top = value.get("actionTop")
-    if (
-        not isinstance(overflow, bool)
-        or not isinstance(toolkit_top, (int, float))
-        or not isinstance(ownership_top, (int, float))
-        or not isinstance(readiness_top, (int, float))
-        or not isinstance(action_top, (int, float))
-    ):
-        raise AssertionError("Expected numeric Toolkit layout measurements")
-    return {
-        "overflow": overflow,
-        "toolkitTop": float(toolkit_top),
-        "ownershipTop": float(ownership_top),
-        "readinessTop": float(readiness_top),
-        "actionTop": float(action_top),
-    }
 
 
 def _headers(token: str) -> dict[str, str]:
@@ -384,56 +353,6 @@ def test_agent_owned_toolkit_owner_management_and_member_legacy_view(
         )
     )
     configure_button.send_keys(Keys.ENTER)
-    name_input = _wait(browser_driver).until(
-        ec.element_to_be_clickable(
-            (
-                By.XPATH,
-                "//label[normalize-space(text())='Name']/following::input[1]",
-            )
-        )
-    )
-    slug_input = _wait(browser_driver).until(
-        ec.element_to_be_clickable(
-            (
-                By.XPATH,
-                "//label[normalize-space(text())='Slug']/following::input[1]",
-            )
-        )
-    )
-    assert name_input.get_attribute("required") is not None
-    assert name_input.get_attribute("placeholder") == (
-        "Enter a name for this MCP connection"
-    )
-    assert slug_input.get_attribute("required") is None
-    assert slug_input.get_attribute("placeholder") == "mcp"
-    unsaved_name = f"Unsaved MCP {unique()}"
-    _fill_text_input(browser_driver, "Name", unsaved_name)
-    expected_unsaved_slug = unsaved_name.lower().replace(" ", "_")
-    _wait(browser_driver).until(
-        lambda _driver: slug_input.get_attribute("placeholder") == expected_unsaved_slug
-    )
-    _click_button(browser_driver, "Cancel")
-    assert not browser_driver.find_elements(
-        By.XPATH,
-        f"//*[normalize-space()={unsaved_name!r}]",
-    )
-
-    _click_button(browser_driver, "Add Toolkit")
-    tool_input = _wait(browser_driver).until(
-        ec.element_to_be_clickable(
-            (
-                By.XPATH,
-                "//label[normalize-space(text())='Tool']/following::input[1]",
-            )
-        )
-    )
-    tool_input.click()
-    _wait(browser_driver).until(
-        ec.element_to_be_clickable(
-            (By.XPATH, "//*[@role='option' and normalize-space()='MCP']")
-        )
-    ).click()
-    _click_button(browser_driver, "Configure for this agent")
 
     _fill_text_input(browser_driver, "Slug", toolkit_slug)
     _fill_text_input(browser_driver, "Name", toolkit_name)
@@ -454,45 +373,6 @@ def test_agent_owned_toolkit_owner_management_and_member_legacy_view(
     _assert_visible_text(browser_driver, "This agent only")
     _assert_visible_text(browser_driver, "Ready")
 
-    browser_driver.set_window_size(390, 844)
-    toolkit_name_element = browser_driver.find_element(
-        By.XPATH,
-        f"//*[normalize-space()={toolkit_name!r}]",
-    )
-    ownership_element = browser_driver.find_element(
-        By.XPATH,
-        "//*[normalize-space()='This agent only']",
-    )
-    readiness_element = browser_driver.find_element(
-        By.XPATH,
-        "//*[normalize-space()='Ready']",
-    )
-    primary_action_element = browser_driver.find_element(
-        By.XPATH,
-        "//button[normalize-space()='Disable']",
-    )
-    layout = _toolkit_layout(
-        browser_driver.execute_script(
-            "return {"
-            "overflow: document.documentElement.scrollWidth > "
-            "document.documentElement.clientWidth,"
-            "toolkitTop: arguments[0].getBoundingClientRect().top,"
-            "ownershipTop: arguments[1].getBoundingClientRect().top,"
-            "readinessTop: arguments[2].getBoundingClientRect().top,"
-            "actionTop: arguments[3].getBoundingClientRect().top"
-            "};",
-            toolkit_name_element,
-            ownership_element,
-            readiness_element,
-            primary_action_element,
-        )
-    )
-    assert layout["overflow"] is False
-    assert layout["toolkitTop"] <= layout["ownershipTop"]
-    assert layout["ownershipTop"] <= layout["readinessTop"]
-    assert layout["readinessTop"] <= layout["actionTop"]
-    browser_driver.set_window_size(1280, 844)
-
     disable_button = _wait(browser_driver).until(
         ec.element_to_be_clickable((By.XPATH, "//button[normalize-space()='Disable']"))
     )
@@ -509,14 +389,6 @@ def test_agent_owned_toolkit_owner_management_and_member_legacy_view(
         ),
     )
     toolkit_card.find_element(By.XPATH, ".//button[@aria-label='Delete']").click()
-    _assert_visible_text(browser_driver, "Delete agent-only toolkit")
-    _assert_visible_text(
-        browser_driver,
-        (
-            f"Delete {toolkit_name} from this agent and permanently remove its "
-            "stored credentials?"
-        ),
-    )
     _click_button(browser_driver, "Delete toolkit")
     _wait(browser_driver).until(
         ec.invisibility_of_element_located(

@@ -6,6 +6,7 @@ import logging
 from collections.abc import Sequence
 from typing import Annotated, assert_never
 
+from azcommon.logging import bind_extra
 from fastapi import Depends
 
 from azents.broker.types import SessionBroker, SessionWakeUp
@@ -109,27 +110,24 @@ class SessionLifecycleService:
         transition = await self.repository.mark_session_idle(
             session_id, owner_generation=owner_generation
         )
+        operation_logger = bind_extra(logger, {"session_id": session_id})
         match transition.disposition:
             case WorkerIdleDisposition.IDLE:
                 return True
             case WorkerIdleDisposition.COMMAND_PENDING:
-                logger.info(
+                operation_logger.info(
                     "Skipped session idle transition because a command is pending",
-                    extra={
-                        "session_id": session_id,
-                        "command_id": transition.command_id,
-                    },
+                    extra={"command_id": transition.command_id},
                 )
             case WorkerIdleDisposition.WAKE_INPUT_PENDING:
-                logger.info(
+                operation_logger.info(
                     "Skipped session idle transition because "
                     "wake-producing input is pending",
-                    extra={"session_id": session_id},
                 )
             case WorkerIdleDisposition.RUN_ACTIVE:
-                logger.info(
+                operation_logger.info(
                     "Skipped session idle transition because an AgentRun is active",
-                    extra={"session_id": session_id, "run_id": transition.run_id},
+                    extra={"run_id": transition.run_id},
                 )
             case _ as unreachable:
                 assert_never(unreachable)

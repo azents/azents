@@ -26,6 +26,7 @@ from azents.core.enums import (
     ExchangeFileStatus,
     ModelFileStatus,
 )
+from azents.core.session_lifecycle_registry import get_session_lifecycle_registry
 from azents.rdb.session import SessionManager
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_session import AgentSessionRepository
@@ -50,7 +51,6 @@ from azents.services.external_channel.lifecycle import ExternalChannelLifecycleS
 from azents.services.scheduled_task.lifecycle import ScheduledTaskLifecycleService
 from azents.services.session_lifecycle.registry import (
     get_session_lifecycle_orchestrator,
-    get_session_lifecycle_registry,
 )
 
 

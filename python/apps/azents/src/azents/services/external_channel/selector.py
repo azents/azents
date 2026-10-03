@@ -16,6 +16,11 @@ from azents.core.enums import (
     ExternalChannelProvider,
     ExternalChannelSetupClaimStatus,
 )
+from azents.core.external_channel_selector_state import (
+    ExternalChannelSelectorState,
+    projection_with_selector_state,
+    selector_state_from_interaction,
+)
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.external_channel.data import (
@@ -26,11 +31,6 @@ from azents.repos.external_channel.data import (
     ExternalChannelInteraction,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
-from azents.services.external_channel.selector_state import (
-    ExternalChannelSelectorState,
-    projection_with_selector_state,
-    selector_state_from_interaction,
-)
 
 _SELECTOR_PAGE_SIZE = 20
 

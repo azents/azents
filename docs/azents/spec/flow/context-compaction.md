@@ -6,6 +6,12 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [agent, conversation, external-channel, memory]
 code_paths:
+  - python/apps/azents/src/azents/core/historical_memory_settings.py
+  - python/apps/azents/src/azents/core/historical_memory_snapshot_policy.py
+  - python/apps/azents/src/azents/core/session_resource_authority.py
+  - python/apps/azents/src/azents/repos/engine_event_repositories.py
+  - python/apps/azents/src/azents/repos/engine_resolve.py
+  - python/apps/azents/src/azents/repos/model_metadata_operations.py
   - python/apps/azents/src/azents/engine/context/compaction.py
   - python/apps/azents/src/azents/engine/context/window.py
   - python/apps/azents/src/azents/services/model_metadata.py
@@ -19,7 +25,7 @@ code_paths:
   - python/apps/azents/src/azents/core/engine_tool_state.py
   - python/apps/azents/src/azents/core/historical_memory_snapshot.py
   - python/apps/azents/src/azents/services/historical_memory/context_snapshot.py
-  - python/apps/azents/src/azents/services/historical_memory/snapshot.py
+  - python/apps/azents/src/azents/repos/historical_memory/context_snapshot_operations.py
   - python/apps/azents/src/azents/repos/historical_memory/**
   - python/apps/azents/src/azents/repos/goal/**
   - python/apps/azents/src/azents/repos/toolkit_state/**

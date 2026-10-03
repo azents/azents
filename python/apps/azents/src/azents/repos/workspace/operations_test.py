@@ -9,6 +9,7 @@ import pytest
 from azcommon.result import Failure, Result, Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.enums import WorkspaceUserRole
 from azents.core.workspace import (
     CreateWithOwnerInput,
     HandleConflict,
@@ -27,7 +28,6 @@ from azents.repos.workspace_user.data import (
     WorkspaceUser,
     WorkspaceUserCreate,
     WorkspaceUserList,
-    WorkspaceUserRole,
 )
 
 

@@ -19,6 +19,11 @@ from azents.core.enums import (
     ExternalChannelRouteCatalogStatus,
     ExternalChannelTransport,
 )
+from azents.core.external_channel_conversation_data import (
+    ExternalChannelConversationLock,
+    ExternalChannelConversationLockLease,
+    ExternalChannelParticipationLock,
+)
 from azents.core.external_channel_projection import is_external_channel_projection
 from azents.core.external_channel_provider import (
     DiscordConnectionConfiguration,
@@ -51,11 +56,6 @@ from azents.repos.external_channel.management_operations import (
 )
 from azents.services.external_channel.connection import (
     ExternalChannelConnectionService,
-)
-from azents.services.external_channel.conversation import (
-    ExternalChannelConversationLock,
-    ExternalChannelConversationLockLease,
-    ExternalChannelParticipationLock,
 )
 from azents.services.external_channel.management import (
     ExternalChannelManagementService,

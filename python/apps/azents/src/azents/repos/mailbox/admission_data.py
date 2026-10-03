@@ -28,8 +28,8 @@ class MailboxEnqueue:
     metadata: dict[str, str]
     attachments: list[str]
     file_parts: list[FileOutputPart]
-    action: dict[str, JSONValue] | None = None
-    payload: MailboxEnvelopePayload | None = None
+    action: dict[str, JSONValue] | None
+    payload: MailboxEnvelopePayload | None
 
 
 @dataclasses.dataclass(frozen=True)

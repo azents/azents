@@ -5,6 +5,8 @@ tags: [backend, frontend, admin, runtime, security, infra]
 spec_type: domain
 domain: runtime-provider
 code_paths:
+  - python/apps/azents/src/azents/core/runtime_provider_bootstrap.py
+  - python/apps/azents/src/azents/repos/runtime_provider_bootstrap_operations.py
   - python/apps/azents/src/azents/rdb/models/runtime_provider.py
   - python/apps/azents/src/azents/rdb/models/runtime_provider_bootstrap.py
   - python/apps/azents/src/azents/rdb/models/runtime_provider_policy.py

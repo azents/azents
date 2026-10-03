@@ -1,4 +1,5 @@
 import { rem } from "@mantine/core";
+import { expect, fn, userEvent, within } from "storybook/test";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import { ManagedAgentToolkitSectionView } from "./AgentToolkitSection";
 import type { AgentToolkitManagementItemResponse } from "@azents/public-client";
@@ -75,6 +76,56 @@ type Story = StoryObj<typeof meta>;
 
 export const Ready = {} satisfies Story;
 
+export const MobileReady = {
+  parameters: { testViewport: { width: 390, height: 844 } },
+  args: {
+    state: {
+      type: "READY",
+      items: [
+        {
+          ...item,
+          readiness: "ready",
+          toolkit: {
+            ...item.toolkit,
+            name: "Production MCP connection for the engineering release workspace",
+          },
+        },
+      ],
+      toolkitTypes: [{ value: "mcp", label: "MCP" }],
+      availableShared: [],
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const view = canvasElement.ownerDocument.defaultView;
+    await expect(view?.innerWidth).toBe(390);
+    await expect(view?.innerHeight).toBe(844);
+    const name = canvas.getByText(
+      "Production MCP connection for the engineering release workspace",
+    );
+    const ownership = canvas.getByText("This agent only");
+    const readiness = canvas.getByText("Ready");
+    const action = canvas.getByRole("button", { name: "Disable" });
+    await expect(name).toBeVisible();
+    await expect(ownership).toBeVisible();
+    await expect(readiness).toBeVisible();
+    await expect(action).toBeVisible();
+    await expect(name.getBoundingClientRect().top).toBeLessThanOrEqual(
+      ownership.getBoundingClientRect().top,
+    );
+    await expect(ownership.getBoundingClientRect().top).toBeLessThanOrEqual(
+      readiness.getBoundingClientRect().top,
+    );
+    await expect(readiness.getBoundingClientRect().top).toBeLessThanOrEqual(
+      action.getBoundingClientRect().top,
+    );
+    const documentElement = canvasElement.ownerDocument.documentElement;
+    await expect(documentElement.scrollWidth).toBeLessThanOrEqual(
+      documentElement.clientWidth,
+    );
+  },
+} satisfies Story;
+
 export const Loading = {
   args: { state: { type: "LOADING" } },
 } satisfies Story;
@@ -93,7 +144,20 @@ export const MutationError = {
 } satisfies Story;
 
 export const DeleteConfirmation = {
-  args: { deleteTarget: item },
+  args: { deleteTarget: item, onConfirmDelete: fn() },
+  play: async ({ canvasElement, args }) => {
+    const body = within(canvasElement.ownerDocument.body);
+    await expect(
+      body.getByRole("dialog", { name: "Delete agent-only toolkit" }),
+    ).toBeVisible();
+    await expect(
+      body.getByText(
+        "Delete Private MCP from this agent and permanently remove its stored credentials?",
+      ),
+    ).toBeVisible();
+    await userEvent.click(body.getByRole("button", { name: "Delete toolkit" }));
+    await expect(args.onConfirmDelete).toHaveBeenCalledTimes(1);
+  },
 } satisfies Story;
 
 export const SelectToolkitType = {

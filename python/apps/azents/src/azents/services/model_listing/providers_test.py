@@ -2,12 +2,15 @@
 
 import datetime
 import json
+from dataclasses import replace
 from types import SimpleNamespace
 from typing import Literal
 
+import boto3
 import httpx
 import pytest
 from botocore.exceptions import ClientError, EndpointConnectionError, InvalidRegionError
+from botocore.stub import Stubber
 from google.auth.exceptions import TransportError as GoogleTransportError
 from openai.types import Model as OpenAIModel
 from pydantic import TypeAdapter, ValidationError
@@ -18,8 +21,12 @@ from azents.core.chatgpt_oauth import (
 )
 from azents.core.credentials import (
     ApiKeySecrets,
+    AwsConfig,
+    AwsSecrets,
     ChatGPTOAuthConfig,
     ChatGPTOAuthSecrets,
+    GcpConfig,
+    GcpSecrets,
     KimiOAuthConfig,
     KimiOAuthSecrets,
     XaiOAuthConfig,
@@ -285,7 +292,9 @@ async def test_list_xai_api_key_models_uses_sdk_and_conservative_capabilities(
     """Use the SDK boundary without inventing omitted capabilities."""
     monkeypatch.setattr(providers, "AsyncOpenAI", _FakeXaiSdkClient)
 
-    result = await providers.list_xai_models_for_integration(_xai_api_key_integration())
+    result = await providers.list_xai_models_for_integration(
+        _xai_api_key_integration(), clients=providers.create_listing_client_factories()
+    )
 
     assert result.summary.source == "xai:developer_models"
     assert result.summary.returned_count == 1
@@ -381,7 +390,7 @@ async def test_openai_image_model_listing_consumes_complete_sdk_pagination(
     )
 
     result = await providers.list_openai_image_generation_models_for_integration(
-        _openai_integration()
+        _openai_integration(), clients=providers.create_listing_client_factories()
     )
 
     assert result.provider == LLMProvider.OPENAI
@@ -422,7 +431,7 @@ async def test_openai_image_model_listing_rejects_malformed_or_ambiguous_data(
 
     with pytest.raises(providers.ListingProviderError) as caught:
         await providers.list_openai_image_generation_models_for_integration(
-            _openai_integration()
+            _openai_integration(), clients=providers.create_listing_client_factories()
         )
 
     assert caught.value.automatic_retry_blocked is False
@@ -499,7 +508,9 @@ async def test_list_xai_oauth_models_projects_verified_account_metadata(
     """Preserve provider-owned capabilities and discard unsafe unknown fields."""
     monkeypatch.setattr(httpx, "AsyncClient", _FakeXaiOAuthAsyncClient)
 
-    result = await providers.list_xai_models_for_integration(_xai_oauth_integration())
+    result = await providers.list_xai_models_for_integration(
+        _xai_oauth_integration(), clients=providers.create_listing_client_factories()
+    )
 
     assert result.summary.source == "xai_oauth:grok_models"
     assert [model.model_identifier for model in result.models] == [
@@ -557,7 +568,10 @@ async def test_xai_listing_failure_is_sanitized_and_classified(
     monkeypatch.setattr(httpx, "AsyncClient", _RejectedXaiOAuthAsyncClient)
 
     with pytest.raises(providers.XaiListingProviderError) as caught:
-        await providers.list_xai_models_for_integration(_xai_oauth_integration())
+        await providers.list_xai_models_for_integration(
+            _xai_oauth_integration(),
+            clients=providers.create_listing_client_factories(),
+        )
 
     assert caught.value.failure_code == "XaiEntitlementDenied"
     assert caught.value.automatic_retry_blocked is True
@@ -670,7 +684,9 @@ async def test_list_chatgpt_models_uses_backend_capability_metadata(
     """ChatGPT listing filters visibility and preserves supported metadata."""
     monkeypatch.setattr(httpx, "AsyncClient", _FakeAsyncClient)
 
-    result = await providers.list_chatgpt_models_for_integration(_chatgpt_integration())
+    result = await providers.list_chatgpt_models_for_integration(
+        _chatgpt_integration(), clients=providers.create_listing_client_factories()
+    )
 
     assert result.summary.source == "chatgpt:codex_models"
     assert result.summary.returned_count == 4
@@ -730,7 +746,9 @@ async def test_chatgpt_web_search_survives_final_catalog_projection(
 ) -> None:
     """Account-visible ChatGPT tools survive the actual replacement producer."""
     monkeypatch.setattr(httpx, "AsyncClient", _FakeAsyncClient)
-    result = await providers.list_chatgpt_models_for_integration(_chatgpt_integration())
+    result = await providers.list_chatgpt_models_for_integration(
+        _chatgpt_integration(), clients=providers.create_listing_client_factories()
+    )
     candidates = [
         NormalizedModelCandidate.model_validate_json(candidate.model_dump_json())
         for candidate in result.models
@@ -836,7 +854,9 @@ async def test_list_kimi_models_projects_authenticated_account_metadata(
     """Kimi listing projects account-visible models without metadata gating."""
     monkeypatch.setattr(httpx, "AsyncClient", _FakeKimiAsyncClient)
 
-    result = await providers.list_kimi_models_for_integration(_kimi_integration())
+    result = await providers.list_kimi_models_for_integration(
+        _kimi_integration(), clients=providers.create_listing_client_factories()
+    )
 
     assert result.summary.source == "kimi:code_models"
     assert result.summary.returned_count == 2
@@ -941,7 +961,7 @@ async def test_list_openrouter_models_projects_account_metadata_without_allowlis
     monkeypatch.setattr(httpx, "AsyncClient", _FakeOpenRouterAsyncClient)
 
     result = await providers.list_openrouter_models_for_integration(
-        _openrouter_integration()
+        _openrouter_integration(), clients=providers.create_listing_client_factories()
     )
 
     assert result.summary.source == "openrouter:account_models"
@@ -1067,7 +1087,12 @@ def test_chatgpt_execution_support_requires_independent_exact_tier_ids(
     expected: list[ModelExecutionOptionId],
 ) -> None:
     """Account metadata is support authority, not a global model or plan policy."""
-    assert providers._chatgpt_supported_execution_options(metadata) == expected
+    assert (
+        providers._chatgpt_supported_execution_options(
+            providers._ChatGPTModelPayload.model_validate(metadata)
+        )
+        == expected
+    )
 
 
 class _ServiceTierChatGPTClient:
@@ -1131,7 +1156,9 @@ async def test_chatgpt_listing_support_is_not_enabled_preference(
     """Project both/only/absent support through the authenticated listing adapter."""
     _ServiceTierChatGPTClient.metadata = metadata
     monkeypatch.setattr(httpx, "AsyncClient", _ServiceTierChatGPTClient)
-    result = await providers.list_chatgpt_models_for_integration(_chatgpt_integration())
+    result = await providers.list_chatgpt_models_for_integration(
+        _chatgpt_integration(), clients=providers.create_listing_client_factories()
+    )
     [candidate] = result.models
     assert candidate.supported_execution_options == expected
     assert result.summary.returned_count == 1
@@ -1177,12 +1204,15 @@ def test_sparse_listing_replay_does_not_promote_constructor_defaults(
     now = datetime.datetime.now(datetime.UTC)
     if provider == LLMProvider.CHATGPT_OAUTH:
         candidate = providers._candidate_from_chatgpt_model(
-            {"slug": "new-model", "supported_in_api": True, "visibility": "list"},
+            providers._ChatGPTModelPayload.model_validate(
+                {"slug": "new-model", "supported_in_api": True, "visibility": "list"}
+            ),
             fetched_at=now,
         )
     elif provider == LLMProvider.KIMI_OAUTH:
         candidate = providers._candidate_from_kimi_model(
-            {"id": "new-model"}, fetched_at=now
+            providers._KimiModelPayload.model_validate({"id": "new-model"}),
+            fetched_at=now,
         )
     elif provider == LLMProvider.XAI:
         candidate = providers._candidate_from_xai_api_key_model(
@@ -1194,15 +1224,23 @@ def test_sparse_listing_replay_does_not_promote_constructor_defaults(
         )
     elif provider == LLMProvider.OPENROUTER:
         candidate = providers._candidate_from_openrouter_model(
-            {"id": "new-publisher/new-model"}, fetched_at=now
+            providers._OpenRouterModelPayload.model_validate(
+                {"id": "new-publisher/new-model"}
+            ),
+            fetched_at=now,
         )
     elif provider == LLMProvider.AWS_BEDROCK:
         candidate = providers._candidate_from_bedrock_summary(
-            {"modelId": "new-model", "providerName": "Anthropic"}, fetched_at=now
+            providers._BedrockModelPayload.model_validate(
+                {"modelId": "new-model", "providerName": "Anthropic"}
+            ),
+            fetched_at=now,
         )
     elif provider == LLMProvider.GOOGLE_VERTEX_AI:
         candidate = providers._candidate_from_vertex_model(
-            {"name": "publishers/google/models/new-model"},
+            providers._VertexModelPayload.model_validate(
+                {"name": "publishers/google/models/new-model"}
+            ),
             publisher="google",
             developer=LLMModelDeveloper.GOOGLE,
             fetched_at=now,
@@ -1226,7 +1264,9 @@ def test_sparse_listing_replay_does_not_promote_constructor_defaults(
 @pytest.mark.parametrize("flag", [True, False, None])
 def test_kimi_media_flags_remain_independent_after_replay(flag: bool | None) -> None:
     candidate = providers._candidate_from_kimi_model(
-        {"id": "kimi-new", "supports_image_in": flag},
+        providers._KimiModelPayload.model_validate(
+            {"id": "kimi-new", "supports_image_in": flag}
+        ),
         fetched_at=datetime.datetime.now(datetime.UTC),
     )
     evidence = _replayed_evidence(candidate)
@@ -1241,12 +1281,14 @@ def test_kimi_media_flags_remain_independent_after_replay(flag: bool | None) -> 
 def test_kimi_video_reasoning_evidence_does_not_invent_effort_controls() -> None:
     evidence = _replayed_evidence(
         providers._candidate_from_kimi_model(
-            {
-                "id": "kimi-new",
-                "supports_image_in": False,
-                "supports_video_in": True,
-                "supports_reasoning": True,
-            },
+            providers._KimiModelPayload.model_validate(
+                {
+                    "id": "kimi-new",
+                    "supports_image_in": False,
+                    "supports_video_in": True,
+                    "supports_reasoning": True,
+                }
+            ),
             fetched_at=datetime.datetime.now(datetime.UTC),
         )
     )
@@ -1275,10 +1317,12 @@ def test_openrouter_parameter_declarations_are_not_generic_effort_arrays(
 ) -> None:
     evidence = _replayed_evidence(
         providers._candidate_from_openrouter_model(
-            {
-                "id": "publisher/new-model",
-                "supported_parameters": parameters,
-            },
+            providers._OpenRouterModelPayload.model_validate(
+                {
+                    "id": "publisher/new-model",
+                    "supported_parameters": parameters,
+                }
+            ),
             fetched_at=datetime.datetime.now(datetime.UTC),
         )
     )
@@ -1314,7 +1358,9 @@ def test_openrouter_structured_response_preserves_complete_parameter_presence(
 ) -> None:
     evidence = _replayed_evidence(
         providers._candidate_from_openrouter_model(
-            {"id": "publisher/new-model", **declaration},
+            providers._OpenRouterModelPayload.model_validate(
+                {"id": "publisher/new-model", **declaration}
+            ),
             fetched_at=datetime.datetime.now(datetime.UTC),
         )
     )
@@ -1343,7 +1389,9 @@ def test_openrouter_structured_response_source_enriches_only_absent_declaration(
     declaration: dict[str, object], provider_state: str, source_support: bool
 ) -> None:
     candidate = providers._candidate_from_openrouter_model(
-        {"id": "publisher/new-model", **declaration},
+        providers._OpenRouterModelPayload.model_validate(
+            {"id": "publisher/new-model", **declaration}
+        ),
         fetched_at=datetime.datetime.now(datetime.UTC),
     )
     assert candidate is not None
@@ -1382,12 +1430,14 @@ def test_openrouter_structured_response_source_enriches_only_absent_declaration(
 def test_openrouter_explicit_empty_modalities_and_nested_null_survive_replay() -> None:
     evidence = _replayed_evidence(
         providers._candidate_from_openrouter_model(
-            {
-                "id": "publisher/new-model",
-                "architecture": {"input_modalities": [], "output_modalities": None},
-                "top_provider": None,
-                "supported_parameters": ["structured_outputs", "tools"],
-            },
+            providers._OpenRouterModelPayload.model_validate(
+                {
+                    "id": "publisher/new-model",
+                    "architecture": {"input_modalities": [], "output_modalities": None},
+                    "top_provider": None,
+                    "supported_parameters": ["structured_outputs", "tools"],
+                }
+            ),
             fetched_at=datetime.datetime.now(datetime.UTC),
         )
     )
@@ -1402,12 +1452,14 @@ def test_openrouter_explicit_empty_modalities_and_nested_null_survive_replay() -
 def test_bedrock_media_declarations_preserve_unsupported_lowering_evidence() -> None:
     evidence = _replayed_evidence(
         providers._candidate_from_bedrock_summary(
-            {
-                "modelId": "provider-new",
-                "providerName": "Anthropic",
-                "inputModalities": ["TEXT", "AUDIO", "FUTURE-MEDIA"],
-                "outputModalities": [],
-            },
+            providers._BedrockModelPayload.model_validate(
+                {
+                    "modelId": "provider-new",
+                    "providerName": "Anthropic",
+                    "inputModalities": ["TEXT", "AUDIO", "FUTURE-MEDIA"],
+                    "outputModalities": [],
+                }
+            ),
             fetched_at=datetime.datetime.now(datetime.UTC),
         )
     )
@@ -1420,11 +1472,13 @@ def test_bedrock_media_declarations_preserve_unsupported_lowering_evidence() -> 
 def test_vertex_explicit_null_and_limits_survive_replay() -> None:
     evidence = _replayed_evidence(
         providers._candidate_from_vertex_model(
-            {
-                "modelId": "provider-new",
-                "inputTokenLimit": None,
-                "outputTokenLimit": 12345,
-            },
+            providers._VertexModelPayload.model_validate(
+                {
+                    "modelId": "provider-new",
+                    "inputTokenLimit": None,
+                    "outputTokenLimit": 12345,
+                }
+            ),
             publisher="google",
             developer=LLMModelDeveloper.GOOGLE,
             fetched_at=datetime.datetime.now(datetime.UTC),
@@ -1440,16 +1494,20 @@ def test_chatgpt_explicit_effort_arrays_are_not_profile_intersections(
     efforts: list[str],
 ) -> None:
     candidate = providers._candidate_from_chatgpt_model(
-        {
-            "slug": "new-model",
-            "visibility": "list",
-            "supported_in_api": True,
-            "supported_reasoning_levels": [{"effort": effort} for effort in efforts],
-            "default_reasoning_level": "ultra",
-            "supports_parallel_tool_calls": False,
-            "supports_reasoning_summaries": None,
-            "input_modalities": [],
-        },
+        providers._ChatGPTModelPayload.model_validate(
+            {
+                "slug": "new-model",
+                "visibility": "list",
+                "supported_in_api": True,
+                "supported_reasoning_levels": [
+                    {"effort": effort} for effort in efforts
+                ],
+                "default_reasoning_level": "ultra",
+                "supports_parallel_tool_calls": False,
+                "supports_reasoning_summaries": None,
+                "input_modalities": [],
+            }
+        ),
         fetched_at=datetime.datetime.now(datetime.UTC),
     )
     evidence = _replayed_evidence(candidate)
@@ -1512,7 +1570,10 @@ async def test_xai_sdk_extensions_are_consumed_but_request_hints_are_not_persist
 
     monkeypatch.setattr(providers, "AsyncOpenAI", FakeClient)
     [candidate] = (
-        await providers.list_xai_models_for_integration(_xai_api_key_integration())
+        await providers.list_xai_models_for_integration(
+            _xai_api_key_integration(),
+            clients=providers.create_listing_client_factories(),
+        )
     ).models
     evidence = _replayed_evidence(candidate)
     assert evidence.max_input_tokens.state == "null"
@@ -1577,6 +1638,382 @@ def test_xai_oauth_ambiguous_default_is_unknown_not_arbitrarily_selected() -> No
     )
     assert evidence.default_reasoning_effort.state == "null"
     assert "unsafe" not in candidate.model_dump_json()
+
+
+@pytest.mark.parametrize(
+    ("schema", "raw"),
+    [
+        (
+            providers._ChatGPTModelPayload,
+            {
+                "slug": "hidden",
+                "visibility": "hidden",
+                "supported_in_api": True,
+                "context_window": "invalid",
+            },
+        ),
+        (
+            providers._ChatGPTModelPayload,
+            {
+                "slug": "not-api-visible",
+                "visibility": "list",
+                "supported_in_api": 1,
+                "input_modalities": False,
+            },
+        ),
+        (providers._KimiModelPayload, {"id": 1, "supports_image_in": "invalid"}),
+        (
+            providers._BedrockModelPayload,
+            {
+                "modelId": "legacy",
+                "providerName": "Anthropic",
+                "modelLifecycle": {"status": "LEGACY"},
+                "inputModalities": False,
+            },
+        ),
+        (
+            providers._BedrockModelPayload,
+            {
+                "modelId": "unknown",
+                "providerName": "New vendor",
+                "outputModalities": "invalid",
+            },
+        ),
+        (providers._VertexModelPayload, {"name": None, "inputTokenLimit": "invalid"}),
+        (
+            providers._OpenRouterModelPayload,
+            {
+                "id": "publisher/image-only",
+                "architecture": {
+                    "output_modalities": ["image"],
+                    "input_modalities": False,
+                },
+                "supported_parameters": False,
+            },
+        ),
+        (providers._OpenRouterModelPayload, {"id": [], "context_length": "invalid"}),
+    ],
+)
+def test_ingress_preserves_eligibility_before_capability_validation(
+    schema: type[providers._ModelMetadataPayload],
+    raw: dict[str, object],
+) -> None:
+    """Skipped entries never failed because of unused malformed capability fields."""
+    payload = schema.model_validate(raw)
+    assert payload.eligible is False
+    for field in schema.normalization_fields:
+        assert field not in payload.model_fields_set
+    expected_metadata = {
+        key: value
+        for key, value in raw.items()
+        if schema.metadata_keys is None or key in schema.metadata_keys
+    }
+    assert payload.source_metadata == expected_metadata
+
+
+@pytest.mark.parametrize(
+    ("schema", "raw"),
+    [
+        (
+            providers._ChatGPTModelPayload,
+            {
+                "slug": "visible",
+                "visibility": "list",
+                "supported_in_api": True,
+                "context_window": "123",
+            },
+        ),
+        (providers._KimiModelPayload, {"id": "visible", "supports_image_in": 1}),
+        (
+            providers._BedrockModelPayload,
+            {
+                "modelId": "visible",
+                "providerName": "Anthropic",
+                "inputModalities": ["text", 1],
+            },
+        ),
+        (
+            providers._VertexModelPayload,
+            {"modelId": "visible", "inputTokenLimit": True},
+        ),
+        (
+            providers._OpenRouterModelPayload,
+            {"id": "publisher/visible", "supported_parameters": "tools"},
+        ),
+    ],
+)
+def test_eligible_model_capabilities_remain_strict_without_coercion(
+    schema: type[providers._ModelMetadataPayload],
+    raw: dict[str, object],
+) -> None:
+    """Malformed consumed evidence remains a failure, not a fabricated capability."""
+    with pytest.raises(ValidationError):
+        schema.model_validate(raw)
+
+
+@pytest.mark.parametrize(
+    ("declaration", "image_supported"),
+    [
+        ({}, True),
+        ({"supports_function_calling": False}, False),
+        ({"mode": "embedding"}, False),
+        ({"supports_function_calling": None, "mode": "chat"}, True),
+    ],
+)
+def test_chatgpt_ingress_retains_shared_builtin_extension_policy(
+    declaration: dict[str, object], image_supported: bool
+) -> None:
+    """Keep existing extension gates without persisting their raw declarations."""
+    payload = providers._ChatGPTModelPayload.model_validate(
+        {
+            "slug": "gpt-6-example",
+            "visibility": "list",
+            "supported_in_api": True,
+            **declaration,
+        }
+    )
+    candidate = providers._candidate_from_chatgpt_model(
+        payload, fetched_at=datetime.datetime.now(datetime.UTC)
+    )
+    assert candidate is not None
+    assert (
+        "image_generation" in candidate.normalized_capabilities.built_in_tools.supported
+    ) is image_supported
+    assert candidate.source_metadata is not None
+    assert "supports_function_calling" not in candidate.source_metadata
+    assert "mode" not in candidate.source_metadata
+
+
+def _injected_http_clients(payload: object) -> providers.ListingClientFactories:
+    def respond(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/models/user") or request.url.path.endswith(
+            "/models"
+        )
+        return httpx.Response(200, request=request, json=payload)
+
+    def http_factory(*, timeout: float) -> httpx.AsyncClient:
+        assert timeout == 20.0
+        return httpx.AsyncClient(
+            timeout=timeout, transport=httpx.MockTransport(respond)
+        )
+
+    return replace(providers.create_listing_client_factories(), http=http_factory)
+
+
+@pytest.mark.parametrize("provider", [LLMProvider.KIMI_OAUTH, LLMProvider.OPENROUTER])
+async def test_injected_listing_clients_preserve_per_entry_skip_policy(
+    provider: LLMProvider,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Use injected transport and retain shape-versus-evidence failure outcomes."""
+    clients = _injected_http_clients(
+        {"data": [None, [], {"id": None, "context_length": "ignored"}, {"id": "valid"}]}
+    )
+
+    def forbidden_composition() -> providers.ListingClientFactories:
+        raise AssertionError("Business listing must not compose its own clients.")
+
+    monkeypatch.setattr(
+        providers, "create_listing_client_factories", forbidden_composition
+    )
+    if provider == LLMProvider.KIMI_OAUTH:
+        output = await providers.list_kimi_models_for_integration(
+            _kimi_integration(), clients=clients
+        )
+    else:
+        output = await providers.list_openrouter_models_for_integration(
+            _openrouter_integration(), clients=clients
+        )
+    assert output.summary.returned_count == 1
+    assert output.summary.skipped_count == 3
+    assert output.models[0].model_identifier == "valid"
+
+
+@pytest.mark.parametrize("provider", [LLMProvider.KIMI_OAUTH, LLMProvider.OPENROUTER])
+async def test_consumed_invalid_evidence_is_not_reclassified_as_entry_skip(
+    provider: LLMProvider,
+) -> None:
+    clients = _injected_http_clients(
+        {"data": [{"id": "valid", "context_length": "invalid"}]}
+    )
+    with pytest.raises(providers.ListingProviderError) as caught:
+        if provider == LLMProvider.KIMI_OAUTH:
+            await providers.list_kimi_models_for_integration(
+                _kimi_integration(), clients=clients
+            )
+        else:
+            await providers.list_openrouter_models_for_integration(
+                _openrouter_integration(), clients=clients
+            )
+    assert caught.value.automatic_retry_blocked is False
+    assert isinstance(caught.value.__cause__, ValidationError)
+
+
+async def test_bedrock_listing_uses_injected_session_and_typed_sdk_summaries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Use the supplied credential boundary and preserve lifecycle/developer gates."""
+    config = AwsConfig(access_key_id="synthetic-key", region="us-east-1")
+    secrets = AwsSecrets(secret_access_key="synthetic-secret")
+    session = boto3.Session(
+        aws_access_key_id=config.access_key_id,
+        aws_secret_access_key=secrets.secret_access_key,
+        region_name=config.region,
+    )
+    bedrock = session.client("bedrock")
+    stubber = Stubber(bedrock)
+    stubber.add_response(
+        "list_foundation_models",
+        {
+            "modelSummaries": [
+                {
+                    "modelId": "anthropic.visible",
+                    "modelArn": (
+                        "arn:aws:bedrock:us-east-1::foundation-model/anthropic.visible"
+                    ),
+                    "providerName": "Anthropic",
+                    "inputModalities": ["TEXT"],
+                    "outputModalities": ["TEXT"],
+                },
+                {
+                    "modelId": "meta.legacy",
+                    "modelArn": (
+                        "arn:aws:bedrock:us-east-1::foundation-model/meta.legacy"
+                    ),
+                    "providerName": "Meta",
+                    "modelLifecycle": {"status": "LEGACY"},
+                },
+                {
+                    "modelId": "amazon.unreviewed",
+                    "modelArn": (
+                        "arn:aws:bedrock:us-east-1::foundation-model/amazon.unreviewed"
+                    ),
+                    "providerName": "Amazon",
+                },
+            ]
+        },
+        {},
+    )
+
+    def sdk_client(service_name: str, *, region_name: str) -> object:
+        assert service_name == "bedrock"
+        assert region_name == config.region
+        return bedrock
+
+    monkeypatch.setattr(session, "client", sdk_client)
+    factory_calls: list[dict[str, object]] = []
+
+    def session_factory(**kwargs: object) -> boto3.Session:
+        factory_calls.append(kwargs)
+        return session
+
+    clients = replace(
+        providers.create_listing_client_factories(), aws_session=session_factory
+    )
+    template = _xai_api_key_integration()
+    integration = LLMProviderIntegrationWithSecrets(
+        id=template.id,
+        workspace_id=template.workspace_id,
+        provider=LLMProvider.AWS_BEDROCK,
+        name="Bedrock",
+        config=config,
+        enabled=True,
+        created_at=template.created_at,
+        updated_at=template.updated_at,
+        secrets=secrets,
+        catalog_configuration_version=1,
+    )
+    with stubber:
+        output = await providers.list_bedrock_models_for_integration(
+            integration, clients=clients
+        )
+        stubber.assert_no_pending_responses()
+    assert factory_calls == [
+        {
+            "aws_access_key_id": config.access_key_id,
+            "aws_secret_access_key": secrets.secret_access_key,
+            "region_name": config.region,
+        }
+    ]
+    assert output.summary.returned_count == 1
+    assert output.summary.skipped_count == 2
+    assert output.models[0].model_identifier == "anthropic.visible"
+
+
+@pytest.mark.parametrize("empty_payload", [None, [], {}, {"publisherModels": None}])
+async def test_vertex_listing_preserves_injected_credentials_and_optional_envelope(
+    empty_payload: object,
+) -> None:
+    """Keep account paths and optional publisher-envelope compatibility."""
+    secrets = GcpSecrets(service_account_json='{"opaque": "credential-data"}')
+    config = GcpConfig(project_id="account-project", region="us-central1")
+    template = _xai_api_key_integration()
+    integration = LLMProviderIntegrationWithSecrets(
+        id=template.id,
+        workspace_id=template.workspace_id,
+        provider=LLMProvider.GOOGLE_VERTEX_AI,
+        name="Vertex",
+        config=config,
+        enabled=True,
+        created_at=template.created_at,
+        updated_at=template.updated_at,
+        secrets=secrets,
+        catalog_configuration_version=1,
+    )
+    token_calls: list[GcpSecrets] = []
+    paths: list[str] = []
+    raw_model = {
+        "name": "publishers/google/models/visible",
+        "inputTokenLimit": None,
+        "outputTokenLimit": 123,
+        "future_extension": {"retained": True},
+    }
+
+    def token_factory(supplied: GcpSecrets) -> str:
+        token_calls.append(supplied)
+        return "synthetic-token"
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        assert request.headers["Authorization"] == "Bearer synthetic-token"
+        paths.append(request.url.path)
+        payload = (
+            {"publisherModels": [raw_model, {"displayName": "No identity"}]}
+            if "/publishers/google/" in request.url.path
+            else empty_payload
+        )
+        return httpx.Response(
+            200,
+            request=request,
+            content=json.dumps(payload).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+
+    def http_factory(*, timeout: float) -> httpx.AsyncClient:
+        assert timeout == 10.0
+        return httpx.AsyncClient(
+            timeout=timeout, transport=httpx.MockTransport(respond)
+        )
+
+    clients = replace(
+        providers.create_listing_client_factories(),
+        http=http_factory,
+        vertex_token=token_factory,
+    )
+    output = await providers.list_vertex_models_for_integration(
+        integration, clients=clients
+    )
+    assert token_calls == [secrets]
+    assert paths == [
+        "/v1/projects/account-project/locations/us-central1/publishers/google/models",
+        "/v1/projects/account-project/locations/us-central1/publishers/anthropic/models",
+    ]
+    assert output.summary.returned_count == 1
+    assert output.summary.skipped_count == 1
+    [candidate] = output.models
+    assert candidate.source_metadata == raw_model
+    assert candidate.capability_evidence is not None
+    assert candidate.capability_evidence.max_input_tokens.state == "null"
+    assert candidate.capability_evidence.max_output_tokens.value == 123
 
 
 def test_xai_oauth_disabled_controls_win_over_conflicting_presets() -> None:

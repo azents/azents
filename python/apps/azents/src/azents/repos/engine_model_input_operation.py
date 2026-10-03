@@ -7,11 +7,6 @@ from collections.abc import Sequence
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import AgentRunPhase
-from azents.engine.events.protocols import (
-    RunStateRepository,
-    SessionHeadRepository,
-    TranscriptRepository,
-)
 from azents.engine.events.tool_results import cancelled_tool_result
 from azents.engine.events.types import (
     ClientToolCallPayload,
@@ -20,6 +15,11 @@ from azents.engine.events.types import (
     OutputTextPart,
 )
 from azents.rdb.session import SessionManager
+from azents.repos.engine_event_contracts import (
+    RunStateRepository,
+    SessionHeadRepository,
+    TranscriptRepository,
+)
 from azents.repos.engine_input_projection import EngineInputProjectionRepository
 from azents.repos.engine_tool_result_operation import (
     EngineToolResultOperationRepository,

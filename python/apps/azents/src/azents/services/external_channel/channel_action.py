@@ -48,6 +48,10 @@ from azents.core.external_channel_session_presence import (
     build_external_channel_scheduled_task_url,
     build_external_channel_session_url,
 )
+from azents.core.session_resource_authority import (
+    SessionExecutionOwner,
+    SessionResourceAuthority,
+)
 from azents.core.slack_external_channel_progress import (
     render_slack_session_actions,
     render_slack_session_presence,
@@ -126,10 +130,6 @@ from azents.services.file_storage import FileStorage, RangedFileStorage
 from azents.services.runtime_storage_error import RuntimeStorageError
 from azents.services.scheduled_task.control import (
     render_scheduled_task_discord_controls,
-)
-from azents.services.session_resource_authority import (
-    SessionExecutionOwner,
-    SessionResourceAuthority,
 )
 
 logger = logging.getLogger(__name__)

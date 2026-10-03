@@ -16,11 +16,15 @@ from azents.core.historical_memory_snapshot import (
     MemorySnapshotConsumer,
     SavedMemorySnapshotEntry,
 )
+from azents.core.historical_memory_snapshot_policy import build_memory_context_snapshot
+from azents.core.memory_scope import MemoryScope
 from azents.engine.events.types import CompactionSummaryPayload, Event
-from azents.rdb.session import SessionManager
 from azents.repos.historical_memory import HistoricalMemoryRepository
+from azents.repos.historical_memory.context_snapshot_operations import (
+    MemoryContextSnapshotOperations,
+)
 from azents.repos.memory import MemoryRepository
-from azents.repos.memory.data import Memory, MemoryScope
+from azents.repos.memory.data import Memory
 from azents.repos.message import MessageRepository
 from azents.repos.toolkit_state import (
     ToolkitStateConflictError,
@@ -30,7 +34,6 @@ from azents.repos.toolkit_state.data import ToolkitStateRecord, ToolkitStateUpse
 from azents.services.historical_memory.context_snapshot import (
     MemoryContextSnapshotService,
 )
-from azents.services.historical_memory.snapshot import build_memory_context_snapshot
 
 _NOW = datetime.datetime(2026, 10, 1, tzinfo=datetime.UTC)
 
@@ -94,19 +97,19 @@ def _service(
     memory: AsyncMock,
     message: AsyncMock,
     toolkit_state: AsyncMock,
-) -> tuple[MemoryContextSnapshotService, SessionManager[AsyncSession]]:
+) -> MemoryContextSnapshotService:
     @asynccontextmanager
     async def session_manager() -> AsyncIterator[AsyncSession]:
         yield session
 
-    return (
-        MemoryContextSnapshotService(
+    return MemoryContextSnapshotService(
+        operations=MemoryContextSnapshotOperations(
             historical_repository=historical,
             memory_repository=memory,
             message_repository=message,
             toolkit_state_repository=toolkit_state,
+            session_manager=session_manager,
         ),
-        session_manager,
     )
 
 
@@ -127,7 +130,7 @@ async def test_initial_boundary_selects_persists_and_renders_snapshot() -> None:
     toolkit_state = AsyncMock(spec=ToolkitStateRepository)
     toolkit_state.get.return_value = None
     toolkit_state.save.return_value = AsyncMock()
-    service, session_manager = _service(
+    service = _service(
         session=session,
         historical=historical,
         memory=memory,
@@ -138,7 +141,6 @@ async def test_initial_boundary_selects_persists_and_renders_snapshot() -> None:
     assert await service.refresh_snapshot(
         session_id="s" * 32,
         after_compaction=False,
-        session_manager=session_manager,
     )
     selected = MemoryContextSnapshotState.model_validate(
         toolkit_state.save.await_args.args[1].state_json
@@ -146,7 +148,6 @@ async def test_initial_boundary_selects_persists_and_renders_snapshot() -> None:
     toolkit_state.get.return_value = _record(selected)
     prompt = await service.prompt_for_turn(
         session_id="s" * 32,
-        session_manager=session_manager,
     )
 
     assert "project-state" in prompt
@@ -186,7 +187,7 @@ async def test_ordinary_turn_filters_stored_entries_without_reselection() -> Non
     message.has_non_reverted_kind.return_value = True
     toolkit_state = AsyncMock(spec=ToolkitStateRepository)
     toolkit_state.get.return_value = _record(snapshot)
-    service, session_manager = _service(
+    service = _service(
         session=session,
         historical=historical,
         memory=memory,
@@ -196,7 +197,6 @@ async def test_ordinary_turn_filters_stored_entries_without_reselection() -> Non
 
     prompt = await service.prompt_for_turn(
         session_id="s" * 32,
-        session_manager=session_manager,
     )
 
     assert "frozen-name" in prompt
@@ -217,7 +217,7 @@ async def test_missing_snapshot_outside_explicit_boundary_contributes_no_memory(
     message.has_non_reverted_kind.return_value = True
     toolkit_state = AsyncMock(spec=ToolkitStateRepository)
     toolkit_state.get.return_value = None
-    service, session_manager = _service(
+    service = _service(
         session=session,
         historical=historical,
         memory=memory,
@@ -228,7 +228,6 @@ async def test_missing_snapshot_outside_explicit_boundary_contributes_no_memory(
     assert (
         await service.prompt_for_turn(
             session_id="s" * 32,
-            session_manager=session_manager,
         )
         == ""
     )
@@ -267,7 +266,7 @@ async def test_committed_compaction_head_reselects_once_then_keeps_snapshot() ->
     )
     toolkit_state = AsyncMock(spec=ToolkitStateRepository)
     toolkit_state.get.return_value = _record(previous)
-    service, session_manager = _service(
+    service = _service(
         session=session,
         historical=historical,
         memory=memory,
@@ -278,7 +277,6 @@ async def test_committed_compaction_head_reselects_once_then_keeps_snapshot() ->
     assert await service.refresh_snapshot(
         session_id="s" * 32,
         after_compaction=True,
-        session_manager=session_manager,
     )
     toolkit_state.save.assert_awaited_once()
     upsert = toolkit_state.save.await_args.args[1]
@@ -290,7 +288,6 @@ async def test_committed_compaction_head_reselects_once_then_keeps_snapshot() ->
     toolkit_state.get.return_value = _record(selected)
     prompt = await service.prompt_for_turn(
         session_id="s" * 32,
-        session_manager=session_manager,
     )
     assert "boundary snapshot design" in prompt
     toolkit_state.save.reset_mock()
@@ -298,7 +295,6 @@ async def test_committed_compaction_head_reselects_once_then_keeps_snapshot() ->
     historical.list_available_snapshot_candidates_in_session.reset_mock()
     again = await service.prompt_for_turn(
         session_id="s" * 32,
-        session_manager=session_manager,
     )
     assert again == prompt
     toolkit_state.save.assert_not_awaited()
@@ -341,7 +337,7 @@ async def test_uncommitted_or_foreign_head_cannot_reselect_memory(
             historical_entries=[],
         )
     )
-    service, session_manager = _service(
+    service = _service(
         session=session,
         historical=historical,
         memory=memory,
@@ -352,14 +348,12 @@ async def test_uncommitted_or_foreign_head_cannot_reselect_memory(
     assert (
         await service.prompt_for_turn(
             session_id="s" * 32,
-            session_manager=session_manager,
         )
         == ""
     )
     assert not await service.refresh_snapshot(
         session_id="s" * 32,
         after_compaction=True,
-        session_manager=session_manager,
     )
     memory.list.assert_not_awaited()
     historical.list_available_snapshot_candidates_in_session.assert_not_awaited()
@@ -371,7 +365,6 @@ class _RefreshFixture:
     """Typed collaborators with deterministic in-memory snapshot persistence."""
 
     service: MemoryContextSnapshotService
-    session_manager: SessionManager[AsyncSession]
     session: AsyncMock
     historical: AsyncMock
     memory: AsyncMock
@@ -382,13 +375,11 @@ class _RefreshFixture:
         return await self.service.refresh_snapshot(
             session_id="s" * 32,
             after_compaction=after_compaction,
-            session_manager=self.session_manager,
         )
 
     async def prompt(self) -> str:
         return await self.service.prompt_for_turn(
             session_id="s" * 32,
-            session_manager=self.session_manager,
         )
 
 
@@ -435,7 +426,7 @@ def _refresh_fixture(
         return record
 
     toolkit_state.save.side_effect = save
-    service, session_manager = _service(
+    service = _service(
         session=session,
         historical=historical,
         memory=memory,
@@ -444,7 +435,6 @@ def _refresh_fixture(
     )
     return _RefreshFixture(
         service=service,
-        session_manager=session_manager,
         session=session,
         historical=historical,
         memory=memory,

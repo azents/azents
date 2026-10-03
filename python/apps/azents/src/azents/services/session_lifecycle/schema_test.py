@@ -8,7 +8,7 @@ from azents.core.session_lifecycle import (
     SessionLifecycleResourceClassification,
     SessionLifecycleResourceKind,
 )
-from azents.services.session_lifecycle.registry import (
+from azents.core.session_lifecycle_registry import (
     get_session_lifecycle_ownership_manifest,
 )
 from azents.services.session_lifecycle.schema import (

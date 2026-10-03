@@ -9,7 +9,7 @@ import re
 from collections import Counter
 from collections.abc import Mapping, Sequence
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from azents.core.engine_tool_state import ToolWorkingSetState
 from azents.engine.run.tool_budget import (
@@ -172,6 +172,8 @@ class DeferredToolSearchIndex:
 
 class ToolSearchInput(BaseModel):
     """Tool Search input schema."""
+
+    model_config = ConfigDict(extra="forbid")
 
     query: str = Field(
         min_length=1,

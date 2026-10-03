@@ -8,6 +8,7 @@ touches_domains: [agent, conversation]
 last_verified_at: 2026-10-03
 spec_version: 26
 code_paths:
+  - python/apps/azents/src/azents/core/chat_data.py
   - python/apps/azents/src/azents/services/agent/**
   - python/apps/azents/src/azents/api/public/agent/**
   - python/apps/azents/src/azents/services/chat/context.py

@@ -9,11 +9,25 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     ExternalChannelConversationScopeKind,
+    ExternalChannelIngressAuthorityKind,
     ExternalChannelMessageRevisionKind,
     ExternalChannelProvider,
     ExternalChannelResourceType,
 )
+from azents.core.external_channel_conversation_data import (
+    ExternalChannelConversationScope,
+    ExternalChannelOperationDeadline,
+)
 from azents.core.external_channel_file import external_channel_file_metadata_items
+from azents.core.external_channel_ingestion import (
+    ExternalChannelIngestionOperation,
+    ExternalChannelIngestionOutcome,
+    ExternalChannelIngestionOutcomeKind,
+    ExternalChannelIngestionReason,
+    ExternalChannelIngestionRequest,
+    ExternalChannelIngressAuthority,
+    ExternalChannelTriggerLocator,
+)
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.external_channel.data import (
@@ -21,10 +35,6 @@ from azents.repos.external_channel.data import (
     ExternalChannelTrigger,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
-from azents.services.external_channel.conversation import (
-    ExternalChannelConversationScope,
-    ExternalChannelOperationDeadline,
-)
 from azents.services.external_channel.discord_events import (
     DiscordEventExcluded,
     DiscordEventNormalizationError,
@@ -33,14 +43,6 @@ from azents.services.external_channel.discord_events import (
 )
 from azents.services.external_channel.ingestion import (
     ExternalChannelConversationIngestionService,
-    ExternalChannelIngestionOperation,
-    ExternalChannelIngestionOutcome,
-    ExternalChannelIngestionOutcomeKind,
-    ExternalChannelIngestionReason,
-    ExternalChannelIngestionRequest,
-    ExternalChannelIngressAuthority,
-    ExternalChannelIngressAuthorityKind,
-    ExternalChannelTriggerLocator,
 )
 from azents.services.external_channel.ingestion_deps import (
     get_external_channel_conversation_ingestion_service,

@@ -10,6 +10,13 @@ import sqlalchemy as sa
 from azcommon.result import Failure, Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.chat_data import (
+    InvalidSessionTitle,
+    PrimarySessionArchiveBlocked,
+    PrimarySessionPinBlocked,
+    RunningSessionArchiveBlocked,
+    UpdateGoalStatusInput,
+)
 from azents.core.enums import (
     AgentRunStatus,
     AgentSessionPrimaryKind,
@@ -50,22 +57,33 @@ from azents.repos.agent_runtime.data import AgentRuntime
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSessionCreate
 from azents.repos.archived_session_retention import ArchivedSessionRetentionRepository
+from azents.repos.chat_operations import ChatOperationsRepository
 from azents.repos.external_channel.lifecycle import ExternalChannelLifecycleRepository
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.goal.store import GoalStateStore
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.mailbox.admission import MailboxAdmissionRepository
+from azents.repos.mailbox_runtime_operations import MailboxRuntimeOperations
 from azents.repos.message import MessageRepository
+from azents.repos.root_agent_session_creation import (
+    RootAgentSessionCreationRepository,
+)
 from azents.repos.scheduled_task.data import ScheduledTaskCreate
 from azents.repos.scheduled_task.lifecycle import ScheduledTaskLifecycleRepository
 from azents.repos.scheduled_task.repository import ScheduledTaskRepository
-from azents.repos.scheduled_task_cycle import (
-    ScheduledTaskCycleRepository,
-    ScheduledTaskCycleSnapshot,
-)
+from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
+from azents.repos.scheduled_task_cycle.data import ScheduledTaskCycleSnapshot
 from azents.repos.session_git_worktree import SessionGitWorktreeRepository
+from azents.repos.session_lifecycle_operations import (
+    SessionLifecycleOperationsRepository,
+)
+from azents.repos.session_working_folder_binding.data import (
+    SessionWorkingFolderAuthority,
+    SessionWorkingFolderBindingError,
+)
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 from azents.repos.toolkit_state import ToolkitStateRepository
+from azents.repos.toolkit_state.engine import TodoStateStore
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository
@@ -82,16 +100,10 @@ from azents.services.agent_runtime.lifecycle_data import (
     RuntimeOperationTarget,
     RuntimeOperationTargetResolver,
 )
-from azents.services.chat.data import (
-    InvalidSessionTitle,
-)
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.external_channel.lifecycle import ExternalChannelLifecycleService
 from azents.services.mailbox import MailboxService
 from azents.services.model_file import ModelFileService
-from azents.services.root_agent_session_creation import (
-    RootAgentSessionCreationService,
-)
 from azents.services.runtime_terminal.invalidation import (
     NoopRuntimeTerminalInvalidationPublisher,
 )
@@ -100,8 +112,6 @@ from azents.services.session_lifecycle.registry import (
     get_session_lifecycle_orchestrator,
 )
 from azents.services.session_working_folder_binding import (
-    SessionWorkingFolderAuthority,
-    SessionWorkingFolderBindingError,
     SessionWorkingFolderBindingService,
 )
 from azents.testing.model_selection import (
@@ -114,12 +124,6 @@ from azents.testing.turn_action import (
 )
 
 from . import ChatSessionService
-from .data import (
-    PrimarySessionArchiveBlocked,
-    PrimarySessionPinBlocked,
-    RunningSessionArchiveBlocked,
-    UpdateGoalStatusInput,
-)
 
 
 class _ScheduledCycleFixture(NamedTuple):
@@ -457,7 +461,7 @@ def _service(
         event_transcript_repository=EventTranscriptRepository(),
         agent_session_repository=AgentSessionRepository(),
         agent_runtime_repository=(agent_runtime_repository or AgentRuntimeRepository()),
-        root_agent_session_creation_service=RootAgentSessionCreationService(
+        root_agent_session_creation_service=RootAgentSessionCreationRepository(
             agent_session_repository=AgentSessionRepository(),
             agent_repository=AgentRepository(),
             automatic_project_repository=AgentAutomaticProjectRepository(),
@@ -534,8 +538,22 @@ class _ModelFileService(ModelFileService):
 
 
 def _make_mailbox_service(**kwargs: Any) -> MailboxService:  # noqa: ANN401
-    """Construct MailboxService with test-owned dependencies."""
-    return MailboxService(**kwargs)
+    """Compose database-only runtime operations and external mailbox effects."""
+    database_keys = (
+        "session_manager",
+        "mailbox_item_repository",
+        "agent_session_repository",
+        "event_transcript_repository",
+        "agent_run_repository",
+        "scheduled_task_repository",
+        "scheduled_task_cycle_repository",
+        "action_execution_repository",
+    )
+    runtime_operations = MailboxRuntimeOperations(
+        **{key: kwargs.pop(key) for key in database_keys}
+    )
+    kwargs.pop("external_channel_repository", None)
+    return MailboxService(runtime_operations=runtime_operations, **kwargs)
 
 
 def _make_external_lifecycle(**kwargs: Any) -> ExternalChannelLifecycleService:  # noqa: ANN401
@@ -544,8 +562,49 @@ def _make_external_lifecycle(**kwargs: Any) -> ExternalChannelLifecycleService: 
 
 
 def _make_chat_service(**kwargs: Any) -> ChatSessionService:  # noqa: ANN401
-    """Construct ChatSessionService with test-owned dependencies."""
-    return ChatSessionService(**kwargs)
+    """Compose completed database operations and external test collaborators."""
+    manager = kwargs.pop("session_manager")
+    root = kwargs.pop("root_agent_session_creation_service")
+    kwargs.pop("mailbox_item_service")
+    registry = kwargs.pop("lifecycle_orchestrator").registry
+    scheduled = kwargs.pop("scheduled_task_lifecycle_service")
+    external = kwargs["external_channel_lifecycle_service"]
+    database_keys = (
+        "message_repository",
+        "agent_repository",
+        "agent_project_preset_repository",
+        "agent_project_catalog_repository",
+        "agent_project_default_repository",
+        "session_git_worktree_repository",
+        "agent_run_repository",
+        "action_execution_repository",
+        "event_transcript_repository",
+        "agent_session_repository",
+        "agent_runtime_repository",
+        "archived_session_retention_repository",
+        "workspace_user_repository",
+        "session_workspace_project_repository",
+        "mailbox_admission_repository",
+    )
+    database = {key: kwargs.pop(key) for key in database_keys}
+    lifecycle = SessionLifecycleOperationsRepository(
+        registry=registry,
+        agent_session_repository=database["agent_session_repository"],
+        external_channel_repository=external.repository
+        if isinstance(external, ExternalChannelLifecycleService)
+        else ExternalChannelLifecycleRepository(),
+        scheduled_task_repository=scheduled.repository,
+    )
+    operations = ChatOperationsRepository(
+        **database,
+        root_session_repository=root,
+        mailbox_repository=MailboxRepository(),
+        lifecycle_operations=lifecycle,
+        goal_store=GoalStateStore(session_manager=manager),
+        todo_store=TodoStateStore(session_manager=manager),
+        session_manager=manager,
+    )
+    return ChatSessionService(operations=operations, **kwargs)
 
 
 class _ChannelActionService:

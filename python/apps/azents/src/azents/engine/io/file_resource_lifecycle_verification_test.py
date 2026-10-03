@@ -25,6 +25,7 @@ from azents.core.enums import (
     WorkspaceUserRole,
 )
 from azents.core.llm_catalog import ModelCapabilities, ModelModalities, ModelModality
+from azents.core.session_resource_authority import SessionResourceAuthority
 from azents.engine.events.file_parts import ModelFileLoweringContent
 from azents.engine.events.openai_responses import OpenAIResponsesLowerer
 from azents.engine.events.types import (
@@ -53,7 +54,6 @@ from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.repos.workspace_user.data import WorkspaceUser
 from azents.runtime.transfer.server_to_runtime import ServerToRuntimeTarget
 from azents.services.artifact import ArtifactService
-from azents.services.session_resource_authority import SessionResourceAuthority
 from azents.testing.types import is_string_object_dict
 
 _NOW = datetime.datetime.now(datetime.timezone.utc)

@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.core.toolkit_state import ToolkitStateIdentity
 from azents.core.tools import AwsToolkitConfig, ToolkitState, TurnContext
 from azents.engine.tools.aws import AwsCredentialProvider, AwsSigV4Auth, AwsToolkit
+from azents.repos.engine_tool_repositories import EngineMcpSnapshotFactory
 from azents.testing.types import is_object_factory
 
 
@@ -197,7 +198,7 @@ def _make_toolkit(
         timeout=30.0,
         proxy_url=None,
         artifact_service=None,
-        session_manager=_session_manager,
+        snapshot_factory=EngineMcpSnapshotFactory(session_manager=_session_manager),
         agent_id="agent-1",
         session_id="session-1",
         state_name="tool_snapshot:test",

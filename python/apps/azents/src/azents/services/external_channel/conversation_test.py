@@ -5,7 +5,7 @@ import datetime
 import pytest
 
 from azents.core.enums import ExternalChannelConversationScopeKind
-from azents.services.external_channel.conversation import (
+from azents.core.external_channel_conversation_data import (
     ExternalChannelConversationScope,
     ExternalChannelHistoryRange,
     ExternalChannelOperationDeadline,

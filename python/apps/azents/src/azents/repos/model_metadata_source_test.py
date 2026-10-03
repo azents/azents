@@ -5,7 +5,11 @@ import datetime
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.model_catalog_source import CATALOG_SOURCE_KEY, CATALOG_SOURCE_KIND
+from azents.core.model_catalog_source import (
+    CATALOG_SOURCE_KEY,
+    CATALOG_SOURCE_KIND,
+    ModelMetadataSourceKind,
+)
 from azents.rdb.models.model_metadata_source import RDBModelMetadataSourceSnapshot
 from azents.repos.model_metadata_source import ModelMetadataSourceRepository
 from azents.testing.model_metadata import make_test_source_payload
@@ -128,7 +132,7 @@ def test_repository_rejects_inconsistent_or_permissive_snapshot(mutation: str) -
     match mutation:
         case "old_family":
             row.source_key = "genai_prices"
-            row.source_kind = "genai_prices"
+            row.source_kind = ModelMetadataSourceKind.GENAI_PRICES
         case "wrong_hash":
             row.source_hash = "0" * 64
         case "wrong_counts":

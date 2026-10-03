@@ -5,7 +5,7 @@ import datetime
 import logging
 from collections.abc import Callable
 from contextlib import AsyncExitStack
-from typing import cast
+from types import TracebackType
 
 import pytest
 from azcommon import di
@@ -169,7 +169,8 @@ async def test_runtime_enforces_concurrency_bound() -> None:
     second_started = asyncio.Event()
 
     async def handler(context: JobExecutionContext) -> JobPayload:
-        execution_key = cast(str, context.request.payload["execution_key"])
+        execution_key = context.request.payload["execution_key"]
+        assert isinstance(execution_key, str)
         started.append(execution_key)
         if execution_key == "first":
             first_started.set()
@@ -202,7 +203,8 @@ async def test_deadline_expires_while_waiting_for_concurrency_slot() -> None:
     started: list[str] = []
 
     async def handler(context: JobExecutionContext) -> JobPayload:
-        execution_key = cast(str, context.request.payload["execution_key"])
+        execution_key = context.request.payload["execution_key"]
+        assert isinstance(execution_key, str)
         started.append(execution_key)
         if execution_key == "first":
             first_started.set()
@@ -300,10 +302,11 @@ async def test_deadline_logs_handler_failure_during_cancellation_grace(
     assert untrusted not in formatted
 
 
-class _TrackedContainer:
+class _TrackedContainer(di.Container):
     """Task-local container double with observable lifecycle."""
 
     def __init__(self) -> None:
+        super().__init__()
         self.closed = asyncio.Event()
 
     async def __aenter__(self) -> "_TrackedContainer":
@@ -311,10 +314,11 @@ class _TrackedContainer:
 
     async def __aexit__(
         self,
-        exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
-        exc_tb: object,
+        exc_type: type[BaseException] | None = None,
+        exc: BaseException | None = None,
+        tb: TracebackType | None = None,
     ) -> None:
+        await super().__aexit__(exc_type, exc, tb)
         self.closed.set()
 
 
@@ -345,10 +349,7 @@ async def test_deadline_cancels_task_local_container_startup() -> None:
 
     runtime = _runtime(
         handler,
-        container_factory=cast(
-            Callable[[], di.Container],
-            lambda: container,
-        ),
+        container_factory=lambda: container,
     )
     handle = await runtime.submit(_request("container-start", timeout=0.01))
 
@@ -381,10 +382,7 @@ async def test_cancellation_grace_overrun_returns_terminal_outcome() -> None:
         handler,
         max_concurrency=1,
         cancellation_grace_seconds=0.01,
-        container_factory=cast(
-            Callable[[], di.Container],
-            lambda: container,
-        ),
+        container_factory=lambda: container,
     )
     handle = await runtime.submit(_request("overrun", timeout=0.01))
     close_task: asyncio.Task[None] | None = None
@@ -441,10 +439,7 @@ async def test_close_cancellation_preserves_quarantined_ownership() -> None:
         handler,
         max_concurrency=1,
         cancellation_grace_seconds=0.01,
-        container_factory=cast(
-            Callable[[], di.Container],
-            lambda: container,
-        ),
+        container_factory=lambda: container,
     )
     handle = await runtime.submit(_request("close-cancel", timeout=0.01))
     assert (await asyncio.wait_for(handle.wait(), timeout=0.2)).status is (
@@ -492,10 +487,7 @@ async def test_close_cancellation_tracks_quarantine_created_during_close(
         handler,
         max_concurrency=1,
         cancellation_grace_seconds=0.01,
-        container_factory=cast(
-            Callable[[], di.Container],
-            lambda: container,
-        ),
+        container_factory=lambda: container,
     )
     await runtime.submit(_request("dynamic-quarantine", timeout=1.0))
     await started.wait()

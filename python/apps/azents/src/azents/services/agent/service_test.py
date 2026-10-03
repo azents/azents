@@ -37,6 +37,8 @@ from azents.repos.model_metadata_source_data import ModelMetadataSourceSnapshot
 from azents.services.model_metadata import ModelMetadataService
 from azents.services.terminal_policy.invalidation import (
     NoopTerminalPolicyInvalidationPublisher,
+)
+from azents.services.terminal_policy.invalidation_contracts import (
     TerminalPolicySourceInvalidation,
     TerminalPolicySourceScope,
 )

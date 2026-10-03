@@ -514,11 +514,7 @@ export function AgentMemorySettings({
               state={savedListState}
               deletingId={deletingId}
               onEdit={onStartEdit}
-              onDelete={(memory) => {
-                if (window.confirm(t("deleteConfirm", { name: memory.name }))) {
-                  onDeleteMemory(memory);
-                }
-              }}
+              onDelete={onDeleteMemory}
             />
           </>
         ) : (

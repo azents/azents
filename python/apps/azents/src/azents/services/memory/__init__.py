@@ -5,16 +5,13 @@ from typing import Annotated, assert_never
 
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.agent_errors import NotFound
 from azents.core.enums import AgentType, WorkspaceUserRole
-from azents.rdb.deps import get_session_manager
-from azents.rdb.session import SessionManager
-from azents.repos.agent import AgentRepository
-from azents.repos.agent.data import Agent, NotFound
-from azents.repos.agent_admin import AgentAdminRepository
-from azents.repos.memory import MemoryRepository
-from azents.repos.memory.data import Memory, MemoryCreate, MemoryScope, MemoryUpdate
+from azents.core.memory_scope import MemoryScope
+from azents.repos.agent.data import Agent
+from azents.repos.memory.data import Memory, MemoryCreate, MemoryUpdate
+from azents.repos.memory.ui_operations import MemoryUIOperations
 from azents.services.agent.data import (
     NotAdmin,
     NotBelongToWorkspace,
@@ -35,12 +32,7 @@ from .data import (
 class MemoryService:
     """Agent Memory CRUD service for human-facing UI semantics."""
 
-    repository: Annotated[MemoryRepository, Depends(MemoryRepository)]
-    agent_repository: Annotated[AgentRepository, Depends(AgentRepository)]
-    admin_repository: Annotated[AgentAdminRepository, Depends(AgentAdminRepository)]
-    session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
-    ]
+    operations: Annotated[MemoryUIOperations, Depends(MemoryUIOperations)]
 
     async def list_by_agent(
         self,
@@ -73,22 +65,12 @@ class MemoryService:
                 assert_never(access)
 
         effective_user_id = self._scope_user_id(scope, user_id)
-        async with self.session_manager() as session:
-            if query is None or query.strip() == "":
-                memories = await self.repository.list(
-                    session,
-                    agent_id=agent_id,
-                    user_id=effective_user_id,
-                    type=type,
-                )
-            else:
-                memories = await self.repository.search_full(
-                    session,
-                    agent_id=agent_id,
-                    user_id=effective_user_id,
-                    query=query,
-                    type=type,
-                )
+        memories = await self.operations.list_memories(
+            agent_id=agent_id,
+            user_id=effective_user_id,
+            type=type,
+            query=query,
+        )
         return Success(
             MemoryListOutput(items=[MemoryOutput.convert_from(m) for m in memories])
         )
@@ -165,32 +147,24 @@ class MemoryService:
                 return Failure(admin_check)
 
         effective_user_id = self._scope_user_id(create.scope, user_id)
-        async with self.session_manager() as session:
-            duplicate = await self.repository.get_by_name(
-                session,
-                agent_id=agent_id,
-                user_id=effective_user_id,
+        memory = await self.operations.create_if_name_available(
+            agent_id=agent_id,
+            user_id=effective_user_id,
+            create=MemoryCreate(
+                scope=create.scope,
+                type=create.type,
                 name=create.name,
-            )
-            if duplicate is not None:
-                return Failure(
-                    DuplicateMemory(
-                        agent_id=agent_id,
-                        user_id=effective_user_id,
-                        name=create.name,
-                    )
-                )
-            memory = await self.repository.create(
-                session,
-                agent_id=agent_id,
-                user_id=effective_user_id,
-                create=MemoryCreate(
-                    scope=create.scope,
-                    type=create.type,
+                description=create.description,
+                content=create.content,
+            ),
+        )
+        if memory is None:
+            return Failure(
+                DuplicateMemory(
+                    agent_id=agent_id,
+                    user_id=effective_user_id,
                     name=create.name,
-                    description=create.description,
-                    content=create.content,
-                ),
+                )
             )
         return Success(MemoryOutput.convert_from(memory))
 
@@ -243,13 +217,11 @@ class MemoryService:
             duplicate_user_id = (
                 None if existing.scope == MemoryScope.AGENT else existing.user_id
             )
-            async with self.session_manager() as session:
-                duplicate = await self.repository.get_by_name(
-                    session,
-                    agent_id=existing.agent_id,
-                    user_id=duplicate_user_id,
-                    name=update["name"],
-                )
+            duplicate = await self.operations.get_by_name(
+                agent_id=existing.agent_id,
+                user_id=duplicate_user_id,
+                name=update["name"],
+            )
             if duplicate is not None and duplicate.id != memory_id:
                 return Failure(
                     DuplicateMemory(
@@ -269,12 +241,7 @@ class MemoryService:
         if "content" in update:
             repo_update["content"] = update["content"]
 
-        async with self.session_manager() as session:
-            memory = await self.repository.update_by_id(
-                session,
-                memory_id,
-                repo_update,
-            )
+        memory = await self.operations.update_by_id(memory_id, repo_update)
         if memory is None:
             return Failure(MemoryNotFound(memory_id=memory_id))
         return Success(MemoryOutput.convert_from(memory))
@@ -322,8 +289,7 @@ class MemoryService:
             if admin_check is not None:
                 return Failure(admin_check)
 
-        async with self.session_manager() as session:
-            deleted = await self.repository.delete_by_id(session, memory_id)
+        deleted = await self.operations.delete_by_id(memory_id)
         if not deleted:
             return Failure(MemoryNotFound(memory_id=memory_id))
         return Success(None)
@@ -337,19 +303,13 @@ class MemoryService:
         role: WorkspaceUserRole,
     ) -> Result[Agent, NotFound | NotBelongToWorkspace | PrivateAgentAccessDenied]:
         """Fetch Agent and check workspace visibility."""
-        async with self.session_manager() as session:
-            agent = await self.agent_repository.get_by_id(session, agent_id)
+        agent = await self.operations.get_agent(agent_id)
         if agent is None:
             return Failure(NotFound(agent_id=agent_id))
         if agent.workspace_id != workspace_id:
             return Failure(NotBelongToWorkspace(agent_id=agent_id))
         if agent.type == AgentType.PRIVATE and role != WorkspaceUserRole.OWNER:
-            async with self.session_manager() as session:
-                admin = await self.admin_repository.is_admin(
-                    session,
-                    agent_id,
-                    workspace_user_id,
-                )
+            admin = await self.operations.is_admin(agent_id, workspace_user_id)
             if not admin:
                 return Failure(PrivateAgentAccessDenied(agent_id=agent_id))
         return Success(agent)
@@ -368,8 +328,7 @@ class MemoryService:
         NotFound | NotBelongToWorkspace | PrivateAgentAccessDenied | MemoryNotFound,
     ]:
         """Fetch Memory and check scope visibility."""
-        async with self.session_manager() as session:
-            memory = await self.repository.get_by_id(session, memory_id)
+        memory = await self.operations.get_by_id(memory_id)
         if memory is None:
             return Failure(MemoryNotFound(memory_id=memory_id))
         if memory.agent_id != agent_id:
@@ -401,12 +360,7 @@ class MemoryService:
         """Check whether requester is Agent admin or workspace owner."""
         if role == WorkspaceUserRole.OWNER:
             return None
-        async with self.session_manager() as session:
-            admin = await self.admin_repository.is_admin(
-                session,
-                agent_id,
-                workspace_user_id,
-            )
+        admin = await self.operations.is_admin(agent_id, workspace_user_id)
         if not admin:
             return NotAdmin(agent_id=agent_id)
         return None

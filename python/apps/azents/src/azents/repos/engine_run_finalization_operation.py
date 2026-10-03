@@ -8,10 +8,10 @@ from typing import Protocol
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import AgentRunStatus
-from azents.engine.events.protocols import RunStateRepository
 from azents.engine.events.terminal_projection import terminal_result_from_events
 from azents.engine.events.types import Event
 from azents.rdb.session import SessionManager
+from azents.repos.engine_event_contracts import RunStateRepository
 from azents.repos.engine_event_mutation import EngineEventMutationRepository
 from azents.repos.model_operation_completion import ModelOperationCompletion
 from azents.repos.terminal_finalization import TerminalRunFinalizationRepository

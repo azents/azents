@@ -4,6 +4,8 @@ import json
 from types import MappingProxyType
 from typing import Literal
 
+import pytest
+
 from azents.engine.events.conversational_tool_projection import (
     CONVERSATIONAL_TOOL_PROJECTIONS,
     project_conversational_tool_call,
@@ -201,3 +203,93 @@ def test_malformed_registered_arguments_fall_back_to_generic_tool_projection() -
     malformed = call.model_copy(update={"arguments": "{"})
 
     assert project_conversational_tool_call(malformed, _result("delivered")) is None
+
+
+@pytest.mark.parametrize(
+    ("arguments", "text", "context"),
+    [
+        ({"message": " legacy answer ", "future": True}, "legacy answer", ()),
+        ({"mode": 7, "message": "answer"}, "answer", ()),
+        ({"message": 7, "title": " Work "}, None, (("title", "Work"),)),
+        ({"message": None, "title": 0}, None, (("title", "0"),)),
+        ({"title": False}, None, (("title", "false"),)),
+        ({"title": "", "todo_update": []}, None, ()),
+        ({"title": {}, "todo_update": None}, None, ()),
+        (
+            {"ignored": True, "text": "not a wire field", "message": "answer"},
+            "answer",
+            (),
+        ),
+    ],
+)
+def test_historical_projection_retains_existing_optional_field_tolerance(
+    arguments: dict[str, object],
+    text: str | None,
+    context: tuple[tuple[str, str], ...],
+) -> None:
+    """Decode the historical view without requiring today's executable payload."""
+    projection = project_conversational_tool_call(_call(arguments), None)
+    if text is None and not context:
+        assert projection is None
+        return
+    assert projection is not None
+    assert projection.text == text
+    assert projection.context == context
+    assert projection.delivery_status == ("unknown" if text is not None else None)
+
+
+@pytest.mark.parametrize("arguments", [None, [], "text", 7, False])
+def test_nonobject_historical_arguments_are_not_conversation(arguments: object) -> None:
+    """Only JSON objects admit the registered historical operation view."""
+    assert project_conversational_tool_call(_call(arguments), None) is None
+
+
+@pytest.mark.parametrize(
+    ("output", "expected"),
+    [
+        ({}, "unknown"),
+        ({"outcomes": None}, "unknown"),
+        ({"outcomes": {}}, "unknown"),
+        (
+            {"outcomes": [None, 7, {"operation": "other", "status": "delivered"}]},
+            "unknown",
+        ),
+        (
+            {
+                "outcomes": [
+                    None,
+                    {"operation": "reply", "status": "delivered", "future": 7},
+                ]
+            },
+            "delivered",
+        ),
+        (
+            {"outcomes": [{"operation": "reply", "status": "not_attempted"}]},
+            "failed",
+        ),
+        (
+            {
+                "outcomes": [
+                    {"operation": "reply"},
+                    {"operation": "reply", "status": "delivered"},
+                ]
+            },
+            "unknown",
+        ),
+        ([], "unknown"),
+    ],
+)
+def test_historical_reply_decoder_retains_order_and_delivery_meanings(
+    output: object, expected: str
+) -> None:
+    """The first matching reply outcome remains the delivery authority."""
+    result = ClientToolResultPayload(
+        call_id="call-1",
+        name="channel_action",
+        wire_dialect="json_function",
+        status="completed",
+        output=json.dumps(output),
+    )
+    projection = project_conversational_tool_call(_call({"message": "answer"}), result)
+    assert projection is not None
+    assert projection.delivery_status == expected

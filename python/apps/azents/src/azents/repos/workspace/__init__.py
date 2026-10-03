@@ -18,6 +18,7 @@ from .data import (
     Workspace,
     WorkspaceList,
     WorkspaceRuntimeProfileDefaultReplace,
+    WorkspaceSnapshot,
 )
 
 
@@ -80,7 +81,7 @@ class WorkspaceRepository:
 
     async def get_with_id_by_handle(
         self, session: AsyncSession, handle: str
-    ) -> tuple[str, Workspace] | None:
+    ) -> WorkspaceSnapshot | None:
         """Fetch one Workspace ID and projection from the same row read."""
         result = await session.execute(
             sa.select(RDBWorkspace).where(RDBWorkspace.handle == handle)
@@ -88,7 +89,10 @@ class WorkspaceRepository:
         rdb_workspace = result.scalar_one_or_none()
         if rdb_workspace is None:
             return None
-        return rdb_workspace.id, self._build_workspace(rdb_workspace)
+        return WorkspaceSnapshot(
+            workspace_id=rdb_workspace.id,
+            workspace=self._build_workspace(rdb_workspace),
+        )
 
     async def get_by_id_for_update(
         self, session: AsyncSession, workspace_id: str

@@ -1,7 +1,7 @@
 """grep tool tests."""
 
 import json
-from typing import List
+from typing import List, NamedTuple
 from unittest.mock import AsyncMock
 
 import pytest
@@ -17,18 +17,25 @@ from azents.services.file_storage import GrepResult
 # ---------------------------------------------------------------------------
 
 
+class _ToolFixture(NamedTuple):
+    """The typed tool and storage used by one file-query test."""
+
+    tool: FunctionTool
+    storage: FakeSharedStorage
+
+
 def _make_tool(
     *,
     files: dict[str, bytes] | None = None,
     agent_id: str = "agent-1",
-) -> tuple[FunctionTool, FakeSharedStorage]:
+) -> _ToolFixture:
     """Create grep tool and fake storage for tests."""
     storage = FakeSharedStorage(files)
     tool = make_grep_tool(
         session_storage=storage,
         agent_id=agent_id,
     )
-    return tool, storage
+    return _ToolFixture(tool=tool, storage=storage)
 
 
 # ---------------------------------------------------------------------------
@@ -42,13 +49,13 @@ class TestGrep:
     async def test_find_pattern_in_single_file(self) -> None:
         """Find pattern in single file."""
         # Given
-        tool, _ = _make_tool(
+        tool = _make_tool(
             files={
                 "/workspace/agent/notes.txt": (
                     b"line1 hello\nline2 world\nline3 hello world"
                 ),
             },
-        )
+        ).tool
 
         # When
         result = await tool.handler(
@@ -94,12 +101,12 @@ class TestGrep:
     async def test_find_pattern_in_multiple_files(self) -> None:
         """Find pattern in multiple files."""
         # Given
-        tool, _ = _make_tool(
+        tool = _make_tool(
             files={
                 "/workspace/agent/a.txt": b"foo bar\nbaz",
                 "/workspace/agent/b.txt": b"hello foo\nworld",
             },
-        )
+        ).tool
 
         # When
         result = await tool.handler(
@@ -120,12 +127,12 @@ class TestGrep:
     async def test_find_pattern_in_nested_files_by_default(self) -> None:
         """Search subdirectories recursively by default."""
         # Given
-        tool, _ = _make_tool(
+        tool = _make_tool(
             files={
                 "/workspace/agent/src/a.txt": b"target",
                 "/workspace/agent/src/nested/b.txt": b"target",
             },
-        )
+        ).tool
 
         # When
         result = await tool.handler(
@@ -146,12 +153,12 @@ class TestGrep:
     async def test_file_path_searches_single_file(self) -> None:
         """When file path is passed directly, search only that file."""
         # Given
-        tool, _ = _make_tool(
+        tool = _make_tool(
             files={
                 "/workspace/agent/src/a.txt": b"target",
                 "/workspace/agent/src/b.txt": b"target",
             },
-        )
+        ).tool
 
         # When
         result = await tool.handler(
@@ -172,12 +179,12 @@ class TestGrep:
     async def test_default_exclude_skips_node_modules(self) -> None:
         """Skip heavy directories with default exclude."""
         # Given
-        tool, _ = _make_tool(
+        tool = _make_tool(
             files={
                 "/workspace/agent/src/app.ts": b"target",
                 "/workspace/agent/node_modules/pkg/index.ts": b"target",
             },
-        )
+        ).tool
 
         # When
         result = await tool.handler(
@@ -198,12 +205,12 @@ class TestGrep:
     async def test_explicit_empty_exclude_keeps_default_exclude(self) -> None:
         """An empty exclude list does not disable default excludes."""
         # Given
-        tool, _ = _make_tool(
+        tool = _make_tool(
             files={
                 "/workspace/agent/src/app.ts": b"target",
                 "/workspace/agent/node_modules/pkg/index.ts": b"target",
             },
-        )
+        ).tool
 
         # When
         result = await tool.handler(
@@ -224,13 +231,13 @@ class TestGrep:
 
     async def test_exclude_adds_to_default_excludes(self) -> None:
         """exclude adds patterns while preserving default excludes."""
-        tool, _ = _make_tool(
+        tool = _make_tool(
             files={
                 "/workspace/agent/src/app.ts": b"target",
                 "/workspace/agent/.next/cache.js": b"target",
                 "/workspace/agent/generated/output.ts": b"target",
             },
-        )
+        ).tool
 
         result = await tool.handler(
             json.dumps(
@@ -250,12 +257,12 @@ class TestGrep:
 
     async def test_disable_default_excludes_allows_heavy_directories(self) -> None:
         """disable_default_excludes=true skips default excludes."""
-        tool, _ = _make_tool(
+        tool = _make_tool(
             files={
                 "/workspace/agent/src/app.ts": b"target",
                 "/workspace/agent/node_modules/pkg/index.ts": b"target",
             },
-        )
+        ).tool
 
         result = await tool.handler(
             json.dumps(
@@ -275,12 +282,12 @@ class TestGrep:
     async def test_recursive_false_searches_direct_files_only(self) -> None:
         """When recursive=false, search only direct files."""
         # Given
-        tool, _ = _make_tool(
+        tool = _make_tool(
             files={
                 "/workspace/agent/src/a.txt": b"target",
                 "/workspace/agent/src/nested/b.txt": b"target",
             },
-        )
+        ).tool
 
         # When
         result = await tool.handler(
@@ -302,13 +309,13 @@ class TestGrep:
     async def test_regex_pattern(self) -> None:
         """Search with regex pattern."""
         # Given
-        tool, _ = _make_tool(
+        tool = _make_tool(
             files={
                 "/workspace/agent/code.py": (
                     b"def hello():\n    return 42\ndef world():\n    pass"
                 ),
             },
-        )
+        ).tool
 
         # When
         result = await tool.handler(
@@ -329,9 +336,9 @@ class TestGrep:
     async def test_no_matches(self) -> None:
         """Return guidance message when no match result exists."""
         # Given
-        tool, _ = _make_tool(
+        tool = _make_tool(
             files={"/workspace/agent/data.txt": b"some content"},
-        )
+        ).tool
 
         # When
         result = await tool.handler(
@@ -350,7 +357,7 @@ class TestGrep:
     async def test_empty_directory(self) -> None:
         """Empty directory returns no-files message."""
         # Given
-        tool, _ = _make_tool(files={})
+        tool = _make_tool(files={}).tool
 
         # When
         result = await tool.handler(
@@ -369,12 +376,12 @@ class TestGrep:
     async def test_skip_binary_files(self) -> None:
         """Skip binary files."""
         # Given
-        tool, _ = _make_tool(
+        tool = _make_tool(
             files={
                 "/workspace/agent/text.txt": b"hello world",
                 "/workspace/agent/bin.dat": b"\xff\xfe\x00\x01",
             },
-        )
+        ).tool
 
         # When
         result = await tool.handler(
@@ -403,7 +410,7 @@ class TestGrepErrors:
 
     async def test_invalid_regex(self) -> None:
         """Invalid regex raises FunctionToolError."""
-        tool, _ = _make_tool()
+        tool = _make_tool().tool
         with pytest.raises(FunctionToolError, match="Invalid regex"):
             await tool.handler(
                 json.dumps(
@@ -416,7 +423,7 @@ class TestGrepErrors:
 
     async def test_unsupported_path(self) -> None:
         """Disallowed path returns no files."""
-        tool, _ = _make_tool()
+        tool = _make_tool().tool
         result = await tool.handler(
             json.dumps(
                 {
@@ -430,7 +437,7 @@ class TestGrepErrors:
 
     async def test_relative_path(self) -> None:
         """Relative path returns no files."""
-        tool, _ = _make_tool()
+        tool = _make_tool().tool
         result = await tool.handler(
             json.dumps(
                 {

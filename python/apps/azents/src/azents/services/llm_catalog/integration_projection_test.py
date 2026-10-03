@@ -36,11 +36,14 @@ from azents.repos.kimi_oauth_runtime import KimiOAuthRuntimeRepository
 from azents.repos.llm_catalog import (
     LLMCatalogRepository,
 )
+from azents.repos.llm_catalog_operations import LLMCatalogOperationsRepository
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.llm_provider_integration.data import (
     LLMProviderIntegrationCreate,
     LLMProviderIntegrationWithSecrets,
 )
+from azents.repos.model_metadata_operations import ModelMetadataSourceOperations
+from azents.repos.model_metadata_read import ModelMetadataReadRepository
 from azents.repos.model_metadata_source import ModelMetadataSourceRepository
 from azents.repos.workspace import WorkspaceRepository
 from azents.repos.xai_oauth_runtime import XaiOAuthRuntimeRepository
@@ -52,10 +55,15 @@ from azents.services.model_listing.data import (
     ModelListingSummary,
     NormalizedModelCandidate,
 )
+from azents.services.model_listing.providers import (
+    ListingClientFactories,
+    create_listing_client_factories,
+)
 from azents.services.model_metadata_source import (
     CatalogSourceAdapter,
     ModelMetadataSourceSyncService,
 )
+from azents.services.oauth_runtime_clients import create_runtime_oauth_client_factories
 
 
 async def test_deterministic_integration_sync_does_not_require_source_authority(
@@ -100,9 +108,17 @@ async def test_deterministic_integration_sync_does_not_require_source_authority(
     ) as _client:
         result = await IntegrationCatalogProjectionService(
             provider_listing=llm_catalog_service.get_integration_model_listing(),
-            session_manager=rdb_session_manager,
-            catalog_repository=LLMCatalogRepository(),
-            integration_repository=integration_repository,
+            operations=LLMCatalogOperationsRepository(
+                session_manager=rdb_session_manager,
+                catalog_repository=LLMCatalogRepository(),
+                integration_repository=integration_repository,
+            ),
+            listing_clients=create_listing_client_factories(),
+            oauth_clients=create_runtime_oauth_client_factories(),
+            kimi_oauth_runtime_repository=KimiOAuthRuntimeRepository(
+                integration_repository=integration_repository,
+                session_manager=rdb_session_manager,
+            ),
             chatgpt_oauth_runtime_repository=ChatGPTOAuthRuntimeRepository(
                 integration_repository=integration_repository,
                 session_manager=rdb_session_manager,
@@ -112,13 +128,15 @@ async def test_deterministic_integration_sync_does_not_require_source_authority(
                 session_manager=rdb_session_manager,
             ),
             source_sync_service=ModelMetadataSourceSyncService(
-                session_manager=rdb_session_manager,
-                repository=ModelMetadataSourceRepository(),
+                read_repository=ModelMetadataReadRepository(
+                    session_manager=rdb_session_manager,
+                    source_snapshot_repository=ModelMetadataSourceRepository(),
+                ),
+                operations=ModelMetadataSourceOperations(
+                    session_manager=rdb_session_manager,
+                    repository=ModelMetadataSourceRepository(),
+                ),
                 source_adapter=AsyncMock(spec=CatalogSourceAdapter),
-            ),
-            kimi_oauth_runtime_repository=KimiOAuthRuntimeRepository(
-                session_manager=rdb_session_manager,
-                integration_repository=integration_repository,
             ),
         ).sync_integration_catalog(
             integration_id=integration.id,
@@ -236,6 +254,8 @@ async def test_oauth_sync_refresh_preserves_generation_and_user_update_fence(
 
     async def list_models(
         listed_integration: LLMProviderIntegrationWithSecrets,
+        *,
+        clients: ListingClientFactories,
     ) -> ModelListingOutput:
         call_order.append("list")
         assert isinstance(
@@ -304,9 +324,17 @@ async def test_oauth_sync_refresh_preserves_generation_and_user_update_fence(
     async with httpx.AsyncClient() as _client:
         service = IntegrationCatalogProjectionService(
             provider_listing=llm_catalog_service.get_integration_model_listing(),
-            session_manager=rdb_session_manager,
-            catalog_repository=LLMCatalogRepository(),
-            integration_repository=integration_repository,
+            operations=LLMCatalogOperationsRepository(
+                session_manager=rdb_session_manager,
+                catalog_repository=LLMCatalogRepository(),
+                integration_repository=integration_repository,
+            ),
+            listing_clients=create_listing_client_factories(),
+            oauth_clients=create_runtime_oauth_client_factories(),
+            kimi_oauth_runtime_repository=KimiOAuthRuntimeRepository(
+                integration_repository=integration_repository,
+                session_manager=rdb_session_manager,
+            ),
             chatgpt_oauth_runtime_repository=ChatGPTOAuthRuntimeRepository(
                 integration_repository=integration_repository,
                 session_manager=rdb_session_manager,
@@ -316,13 +344,15 @@ async def test_oauth_sync_refresh_preserves_generation_and_user_update_fence(
                 session_manager=rdb_session_manager,
             ),
             source_sync_service=ModelMetadataSourceSyncService(
-                session_manager=rdb_session_manager,
-                repository=ModelMetadataSourceRepository(),
+                read_repository=ModelMetadataReadRepository(
+                    session_manager=rdb_session_manager,
+                    source_snapshot_repository=ModelMetadataSourceRepository(),
+                ),
+                operations=ModelMetadataSourceOperations(
+                    session_manager=rdb_session_manager,
+                    repository=ModelMetadataSourceRepository(),
+                ),
                 source_adapter=AsyncMock(spec=CatalogSourceAdapter),
-            ),
-            kimi_oauth_runtime_repository=KimiOAuthRuntimeRepository(
-                session_manager=rdb_session_manager,
-                integration_repository=integration_repository,
             ),
         )
         if user_change_during_listing:
@@ -429,7 +459,9 @@ async def test_xai_failure_preserves_last_successful_snapshot(
     )
     calls = 0
 
-    async def list_models(integration_value: object) -> ModelListingOutput:
+    async def list_models(
+        integration_value: object, *, clients: ListingClientFactories
+    ) -> ModelListingOutput:
         nonlocal calls
         del integration_value
         calls += 1
@@ -449,9 +481,17 @@ async def test_xai_failure_preserves_last_successful_snapshot(
     async with httpx.AsyncClient() as _client:
         service = IntegrationCatalogProjectionService(
             provider_listing=llm_catalog_service.get_integration_model_listing(),
-            session_manager=rdb_session_manager,
-            catalog_repository=catalog_repository,
-            integration_repository=integration_repository,
+            operations=LLMCatalogOperationsRepository(
+                session_manager=rdb_session_manager,
+                catalog_repository=catalog_repository,
+                integration_repository=integration_repository,
+            ),
+            listing_clients=create_listing_client_factories(),
+            oauth_clients=create_runtime_oauth_client_factories(),
+            kimi_oauth_runtime_repository=KimiOAuthRuntimeRepository(
+                integration_repository=integration_repository,
+                session_manager=rdb_session_manager,
+            ),
             chatgpt_oauth_runtime_repository=ChatGPTOAuthRuntimeRepository(
                 integration_repository=integration_repository,
                 session_manager=rdb_session_manager,
@@ -461,13 +501,15 @@ async def test_xai_failure_preserves_last_successful_snapshot(
                 session_manager=rdb_session_manager,
             ),
             source_sync_service=ModelMetadataSourceSyncService(
-                session_manager=rdb_session_manager,
-                repository=ModelMetadataSourceRepository(),
+                read_repository=ModelMetadataReadRepository(
+                    session_manager=rdb_session_manager,
+                    source_snapshot_repository=ModelMetadataSourceRepository(),
+                ),
+                operations=ModelMetadataSourceOperations(
+                    session_manager=rdb_session_manager,
+                    repository=ModelMetadataSourceRepository(),
+                ),
                 source_adapter=AsyncMock(spec=CatalogSourceAdapter),
-            ),
-            kimi_oauth_runtime_repository=KimiOAuthRuntimeRepository(
-                session_manager=rdb_session_manager,
-                integration_repository=integration_repository,
             ),
         )
         first = await service.sync_integration_catalog(

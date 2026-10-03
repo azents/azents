@@ -9,6 +9,9 @@ from fastapi import Depends
 
 from azents.broker.broadcast import WebSocketBroadcast
 from azents.broker.types import PublishedEvent
+from azents.core.chat_data import (
+    ChatLiveRunState,
+)
 from azents.core.enums import EventKind
 from azents.engine.events.engine_events import (
     ContentDelta,
@@ -20,7 +23,6 @@ from azents.engine.events.engine_events import (
 )
 from azents.engine.events.types import ActiveToolCall, Event
 from azents.repos.live_projection_authority import LiveProjectionAuthorityRepository
-from azents.services.chat.data import ChatLiveRunState
 from azents.services.chat.live_events import (
     BaseLiveEventStore,
     RedisLiveEventStore,

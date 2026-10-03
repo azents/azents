@@ -11,7 +11,17 @@ from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import ExternalChannelProvider
+from azents.core.external_channel_conversation_data import (
+    ExternalChannelHistoryCredentialsInvalid,
+    ExternalChannelHistoryRange,
+    ExternalChannelHistoryTemporaryFailure,
+    ExternalChannelOperationDeadline,
+)
 from azents.core.external_channel_file import external_channel_file_metadata_items
+from azents.core.external_channel_ingestion import (
+    ExternalChannelCanonicalHistoryMessage,
+    ExternalChannelTriggerLocator,
+)
 from azents.core.external_channel_provider import (
     DiscordConnectionCredentials,
     SlackConnectionCredentials,
@@ -23,12 +33,6 @@ from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.services.external_channel.connection import (
     get_external_channel_credentials_codec,
 )
-from azents.services.external_channel.conversation import (
-    ExternalChannelHistoryCredentialsInvalid,
-    ExternalChannelHistoryRange,
-    ExternalChannelHistoryTemporaryFailure,
-    ExternalChannelOperationDeadline,
-)
 from azents.services.external_channel.credentials import ExternalChannelCredentialsCodec
 from azents.services.external_channel.discord_events import DiscordNormalizedMessage
 from azents.services.external_channel.discord_history import (
@@ -38,10 +42,6 @@ from azents.services.external_channel.discord_history import (
 from azents.services.external_channel.discord_sdk import (
     DiscordSDKClientFactory,
     get_discord_sdk_client_factory,
-)
-from azents.services.external_channel.ingestion import (
-    ExternalChannelCanonicalHistoryMessage,
-    ExternalChannelTriggerLocator,
 )
 from azents.services.external_channel.slack_events import (
     SlackConversationClient,

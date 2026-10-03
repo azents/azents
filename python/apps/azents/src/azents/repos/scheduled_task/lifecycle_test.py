@@ -2,7 +2,7 @@
 
 import datetime
 from dataclasses import dataclass
-from typing import cast
+from unittest.mock import AsyncMock
 
 import pytest
 import sqlalchemy as sa
@@ -31,9 +31,9 @@ from azents.repos.mailbox.data import MailboxItemCreate
 from azents.repos.scheduled_task.data import ScheduledTaskCreate
 from azents.repos.scheduled_task.lifecycle import ScheduledTaskLifecycleRepository
 from azents.repos.scheduled_task.repository import ScheduledTaskRepository
-from azents.repos.scheduled_task_cycle import (
+from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
+from azents.repos.scheduled_task_cycle.data import (
     ScheduledTaskCycleRecord,
-    ScheduledTaskCycleRepository,
     ScheduledTaskCycleSnapshot,
 )
 from azents.repos.toolkit_state import ToolkitStateRepository
@@ -72,11 +72,11 @@ class _BindingFenceSession:
         self.locked_task = locked_task
         self.deleted: list[object] = []
         self.flushed = False
-
-    async def scalar(self, query: object) -> RDBScheduledTask:
-        """Return the Task visible at the final lock boundary."""
-        del query
-        return self.locked_task
+        session = AsyncMock(spec=AsyncSession)
+        session.scalar.return_value = locked_task
+        session.delete.side_effect = self.delete
+        session.flush.side_effect = self.flush
+        self.session: AsyncSession = session
 
     async def delete(self, row: object) -> None:
         """Record unexpected deletion."""
@@ -296,7 +296,7 @@ class TestScheduledTaskLifecycleRepository:
         session = _BindingFenceSession(locked)
 
         cleanup = await ScheduledTaskLifecycleRepository()._terminate_tasks(
-            cast(AsyncSession, session),
+            session.session,
             tasks=[candidate],
             expected_binding_id="b" * 32,
         )

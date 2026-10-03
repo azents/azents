@@ -21,6 +21,7 @@ from azents.core.enums import (
     EventKind,
     ExchangeFileProvenanceKind,
 )
+from azents.core.session_resource_authority import SessionResourceAuthority
 from azents.engine.events.protocols import NormalizedAdapterOutput
 from azents.engine.events.provider_output import (
     ProviderOutputMaterializer,
@@ -59,7 +60,6 @@ from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.repos.workspace_user.data import WorkspaceUser
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.model_file import ModelFileService
-from azents.services.session_resource_authority import SessionResourceAuthority
 from azents.testing.types import require_instance
 
 _PNG_BASE64 = (

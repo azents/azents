@@ -6,9 +6,9 @@ from typing import Annotated
 
 from fastapi import Depends
 
-from azents.broker.types import PublishedEvent
 from azents.engine.events.engine_events import RunComplete
 from azents.engine.events.types import Event
+from azents.engine.run.emit import PublishedEvent
 from azents.engine.run.failure import (
     FailedRunFinalizationReason,
     FailedRunRetryState,

@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.rdb.session import SessionManager
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.session_execution import (
@@ -43,3 +44,19 @@ class OwnerBoundSessionManager:
         """Check admission authority without retaining a transaction across I/O."""
         async with self():
             pass
+
+
+@dataclasses.dataclass(frozen=True)
+class SessionExecutionAuthorityRepository:
+    """Expose a completed ownership check without exposing a transaction scope."""
+
+    session_manager: SessionManager[AsyncSession]
+    owner: SessionExecutionOwner
+
+    async def assert_current(self) -> None:
+        """Complete an ownership check before admitting external execution."""
+        await OwnerBoundSessionManager(
+            session_manager=self.session_manager,
+            session_id=self.owner.session_id,
+            owner_generation=self.owner.owner_generation,
+        ).assert_current()

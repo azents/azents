@@ -7,6 +7,7 @@ from azcommon.result import Failure, Result, Success
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.enums import WorkspaceUserRole
 from azents.core.workspace import (
     CreateWithOwnerInput,
     HandleConflict,
@@ -20,7 +21,7 @@ from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace.data import Workspace, WorkspaceList
 from azents.repos.workspace.operation_data import WorkspaceOwnerCreation
 from azents.repos.workspace_user import WorkspaceUserRepository
-from azents.repos.workspace_user.data import WorkspaceUserCreate, WorkspaceUserRole
+from azents.repos.workspace_user.data import WorkspaceUserCreate
 
 
 @dataclasses.dataclass

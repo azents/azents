@@ -16,7 +16,10 @@ from azents.engine.events.types import Event, public_event_payload
 from azents.repos.action_execution.data import ActionExecutionProjection
 
 if TYPE_CHECKING:
-    from azents.services.chat.data import ChatLiveRunState, PendingMailboxEnvelope
+    from azents.core.chat_data import (
+        ChatLiveRunState,
+        PendingMailboxEnvelope,
+    )
 
 
 class ChatAttachmentSnapshot(BaseModel):

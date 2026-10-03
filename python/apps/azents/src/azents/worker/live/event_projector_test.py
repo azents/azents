@@ -8,6 +8,9 @@ import pytest
 from azents.broker.broadcast import (
     WebSocketBroadcastPublishError,
 )
+from azents.core.chat_data import (
+    ChatLiveRunState,
+)
 from azents.core.enums import AgentRunPhase, AgentRunStatus
 from azents.core.inference_profile import AppliedInferenceProfile
 from azents.engine.events.engine_events import (
@@ -25,7 +28,6 @@ from azents.engine.events.types import (
     ReasoningPayload,
 )
 from azents.repos.live_projection_authority import LiveProjectionAuthorityRepository
-from azents.services.chat.data import ChatLiveRunState
 from azents.services.chat.live_events import (
     InMemoryLiveEventStore,
     LiveOwnerAdvance,

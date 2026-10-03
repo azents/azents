@@ -17,6 +17,7 @@ from azents.core.agent import (
     SelectableModelOptionInput,
     SelectableModelSettings,
 )
+from azents.core.agent_errors import NotFound
 from azents.core.config import Config
 from azents.core.deps import get_config
 from azents.core.enums import (
@@ -32,7 +33,7 @@ from azents.engine.context.window import (
     compute_effective_context_window_tokens,
     resolve_model_input_tokens,
 )
-from azents.repos.agent.data import Agent, AgentCreate, AgentUpdate, NotFound
+from azents.repos.agent.data import Agent, AgentCreate, AgentUpdate
 from azents.repos.agent_operations import (
     AgentOperationAdminNotFound,
     AgentOperationLastAdmin,
@@ -61,6 +62,8 @@ from azents.services.runtime_profile_workspace.service import (
 )
 from azents.services.terminal_policy.invalidation import (
     TerminalPolicyInvalidationPublisherDependency,
+)
+from azents.services.terminal_policy.invalidation_contracts import (
     TerminalPolicySourceInvalidation,
     TerminalPolicySourceScope,
 )

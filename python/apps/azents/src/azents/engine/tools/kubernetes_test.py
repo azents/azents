@@ -10,7 +10,6 @@ from kubernetes_asyncio.client import Configuration
 from kubernetes_asyncio.client.rest import ApiException
 from lightkube import ApiError, AsyncClient
 from lightkube.models.meta_v1 import Status
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.tools import (
     ClusterConfig,
@@ -61,7 +60,6 @@ def _make_resolve_context(credentials_json: str) -> ResolveContext:
         credentials_json=credentials_json,
         agent_id="agent-1",
         session_id="session-1",
-        session=AsyncMock(spec=AsyncSession),
         web_url="https://test.example.com",
         oauth_secret_key="test-key",
         workspace_id="ws-1",

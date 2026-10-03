@@ -26,6 +26,9 @@ from azents.core.llm_catalog_sync import (
 )
 from azents.core.workspace import WorkspaceCreate
 from azents.rdb.session import SessionManager
+from azents.repos.image_generation_catalog_operations import (
+    ImageGenerationCatalogOperationsRepository,
+)
 from azents.repos.llm_catalog import LLMCatalogRepository
 from azents.repos.llm_catalog.data import (
     ImageGenerationCatalogEntryCreate,
@@ -45,6 +48,10 @@ from azents.services.image_generation_catalog import (
     image_generation_explicit_selection_supported,
 )
 from azents.services.model_listing.data import ImageGenerationModelListingOutput
+from azents.services.model_listing.providers import (
+    ListingClientFactories,
+    create_listing_client_factories,
+)
 from azents.testing.model_selection import make_test_model_selection
 
 
@@ -129,9 +136,12 @@ async def _create_service(
         ),
     )
     service = ImageGenerationCatalogService(
-        session_manager=_session_manager_for(rdb_session),
-        catalog_repository=LLMCatalogRepository(),
-        integration_repository=integration_repository,
+        operations=ImageGenerationCatalogOperationsRepository(
+            session_manager=_session_manager_for(rdb_session),
+            catalog_repository=LLMCatalogRepository(),
+            integration_repository=integration_repository,
+        ),
+        listing_clients=create_listing_client_factories(),
     )
     return _ImageCatalogServiceFixture(
         service=service,
@@ -149,14 +159,14 @@ async def _publish_flare(
     integration_id: str,
 ) -> None:
     """Publish one current-generation Flare entry through repository fencing."""
-    catalog = await service.catalog_repository.ensure_integration_catalog(
+    catalog = await service.operations.catalog_repository.ensure_integration_catalog(
         rdb_session,
         integration_id=integration_id,
         provider=LLMProvider.OPENAI,
         purpose=LLMCatalogPurpose.IMAGE_GENERATION,
     )
     started_at = datetime.datetime.now(datetime.UTC)
-    claim = await service.catalog_repository.begin_integration_attempt(
+    claim = await service.operations.catalog_repository.begin_integration_attempt(
         rdb_session,
         catalog_id=catalog.id,
         workspace_id=workspace_id,
@@ -165,31 +175,30 @@ async def _publish_flare(
         trigger=IntegrationCatalogSyncTrigger.CREATE,
     )
     assert isinstance(claim, IntegrationCatalogSyncClaim)
-    publication = (
-        await service.catalog_repository.replace_current_image_generation_snapshot(
-            rdb_session,
-            catalog=catalog,
-            attempt_id=claim.attempt_id,
-            entries=[
-                ImageGenerationCatalogEntryCreate(
-                    provider=LLMProvider.OPENAI,
-                    provider_model_identifier="gpt-image-2.5-flare",
-                    display_name="GPT Image 2.5 Flare",
-                    description="Recommended image model.",
-                    recommendation_rank=1,
-                    lifecycle_status=LLMModelLifecycleStatus.ACTIVE,
-                    visibility_status=LLMCatalogEntryVisibility.SELECTABLE,
-                    provider_integration_id=integration_id,
-                    source_metadata=None,
-                    projection_metadata={"registry_revision": 1},
-                    hidden_reason=None,
-                )
-            ],
-            diagnostics={"catalog_purpose": "image_generation"},
-        )
+    repository = service.operations.catalog_repository
+    publication = await repository.replace_current_image_generation_snapshot(
+        rdb_session,
+        catalog=catalog,
+        attempt_id=claim.attempt_id,
+        entries=[
+            ImageGenerationCatalogEntryCreate(
+                provider=LLMProvider.OPENAI,
+                provider_model_identifier="gpt-image-2.5-flare",
+                display_name="GPT Image 2.5 Flare",
+                description="Recommended image model.",
+                recommendation_rank=1,
+                lifecycle_status=LLMModelLifecycleStatus.ACTIVE,
+                visibility_status=LLMCatalogEntryVisibility.SELECTABLE,
+                provider_integration_id=integration_id,
+                source_metadata=None,
+                projection_metadata={"registry_revision": 1},
+                hidden_reason=None,
+            )
+        ],
+        diagnostics={"catalog_purpose": "image_generation"},
     )
     assert publication.snapshot_id is not None
-    await service.catalog_repository.mark_attempt_succeeded(
+    await service.operations.catalog_repository.mark_attempt_succeeded(
         rdb_session,
         attempt_id=claim.attempt_id,
         finished_at=started_at + datetime.timedelta(seconds=1),
@@ -217,7 +226,9 @@ async def test_sync_uses_credential_snapshot_loaded_after_attempt_claim(
         rdb_session,
         handle="image-service-credential-snapshot",
     )
-    original_begin_attempt = service.catalog_repository.begin_integration_attempt
+    original_begin_attempt = (
+        service.operations.catalog_repository.begin_integration_attempt
+    )
 
     async def begin_attempt_after_credential_update(
         session: AsyncSession,
@@ -247,6 +258,8 @@ async def test_sync_uses_credential_snapshot_loaded_after_attempt_claim(
 
     async def list_models_from_claimed_credentials(
         integration: LLMProviderIntegrationWithSecrets,
+        *,
+        clients: ListingClientFactories,
     ) -> ImageGenerationModelListingOutput:
         assert integration.secrets == ApiKeySecrets(api_key="sk-updated")
         return ImageGenerationModelListingOutput(
@@ -257,7 +270,7 @@ async def test_sync_uses_credential_snapshot_loaded_after_attempt_claim(
         )
 
     monkeypatch.setattr(
-        service.catalog_repository,
+        service.operations.catalog_repository,
         "begin_integration_attempt",
         begin_attempt_after_credential_update,
     )

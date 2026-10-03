@@ -7,6 +7,10 @@ import pytest
 import pytest_asyncio
 from redis.asyncio import Redis
 
+from azents.core.chat_data import (
+    PendingMailboxAgentMessagePresentation,
+    PendingMailboxExternalChannelPresentation,
+)
 from azents.core.enums import (
     ActionExecutionStatus,
     AgentRunStatus,
@@ -37,10 +41,6 @@ from azents.repos.mailbox.data import (
     MailboxItem,
     MailboxPresentationItem,
     TurnActionContinuationMailboxPayload,
-)
-from azents.services.chat.data import (
-    PendingMailboxAgentMessagePresentation,
-    PendingMailboxExternalChannelPresentation,
 )
 
 from .live_events import (

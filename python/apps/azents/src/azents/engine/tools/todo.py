@@ -11,6 +11,11 @@ from azents.core.engine_tool_state import (
     TodoState,
     TodoStatus,
 )
+from azents.core.session_resource_authority import (
+    SessionExecutionOwner,
+    SessionResourceAuthority,
+    accepts_execution_owner,
+)
 from azents.core.toolkit_state import ToolkitStateModel
 from azents.core.tools import (
     ResolveContext,
@@ -29,11 +34,6 @@ from azents.engine.hooks.types import (
 from azents.engine.run.types import FunctionTool, FunctionToolError
 from azents.engine.tooling.make_tool import make_tool
 from azents.repos.toolkit_state.engine import TodoStateStore
-from azents.services.session_resource_authority import (
-    SessionExecutionOwner,
-    SessionResourceAuthority,
-    accepts_execution_owner,
-)
 
 TODO_STATUS_VALUES = {"pending", "in_progress", "completed"}
 TodoOperation = Literal["replace", "clear"]

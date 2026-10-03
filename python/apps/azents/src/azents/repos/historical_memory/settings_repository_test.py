@@ -1,6 +1,7 @@
 """Historical Memory settings repository tests."""
 
 import datetime
+from typing import NamedTuple
 
 import pytest
 import sqlalchemy as sa
@@ -11,6 +12,7 @@ from azents.core.enums import (
     AgentSessionStatus,
     WorkspaceUserRole,
 )
+from azents.core.historical_memory_settings import HistoricalMemorySettingsScope
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.agent_session import RDBAgentSession
@@ -25,7 +27,6 @@ from azents.repos.historical_memory.settings import (
 )
 from azents.repos.historical_memory.settings_data import (
     HistoricalMemorySettingsCursorError,
-    HistoricalMemorySettingsScope,
 )
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
@@ -77,9 +78,18 @@ async def _create_source(
     return source.id
 
 
+class _SettingsFixture(NamedTuple):
+    """Agent scope and two distinct current members."""
+
+    workspace_id: str
+    agent_id: str
+    user_id: str
+    other_user_id: str
+
+
 async def _fixture(
     session: AsyncSession,
-) -> tuple[str, str, str, str]:
+) -> _SettingsFixture:
     """Create one Memory-disabled Agent and two current members."""
     workspace = RDBWorkspace(name="Historical settings", handle="historical-settings")
     session.add(workspace)
@@ -121,7 +131,12 @@ async def _fixture(
             )
         )
     await session.flush()
-    return workspace.id, agent.id, first_user.id, second_user.id
+    return _SettingsFixture(
+        workspace_id=workspace.id,
+        agent_id=agent.id,
+        user_id=first_user.id,
+        other_user_id=second_user.id,
+    )
 
 
 async def test_settings_list_is_scope_search_cursor_and_enablement_independent(

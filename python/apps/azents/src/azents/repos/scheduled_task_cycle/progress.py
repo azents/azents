@@ -21,6 +21,7 @@ from azents.core.external_channel_progress import (
     ExternalChannelWorkTask,
     checking_progress,
 )
+from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.core.slack_external_channel_progress import (
     render_scheduled_task_slack_progress,
 )
@@ -37,7 +38,6 @@ from azents.repos.scheduled_task_cycle.progress_data import (
     ScheduledTaskTrackerEffect,
 )
 from azents.repos.session_execution.ownership import OwnerBoundSessionManager
-from azents.services.session_resource_authority import SessionExecutionOwner
 
 
 @dataclasses.dataclass(frozen=True)

@@ -6,6 +6,16 @@ spec_type: domain
 domain: memory
 owner: "@Hardtack"
 code_paths:
+  - python/apps/azents/src/azents/core/agent_automatic_project.py
+  - python/apps/azents/src/azents/core/agent_errors.py
+  - python/apps/azents/src/azents/core/historical_memory_settings.py
+  - python/apps/azents/src/azents/core/historical_memory_snapshot_policy.py
+  - python/apps/azents/src/azents/core/memory_scope.py
+  - python/apps/azents/src/azents/core/session_resource_authority.py
+  - python/apps/azents/src/azents/core/session_workspace_paths.py
+  - python/apps/azents/src/azents/repos/engine_resolve.py
+  - python/apps/azents/src/azents/repos/engine_tool_repositories.py
+  - python/apps/azents/src/azents/repos/vfs_read_authority.py
   - python/apps/azents/src/azents/core/historical_memory.py
   - python/apps/azents/src/azents/core/historical_memory_output.py
   - python/apps/azents/src/azents/core/historical_memory_snapshot.py
