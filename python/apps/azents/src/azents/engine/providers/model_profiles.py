@@ -33,7 +33,7 @@ from azents.core.model_catalog_source import CatalogSourceModel
 from azents.engine.events.pydantic_ai_types import NativeModelProtocol
 from azents.engine.model_assembly import ModelAssemblyMetadata
 
-RUNTIME_MODEL_PROFILE_RESOLVER_REVISION = "4"
+RUNTIME_MODEL_PROFILE_RESOLVER_REVISION = "5"
 
 RuntimeModelKind = Literal[
     "native_openai_responses",
@@ -279,6 +279,7 @@ def resolve_runtime_model_profile(
             assert_never(unreachable)
 
     profile = merge_profile(stock, override)
+    profile = _preserve_sampling_codec(profile, protocol=protocol)
     if assembly_metadata is not None and capabilities.semantic_contract is not None:
         profile = _apply_saved_support(
             profile, protocol=protocol, capabilities=capabilities
@@ -314,6 +315,23 @@ def _anthropic_override() -> AnthropicModelProfile:
         tool_addition_mode=None,
         tool_deferral_mode=None,
     )
+
+
+def _preserve_sampling_codec(
+    profile: ModelProfile, *, protocol: NativeModelProtocol
+) -> ModelProfile:
+    """Keep accepted controls for saved and historical requests on the wire."""
+    if protocol == "anthropic":
+        return merge_profile(
+            profile, AnthropicModelProfile(anthropic_disallows_sampling_settings=False)
+        )
+    if protocol == "bedrock":
+        return merge_profile(
+            profile,
+            AnthropicModelProfile(anthropic_disallows_sampling_settings=False),
+            BedrockModelProfile(bedrock_disallows_sampling_settings=False),
+        )
+    return profile
 
 
 def _apply_saved_support(
@@ -359,6 +377,12 @@ def _apply_saved_support(
             supports_thinking=reasoning,
             supports_json_schema_output=(
                 structured or (protocol == "anthropic" and strict)
+            ),
+            supports_image_output=protocol == "google"
+            and any(
+                output.modality == "image"
+                and output.support.state in {"supported", "conditional"}
+                for output in contract.output_modalities
             ),
             supported_native_tools=frozenset(native_tools),
         ),

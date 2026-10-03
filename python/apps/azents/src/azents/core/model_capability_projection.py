@@ -2,6 +2,7 @@
 
 from typing import Literal, NamedTuple
 
+from pydantic_ai.profiles.google import GOOGLE_THINKING_LEVELS
 from pydantic_ai.providers.google import GoogleProvider
 
 from azents.core.builtin_tools import supported_builtin_capabilities
@@ -28,6 +29,7 @@ from azents.core.model_capability_contract import (
     ParameterSupport,
     ReasoningEffortValue,
     ReasoningSupport,
+    SupportPredicate,
 )
 from azents.core.model_capability_evidence import (
     ProviderCapabilityEvidence,
@@ -40,7 +42,7 @@ from azents.core.model_catalog_source import (
     CatalogSourceModel,
 )
 
-CAPABILITY_PROJECTION_REVISION = "2"
+CAPABILITY_PROJECTION_REVISION = "3"
 type ProjectionProtocol = Literal[
     "native_responses", "responses", "chat", "anthropic", "google", "bedrock"
 ]
@@ -243,11 +245,11 @@ def _reasoning(
 def google_lossless_efforts(
     *, provider: LLMProvider, model: str
 ) -> tuple[ModelReasoningEffort, ...]:
-    """Bound scalar efforts to explicitly declared, unchanged Google wire levels.
+    """Bound supplied model evidence to the installed Google scalar wire domain.
 
     This reads the retained adapter's encoding traits, not source support. Sparse
-    profile defaults and invented effort-to-token budgets do not prove a lossless
-    mapping. Native OpenAI never enters this provider-specific helper.
+    scalar profiles use the codec's documented level domain; budget-only profiles
+    do not prove a lossless mapping. Native OpenAI never enters this helper.
     """
     if provider not in {LLMProvider.GOOGLE_GEMINI, LLMProvider.GOOGLE_VERTEX_AI}:
         raise ValueError("Google wire effort bounds require a Google provider route.")
@@ -255,8 +257,12 @@ def google_lossless_efforts(
     if profile is None or profile.get("google_supports_thinking_level") is not True:
         return ()
     levels = profile.get("google_thinking_levels")
-    if not isinstance(levels, frozenset):
-        return ()
+    if levels is None:
+        levels = (
+            GOOGLE_THINKING_LEVELS
+            if profile.get("google_supports_minimal_thinking_level", True)
+            else GOOGLE_THINKING_LEVELS - {"MINIMAL"}
+        )
     return tuple(
         effort
         for effort in (
@@ -357,10 +363,14 @@ def _media(
                 support=_modality_support(
                     modality=modality,
                     listing=evidence.output_modalities,
-                    listing_flag=None,
+                    listing_flag=evidence.hosted_image_generation
+                    if route == "google" and modality == ModelModality.IMAGE
+                    else None,
                     source_list=facts.output_modalities if facts else None,
                     source_flag=None,
-                    implemented=modality == ModelModality.TEXT,
+                    implemented=modality == ModelModality.TEXT
+                    or route == "google"
+                    and modality == ModelModality.IMAGE,
                 ),
             )
             for modality in ModelModality
@@ -408,11 +418,24 @@ def project_capabilities(
         and function.enabled
     ):
         strict = _derived(True)
-    if not function.enabled:
+    if function.state == "unsupported":
         if parallel.enabled:
             parallel = _derived(False)
         if strict.enabled:
             strict = _derived(False)
+    elif function.state == "unknown":
+        if parallel.enabled:
+            parallel = CapabilitySupport(
+                state="conditional",
+                origin=parallel.origin,
+                predicate=SupportPredicate(reasoning_efforts=None, function_tools=True),
+            )
+        if strict.enabled:
+            strict = CapabilitySupport(
+                state="conditional",
+                origin=strict.origin,
+                predicate=SupportPredicate(reasoning_efforts=None, function_tools=True),
+            )
     structure_fact = facts.response_schema if facts else None
     if structure_fact is not None and structure_fact.state == "absent":
         structure_fact = facts.native_structured_output if facts else None
@@ -455,6 +478,7 @@ def project_capabilities(
         web = _derived(True)
     elif route in {"bedrock", "chat"}:
         web = _derived(False)
+    inputs, outputs = _media(facts=facts, evidence=listing, route=route)
     client_image = provider in {
         LLMProvider.OPENAI,
         LLMProvider.CHATGPT_OAUTH,
@@ -489,10 +513,24 @@ def project_capabilities(
         if function.state == "unsupported" and image.enabled:
             image = _derived(False)
     elif route == "google":
-        image = _support(listing.hosted_image_generation)
+        image = next(
+            output.support
+            for output in outputs
+            if output.modality == ModelModality.IMAGE
+        )
+        if (
+            listing.hosted_image_generation.state != "absent"
+            and listing.hosted_image_generation.value is not True
+        ):
+            image = _support(listing.hosted_image_generation)
+            outputs = tuple(
+                output.model_copy(update={"support": image})
+                if output.modality == ModelModality.IMAGE
+                else output
+                for output in outputs
+            )
     else:
         image = _derived(False)
-    inputs, outputs = _media(facts=facts, evidence=listing, route=route)
     contract = ModelCapabilityContract(
         version=2,
         reasoning=reasoning,

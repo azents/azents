@@ -1,6 +1,7 @@
 """Captured catalog pricing and provider-charge integration contracts."""
 
 import datetime
+import json
 
 import pytest
 
@@ -187,3 +188,161 @@ def test_upstream_computed_cost_is_not_adopted_without_native_charge() -> None:
     )
     assert result.cost_usd is None
     assert result.cost_provenance is None
+
+
+def _google_estimate(
+    raw: dict[str, object], *, cached: int | None, charge: float | None
+) -> TokenUsagePayload:
+    source = decode_catalog_source(
+        b'{"gemini/selected-model":{"litellm_provider":"gemini",'
+        b'"input_cost_per_token":0.1,"output_cost_per_token":0.2,'
+        b'"input_cost_per_image_token":0.7,"input_cost_per_audio_token":0.6,'
+        b'"output_cost_per_image_token":0.8,"output_cost_per_audio_token":0.9,'
+        b'"cache_read_input_token_cost":0.01}}'
+    ).models[0]
+    pricing = normalize_model_pricing(
+        provider=LLMProvider.GOOGLE_GEMINI,
+        model_identifier="selected-model",
+        source_snapshot_id="google-capture",
+        source_hash="google-hash",
+        source_model=source,
+        request_timestamp=datetime.datetime(2026, 10, 3, tzinfo=datetime.UTC),
+    )
+    return apply_model_usage_pricing(
+        TokenUsagePayload(
+            prompt_tokens=7,
+            completion_tokens=2,
+            total_tokens=9,
+            cached_tokens=cached,
+            cache_creation_tokens=None,
+            reasoning_tokens=None,
+            cost_usd=None,
+            raw=raw,
+            raw_hidden_params=None,
+        ),
+        provider="google_gemini",
+        model_identifier="selected-model",
+        pricing=pricing,
+        service_tier=None,
+        output_item_types=["message"],
+        reported_charge=charge,
+    )
+
+
+def _google_raw() -> dict[str, object]:
+    return {
+        "promptTokenCount": 7,
+        "candidatesTokenCount": 2,
+        "promptTokensDetails": [
+            {"modality": "TEXT", "tokenCount": 3},
+            {"modality": "IMAGE", "tokenCount": 4},
+        ],
+    }
+
+
+def test_google_directed_media_partition_is_not_priced_as_ordinary_tokens() -> None:
+    result = _google_estimate(_google_raw(), cached=None, charge=None)
+    assert result.cost_usd == pytest.approx(3.5)
+    assert result.cost_provenance is not None
+    assert result.cost_provenance.source_snapshot_id == "google-capture"
+    audio = _google_raw()
+    audio["promptTokensDetails"] = [
+        {"modality": "TEXT", "tokenCount": 3},
+        {"modality": "AUDIO", "tokenCount": 4},
+    ]
+    audio["candidatesTokensDetails"] = [
+        {"modality": "TEXT", "tokenCount": 1},
+        {"modality": "AUDIO", "tokenCount": 1},
+    ]
+    assert _google_estimate(audio, cached=None, charge=None).cost_usd == pytest.approx(
+        3.8
+    )
+
+
+def test_google_text_only_cache_receipt_keeps_media_and_cache_disjoint() -> None:
+    raw = _google_raw()
+    raw.update(
+        cachedContentTokenCount=2,
+        cacheTokensDetails=[{"modality": "TEXT", "tokenCount": 2}],
+    )
+    assert _google_estimate(raw, cached=2, charge=None).cost_usd == pytest.approx(3.32)
+
+
+def test_google_snake_case_receipts_are_native_modality_partitions() -> None:
+    raw: dict[str, object] = {
+        "prompt_token_count": 7,
+        "candidates_token_count": 2,
+        "cached_content_token_count": 2,
+        "prompt_tokens_details": [
+            {"modality": "TEXT", "token_count": 3},
+            {"modality": "IMAGE", "token_count": 4},
+        ],
+        "cache_tokens_details": [{"modality": "TEXT", "token_count": 2}],
+    }
+    assert _google_estimate(raw, cached=2, charge=None).cost_usd == pytest.approx(3.32)
+
+
+@pytest.mark.parametrize(
+    ("raw_cache", "normalized_cache", "expected"),
+    [(2, 1, None), (2, None, None), (0, 2, None), (None, 2, 3.32)],
+)
+def test_google_cache_receipt_matches_normalized_billed_counter(
+    raw_cache: int | None, normalized_cache: int | None, expected: float | None
+) -> None:
+    raw = _google_raw()
+    raw["cacheTokensDetails"] = [{"modality": "TEXT", "tokenCount": 2}]
+    if raw_cache is not None:
+        raw["cachedContentTokenCount"] = raw_cache
+    result = _google_estimate(raw, cached=normalized_cache, charge=None)
+    if expected is None:
+        assert result.cost_usd is None
+        assert result.cost_provenance is None
+    else:
+        assert result.cost_usd == pytest.approx(expected)
+
+
+def test_google_normalized_cache_without_partition_cannot_overlap_media() -> None:
+    result = _google_estimate(_google_raw(), cached=2, charge=None)
+    assert result.cost_usd is None
+    assert result.cost_provenance is None
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"promptTokensDetails": None},
+        {"promptTokensDetails": [{"modality": "IMAGE", "tokenCount": True}]},
+        {"promptTokensDetails": [{"modality": "IMAGE", "tokenCount": "7"}]},
+        {"promptTokensDetails": [{"modality": "IMAGE", "tokenCount": 8}]},
+        {"promptTokensDetails": [{"modality": "VIDEO", "tokenCount": 7}]},
+        {
+            "promptTokensDetails": [
+                {"modality": "IMAGE", "tokenCount": 4},
+                {"modality": "IMAGE", "tokenCount": 3},
+            ]
+        },
+        {"input_image_tokens": 1},
+        {"cachedContentTokenCount": 2},
+        {
+            "cachedContentTokenCount": 2,
+            "cacheTokensDetails": [{"modality": "IMAGE", "tokenCount": 2}],
+        },
+        {"toolUsePromptTokenCount": 1},
+        {"candidatesTokensDetails": [{"modality": "IMAGE", "tokenCount": 3}]},
+    ],
+)
+def test_google_incomplete_or_unadopted_partition_leaves_whole_cost_unknown(
+    change: dict[str, object],
+) -> None:
+    raw = {**_google_raw(), **change}
+    before = json.dumps(raw)
+    result = _google_estimate(
+        raw, cached=2 if "cachedContentTokenCount" in raw else None, charge=None
+    )
+    assert result.cost_usd is None
+    assert result.cost_provenance is None
+    assert json.dumps(raw) == before
+    reported = _google_estimate(raw, cached=None, charge=0.0)
+    assert reported.cost_usd == 0.0
+    assert reported.cost_provenance is not None
+    assert reported.cost_provenance.method == "provider_reported"

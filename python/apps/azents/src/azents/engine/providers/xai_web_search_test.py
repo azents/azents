@@ -1,5 +1,6 @@
 """Real SDK request-wire regression tests for xAI native search compatibility."""
 
+import dataclasses
 import json
 
 import httpx2
@@ -9,12 +10,16 @@ from pydantic_ai.native_tools import WebSearchTool
 
 from azents.core.enums import LLMProvider
 from azents.core.llm_catalog import ModelBuiltInToolCapabilities, ModelCapabilities
+from azents.core.model_capability_evidence import ProviderCapabilityEvidence
+from azents.core.model_capability_projection import project_capabilities
+from azents.core.model_catalog_source import CatalogFact
 from azents.engine.events.pydantic_ai_adapter import PydanticAIModelAdapter
 from azents.engine.events.pydantic_ai_adapter_test import (
     context_for_test,
     watchdog_for_test,
 )
 from azents.engine.events.pydantic_ai_lowering import PydanticAILowerer
+from azents.engine.model_assembly import ModelAssemblyMetadata
 from azents.engine.model_stream import ModelStreamTimeoutPolicy
 from azents.engine.model_stream_test import ControlledClock
 from azents.engine.provider_errors import SDK_PROVIDER_ERRORS, map_model_provider_error
@@ -30,8 +35,9 @@ from azents.testing.provider_native_envelopes import core_native_response
 @pytest.mark.parametrize(
     "provider", [LLMProvider.XAI, LLMProvider.XAI_OAUTH, LLMProvider.OPENROUTER]
 )
+@pytest.mark.parametrize("semantic", [False, True])
 async def test_search_wire_preserves_function_tools_and_other_settings(
-    provider: LLMProvider,
+    provider: LLMProvider, semantic: bool
 ) -> None:
     bodies: list[dict[str, object]] = []
     envelope = core_native_response(
@@ -80,7 +86,23 @@ async def test_search_wire_preserves_function_tools_and_other_settings(
             request=request,
         )
 
+    capabilities = (
+        project_capabilities(
+            provider=provider,
+            exact_model="grok-test",
+            source_model=None,
+            model_developer=None,
+            evidence=ProviderCapabilityEvidence(
+                web_search=CatalogFact(state="value", value=True)
+            ),
+        )
+        if semantic
+        else ModelCapabilities(
+            built_in_tools=ModelBuiltInToolCapabilities(supported=["web_search"])
+        )
+    )
     lowerer = PydanticAILowerer(
+        top_k=None,
         provider=provider.value,
         provider_id=provider,
         model="grok-test",
@@ -98,9 +120,7 @@ async def test_search_wire_preserves_function_tools_and_other_settings(
             }
             for name in ("first_function", "second_function")
         ],
-        model_capabilities=ModelCapabilities(
-            built_in_tools=ModelBuiltInToolCapabilities(supported=["web_search"])
-        ),
+        model_capabilities=capabilities,
         hosted_tools=[
             BuiltinToolSpec(
                 name="web_search",
@@ -116,9 +136,16 @@ async def test_search_wire_preserves_function_tools_and_other_settings(
         supported_execution_options=[],
         enabled_execution_options=[],
         max_output_tokens=32,
+        temperature=0.2 if semantic else None,
+        top_p=0.7 if semantic else None,
         kwargs={"extra_body": {"metadata": {"source": "synthetic"}}},
     )
-    logical = lowerer.lower([], model="grok-test")
+    logical = dataclasses.replace(
+        lowerer.lower([], model="grok-test"),
+        assembly_metadata=ModelAssemblyMetadata(
+            model_developer=None, model_family=None, capabilities=capabilities
+        ),
+    )
     adapter = PydanticAIModelAdapter(
         factory=ProviderModelFactory(
             provider=provider,
@@ -174,6 +201,9 @@ async def test_search_wire_preserves_function_tools_and_other_settings(
     assert first["strict"] is False
     assert bodies[0]["max_output_tokens"] == 32
     assert bodies[0]["metadata"] == {"source": "synthetic"}
+    if semantic:
+        assert bodies[0]["temperature"] == 0.2
+        assert bodies[0]["top_p"] == 0.7
     assert len(logical.parameters.function_tools) == 2
 
 

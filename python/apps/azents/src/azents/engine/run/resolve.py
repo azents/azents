@@ -716,7 +716,7 @@ async def resolve_invoke_input_with_model_source(
         and params.reasoning_effort is not None
         and main_selection.normalized_capabilities.semantic_contract is not None
         and params.reasoning_effort
-        not in main_selection.normalized_capabilities.reasoning.effort_levels
+        not in main_selection.normalized_capabilities.configurable_reasoning_efforts()
     ):
         return Failure(
             ReasoningEffortUnsupported(
@@ -860,6 +860,7 @@ async def resolve_invoke_input_with_model_source(
                     main_settings,
                 ),
                 top_p=params.top_p if params else None,
+                top_k=params.top_k if params else None,
                 stop=params.stop_sequences if params else None,
                 reasoning_effort=reasoning_effort,
                 builtin_tools=builtin_tools,

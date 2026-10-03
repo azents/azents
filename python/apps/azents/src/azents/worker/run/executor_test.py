@@ -2601,6 +2601,7 @@ async def _resolve_success(*args: object, **kwargs: object) -> object:
     return Success(
         ResolvedInvokeInputProfile(
             run_request=RunRequest(
+                top_k=None,
                 model_assembly_metadata=None,
                 compaction_assembly_metadata=None,
                 enabled_execution_options=[],
@@ -2636,6 +2637,7 @@ async def _resolve_existing_success(*args: object, **kwargs: object) -> object:
     selection = make_test_model_selection()
     return Success(
         RunRequest(
+            top_k=None,
             model_assembly_metadata=None,
             compaction_assembly_metadata=None,
             enabled_execution_options=[],
@@ -3013,6 +3015,7 @@ async def test_execute_recovers_activated_run_before_flushing_input(
         recovered_snapshots.append(resolved_selection)
         return Success(
             RunRequest(
+                top_k=None,
                 model_assembly_metadata=None,
                 compaction_assembly_metadata=None,
                 enabled_execution_options=[],
@@ -3237,6 +3240,7 @@ async def test_execute_recovers_activated_command_run(
         del args, kwargs
         return Success(
             RunRequest(
+                top_k=None,
                 model_assembly_metadata=None,
                 compaction_assembly_metadata=None,
                 enabled_execution_options=[],
@@ -3348,6 +3352,7 @@ async def test_execute_recovers_durable_retry_budget(
         del args, kwargs
         return Success(
             RunRequest(
+                top_k=None,
                 model_assembly_metadata=None,
                 compaction_assembly_metadata=None,
                 enabled_execution_options=[],
@@ -3463,6 +3468,7 @@ async def test_execute_recovers_unclassified_provider_retry_with_current_profile
         return Success(
             ResolvedInvokeInputProfile(
                 run_request=RunRequest(
+                    top_k=None,
                     model_assembly_metadata=None,
                     compaction_assembly_metadata=None,
                     enabled_execution_options=(
@@ -6852,6 +6858,7 @@ async def test_quota_progresses_candidate_before_generic_retry(
 
     def request_for(selection: AgentModelSelection) -> RunRequest:
         return RunRequest(
+            top_k=None,
             model_assembly_metadata=None,
             compaction_assembly_metadata=None,
             session_id="session-001",
@@ -7087,6 +7094,7 @@ async def test_execute_refreshes_session_profile_before_model_retry(
         return Success(
             ResolvedInvokeInputProfile(
                 run_request=RunRequest(
+                    top_k=None,
                     model_assembly_metadata=None,
                     compaction_assembly_metadata=None,
                     enabled_execution_options=(
