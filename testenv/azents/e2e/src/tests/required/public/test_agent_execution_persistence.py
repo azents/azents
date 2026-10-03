@@ -732,7 +732,10 @@ def _list_live(
         timeout=10,
     )
     response.raise_for_status()
-    return LiveEventListResponse.model_validate(response.json())
+    live = LiveEventListResponse.from_dict(response.json())
+    if live is None:
+        raise ValueError("Expected a REST live projection object.")
+    return live
 
 
 def _wait_for_session_idle(
@@ -1187,9 +1190,8 @@ def list_history(*, server_url: str, token: str, session_id: str) -> dict[str, o
 
 def list_live(*, server_url: str, token: str, session_id: str) -> dict[str, object]:
     """Serialize decoded live state at the legacy scenario helper boundary."""
-    return _list_live(
-        server_url=server_url, token=token, session_id=session_id
-    ).model_dump(mode="json", exclude_unset=True)
+    live = _list_live(server_url=server_url, token=token, session_id=session_id)
+    return _JSON_OBJECT.dump_python(live.to_dict(), mode="json")
 
 
 def history_events(payload: dict[str, object]) -> list[dict[str, object]]:

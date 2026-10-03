@@ -583,6 +583,31 @@ def test_idle_polling_reads_authoritative_generated_live_state(
             "session_run_state": "idle",
             "run": None,
             "future_live": True,
+            "action_executions": [
+                {
+                    "execution": {
+                        "id": "execution",
+                        "source_mailbox_item_id": "mailbox",
+                        "sender_user_id": None,
+                        "action_type": "create_session_working_folder",
+                        "action": {
+                            "type": "create_session_working_folder",
+                            "future_context": {"opaque": ["retained", None]},
+                        },
+                        "result": {
+                            "phase": "completed",
+                            "outcome": "ready",
+                            "reason_code": None,
+                        },
+                        "status": "completed",
+                        "owner_generation": 1,
+                        "updated_at": "2026-10-03T00:00:00Z",
+                        "future_execution": {"opaque": ["retained", None]},
+                    },
+                    "events": [],
+                    "future_projection": True,
+                }
+            ],
         }
     )
     monkeypatch.setattr(persistence.requests, "get", lambda *args, **kwargs: response)
@@ -592,6 +617,45 @@ def test_idle_polling_reads_authoritative_generated_live_state(
         session_id="session",
         timeout=1,
     )
+    live = persistence._list_live(
+        server_url="http://injected.invalid",
+        token="token",
+        session_id="session",
+    )
+    assert live.additional_properties["future_live"] is True
+    assert live.action_executions is not None
+    projection = live.action_executions[0]
+    assert projection.additional_properties["future_projection"] is True
+    execution = projection.execution
+    assert execution.result is not None
+    assert execution.result["phase"].to_dict() == "completed"
+    assert execution.result["outcome"].to_dict() == "ready"
+    assert execution.result["reason_code"].to_dict() is None
+    assert execution.additional_properties["future_execution"] == {
+        "opaque": ["retained", None]
+    }
+    action_wire = execution.action.to_dict()
+    assert isinstance(action_wire, dict)
+    assert action_wire["future_context"] == {"opaque": ["retained", None]}
+    wire = persistence.list_live(
+        server_url="http://injected.invalid",
+        token="token",
+        session_id="session",
+    )
+    projections = persistence.json_object_list_payload(
+        wire["action_executions"], label="action execution projections"
+    )
+    execution_wire = persistence.json_object_payload(
+        projections[0]["execution"], label="action execution"
+    )
+    assert execution_wire["result"] == {
+        "phase": "completed",
+        "outcome": "ready",
+        "reason_code": None,
+    }
+    assert execution_wire["updated_at"] == "2026-10-03T00:00:00Z"
+    assert execution_wire["future_execution"] == {"opaque": ["retained", None]}
+    assert wire["future_live"] is True
 
 
 def test_runtime_hook_decoder_declares_structured_lifecycle() -> None:
