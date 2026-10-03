@@ -143,8 +143,11 @@ is introduced.
 - Whole backend Ruff/format/ty, docs validation and diff checks passed. The same
   independent reviewer cleared all three material boundary findings with 77
   independent tests and an actual candidate-preparation transaction probe.
-  Post-rebase checks remain an explicit submission gate; full-stack CI is checked
-  after all correction PRs exist.
+  The conflict-free main rebase preserved both phase-2 commits exactly in
+  `git range-diff`. Post-rebase whole backend passed 8,678 tests with 3 skips
+  (94 existing/JUnit fixture warnings), and fresh required deployed E2E passed
+  29 tests in 134.52 seconds. Whole Ruff/format/ty and docs/diff checks passed
+  again. Full-stack CI is checked after all correction PRs exist.
 
 Commands use `uv run --frozen pytest` and whole Ruff/format/ty under
 `python/apps/azents`. Deployed tests use `AZENTS_E2E_IMAGE_BUILD_PROFILE=required`
