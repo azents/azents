@@ -12,6 +12,11 @@ from azents.core.auth.deps import CurrentUser, get_current_user
 from azents.core.config import AuthConfig
 from azents.core.deps import get_auth_config
 from azents.core.email.service import EmailService
+from azents.core.signup_token_operations import (
+    InvalidSignupToken,
+    SignupTokenEmailAlreadyRegistered,
+    SignupTokenEmailMismatch,
+)
 from azents.services.auth import AuthService
 from azents.services.auth.data import (
     InvalidCredentials,
@@ -34,12 +39,9 @@ from azents.services.password_reset_token.data import (
 )
 from azents.services.signup_token import SignupTokenService
 from azents.services.signup_token.data import (
-    InvalidSignupToken,
     PreviewSignupTokenInput,
     RedeemSignupTokenInput,
     SignupEmailDeliveryUnavailable,
-    SignupTokenEmailAlreadyRegistered,
-    SignupTokenEmailMismatch,
     WeakSignupPassword,
 )
 from azents.utils.fastapi.route import RouteMounter

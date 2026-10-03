@@ -16,6 +16,15 @@ tags: [backend, architecture, database]
   `/root/tx-review` role).
 - Integration owner: `/root`.
 
+## Current Delivery Limit — 2026-10-03
+
+The requester clarified the current execution boundary: complete Phase37 through
+integrated validation, the retained independent review, PR creation and exact-head
+CI, then stop. Later phases and their discovery/planning/implementation are not
+part of this continuation. Remaining migration coverage and issue #1718 stay open;
+there is no Agent merge or whole-feature implementation marking. Earlier continuous
+execution entries below remain historical checkpoints.
+
 ## Resumed Stack — 2026-10-01
 
 The requester authorized continuous stacked-PR delivery until #1718 is complete.
@@ -401,9 +410,22 @@ Model Catalog/web-search changes have no phase overlap or dependency change.
 Fresh root QA passed 252 focused and 8,563 full cases with the same three
 Redis-only skips and all nine gates. Completed reads preserve exact query/order/
 duplicate/absence/SMTP/projection contracts and separate deletion authority.
-Submission and exact-head required CI/E2E remain pending; metadata-only plan
-updates do not change reviewed source or Design authority. No Agent merge,
-implementation marking, live action or #1718 closure.
+Delivered as main-base PR #2074 at `abd26825ca`, OPEN/MERGEABLE/CLEAN. Actual
+CI37089093549 attempt1 SUCCESS/native37success/two path skips; required E2E4shards,
+web1, aggregate, Python, Docker, migrations, pre-commit and CodeQL pass. No Agent
+merge, implementation marking, live action or #1718 closure.
+
+Phase 37 starts the complete SignupToken five-group Registration slice. Required
+prepared inputs retain pre-DB strength/hash/RNG/captured-clock order; one completed
+redemption keeps token eligibility/email/conditional claim/User+verified email/
+PasswordLogin/AuthSession/audit atomic before JWT. SMTP/helper/public contracts,
+including existing failure retention and status policies, remain. Canonical pure
+failure relocation updates actual defining callers with no aliases. The same
+reviewer and root integrated/removal/schema/real-SQL/CI gates apply. PasswordReset
+rollback/restart concern remains source-only deferred investigation, not a chosen
+new policy or reproduction. Broader WorkspaceInvitation and other residual
+coverage remain; Design delta None. Implementation starts only after the full
+tracked Phase37 plan and required interfaces are reported.
 
 ## Delivery Boundaries
 

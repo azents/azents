@@ -237,6 +237,10 @@ stays explicit after this slice.
   whitespace. Original 8,550-case evidence remains separately retained. All ten
   Python and the User/Auth Spec hashes remain reviewed; only plan execution
   metadata changes after review. No behavior correction or re-review trigger.
-- Commit/PR submission and actual exact-head CI/E2E remain explicit gates.
-  No new implementation phase starts before this phase PR exists. No Agent
-  merge, live change, implementation marking or issue #1718 closure.
+- Submitted as PR #2074 against main at exact head
+  `abd26825cadbc1980168300ae2bef0225d4e4826`. Actual CI37089093549 attempt1 succeeded:
+  native37success/two path-condition skips including four external CodeQL checks;
+  actual CI33success/two skips. Required E2E4shards/web1/aggregate, Python, Docker,
+  migrations, pre-commit and CodeQL all pass. Final OPEN/MERGEABLE/CLEAN; parent
+  #2073 exact-head checks separately remain successful and externally merged.
+  No Agent merge, live change, implementation marking or issue #1718 closure.
