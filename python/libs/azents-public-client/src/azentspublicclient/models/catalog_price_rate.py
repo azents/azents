@@ -43,8 +43,8 @@ class CatalogPriceRate(BaseModel):
         if value is None:
             return value
 
-        if not re.match(r"^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$", value):
-            raise ValueError(r"must validate the regular expression /^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$/")
+        if not re.match(r"^[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$", value):
+            raise ValueError(r"must validate the regular expression /^[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$/")
         return value
 
     @field_validator('search_context_size')

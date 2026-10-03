@@ -38,7 +38,7 @@ class TestCatalogPriceRate(unittest.TestCase):
                 metric = 'input_tokens',
                 tier = 'standard',
                 above_input_tokens = 56,
-                usd_per_unit = ERROR_TO_EXAMPLE_VALUE,
+                usd_per_unit = '-72888001528021798096225500850762068629339333975650685139102691291732729.86014820265091272755041757701929816286488291663322',
                 search_context_size = 'low'
             )
         else:
@@ -46,7 +46,7 @@ class TestCatalogPriceRate(unittest.TestCase):
                 metric = 'input_tokens',
                 tier = 'standard',
                 above_input_tokens = 56,
-                usd_per_unit = ERROR_TO_EXAMPLE_VALUE,
+                usd_per_unit = '-72888001528021798096225500850762068629339333975650685139102691291732729.86014820265091272755041757701929816286488291663322',
                 search_context_size = 'low',
         )
         """

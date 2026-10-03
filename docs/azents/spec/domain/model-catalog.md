@@ -417,6 +417,10 @@ version, and aware call time. Fallback candidates use their own definitions. Cap
 no pricing DB read, raw-price interpretation, source restore, hashing, or caching, and usage
 completion never rematches a newer catalog. Typed rates are USD per named unit, including
 per-token source amounts.
+Normalized pricing JSON exposes USD rates as lossless decimal strings (or null),
+including scientific notation. The API schema and generated clients accept that
+same representation; rates are not converted to binary floats. Raw source
+numeric validation remains a separate, strict ingestion boundary.
 Decimal evaluation partitions cache/reasoning/media quantities using explicit
 usage inclusion flags, honors TTL/context thresholds, trustworthy service tiers
 and bounded off-peak windows, and requires every used specialized dimension.

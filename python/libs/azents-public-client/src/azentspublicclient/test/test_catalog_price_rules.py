@@ -35,8 +35,32 @@ class TestCatalogPriceRules(unittest.TestCase):
         model = CatalogPriceRules()
         if include_optional:
             return CatalogPriceRules(
-                rates = ERROR_TO_EXAMPLE_VALUE,
-                off_peak = ERROR_TO_EXAMPLE_VALUE,
+                rates = [
+                    azentspublicclient.models.catalog_price_rate.CatalogPriceRate(
+                        metric = 'input_tokens', 
+                        tier = 'standard', 
+                        above_input_tokens = 56, 
+                        usd_per_unit = '-72888001528021798096225500850762068629339333975650685139102691291732729.86014820265091272755041757701929816286488291663322', 
+                        search_context_size = 'low', )
+                    ],
+                off_peak = azentspublicclient.models.catalog_off_peak_rule.CatalogOffPeakRule(
+                    windows = [
+                        azentspublicclient.models.catalog_time_window.CatalogTimeWindow(
+                            start_minute = 56, 
+                            end_minute = 56, 
+                            weekdays = [
+                                56
+                                ], )
+                        ], 
+                    weekday_timezone = '', 
+                    overrides = [
+                        azentspublicclient.models.catalog_price_rate.CatalogPriceRate(
+                            metric = 'input_tokens', 
+                            tier = 'standard', 
+                            above_input_tokens = 56, 
+                            usd_per_unit = '-72888001528021798096225500850762068629339333975650685139102691291732729.86014820265091272755041757701929816286488291663322', 
+                            search_context_size = 'low', )
+                        ], ),
                 issues = [
                     azentspublicclient.models.catalog_price_issue.CatalogPriceIssue(
                         source_field = '', 
@@ -49,8 +73,32 @@ class TestCatalogPriceRules(unittest.TestCase):
             )
         else:
             return CatalogPriceRules(
-                rates = ERROR_TO_EXAMPLE_VALUE,
-                off_peak = ERROR_TO_EXAMPLE_VALUE,
+                rates = [
+                    azentspublicclient.models.catalog_price_rate.CatalogPriceRate(
+                        metric = 'input_tokens', 
+                        tier = 'standard', 
+                        above_input_tokens = 56, 
+                        usd_per_unit = '-72888001528021798096225500850762068629339333975650685139102691291732729.86014820265091272755041757701929816286488291663322', 
+                        search_context_size = 'low', )
+                    ],
+                off_peak = azentspublicclient.models.catalog_off_peak_rule.CatalogOffPeakRule(
+                    windows = [
+                        azentspublicclient.models.catalog_time_window.CatalogTimeWindow(
+                            start_minute = 56, 
+                            end_minute = 56, 
+                            weekdays = [
+                                56
+                                ], )
+                        ], 
+                    weekday_timezone = '', 
+                    overrides = [
+                        azentspublicclient.models.catalog_price_rate.CatalogPriceRate(
+                            metric = 'input_tokens', 
+                            tier = 'standard', 
+                            above_input_tokens = 56, 
+                            usd_per_unit = '-72888001528021798096225500850762068629339333975650685139102691291732729.86014820265091272755041757701929816286488291663322', 
+                            search_context_size = 'low', )
+                        ], ),
                 issues = [
                     azentspublicclient.models.catalog_price_issue.CatalogPriceIssue(
                         source_field = '', 

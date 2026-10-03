@@ -55,6 +55,14 @@ not new authority. Design delta: None. Root owns source publication and integrat
 validation; `/root/catalog-service-implementation` owns the bounded seed/setup
 correction; `/root/catalog-design-owner` remains the sole reviewer.
 
+The subsequent CI decoder correction aligns the normalized Decimal-string
+schema with actual scientific-notation JSON (M3/M8) without changing arithmetic,
+raw-source validation, or wire values. Root regenerated clients and validated the
+full backend (9,142 passed/3 skipped), actual SDK round trips, testenv (148
+passed)/E2E support (555 passed), and fresh frontend matrix. The same sole reviewer
+accepted the targeted correction and independently reran the six SDK and twelve
+core schema cases.
+
 - Scope-drift check at each integration boundary: every approved behavior/removal covered; no new authority/history/hash/cache/fallback/mode, no conversation predicate strengthening.
 - Latest-base checkpoint: `359bc0ff9`, with existing model transition adaptation retained; approved design delta none.
 - Shared contract checkpoint: current source/model/status DTOs, embedded normalized price definitions, purpose-specific image usability, exact context batches, and generated clients integrated.

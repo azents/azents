@@ -1,12 +1,16 @@
 """Lossless persisted pricing and read-only historical selection contracts."""
 
 import datetime
+import json
+import re
 from decimal import Decimal
 
 import pytest
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
+from pydantic.json_schema import JsonSchemaMode
 
 from azents.core.agent import AgentModelSelection, AgentModelSelectionInput
+from azents.core.catalog_price_rules import CatalogPriceRate, PriceMetric, PriceTier
 from azents.core.enums import LLMProvider
 from azents.core.model_catalog_source import decode_catalog_source
 from azents.core.model_pricing import (
@@ -17,6 +21,44 @@ from azents.core.model_pricing import (
 )
 from azents.engine.events.types import ModelCostProvenance
 from azents.testing.model_selection import make_test_model_selection
+
+
+@pytest.mark.parametrize("mode", ["validation", "serialization"])
+@pytest.mark.parametrize(
+    "amount",
+    [
+        Decimal("1E-7"),
+        Decimal("1E+7"),
+        Decimal("0"),
+        Decimal("-0"),
+        Decimal("0.00000012345678901234567890123456789"),
+        None,
+    ],
+)
+def test_normalized_rate_wire_json_matches_schema_losslessly(
+    mode: JsonSchemaMode, amount: Decimal | None
+) -> None:
+    """Every published Decimal representation satisfies the generated-client schema."""
+    rate = CatalogPriceRate(
+        metric=PriceMetric.INPUT,
+        tier=PriceTier.STANDARD,
+        above_input_tokens=None,
+        usd_per_unit=amount,
+        search_context_size=None,
+    )
+    adapter = TypeAdapter(CatalogPriceRate)
+    wire = adapter.dump_json(rate)
+    value = json.loads(wire)["usd_per_unit"]
+    variants = adapter.json_schema(mode=mode)["properties"]["usd_per_unit"]["anyOf"]
+    if amount is None:
+        assert value is None
+        assert {"type": "null"} in variants
+    else:
+        string_schema = next(item for item in variants if item.get("type") == "string")
+        assert isinstance(value, str)
+        assert re.fullmatch(string_schema["pattern"], value) is not None
+        assert Decimal(value) == amount
+    assert adapter.validate_json(wire) == rate
 
 
 def _definition() -> ModelPricingDefinition:

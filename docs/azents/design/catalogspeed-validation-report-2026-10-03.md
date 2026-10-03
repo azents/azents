@@ -111,9 +111,28 @@ the backend correction and the seed-readiness re-review with no remaining
 findings; an independent 11-case seed regression run also passed. No required CI
 failure is treated as a pass.
 
+## Decimal Wire Contract Correction
+
+The next CI run at `df5f23d26` reached the corrected source path and exposed a
+generated-client pricing decoder failure: the backend legitimately emits a
+lossless rate such as `1E-7`, but the inferred Decimal schema pattern omitted
+scientific notation. The normalized-rate schema now advertises the actual
+decimal-string representation, including exponents and null, without a float
+conversion, expanded fixed-point representation, changed raw-source validation,
+or pricing-algorithm change. Public/admin clients were regenerated through the
+standard workflow; no generated file was manually edited.
+
+Root validation: backend 9,142 passed/3 skipped; testenv 148 passed, including six
+actual backend-to-generated-SDK pricing round trips; E2E support 555 passed; fresh
+cache-bypassed workspace TypeScript type/lint/format and both product builds
+passed. Twelve core cases verify wire/schema agreement in validation and
+serialization modes. The same sole reviewer accepted the targeted correction
+with no remaining findings and independently executed all six SDK and twelve
+core schema cases. Prior review acceptances remain intact.
+
 ## Remaining Gates
 
-- Root-integrated checks and sole review/re-review, including the CI corrections,
-  are complete.
+- Root-integrated checks and sole review/re-review, including the Decimal wire
+  correction, are complete.
 - Required PR CI, especially the updated saved-support/embedded-price catalog-refresh product E2E.
 - Verified snapshot promotion and temporary-plan cleanup only after the remaining validation completes.
