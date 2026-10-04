@@ -39,14 +39,14 @@ class RDBOwnerLifecycleJob(RDBModel):
     __tablename__ = "owner_lifecycle_jobs"
 
     UQ_MEMBERSHIP_ARCHIVE = sa.Index(
-        "uq_owner_lifecycle_jobs_membership_archive",
+        "ix_owner_lifecycle_jobs_workspace_id_user_id",
         "workspace_id",
         "user_id",
         unique=True,
         postgresql_where=sa.text("kind = 'membership_archive'"),
     )
     UQ_ACCOUNT_PURGE = sa.Index(
-        "uq_owner_lifecycle_jobs_account_purge",
+        "ix_owner_lifecycle_jobs_user_id",
         "user_id",
         unique=True,
         postgresql_where=sa.text("kind = 'account_purge'"),

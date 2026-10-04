@@ -188,7 +188,7 @@ class RDBExternalChannelConnection(RDBModel):
         "slack_presence_lease_until",
     )
     UQ_INSTALLATION_IDENTITY = sa.Index(
-        "uq_external_channel_connections_installation_identity",
+        "ix_external_channel_connections_provider_provi_0a15e241b656e145",
         "provider",
         "provider_tenant_id",
         "provider_app_id",
@@ -518,14 +518,14 @@ class RDBExternalChannelConversationPosition(RDBModel):
         name="uq_external_channel_conversation_positions_connection_id_id",
     )
     UQ_CONNECTION_PARENT = sa.Index(
-        "uq_external_channel_conversation_positions_parent",
+        "ix_external_channel_conversation_positions_con_1d1df5ccdc27993c",
         "connection_id",
         "provider_channel_id",
         unique=True,
         postgresql_where=sa.text("scope_kind = 'parent_channel'"),
     )
     UQ_CONNECTION_THREAD = sa.Index(
-        "uq_external_channel_conversation_positions_thread",
+        "ix_external_channel_conversation_positions_con_fced1c72c65a3bca",
         "connection_id",
         "provider_channel_id",
         "provider_thread_key",
@@ -607,7 +607,7 @@ class RDBExternalChannelAgentRoute(RDBModel):
         name="uq_external_channel_agent_routes_connection_id_id",
     )
     UQ_SINGLE_CONNECTION = sa.Index(
-        "uq_external_channel_agent_routes_single_connection",
+        "ix_external_channel_agent_routes_connection_id_e76c6f5501491d09",
         "connection_id",
         unique=True,
         postgresql_where=sa.text("connection_app_mode = 'single'"),
@@ -826,7 +826,7 @@ class RDBExternalChannelChannelDefault(RDBModel):
     __tablename__ = "external_channel_channel_defaults"
 
     UQ_ACTIVE_CONNECTION_CHANNEL = sa.Index(
-        "uq_external_channel_channel_defaults_active_connection_channel",
+        "ix_external_channel_channel_defaults_connectio_3ed2f72938e718df",
         "connection_id",
         "provider_channel_id",
         unique=True,
@@ -920,7 +920,7 @@ class RDBExternalChannelParticipationSetting(RDBModel):
         name="uq_external_channel_participation_settings_connection_id_id",
     )
     UQ_ACTIVE_CONNECTION_CHANNEL = sa.Index(
-        "uq_external_channel_participation_active_channel",
+        "ix_external_channel_participation_settings_con_eff7d8df5d637efe",
         "connection_id",
         "provider_parent_channel_id",
         unique=True,
@@ -1206,7 +1206,7 @@ class RDBExternalChannelSetupClaim(RDBModel):
         name="uq_external_channel_setup_claims_connection_id_id",
     )
     UQ_NONTERMINAL_CONNECTION_CHANNEL = sa.Index(
-        "uq_external_channel_setup_claims_nonterminal_connection_channel",
+        "ix_external_channel_setup_claims_connection_id_14a8330f61c7560b",
         "connection_id",
         "provider_parent_channel_id",
         unique=True,

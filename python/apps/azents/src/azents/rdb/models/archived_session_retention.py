@@ -120,7 +120,7 @@ class RDBArchivedSessionRetentionApplication(RDBModel):
         "lease_until",
     )
     UQ_ACTIVE = sa.Index(
-        "uq_archived_session_retention_applications_active",
+        "ix_archived_session_retention_applications_exp_733c28f24767a30d",
         sa.literal_column("(1)"),
         unique=True,
         postgresql_where=sa.text("status IN ('pending', 'running', 'retry_wait')"),
@@ -325,7 +325,7 @@ class RDBArchivedSessionPurgeParticipantExecution(RDBModel):
     __tablename__ = "archived_session_purge_participant_executions"
 
     IX_PURGE_JOB_ID_PHASE = sa.Index(
-        "ix_archived_purge_part_exec_job_phase",
+        "ix_archived_session_purge_participant_executio_5ea0028eac0baeb3",
         "purge_job_id",
         "phase",
     )

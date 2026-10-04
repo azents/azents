@@ -38,7 +38,7 @@ class RDBAgentProjectCatalogEntry(RDBModel):
         name="uq_agent_project_catalog_entries_agent_path",
     )
     IX_AGENT_UPDATED = sa.Index(
-        "ix_agent_project_catalog_entries_agent_updated",
+        "ix_agent_project_catalog_entries_agent_id_updated_at",
         "agent_id",
         "updated_at",
     )

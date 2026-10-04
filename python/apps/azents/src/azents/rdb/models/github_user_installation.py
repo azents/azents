@@ -64,7 +64,7 @@ class RDBGithubUserInstallation(RDBModel):
     )
 
     UQ_USER_APP_INSTALLATION = sa.Index(
-        "uq_github_user_installations_user_app_installation",
+        "ix_github_user_installations_user_id_platform__04fa208ede6106a8",
         "user_id",
         "platform_app_id",
         "installation_id",

@@ -174,5 +174,5 @@ def test_current_models_keep_enum_labels_and_bounded_named_indexes() -> None:
     )
     assert RDBAgentToolkitNamespaceReservation.UQ_ACTIVE_AGENT_TOOLKIT.unique is True
     assert RDBImageGenerationCatalogEntry.IX_CATALOG_RANK.name == (
-        "ix_image_generation_catalog_entries_catalog_rank"
+        "ix_image_generation_catalog_entries_catalog_id_09d1052ed90fd2e8"
     )

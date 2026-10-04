@@ -91,12 +91,12 @@ class RDBRuntimeWebService(RDBModel):
         name="uq_runtime_web_services_hostname_key",
     )
     IX_AGENT = sa.Index(
-        "ix_runtime_web_services_agent",
+        "ix_runtime_web_services_agent_id_created_at",
         "agent_id",
         "created_at",
     )
     IX_DEADLINE = sa.Index(
-        "ix_runtime_web_services_deadline",
+        "ix_runtime_web_services_exposure_deadline_at",
         "exposure_deadline_at",
         postgresql_where=sa.text("exposure_deadline_at IS NOT NULL"),
     )
@@ -180,7 +180,7 @@ class RDBRuntimeWebOperationReceipt(RDBModel):
         name="uq_runtime_web_operation_receipts_operation",
     )
     IX_SERVICE = sa.Index(
-        "ix_runtime_web_operation_receipts_service",
+        "ix_runtime_web_operation_receipts_service_id_created_at",
         "service_id",
         "created_at",
     )
@@ -290,12 +290,12 @@ class RDBRuntimeWebGatewayIdentity(RDBModel):
         name="uq_runtime_web_gateway_identities_secret_hash",
     )
     IX_AUTH_SESSION = sa.Index(
-        "ix_runtime_web_gateway_identities_auth_session",
+        "ix_runtime_web_gateway_identities_auth_session_id_expires_at",
         "auth_session_id",
         "expires_at",
     )
     IX_EXPIRY = sa.Index(
-        "ix_runtime_web_gateway_identities_expiry",
+        "ix_runtime_web_gateway_identities_expires_at",
         "expires_at",
         postgresql_where=sa.text("revoked_at IS NULL"),
     )
@@ -371,7 +371,7 @@ class RDBRuntimeWebAuthBinding(RDBModel):
         name="uq_runtime_web_auth_bindings_broker_hash",
     )
     IX_EXPIRY = sa.Index(
-        "ix_runtime_web_auth_bindings_expiry",
+        "ix_runtime_web_auth_bindings_expires_at",
         "expires_at",
         postgresql_where=sa.text("settled_at IS NULL"),
     )
@@ -448,7 +448,7 @@ class RDBRuntimeWebAuthTicket(RDBModel):
         name="uq_runtime_web_auth_tickets_secret_hash",
     )
     IX_EXPIRY = sa.Index(
-        "ix_runtime_web_auth_tickets_expiry",
+        "ix_runtime_web_auth_tickets_expires_at",
         "expires_at",
         postgresql_where=sa.text("consumed_at IS NULL"),
     )
@@ -526,12 +526,12 @@ class RDBRuntimeWebSessionRoute(RDBModel):
         name="uq_runtime_web_session_routes_join_nonce_hash",
     )
     IX_OWNER_LEASE = sa.Index(
-        "ix_runtime_web_session_routes_owner_lease",
+        "ix_runtime_web_session_routes_owner_boot_id_lease_expires_at",
         "owner_boot_id",
         "lease_expires_at",
     )
     IX_GENERATION = sa.Index(
-        "ix_runtime_web_session_routes_generation",
+        "ix_runtime_web_session_routes_desired_generati_45b803111f49cb65",
         "desired_generation",
         "runner_generation",
         "lease_expires_at",

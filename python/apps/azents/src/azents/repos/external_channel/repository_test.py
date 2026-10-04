@@ -1406,7 +1406,7 @@ class TestExternalChannelRepository:
 
         with pytest.raises(
             IntegrityError,
-            match="uq_external_channel_connections_installation_identity",
+            match="ix_external_channel_connections_provider_provi_0a15e241b656e145",
         ):
             async with rdb_session.write_session.begin_nested():
                 await repo.create_connection(
@@ -2258,7 +2258,7 @@ async def test_create_agent_route_enforces_mode_and_workspace_boundaries(
     assert route.agent_id_snapshot == agent.id
     with pytest.raises(
         IntegrityError,
-        match="uq_external_channel_agent_routes_single_connection",
+        match="ix_external_channel_agent_routes_connection_id_e76c6f5501491d09",
     ):
         async with rdb_session.write_session.begin_nested():
             await repository.create_agent_route(

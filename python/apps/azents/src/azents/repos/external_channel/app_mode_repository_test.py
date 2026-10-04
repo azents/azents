@@ -2716,7 +2716,9 @@ async def test_agent_scoped_management_excludes_multi_and_corrupt_single_routes(
         ),
     )
     await rdb_session.write_session.execute(
-        sa.text("DROP INDEX uq_external_channel_agent_routes_single_connection")
+        sa.text(
+            "DROP INDEX ix_external_channel_agent_routes_connection_id_e76c6f5501491d09"
+        )
     )
     rdb_session.write_session.add(
         RDBExternalChannelAgentRoute(

@@ -36,7 +36,7 @@ class RDBExchangeUploadOperation(RDBModel):
         "preview_file_id", name="uq_exchange_upload_operations_preview_file_id"
     )
     IX_DUE_CLEANUP = sa.Index(
-        "ix_exchange_upload_operations_due_cleanup",
+        "ix_exchange_upload_operations_cleanup_after_cl_183b909f7be93a36",
         "cleanup_after",
         "cleanup_lease_until",
         "id",

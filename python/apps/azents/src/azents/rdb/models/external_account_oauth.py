@@ -33,7 +33,7 @@ class RDBExternalAccountOAuthAttempt(RDBModel):
         name="uq_external_account_oauth_attempts_state_hash",
     )
     IX_USER_SESSION = sa.Index(
-        "ix_external_account_oauth_attempts_user_session",
+        "ix_external_account_oauth_attempts_user_id_auth_session_id",
         "user_id",
         "auth_session_id",
     )

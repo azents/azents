@@ -21,12 +21,12 @@ class RDBAgentRunInputEvent(RDBModel):
         name="uq_agent_run_input_events_run_input_order",
     )
     IX_EVENT_RUN = sa.Index(
-        "ix_agent_run_input_events_event_run",
+        "ix_agent_run_input_events_event_id_agent_run_id",
         "event_id",
         "agent_run_id",
     )
     IX_RUN_INPUT_ORDER = sa.Index(
-        "ix_agent_run_input_events_run_input_order",
+        "ix_agent_run_input_events_agent_run_id_input_order",
         "agent_run_id",
         "input_order",
     )

@@ -55,7 +55,7 @@ class RDBExternalChannelIngressOwner(RDBModel):
         name="uq_external_channel_ingress_owners_target_resource",
     )
     IX_RECOVERY = sa.Index(
-        "ix_external_channel_ingress_owners_recovery",
+        "ix_external_channel_ingress_owners_preparation_401dc98916b2a085",
         "preparation_next_attempt_at",
         "lease_expires_at",
         "updated_at",
@@ -225,14 +225,14 @@ class RDBExternalChannelIngressItem(RDBModel):
         name="uq_external_channel_ingress_items_queue_key",
     )
     IX_OWNER_DUE_QUEUE = sa.Index(
-        "ix_external_channel_ingress_items_owner_due_queue",
+        "ix_external_channel_ingress_items_owner_id_sta_805bf271f468bc7a",
         "owner_id",
         "state",
         "next_attempt_at",
         "queue_key",
     )
     IX_POSITION = sa.Index(
-        "ix_external_channel_ingress_items_position",
+        "ix_external_channel_ingress_items_conversation_e956b183b9e748f3",
         "conversation_position_id",
         "trigger_position",
     )

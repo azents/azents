@@ -38,7 +38,7 @@ class RDBAgentProjectDefault(RDBModel):
         name="uq_agent_project_defaults_agent_position",
     )
     IX_AGENT_POSITION = sa.Index(
-        "ix_agent_project_defaults_agent_position",
+        "ix_agent_project_defaults_agent_id_position",
         "agent_id",
         "position",
     )

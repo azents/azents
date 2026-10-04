@@ -248,12 +248,12 @@ class RDBSessionAgentContextGitWorktree(RDBModel):
     )
     IX_STATUS = sa.Index("ix_session_agent_context_git_worktrees_status", "status")
     IX_CONTEXT_STATUS = sa.Index(
-        "ix_session_agent_context_git_worktrees_context_id_status",
+        "ix_session_agent_context_git_worktrees_session_eed7843d46102e3f",
         "session_agent_context_id",
         "status",
     )
     IX_CONTEXT_PROJECT_ID = sa.Index(
-        "ix_session_agent_context_git_worktrees_context_project_id",
+        "ix_session_agent_context_git_worktrees_session_ff1a8aeb4dda50f3",
         "session_agent_context_project_id",
     )
     IX_ACTION_EXECUTION_ID = sa.Index(

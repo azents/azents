@@ -217,7 +217,7 @@ def test_operation_schema_preserves_cleanup_without_owner_foreign_keys() -> None
     assert isinstance(table, sa.Table)
     assert not table.foreign_keys
     assert {index.name for index in table.indexes} == {
-        "ix_exchange_upload_operations_due_cleanup"
+        "ix_exchange_upload_operations_cleanup_after_cl_183b909f7be93a36"
     }
     cleanup_index = RDBExchangeUploadOperation.IX_DUE_CLEANUP
     assert cleanup_index.dialect_options["postgresql"]["where"] is None

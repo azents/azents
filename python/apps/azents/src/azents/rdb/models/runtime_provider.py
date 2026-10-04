@@ -76,7 +76,7 @@ class RDBRuntimeProvider(RDBModel):
     IX_WORKSPACE_ID = sa.Index("ix_runtime_providers_workspace_id", "workspace_id")
     IX_KIND = sa.Index("ix_runtime_providers_kind", "kind")
     IX_LIFECYCLE_ENABLED = sa.Index(
-        "ix_runtime_providers_lifecycle_enabled",
+        "ix_runtime_providers_lifecycle_state_enabled",
         "lifecycle_state",
         "enabled",
     )

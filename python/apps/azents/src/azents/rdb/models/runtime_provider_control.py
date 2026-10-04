@@ -56,7 +56,7 @@ class RDBRuntimeProviderEnrollmentGrant(RDBModel):
     __tablename__ = "runtime_provider_enrollment_grants"
 
     IX_PROVIDER_STATE = sa.Index(
-        "ix_runtime_provider_enrollment_grants_provider_state",
+        "ix_runtime_provider_enrollment_grants_provider_id_state",
         "provider_id",
         "state",
     )
@@ -147,7 +147,7 @@ class RDBRuntimeProviderCredential(RDBModel):
     __tablename__ = "runtime_provider_credentials"
 
     IX_PROVIDER_STATE = sa.Index(
-        "ix_runtime_provider_credentials_provider_state",
+        "ix_runtime_provider_credentials_provider_id_state",
         "provider_id",
         "state",
     )
@@ -224,24 +224,24 @@ class RDBRuntimeProviderConnection(RDBModel):
         name="uq_runtime_provider_connections_provider_generation",
     )
     IX_PROVIDER_STATUS = sa.Index(
-        "ix_runtime_provider_connections_provider_status",
+        "ix_runtime_provider_connections_provider_id_status",
         "provider_id",
         "status",
     )
     IX_CREDENTIAL_STATUS = sa.Index(
-        "ix_runtime_provider_connections_credential_status",
+        "ix_runtime_provider_connections_credential_id_status",
         "credential_id",
         "status",
     )
     IX_AUTHENTICATION = sa.Index(
-        "ix_runtime_provider_connections_authentication",
+        "ix_runtime_provider_connections_binding_id_aut_43f2baf6a989b7a6",
         "binding_id",
         "auth_method",
         "auth_subject",
         "status",
     )
     IX_BINDING_STATUS = sa.Index(
-        "ix_runtime_provider_connections_binding_status",
+        "ix_runtime_provider_connections_binding_id_status",
         "binding_id",
         "status",
     )

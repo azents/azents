@@ -27,7 +27,7 @@ class RDBExternalAccountLink(RDBModel):
     __tablename__ = "external_account_links"
 
     UQ_ACTIVE_EXTERNAL_IDENTITY = sa.Index(
-        "uq_external_account_links_active_external_identity",
+        "ix_external_account_links_provider_identity_sc_13d48b547d72dd7a",
         "provider",
         "identity_scope",
         "provider_user_id",

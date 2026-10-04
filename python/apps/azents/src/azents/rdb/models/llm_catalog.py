@@ -225,7 +225,7 @@ class RDBImageGenerationCatalogEntry(RDBModel):
         name="uq_image_generation_catalog_entries_catalog_model",
     )
     IX_CATALOG_RANK = sa.Index(
-        "ix_image_generation_catalog_entries_catalog_rank",
+        "ix_image_generation_catalog_entries_catalog_id_09d1052ed90fd2e8",
         "catalog_id",
         "recommendation_rank",
         "display_name",

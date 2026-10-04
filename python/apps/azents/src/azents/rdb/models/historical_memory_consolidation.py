@@ -38,14 +38,14 @@ class RDBConsolidationUnit(RDBModel):
         name="ck_historical_consolidation_units_owner",
     )
     IX_TEAM = sa.Index(
-        "uq_historical_consolidation_units_team",
+        "ix_historical_consolidation_units_workspace_id_agent_id",
         "workspace_id",
         "agent_id",
         unique=True,
         postgresql_where=sa.text("associated_user_id IS NULL"),
     )
     IX_USER = sa.Index(
-        "uq_historical_consolidation_units_user",
+        "ix_historical_consolidation_units_workspace_id_bea7c9654d4d7b7d",
         "workspace_id",
         "agent_id",
         "associated_user_id",
@@ -133,7 +133,7 @@ class RDBConsolidationWork(RDBModel):
         "sequence", name="uq_historical_consolidation_work_sequence"
     )
     IX_PENDING = sa.Index(
-        "ix_historical_consolidation_work_pending",
+        "ix_historical_consolidation_work_workspace_id__76da5073a287ecef",
         "workspace_id",
         "agent_id",
         "scope",
@@ -464,7 +464,8 @@ class RDBConsolidationRevisionDependency(RDBModel):
         postgresql_nulls_not_distinct=True,
     )
     IX_SOURCE = sa.Index(
-        "ix_historical_consolidation_revision_dependencies_source", "source_session_id"
+        "ix_historical_consolidation_revision_dependenc_6679cd501af214fe",
+        "source_session_id",
     )
     id: Mapped[str] = mapped_column(sa.String(32), primary_key=True)
     revision_id: Mapped[str] = mapped_column(

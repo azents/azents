@@ -115,7 +115,7 @@ class RDBMailboxItem(RDBModel):
     )
     IX_SESSION_ID = sa.Index("ix_mailbox_items_session_id", "session_id")
     IX_SESSION_ORDER = sa.Index(
-        "ix_mailbox_items_session_order",
+        "ix_mailbox_items_session_id_order_group_order_sequence_id",
         "session_id",
         "order_group",
         "order_sequence",
@@ -128,7 +128,7 @@ class RDBMailboxItem(RDBModel):
     )
     IX_KIND = sa.Index("ix_mailbox_items_kind", "kind")
     UQ_SESSION_KIND_IDEMPOTENCY = sa.Index(
-        "uq_mailbox_items_session_kind_idempotency",
+        "ix_mailbox_items_session_id_kind_idempotency_key",
         "session_id",
         "kind",
         "idempotency_key",

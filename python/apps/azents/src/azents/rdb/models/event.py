@@ -33,9 +33,9 @@ class RDBEvent(RDBModel):
     __tablename__ = "events"
 
     IX_SESSION_ID = sa.Index("ix_events_session_id", "session_id")
-    IX_SESSION_CREATED = sa.Index("ix_events_session_created", "session_id", "id")
+    IX_SESSION_CREATED = sa.Index("ix_events_session_id_id", "session_id", "id")
     UQ_SESSION_EXTERNAL = sa.Index(
-        "uq_events_session_external",
+        "ix_events_session_id_external_id",
         "session_id",
         "external_id",
         unique=True,

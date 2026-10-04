@@ -172,7 +172,7 @@ class RDBAgentSession(RDBModel):
     IX_AGENT_ID = sa.Index("ix_agent_sessions_agent_id", "agent_id")
     IX_SESSION_KIND = sa.Index("ix_agent_sessions_session_kind", "session_kind")
     IX_AGENT_ACTIVE_LAST_USER_INPUT = sa.Index(
-        "ix_agent_sessions_agent_active_last_user_input",
+        "ix_agent_sessions_agent_id_primary_kind_last_user_input_at",
         "agent_id",
         "primary_kind",
         "last_user_input_at",
@@ -183,13 +183,13 @@ class RDBAgentSession(RDBModel):
         "model_input_head_event_id",
     )
     IX_MODEL_FILE_GC_CURSOR = sa.Index(
-        "ix_agent_sessions_model_file_gc_cursor",
+        "ix_agent_sessions_model_file_gc_cursor_event_i_75efbf56f215debd",
         sa.text("model_file_gc_cursor_event_id ASC NULLS FIRST"),
         "model_input_head_event_id",
         postgresql_where=sa.text("model_input_head_event_id IS NOT NULL"),
     )
     IX_PENDING_COMMAND = sa.Index(
-        "ix_agent_sessions_pending_command",
+        "ix_agent_sessions_pending_command_created_at",
         "pending_command_created_at",
         postgresql_where=sa.text("pending_command_id IS NOT NULL"),
     )
@@ -199,19 +199,19 @@ class RDBAgentSession(RDBModel):
         postgresql_where=sa.text("stop_requested_at IS NOT NULL"),
     )
     IX_RUN_STATE_RUNNING = sa.Index(
-        "ix_agent_sessions_run_state_running",
+        "ix_agent_sessions_run_heartbeat_at",
         "run_heartbeat_at",
         postgresql_where=sa.text("run_state = 'running'"),
     )
     IX_ARCHIVED_PURGE_AFTER = sa.Index(
-        "ix_agent_sessions_archived_purge_after",
+        "ix_agent_sessions_purge_after",
         "purge_after",
         postgresql_where=sa.text(
             "status = 'archived' AND session_kind = 'root' AND purge_after IS NOT NULL"
         ),
     )
     IX_ACTIVE_AUTO_ARCHIVE = sa.Index(
-        "ix_agent_sessions_active_auto_archive",
+        "ix_agent_sessions_last_activity_at_agent_id",
         "last_activity_at",
         "agent_id",
         postgresql_where=sa.text(
@@ -219,7 +219,7 @@ class RDBAgentSession(RDBModel):
         ),
     )
     UQ_AGENT_ACTIVE_TEAM_PRIMARY = sa.Index(
-        "uq_agent_sessions_agent_active_team_primary",
+        "ix_agent_sessions_agent_id_unique_p7b932c5c10d734da",
         "agent_id",
         unique=True,
         postgresql_where=sa.text(
@@ -251,7 +251,7 @@ class RDBAgentSession(RDBModel):
         name="ck_agent_sessions_product_mode_ownership",
     )
     IX_AGENT_ASSOCIATED_USER_STATUS = sa.Index(
-        "ix_agent_sessions_agent_associated_user_status",
+        "ix_agent_sessions_agent_id_associated_user_id_status",
         "agent_id",
         "associated_user_id",
         "status",

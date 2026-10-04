@@ -234,7 +234,7 @@ class RDBRuntimeProviderAuditEvent(RDBModel):
     __tablename__ = "runtime_provider_audit_events"
 
     IX_PROVIDER_CREATED = sa.Index(
-        "ix_runtime_provider_audit_events_provider_created",
+        "ix_runtime_provider_audit_events_provider_id_created_at",
         "provider_id",
         "created_at",
     )

@@ -89,7 +89,7 @@ class RDBChatWriteRequest(RDBModel):
         name="uq_chat_write_requests_session_requester_client_request",
     )
     UQ_CREATION_AGENT_REQUESTER_CLIENT_REQUEST = sa.Index(
-        "uq_chat_write_requests_creation_agent_requester_client",
+        "ix_chat_write_requests_creation_agent_id_reque_b51989afdaf21d2f",
         "creation_agent_id",
         "requester_user_id",
         "client_request_id",

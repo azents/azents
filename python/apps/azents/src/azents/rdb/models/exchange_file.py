@@ -75,7 +75,7 @@ class RDBExchangeFile(RDBModel):
         "preview_thumbnail_file_id",
     )
     IX_RETENTION_ROOT_STATUS = sa.Index(
-        "ix_exchange_files_retention_root_status",
+        "ix_exchange_files_retention_root_session_id_status_id",
         "retention_root_session_id",
         "status",
         "id",

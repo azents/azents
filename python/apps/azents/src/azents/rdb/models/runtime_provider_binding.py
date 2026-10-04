@@ -56,14 +56,14 @@ class RDBRuntimeProviderAuthBinding(RDBModel):
     __tablename__ = "runtime_provider_auth_bindings"
 
     UQ_METHOD_SUBJECT_ACTIVE = sa.Index(
-        "uq_runtime_provider_auth_bindings_method_subject_active",
+        "ix_runtime_provider_auth_bindings_auth_method_subject",
         "auth_method",
         "subject",
         unique=True,
         postgresql_where=sa.text("state = 'active'"),
     )
     UQ_BOOTSTRAP_DECLARATION_ACTIVE = sa.Index(
-        "uq_runtime_provider_auth_bindings_bootstrap_declaration_active",
+        "ix_runtime_provider_auth_bindings_bootstrap_declaration_id",
         "bootstrap_declaration_id",
         unique=True,
         postgresql_where=sa.text(
@@ -71,12 +71,12 @@ class RDBRuntimeProviderAuthBinding(RDBModel):
         ),
     )
     IX_PROVIDER_STATE = sa.Index(
-        "ix_runtime_provider_auth_bindings_provider_state",
+        "ix_runtime_provider_auth_bindings_provider_id_state",
         "provider_id",
         "state",
     )
     IX_METHOD_SUBJECT_STATE = sa.Index(
-        "ix_runtime_provider_auth_bindings_method_subject_state",
+        "ix_runtime_provider_auth_bindings_auth_method_subject_state",
         "auth_method",
         "subject",
         "state",
@@ -180,7 +180,7 @@ class RDBRuntimeProviderAuthBindingAuditEvent(RDBModel):
     __tablename__ = "runtime_provider_auth_binding_audit_events"
 
     IX_BINDING_CREATED = sa.Index(
-        "ix_runtime_provider_auth_binding_audit_events_binding_created",
+        "ix_runtime_provider_auth_binding_audit_events__eb3dbab7484ad7a9",
         "binding_id",
         "created_at",
     )

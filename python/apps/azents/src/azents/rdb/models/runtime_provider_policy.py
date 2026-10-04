@@ -42,7 +42,7 @@ class RDBRuntimeProviderContractRevision(RDBModel):
     __tablename__ = "runtime_provider_contract_revisions"
 
     IX_PROVIDER_CREATED = sa.Index(
-        "ix_runtime_provider_contract_revisions_provider_created",
+        "ix_runtime_provider_contract_revisions_provider_id_created_at",
         "provider_id",
         "created_at",
     )
@@ -84,12 +84,12 @@ class RDBRuntimeProviderConfigRevision(RDBModel):
         name="uq_runtime_provider_config_revisions_provider_revision",
     )
     IX_PROVIDER_STATE = sa.Index(
-        "ix_runtime_provider_config_revisions_provider_state",
+        "ix_runtime_provider_config_revisions_provider_id_state",
         "provider_id",
         "state",
     )
     IX_VALIDATION_REQUEST = sa.Index(
-        "ix_runtime_provider_config_revisions_validation_request",
+        "ix_runtime_provider_config_revisions_validation_request_id",
         "validation_request_id",
     )
 

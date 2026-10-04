@@ -59,7 +59,7 @@ class RDBAgentRun(RDBModel):
         name="uq_agent_runs_session_run_index",
     )
     IX_SESSION_STATUS = sa.Index(
-        "ix_agent_runs_session_status",
+        "ix_agent_runs_session_id_status",
         "session_id",
         "status",
     )
@@ -70,7 +70,7 @@ class RDBAgentRun(RDBModel):
         "parent_agent_run_id",
     )
     UQ_SESSION_PENDING = sa.Index(
-        "uq_agent_runs_session_pending",
+        "ix_agent_runs_session_id_unique_pafdf7e0366e76506",
         "session_id",
         unique=True,
         postgresql_where=sa.text("status = 'pending'"),

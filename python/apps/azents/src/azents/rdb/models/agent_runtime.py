@@ -94,12 +94,12 @@ class RDBAgentRuntime(RDBModel):
         "runtime_provider_resource_id",
     )
     IX_DESIRED_OBSERVED = sa.Index(
-        "ix_agent_runtimes_desired_observed",
+        "ix_agent_runtimes_desired_state_provider_observed_state",
         "desired_state",
         "provider_observed_state",
     )
     IX_LIFECYCLE_DISPATCH = sa.Index(
-        "ix_agent_runtimes_lifecycle_dispatch",
+        "ix_agent_runtimes_desired_generation_last_life_bb2bd3e4f43c8f7a",
         "desired_generation",
         "last_lifecycle_dispatch_generation",
     )
