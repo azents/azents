@@ -17,6 +17,10 @@ from azents.core.enums import (
     ExternalChannelPrincipalAuthorType,
     ExternalChannelSetupClaimStatus,
 )
+from azents.core.external_channel_selection import (
+    ExternalChannelSelectorCandidate,
+    ExternalChannelSelectorError,
+)
 from azents.core.external_channel_selector_state import (
     ExternalChannelSelectorState,
     projection_with_selector_state,
@@ -35,11 +39,21 @@ from azents.repos.external_channel.data import (
     ExternalChannelSetupClaim,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
-from azents.services.external_channel.selector import (
-    ExternalChannelSelectorCandidate,
-    ExternalChannelSelectorError,
-    ExternalChannelSelectorService,
+from azents.repos.external_channel.selector_operations import (
+    ExternalChannelSelectorOperations,
 )
+from azents.services.external_channel.selector import ExternalChannelSelectorService
+
+
+class _SelectorOperations(ExternalChannelSelectorOperations):
+    def bind_fake(self, fake: _Repository) -> None:
+        self.fake = fake
+
+    async def _read_interaction(
+        self, session: ReadSession, *, interaction_id: str
+    ) -> ExternalChannelInteraction | None:
+        return await self.fake.lock_interaction(session, interaction_id=interaction_id)
+
 
 _NOW = datetime.datetime(2026, 7, 31, tzinfo=datetime.UTC)
 
@@ -54,9 +68,7 @@ class _Session:
 
 def _route(route_id: str, agent_id: str) -> ExternalChannelAgentRoute:
     return ExternalChannelAgentRoute.model_construct(
-        id=route_id,
-        connection_id="connection-1",
-        agent_id=agent_id,
+        id=route_id, connection_id="connection-1", agent_id=agent_id
     )
 
 
@@ -122,20 +134,14 @@ class _Repository:
         return self.selector if interaction_id == self.selector.id else None
 
     async def lock_interaction(
-        self,
-        session: ReadSession,
-        *,
-        interaction_id: str,
+        self, session: ReadSession, *, interaction_id: str
     ) -> ExternalChannelInteraction | None:
         del session
         self.calls.append("interaction_lock")
         return self.selector if interaction_id == self.selector.id else None
 
     async def get_connection(
-        self,
-        session: ReadSession,
-        *,
-        connection_id: str,
+        self, session: ReadSession, *, connection_id: str
     ) -> ExternalChannelConnection | None:
         del session
         self.calls.append("connection_snapshot")
@@ -148,18 +154,14 @@ class _Repository:
         )
 
     async def get_principal(
-        self,
-        session: ReadSession,
-        *,
-        principal_id: str,
+        self, session: ReadSession, *, principal_id: str
     ) -> ExternalChannelPrincipal | None:
         del session
         self.calls.append("principal")
         if principal_id != "principal-1":
             return None
         return ExternalChannelPrincipal.model_construct(
-            id=principal_id,
-            author_type=self.author_type,
+            id=principal_id, author_type=self.author_type
         )
 
     async def list_routable_multi_catalog_routes(
@@ -201,44 +203,30 @@ class _Repository:
         return object() if agent_id in self.granted_agents else None
 
     async def lock_connection_for_routing(
-        self,
-        session: ReadSession,
-        *,
-        connection_id: str,
+        self, session: ReadSession, *, connection_id: str
     ) -> ExternalChannelConnection | None:
         return await self.get_connection(session, connection_id=connection_id)
 
     async def get_routable_route_by_id(
-        self,
-        session: ReadSession,
-        *,
-        route_id: str,
+        self, session: ReadSession, *, route_id: str
     ) -> ExternalChannelAgentRoute | None:
         del session
         self.calls.append("route_lock")
         return next((row.route for row in self.rows if row.route.id == route_id), None)
 
     async def lock_resource(
-        self,
-        session: ReadSession,
-        *,
-        resource_id: str,
+        self, session: ReadSession, *, resource_id: str
     ) -> object | None:
         del session
         self.calls.append("resource_lock")
         if resource_id != "resource-1":
             return None
         return type(
-            "Resource",
-            (),
-            {"id": "resource-1", "connection_id": "connection-1"},
+            "Resource", (), {"id": "resource-1", "connection_id": "connection-1"}
         )()
 
     async def lock_connected_binding_by_resource(
-        self,
-        session: ReadSession,
-        *,
-        resource_id: str,
+        self, session: ReadSession, *, resource_id: str
     ) -> ExternalChannelBinding | None:
         del session
         self.calls.append("binding_lock")
@@ -246,10 +234,7 @@ class _Repository:
         return self.binding
 
     async def lock_setup_claim(
-        self,
-        session: ReadSession,
-        *,
-        claim_id: str,
+        self, session: ReadSession, *, claim_id: str
     ) -> ExternalChannelSetupClaim | None:
         del session
         self.calls.append("setup_claim_lock")
@@ -258,11 +243,7 @@ class _Repository:
         return self.setup_claim
 
     async def lock_routable_channel_default(
-        self,
-        session: ReadSession,
-        *,
-        connection_id: str,
-        provider_channel_id: str,
+        self, session: ReadSession, *, connection_id: str, provider_channel_id: str
     ) -> ExternalChannelAgentRoute | None:
         del session
         self.calls.append("channel_default_lock")
@@ -271,9 +252,7 @@ class _Repository:
         return self.current_default
 
     async def create_channel_default(
-        self,
-        session: ReadSession,
-        create: ExternalChannelChannelDefaultCreate,
+        self, session: ReadSession, create: ExternalChannelChannelDefaultCreate
     ) -> object:
         del session
         self.calls.append("channel_default_create")
@@ -306,11 +285,7 @@ class _Repository:
         return self.setup_claim
 
     async def get_active_block(
-        self,
-        session: ReadSession,
-        *,
-        agent_id: str,
-        principal_id: str,
+        self, session: ReadSession, *, agent_id: str, principal_id: str
     ) -> object | None:
         del session
         self.calls.append("block")
@@ -352,14 +327,18 @@ class _Repository:
 def _service(
     session: _Session, repository: _Repository
 ) -> ExternalChannelSelectorService:
+
     @asynccontextmanager
     async def session_manager() -> AsyncGenerator[WriteSession, None]:
         yield ReadWriteSession(cast(AsyncSession, session))
 
-    return ExternalChannelSelectorService(
+    operations = _SelectorOperations(
         session_manager=cast(SessionManager[WriteSession], session_manager),
         repository=cast(ExternalChannelRepository, repository),
+        read_session_manager=cast(SessionManager[WriteSession], session_manager),
     )
+    operations.bind_fake(repository)
+    return ExternalChannelSelectorService(operations=operations)
 
 
 @pytest.mark.asyncio
@@ -377,7 +356,6 @@ async def test_catalog_uses_interaction_state_and_labels_access() -> None:
     )
     repository.granted_agents.add("agent-1")
     repository.blocked_agents.add("agent-2")
-
     catalog = await _service(session, repository).project_catalog(
         selector_interaction_id="selector-1",
         principal_id="principal-1",
@@ -385,12 +363,9 @@ async def test_catalog_uses_interaction_state_and_labels_access() -> None:
         offset=0,
         now=_NOW,
     )
-
     assert catalog.candidates == (
         ExternalChannelSelectorCandidate(
-            route_id="route-1",
-            agent_name="Alpha",
-            access="available",
+            route_id="route-1", agent_name="Alpha", access="available"
         ),
     )
     assert catalog.next_offset is None
@@ -411,14 +386,12 @@ async def test_selection_replaces_only_typed_interaction_projection() -> None:
             ),
         ]
     )
-
     selection = await _service(session, repository).select_route(
         selector_interaction_id="selector-1",
         principal_id="principal-1",
         route_id="route-1",
         now=_NOW,
     )
-
     assert selection.status == "selected"
     assert (
         selector_state_from_interaction(
@@ -428,7 +401,6 @@ async def test_selection_replaces_only_typed_interaction_projection() -> None:
     )
     assert "projection_replace" in repository.calls
     assert session.committed is True
-
     repeated = await _service(_Session(), repository).select_route(
         selector_interaction_id="selector-1",
         principal_id="principal-1",
@@ -436,7 +408,6 @@ async def test_selection_replaces_only_typed_interaction_projection() -> None:
         now=_NOW,
     )
     assert repeated.status == "already_selected"
-
     with pytest.raises(ExternalChannelSelectorError, match="immutable"):
         await _service(_Session(), repository).select_route(
             selector_interaction_id="selector-1",
@@ -458,14 +429,12 @@ async def test_existing_binding_wins_without_selector_mutation() -> None:
         ],
         binding=binding,
     )
-
     selection = await _service(session, repository).select_route(
         selector_interaction_id="selector-1",
         principal_id="principal-1",
         route_id="route-1",
         now=_NOW,
     )
-
     assert selection.status == "already_bound"
     assert selection.binding is binding
     assert "projection_replace" not in repository.calls
@@ -491,14 +460,12 @@ async def test_setup_selector_assigns_parent_route_without_binding() -> None:
         claim_generation=1,
         status=ExternalChannelSetupClaimStatus.PENDING_AGENT,
     )
-
     selection = await _service(session, repository).select_route(
         selector_interaction_id="selector-1",
         principal_id="principal-1",
         route_id="route-1",
         now=_NOW,
     )
-
     assert selection.status == "setup_pending_location"
     assert selection.binding is None
     assert repository.setup_claim is not None
@@ -527,14 +494,12 @@ async def test_expired_interaction_is_terminalized_before_selection() -> None:
         ]
     )
     repository.selector = _selector(expires_at=_NOW - datetime.timedelta(seconds=1))
-
     selection = await _service(session, repository).select_route(
         selector_interaction_id="selector-1",
         principal_id="principal-1",
         route_id="route-1",
         now=_NOW,
     )
-
     assert selection.status == "expired"
     assert (
         selection.selector_interaction.status
@@ -547,7 +512,6 @@ async def test_expired_interaction_is_terminalized_before_selection() -> None:
 @pytest.mark.asyncio
 async def test_catalog_rejects_cross_principal_interaction() -> None:
     repository = _Repository(rows=[])
-
     with pytest.raises(ExternalChannelSelectorError, match="unavailable"):
         await _service(_Session(), repository).project_catalog(
             selector_interaction_id="selector-1",
@@ -556,7 +520,6 @@ async def test_catalog_rejects_cross_principal_interaction() -> None:
             offset=0,
             now=_NOW,
         )
-
     assert repository.catalog_queries == []
 
 
@@ -564,10 +527,8 @@ async def test_catalog_rejects_cross_principal_interaction() -> None:
 async def test_catalog_rejects_connection_without_routing_authority() -> None:
     """Catalog projection cannot race past connection routing shutdown."""
     repository = _Repository(
-        rows=[],
-        connection_status=ExternalChannelConnectionStatus.RECONNECT_REQUIRED,
+        rows=[], connection_status=ExternalChannelConnectionStatus.RECONNECT_REQUIRED
     )
-
     with pytest.raises(ExternalChannelSelectorError, match="unavailable"):
         await _service(_Session(), repository).project_catalog(
             selector_interaction_id="selector-1",
@@ -576,5 +537,4 @@ async def test_catalog_rejects_connection_without_routing_authority() -> None:
             offset=0,
             now=_NOW,
         )
-
     assert repository.catalog_queries == []
