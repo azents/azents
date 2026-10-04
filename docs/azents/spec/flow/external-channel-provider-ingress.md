@@ -12,6 +12,7 @@ code_paths:
   - python/apps/azents/src/azents/core/external_channel_conversation_preparation.py
   - python/apps/azents/src/azents/core/external_channel_discord_selector_scope.py
   - python/apps/azents/src/azents/core/external_channel_ingestion.py
+  - python/apps/azents/src/azents/core/external_channel_replay.py
   - python/apps/azents/src/azents/core/external_channel_participation_state.py
   - python/apps/azents/src/azents/core/external_channel_selector_state.py
   - python/apps/azents/src/azents/core/mailbox_errors.py
@@ -19,6 +20,11 @@ code_paths:
   - python/apps/azents/src/azents/repos/external_channel/access_operations.py
   - python/apps/azents/src/azents/repos/external_channel/conversation_provisioning.py
   - python/apps/azents/src/azents/repos/external_channel/ingress_drain.py
+  - python/apps/azents/src/azents/repos/external_channel/http_admission_read.py
+  - python/apps/azents/src/azents/repos/external_channel/ingestion_history_read.py
+  - python/apps/azents/src/azents/repos/external_channel/transport_ingestion_read.py
+  - python/apps/azents/src/azents/repos/external_channel/ingestion_replay_operations.py
+  - python/apps/azents/src/azents/repos/external_channel/ingress_admission_operations.py
   - python/apps/azents/src/azents/repos/mailbox_runtime_operations.py
   - python/apps/azents/src/azents/api/public/external_channel/v1/route.py
   - python/apps/azents/src/azents/services/external_channel/admission.py
@@ -99,7 +105,7 @@ api_routes:
   - /external-channel/v1/slack/events
   - /external-channel/v1/discord/interactions/{selector}
 last_verified_at: 2026-10-05
-spec_version: 67
+spec_version: 68
 ---
 
 # External Channel Provider Ingress
@@ -138,6 +144,16 @@ operation fixtures; it does not mutate SDK globals, emulate private SDK HTTP sta
 run a duplicate Discord Gateway protocol server.
 
 ## HTTP Admission
+
+Slack candidate configuration, provider-history configuration, Discord transport
+authority/resource snapshots, access/setup replay owners and bounded recovery IDs
+are captured by completed native read-only repository operations.
+Selected-interaction replay retains its row lock inside a completed write operation.
+Configured triggers enter one repository-owned atomic write operation preserving
+connection-to-route/resource/principal/position/queue order and deduplication.
+Every operation finishes before result-dependent credential/signature processing,
+provider history/ingestion, committed-outcome logging or Runtime submission.
+Services receive detached domain evidence rather than a live SQL session.
 
 Slack sends HTTP callbacks to the single fixed endpoint
 `POST /external-channel/v1/slack/events`.
@@ -661,7 +677,13 @@ persistent provider connections.
 
 ## Changelog
 
+- **2026-10-05** (spec_version 68) — Combined completed admission/replay
+  ownership with the current scoped ingress fences and nonblocking observations.
+
 - **2026-10-05** (spec_version 67) — Separated owner/diagnostic/first-trigger observations from exact ingress lease and batch claims, preserving generation/cursor-conditioned mailbox and queue finalization.
+- **2026-10-05** — v67. Completed provider ingress configuration/replay reads
+  and atomic configured-trigger admission in repositories, preserving authorization,
+  idempotency and postcommit provider/Runtime orchestration.
 
 - **2026-10-03** (spec_version 65) — Added Session and AgentRun execution authority
   to the Gateway typing target projection.
