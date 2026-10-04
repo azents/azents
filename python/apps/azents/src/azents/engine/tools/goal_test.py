@@ -17,7 +17,11 @@ from azents.engine.tools.goal import (
     render_goal_prompt,
     render_goal_snapshot,
 )
-from azents.repos.goal.store import GoalAlreadyExistsError, GoalStatusUpdate
+from azents.repos.goal.store import (
+    GoalAlreadyExistsError,
+    GoalStateStore,
+    GoalStatusUpdate,
+)
 
 
 def _compaction_context(
@@ -58,6 +62,32 @@ async def test_goal_toolkit_exposes_goal_tools() -> None:
         "update_goal",
     ]
     assert "Ship goal" not in (await toolkit.get_static_prompt(context))
+    store.load.assert_not_awaited()
+
+
+async def test_goal_toolkit_waits_for_explicit_identity_binding() -> None:
+    """Unbound Goal state stays absent until both durable identities are set."""
+    store = AsyncMock(spec=GoalStateStore)
+    toolkit = GoalToolkit(store=store, agent_id=None, session_id=None)
+    context = TurnContext(
+        workspace_id="workspace-1",
+        model="model",
+        run_id="run-1",
+        publish_event=AsyncMock(),
+    )
+    assert (await toolkit.update_context(context)).tools == []
+    assert await toolkit._on_compaction_summary(_compaction_context()) is None
+    store.load.assert_not_awaited()
+    toolkit.set_session_id("session-1")
+    assert (await toolkit.update_context(context)).tools == []
+    toolkit.set_agent_id("agent-1")
+    assert [
+        tool.spec.name for tool in (await toolkit.update_context(context)).tools
+    ] == [
+        "get_goal",
+        "create_goal",
+        "update_goal",
+    ]
     store.load.assert_not_awaited()
 
 
