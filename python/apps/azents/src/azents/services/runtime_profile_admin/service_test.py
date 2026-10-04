@@ -23,6 +23,10 @@ from azents.core.runtime_profile import (
 )
 from azents.core.runtime_provider_data import RuntimeProvider
 from azents.rdb.session_capabilities import WriteSession
+from azents.repos.runtime_profile.admin_operations import (
+    RuntimeProfileAdminOperationsRepository,
+    _infrastructure_terminal_only_change,
+)
 from azents.repos.runtime_profile.data import (
     RuntimeInfrastructureProfile,
     RuntimeInfrastructureProfileDeleteOutcome,
@@ -44,7 +48,6 @@ from azents.testing.types import require_instance
 from .service import (
     RuntimeProfileAdminService,
     RuntimeProfileAdminUnavailable,
-    _infrastructure_terminal_only_change,
 )
 
 
@@ -143,14 +146,17 @@ def _service() -> tuple[
     provider_repository = AsyncMock()
     workspace_repository = AsyncMock()
     service = RuntimeProfileAdminService(
-        session_manager=session_manager,
-        profile_repository=profile_repository,
-        provider_repository=provider_repository,
-        policy_repository=require_instance(
-            MagicMock(spec=RuntimeProviderPolicyRepository),
-            RuntimeProviderPolicyRepository,
+        repository=RuntimeProfileAdminOperationsRepository(
+            session_manager=session_manager,
+            read_session_manager=session_manager,
+            profile_repository=profile_repository,
+            provider_repository=provider_repository,
+            policy_repository=require_instance(
+                MagicMock(spec=RuntimeProviderPolicyRepository),
+                RuntimeProviderPolicyRepository,
+            ),
+            workspace_repository=workspace_repository,
         ),
-        workspace_repository=workspace_repository,
         terminal_policy_invalidation_publisher=(
             NoopTerminalPolicyInvalidationPublisher()
         ),
