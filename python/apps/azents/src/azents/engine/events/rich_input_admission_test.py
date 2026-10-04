@@ -160,7 +160,7 @@ def _request(
         enabled_execution_options=[],
         top_k=None,
     )
-    return lowerer.lower(transcript, model="probe-model")
+    return lowerer.lower(transcript, native_replay_context=None, model="probe-model")
 
 
 def _rich_count(request: PydanticAIRequest | OpenAIResponsesRequest) -> int:

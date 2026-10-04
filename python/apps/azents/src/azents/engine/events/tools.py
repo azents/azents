@@ -64,6 +64,7 @@ class ToolCatalog:
     entries: Mapping[str, CatalogTool]
     static_prompt_fragment_inputs: list[ToolkitPromptInput]
     dynamic_prompt_fragment_inputs: list[ToolkitPromptInput]
+    native_replay_context: str | None
     active_toolkit_bindings: list[ToolkitBinding]
 
     @property
@@ -230,6 +231,7 @@ def project_tool_catalog_for_client_compatibility(
             *variant_prompt_inputs,
         ],
         dynamic_prompt_fragment_inputs=catalog.dynamic_prompt_fragment_inputs,
+        native_replay_context=catalog.native_replay_context,
         active_toolkit_bindings=catalog.active_toolkit_bindings,
     )
 
@@ -310,6 +312,7 @@ def extend_tool_catalog_candidates(
         entries=MappingProxyType(entries),
         static_prompt_fragment_inputs=catalog.static_prompt_fragment_inputs,
         dynamic_prompt_fragment_inputs=catalog.dynamic_prompt_fragment_inputs,
+        native_replay_context=catalog.native_replay_context,
         active_toolkit_bindings=catalog.active_toolkit_bindings,
     )
 
@@ -356,6 +359,7 @@ def extend_prepared_tool_catalog_with_json_functions(
         entries=MappingProxyType(entries),
         static_prompt_fragment_inputs=catalog.static_prompt_fragment_inputs,
         dynamic_prompt_fragment_inputs=catalog.dynamic_prompt_fragment_inputs,
+        native_replay_context=catalog.native_replay_context,
         active_toolkit_bindings=catalog.active_toolkit_bindings,
     )
 
@@ -383,6 +387,7 @@ async def build_tool_catalog(
     entries: dict[str, CatalogTool] = {}
     static_prompt_fragment_inputs: list[ToolkitPromptInput] = []
     dynamic_prompt_fragment_inputs: list[ToolkitPromptInput] = []
+    native_replay_contexts: list[str] = []
     active_toolkit_bindings: list[ToolkitBinding] = []
     for index, binding in enumerate(toolkit_bindings):
         update_started_at = time.monotonic()
@@ -417,7 +422,10 @@ async def build_tool_catalog(
                     content=prompt,
                 )
             )
-        dynamic_prompt = (await binding.toolkit.get_dynamic_prompt(context)).strip()
+        prepared_prompt = await binding.toolkit.prepare_dynamic_prompt(context)
+        dynamic_prompt = prepared_prompt.text.strip()
+        if prepared_prompt.native_replay_context is not None:
+            native_replay_contexts.append(prepared_prompt.native_replay_context)
         if dynamic_prompt:
             dynamic_prompt_fragment_inputs.append(
                 _toolkit_prompt_input(
@@ -466,6 +474,11 @@ async def build_tool_catalog(
         entries=MappingProxyType(entries),
         static_prompt_fragment_inputs=static_prompt_fragment_inputs,
         dynamic_prompt_fragment_inputs=dynamic_prompt_fragment_inputs,
+        native_replay_context=(
+            json.dumps(sorted(native_replay_contexts), separators=(",", ":"))
+            if native_replay_contexts
+            else None
+        ),
         active_toolkit_bindings=active_toolkit_bindings,
     )
 

@@ -6,8 +6,8 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: []
 code_paths:
-  - typescript/apps/azents-web/src/features/agents/model-option-editor.ts
-  - typescript/apps/azents-web/src/features/agents/image-generation-config.ts
+  - typescript/apps/azents-web/src/shared/model-options/model-option-editor.ts
+  - typescript/apps/azents-web/src/shared/model-options/image-generation-config.ts
   - typescript/apps/azents-web/src/features/toolkits/toolkit-config-projection.ts
   - python/apps/azents/src/azents/api/public/chat/v1/validation_audit_test.py
   - python/apps/azents/src/azents/api/public/toolkit/v1/validation_audit_test.py
@@ -16,11 +16,12 @@ code_paths:
   - typescript/apps/azents-web/src/features/agents/components/AgentForm.stories.tsx
   - typescript/apps/azents-web/src/features/agents/components/AgentMemorySettings.stories.tsx
   - typescript/apps/azents-web/src/features/agents/components/AgentToolkitManagementSection.stories.tsx
-  - typescript/apps/azents-web/src/features/agents/components/ModelCatalogPicker.stories.tsx
-  - typescript/apps/azents-web/src/features/agents/components/SelectableModelOptionsEditor.stories.tsx
+  - typescript/apps/azents-web/src/shared/model-options/components/ModelCatalogPicker.stories.tsx
+  - typescript/apps/azents-web/src/shared/model-options/components/SelectableModelOptionsEditor.stories.tsx
+  - typescript/apps/azents-web/src/features/llm-settings/components/WorkspaceModelSettingsCard.stories.tsx
   - typescript/apps/azents-web/src/features/toolkits/components/ToolkitForm.stories.tsx
-  - typescript/apps/azents-web/src/features/agents/image-generation-config.test.mts
-  - typescript/apps/azents-web/src/features/agents/model-selection.test.mts
+  - typescript/apps/azents-web/src/shared/model-options/image-generation-config.test.mts
+  - typescript/apps/azents-web/src/shared/model-options/model-selection.test.mts
   - typescript/apps/azents-web/src/features/toolkits/toolkit-config-projection.test.mts
   - .claude/skills/e2e-ci-optimization/**
   - .claude/skills/technical-feature-design/SKILL.md
@@ -46,7 +47,7 @@ code_paths:
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
 last_verified_at: 2026-10-04
-spec_version: 83
+spec_version: 84
 ---
 
 # E2E Primary Test Strategy
@@ -178,17 +179,22 @@ The required Historical Memory public journey creates a Runtime-free Agent,
 integration and source Sessions through product APIs. Its
 credential-free provider fixture returns strict `{"summary": ...}` output
 through the ordinary Lightweight summary SDK path, separately from foreground
-model behavior. It verifies preparation, boundary context, live generic VFS
+model behavior. A second representative journey runs independent Team and two
+personal consolidation chains through real inventory/source reads, draft write/
+edit error recovery, exact coverage and host publication. Captured model inputs
+and tool results prove scope isolation and Runtime absence. It verifies preparation, boundary context, live generic VFS
 inspection, retained human settings, and source archive/restore/Memory-disable
 effects without live provider credentials or direct product DB writes.
 
 The isolated testenv `POST /scheduler/v1/historical-memory/sample`
 endpoint accepts an aware sampling instant and exact Agent ID, then invokes
-the real bounded discovery admission/due-source and preparation/publication
-services. It does not rewrite source activity, replace production real-time
+the real bounded discovery admission/due-source, preparation and consolidation
+services. Sampling changes Stage 1 eligibility time only; consolidation retains
+real database leases and absolute deadlines. It does not rewrite source activity, replace production real-time
 semantics, bypass source authorization, or add a production configuration mode.
-An outer 120-second timeout and preparation's 110-second real deadline keep
-the fixture operation bounded.
+An outer bounded timeout, preparation's 110-second real deadline and ordinary
+consolidation attempt limits bound fixture work. Unexpected errors propagate
+instead of becoming successful fixture responses.
 
 This product journey proves service admission, provider summary execution,
 publication, and visible consumption; it does not claim Scheduler dispatch,
@@ -543,8 +549,10 @@ Always-on required CI does not depend on external credentials.
 - Web Surface E2E runs from `src/tests/web/` in its own suite lane.
 - Required Brave Search journeys admit the five independent success Sessions before
   waiting for their persisted terminal run markers and idle projections. Every
-  created Session is registered for draining before input admission, and cleanup
-  continues through all registered Sessions after a submission or drain failure.
+  created Session is registered for draining before input admission; definite
+  validation/auth rejection preserves the original error without awaiting a run
+  that was never admitted. Cleanup continues through every admitted or ambiguous
+  Session after a submission or drain failure.
   Tool Search routing, five endpoint results, Runtime capability, correlation,
   attachment bytes, vision continuation, credential failures, and text-only fallback
   assertions remain unchanged. Credential mutation and failure journeys remain serial.
@@ -609,6 +617,12 @@ Always-on required CI does not depend on external credentials.
   exact-base CI workflow publishes a pending status and linked run, while an absent or
   completed base without compatible artifacts publishes a neutral successful status
   with an unavailable comparison. Candidate CI never waits for base completion.
+  The CI aggregate evaluates and records the local duration verdict without posting
+  a commit status. The existing independent reevaluation workflow owns external
+  `ci-python-e2e` status publication. Publication failures remain visible in that
+  workflow and cannot change a completed local duration verdict or its CI gate result;
+  exact-base pending, terminal unavailable, regression, and invalid-evidence status
+  meanings are unchanged.
   Every CI completion selects all open same-repository pull requests whose current
   head or base SHA matches the completed workflow head SHA. This includes dependent
   stacked pull requests with non-main bases and does not depend on run-associated PR
@@ -690,6 +704,10 @@ External substrate features such as Agent Runtime Provider are recorded in two l
 Local/PR environment without live substrate does not fake live PASS. Instead, separate prerequisite snapshot state and deterministic evidence in PR body and design QA record. If primary E2E substrate such as Browser runner or Docker/testcontainers is unavailable and product path cannot be executed, do not replace it with PASS. Track scenario, blocker category, observed error, expected verification target, and next action in GitHub Issue, and leave blocked evidence plus issue link in design QA record.
 
 ## Changelog
+
+- **2026-10-04** (spec_version 82) — Added isolated multi-turn consolidation
+  product verification and production-service sampling with ordinary leases and
+  deadlines; retained narrow backend ownership of exhaustive races/capacity.
 
 - **2026-10-02** (spec_version 81) — Excluded cancelled candidate workflow
   artifacts from duration reevaluation without filtering genuine failed runs

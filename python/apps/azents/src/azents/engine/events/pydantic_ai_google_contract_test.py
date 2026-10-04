@@ -81,7 +81,12 @@ def _request(
         hosted_tools=[BuiltinToolSpec(name="image_generation", config=image_config)]
         if image_config is not None
         else None,
-    ).lower([], model=model, system_prompt="Synthetic SDK contract")
+    ).lower(
+        [],
+        native_replay_context=None,
+        model=model,
+        system_prompt="Synthetic SDK contract",
+    )
 
 
 async def _dispatch(
@@ -375,7 +380,12 @@ async def test_exact_source_image_support_reaches_google_sdk_without_name_profil
         supported_execution_options=[],
         enabled_execution_options=[],
         hosted_tools=[BuiltinToolSpec(name="image_generation", config={"size": "2K"})],
-    ).lower([], model=model, system_prompt="Exact source image test")
+    ).lower(
+        [],
+        native_replay_context=None,
+        model=model,
+        system_prompt="Exact source image test",
+    )
     buffer = BytesIO()
     Image.new("RGB", (1, 1), color=(0, 0, 255)).save(buffer, format="PNG")
     result = await _dispatch(
@@ -439,7 +449,7 @@ async def test_saved_google_image_denial_is_not_reenabled_by_codec_defaults(
         hosted_tools=[BuiltinToolSpec(name="image_generation", config={})],
     )
     with pytest.raises(ValueError):
-        lowerer.lower([], model=model)
+        lowerer.lower([], native_replay_context=None, model=model)
     lowerer = PydanticAILowerer(
         top_k=None,
         provider=provider.value,
@@ -454,7 +464,7 @@ async def test_saved_google_image_denial_is_not_reenabled_by_codec_defaults(
     )
     result = await _dispatch(
         provider=provider,
-        request=lowerer.lower([], model=model),
+        request=lowerer.lower([], native_replay_context=None, model=model),
         image=None,
         media_type=None,
         capabilities=caps,
@@ -514,7 +524,12 @@ async def test_explicit_source_effort_survives_sparse_google_codec_on_wire(
         enabled_execution_options=[],
         reasoning_effort=effort,
         hosted_tools=None,
-    ).lower([], model=model, system_prompt="Exact source scalar test")
+    ).lower(
+        [],
+        native_replay_context=None,
+        model=model,
+        system_prompt="Exact source scalar test",
+    )
     result = await _dispatch(
         provider=provider,
         request=request,

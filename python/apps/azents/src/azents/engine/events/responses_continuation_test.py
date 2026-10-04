@@ -20,6 +20,7 @@ def _request(
 ) -> NativeModelRequest:
     """Build a full logical request for continuation tests."""
     return NativeModelRequest(
+        native_replay_context=None,
         model=model,
         input=[dict(item) for item in input_items],
         tools=(tools if tools is not None else [{"type": "function", "name": "read"}]),

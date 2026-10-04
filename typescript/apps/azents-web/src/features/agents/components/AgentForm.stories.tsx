@@ -2,25 +2,25 @@ import { rem } from "@mantine/core";
 import { useForm } from "@mantine/form";
 import { expect, userEvent, within } from "storybook/test";
 import { reasoningEffortLevels } from "@/shared/lib/reasoning-effort";
-import { partialReasoningCapabilities } from "@/shared/storybook/model-capability-fixtures";
-import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
-import { SelectableModelOptionsEditorContainer } from "../containers/SelectableModelOptionsEditorContainer";
-import { useAgentFormTranslations } from "../containers/useAgentFormTranslations";
+import { renderStaticModelPicker } from "@/shared/model-options/components/model-option-editor-story-fixtures";
+import { SelectableModelOptionsEditorContainer } from "@/shared/model-options/containers/SelectableModelOptionsEditorContainer";
 import {
   findSelectableModelOptionByLabel,
   selectableModelOptionFormValuesFromStoredOptions,
-} from "../model-selection";
+} from "@/shared/model-options/model-selection";
+import { partialReasoningCapabilities } from "@/shared/storybook/model-capability-fixtures";
+import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
+import { useAgentFormTranslations } from "../containers/useAgentFormTranslations";
 import { AgentForm } from "./AgentForm";
-import { renderStaticModelPicker } from "./model-option-editor-story-fixtures";
+import type { AgentFormValues } from "../schemas";
+import type { AgentFormState } from "../types";
+import type { AgentFormProps } from "./AgentForm";
+import type { SelectableModelOptionsEditorProps } from "@/shared/model-options/components/SelectableModelOptionsEditor";
 import type {
   ImageGenerationCatalogState,
   ModelSelectionOption,
   ProviderIntegrationOption,
-} from "../model-selection";
-import type { AgentFormValues } from "../schemas";
-import type { AgentFormState } from "../types";
-import type { AgentFormProps } from "./AgentForm";
-import type { SelectableModelOptionsEditorProps } from "./SelectableModelOptionsEditor";
+} from "@/shared/model-options/model-selection";
 import type {
   AgentModelSelection,
   AgentResponse,

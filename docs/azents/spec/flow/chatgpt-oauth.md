@@ -34,7 +34,7 @@ code_paths:
   - python/apps/azents/src/azents/engine/events/**
   - python/apps/azents/src/azents/engine/context/compaction.py
   - python/apps/azents/src/azents/services/session_title.py
-  - typescript/apps/azents-web/src/features/agents/components/ModelCatalogPicker.tsx
+  - typescript/apps/azents-web/src/shared/model-options/components/ModelCatalogPicker.tsx
   - typescript/apps/azents-web/src/features/llm-settings/**
   - typescript/apps/azents-web/src/shared/subscription-usage/**
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts

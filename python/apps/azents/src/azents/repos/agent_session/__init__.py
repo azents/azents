@@ -51,6 +51,9 @@ from azents.rdb.models.model_candidate_health import RDBModelCandidateHealth
 from azents.rdb.models.session_agent import RDBSessionAgent
 from azents.rdb.models.session_agent_context import RDBSessionAgentContext
 from azents.repos.agent_runtime import AgentRuntimeRepository
+from azents.repos.historical_memory_consolidation.lifecycle import (
+    source_availability_in_session,
+)
 
 from .data import (
     AgentSession,
@@ -1861,6 +1864,9 @@ class AgentSessionRepository:
                 archive_retention_days_snapshot=retention_days,
             )
         )
+        await source_availability_in_session(
+            session, source_session_id=root_session_id, denied=True
+        )
         await session.flush()
 
     async def restore_tree(
@@ -1905,6 +1911,9 @@ class AgentSessionRepository:
                 working_folder_cleanup_completed_at=None,
             )
         )
+        await source_availability_in_session(
+            session, source_session_id=root_session_id, denied=False
+        )
         await session.flush()
 
     async def archive(
@@ -1930,6 +1939,9 @@ class AgentSessionRepository:
                 primary_model_reservation=None,
                 title_model_operation_state=None,
             )
+        )
+        await source_availability_in_session(
+            session, source_session_id=agent_session_id, denied=True
         )
         await session.flush()
 

@@ -12,7 +12,6 @@ import {
   selectCandidateIntegration,
   selectCandidateModel,
 } from "../model-selection";
-import { ModelCatalogPickerContainer } from "./ModelCatalogPickerContainer";
 import { useSelectableModelOptionsEditor } from "./useSelectableModelOptionsEditor";
 import type {
   OptionCardProps,
@@ -22,7 +21,7 @@ import type { ModelCatalogPickerContainerProps } from "./ModelCatalogPickerConta
 import type { ReactNode } from "react";
 
 export interface SelectableModelOptionsEditorContainerProps extends SelectableModelOptionsEditorProps {
-  renderModelPicker?: (props: ModelCatalogPickerContainerProps) => ReactNode;
+  renderModelPicker: (props: ModelCatalogPickerContainerProps) => ReactNode;
 }
 
 function SortableOptionCard(props: OptionCardProps): React.ReactElement {
@@ -33,14 +32,8 @@ function SortableOptionCard(props: OptionCardProps): React.ReactElement {
   return <OptionCard {...props} sortable={sortable} />;
 }
 
-function renderLiveModelPicker(
-  props: ModelCatalogPickerContainerProps,
-): ReactNode {
-  return <ModelCatalogPickerContainer {...props} />;
-}
-
 export function SelectableModelOptionsEditorContainer({
-  renderModelPicker = renderLiveModelPicker,
+  renderModelPicker,
   ...props
 }: SelectableModelOptionsEditorContainerProps): React.ReactElement {
   const t = useTranslations("workspace.agents.selectableModelOptions");

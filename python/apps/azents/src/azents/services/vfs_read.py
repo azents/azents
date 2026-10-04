@@ -164,10 +164,10 @@ class VfsGlobResult:
     stopped_reason: str | None = None
 
 
-class VfsReadAuthorityValidator(Protocol):
+class VfsReadAuthorityValidator[ReadContextT = VfsReadContext](Protocol):
     """Execution-owner admission check used before backend I/O."""
 
-    async def validate(self, context: VfsReadContext) -> None:
+    async def validate(self, context: ReadContextT) -> None:
         """Raise when the concrete Session owner generation is stale."""
         ...
 
@@ -187,7 +187,7 @@ class OwnerBoundVfsReadAuthorityValidator:
 
 
 @runtime_checkable
-class VfsReadBackend(Protocol):
+class VfsReadBackend[ReadContextT = VfsReadContext](Protocol):
     """Native bounded read operations owned by one canonical VFS mount."""
 
     @property
@@ -202,7 +202,7 @@ class VfsReadBackend(Protocol):
 
     async def read_text(
         self,
-        context: VfsReadContext,
+        context: ReadContextT,
         location: VfsLocation,
         *,
         offset: int,
@@ -214,7 +214,7 @@ class VfsReadBackend(Protocol):
 
     async def grep(
         self,
-        context: VfsReadContext,
+        context: ReadContextT,
         location: VfsLocation,
         *,
         pattern: re.Pattern[str],
@@ -230,7 +230,7 @@ class VfsReadBackend(Protocol):
 
     async def glob(
         self,
-        context: VfsReadContext,
+        context: ReadContextT,
         location: VfsLocation,
         *,
         exclude_patterns: Sequence[str],
@@ -240,23 +240,23 @@ class VfsReadBackend(Protocol):
 
 
 @runtime_checkable
-class VfsTransferReadBackend(Protocol):
+class VfsTransferReadBackend[ReadContextT = VfsReadContext](Protocol):
     """Optional backend capability for server-to-Runtime transfer."""
 
     async def transfer_read(
         self,
-        context: VfsReadContext,
+        context: ReadContextT,
         location: VfsLocation,
     ) -> VfsFileEntry:
         """Resolve one immutable transfer entry without materializing a tree."""
         ...
 
 
-class VfsReadBackendRegistry:
+class VfsReadBackendRegistry[ReadContextT = VfsReadContext]:
     """Immutable canonical-mount registry with fatal duplicate detection."""
 
-    def __init__(self, backends: Sequence[VfsReadBackend]) -> None:
-        registered: dict[str, VfsReadBackend] = {}
+    def __init__(self, backends: Sequence[VfsReadBackend[ReadContextT]]) -> None:
+        registered: dict[str, VfsReadBackend[ReadContextT]] = {}
         for backend in backends:
             canonical_mount = parse_vfs_search_uri(f"azents://{backend.mount}").mount
             if canonical_mount != backend.mount:
@@ -268,7 +268,7 @@ class VfsReadBackendRegistry:
             registered[backend.mount] = backend
         self._backends = registered
 
-    def get(self, mount: str) -> VfsReadBackend:
+    def get(self, mount: str) -> VfsReadBackend[ReadContextT]:
         """Return one registered mount backend or fail explicitly."""
         backend = self._backends.get(mount)
         if backend is None:
@@ -285,15 +285,15 @@ class VfsReadBackendRegistry:
 
 
 @dataclasses.dataclass(frozen=True)
-class VfsReadRouter:
+class VfsReadRouter[ReadContextT = VfsReadContext]:
     """Validate one VFS location and dispatch to its native backend."""
 
-    registry: VfsReadBackendRegistry
-    authority_validator: VfsReadAuthorityValidator
+    registry: VfsReadBackendRegistry[ReadContextT]
+    authority_validator: VfsReadAuthorityValidator[ReadContextT]
 
     async def read_text(
         self,
-        context: VfsReadContext,
+        context: ReadContextT,
         uri: str,
         *,
         offset: int,
@@ -327,7 +327,7 @@ class VfsReadRouter:
 
     async def grep(
         self,
-        context: VfsReadContext,
+        context: ReadContextT,
         uri: str,
         *,
         pattern: re.Pattern[str],
@@ -369,7 +369,7 @@ class VfsReadRouter:
 
     async def glob(
         self,
-        context: VfsReadContext,
+        context: ReadContextT,
         pattern: str,
         *,
         exclude_patterns: Sequence[str],
@@ -399,7 +399,7 @@ class VfsReadRouter:
 
     @staticmethod
     def _require_capability(
-        backend: VfsReadBackend,
+        backend: VfsReadBackend[ReadContextT],
         operation: Literal["read_text", "grep", "glob"],
     ) -> None:
         match operation:
@@ -418,7 +418,7 @@ class VfsReadRouter:
     @staticmethod
     def _log_operation(
         *,
-        backend: VfsReadBackend,
+        backend: VfsReadBackend[ReadContextT],
         operation: Literal["read_text", "grep", "glob"],
         started_at: float,
         visited_files: int | None,

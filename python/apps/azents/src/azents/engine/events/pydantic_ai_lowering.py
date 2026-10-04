@@ -49,6 +49,7 @@ from azents.engine.events.file_parts import (
     file_output_part_placeholder_text,
     lower_file_output_part,
 )
+from azents.engine.events.model_messages import ModelTranscriptMessage
 from azents.engine.events.model_support_contract import (
     decode_model_support_options,
     model_support_allowed,
@@ -57,6 +58,7 @@ from azents.engine.events.model_support_contract import (
     saved_builtin_tool_allowed,
     validate_saved_model_request,
 )
+from azents.engine.events.native_replay import native_replay_schema_version
 from azents.engine.events.output_parts import (
     enforce_tool_output_text_hard_cap,
     lower_output_to_text,
@@ -80,7 +82,6 @@ from azents.engine.events.types import (
     ClientToolCallPayload,
     ClientToolResultPayload,
     CompactionSummaryPayload,
-    Event,
     ExternalChannelMessagePayload,
     FileOutputPart,
     InputTextPart,
@@ -218,9 +219,10 @@ class PydanticAILowerer:
 
     def lower(
         self,
-        transcript: Sequence[Event],
+        transcript: Sequence[ModelTranscriptMessage],
         *,
         model: str,
+        native_replay_context: str | None,
         system_prompt: str | None = None,
     ) -> PydanticAIRequest:
         """Build explicit model messages without another execution graph."""
@@ -228,10 +230,19 @@ class PydanticAILowerer:
             raise ValueError("Lowerer model identity differs from the selected model")
         settings = self._settings()
         parameters = self._parameters(settings)
+        instructions = system_prompt or _DEFAULT_INSTRUCTIONS
+        self.schema_version = native_replay_schema_version(
+            instructions, native_replay_context=native_replay_context
+        )
+        self.compat_key = build_native_compat_key(
+            adapter=self.adapter,
+            native_format=self.native_format,
+            provider=self.provider,
+            model=model,
+            schema_version=self.schema_version,
+        )
         messages: list[ModelMessage] = [
-            ModelRequest(
-                parts=[SystemPromptPart(system_prompt or _DEFAULT_INSTRUCTIONS)]
-            )
+            ModelRequest(parts=[SystemPromptPart(instructions)])
         ]
         calls: dict[str, tuple[str, str]] = {}
         unrepresentable_calls: set[str] = set()
@@ -390,13 +401,14 @@ class PydanticAILowerer:
             settings=settings,
             parameters=parameters,
             assembly_metadata=None,
+            native_replay_context=native_replay_context,
         )
 
     @staticmethod
     def _prompt(content: str | Sequence[UserContent]) -> ModelRequest:
         return ModelRequest(parts=[UserPromptPart(content)])
 
-    def _native(self, event: Event) -> list[ModelMessage] | None:
+    def _native(self, event: ModelTranscriptMessage) -> list[ModelMessage] | None:
         payload = event.payload
         if not isinstance(
             payload,
@@ -452,7 +464,7 @@ class PydanticAILowerer:
             return False
         return native_args == canonical_args
 
-    def _canonical(self, event: Event) -> ModelMessage | None:
+    def _canonical(self, event: ModelTranscriptMessage) -> ModelMessage | None:
         payload = event.payload
         if isinstance(payload, UserMessagePayload):
             if event.kind == EventKind.GOAL_CONTINUATION:

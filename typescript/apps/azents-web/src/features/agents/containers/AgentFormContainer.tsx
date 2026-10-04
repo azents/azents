@@ -6,23 +6,45 @@ import {
   normalizeReasoningEffortForCapabilities,
   reasoningEffortLevels,
 } from "@/shared/lib/reasoning-effort";
-import { AgentForm } from "../components/AgentForm";
+import { ModelCatalogPickerContainer } from "@/shared/model-options/containers/ModelCatalogPickerContainer";
+import { SelectableModelOptionsEditorContainer } from "@/shared/model-options/containers/SelectableModelOptionsEditorContainer";
+import { useImageGenerationCatalogs } from "@/shared/model-options/containers/useImageGenerationCatalogs";
 import {
   findSelectableModelOptionByLabel,
   selectableModelOptionFormValuesFromStoredOptions,
-} from "../model-selection";
+} from "@/shared/model-options/model-selection";
+import { AgentForm } from "../components/AgentForm";
 import { agentFormSchema } from "../schemas";
-import { SelectableModelOptionsEditorContainer } from "./SelectableModelOptionsEditorContainer";
+import {
+  useImageCatalogTransport,
+  useModelCatalogQuery,
+} from "./model-catalog-transport";
 import { useAgentFormTranslations } from "./useAgentFormTranslations";
-import { useImageGenerationCatalogs } from "./useImageGenerationCatalogs";
 import type { AgentFormProps } from "../components/AgentForm";
-import type { SelectableModelOptionsEditorProps } from "../components/SelectableModelOptionsEditor";
 import type { AgentFormValues } from "../schemas";
+import type { SelectableModelOptionsEditorProps } from "@/shared/model-options/components/SelectableModelOptionsEditor";
+import type { ModelCatalogPickerContainerProps } from "@/shared/model-options/containers/ModelCatalogPickerContainer";
+
+function renderModelPicker(
+  props: ModelCatalogPickerContainerProps,
+): React.ReactNode {
+  return (
+    <ModelCatalogPickerContainer
+      {...props}
+      useCatalogQuery={useModelCatalogQuery}
+    />
+  );
+}
 
 function renderModelOptionsEditor(
   props: SelectableModelOptionsEditorProps,
 ): React.ReactNode {
-  return <SelectableModelOptionsEditorContainer {...props} />;
+  return (
+    <SelectableModelOptionsEditorContainer
+      {...props}
+      renderModelPicker={renderModelPicker}
+    />
+  );
 }
 
 const initialValues: AgentFormValues = {
@@ -163,6 +185,7 @@ export function AgentFormContainer(props: AgentFormProps): React.ReactElement {
   const imageCatalogs = useImageGenerationCatalogs(
     props.handle,
     form.values.selectable_model_options,
+    useImageCatalogTransport,
     form.values.reasoning_effort ?? null,
   );
 

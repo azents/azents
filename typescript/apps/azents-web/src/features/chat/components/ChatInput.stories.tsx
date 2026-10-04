@@ -1,8 +1,10 @@
 import { rem } from "@mantine/core";
 import { expect, fn, spyOn, userEvent, waitFor, within } from "storybook/test";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
+import { useChatInputContainer } from "../containers/useChatInputContainer";
 import { longUploadErrorFile, pendingFiles } from "../story-fixtures";
 import { ChatInput } from "./ChatInput";
+import type { ChatInputProps } from "../containers/useChatInputContainer";
 import type {
   ChatLiveRunState,
   InputActionDefinition,
@@ -202,8 +204,12 @@ const inputActions: InputActionDefinition[] = [
   },
 ];
 
+function ChatInputStory(props: ChatInputProps): React.ReactElement {
+  return <ChatInput view={useChatInputContainer(props)} />;
+}
+
 const meta = {
-  component: ChatInput,
+  component: ChatInputStory,
   decorators: [
     (Story) => (
       <StorybookCanvas maxWidth={rem(860)}>
@@ -211,7 +217,7 @@ const meta = {
       </StorybookCanvas>
     ),
   ],
-} satisfies Meta<typeof ChatInput>;
+} satisfies Meta<typeof ChatInputStory>;
 
 export default meta;
 

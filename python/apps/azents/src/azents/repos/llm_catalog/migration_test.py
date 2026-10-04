@@ -195,12 +195,13 @@ def _seed_ready_cutover(engine: Engine) -> None:
 def test_fresh_upgrade_has_only_generic_source_schema(
     migration_database: _MigrationDatabase,
 ) -> None:
-    """A fresh database reaches the fenced source head without legacy objects."""
+    """A fresh database reaches the current linear head without legacy objects."""
     scripts = ScriptDirectory.from_config(migration_database.config)
-    assert scripts.get_heads() == [_CURRENT_DATA_REVISION]
     current = scripts.get_revision(_CURRENT_DATA_REVISION)
     assert current is not None
     assert current.down_revision == _SCHEMA_ALIGNMENT_REVISION
+    current_revision = (PROJECT_ROOT / "db-schemas/rdb/revision").read_text().strip()
+    assert scripts.get_heads() == [current_revision]
     head = scripts.get_revision(_SCHEMA_ALIGNMENT_REVISION)
     assert head is not None
     assert head.down_revision == _DATA_SOURCE_CUTOVER_REVISION
@@ -229,10 +230,13 @@ def test_historical_memory_revision_extends_toolkit_head(
 ) -> None:
     """Historical Memory preserves the complete canonical Toolkit chain."""
     scripts = ScriptDirectory.from_config(migration_database.config)
-    assert scripts.get_heads() == [_CURRENT_DATA_REVISION]
     current = scripts.get_revision(_CURRENT_DATA_REVISION)
     assert current is not None
     assert current.down_revision == _SCHEMA_ALIGNMENT_REVISION
+    current_revision = (
+        (PROJECT_ROOT / "db-schemas" / "rdb" / "revision").read_text().strip()
+    )
+    assert scripts.get_heads() == [current_revision]
     head = scripts.get_revision(_SCHEMA_ALIGNMENT_REVISION)
     assert head is not None
     assert head.down_revision == _DATA_SOURCE_CUTOVER_REVISION

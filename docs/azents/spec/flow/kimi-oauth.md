@@ -26,7 +26,7 @@ code_paths:
   - python/apps/azents/src/azents/engine/events/pydantic_ai_output.py
   - python/apps/azents/src/azents/engine/providers/**
   - typescript/apps/azents-web/src/features/llm-settings/**
-  - typescript/apps/azents-web/src/features/agents/components/ModelCatalogPicker.tsx
+  - typescript/apps/azents-web/src/shared/model-options/components/ModelCatalogPicker.tsx
   - typescript/apps/azents-web/src/features/chat/**
   - typescript/apps/azents-web/src/shared/subscription-usage/**
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts

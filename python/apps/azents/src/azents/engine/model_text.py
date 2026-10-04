@@ -75,6 +75,7 @@ async def call_provider_text_with_usage(
             ),
         )
     request = PydanticAIRequest(
+        native_replay_context=None,
         provider=provider.value,
         model=model,
         messages=[
@@ -92,13 +93,17 @@ async def call_provider_text_with_usage(
             credential_kwargs=credential_kwargs,
         )
     )
-    output = PydanticAIOutputNormalizer(
-        provider=provider.value,
-        model=model,
-        pricing=None,
-        operation=call_context.call_kind,
-        integration=call_context.provider_integration_id,
-    ).start(call_context.session_id or uuid.uuid4().hex)
+    output = (
+        PydanticAIOutputNormalizer(
+            provider=provider.value,
+            model=model,
+            pricing=None,
+            operation=call_context.call_kind,
+            integration=call_context.provider_integration_id,
+        )
+        .for_native_replay(request.native_replay_schema_version())
+        .start(call_context.session_id or uuid.uuid4().hex)
+    )
     try:
         async for event in adapter.stream(
             request,

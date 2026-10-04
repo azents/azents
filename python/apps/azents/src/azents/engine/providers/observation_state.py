@@ -15,8 +15,11 @@ from azents.engine.events.pydantic_ai_types import (
     SDKFailureMapper,
 )
 from azents.engine.model_stream import (
+    InternalModelStreamCallContext,
+    ModelDispatchAdmissionError,
     ModelStreamCallContext,
     ModelStreamTimeoutPolicy,
+    admit_model_dispatch,
 )
 from azents.engine.providers.native_observation import observe_native_payload
 from azents.engine.run.provider_failure import (
@@ -113,6 +116,42 @@ class NativeObservationState:
                 raise self.original_failure from None
             raise UnauthorizedModelDispatchError() from None
         self.dispatch_count += 1
+
+    async def authorize_dispatch_with_admission(self) -> None:
+        """Keep the one-generation guard and commit internal budgets before I/O."""
+        if (
+            isinstance(self.call_context, InternalModelStreamCallContext)
+            and self.closing
+        ):
+            raise ModelDispatchAdmissionError("ownership")
+        self.authorize_dispatch()
+        try:
+            await admit_model_dispatch(self.call_context)
+        except asyncio.CancelledError:
+            self.dispatch_blocked = True
+            raise
+        except ModelDispatchAdmissionError:
+            self.dispatch_blocked = True
+            raise
+
+    def authorize_dispatch_from_thread(self) -> None:
+        """Backpressure a public synchronous SDK on event-loop-owned admission."""
+        if not isinstance(self.call_context, InternalModelStreamCallContext):
+            self.authorize_dispatch()
+            return
+        future = asyncio.run_coroutine_threadsafe(
+            self.authorize_dispatch_with_admission(), self.loop
+        )
+        with self.thread_lock:
+            if self.closing:
+                future.cancel()
+            else:
+                self.thread_emissions.add(future)
+        try:
+            future.result()
+        finally:
+            with self.thread_lock:
+                self.thread_emissions.discard(future)
 
     def acquired(self) -> None:
         """Signal real SDK response acquisition, before stock first-event peeks."""

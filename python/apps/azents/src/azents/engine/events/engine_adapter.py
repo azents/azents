@@ -1067,6 +1067,7 @@ class AgentEngineAdapter:
                 native_request = lowerer.lower(
                     transcript,
                     model=model,
+                    native_replay_context=catalog.native_replay_context,
                     system_prompt=system_prompt_result.prompt,
                 )
                 if isinstance(native_request, PydanticAIRequest):

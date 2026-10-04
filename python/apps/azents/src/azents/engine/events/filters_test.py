@@ -2028,7 +2028,9 @@ async def test_auto_compaction_counts_events_after_latest_turn_marker() -> None:
 async def test_native_request_guard_and_post_lower_pipeline() -> None:
     """Post-lower guard rejects oversized input and counts all request parts."""
     guard = NativeRequestSizeGuard(max_input_chars=4)
-    request = NativeModelRequest(model="gpt-5.1", input=[{"content": "too long"}])
+    request = NativeModelRequest(
+        native_replay_context=None, model="gpt-5.1", input=[{"content": "too long"}]
+    )
     try:
         guard.apply(request)
     except ValueError as exc:
@@ -2037,6 +2039,7 @@ async def test_native_request_guard_and_post_lower_pipeline() -> None:
         raise AssertionError("guard must reject oversized request")
 
     tool_schema_request = NativeModelRequest(
+        native_replay_context=None,
         model="gpt-5.1",
         input=[],
         tools=[{"name": "tool", "description": "x" * 100}],
@@ -2050,7 +2053,12 @@ async def test_native_request_guard_and_post_lower_pipeline() -> None:
         raise AssertionError("guard must count tools and instructions")
 
     pipeline = PostLowerFilterPipeline([NativeRequestSizeGuard(max_input_chars=100)])
-    assert pipeline.apply(NativeModelRequest(model="gpt-5.1", input=[])).input == []
+    assert (
+        pipeline.apply(
+            NativeModelRequest(native_replay_context=None, model="gpt-5.1", input=[])
+        ).input
+        == []
+    )
 
 
 def _event(

@@ -239,7 +239,12 @@ async def test_real_main_lowerer_default_cache_ttl_survives_boto_validation(
         enabled_execution_options=(),
         temperature=0.2,
         max_output_tokens=64,
-    ).lower(transcript, model=model, system_prompt="Synthetic instruction")
+    ).lower(
+        transcript,
+        native_replay_context=None,
+        model=model,
+        system_prompt="Synthetic instruction",
+    )
     logical_cache = [
         part
         for message in request.messages

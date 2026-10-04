@@ -938,6 +938,7 @@ def _catalog(tools: Mapping[str, FunctionTool]) -> ToolCatalog:
         use_prefix=False,
     )
     return ToolCatalog(
+        native_replay_context=None,
         tools=MappingProxyType(typed_tools),
         wire_dialects=MappingProxyType({name: "json_function" for name in typed_tools}),
         entries=MappingProxyType(

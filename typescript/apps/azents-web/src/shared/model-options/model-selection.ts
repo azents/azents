@@ -1,10 +1,10 @@
-import { supportedBuiltinTools } from "../../shared/lib/model-capability-support.ts";
+import { supportedBuiltinTools } from "../lib/model-capability-support.ts";
 import {
   builtinToolConfigHasSettings,
   encodeImageGenerationModel,
   projectImageGenerationConfig,
 } from "./image-generation-config.ts";
-import type { CapabilityRequestContext } from "../../shared/lib/model-capability-support.ts";
+import type { CapabilityRequestContext } from "../lib/model-capability-support.ts";
 import type {
   AgentModelSelection,
   AgentModelSelectionInput,

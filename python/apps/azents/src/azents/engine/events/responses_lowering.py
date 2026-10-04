@@ -27,6 +27,7 @@ from azents.engine.events.file_parts import (
     ModelFileResolver,
     lower_file_output_part,
 )
+from azents.engine.events.model_messages import ModelTranscriptMessage
 from azents.engine.events.model_support_contract import (
     ModelSupportContext,
     decode_model_support_options,
@@ -36,6 +37,7 @@ from azents.engine.events.model_support_contract import (
     saved_builtin_tool_allowed,
     validate_saved_model_request,
 )
+from azents.engine.events.native_replay import native_replay_schema_version
 from azents.engine.events.output_parts import (
     iter_output_parts,
     lower_output_to_text,
@@ -61,7 +63,6 @@ from azents.engine.events.types import (
     ClientToolCallPayload,
     ClientToolResultPayload,
     CompactionSummaryPayload,
-    Event,
     ExternalChannelMessagePayload,
     FileOutputPart,
     InputContentPart,
@@ -305,9 +306,10 @@ class ResponsesRequestLowerer:
 
     def lower(
         self,
-        transcript: Sequence[Event],
+        transcript: Sequence[ModelTranscriptMessage],
         *,
         model: str,
+        native_replay_context: str | None,
         system_prompt: str | None = None,
     ) -> NativeModelRequest:
         """Convert Event transcript to a provider-native Responses request."""
@@ -326,6 +328,16 @@ class ResponsesRequestLowerer:
         )
         default_instructions = kwargs.get("instructions") or _DEFAULT_INSTRUCTIONS
         instructions = system_prompt or str(default_instructions)
+        self.schema_version = native_replay_schema_version(
+            instructions, native_replay_context=native_replay_context
+        )
+        self.compat_key = build_native_compat_key(
+            adapter=self.adapter,
+            native_format=self.native_format,
+            provider=self.provider,
+            model=model,
+            schema_version=self.schema_version,
+        )
         if _uses_input_message_instructions(
             provider=self.provider,
             provider_id=self._provider_id,
@@ -423,6 +435,7 @@ class ResponsesRequestLowerer:
             input=input_items,
             tools=tools,
             kwargs=kwargs,
+            native_replay_context=native_replay_context,
         )
 
     def _resolve_support_context(
@@ -538,7 +551,7 @@ class ResponsesRequestLowerer:
 
     def _compatible_native_items(
         self,
-        event: Event,
+        event: ModelTranscriptMessage,
         *,
         retain_response_item_ids: bool,
     ) -> list[dict[str, object]] | None:
@@ -642,7 +655,7 @@ class ResponsesRequestLowerer:
 
     def _lower_event(
         self,
-        event: Event,
+        event: ModelTranscriptMessage,
         *,
         replayable_plaintext_custom_call_ids: set[str],
     ) -> dict[str, object] | None:
@@ -851,7 +864,7 @@ def _historical_custom_tool_result_projection(
 
 
 def _replays_plaintext_custom_call(
-    event: Event,
+    event: ModelTranscriptMessage,
     native_items: Sequence[dict[str, object]],
 ) -> bool:
     """Return whether compatible native replay retained a custom call item."""
@@ -862,7 +875,9 @@ def _replays_plaintext_custom_call(
     )
 
 
-def _lowers_plaintext_custom_call(event: Event, item: dict[str, object]) -> bool:
+def _lowers_plaintext_custom_call(
+    event: ModelTranscriptMessage, item: dict[str, object]
+) -> bool:
     """Return whether semantic lowering emitted a custom call item."""
     return (
         isinstance(event.payload, ClientToolCallPayload)

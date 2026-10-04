@@ -10,6 +10,9 @@ from azents.core.enums import WorkspaceUserRole
 from azents.rdb.models.user import RDBUser
 from azents.rdb.models.workspace import RDBWorkspace
 from azents.rdb.models.workspace_user import RDBWorkspaceUser
+from azents.repos.historical_memory_consolidation.lifecycle import (
+    membership_work_in_session,
+)
 
 from .data import (
     NotFound,
@@ -311,6 +314,18 @@ class WorkspaceUserRepository:
         :param session: Database session
         :param workspace_user_id: WorkspaceUser ID
         """
+        member = await session.scalar(
+            sa.select(RDBWorkspaceUser)
+            .where(RDBWorkspaceUser.id == workspace_user_id)
+            .with_for_update()
+        )
+        if member is not None:
+            await membership_work_in_session(
+                session,
+                workspace_id=member.workspace_id,
+                user_id=member.user_id,
+                denied=True,
+            )
         await session.execute(
             sa.delete(RDBWorkspaceUser).where(RDBWorkspaceUser.id == workspace_user_id)
         )
@@ -341,4 +356,10 @@ class WorkspaceUserRepository:
         )
         session.add(rdb_workspace_user)
         await session.flush()
+        await membership_work_in_session(
+            session,
+            workspace_id=create.workspace_id,
+            user_id=create.user_id,
+            denied=False,
+        )
         return self._build_workspace_user(rdb_workspace_user)
