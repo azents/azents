@@ -72,13 +72,29 @@ class WorkspaceModelSettingsRepository:
             await session.write_session.refresh(row)
 
         if (
-            "default_model_selection" in update
-            and update["default_model_selection"] is None
-            and row.default_model_selection is not None
-        ) or (
-            "default_selectable_model_options" in update
-            and update["default_selectable_model_options"] is None
-            and row.default_selectable_model_options is not None
+            (
+                "default_model_selection" in update
+                and update["default_model_selection"] is None
+                and row.default_model_selection is not None
+            )
+            or (
+                "default_selectable_model_options" in update
+                and update["default_selectable_model_options"] is None
+                and row.default_selectable_model_options is not None
+            )
+            or (
+                row.default_selectable_model_options is not None
+                and (
+                    (
+                        "default_main_model_label" in update
+                        and update["default_main_model_label"] is None
+                    )
+                    or (
+                        "default_lightweight_model_label" in update
+                        and update["default_lightweight_model_label"] is None
+                    )
+                )
+            )
         ):
             return Failure(DefaultModelCannotBeCleared(workspace_id=workspace_id))
 

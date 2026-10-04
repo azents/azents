@@ -90,6 +90,21 @@ class WorkspaceModelSettingsService:
             return Success(
                 await self._build_active_output_from_settings(current_or_empty)
             )
+        configured_options = (
+            current.default_selectable_model_options if current is not None else None
+        )
+        if (configured_options is not None or option_inputs) and (
+            ("default_main_model_label" in update and main_model_label is None)
+            or (
+                "default_lightweight_model_label" in update
+                and lightweight_model_label is None
+            )
+        ):
+            return Failure(DefaultModelCannotBeCleared(workspace_id=workspace_id))
+        if "default_main_model_label" not in update and current is not None:
+            main_model_label = current.default_main_model_label
+        if "default_lightweight_model_label" not in update and current is not None:
+            lightweight_model_label = current.default_lightweight_model_label
         if option_inputs is not None:
             options_result = await self._normalize_option_inputs(
                 workspace_id,
@@ -111,9 +126,16 @@ class WorkspaceModelSettingsService:
                 return Failure(DefaultModelCannotBeCleared(workspace_id=workspace_id))
             model_options = normalize_stored_selectable_model_options(
                 selectable_model_options=current.default_selectable_model_options,
-                main_model_label=main_model_label or current.default_main_model_label,
-                lightweight_model_label=lightweight_model_label
-                or current.default_lightweight_model_label,
+                main_model_label=(
+                    current.default_main_model_label
+                    if main_model_label == ""
+                    else main_model_label
+                ),
+                lightweight_model_label=(
+                    current.default_lightweight_model_label
+                    if lightweight_model_label == ""
+                    else lightweight_model_label
+                ),
             )
 
         if model_options is None:

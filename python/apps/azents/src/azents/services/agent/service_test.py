@@ -350,9 +350,34 @@ async def test_active_agent_metadata_absence_preserves_identity() -> None:
     assert agent.model_selection == primary
 
 
-async def test_new_agent_captures_defaults_without_rewriting_workspace() -> None:
+@pytest.mark.parametrize("second_default", [False, True])
+async def test_new_agent_captures_defaults_without_rewriting_workspace(
+    second_default: bool,
+) -> None:
     service = _make_service()
     configured = _configured_agent()
+    if second_default:
+        first = configured.selectable_model_options[0]
+        second_selection = make_test_model_selection(model_identifier="second-default")
+        second = first.model_copy(
+            update={
+                "label": "Second",
+                "candidates": [
+                    first.candidates[0].model_copy(
+                        update={"model_selection": second_selection}
+                    )
+                ],
+            }
+        )
+        configured = configured.model_copy(
+            update={
+                "selectable_model_options": [first, second],
+                "main_model_label": second.label,
+                "lightweight_model_label": second.label,
+                "model_selection": second_selection,
+                "lightweight_model_selection": second_selection,
+            }
+        )
     settings = WorkspaceModelSettings(
         workspace_id=configured.workspace_id,
         default_model_selection=configured.model_selection,
@@ -381,12 +406,23 @@ async def test_new_agent_captures_defaults_without_rewriting_workspace() -> None
         create = require_instance(value, AgentCreate)
         assert len(active.calls) == 1
         assert create.model_selection.normalized_capabilities.tool_calling.supported
+        assert create.main_model_label == settings.default_main_model_label
+        assert (
+            create.lightweight_model_label == settings.default_lightweight_model_label
+        )
+        assert settings.default_model_selection is not None
+        assert (
+            create.model_selection.model_identifier
+            == settings.default_model_selection.model_identifier
+        )
         return Success(
             configured.model_copy(
                 update={
                     "model_selection": create.model_selection,
                     "lightweight_model_selection": create.lightweight_model_selection,
                     "selectable_model_options": create.selectable_model_options,
+                    "main_model_label": create.main_model_label,
+                    "lightweight_model_label": create.lightweight_model_label,
                 }
             )
         )

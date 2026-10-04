@@ -378,3 +378,44 @@ async def test_cancellation_after_both_writes_propagates_and_rolls_back(
     async with rdb_session_manager() as session:
         assert await session.read_session.get(RDBWorkspaceModelSettings, id) is None
         assert await marker_state(session) == before
+
+
+@pytest.mark.parametrize("lightweight", [False, True])
+async def test_configured_label_clear_is_rejected_by_complete_operation(
+    rdb_session_manager: SessionManager[WriteSession], lightweight: bool
+) -> None:
+    """Internal partial updates cannot invalidate configured default label authority."""
+    id = await create_workspace(rdb_session_manager, "defaults-repository-null-label")
+    operations = WorkspaceModelSettingsOperationRepository(
+        rdb_session_manager, WorkspaceModelSettingsRepository()
+    )
+    configured = await operations.update(id, full_update())
+    assert isinstance(configured, Success)
+    update: WorkspaceModelSettingsUpdate = {}
+    if lightweight:
+        update["default_lightweight_model_label"] = None
+    else:
+        update["default_main_model_label"] = None
+    assert await operations.update(id, update) == Failure(
+        DefaultModelCannotBeCleared(id)
+    )
+    assert await operations.get(id) == configured.value
+
+
+async def test_initial_label_null_remains_valid_absence(
+    rdb_session_manager: SessionManager[WriteSession],
+) -> None:
+    """Empty Workspace settings retain their initial nullable label representation."""
+    id = await create_workspace(rdb_session_manager, "defaults-repository-initial-null")
+    operations = WorkspaceModelSettingsOperationRepository(
+        rdb_session_manager, WorkspaceModelSettingsRepository()
+    )
+    result = await operations.update(
+        id,
+        WorkspaceModelSettingsUpdate(
+            default_main_model_label=None, default_lightweight_model_label=None
+        ),
+    )
+    assert isinstance(result, Success)
+    assert result.value.default_main_model_label is None
+    assert result.value.default_lightweight_model_label is None
