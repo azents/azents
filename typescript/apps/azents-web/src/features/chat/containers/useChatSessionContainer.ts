@@ -13,6 +13,7 @@ import * as Sentry from "@sentry/nextjs";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { knownReasoningEffort } from "@/shared/lib/reasoning-effort";
 import { trpc } from "@/trpc/client";
+import { actionExecutionResultFromEvent } from "../actionExecutionDecoder";
 import { continuationMetadata } from "../continuationPresentation";
 import { executionOptionIdsFromValue } from "../executionOptions";
 import {
@@ -1462,36 +1463,6 @@ function upsertActionExecutionProjection(
   return actionExecutions.map((item, itemIndex) =>
     itemIndex === index ? actionExecution : item,
   );
-}
-
-function isActionExecutionProjectionValue(
-  value: unknown,
-): value is ActionExecutionProjectionResponse {
-  if (!isRecord(value) || !isRecord(value.execution)) {
-    return false;
-  }
-  return (
-    typeof value.execution.id === "string" &&
-    typeof value.execution.source_mailbox_item_id === "string" &&
-    typeof value.execution.status === "string" &&
-    Array.isArray(value.events)
-  );
-}
-
-function actionExecutionResultFromEvent(
-  event: ChatEventResponse,
-): ActionExecutionProjection | null {
-  if (event.kind !== "action_execution_result" || !isRecord(event.payload)) {
-    return null;
-  }
-  return isActionExecutionProjectionValue(event.payload.action_execution)
-    ? {
-        ...event.payload.action_execution,
-        provenance: "durable",
-        historyEventId: event.id,
-        historyCreatedAt: event.created_at,
-      }
-    : null;
 }
 
 function isCompletedGitWorktreeActionExecution(
