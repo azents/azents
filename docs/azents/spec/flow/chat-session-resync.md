@@ -32,7 +32,6 @@ code_paths:
   - python/apps/azents/src/azents/broker/broadcast.py
   - python/apps/azents/src/azents/broker/websocket_deps.py
   - python/apps/azents/src/azents/core/config.py
-  - python/apps/azents/src/azents/core/settings.py
   - python/apps/azents/src/azents/transport/chat.py
   - python/apps/azents/src/azents/engine/tools/skill.py
   - python/apps/azents/src/azents/worker/deps.py
@@ -44,7 +43,7 @@ code_paths:
   - typescript/apps/azents-web/src/shared/subagent-tree/**
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
 last_verified_at: 2026-10-05
-spec_version: 55
+spec_version: 56
 ---
 
 # Chat Session Resync
@@ -591,6 +590,9 @@ presentation-only and does not change canonical content or model lowering.
 Session Channels management state is queried separately from timeline resync.
 
 ## 12. Changelog
+
+- **2026-10-05** — v56. Reconciled code-path discovery with current defining
+  modules; system behavior is unchanged.
 
 - **2026-10-05** — v55. Kept stale applied-label fallback in detached REST
   projections without hidden profile writes or fabricated generations, and

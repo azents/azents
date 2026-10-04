@@ -32,7 +32,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/engine_resolve.py
   - python/apps/azents/src/azents/repos/engine_tool_repositories.py
   - python/apps/azents/src/azents/repos/image_generation_catalog_operations.py
-  - python/apps/azents/src/azents/repos/kimi_oauth_runtime/**
+  - python/apps/azents/src/azents/repos/kimi_oauth_runtime.py
   - python/apps/azents/src/azents/repos/llm_catalog_operations.py
   - python/apps/azents/src/azents/repos/mailbox_runtime_operations.py
   - python/apps/azents/src/azents/repos/model_metadata_operations.py
@@ -184,7 +184,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
   - typescript/apps/azents-web/messages/*/chat.json
 last_verified_at: 2026-10-05
-spec_version: 214
+spec_version: 215
 ---
 
 # Agent Execution Loop
@@ -1940,6 +1940,9 @@ projections retain the dedicated kind, and the UI labels it with a channel/messa
 icon.
 
 ## Changelog
+
+- **2026-10-05** (spec_version 215) — Reconciled code-path discovery with current
+  defining modules; system behavior is unchanged.
 
 - **2026-10-05** (spec_version 214) — Replaced blanket execution-tree gates
   with exact critical commit fences, independent private/preparation operations,

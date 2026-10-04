@@ -120,7 +120,6 @@ code_paths:
   - python/apps/azents/src/azents/services/subagent_terminal_result.py
   - python/apps/azents/src/azents/services/subagent_coordination.py
   - python/apps/azents/src/azents/services/session_workspace_project/**
-  - python/apps/azents/src/azents/services/root_agent_session_creation/**
   - python/apps/azents/src/azents/services/session_git_worktree/**
   - python/apps/azents/src/azents/services/archived_session_retention.py
   - python/apps/azents/src/azents/services/archived_session_purge.py
@@ -184,7 +183,7 @@ api_routes:
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ticket
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ws
 last_verified_at: 2026-10-05
-spec_version: 182
+spec_version: 183
 ---
 
 # Conversation & Events
@@ -1534,6 +1533,9 @@ identify trigger and continuation work with dedicated Scheduled Task
 presentations.
 
 ## 13. Changelog
+
+- **2026-10-05** — v183. Reconciled code-path discovery with current defining
+  modules; system behavior is unchanged.
 
 - **2026-10-05** — v182. Removed hidden GET profile replacement while preserving
   detached fallback responses and persisted generation identity; separated

@@ -52,7 +52,7 @@ code_paths:
   - python/apps/azents/src/azents/services/exchange_file/**
   - python/apps/azents/src/azents/repos/session_resource_authority.py
   - python/apps/azents/src/azents/repos/external_channel/management.py
-  - python/apps/azents/src/azents/repos/external_channel/management_data.py
+  - python/apps/azents/src/azents/core/external_channel_management.py
   - python/apps/azents/src/azents/repos/external_channel/work.py
   - python/apps/azents/src/azents/repos/external_channel/work_data.py
   - python/apps/azents/src/azents/repos/external_channel/work_state.py
@@ -60,7 +60,7 @@ code_paths:
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - typescript/apps/azents-web/src/features/session-channels/**
 last_verified_at: 2026-10-05
-spec_version: 65
+spec_version: 66
 ---
 
 # External Channel Delivery and Channel Work
@@ -642,6 +642,9 @@ outbox, compensation, canonical rollback, or fallback target. Recovery of an
 already-committed terminal result does not replay provider publication.
 
 ## Changelog
+
+- **2026-10-05** (spec_version 66) — Reconciled code-path discovery with current
+  defining modules; system behavior is unchanged.
 
 - **2026-10-05** (spec_version 65) — Documented short nonlocking effect admission and Work cycle/revision CAS settlement independently of exact critical Session output fencing; control delete capture does not claim execution.
 

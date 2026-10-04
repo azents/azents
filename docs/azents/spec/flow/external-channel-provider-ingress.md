@@ -81,7 +81,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/external_channel/repository.py
   - python/apps/azents/src/azents/services/mailbox.py
   - python/apps/azents/src/azents/repos/agent_session/**
-  - python/apps/azents/src/azents/services/root_agent_session_creation/**
+  - python/apps/azents/src/azents/repos/root_agent_session_creation.py
   - python/apps/azents/src/azents/repos/agent_automatic_project/**
   - python/apps/azents/src/azents/services/external_channel/provider.py
   - python/apps/azents/src/azents/services/external_channel/slack_endpoint.py
@@ -99,7 +99,7 @@ api_routes:
   - /external-channel/v1/slack/events
   - /external-channel/v1/discord/interactions/{selector}
 last_verified_at: 2026-10-05
-spec_version: 67
+spec_version: 68
 ---
 
 # External Channel Provider Ingress
@@ -660,6 +660,9 @@ shared gateway unready. General Agent Workers own Session execution and do not o
 persistent provider connections.
 
 ## Changelog
+
+- **2026-10-05** (spec_version 68) — Reconciled code-path discovery with current
+  defining modules; system behavior is unchanged.
 
 - **2026-10-05** (spec_version 67) — Separated owner/diagnostic/first-trigger observations from exact ingress lease and batch claims, preserving generation/cursor-conditioned mailbox and queue finalization.
 

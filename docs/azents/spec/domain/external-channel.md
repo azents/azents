@@ -25,8 +25,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/engine_resolve.py
   - python/apps/azents/src/azents/repos/root_agent_session_creation.py
   - python/apps/azents/src/azents/repos/scheduled_task_terminal_operations.py
-  - python/apps/azents/src/azents/repos/worker_session_lifecycle.py
-  - python/apps/azents/src/azents/repos/worker_user_stop.py
+  - python/apps/azents/src/azents/repos/session_lifecycle_operations.py
+  - python/apps/azents/src/azents/repos/user_stop.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/097a97177350_create_operational_schema_baseline.py
   - python/apps/azents/src/azents/core/external_account_link.py
   - python/apps/azents/src/azents/core/external_account_oauth.py
@@ -70,7 +70,6 @@ code_paths:
   - python/apps/azents/src/azents/repos/scheduled_task_cycle/progress_data.py
   - python/apps/azents/src/azents/broker/types.py
   - python/apps/azents/src/azents/worker/session/**
-  - python/apps/azents/src/azents/services/root_agent_session_creation/**
   - python/apps/azents/src/azents/repos/agent_automatic_project/**
   - python/apps/azents/src/azents/api/public/external_channel/**
   - python/apps/azents/specs/public/openapi.json
@@ -122,7 +121,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/approval-requests/{access_request_id}
 last_verified_at: 2026-10-05
-spec_version: 84
+spec_version: 85
 ---
 
 # External Channel
@@ -698,6 +697,9 @@ already admitted for immediate one-attempt delivery. No cross-I/O lock, provider
 history, queue, retry, or fallback target is part of this boundary.
 
 ## Changelog
+
+- **2026-10-05** (spec_version 85) — Reconciled code-path discovery with current
+  defining modules; system behavior is unchanged.
 
 - **2026-10-05** (spec_version 84) — Separated plain Work descriptions/private CAS and short effect-owner admission from critical finalization; made bounded OAuth cleanup and interaction projection/mode metadata writes independent of read gates.
 
